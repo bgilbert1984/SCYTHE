@@ -115,6 +115,149 @@ class IngestConfig:
     enable_bsg: bool = True                      # Run BSG detection after sessionization
 
 
+def _get_writebus_instance() -> Optional[Any]:
+    """Return the process WriteBus singleton when the server initialized it."""
+    try:
+        import writebus
+        return writebus.bus()
+    except Exception:
+        return None
+
+
+class _DirectGraphWriter:
+    """Compatibility writer for CLI/tests where WriteBus is not initialized."""
+
+    uses_writebus = False
+
+    def __init__(self, engine: Any, config: IngestConfig):
+        self._engine = engine
+        self._config = config
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._engine, name)
+
+    @property
+    def pending_ops(self) -> int:
+        return 0
+
+    def add_node(self, node: Dict[str, Any]) -> Any:
+        return self._engine.add_node(node)
+
+    def add_edge(self, edge: Dict[str, Any]) -> Any:
+        return self._engine.add_edge(edge)
+
+    def flush(
+        self,
+        *,
+        entity_id: str,
+        entity_type: str,
+        entity_data: Dict[str, Any],
+        room_name: str = "Global",
+        request_id: Optional[str] = None,
+        correlation_id: Optional[str] = None,
+        evidence_refs: Optional[List[str]] = None,
+        idempotency_key: Optional[str] = None,
+    ) -> None:
+        return None
+
+    def discard_pending(self) -> None:
+        return None
+
+
+class _WriteBusGraphWriter:
+    """Queues graph mutations and flushes them through WriteBus.commit()."""
+
+    uses_writebus = True
+
+    def __init__(self, engine: Any, config: IngestConfig, writebus_instance: Any):
+        self._engine = engine
+        self._config = config
+        self._writebus = writebus_instance
+        self._ops: List[Any] = []
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._engine, name)
+
+    @property
+    def pending_ops(self) -> int:
+        return len(self._ops)
+
+    def add_node(self, node: Dict[str, Any]) -> str:
+        payload = dict(node or {})
+        entity_id = payload.get("id") or payload.get("node_id")
+        if not entity_id:
+            raise ValueError("pcap_ingest attempted to emit a node without an id")
+        self._ops.append(self._graph_op("NODE_UPDATE", str(entity_id), payload))
+        return str(entity_id)
+
+    def add_edge(self, edge: Dict[str, Any]) -> str:
+        payload = dict(edge or {})
+        entity_id = payload.get("id")
+        if not entity_id:
+            kind = payload.get("kind", "edge")
+            members = payload.get("nodes") or payload.get("members") or []
+            entity_id = "e:pcap:auto:" + hashlib.sha256(
+                json.dumps([kind, members], sort_keys=True, default=str).encode("utf-8")
+            ).hexdigest()[:16]
+            payload["id"] = entity_id
+        self._ops.append(self._graph_op("EDGE_UPDATE", str(entity_id), payload))
+        return str(entity_id)
+
+    @staticmethod
+    def _graph_op(event_type: str, entity_id: str, entity_data: Dict[str, Any]) -> Any:
+        from writebus import GraphOp
+        return GraphOp(event_type=event_type, entity_id=entity_id, entity_data=entity_data)
+
+    def flush(
+        self,
+        *,
+        entity_id: str,
+        entity_type: str,
+        entity_data: Dict[str, Any],
+        room_name: str = "Global",
+        request_id: Optional[str] = None,
+        correlation_id: Optional[str] = None,
+        evidence_refs: Optional[List[str]] = None,
+        idempotency_key: Optional[str] = None,
+    ) -> None:
+        if not self._ops:
+            return
+        from writebus import WriteContext
+
+        ops = list(self._ops)
+        ctx = WriteContext(
+            room_name=room_name,
+            operator_id="SYSTEM:PCAP_INGEST",
+            request_id=request_id,
+            source=self._config.source_tag,
+            evidence_refs=list(evidence_refs or []),
+            correlation_id=correlation_id or request_id,
+        )
+        result = self._writebus.commit(
+            entity_id=entity_id,
+            entity_type=entity_type,
+            entity_data=entity_data,
+            graph_ops=ops,
+            ctx=ctx,
+            persist=False,
+            audit=True,
+            idempotency_key=idempotency_key,
+        )
+        if not result.ok:
+            raise RuntimeError("; ".join(result.errors) or result.commit_status)
+        self._ops.clear()
+
+    def discard_pending(self) -> None:
+        self._ops.clear()
+
+
+def _make_graph_writer(engine: Any, config: IngestConfig) -> Any:
+    writebus_instance = _get_writebus_instance()
+    if writebus_instance is not None:
+        return _WriteBusGraphWriter(engine, config, writebus_instance)
+    return _DirectGraphWriter(engine, config)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Deterministic Session Key
 # ─────────────────────────────────────────────────────────────────────────────
@@ -718,7 +861,7 @@ class HypergraphEmitter:
     }
 
     def __init__(self, engine: Any, config: IngestConfig):
-        self.engine = engine
+        self.engine = _make_graph_writer(engine, config)
         self.config = config
         self._emitted_hosts: Set[str] = set()  # dedup hosts across sessions
         self._emitted_ids: Set[str] = set()     # dedup all geo/asn/org/service/port nodes
@@ -741,6 +884,31 @@ class HypergraphEmitter:
                     logger.info(f"[pcap_ingest][GeoIP] ASN DB loaded: {config.geoip_asn_mmdb}")
                 except Exception as exc:
                     logger.warning(f"[pcap_ingest][GeoIP] ASN DB failed: {exc}")
+
+    def flush(
+        self,
+        *,
+        entity_id: str,
+        entity_type: str,
+        entity_data: Dict[str, Any],
+        request_id: Optional[str],
+        evidence_refs: List[str],
+        idempotency_key: str,
+        room_name: str = "Global",
+    ) -> None:
+        self.engine.flush(
+            entity_id=entity_id,
+            entity_type=entity_type,
+            entity_data=entity_data,
+            room_name=room_name,
+            request_id=request_id,
+            correlation_id=entity_id,
+            evidence_refs=evidence_refs,
+            idempotency_key=idempotency_key,
+        )
+
+    def discard_pending(self) -> None:
+        self.engine.discard_pending()
 
     # ── GeoIP lookup ─────────────────────────────────────────────────
     def _geoip_lookup(self, ip: str) -> Optional[Dict[str, Any]]:
@@ -1518,12 +1686,60 @@ class PcapIngestPipeline:
                 if self.registrar:
                     self.registrar.register_session(session, artifact_id)
 
+            self.emitter.flush(
+                entity_id=artifact_id,
+                entity_type="PCAP_INGEST_MATERIALIZATION",
+                entity_data={
+                    "id": artifact_id,
+                    "kind": "pcap_artifact",
+                    "labels": {
+                        "filename": filename,
+                        "file_size": file_size,
+                        "sessions_created": result.sessions_created,
+                        "nodes_emitted": result.nodes_emitted,
+                        "edges_emitted": result.edges_emitted,
+                    },
+                    "metadata": {
+                        "provenance": {
+                            "source": self.config.source_tag,
+                            "evidence_type": "packet_capture",
+                        },
+                    },
+                },
+                request_id=f"pcap_ingest:{artifact_id}:materialize",
+                evidence_refs=[artifact_id, filename],
+                idempotency_key=f"pcap-ingest:{artifact_id}:materialize:v1",
+            )
+
             # ── 4b. BSG detection (post-sessionization) ──────────────
             if self.config.enable_bsg and sessions:
                 try:
                     from behavior_groups import BehaviorGroupDetector, BSGConfig
-                    bsg_detector = BehaviorGroupDetector(self.engine)
+                    bsg_detector = BehaviorGroupDetector(self.emitter.engine)
                     bsg_result = bsg_detector.detect_all(sessions)
+                    self.emitter.flush(
+                        entity_id=f"{artifact_id}:bsg",
+                        entity_type="PCAP_BSG_MATERIALIZATION",
+                        entity_data={
+                            "id": f"{artifact_id}:bsg",
+                            "kind": "pcap_behavior_groups",
+                            "labels": {
+                                "filename": filename,
+                                "groups_created": bsg_result.groups_created,
+                                "sessions_grouped": bsg_result.sessions_grouped,
+                                "sessions_total": bsg_result.sessions_total,
+                            },
+                            "metadata": {
+                                "provenance": {
+                                    "source": "bsg_detector",
+                                    "evidence_type": "behavioral_inference",
+                                },
+                            },
+                        },
+                        request_id=f"pcap_ingest:{artifact_id}:bsg",
+                        evidence_refs=[artifact_id, filename],
+                        idempotency_key=f"pcap-ingest:{artifact_id}:bsg:v1",
+                    )
                     result.nodes_emitted += bsg_result.groups_created
                     result.edges_emitted += bsg_result.edges_created
                     result.bsg_summary = bsg_result.to_dict()
@@ -1534,9 +1750,11 @@ class PcapIngestPipeline:
                         bsg_result.sessions_total,
                     )
                 except Exception as bsg_err:
+                    self.emitter.discard_pending()
                     logger.warning("[pcap_ingest] BSG detection failed: %s", bsg_err)
 
         except Exception as e:
+            self.emitter.discard_pending()
             result.errors.append(f"{type(e).__name__}: {e}")
             logger.error("[pcap_ingest] Failed to ingest %s: %s", filename, e)
 
@@ -1621,8 +1839,35 @@ class PcapIngestPipeline:
         if self.config.enable_bsg and batch.total_sessions > 0:
             try:
                 from behavior_groups import BehaviorGroupDetector, BSGConfig
-                bsg_detector = BehaviorGroupDetector(self.engine)
+                bsg_detector = BehaviorGroupDetector(self.emitter.engine)
                 bsg_result = bsg_detector.detect_from_graph()
+                evidence_refs = [r.pcap_artifact_id for r in batch.per_file if r.ok]
+                evidence_hash = hashlib.sha256(
+                    json.dumps(sorted(evidence_refs), sort_keys=True).encode("utf-8")
+                ).hexdigest()[:16]
+                self.emitter.flush(
+                    entity_id=f"pcap_ingest:batch:bsg:{evidence_hash}",
+                    entity_type="PCAP_BATCH_BSG_MATERIALIZATION",
+                    entity_data={
+                        "id": f"pcap_ingest:batch:bsg:{evidence_hash}",
+                        "kind": "pcap_batch_behavior_groups",
+                        "labels": {
+                            "groups_created": bsg_result.groups_created,
+                            "sessions_grouped": bsg_result.sessions_grouped,
+                            "sessions_total": bsg_result.sessions_total,
+                            "pcaps_processed": batch.pcaps_processed,
+                        },
+                        "metadata": {
+                            "provenance": {
+                                "source": "bsg_detector",
+                                "evidence_type": "behavioral_inference",
+                            },
+                        },
+                    },
+                    request_id=f"pcap_ingest:batch:bsg:{evidence_hash}",
+                    evidence_refs=evidence_refs,
+                    idempotency_key=f"pcap-ingest:batch:bsg:{evidence_hash}:v1",
+                )
                 batch.bsg_summary = bsg_result.to_dict()
                 batch.total_nodes += bsg_result.groups_created
                 batch.total_edges += bsg_result.edges_created
@@ -1633,6 +1878,7 @@ class PcapIngestPipeline:
                     bsg_result.sessions_total,
                 )
             except Exception as bsg_err:
+                self.emitter.discard_pending()
                 logger.warning("[pcap_ingest] BSG batch detection failed: %s", bsg_err)
 
         batch.duration_sec = time.monotonic() - t0
