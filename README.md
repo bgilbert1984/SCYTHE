@@ -1,4 +1,6 @@
 # SCYTHE
+Spectrcyde @ https://neurosphere-2.tail52f848.ts.net/wordpress/
+SCYTHE_Blog @ https://neurosphere-2.tail52f848.ts.net/wordpress/?page_id=14
 
 ### A command operations visualization layer for RF intelligence, PCAP analysis, hypergraph reasoning, and geospatial situational awareness.
 
