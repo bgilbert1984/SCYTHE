@@ -17,5 +17,13 @@ data/
 logs/
 tmp/
 temp/
+instances/
+metrics_logs/
+
+# Captures and other bulky local telemetry should stay out of the public repo.
+ftp_share/
+*.pcap
+*.pcapng
+*.pcapng*
 
 .DS_Store

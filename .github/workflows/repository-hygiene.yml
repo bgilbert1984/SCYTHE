@@ -1,0 +1,15 @@
+name: Repository Hygiene
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Reject hardcoded feed tokens
+        run: tools/preflight_secret_scan.sh
