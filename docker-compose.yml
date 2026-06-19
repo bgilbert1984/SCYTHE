@@ -1,0 +1,181 @@
+# ─── RF SCYTHE / NerfEngine — Docker Compose ─────────────────────────────────
+#
+# NETWORKING NOTE
+# ───────────────
+# Linux (recommended): network_mode: host is active by default.
+#   The orchestrator spawns API server instances on dynamic ports (40000-50000).
+#   The browser UI connects directly to those ports, so host networking is
+#   required to avoid port-mapping every possible instance port.
+#
+# macOS / Windows (Docker Desktop):
+#   host networking is not supported. Comment out the `network_mode: host`
+#   lines and uncomment the `ports:` + `networks:` blocks in each service.
+#   Instance ports are then NOT reachable from the browser UI — use the
+#   orchestrator's built-in reverse-proxy feature (coming soon) or VPN into
+#   the container network.
+#
+# QUICK START
+# ───────────
+#   cp .env.example .env            # edit STREAM_RELAY_URL with your host IP
+#   docker compose up -d
+#   # Models are pulled automatically by ollama-init on first run (~2-4 GB)
+#   open http://localhost:5001
+
+services:
+
+  # ── SCYTHE Orchestrator ───────────────────────────────────────────────────
+  scythe:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: scythe/nerf-engine:latest
+    container_name: scythe-orchestrator
+    restart: unless-stopped
+
+    # Linux: share the host network stack (required for dynamic instance ports)
+    network_mode: host
+
+    # ── macOS / Windows: comment out network_mode above and use this instead ──
+    # networks:
+    #   - scythe-net
+    # ports:
+    #   - "${ORCHESTRATOR_PORT:-5001}:5001"
+    #   - "${STREAM_RELAY_PORT:-8765}:8765"
+    #   - "${MCP_WS_PORT:-8766}:8766"
+    #   - "44000-44100:44000-44100"  # instance port range
+
+    environment:
+      ORCHESTRATOR_HOST:    "0.0.0.0"
+      ORCHESTRATOR_PORT:    "${ORCHESTRATOR_PORT:-5001}"
+      # STREAM_RELAY_URL must use the IP reachable by the browser/Android client
+      STREAM_RELAY_URL:     "${STREAM_RELAY_URL:-ws://127.0.0.1:8765/ws}"
+      MCP_WS_URL:           "${MCP_WS_URL:-ws://127.0.0.1:8766/ws}"
+      TAKML_URL:            "${TAKML_URL:-http://localhost:8234}"
+      # With host networking, ollama runs on the same network stack
+      OLLAMA_URL:           "${OLLAMA_URL:-http://localhost:11434}"
+      PYTHONUNBUFFERED:     "1"
+      PYTHONDONTWRITEBYTECODE: "1"
+
+    volumes:
+      # Named volume for persisted instance databases and subgraphs
+      - scythe-instances:/app/instances
+      # Named volume for structured logs
+      - scythe-logs:/app/logs
+      # Optional: bind-mount a local PCAP drop folder for ingest
+      # - ./pcap-drop:/app/pcap-drop
+
+    depends_on:
+      - ollama
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  # ── Ollama LLM Server ─────────────────────────────────────────────────────
+  ollama:
+    image: ollama/ollama:latest
+    container_name: scythe-ollama
+    restart: unless-stopped
+    network_mode: host
+
+    # macOS / Windows alternative:
+    # networks:
+    #   - scythe-net
+    # ports:
+    #   - "${OLLAMA_PORT:-11434}:11434"
+
+    volumes:
+      - ollama-models:/root/.ollama
+
+    # ── NVIDIA GPU passthrough ── uncomment if GPU is available ──────────────
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "3"
+
+  # ── One-shot: pull required Ollama models on first run ────────────────────
+  ollama-init:
+    image: ollama/ollama:latest
+    container_name: scythe-ollama-init
+    restart: "no"
+    network_mode: host
+
+    # macOS / Windows alternative:
+    # networks:
+    #   - scythe-net
+
+    volumes:
+      - ollama-models:/root/.ollama
+
+    entrypoint: >
+      /bin/sh -c "
+        echo '[ollama-init] Waiting for Ollama to become ready...';
+        until ollama list > /dev/null 2>&1; do
+          echo '[ollama-init] ... still waiting';
+          sleep 3;
+        done;
+        echo '[ollama-init] Pulling gemma3:1b (inference model)...';
+        ollama pull gemma3:1b;
+        echo '[ollama-init] Pulling embeddinggemma (semantic repair model)...';
+        ollama pull embeddinggemma || echo '[ollama-init] embeddinggemma not available, skipping';
+        echo '[ollama-init] Model setup complete.';
+      "
+
+    depends_on:
+      - ollama
+
+  # ── Envoy gRPC-Web proxy ─────────────────────────────────────────────────
+  # Translates browser gRPC-Web (HTTP/1.1) → native gRPC H2 for scythe_grpc_server.
+  # Browser connects to: http://127.0.0.1:8080
+  # Envoy forwards to:   127.0.0.1:50051 (scythe_grpc_server.py)
+  envoy:
+    image: envoyproxy/envoy:v1.32-latest
+    container_name: scythe-envoy
+    restart: unless-stopped
+    network_mode: host
+
+    # macOS / Windows alternative:
+    # networks:
+    #   - scythe-net
+    # ports:
+    #   - "8080:8080"
+    #   - "9901:9901"  # Envoy admin
+
+    volumes:
+      - ./grpc/envoy.yaml:/etc/envoy/envoy.yaml:ro
+
+    command: ["-c", "/etc/envoy/envoy.yaml", "--log-level", "warn"]
+
+    depends_on:
+      - scythe
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+
+# networks:
+#   scythe-net:
+#     driver: bridge
+
+# ─── Named volumes ────────────────────────────────────────────────────────────
+volumes:
+  scythe-instances:
+    driver: local
+  scythe-logs:
+    driver: local
+  ollama-models:
+    driver: local

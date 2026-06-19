@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SCYTHE Broker Authentication</title>
+
+    <script>
+    // Declare bootstrap role explicitly
+    window.__SCYTHE_BOOTSTRAP__ = {
+        runtime_role: 'broker'
+    };
+    </script>
+
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@300;400;500;700&family=Titillium+Web:wght@300;400;600;700&display=swap" rel="stylesheet">
+
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        html, body {
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(135deg, #0d1117 0%, #1a1a2e 100%);
+            color: #e0e0e0;
+            font-family: 'Roboto Mono', monospace;
+            overflow: hidden;
+        }
+
+        .login-container {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            width: 100%;
+            height: 100%;
+            position: relative;
+        }
+
+        /* Animated background */
+        .login-bg {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background:
+                radial-gradient(circle at 20% 50%, rgba(0, 206, 201, 0.1) 0%, transparent 50%),
+                radial-gradient(circle at 80% 80%, rgba(108, 92, 231, 0.1) 0%, transparent 50%);
+            pointer-events: none;
+            animation: gradientShift 15s ease infinite;
+        }
+
+        @keyframes gradientShift {
+            0%, 100% {
+                background:
+                    radial-gradient(circle at 20% 50%, rgba(0, 206, 201, 0.1) 0%, transparent 50%),
+                    radial-gradient(circle at 80% 80%, rgba(108, 92, 231, 0.1) 0%, transparent 50%);
+            }
+            50% {
+                background:
+                    radial-gradient(circle at 80% 20%, rgba(0, 206, 201, 0.1) 0%, transparent 50%),
+                    radial-gradient(circle at 20% 80%, rgba(108, 92, 231, 0.1) 0%, transparent 50%);
+            }
+        }
+
+        .login-card {
+            position: relative;
+            z-index: 10;
+            background: rgba(13, 17, 23, 0.95);
+            border: 1px solid rgba(0, 206, 201, 0.3);
+            border-radius: 12px;
+            padding: 48px 40px;
+            min-width: 420px;
+            max-width: 480px;
+            box-shadow:
+                0 0 60px rgba(0, 206, 201, 0.1),
+                0 0 120px rgba(0, 0, 0, 0.5);
+            backdrop-filter: blur(10px);
+        }
+
+        .login-header {
+            text-align: center;
+            margin-bottom: 32px;
+        }
+
+        .login-header h1 {
+            font-family: 'Titillium Web', sans-serif;
+            font-size: 2.4rem;
+            font-weight: 700;
+            letter-spacing: 3px;
+            text-transform: uppercase;
+            color: #00cec9;
+            margin-bottom: 8px;
+            text-shadow: 0 0 20px rgba(0, 206, 201, 0.3);
+        }
+
+        .login-header p {
+            color: #666;
+            font-size: 0.85rem;
+            letter-spacing: 1px;
+        }
+
+        .login-form {
+            margin-bottom: 24px;
+        }
+
+        .form-group {
+            margin-bottom: 16px;
+        }
+
+        .form-group label {
+            display: block;
+            color: #aaa;
+            font-size: 0.8rem;
+            font-weight: 600;
+            margin-bottom: 6px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .form-group input {
+            width: 100%;
+            padding: 12px 14px;
+            background: rgba(26, 26, 46, 0.6);
+            border: 1px solid rgba(0, 206, 201, 0.2);
+            border-radius: 6px;
+            color: #e0e0e0;
+            font-family: 'Roboto Mono', monospace;
+            font-size: 0.9rem;
+            outline: none;
+            transition: all 0.3s ease;
+        }
+
+        .form-group input:focus {
+            border-color: #00cec9;
+            background: rgba(26, 26, 46, 0.9);
+            box-shadow: 0 0 12px rgba(0, 206, 201, 0.2);
+        }
+
+        .form-group input::placeholder {
+            color: #555;
+        }
+
+        .login-btn {
+            width: 100%;
+            padding: 14px 20px;
+            background: linear-gradient(135deg, #00a8ff 0%, #00cec9 100%);
+            color: #000;
+            border: none;
+            border-radius: 6px;
+            font-family: 'Titillium Web', sans-serif;
+            font-size: 1rem;
+            font-weight: 700;
+            letter-spacing: 1.5px;
+            text-transform: uppercase;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 0 20px rgba(0, 206, 201, 0.2);
+        }
+
+        .login-btn:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 0 30px rgba(0, 206, 201, 0.4);
+        }
+
+        .login-btn:active:not(:disabled) {
+            transform: translateY(0);
+        }
+
+        .login-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .status-message {
+            margin-top: 16px;
+            padding: 12px;
+            border-radius: 6px;
+            font-size: 0.85rem;
+            text-align: center;
+            min-height: 22px;
+            display: none;
+        }
+
+        .status-message.success {
+            background: rgba(76, 175, 80, 0.15);
+            color: #81c784;
+            border: 1px solid rgba(76, 175, 80, 0.3);
+            display: block;
+        }
+
+        .status-message.error {
+            background: rgba(244, 67, 54, 0.15);
+            color: #ef5350;
+            border: 1px solid rgba(244, 67, 54, 0.3);
+            display: block;
+        }
+
+        .status-message.loading {
+            background: rgba(33, 150, 243, 0.15);
+            color: #64b5f6;
+            border: 1px solid rgba(33, 150, 243, 0.3);
+            display: block;
+        }
+
+        .auth-link-container {
+            text-align: center;
+            margin-top: 24px;
+            font-size: 0.75rem;
+            color: #555;
+        }
+
+        .auth-divider {
+            margin-top: 20px;
+            padding-top: 16px;
+            border-top: 1px solid rgba(0, 206, 201, 0.15);
+        }
+
+        .auth-link {
+            display: inline-block;
+            margin-top: 12px;
+            color: #00cec9;
+            text-decoration: none;
+            font-size: 0.85rem;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+            transition: all 0.3s ease;
+            cursor: pointer;
+        }
+
+        .auth-link:hover {
+            color: #00a8ff;
+            text-shadow: 0 0 10px rgba(0, 206, 201, 0.3);
+        }
+
+        .footer-text {
+            text-align: center;
+            margin-top: 12px;
+            font-size: 0.75rem;
+            color: #555;
+        }
+
+        .totp-section {
+            margin-top: 24px;
+            padding-top: 20px;
+            border-top: 1px solid rgba(0, 206, 201, 0.2);
+            display: none;
+        }
+
+        .totp-section.active {
+            display: block;
+        }
+
+        .totp-section h3 {
+            font-family: 'Titillium Web', sans-serif;
+            color: #00cec9;
+            font-size: 0.95rem;
+            margin-bottom: 12px;
+            letter-spacing: 1px;
+        }
+
+        .totp-input {
+            width: 100%;
+            padding: 12px 14px;
+            background: rgba(26, 26, 46, 0.6);
+            border: 1px solid rgba(0, 206, 201, 0.2);
+            border-radius: 6px;
+            color: #e0e0e0;
+            font-family: 'Roboto Mono', monospace;
+            font-size: 1.1rem;
+            outline: none;
+            text-align: center;
+            letter-spacing: 2px;
+            margin-bottom: 12px;
+            transition: all 0.3s ease;
+        }
+
+        .totp-input:focus {
+            border-color: #00cec9;
+            background: rgba(26, 26, 46, 0.9);
+            box-shadow: 0 0 12px rgba(0, 206, 201, 0.2);
+        }
+
+        .totp-buttons {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+        }
+
+        .totp-btn {
+            padding: 10px 14px;
+            border: none;
+            border-radius: 6px;
+            font-family: 'Titillium Web', sans-serif;
+            font-size: 0.85rem;
+            font-weight: 600;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .totp-btn-verify {
+            background: linear-gradient(135deg, #4CAF50, #8BC34A);
+            color: #fff;
+        }
+
+        .totp-btn-verify:hover {
+            box-shadow: 0 0 15px rgba(76, 175, 80, 0.3);
+            transform: translateY(-1px);
+        }
+
+        .totp-btn-skip {
+            background: rgba(100, 100, 120, 0.3);
+            color: #aaa;
+            border: 1px solid rgba(100, 100, 120, 0.5);
+        }
+
+        .totp-btn-skip:hover {
+            background: rgba(100, 100, 120, 0.5);
+            border-color: rgba(100, 100, 120, 0.7);
+        }
+
+        @media (max-width: 500px) {
+            .login-card {
+                min-width: 320px;
+                padding: 32px 24px;
+            }
+
+            .login-header h1 {
+                font-size: 1.8rem;
+            }
+
+            .login-card {
+                margin: 0 16px;
+            }
+        }
+    </style>
+
+    <!-- Auth modules -->
+    <script src="/assets/js/scythe_transport.js"></script>
+    <script src="/assets/js/shared_auth.js"></script>
+</head>
+<body>
+    <div class="login-bg"></div>
+
+    <div class="login-container">
+        <div class="login-card">
+            <div class="login-header">
+                <h1>SCYTHE</h1>
+                <p>Broker Authentication</p>
+            </div>
+
+            <form id="loginForm" class="login-form">
+                <div class="form-group">
+                    <label for="callsign">Callsign</label>
+                    <input
+                        id="callsign"
+                        type="text"
+                        placeholder="Operator callsign"
+                        autocomplete="username"
+                        required
+                    />
+                </div>
+
+                <div class="form-group">
+                    <label for="password">Password</label>
+                    <input
+                        id="password"
+                        type="password"
+                        placeholder="Secure password"
+                        autocomplete="current-password"
+                        required
+                    />
+                </div>
+
+                <button type="submit" class="login-btn" id="submitBtn">
+                    Authenticate
+                </button>
+
+                <div id="statusMessage" class="status-message"></div>
+            </form>
+
+            <!-- TOTP verification section (shown conditionally) -->
+            <div id="totpSection" class="totp-section">
+                <h3>Two-Factor Authentication</h3>
+                <input
+                    id="totpCode"
+                    type="text"
+                    class="totp-input"
+                    placeholder="000000"
+                    maxlength="6"
+                    pattern="[0-9]{6}"
+                    autocomplete="off"
+                />
+                <div class="totp-buttons">
+                    <button type="button" class="totp-btn totp-btn-verify" id="verifyTotpBtn">
+                        Verify
+                    </button>
+                    <button type="button" class="totp-btn totp-btn-skip" id="skipTotpBtn">
+                        Skip
+                    </button>
+                </div>
+            </div>
+
+            <div class="footer-text">
+                <p>Secure Operations Center</p>
+                <p style="margin-top: 4px; color: #444;">v2.1.0</p>
+            </div>
+
+            <div class="auth-divider">
+                <p style="font-size: 0.75rem; color: #666;">New operator?</p>
+                <a href="/register.html" class="auth-link">Create Account</a>
+            </div>
+        </div>
+    </div>
+
+    <!-- Login controller -->
+    <script src="/assets/js/login_page.js"></script>
+</body>
+</html>

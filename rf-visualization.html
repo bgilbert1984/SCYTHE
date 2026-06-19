@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RF SCYTHE Visualization</title>
+    <script src="https://cesium.com/downloads/cesiumjs/releases/1.104/Build/Cesium/Cesium.js"></script>
+    <link href="https://cesium.com/downloads/cesiumjs/releases/1.104/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
+    <script src="cesium-visualization.js"></script>
+    <link rel="stylesheet" href="rf-visualization.css">
+</head>
+<body>
+    <div id="cesiumContainer"></div>
+    <div class="toolbar">
+        <h3>RF SCYTHE Visualization</h3>
+        <button id="btnAddRFSignal">Add Sample RF Signal</button>
+        <button id="btnAddViolation">Add Sample Violation</button>
+        <div id="modelControls">
+            <h4>3D Model Controls</h4>
+            <button id="btnLoadModel">Load 3D Model</button>
+            <div>
+                <label for="modelScale">Scale:</label>
+                <input type="range" id="modelScale" min="0.1" max="10" step="0.1" value="1">
+                <span id="scaleValue">1.0</span>
+            </div>
+            <div>
+                <label for="modelHeading">Heading:</label>
+                <input type="range" id="modelHeading" min="0" max="360" step="1" value="0">
+                <span id="headingValue">0°</span>
+            </div>
+            <div>
+                <label for="modelAltitude">Altitude:</label>
+                <input type="range" id="modelAltitude" min="0" max="1000" step="10" value="100">
+                <span id="altitudeValue">100m</span>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Initialize Cesium viewer
+        const viewer = RF_SCYTHE.initializeCesiumViewer();
+
+        // Set default view
+        viewer.camera.setView({
+            destination: Cesium.Cartesian3.fromDegrees(-98.0, 40.0, 5000000.0)
+        });
+
+        // Sample model location (middle of USA)
+        const modelLat = 39.8283;
+        const modelLon = -98.5795;
+        let modelAlt = 100;
+        let modelScale = 1.0;
+        let modelHeading = 0;
+        let modelEntity = null;
+
+        // Button event listeners
+        document.getElementById('btnAddRFSignal').addEventListener('click', () => {
+            const lat = modelLat + (Math.random() - 0.5) * 10;
+            const lon = modelLon + (Math.random() - 0.5) * 10;
+            const freq = 100 + Math.random() * 900;
+            const power = Math.random();
+            const modulationTypes = ['AM', 'FM', 'SSB', 'CW', 'PSK', 'FSK'];
+            const modulation = modulationTypes[Math.floor(Math.random() * modulationTypes.length)];
+
+            RF_SCYTHE.addRFSignal(viewer, lat, lon, freq, power, modulation);
+            RF_SCYTHE.addUncertaintyCircle(viewer, lat, lon, 50000 + Math.random() * 100000);
+        });
+
+        document.getElementById('btnAddViolation').addEventListener('click', () => {
+            const lat = modelLat + (Math.random() - 0.5) * 8;
+            const lon = modelLon + (Math.random() - 0.5) * 8;
+            const freq = 100 + Math.random() * 900;
+            const descriptions = [
+                'Unauthorized frequency use',
+                'Signal power exceeds limits',
+                'Operation outside authorized hours',
+                'Interference with protected band'
+            ];
+            const description = descriptions[Math.floor(Math.random() * descriptions.length)];
+
+            RF_SCYTHE.addViolation(viewer, lat, lon, freq, description);
+            RF_SCYTHE.addUncertaintyCircle(viewer, lat, lon, 30000 + Math.random() * 70000, true);
+        });
+
+        document.getElementById('btnLoadModel').addEventListener('click', () => {
+            // Remove existing model if any
+            if (modelEntity) {
+                viewer.entities.remove(modelEntity);
+            }
+
+            // Add the 3D model
+            modelEntity = RF_SCYTHE.add3DModel(
+                viewer,
+                'assets/Part2.gltf',
+                modelLat,
+                modelLon,
+                modelAlt,
+                modelScale,
+                modelHeading,
+                0,
+                0
+            );
+
+            // Zoom to the model
+            viewer.zoomTo(modelEntity);
+        });
+
+        // Model control sliders
+        document.getElementById('modelScale').addEventListener('input', (e) => {
+            modelScale = parseFloat(e.target.value);
+            document.getElementById('scaleValue').textContent = modelScale.toFixed(1);
+
+            if (modelEntity) {
+                modelEntity.model.scale = modelScale;
+            }
+        });
+
+        document.getElementById('modelHeading').addEventListener('input', (e) => {
+            modelHeading = parseInt(e.target.value);
+            document.getElementById('headingValue').textContent = `${modelHeading}°`;
+
+            if (modelEntity) {
+                modelEntity.orientation = Cesium.Transforms.headingPitchRollQuaternion(
+                    Cesium.Cartesian3.fromDegrees(modelLon, modelLat, modelAlt),
+                    new Cesium.HeadingPitchRoll(
+                        Cesium.Math.toRadians(modelHeading),
+                        0,
+                        0
+                    )
+                );
+            }
+        });
+
+        document.getElementById('modelAltitude').addEventListener('input', (e) => {
+            modelAlt = parseInt(e.target.value);
+            document.getElementById('altitudeValue').textContent = `${modelAlt}m`;
+
+            if (modelEntity) {
+                modelEntity.position = Cesium.Cartesian3.fromDegrees(modelLon, modelLat, modelAlt);
+            }
+        });
+
+        // Add sample ionospheric data
+        const ionosphereData = {
+            layers: {
+                D: { active: true, minHeight: 60, maxHeight: 90 },
+                E: { active: true, minHeight: 90, maxHeight: 150 },
+                F1: { active: true, minHeight: 150, maxHeight: 250 },
+                F2: { active: true, minHeight: 250, maxHeight: 500 }
+            },
+            solarActivity: {
+                solarFlux: 120.5,
+                kpIndex: 3.2
+            },
+            lastUpdate: new Date().getTime()
+        };
+
+        RF_SCYTHE.addIonosphericLayers(viewer, ionosphereData);
+    </script>
+</body>
+</html>

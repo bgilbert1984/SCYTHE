@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RF SCYTHE | JWST Data Integration</title>
+
+    <!-- Favicon -->
+    <link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
+
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@300;400;500;700&family=Titillium+Web:wght@300;400;600;700&display=swap" rel="stylesheet">
+
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="assets/css/rf-scythe-styles.css">
+    <link rel="stylesheet" href="assets/css/jwst-dashboard.css">
+
+    <!-- Scientific Libraries -->
+    <script src="https://cdn.jsdelivr.net/npm/plotly.js@2.11.1/dist/plotly.min.js"></script>
+</head>
+<body class="jwst-dashboard">
+    <!-- Header -->
+    <header>
+        <div class="logo">
+            <img src="assets/images/rf-scythe-logo.svg" alt="RF SCYTHE Logo">
+            <div class="logo-text">RF <span class="highlight">SCYTHE</span> | JWST Data Integration</div>
+        </div>
+        <nav>
+            <ul>
+                <li><a href="/">Home</a></li>
+                <li><a href="/rf_scythe_home.html">Dashboard</a></li>
+                <li><a href="#" class="active">JWST Integration</a></li>
+                <li><a href="/gemini-lhc-jwst-interface.html">LHC Interface</a></li>
+            </ul>
+        </nav>
+    </header>
+
+    <!-- Main Content -->
+    <main>
+        <div class="dashboard-grid">
+            <!-- JWST Data Status Panel -->
+            <div class="panel jwst-status">
+                <h2>JWST Data Status</h2>
+                <div class="status-grid">
+                    <div class="status-item">
+                        <span class="status-indicator status-green"></span>
+                        <span class="label">Data Server:</span>
+                        <span class="value" id="data-server-status">Connected</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-indicator status-green"></span>
+                        <span class="label">Files Downloaded:</span>
+                        <span class="value" id="files-downloaded">42/57</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-indicator status-yellow"></span>
+                        <span class="label">Processing:</span>
+                        <span class="value" id="processing-status">Active</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-indicator status-green"></span>
+                        <span class="label">RF Correlation:</span>
+                        <span class="value" id="rf-correlation-status">Running</span>
+                    </div>
+                </div>
+                <div class="jwst-controls">
+                    <button id="refresh-data" class="btn">Refresh Data</button>
+                    <button id="download-fits" class="btn btn-outline">Download FITS Files</button>
+                </div>
+            </div>
+
+            <!-- Spectral Data Visualization -->
+            <div class="panel spectral-panel">
+                <h2>JWST Spectral Data</h2>
+                <div class="tabs">
+                    <button class="tab-btn active" data-tab="niriss">NIRISS</button>
+                    <button class="tab-btn" data-tab="nirspec">NIRSpec</button>
+                    <button class="tab-btn" data-tab="miri">MIRI</button>
+                </div>
+                <div id="spectral-plot" class="plot-container"></div>
+                <div class="control-bar">
+                    <label>
+                        Wavelength Range:
+                        <select id="wavelength-range">
+                            <option value="full">Full Spectrum</option>
+                            <option value="near-ir">Near Infrared (0.6-5μm)</option>
+                            <option value="mid-ir">Mid Infrared (5-28μm)</option>
+                            <option value="far-ir">Far Infrared (28-1000μm)</option>
+                        </select>
+                    </label>
+                    <label>
+                        Data Source:
+                        <select id="data-source">
+                            <option value="jw02736">JW02736 (COSMOS-Web)</option>
+                            <option value="jw01345">JW01345 (CEERS)</option>
+                            <option value="jw02107">JW02107 (JADES)</option>
+                        </select>
+                    </label>
+                </div>
+            </div>
+
+            <!-- RF Correlation Analysis -->
+            <div class="panel rf-correlation-panel">
+                <h2>RF-Spectral Correlation</h2>
+                <div id="rf-correlation-plot" class="plot-container"></div>
+                <div class="correlation-stats">
+                    <div class="stat-item">
+                        <span class="label">Correlation Coefficient:</span>
+                        <span class="value" id="correlation-coefficient">0.72</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="label">Ionospheric Impact:</span>
+                        <span class="value" id="ionospheric-impact">Medium</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="label">Signal-to-Noise:</span>
+                        <span class="value" id="signal-to-noise">18.3 dB</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- JWST Model Visualization -->
+            <div class="panel jwst-model-panel">
+                <h2>JWST Orientation</h2>
+                <div id="jwst-model-container"></div>
+                <div class="model-controls">
+                    <button id="toggle-animation" class="btn">Pause Animation</button>
+                    <button id="reset-view" class="btn btn-outline">Reset View</button>
+                </div>
+            </div>
+
+            <!-- Data Downloads -->
+            <div class="panel data-browser-panel">
+                <h2>Data Browser</h2>
+                <div class="file-list-container">
+                    <table class="file-list">
+                        <thead>
+                            <tr>
+                                <th>Filename</th>
+                                <th>Instrument</th>
+                                <th>Size</th>
+                                <th>Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="file-list-body">
+                            <tr>
+                                <td>jw02736-o003_s00151_niriss_f200w-gr150c-gr150r_c1d.fits</td>
+                                <td>NIRISS</td>
+                                <td>128.4 MB</td>
+                                <td><button class="download-btn">Download</button></td>
+                            </tr>
+                            <tr>
+                                <td>jw02736-o003_s00361_niriss_f200w-gr150c-gr150r_cal.fits</td>
+                                <td>NIRISS</td>
+                                <td>97.2 MB</td>
+                                <td><button class="download-btn">Download</button></td>
+                            </tr>
+                            <tr>
+                                <td>jw02736-o003_s00055_niriss_f115w-gr150c-gr150r_cal.jpg</td>
+                                <td>NIRISS</td>
+                                <td>1.8 MB</td>
+                                <td><button class="download-btn">Download</button></td>
+                            </tr>
+                            <tr>
+                                <td>jw02736-o003_s00782_niriss_f200w-gr150c-gr150r_c1d.fits</td>
+                                <td>NIRISS</td>
+                                <td>113.9 MB</td>
+                                <td><button class="download-btn">Download</button></td>
+                            </tr>
+                            <tr>
+                                <td>jw02736-o008_s04590_nirspec_f290lp-g395m_x1d.fits</td>
+                                <td>NIRSpec</td>
+                                <td>211.3 MB</td>
+                                <td><button class="download-btn">Download</button></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="pagination">
+                    <button class="prev-page">Previous</button>
+                    <span class="page-indicator">Page 1 of 5</span>
+                    <button class="next-page">Next</button>
+                </div>
+            </div>
+
+            <!-- RF Analysis Settings -->
+            <div class="panel rf-settings-panel">
+                <h2>RF Analysis Settings</h2>
+                <div class="settings-form">
+                    <div class="setting-group">
+                        <label for="frequency-range">Frequency Range (MHz):</label>
+                        <div class="range-selector">
+                            <input type="number" id="freq-min" value="100" min="1" max="10000">
+                            <span>to</span>
+                            <input type="number" id="freq-max" value="1000" min="1" max="10000">
+                        </div>
+                    </div>
+                    <div class="setting-group">
+                        <label for="correlation-method">Correlation Method:</label>
+                        <select id="correlation-method">
+                            <option value="pearson">Pearson</option>
+                            <option value="spearman">Spearman</option>
+                            <option value="kendall">Kendall Tau</option>
+                        </select>
+                    </div>
+                    <div class="setting-group">
+                        <label for="ionosphere-model">Ionosphere Model:</label>
+                        <select id="ionosphere-model">
+                            <option value="IRI">International Reference Ionosphere (IRI)</option>
+                            <option value="NeQuick">NeQuick G</option>
+                            <option value="GAIM">Global Assimilation of Ionospheric Measurements</option>
+                        </select>
+                    </div>
+                    <div class="setting-group checkbox-group">
+                        <label><input type="checkbox" id="enable-realtime" checked> Enable Real-time Analysis</label>
+                        <label><input type="checkbox" id="include-weather"> Include Space Weather Events</label>
+                        <label><input type="checkbox" id="advanced-mode"> Advanced Analysis Mode</label>
+                    </div>
+                    <button id="apply-settings" class="btn">Apply Settings</button>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Status Panel -->
+    <div class="status-panel">
+        <div class="status-title">
+            <span>System Status</span>
+            <span id="system-time">2025-05-01 00:00:00</span>
+        </div>
+        <div class="status-grid">
+            <div class="status-item">
+                <span class="status-indicator status-green"></span>
+                <span class="label">NeRF Engine:</span>
+                <span class="value">Online</span>
+            </div>
+            <div class="status-item">
+                <span class="status-indicator status-green"></span>
+                <span class="label">RF Analysis:</span>
+                <span class="value">Active</span>
+            </div>
+            <div class="status-item">
+                <span class="status-indicator status-green"></span>
+                <span class="label">JWST Server:</span>
+                <span class="value">Connected</span>
+            </div>
+            <div class="status-item">
+                <span class="status-indicator status-green"></span>
+                <span class="label">WebSocket:</span>
+                <span class="value">Connected</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Three.js and dependencies -->
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.module.js",
+            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.158.0/examples/jsm/"
+        }
+    }
+    </script>
+
+    <!-- JWST Integration Scripts -->
+    <script src="jwst-integration.js"></script>
+    <script src="jwst-dashboard.js"></script>
+</body>
+</html>

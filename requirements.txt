@@ -1,0 +1,121 @@
+# RF SCYTHE System Requirements
+# Generated: 2025-04-25
+
+# Core Python Dependencies
+numpy>=1.21.0
+scipy>=1.7.0
+matplotlib>=3.4.0
+Flask>=2.0.0
+Werkzeug>=2.0.0
+requests>=2.25.0
+websockets>=10.0
+websocket-client>=1.0.0
+pytz>=2021.1
+
+# Signal Processing
+pyrtlsdr>=0.2.91    # RTL-SDR support
+SoapySDR>=0.8.0     # General SDR support
+soundfile>=0.10.0   # Audio file handling for IQ data
+scikit-dsp-comm>=2.0.0  # DSP tools
+
+# STRF Toolkit Dependencies
+sgp4>=2.20          # Satellite tracking
+astropy>=5.0        # Astronomical calculations
+pyhamtools>=0.8.0   # Ham radio tools
+python-dateutil>=2.8.0
+
+# Machine Learning
+torch>=1.10.0       # PyTorch for ML models
+torchvision>=0.11.0
+torchaudio>=0.10.0
+scikit-learn>=1.0.0
+pandas>=1.3.0
+
+# Visualization
+plotly>=5.3.0
+ipywidgets>=7.6.0   # For interactive notebooks
+ipython>=7.0.0
+
+# Web Development
+gunicorn>=20.1.0    # WSGI HTTP Server
+Flask-CORS>=3.0.0
+Flask-SocketIO>=5.1.0
+eventlet>=0.30.0
+gevent>=21.12.0
+# GeoIP lookups (optional but recommended when GeoLite2 DBs are present)
+maxminddb>=2.0.0
+
+# Embedded PostgreSQL server used for per-instance authority.  The
+# `pgserver` Python package wraps a copy of PostgreSQL binaries; it's not
+# published on PyPI so developers can either install it from the bundled
+# source tree or use `pip install pgserver` if you have it available.
+# Note: the bundled assets directory currently contains only the Python
+# sources and may **not** include the actual PostgreSQL binaries.  After
+# installing from `assets/pgserver-main` you must ensure the
+# `pginstall/bin` directory exists (e.g. by building/running pgbuild) or
+# else imports will fail with a FileNotFoundError and the server will
+# automatically fall back to SQLite.
+# To install from assets:
+#     pip install -e assets/pgserver-main
+pgserver>=0.0.0  # may resolve to editable local path
+# Neural Rendering
+pytorch3d>=0.6.0    # 3D deep learning
+open3d>=0.13.0      # Point cloud processing
+trimesh>=3.9.0      # Mesh processing
+
+# Networking and APIs
+aiohttp>=3.8.0
+kafka-python>=2.0.2
+socketio>=0.2.1
+python-socketio>=5.4.0
+fastapi>=0.95.0
+uvicorn>=0.21.0
+websockets>=10.4
+axios            # Note: This is a JS dependency, not Python
+
+# Data Storage
+questdb>=1.1.0    # Time series database client
+psycopg2-binary>=2.9.5  # PostgreSQL adapter
+
+# Signal Processing & Tracking
+filterpy>=1.4.5   # Kalman filtering and tracking
+pykalman>=0.9.5   # Alternative Kalman implementation
+
+# Satellite & Geospatial
+pymap3d>=2.7.0   # Coordinate conversions
+cartopy>=0.20.0  # Geospatial data visualization
+pyproj>=3.1.0    # Cartographic projections
+pyorbital>=1.5.1  # TLE propagation helper
+
+# Testing and Development
+pytest>=6.2.5
+tox>=3.24.0
+pre-commit>=2.15.0
+black>=21.9b0    # Code formatting
+
+# Documentation
+sphinx>=4.2.0
+sphinx-rtd-theme>=1.0.0
+nbsphinx>=0.8.7  # Jupyter notebook support
+
+# Environment Management
+python-dotenv>=0.19.0
+
+# Authentication & 2FA
+pyotp>=2.9.0  # TOTP/HOTP implementation for 2FA
+
+# Optional: CUDA Support for Neural Networks
+# Note: CUDA version should match your PyTorch build
+# cupy-cuda11x>=10.2.0  # Uncomment and adjust CUDA version as needed
+
+# JavaScript Dependencies (for reference, install with npm)
+# - cesium
+# - three.js
+# - axios
+# - socket.io-client
+# - express
+# - ws
+
+# gRPC — core transport + code generation
+grpcio>=1.62.0
+grpcio-tools>=1.62.0

@@ -1,0 +1,1288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="RF SCYTHE - Advanced RF Signal Analysis, Neural Radiance Fields, JWST Data Integration, and Hypersonic Threat Detection System">
+    <meta name="keywords" content="RF SCYTHE, Neural Radiance Fields, NeRF, RF Analysis, SDR, Hypersonic, RF Hypergraph, LHC, JWST, Space Telescope Data">
+    <meta name="author" content="RF SCYTHE Development Team">
+    <title>RF SCYTHE | Advanced RF Signal Analysis Platform</title>
+
+    <!-- Favicon -->
+    <link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
+
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@300;400;500;700&family=Titillium+Web:wght@300;400;600;700&display=swap" rel="stylesheet">
+
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="assets/css/rf-scythe-styles.css">
+
+    <script>
+    // ── Declare broker runtime role (must be before auth modules) ────────
+    window.__SCYTHE_BOOTSTRAP__ = {
+       runtime_role: 'broker'
+    };
+    </script>
+
+    <!-- Auth modules (needs bootstrap declaration) -->
+    <script src="assets/js/scythe_transport.js"></script>
+    <script src="assets/js/shared_auth.js"></script>
+
+    <!-- ── Deterministic Auth Gate (before DOM render) ────────────────── -->
+    <script>
+    (async function authBootstrapGate() {
+       await SCYTHE_AUTH.requireAuth();
+    })();
+    </script>
+
+    <script>
+    // Guard: rewrite absolute orchestrator API URLs to instance-relative paths and protect SSE
+    (function installScytheBootstrapGuard() {
+        const originalFetch = window.fetch;
+        function normalizeFetchResource(resource) {
+            try {
+                if (typeof resource === 'string') {
+                    const u = new URL(resource, window.location.href);
+                    if ((u.hostname === 'localhost' || u.hostname === '127.0.0.1') && u.port === '5001' && u.pathname.startsWith('/api/')) {
+                        console.warn('[SCYTHE] Rewriting absolute API URL to relative for instance scoping:', resource);
+                        return u.pathname + u.search + u.hash;
+                    }
+                } else if (resource instanceof Request) {
+                    const urlStr = resource.url;
+                    const u = new URL(urlStr, window.location.href);
+                    if ((u.hostname === 'localhost' || u.hostname === '127.0.0.1') && u.port === '5001' && u.pathname.startsWith('/api/')) {
+                        console.warn('[SCYTHE] Rewriting absolute API URL (Request) to relative for instance scoping:', urlStr);
+                        return new Request(u.pathname + u.search + u.hash, resource);
+                    }
+                }
+            } catch (e) {
+                // ignore
+            }
+            return resource;
+        }
+        window.fetch = async function(...args) {
+            args[0] = normalizeFetchResource(args[0]) || args[0];
+            try {
+                const response = await originalFetch(...args);
+                if (!response.ok && response.status === 404) {
+                    console.warn(`[API] 404 on ${args[0]} - potentially missing route`);
+                }
+                return response;
+            } catch (e) {
+                console.error(`[API] Network Error on ${args[0]}:`, e);
+                throw e;
+            }
+        };
+        if (window.EventSource) {
+            const OrigES = window.EventSource;
+            window.EventSource = function(u, opts) {
+                try {
+                    if (typeof u === 'string') {
+                        const url = new URL(u, window.location.href);
+                        if ((url.hostname === 'localhost' || url.hostname === '127.0.0.1') && url.port === '5001' && url.pathname.startsWith('/api/')) {
+                            console.warn('[SCYTHE] Rewriting absolute SSE URL to relative for instance scoping:', u);
+                            u = url.pathname + url.search + url.hash;
+                        }
+                    }
+                } catch (e) {}
+                return opts !== undefined ? new OrigES(u, opts) : new OrigES(u);
+            };
+        }
+        console.log('[SCYTHE] Bootstrap guard installed.');
+    })();
+    </script>
+
+    <!-- Multi-Instance Command Center Styles -->
+    <style>
+        /* ── Instance Command Center ────────────────────────────── */
+        .instance-command-center {
+            text-align: center;
+            padding: 40px 24px 20px;
+            position: relative;
+            z-index: 10;
+        }
+        .instance-command-center h2 {
+            font-family: 'Titillium Web', sans-serif;
+            color: #e0e0e0;
+            font-size: 1.3rem;
+            margin-bottom: 8px;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+        }
+        .instance-command-center .subtitle {
+            color: #666;
+            font-size: 0.8rem;
+            font-family: 'Roboto Mono', monospace;
+            margin-bottom: 24px;
+        }
+        .instance-btn-group {
+            display: flex;
+            justify-content: center;
+            gap: 20px;
+            flex-wrap: wrap;
+        }
+        .instance-btn {
+            font-family: 'Titillium Web', sans-serif;
+            font-size: 1rem;
+            font-weight: 600;
+            letter-spacing: 1.5px;
+            text-transform: uppercase;
+            padding: 16px 36px;
+            border: 2px solid;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            min-width: 280px;
+        }
+        .instance-btn-new {
+            background: linear-gradient(135deg, #00a8ff22, #00cec922);
+            color: #00cec9;
+            border-color: #00cec9;
+        }
+        .instance-btn-new:hover {
+            background: linear-gradient(135deg, #00a8ff44, #00cec944);
+            box-shadow: 0 0 30px rgba(0, 206, 201, 0.3), inset 0 0 20px rgba(0, 206, 201, 0.1);
+            transform: translateY(-2px);
+        }
+        .instance-btn-join {
+            background: linear-gradient(135deg, #6c5ce722, #a29bfe22);
+            color: #a29bfe;
+            border-color: #a29bfe;
+        }
+        .instance-btn-join:hover {
+            background: linear-gradient(135deg, #6c5ce744, #a29bfe44);
+            box-shadow: 0 0 30px rgba(108, 92, 231, 0.3), inset 0 0 20px rgba(108, 92, 231, 0.1);
+            transform: translateY(-2px);
+        }
+        .instance-btn-wordpress {
+            background: linear-gradient(135deg, #21759b22, #0073aa22);
+            color: #7ec8e3;
+            border-color: #3ea6d9;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            box-sizing: border-box;
+        }
+        .instance-btn-wordpress:hover {
+            background: linear-gradient(135deg, #21759b44, #0073aa44);
+            box-shadow: 0 0 30px rgba(62, 166, 217, 0.25), inset 0 0 20px rgba(62, 166, 217, 0.08);
+            transform: translateY(-2px);
+        }
+        .instance-btn svg {
+            width: 20px;
+            height: 20px;
+            vertical-align: middle;
+            margin-right: 8px;
+        }
+
+        /* ── Instance Running Count ───────────────────────────── */
+        .instance-live-count {
+            margin-top: 16px;
+            font-family: 'Roboto Mono', monospace;
+            font-size: 0.75rem;
+            color: #555;
+        }
+        .instance-live-count .count-num {
+            color: #00cec9;
+            font-weight: 700;
+        }
+
+        /* ── Modal Overlay ────────────────────────────────────── */
+        .scythe-modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0, 0, 0, 0.85);
+            z-index: 10000;
+            justify-content: center;
+            align-items: center;
+        }
+        .scythe-modal-overlay.active {
+            display: flex;
+        }
+        .scythe-modal {
+            background: #0d1117;
+            border: 1px solid #00cec9;
+            border-radius: 10px;
+            padding: 32px;
+            min-width: 420px;
+            max-width: 650px;
+            max-height: 80vh;
+            overflow-y: auto;
+            box-shadow: 0 0 60px rgba(0, 206, 201, 0.15);
+            position: relative;
+        }
+        .scythe-modal h3 {
+            font-family: 'Titillium Web', sans-serif;
+            color: #00cec9;
+            font-size: 1.2rem;
+            margin: 0 0 6px;
+            letter-spacing: 1px;
+        }
+        .scythe-modal .modal-sub {
+            color: #666;
+            font-size: 0.75rem;
+            font-family: 'Roboto Mono', monospace;
+            margin-bottom: 20px;
+        }
+        .scythe-modal .modal-close {
+            position: absolute;
+            top: 12px; right: 16px;
+            color: #666;
+            font-size: 20px;
+            cursor: pointer;
+            background: none;
+            border: none;
+            transition: color 0.2s;
+        }
+        .scythe-modal .modal-close:hover { color: #e74c3c; }
+
+        /* ── New Instance Form ────────────────────────────────── */
+        .new-instance-form label {
+            display: block;
+            color: #888;
+            font-size: 0.8rem;
+            font-family: 'Roboto Mono', monospace;
+            margin-bottom: 6px;
+        }
+        .new-instance-form input {
+            width: 100%;
+            padding: 10px 14px;
+            background: #1a1a2e;
+            border: 1px solid #333;
+            border-radius: 5px;
+            color: #eee;
+            font-family: 'Roboto Mono', monospace;
+            font-size: 0.9rem;
+            outline: none;
+            margin-bottom: 20px;
+            box-sizing: border-box;
+        }
+        .new-instance-form input:focus {
+            border-color: #00cec9;
+            box-shadow: 0 0 8px rgba(0, 206, 201, 0.2);
+        }
+        .modal-launch-btn {
+            width: 100%;
+            padding: 12px;
+            background: linear-gradient(135deg, #00a8ff, #00cec9);
+            color: #000;
+            border: none;
+            border-radius: 5px;
+            font-family: 'Titillium Web', sans-serif;
+            font-size: 1rem;
+            font-weight: 700;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        .modal-launch-btn:hover {
+            box-shadow: 0 0 20px rgba(0, 206, 201, 0.4);
+            transform: translateY(-1px);
+        }
+        .modal-launch-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        /* ── Join Instance List ───────────────────────────────── */
+        .instance-list {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+        .instance-list li {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 16px;
+            border: 1px solid #222;
+            border-radius: 6px;
+            margin-bottom: 8px;
+            transition: all 0.2s;
+            cursor: pointer;
+        }
+        .instance-list li:hover {
+            border-color: #a29bfe;
+            background: rgba(108, 92, 231, 0.08);
+        }
+        .instance-info {
+            flex: 1;
+        }
+        .instance-name {
+            color: #e0e0e0;
+            font-family: 'Titillium Web', sans-serif;
+            font-weight: 600;
+            font-size: 0.95rem;
+        }
+        .instance-meta {
+            color: #666;
+            font-family: 'Roboto Mono', monospace;
+            font-size: 0.7rem;
+            margin-top: 2px;
+        }
+        .instance-status {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            margin-right: 10px;
+        }
+        .instance-status.running { background: #00b894; box-shadow: 0 0 6px #00b894; }
+        .instance-status.starting { background: #fdcb6e; box-shadow: 0 0 6px #fdcb6e; }
+        .instance-status.dead { background: #e74c3c; box-shadow: 0 0 6px #e74c3c; }
+        .instance-status.unknown { background: #636e72; }
+        .instance-join-btn {
+            padding: 6px 16px;
+            background: transparent;
+            border: 1px solid #a29bfe;
+            color: #a29bfe;
+            border-radius: 4px;
+            font-family: 'Roboto Mono', monospace;
+            font-size: 0.75rem;
+            cursor: pointer;
+            transition: all 0.2s;
+            white-space: nowrap;
+        }
+        .instance-join-btn:hover {
+            background: #a29bfe;
+            color: #000;
+        }
+        .instance-kill-btn {
+            padding: 6px 10px;
+            background: transparent;
+            border: 1px solid #e74c3c44;
+            color: #e74c3c88;
+            border-radius: 4px;
+            font-size: 0.7rem;
+            cursor: pointer;
+            transition: all 0.2s;
+            margin-left: 6px;
+        }
+        .instance-kill-btn:hover {
+            background: #e74c3c;
+            color: #fff;
+            border-color: #e74c3c;
+        }
+        .instance-empty {
+            text-align: center;
+            color: #555;
+            padding: 30px;
+            font-family: 'Roboto Mono', monospace;
+            font-size: 0.85rem;
+        }
+        .instance-loading {
+            text-align: center;
+            color: #00cec9;
+            padding: 20px;
+            font-family: 'Roboto Mono', monospace;
+            font-size: 0.8rem;
+        }
+        .instance-error {
+            text-align: center;
+            color: #e74c3c;
+            padding: 16px;
+            font-family: 'Roboto Mono', monospace;
+            font-size: 0.8rem;
+            border: 1px solid #e74c3c33;
+            border-radius: 6px;
+            margin-top: 10px;
+        }
+        .spawn-status {
+            margin-top: 14px;
+            padding: 10px;
+            border-radius: 5px;
+            font-family: 'Roboto Mono', monospace;
+            font-size: 0.8rem;
+            display: none;
+        }
+        .spawn-status.success {
+            display: block;
+            color: #00b894;
+            background: rgba(0, 184, 148, 0.08);
+            border: 1px solid #00b89433;
+        }
+        .spawn-status.error {
+            display: block;
+            color: #e74c3c;
+            background: rgba(231, 76, 60, 0.08);
+            border: 1px solid #e74c3c33;
+        }
+    </style>
+</head>
+<body>
+    <style>
+        .login-btn {
+            background: linear-gradient(135deg, #00b89422, #00cec922);
+            color: #00cec9;
+            border: 2px solid #00cec9;
+            padding: 10px 24px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-family: 'Titillium Web', sans-serif;
+            text-transform: uppercase;
+        }
+    </style>
+</head>
+<body>
+    <!-- Magma Background -->
+    <iframe id="scene-container" src="assets/magma_effect-master/dist/index.html" frameborder="0" style="border: none;"></iframe>
+
+    <!-- Loading Screen -->
+    <div id="loading-screen">
+        <svg class="loading-logo" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+            <circle cx="100" cy="100" r="90" fill="none" stroke="#00a8ff" stroke-width="4" />
+            <path d="M40,100 L70,70 L130,70 L160,100 L130,130 L70,130 Z" fill="none" stroke="#00a8ff" stroke-width="4" />
+            <circle cx="100" cy="100" r="30" fill="none" stroke="#00a8ff" stroke-width="4" />
+            <path d="M100,70 L100,40 M100,130 L100,160 M70,100 L40,100 M130,100 L160,100" stroke="#00a8ff" stroke-width="4" />
+        </svg>
+        <div class="loading-bar-container">
+            <div class="loading-bar" id="loading-progress"></div>
+        </div>
+        <div class="loading-text" id="loading-text">Initializing RF SCYTHE systems...</div>
+    </div>
+
+    <!-- Header -->
+    <header>
+        <div class="logo">
+            <img src="assets/images/rf-scythe-logo.svg" alt="RF SCYTHE Logo">
+            <div class="logo-text">RF <span class="highlight">SCYTHE</span></div>
+        </div>
+        <nav>
+            <ul>
+                <li><a href="#" class="active">Home</a></li>
+                <li><a href="#modules">Modules</a></li>
+                <li><a href="https://mastodon.social/@Bgilbert1984" target="_blank">mastodon.social/@Bgilbert1984</a></li>
+                <li><a href="https://x.com/Spectrcyde/" target="_blank">x.com/Spectrcyde</a></li>
+                <li><a href="docs/documentation.html" target="_blank">Documentation</a></li>
+                <li><a id="scythe-wp-nav-link" href="#" target="_blank" rel="noopener">WordPress</a></li>
+                <li><a href="#about">About</a></li>
+                <li><a href="#logout" onclick="handleLogout()">Logout</a></li>
+                <li><a href="#account" onclick="openAccountModal()">Account</a></li>
+                <li id="user-account-nav"></li>
+                <!-- User Account Modal -->
+                <div id="account-modal" class="scythe-modal-overlay">
+                    <div class="scythe-modal">
+                        <button class="modal-close" onclick="closeAccountModal()">&times;</button>
+                        <h3>User Account</h3>
+                        <div id="account-view" style="margin-bottom:18px;">
+                            <!-- Populated by JS -->
+                        </div>
+                        <div id="account-edit" style="display:none;margin-bottom:18px;">
+                            <label style="display:block;margin-bottom:12px;color:#ddd;">
+                                <b>Callsign:</b>
+                                <input type="text" id="edit-callsign" placeholder="Your callsign" style="width:100%;padding:8px;margin-top:4px;border:1px solid #555;background:#222;color:#ddd;border-radius:4px;">
+                            </label>
+                            <label style="display:block;margin-bottom:12px;color:#ddd;">
+                                <b>Email:</b>
+                                <input type="email" id="edit-email" placeholder="your@email.com" style="width:100%;padding:8px;margin-top:4px;border:1px solid #555;background:#222;color:#ddd;border-radius:4px;">
+                            </label>
+                            <div id="edit-status" style="margin-bottom:12px;font-size:0.9em;"></div>
+                            <div style="display:flex;gap:8px;">
+                                <button class="modal-launch-btn" onclick="saveAccountChanges()" style="flex:1;background:linear-gradient(135deg,#4CAF50,#8BC34A);color:#fff;">Save</button>
+                                <button class="modal-launch-btn" onclick="cancelEditMode()" style="flex:1;background:linear-gradient(135deg,#666,#888);color:#fff;">Cancel</button>
+                            </div>
+                        </div>
+                        <div id="account-totp-setup" style="display:none;margin-bottom:18px;">
+                            <h4>Setup Two-Factor Authentication</h4>
+                            <p style="font-size:0.9em;color:#ccc;margin-bottom:16px;">Scan the QR code below with your authenticator app (Google Authenticator, Authy, etc.)</p>
+                            <div id="account-qr-container" style="text-align:center;margin-bottom:16px;">
+                                <img id="account-totp-qr" src="" alt="TOTP QR Code" style="max-width:200px;max-height:200px;border:1px solid #555;" />
+                            </div>
+                            <input type="text" id="account-totp-code" placeholder="Enter verification code" maxlength="6" style="width:100%;padding:8px;margin-bottom:8px;border:1px solid #555;background:#222;color:#ddd;border-radius:4px;text-align:center;font-size:1.2em;" />
+                            <div id="totp-setup-status" style="margin-bottom:12px;font-size:0.9em;"></div>
+                            <div style="display:flex;gap:8px;">
+                                <button class="modal-launch-btn" onclick="enableAccountTOTP()" style="flex:1;background:linear-gradient(135deg,#4CAF50,#8BC34A);color:#fff;">Enable 2FA</button>
+                                <button class="modal-launch-btn" onclick="cancelTOTPSetup()" style="flex:1;background:linear-gradient(135deg,#666,#888);color:#fff;">Cancel</button>
+                            </div>
+                        </div>
+                        <div id="account-actions" style="display:flex;gap:8px;">
+                            <button class="modal-launch-btn" id="edit-btn" onclick="enterEditMode()" style="flex:1;background:linear-gradient(135deg,#2196F3,#64B5F6);color:#fff;">Edit</button>
+                            <button class="modal-launch-btn" id="totp-btn" onclick="setupTOTP()" style="flex:1;background:linear-gradient(135deg,#FF9800,#FFC107);color:#fff;">Setup 2FA</button>
+                            <button class="modal-launch-btn" onclick="handleLogout()" style="flex:1;background:linear-gradient(135deg,#ff4444,#ff8888);color:#fff;">Logout</button>
+                        </div>
+                    </div>
+                </div>
+                <script>
+                let currentUserData = null;
+
+                function openAccountModal() {
+                    document.getElementById('account-modal').classList.add('active');
+                    renderAccountInfo();
+                }
+                function closeAccountModal() {
+                    document.getElementById('account-modal').classList.remove('active');
+                    cancelEditMode();
+                }
+                async function renderAccountInfo() {
+                    const viewDiv = document.getElementById('account-view');
+                    const token = SCYTHE_AUTH.restoreSession();
+                    if (!token) {
+                        viewDiv.innerHTML = '<span style="color:#e74c3c">Not logged in.</span>';
+                        document.getElementById('account-actions').style.display = 'none';
+                        return;
+                    }
+                    const { valid, operator } = await SCYTHE_AUTH.validateSession(token);
+                    if (!valid) {
+                        // Session expired - automatically logout and show login modal
+                        SCYTHE_AUTH.logout();
+                        closeAccountModal();
+                        openAuthModal();
+                        return;
+                    }
+                    currentUserData = operator;
+
+                    // Check TOTP status (Note: getTOTPStatus currently calls backend, keep as is for now)
+                    const { totpEnabled } = await SCYTHE_AUTH.getTOTPStatus();
+
+                    viewDiv.innerHTML = `
+                        <div style="font-size:1.1em;margin-bottom:8px;"><b>Callsign:</b> ${operator?.callsign || '(unknown)'}</div>
+                        <div style="font-size:1em;margin-bottom:8px;"><b>Email:</b> ${operator?.email || '(not set)'}</div>
+                        <div style="font-size:1em;margin-bottom:8px;"><b>Role:</b> ${operator?.role || 'operator'}</div>
+                        <div style="font-size:1em;margin-bottom:8px;"><b>2FA Status:</b> <span style="color:${totpEnabled ? '#4CAF50' : '#ff9800'}">${totpEnabled ? 'Enabled' : 'Disabled'}</span></div>
+                    `;
+                    document.getElementById('account-actions').style.display = 'flex';
+
+                    // Hide TOTP setup button if already enabled
+                    document.getElementById('totp-btn').style.display = totpEnabled ? 'none' : 'inline-block';
+                    document.getElementById('edit-btn').style.display = totpEnabled ? 'inline-block' : 'inline-block';
+                }
+                function enterEditMode() {
+                    if (!currentUserData) return;
+                    document.getElementById('account-view').style.display = 'none';
+                    document.getElementById('edit-btn').style.display = 'none';
+                    document.getElementById('account-edit').style.display = 'block';
+                    document.getElementById('edit-callsign').value = currentUserData.callsign || '';
+                    document.getElementById('edit-email').value = currentUserData.email || '';
+                    document.getElementById('edit-status').innerHTML = '';
+                }
+                function cancelEditMode() {
+                    document.getElementById('account-view').style.display = 'block';
+                    document.getElementById('edit-btn').style.display = 'inline-block';
+                    document.getElementById('account-edit').style.display = 'none';
+                    document.getElementById('edit-status').innerHTML = '';
+                }
+                async function setupTOTP() {
+                    document.getElementById('account-view').style.display = 'none';
+                    document.getElementById('account-actions').style.display = 'none';
+                    document.getElementById('account-totp-setup').style.display = 'block';
+
+                    try {
+                        const { success, secret, qrCodeUrl } = await SCYTHE_AUTH.setupTOTP();
+                        if (success) {
+                            accountTOTPSecret = secret;
+                            document.getElementById('account-totp-qr').src = qrCodeUrl;
+                            document.getElementById('totp-setup-status').innerHTML = '';
+                        } else {
+                            document.getElementById('totp-setup-status').innerHTML = '<span style="color:#e74c3c;">Failed to setup TOTP</span>';
+                        }
+                    } catch (e) {
+                        document.getElementById('totp-setup-status').innerHTML = '<span style="color:#e74c3c;">Error setting up TOTP</span>';
+                    }
+                }
+                async function enableAccountTOTP() {
+                    const code = document.getElementById('account-totp-code').value;
+                    if (!code || code.length !== 6) {
+                        document.getElementById('totp-setup-status').innerHTML = '<span style="color:#e74c3c;">Please enter a valid 6-digit code</span>';
+                        return;
+                    }
+
+                    if (!accountTOTPSecret) {
+                        document.getElementById('totp-setup-status').innerHTML = '<span style="color:#e74c3c;">TOTP secret not available. Please try setup again.</span>';
+                        return;
+                    }
+
+                    document.getElementById('totp-setup-status').innerHTML = '<span style="color:#ffc107;">Verifying...</span>';
+
+                    const { success, message } = await SCYTHE_AUTH.enableTOTP(accountTOTPSecret, code);
+                    if (success) {
+                        document.getElementById('totp-setup-status').innerHTML = '<span style="color:#4CAF50;">✓ Two-factor authentication enabled!</span>';
+                        setTimeout(() => {
+                            cancelTOTPSetup();
+                            renderAccountInfo();
+                        }, 1500);
+                    } else {
+                        document.getElementById('totp-setup-status').innerHTML = `<span style="color:#e74c3c;">${message || 'Failed to enable 2FA'}</span>`;
+                    }
+                }
+                function cancelTOTPSetup() {
+                    document.getElementById('account-view').style.display = 'block';
+                    document.getElementById('account-actions').style.display = 'flex';
+                    document.getElementById('account-totp-setup').style.display = 'none';
+                    document.getElementById('account-totp-code').value = '';
+                    document.getElementById('totp-setup-status').innerHTML = '';
+                    accountTOTPSecret = null;
+                }
+                async function saveAccountChanges() {
+                    const newCallsign = document.getElementById('edit-callsign').value.trim();
+                    const newEmail = document.getElementById('edit-email').value.trim();
+                    const statusDiv = document.getElementById('edit-status');
+
+                    if (!newCallsign || !newEmail) {
+                        statusDiv.innerHTML = '<span style="color:#e74c3c;">Callsign and email are required.</span>';
+                        return;
+                    }
+
+                    const token = SCYTHE_AUTH.restoreSession();
+                    if (!token) {
+                        statusDiv.innerHTML = '<span style="color:#e74c3c;">Session expired.</span>';
+                        return;
+                    }
+
+                    statusDiv.innerHTML = '<span style="color:#ffc107;">Saving...</span>';
+
+                    try {
+                        const response = await fetch('/api/operator/update', {
+                            method: 'PUT',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'X-Session-Token': token
+                            },
+                            body: JSON.stringify({
+                                callsign: newCallsign,
+                                email: newEmail
+                            })
+                        });
+
+                        if (!response.ok) {
+                            const error = await response.json();
+                            statusDiv.innerHTML = `<span style="color:#e74c3c;">${error.message || 'Update failed'}</span>`;
+                            return;
+                        }
+
+                        const result = await response.json();
+                        if (result.status === 'ok') {
+                            currentUserData.callsign = newCallsign;
+                            currentUserData.email = newEmail;
+                            statusDiv.innerHTML = '<span style="color:#4CAF50;">✓ Changes saved!</span>';
+                            setTimeout(() => {
+                                cancelEditMode();
+                                renderAccountInfo();
+                            }, 1000);
+                        } else {
+                            statusDiv.innerHTML = `<span style="color:#e74c3c;">${result.message || 'Update failed'}</span>`;
+                        }
+                    } catch (e) {
+                        statusDiv.innerHTML = `<span style="color:#e74c3c;">Error: ${e.message}</span>`;
+                    }
+                }
+                function handleLogout() {
+                    SCYTHE_AUTH.logout();
+                    closeAccountModal();
+                    window.location.href = '/login.html';
+                }
+                // Redirect to dedicated login page (force login when user explicitly clicks)
+                function openAuthModal() {
+                    SCYTHE_AUTH.requireAuth({ force: true });
+                }
+                // Insert account/login button in nav
+                function updateAccountNav() {
+                    const nav = document.getElementById('user-account-nav');
+                    const token = SCYTHE_AUTH.restoreSession();
+                    if (token) {
+                        nav.innerHTML = '<a href="user_account.html" class="login-btn">Account</a>';
+                    } else {
+                        nav.innerHTML = '<button class="login-btn" onclick="openAuthModal()">Login / Register</button>';
+                    }
+                }
+                // Update on load and on auth change
+                document.addEventListener('DOMContentLoaded', updateAccountNav);
+                window.addEventListener('scythe:auth-changed', updateAccountNav);
+                </script>
+            </ul>
+        </nav>
+    </header>
+
+    <!-- Main Content -->
+    <main>
+        <section class="hero">
+            <h1>Advanced <span class="highlight">Packet Capture Analysis</span> and Threat Detection</h1>
+            <p>Behavior-first cognition</p>
+            <p>LOD-enforced visualization </p>
+            <p>Inference humility </p>
+            <p>Operator-centric control</p>
+            <div>
+                <a href="#modules" class="btn">Explore Modules</a>
+                <a href="#documentation" class="btn btn-outline">View Documentation</a>
+            </div>
+        </section>
+
+        <!-- ════════ Multi-Instance Command Center ════════ -->
+        <section class="instance-command-center" id="instance-center">
+            <h2>SCYTHE <span class="highlight">Command Center</span></h2>
+            <p class="subtitle">Each instance: one sovereign hypergraph. No shared state. No cross-contamination.</p>
+            <div class="instance-btn-group">
+                <button class="instance-btn instance-btn-new" id="btn-new-instance" onclick="ScytheInstances.openNewModal()">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+                    New SCYTHE Command Server
+                </button>
+                <button class="instance-btn instance-btn-join" id="btn-join-instance" onclick="ScytheInstances.openJoinModal()">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+                    Join SCYTHE Command Server
+                </button>
+                <a class="instance-btn instance-btn-wordpress" id="btn-wordpress-site" href="#" target="_blank" rel="noopener"
+                   title="Docker WordPress on port 8080 (same host). Set window.SCYTHE_WORDPRESS_URL to override.">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm0 18a8 8 0 1 1 8-8 8 8 0 0 1-8 8z"/><path d="M12 6v6l4 2"/></svg>
+                    WordPress site
+                </a>
+            </div>
+            <div class="instance-live-count" id="instance-live-count">
+                Loading instance status...
+            </div>
+        </section>
+
+        <!-- ════════ NEW Instance Modal ════════ -->
+        <div class="scythe-modal-overlay" id="modal-new-instance">
+            <div class="scythe-modal">
+                <button class="modal-close" onclick="ScytheInstances.closeModals()">&times;</button>
+                <h3>&#x1F680; Launch New SCYTHE Instance</h3>
+                <p class="modal-sub">Spawns an isolated server with its own hypergraph, ledger, and inference engine.</p>
+                <div class="new-instance-form">
+                    <label for="new-instance-name">Instance Name (optional)</label>
+                    <input type="text" id="new-instance-name" placeholder="e.g. Case-2025-Alpha, Iran-Cell-12, Training-A" autocomplete="off" />
+                    <button class="modal-launch-btn" id="btn-launch-instance" onclick="ScytheInstances.spawnNew()">
+                        &#x26A1; Launch Instance
+                    </button>
+                </div>
+                <div class="spawn-status" id="spawn-status"></div>
+            </div>
+        </div>
+
+        <!-- ════════ JOIN Instance Modal ════════ -->
+        <div class="scythe-modal-overlay" id="modal-join-instance">
+            <div class="scythe-modal">
+                <button class="modal-close" onclick="ScytheInstances.closeModals()">&times;</button>
+                <h3>&#x1F517; Join SCYTHE Command Server</h3>
+                <p class="modal-sub">Select an active instance to open its Command Ops visualization.</p>
+                <div id="join-instance-list">
+                    <div class="instance-loading">Fetching active instances...</div>
+                </div>
+            </div>
+        </div>
+
+        <section class="modules-section" id="modules">
+            <h2 class="section-title">System <span class="highlight">Modules</span></h2>
+            <div class="modules-grid">
+                <!-- RF Visualization Module -->
+                <div class="module-card" data-href="/rf-visualization.html">
+                    <h3>
+                        <svg class="module-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M2 16.1A5 5 0 0 1 5.9 20M2 12.05A9 9 0 0 1 9.95 20M2 8V6a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-6"></path>
+                            <line x1="2" y1="20" x2="2" y2="20"></line>
+                        </svg>
+                        RF Visualization
+                    </h3>
+                    <p>Real-time 3D visualization of RF signals using Neural Radiance Fields (NeRF) and advanced rendering techniques.</p>
+                    <a href="/rf-visualization.html" class="btn">Open Module</a>
+                </div>
+
+                <!-- LHC RF Visualization Module -->
+                <div class="module-card" data-href="/lhc-rf-visualization-fixed.html">
+                    <h3>
+                        <svg class="module-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="12" cy="12" r="10"></circle>
+                            <circle cx="12" cy="12" r="4"></circle>
+                            <line x1="21.17" y1="8" x2="12" y2="8"></line>
+                            <line x1="3.95" y1="6.06" x2="8.54" y2="14"></line>
+                            <line x1="10.88" y1="21.94" x2="15.46" y2="14"></line>
+                        </svg>
+                        LHC RF Impact Analysis
+                    </h3>
+                    <p>Analyze the effects of Large Hadron Collider operations on RF signals and ionospheric conditions using hypergraph modeling.</p>
+                    <a href="/lhc-rf-visualization-fixed.html" class="btn">Open Module</a>
+                </div>
+
+                <!-- Remora Autonomous Space Fleet Module -->
+                <div class="module-card" data-href="/remora-fleet-demo.html">
+                    <h3>
+                        <svg class="module-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"></path>
+                        </svg>
+                        Remora Autonomous Space Fleet
+                    </h3>
+                    <p>Tactical visualization interface for command and control operations with integrated RF environment awareness.</p>
+                    <a href="/remora-fleet-demo.html" class="btn">Open Module</a>
+                </div>
+
+                <!-- X-37B Space Mission Module -->
+                <div class="module-card" data-href="/x37b-space-mission.html">
+                    <h3>
+                        <svg class="module-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"></path>
+                        </svg>
+                        X-37B Space Mission
+                    </h3>
+                    <p>Monitor and analyze X-37B orbital mission data with RF signature tracking and plasma sheath modeling capabilities.</p>
+                    <a href="/x37b-space-mission.html" class="btn">Open Module</a>
+                </div>
+
+                <!-- JWST Data Integration Module -->
+                <div class="module-card" data-href="/gemini-lhc-jwst-interface.html">
+                    <h3>
+                        <svg class="module-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="12" cy="12" r="10"></circle>
+                            <line x1="14.31" y1="8" x2="20.05" y2="17.94"></line>
+                            <line x1="9.69" y1="8" x2="21.17" y2="8"></line>
+                            <line x1="7.38" y1="12" x2="13.12" y2="2.06"></line>
+                            <line x1="9.69" y1="16" x2="3.95" y2="6.06"></line>
+                            <line x1="14.31" y1="16" x2="2.83" y2="16"></line>
+                            <line x1="16.62" y1="12" x2="10.88" y2="21.94"></line>
+                        </svg>
+                        JWST Data Integration
+                    </h3>
+                    <p>Analyze JWST spectroscopic and imaging data for RF correlations and advanced signal processing integration.</p>
+                    <a href="/jwst-dashboard.html" class="btn">Open Module</a>
+                </div>
+
+                <!-- Missile Demo Module -->
+                <div class="module-card" data-href="/missile_demo.html">
+                    <h3>
+                        <svg class="module-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <line x1="22" y1="2" x2="11" y2="13"></line>
+                            <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                        </svg>
+                        Missile Detection Demo
+                    </h3>
+                    <p>Demonstration of hypersonic missile detection capabilities using RF SCYTHE's neural signal processing and analysis algorithms.</p>
+                    <a href="/missile_demo.html" class="btn">Open Module</a>
+                </div>
+
+                <!-- RF SCYTHE Tactical Demo -->
+                <div class="module-card" data-href="/scythe-demo-fixed.html">
+                    <h3>
+                        <svg class="module-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M12 19l7-7 3 3-7 7-3-3z"></path>
+                            <path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"></path>
+                            <path d="M2 2l7.586 7.586"></path>
+                            <circle cx="11" cy="11" r="2"></circle>
+                        </svg>
+                        RF SCYTHE Tactical Demo
+                    </h3>
+                    <p>Full tactical demonstration of RF SCYTHE system capabilities including threat detection, analysis, and response.</p>
+                    <a href="/scythe-demo-fixed.html" class="btn">Open Module</a>
+                </div>
+
+                <!-- Multi-Plane Architecture Infographic -->
+                <div class="module-card" data-href="/multi_plane_infographic.html">
+                    <h3>
+                        <svg class="module-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <line x1="18" y1="20" x2="18" y2="10"></line>
+                            <line x1="12" y1="20" x2="12" y2="4"></line>
+                            <line x1="6" y1="20" x2="6" y2="14"></line>
+                            <line x1="4" y1="22" x2="20" y2="22"></line>
+                        </svg>
+                        Architecture Infographic
+                    </h3>
+                    <p>Interactive Mermaid.js infographic detailing the Multi-Plane Intelligence Fabric and future system roadmaps.</p>
+                    <a href="/multi_plane_infographic.html" class="btn">Open Module</a>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- Status Panel -->
+    <div class="status-panel">
+        <div class="status-title">
+            <span>System Status</span>
+            <span id="system-time">2025-05-01 00:00:00</span>
+        </div>
+        <div class="status-grid">
+            <div class="status-item">
+                <span class="status-indicator status-green"></span>
+                <span class="label">NeRF Engine:</span>
+                <span class="value">Online</span>
+            </div>
+            <div class="status-item">
+                <span class="status-indicator status-green"></span>
+                <span class="label">RF Analysis:</span>
+                <span class="value">Active</span>
+            </div>
+            <div class="status-item">
+                <span class="status-indicator status-green"></span>
+                <span class="label">GEMMA LLM:</span>
+                <span class="value">Connected</span>
+            </div>
+            <div class="status-item">
+                <span class="status-indicator status-yellow"></span>
+                <span class="label">SDR Interface:</span>
+                <span class="value">Melted Down</span>
+            </div>
+            <div class="status-item">
+                <span class="status-indicator status-green"></span>
+                <span class="label">Hypergraph:</span>
+                <span class="value">Online</span>
+            </div>
+            <div class="status-item">
+                <span class="status-indicator status-green"></span>
+                <span class="label">Threat Detection:</span>
+                <span class="value">Monitoring</span>
+            </div>
+            <div class="status-item">
+                <span class="status-indicator status-green"></span>
+                <span class="label">JWST Data:</span>
+                <span class="value">Space Weather Affecting Signal</span>
+            </div>
+            <div class="status-item">
+                <span class="status-indicator status-yellow"></span>
+                <span class="label">FITS Analysis:</span>
+                <span class="value">Processing</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Footer -->
+    <footer>
+        <p>&copy; 2025 RF SCYTHE Development Team. All rights reserved.</p>
+        <p style="font-size: 0.75rem; color: #666; margin-top: 5px;">
+            Background animation based on <a href="https://ics.media/en/entry/13973/?fbclid=IwdGRjcASfS3l0ZHNoBJ9IyWNsY2sEn0jAZXh0bgNhZW0CMTEAc3J0YwZhcHBfaWQMMzUwNjg1NTMxNzI4AAEeQoEEya4tdsOi64UTFpQmu3fqP1I_a-NohpQY00sNoo6Ul5bd7kvzNUuOxjU_aem_bAXix2JE5i4ZSw31VXD6gg" target="_blank" style="color: #00cec9; text-decoration: none;">Three.js Magma Effect by ICS INC.</a> (MIT License).
+        </p>
+    </footer>
+
+    <!-- Multi-Instance Management -->
+    <script>
+    const ScytheInstances = (function() {
+        const ORCH_BASE = window.location.origin; // orchestrator serves this page
+
+        // ── Modals ──────────────────────────────────────────────
+        async function ensureAuth() {
+            return await SCYTHE_AUTH.requireAuth();
+        }
+
+        function sleep(ms) {
+            return new Promise(resolve => setTimeout(resolve, ms));
+        }
+
+        async function waitForInstanceReady(instanceId, timeoutMs = 25000) {
+            const deadline = Date.now() + timeoutMs;
+            while (Date.now() < deadline) {
+                try {
+                    const resp = await fetch(ORCH_BASE + '/api/scythe/instances');
+                    if (resp.ok) {
+                        const data = await resp.json();
+                        const inst = (data.instances || []).find(item => item.id === instanceId);
+                        if (inst && (inst.socket_io_ready || inst.status === 'ready')) {
+                            return inst;
+                        }
+                    }
+                } catch (e) {}
+                await sleep(500);
+            }
+            return null;
+        }
+
+        async function openNewModal() {
+            if (!(await ensureAuth())) { alert('Please login to create a new SCYTHE instance.'); return; }
+            document.getElementById('modal-new-instance').classList.add('active');
+            document.getElementById('new-instance-name').value = '';
+            const ss = document.getElementById('spawn-status');
+            ss.className = 'spawn-status'; ss.textContent = '';
+            document.getElementById('new-instance-name').focus();
+        }
+
+        async function openJoinModal() {
+            if (!(await ensureAuth())) { alert('Please login to join a SCYTHE instance.'); return; }
+            document.getElementById('modal-join-instance').classList.add('active');
+            refreshInstanceList();
+        }
+
+        function closeModals() {
+            document.getElementById('modal-new-instance').classList.remove('active');
+            document.getElementById('modal-join-instance').classList.remove('active');
+        }
+
+        // Close on backdrop click
+        document.addEventListener('click', (e) => {
+            if (e.target.classList.contains('scythe-modal-overlay')) closeModals();
+        });
+        // Close on Escape
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') closeModals();
+        });
+
+        // ── Spawn New Instance ──────────────────────────────────
+        async function spawnNew() {
+            const nameInput = document.getElementById('new-instance-name');
+            const btn = document.getElementById('btn-launch-instance');
+            const ss = document.getElementById('spawn-status');
+            const name = nameInput.value.trim();
+
+            // Ensure authenticated before attempting spawn
+            if (!(await ensureAuth())) {
+                btn.disabled = false;
+                btn.textContent = '\u26A1 Launch Instance';
+                ss.className = 'spawn-status error';
+                ss.textContent = 'Login required.';
+                return;
+            }
+
+            btn.disabled = true;
+            btn.textContent = 'Launching...';
+            ss.className = 'spawn-status'; ss.textContent = '';
+
+            try {
+                const resp = await fetch(ORCH_BASE + '/api/scythe/instances/new', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name: name || undefined })
+                });
+                if (!resp.ok) {
+                    const err = await resp.json().catch(() => ({ error: resp.statusText }));
+                    throw new Error(err.error || 'Spawn failed');
+                }
+                const data = await resp.json();
+
+                ss.className = 'spawn-status';
+                ss.textContent = `Instance ${data.instance_id} is starting...`;
+                await waitForInstanceReady(data.instance_id);
+
+                // Get bootstrap token for immediate redirection
+                const brokerToken = SCYTHE_AUTH.restoreSession();
+                const bootstrapResp = await fetch(ORCH_BASE + '/api/operator/issue-bootstrap', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Session-Token': brokerToken
+                    },
+                    body: JSON.stringify({ instance_id: data.instance_id })
+                });
+
+                let vizUrl = data.visualization_url;
+                if (bootstrapResp.ok) {
+                    const bData = await bootstrapResp.json();
+                    if (bData.status === 'ok') {
+                        vizUrl += `?bootstrap_token=${encodeURIComponent(bData.bootstrap_token)}`;
+                    }
+                } else if (bootstrapResp.status === 401) {
+                    console.warn('[SCYTHE] Broker session was rejected while minting bootstrap token.');
+                }
+
+                ss.className = 'spawn-status success';
+                ss.innerHTML = `
+                    <strong>Instance launched!</strong><br>
+                    Name: ${data.name}<br>
+                    Port: ${data.port} &nbsp;|&nbsp; ID: ${data.instance_id}<br>
+                    <a href="${vizUrl}" target="_blank"
+                       style="color:#00cec9;text-decoration:underline;font-weight:600;">
+                        &#x2192; Open Command Ops Visualization
+                    </a>
+                `;
+
+                // Auto-open after 2s
+                setTimeout(() => {
+                    window.open(vizUrl, '_blank');
+                }, 2000);
+
+                refreshLiveCount();
+            } catch (e) {
+                ss.className = 'spawn-status error';
+                ss.textContent = 'Error: ' + e.message;
+            } finally {
+                btn.disabled = false;
+                btn.textContent = '\u26A1 Launch Instance';
+            }
+        }
+
+        // Enter key on name input triggers launch
+        document.addEventListener('DOMContentLoaded', () => {
+            const ni = document.getElementById('new-instance-name');
+            if (ni) ni.addEventListener('keydown', (e) => { if (e.key === 'Enter') spawnNew(); });
+        });
+
+        // ── Join / List Instances ────────────────────────────────
+        async function refreshInstanceList() {
+            const container = document.getElementById('join-instance-list');
+            container.innerHTML = '<div class="instance-loading">Fetching active instances...</div>';
+
+            try {
+                const resp = await fetch(ORCH_BASE + '/api/scythe/instances');
+                if (!resp.ok) throw new Error(resp.statusText);
+                const data = await resp.json();
+                const instances = data.instances || [];
+
+                if (instances.length === 0) {
+                    container.innerHTML = '<div class="instance-empty">No active instances.<br>Click <strong>NEW SCYTHE COMMAND SERVER</strong> to create one.</div>';
+                    return;
+                }
+
+                let html = '<ul class="instance-list">';
+                for (const inst of instances) {
+                    const info = inst.info || {};
+                    const age = inst.created ? timeSince(inst.created) : 'unknown';
+                    const nodes = info.node_count || 0;
+                    const sessions = info.session_count || 0;
+                    const bsgs = info.behavior_groups || 0;
+                    html += `
+                        <li>
+                            <span class="instance-status ${inst.status}"></span>
+                            <div class="instance-info">
+                                <div class="instance-name">${escHtml(inst.name)}</div>
+                                <div class="instance-meta">
+                                    Port ${inst.port} &nbsp;|&nbsp; ${age} &nbsp;|&nbsp;
+                                    ${nodes} nodes &nbsp;|&nbsp; ${sessions} sessions &nbsp;|&nbsp; ${bsgs} BSGs
+                                </div>
+                            </div>
+                            <button class="instance-join-btn" onclick="ScytheInstances.joinInstance('${inst.id}')">
+                                Connect &#x2192;
+                            </button>
+                            <button class="instance-kill-btn" onclick="ScytheInstances.killInstance('${inst.id}')" title="Terminate">
+                                &#x2716;
+                            </button>
+                        </li>
+                    `;
+                }
+                html += '</ul>';
+                container.innerHTML = html;
+            } catch (e) {
+                container.innerHTML = '<div class="instance-error">Failed to fetch instances: ' + escHtml(e.message) + '</div>';
+            }
+        }
+
+        async function joinInstance(instanceId) {
+            const ok = await SCYTHE_AUTH.requireAuth();
+            if (!ok) return;
+
+            const brokerToken = SCYTHE_AUTH.restoreSession();
+
+            try {
+                const resp = await fetch(ORCH_BASE + '/api/operator/issue-bootstrap', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Session-Token': brokerToken
+                    },
+                    body: JSON.stringify({ instance_id: instanceId })
+                });
+
+                if (!resp.ok) {
+                    const err = await resp.json().catch(() => ({ message: resp.statusText }));
+                    throw new Error(err.message || 'Failed to issue bootstrap token');
+                }
+
+                const data = await resp.json();
+                if (data.status !== 'ok') {
+                    throw new Error(data.message || 'Failed to issue bootstrap token');
+                }
+
+                const url = `${ORCH_BASE}/scythe/i/${instanceId}/command-ops-visualization.html?bootstrap_token=${encodeURIComponent(data.bootstrap_token)}`;
+                window.open(url, '_blank');
+                closeModals();
+            } catch (e) {
+                alert('Join failed: ' + e.message);
+            }
+        }
+
+        async function killInstance(id) {
+            if (!confirm('Terminate this SCYTHE instance? All data in its hypergraph will be lost.')) return;
+            try {
+                await fetch(ORCH_BASE + '/api/scythe/instances/' + id, { method: 'DELETE' });
+                refreshInstanceList();
+                refreshLiveCount();
+            } catch (e) {
+                alert('Failed to terminate: ' + e.message);
+            }
+        }
+
+        // ── Live Instance Count ─────────────────────────────────
+        async function refreshLiveCount() {
+            try {
+                const resp = await fetch(ORCH_BASE + '/api/scythe/instances');
+                if (!resp.ok) return;
+                const data = await resp.json();
+                const total = data.count || 0;
+                const running = (data.instances || []).filter(i => i.status === 'running').length;
+                const el = document.getElementById('instance-live-count');
+                if (total === 0) {
+                    el.innerHTML = 'No active instances &mdash; launch one to begin.';
+                } else {
+                    el.innerHTML = `<span class="count-num">${running}</span> running / <span class="count-num">${total}</span> total instances`;
+                }
+            } catch (e) {
+                const el = document.getElementById('instance-live-count');
+                el.innerHTML = '<span style="color:#e74c3c;">Orchestrator unreachable</span>';
+            }
+        }
+
+        // Refresh count on load + every 10s
+        refreshLiveCount();
+        setInterval(refreshLiveCount, 10000);
+
+        // ── Helpers ─────────────────────────────────────────────
+        function escHtml(s) {
+            const d = document.createElement('div');
+            d.textContent = s;
+            return d.innerHTML;
+        }
+
+        function timeSince(isoStr) {
+            const d = new Date(isoStr);
+            const secs = Math.floor((Date.now() - d.getTime()) / 1000);
+            if (secs < 60) return secs + 's ago';
+            if (secs < 3600) return Math.floor(secs / 60) + 'm ago';
+            if (secs < 86400) return Math.floor(secs / 3600) + 'h ago';
+            return Math.floor(secs / 86400) + 'd ago';
+        }
+
+        // Public API
+        return { openNewModal, openJoinModal, closeModals, spawnNew, joinInstance, killInstance, refreshInstanceList };
+    })();
+
+    (function installWordPressLinks() {
+        function wordPressBaseUrl() {
+            if (window.SCYTHE_WORDPRESS_URL) {
+                return String(window.SCYTHE_WORDPRESS_URL).replace(/\/?$/, '/');
+            }
+            // Use same-origin proxy via orchestrator for HTTPS consistency
+            return window.location.origin + '/wordpress/';
+        }
+        function go() {
+            const u = wordPressBaseUrl();
+            const nav = document.getElementById('scythe-wp-nav-link');
+            const btn = document.getElementById('btn-wordpress-site');
+            if (nav) nav.href = u;
+            if (btn) btn.href = u;
+        }
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', go);
+        } else {
+            go();
+        }
+    })();
+    </script>
+
+    <script>
+    (function initializeHomeUI() {
+        // Hide loading screen
+        const loadingScreen = document.getElementById('loading-screen');
+        const hideLoading = () => {
+            if (loadingScreen) loadingScreen.classList.add('hidden');
+        };
+        window.addEventListener('load', hideLoading);
+        setTimeout(hideLoading, 1500); // Safety timeout
+
+        // Restore module card navigation
+        const moduleCards = document.querySelectorAll('.module-card');
+        moduleCards.forEach(card => {
+            card.addEventListener('click', () => {
+                const href = card.getAttribute('data-href');
+                if (href) window.location.href = href;
+            });
+        });
+
+        // Update system time in the status panel
+        function updateSystemTime() {
+            const el = document.getElementById('system-time');
+            if (el) {
+                const now = new Date();
+                el.textContent = now.toISOString().replace('T', ' ').substr(0, 19);
+            }
+        }
+        setInterval(updateSystemTime, 1000);
+        updateSystemTime();
+    })();
+    </script>
+</body>
+</html>

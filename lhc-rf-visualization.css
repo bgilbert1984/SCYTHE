@@ -1,0 +1,228 @@
+/*
+ * LHC RF Impact Visualization Styles
+ * Specific styles for LHC RF visualization pages
+ */
+
+/* Import common RF visualization styles */
+@import url('rf-visualization.css');
+
+/* LHC-specific styles */
+body, html {
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    overflow: hidden;
+    background-color: #0d1117;
+    color: #c9d1d9;
+}
+
+#app-container {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+}
+
+#header {
+    background-color: #161b22;
+    padding: 10px 20px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid #30363d;
+}
+
+#header h1 {
+    margin: 0;
+    font-size: 1.5rem;
+    color: #58a6ff;
+}
+
+#status-indicator {
+    display: flex;
+    align-items: center;
+    font-size: 0.9rem;
+}
+
+#content {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+}
+
+#left-panel {
+    width: 25%;
+    min-width: 300px;
+    background-color: #161b22;
+    color: #c9d1d9;
+    overflow-y: auto;
+    border-right: 1px solid #30363d;
+    display: flex;
+    flex-direction: column;
+}
+
+#simulation-controls {
+    padding: 15px;
+    border-bottom: 1px solid #30363d;
+}
+
+#simulation-results {
+    padding: 15px;
+    flex: 1;
+    overflow-y: auto;
+}
+
+.control-group {
+    margin-bottom: 15px;
+}
+
+.control-group h3 {
+    margin-top: 0;
+    margin-bottom: 10px;
+    font-size: 1.1rem;
+    color: #58a6ff;
+}
+
+.slider-control {
+    margin-bottom: 10px;
+}
+
+.slider-control label {
+    display: block;
+    margin-bottom: 5px;
+    font-size: 0.9rem;
+}
+
+.slider-control input[type="range"] {
+    width: 100%;
+}
+
+.slider-values {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.8rem;
+    color: #8b949e;
+}
+
+.button-group {
+    display: flex;
+    gap: 10px;
+    margin-top: 15px;
+}
+
+#right-panel {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+#visualization-container {
+    flex: 1;
+    position: relative;
+}
+
+#visualization-tabs {
+    display: flex;
+    background-color: #161b22;
+    border-bottom: 1px solid #30363d;
+}
+
+.tab {
+    padding: 10px 15px;
+    cursor: pointer;
+    color: #8b949e;
+    font-size: 0.9rem;
+    border-bottom: 2px solid transparent;
+}
+
+.tab.active {
+    color: #58a6ff;
+    border-bottom-color: #58a6ff;
+}
+
+#chart-container {
+    height: 200px;
+    background-color: #161b22;
+    border-top: 1px solid #30363d;
+    padding: 10px;
+}
+
+#cesiumContainer {
+    width: 100%;
+    height: 100%;
+}
+
+#worldMap {
+    width: 100%;
+    height: 100%;
+}
+
+.visualization-panel {
+    width: 100%;
+    height: 100%;
+    display: none;
+}
+
+.visualization-panel.active {
+    display: block;
+}
+
+.data-item {
+    background-color: #0d1117;
+    border: 1px solid #30363d;
+    border-radius: 4px;
+    padding: 10px;
+    margin-bottom: 10px;
+}
+
+.data-item h4 {
+    margin-top: 0;
+    margin-bottom: 5px;
+    color: #58a6ff;
+    font-size: 0.9rem;
+}
+
+.data-value {
+    font-family: 'Courier New', monospace;
+    font-size: 0.85rem;
+}
+
+.progress-bar {
+    height: 8px;
+    background-color: #161b22;
+    border-radius: 4px;
+    overflow: hidden;
+    margin-top: 5px;
+}
+
+.progress-fill {
+    height: 100%;
+    background-color: #238636;
+    transition: width 0.3s ease;
+}
+
+.coordinates {
+    font-size: 0.8rem;
+    color: #8b949e;
+    margin-top: 5px;
+}
+
+/* Mobile responsiveness */
+@media (max-width: 768px) {
+    #content {
+        flex-direction: column;
+    }
+
+    #left-panel {
+        width: 100%;
+        min-width: auto;
+        max-height: 40%;
+        border-right: none;
+        border-bottom: 1px solid #30363d;
+    }
+
+    #right-panel {
+        flex: 1;
+    }
+}

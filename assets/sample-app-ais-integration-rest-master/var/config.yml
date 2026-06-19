@@ -1,0 +1,12 @@
+lattice-endpoint: <LATTICE_ENDPOINT>
+environment-token: <ENVIRONMENT_TOKEN>
+sandboxes-token: <SANDBOXES_TOKEN>
+# entity update frequency (seconds)
+entity-update-rate-seconds: 1
+# vessels to track
+vessel-mmsi:
+    - 730156067 # RM SEA TROUT
+    - 368179250 # SEAHAWK
+    - 368138010 # NEW YORK
+# vessel data generation time interval (seconds)
+ais-generate-interval-seconds: 1

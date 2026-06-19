@@ -1,0 +1,523 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RF SCYTHE Tactical Demo</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: Arial, sans-serif;
+            background-color: #000;
+        }
+
+        #info {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: white;
+            background: rgba(0,0,0,0.5);
+            padding: 10px;
+            border-radius: 5px;
+            z-index: 100;
+        }
+
+        #loadingOverlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.8);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+            color: white;
+            font-size: 24px;
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        #debugPanel {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            color: white;
+            background: rgba(255,0,0,0.7);
+            padding: 10px;
+            border-radius: 5px;
+            max-width: 400px;
+            max-height: 400px;
+            overflow: auto;
+            font-family: monospace;
+            z-index: 2000;
+        }
+
+        /* GPT Display Panels */
+        .gpt-display {
+            position: absolute;
+            color: white;
+            background: rgba(0, 0, 0, 0.7);
+            border: 1px solid #00aaff;
+            border-radius: 5px;
+            padding: 10px;
+            font-family: monospace;
+            font-size: 12px;
+            width: 250px;
+            height: 150px;
+            overflow: auto;
+        }
+
+        .gpt-display h3 {
+            margin-top: 0;
+            color: #00aaff;
+            border-bottom: 1px solid #00aaff;
+            padding-bottom: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div id="loadingOverlay">
+        <div>
+            <h2>Loading RF SCYTHE Tactical Demo...</h2>
+            <p>Please wait while the tactical systems initialize.</p>
+        </div>
+    </div>
+
+    <div id="debugPanel">
+        <h3>Debug Info</h3>
+        <div id="debugOutput"></div>
+        <button id="reloadBtn">Reload Page</button>
+        <button id="dismissDebugBtn">Dismiss</button>
+    </div>
+
+    <div id="info">
+        <h3>RF SCYTHE Tactical Demo</h3>
+        <p>Australian Emu Resurgence Scenario</p>
+        <p><strong>Instructions:</strong> Watch as threats are detected and engaged</p>
+    </div>
+
+    <!-- GPT Display Panels -->
+    <div id="AnalystGPT" class="gpt-display" style="top: 100px; right: 10px;">
+        <h3>Analyst GPT</h3>
+        <div id="AnalystGPTContent">Initializing...</div>
+    </div>
+
+    <div id="SecurityGPT" class="gpt-display" style="top: 100px; left: 10px;">
+        <h3>Security GPT</h3>
+        <div id="SecurityGPTContent">Initializing...</div>
+    </div>
+
+    <div id="WeaponsControlGPT" class="gpt-display" style="bottom: 10px; left: 10px;">
+        <h3>Weapons Control GPT</h3>
+        <div id="WeaponsControlGPTContent">Initializing...</div>
+    </div>
+
+    <!-- Import ThreeJS using ES modules -->
+    <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.158.0/examples/jsm/"
+      }
+    }
+    </script>
+
+    <!-- Main demo script -->
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { setupScytheScene } from './rfScytheScene.js';
+        import { createThreat, updateThreats } from './threatVisualizer.js';
+        import { showRFSweep, showSignatureAnalysis, showNeuralIntentScan, updateScytheEffects } from './scytheEffects.js';
+
+        // Debug logging function
+        window.debug = function(message, isError = false) {
+            const debugOutput = document.getElementById('debugOutput');
+            if (!debugOutput) return;
+
+            const entry = document.createElement('div');
+            entry.textContent = `${new Date().toLocaleTimeString()}: ${message}`;
+            if (isError) {
+                entry.style.color = 'red';
+                console.error(message);
+            } else {
+                console.log(message);
+            }
+            debugOutput.appendChild(entry);
+            debugOutput.scrollTop = debugOutput.scrollHeight;
+        };
+
+        // Setup global error handling
+        window.addEventListener('error', function(event) {
+            window.debug(`ERROR: ${event.message} at ${event.filename}:${event.lineno}`, true);
+            document.getElementById('loadingOverlay').classList.add('hidden');
+            return false;
+        });
+
+        // Debug button handlers
+        document.getElementById('reloadBtn').addEventListener('click', function() {
+            location.reload();
+        });
+
+        document.getElementById('dismissDebugBtn').addEventListener('click', function() {
+            document.getElementById('debugPanel').classList.add('hidden');
+        });
+
+        // Weapon effects implementation
+        const weaponEffects = [];
+
+        function fireCIWS(scene, origin, target) {
+            console.log(`Firing CIWS from ${origin.toArray()} at ${target.toArray()}`);
+
+            // Create tracer effect
+            const points = [];
+            points.push(origin.clone());
+            points.push(target.clone());
+
+            const geometry = new THREE.BufferGeometry().setFromPoints(points);
+            const material = new THREE.LineBasicMaterial({
+                color: 0xffff00,
+                transparent: true,
+                opacity: 0.7
+            });
+
+            const tracer = new THREE.Line(geometry, material);
+            scene.add(tracer);
+
+            // Add to effects for removal
+            weaponEffects.push({
+                mesh: tracer,
+                startTime: Date.now(),
+                duration: 500, // half second
+                target: target.clone()
+            });
+
+            return tracer;
+        }
+
+        function fireDEW(scene, type, origin, target) {
+            console.log(`Firing ${type} DEW from ${origin.toArray()} at ${target.toArray()}`);
+
+            // Create laser beam effect
+            const points = [];
+            points.push(origin.clone());
+            points.push(target.clone());
+
+            const geometry = new THREE.BufferGeometry().setFromPoints(points);
+            const material = new THREE.LineBasicMaterial({
+                color: 0x00ffff,
+                transparent: true,
+                opacity: 0.9
+            });
+
+            const beam = new THREE.Line(geometry, material);
+            scene.add(beam);
+
+            // Add impact effect at target
+            const impactGeometry = new THREE.SphereGeometry(0.3, 8, 8);
+            const impactMaterial = new THREE.MeshBasicMaterial({
+                color: 0x00ffff,
+                transparent: true,
+                opacity: 0.8
+            });
+
+            const impact = new THREE.Mesh(impactGeometry, impactMaterial);
+            impact.position.copy(target);
+            scene.add(impact);
+
+            // Add to effects for removal
+            weaponEffects.push({
+                mesh: beam,
+                startTime: Date.now(),
+                duration: 1000, // one second
+                target: target.clone()
+            });
+
+            weaponEffects.push({
+                mesh: impact,
+                startTime: Date.now(),
+                duration: 1500, // 1.5 seconds
+                isImpact: true
+            });
+
+            return { beam, impact };
+        }
+
+        function updateWeaponEffects(deltaTime, threats) {
+            const now = Date.now();
+
+            // Update existing effects
+            for (let i = weaponEffects.length - 1; i >= 0; i--) {
+                const effect = weaponEffects[i];
+                const age = now - effect.startTime;
+
+                // Remove expired effects
+                if (age > effect.duration) {
+                    if (effect.mesh.parent) {
+                        effect.mesh.parent.remove(effect.mesh);
+                    }
+                    weaponEffects.splice(i, 1);
+                    continue;
+                }
+
+                // Animate effects
+                const progress = age / effect.duration;
+
+                // If it's an impact effect, pulse/grow then shrink
+                if (effect.isImpact) {
+                    // Pulse effect
+                    if (progress < 0.3) {
+                        // Grow quickly
+                        effect.mesh.scale.set(1 + progress * 5, 1 + progress * 5, 1 + progress * 5);
+                    } else {
+                        // Shrink slowly
+                        const fadeScale = 1 - ((progress - 0.3) / 0.7);
+                        effect.mesh.scale.set(fadeScale, fadeScale, fadeScale);
+                    }
+
+                    // Fade out
+                    if (effect.mesh.material) {
+                        effect.mesh.material.opacity = 1 - progress;
+                    }
+                }
+                // For beam/tracer effects, just fade out
+                else {
+                    if (effect.mesh.material) {
+                        effect.mesh.material.opacity = 1 - progress;
+                    }
+                }
+            }
+        }
+
+        // GPT Display implementation
+        const gptDisplays = {};
+
+        function setupGptDisplays() {
+            // Find all GPT display divs and initialize them
+            const displayElements = document.querySelectorAll('.gpt-display');
+
+            displayElements.forEach(element => {
+                const id = element.id;
+                const contentElement = document.getElementById(`${id}Content`);
+
+                if (contentElement) {
+                    gptDisplays[id] = {
+                        element: element,
+                        contentElement: contentElement,
+                        lastUpdate: Date.now()
+                    };
+                }
+            });
+
+            console.log(`Initialized ${Object.keys(gptDisplays).length} GPT displays`);
+        }
+
+        function updateGptDisplay(id, content) {
+            if (gptDisplays[id] && gptDisplays[id].contentElement) {
+                const display = gptDisplays[id];
+
+                // Format content (replace newlines with <br>)
+                const formattedContent = content.replace(/\n/g, '<br>');
+
+                // Update the content
+                display.contentElement.innerHTML = formattedContent;
+                display.lastUpdate = Date.now();
+
+                // Highlight the display briefly to indicate an update
+                display.element.style.borderColor = '#ff0000';
+                setTimeout(() => {
+                    display.element.style.borderColor = '#00aaff';
+                }, 500);
+            }
+        }
+
+        // Main Demo
+        let scene, camera, renderer, controls, clock;
+        let holoSphere; // Reference to the holographic sphere
+        let activeThreatsForDemo = []; // Keep track of threats for targeting
+
+        function init() {
+            console.log("Initializing RF SCYTHE Demo...");
+            debug("Initializing RF SCYTHE Demo...");
+
+            // Scene
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x000011);
+
+            // Camera
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(0, 20, 25);
+            camera.lookAt(0, 0, 0);
+
+            // Renderer
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            document.body.appendChild(renderer.domElement);
+
+            // Controls
+            controls = new OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+
+            // Clock for delta time
+            clock = new THREE.Clock();
+
+            // Hide loading overlay
+            document.getElementById('loadingOverlay').classList.add('hidden');
+
+            // Setup Scene Elements (Command Center, HoloSphere)
+            const sceneElements = setupScytheScene(scene);
+            holoSphere = sceneElements.holoSphere; // Get reference if needed
+
+            // Setup GPT HTML Displays
+            setupGptDisplays();
+
+            // Spawn threats and show effects with delays
+            runDemoSequence();
+
+            // Handle window resize
+            window.addEventListener('resize', onWindowResize, false);
+
+            // Start Animation Loop
+            animate();
+
+            debug("Initialization Complete. Starting Animation Loop.");
+        }
+
+        function runDemoSequence() {
+            // Spawn an initial threat after a delay
+            setTimeout(() => {
+                const startPos = new THREE.Vector3(0, 5, -20); // Outside the sphere
+                const targetPos = new THREE.Vector3(0, 2, 0); // Towards the center
+                const velocity = targetPos.clone().sub(startPos).normalize();
+                const speed = 5; // Units per second
+                const threat = createThreat(scene, startPos, velocity, speed);
+                activeThreatsForDemo.push(threat); // Store for later targeting
+
+                // Example: Trigger RF Sweep
+                const sensorOrigin = new THREE.Vector3(-10, 5, -10); // Example sensor position
+                showRFSweep(scene, sensorOrigin, threat.mesh.position.clone());
+
+                // Example: Update GPT displays
+                updateGptDisplay('SecurityGPT', 'Threat Detected: 1 Hypersonic\nPriority: HIGH');
+                updateGptDisplay('AnalystGPT', 'Calculating trajectory...');
+
+            }, 2000); // Wait 2 seconds
+
+            // Example: Fire CIWS after another delay
+            setTimeout(() => {
+                if (activeThreatsForDemo.length > 0) {
+                    const weaponOrigin = new THREE.Vector3(5, 1, -5); // Example weapon position
+                    fireCIWS(scene, weaponOrigin, activeThreatsForDemo[0].mesh.position);
+                    updateGptDisplay('WeaponsControlGPT', 'Engaging Threat 1 with CIWS...');
+                }
+            }, 5000); // Wait 5 seconds
+
+            // Example: Fire Laser after another delay
+            setTimeout(() => {
+                if (activeThreatsForDemo.length > 0) {
+                    const weaponOrigin = new THREE.Vector3(-5, 1, -5); // Example weapon position
+                    fireDEW(scene, 'laser', weaponOrigin, activeThreatsForDemo[0].mesh.position);
+                    updateGptDisplay('WeaponsControlGPT', 'Engaging Threat 1 with Laser...');
+
+                    // Example: Show analysis and intent scan on hit (concept)
+                    showSignatureAnalysis(scene, activeThreatsForDemo[0].mesh.position);
+
+                    // Neural Intent Scan - now pass the actual mesh object for tracking and custom analysis results
+                    const scannerOrigin = new THREE.Vector3(-8, 3, -8);
+                    const analysisResults = {
+                        hostility: "CONFIRMED",
+                        target: "CRITICAL INFRA",
+                        confidence: "94.7%",
+                        recommendation: "NEUTRALIZE"
+                    };
+
+                    // Only call if the function exists with the right signature
+                    if (typeof showNeuralIntentScan === 'function') {
+                        try {
+                            showNeuralIntentScan(scene, scannerOrigin, activeThreatsForDemo[0].mesh, 3.0, analysisResults);
+                        } catch (e) {
+                            debug("Error in neural intent scan: " + e.message, true);
+                        }
+                    }
+
+                    updateGptDisplay('AnalystGPT', 'Neural Intent Analysis:\nHostility: CONFIRMED\nTarget: CRITICAL INFRA\nConfidence: 94.7%\nRecommend: NEUTRALIZE');
+                }
+            }, 7000); // Wait 7 seconds
+
+            // Spawn an Emu threat after another delay
+            setTimeout(() => {
+                const angle = Math.random() * Math.PI * 2;
+                const startPos = new THREE.Vector3(
+                    Math.cos(angle) * 25,
+                    1,
+                    Math.sin(angle) * 25
+                );
+                const targetPos = new THREE.Vector3(0, 1, 0); // Towards the center
+                const velocity = targetPos.clone().sub(startPos).normalize();
+
+                debug("Spawning Emu threat");
+                try {
+                    const threat = createThreat(scene, startPos, velocity, 3, 'elder-emu');
+                    activeThreatsForDemo.push(threat);
+                } catch (e) {
+                    debug("Error creating elder-emu threat: " + e.message, true);
+                }
+
+                updateGptDisplay('SecurityGPT', 'ALERT! ELDRITCH ENTITY DETECTED\nSignature: EMU\nThreat Level: EXTREME');
+            }, 10000); // Wait 10 seconds
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            const deltaTime = clock.getDelta(); // Time since last frame in seconds
+
+            // Animate holoSphere rotation if exists
+            if (holoSphere) {
+                holoSphere.rotation.y += 0.002;
+            }
+
+            // Update simulation modules
+            try {
+                if (typeof updateThreats === 'function') {
+                    updateThreats(deltaTime);
+                }
+
+                if (typeof updateScytheEffects === 'function') {
+                    updateScytheEffects(deltaTime, camera); // Pass camera for billboard effects
+                }
+
+                updateWeaponEffects(deltaTime, activeThreatsForDemo);
+
+                // Update GPT displays periodically
+                if (Math.random() < 0.01 && activeThreatsForDemo.length > 0) { // Low probability update
+                    updateGptDisplay('AnalystGPT', `Threat 1 Pos: ${activeThreatsForDemo[0].mesh.position.x.toFixed(1)}, ${activeThreatsForDemo[0].mesh.position.y.toFixed(1)}, ${activeThreatsForDemo[0].mesh.position.z.toFixed(1)}`);
+                }
+            } catch (e) {
+                debug("Error in animation loop: " + e.message, true);
+            }
+
+            // Update controls
+            controls.update();
+
+            // Render the scene
+            renderer.render(scene, camera);
+        }
+
+        // Start the application
+        init();
+    </script>
+</body>
+</html>

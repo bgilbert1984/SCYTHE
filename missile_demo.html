@@ -1,0 +1,915 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RF SCYTHE - Hypersonic Missile Demo</title>
+    <link rel="stylesheet" href="https://cesium.com/downloads/cesiumjs/releases/1.95/Build/Cesium/Widgets/widgets.css" />
+    <script src="https://cesium.com/downloads/cesiumjs/releases/1.95/Build/Cesium/Cesium.js"></script>
+    <style>
+        html, body, #cesiumContainer {
+            width: 100%;
+            height: 100%;
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+        }
+
+        #controls {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background: rgba(40, 40, 80, 0.85);
+            color: white;
+            padding: 10px;
+            border-radius: 5px;
+            font-family: monospace;
+            font-size: 12px;
+            z-index: 100;
+            max-width: 300px;
+        }
+
+        button {
+            background-color: #3a6fc4;
+            border: none;
+            color: white;
+            padding: 5px 10px;
+            margin: 2px;
+            border-radius: 3px;
+            cursor: pointer;
+        }
+
+        button:hover {
+            background-color: #4d84db;
+        }
+
+        .control-group {
+            margin-top: 10px;
+            border-top: 1px solid rgba(255,255,255,0.2);
+            padding-top: 8px;
+        }
+
+        #telemetry {
+            margin-top: 10px;
+            font-size: 11px;
+            background: rgba(0,0,0,0.3);
+            padding: 5px;
+            border-radius: 3px;
+            max-height: 150px;
+            overflow-y: auto;
+        }
+
+        .telemetry-row {
+            margin: 3px 0;
+        }
+
+        .value {
+            color: #7cffcb;
+        }
+
+        .hypersonic-btn {
+            background-color: #ff5e00;
+        }
+
+        .hypersonic-btn:hover {
+            background-color: #ff7b00;
+        }
+
+        .defense-btn {
+            background-color: #00a8ff;
+        }
+
+        .defense-btn:hover {
+            background-color: #30b8ff;
+        }
+    </style>
+</head>
+<body>
+    <div id="cesiumContainer"></div>
+
+    <div id="controls">
+        <h3>Hypersonic Missile Demo</h3>
+        <button id="placeMissileBtn">Place Missile</button>
+        <button id="launchMissileBtn">Launch Missile</button>
+        <button id="multiLaunchBtn">Multiple Launch</button>
+        <button id="clearBtn">Clear All</button>
+
+        <div class="control-group">
+            <h4>Hypersonic Capabilities</h4>
+            <button class="hypersonic-btn" id="hypersonicLaunchBtn">Hypersonic Launch</button>
+            <button class="hypersonic-btn" id="plasmaToggleBtn">Toggle Plasma Sheath</button>
+            <div class="telemetry-row">
+                Speed: <span id="speedValue" class="value">0 m/s (Mach 0)</span>
+            </div>
+        </div>
+
+        <div class="control-group">
+            <h4>Defense Systems</h4>
+            <button class="defense-btn" id="disruptPlasmaBtn">Disrupt Plasma Sheath</button>
+            <button class="defense-btn" id="trackMissileBtn">Track Missile</button>
+        </div>
+
+        <div id="telemetry">
+            <div class="telemetry-row">Status: <span id="statusValue" class="value">Ready</span></div>
+            <div class="telemetry-row">Plasma: <span id="plasmaValue" class="value">Inactive</span></div>
+            <div class="telemetry-row">RF Attenuation: <span id="rfAttenuationValue" class="value">0%</span></div>
+            <div class="telemetry-row">Temperature: <span id="tempValue" class="value">0K</span></div>
+        </div>
+    </div>
+
+    <script src="assets/cesium_models/STAND_OFF_MISSILE/stand_off_missile.js"></script>
+    <script src="cesium-material-fix.js"></script>
+    <script src="cesium-material-helpers.js"></script>
+    <script src="hypersonic-plasma-sheath-fixed.js"></script>
+    <script>
+        // Initialize Cesium viewer
+        Cesium.Ion.defaultAccessToken = window.CESIUM_ION_TOKEN || window.SCYTHE_CESIUM_ION_TOKEN || '';
+
+        // Add global error handler
+        window.addEventListener('error', function(e) {
+            console.error('Global error:', e.error || e.message);
+            document.getElementById('statusValue').innerText = 'Error detected';
+
+            // Check for material property issue
+            if (e.error && e.error.message && e.error.message.includes('getType is not a function')) {
+                console.warn('Material property error detected. Applying fix...');
+                document.getElementById('statusValue').innerText = 'Fixing material error...';
+
+                // If we have active entities, try to fix them
+                if (activeMissile) {
+                    try {
+                        // Reset plasma sheath with fixed implementation
+                        if (plasmaSheath) {
+                            if (plasmaSheath.plasmaEntity) viewer.entities.remove(plasmaSheath.plasmaEntity);
+                            if (plasmaSheath.glowEntity) viewer.entities.remove(plasmaSheath.glowEntity);
+                            plasmaSheath = null;
+                        }
+
+                        setTimeout(function() {
+                            // Create new plasma sheath with fixed implementation
+                            plasmaSheath = RF_SCYTHE.addPlasmaSheath(viewer, activeMissile, {
+                                useGlow: true,
+                                scale: 1.2
+                            });
+                            document.getElementById('statusValue').innerText = 'Recovered from error';
+                        }, 500);
+                    } catch (fixError) {
+                        console.error('Error while fixing:', fixError);
+                    }
+                }
+            }
+
+            return true; // Prevent default error handling
+        });
+
+        const viewer = new Cesium.Viewer('cesiumContainer', {
+            terrainProvider: Cesium.createWorldTerrain(),
+            shouldAnimate: true
+        });
+
+        // Global variables to track entities
+        let activeMissile = null;
+        let plasmaSheath = null;
+        let telemetryInterval = null;
+
+        // Fly to San Francisco area
+        viewer.camera.flyTo({
+            destination: Cesium.Cartesian3.fromDegrees(-122.4, 37.8, 30000),
+            orientation: {
+                heading: Cesium.Math.toRadians(0),
+                pitch: Cesium.Math.toRadians(-30),
+                roll: 0.0
+            }
+        });
+
+        /**
+         * Get the correct missile orientation based on direction of travel
+         * Accounts for aerodynamic design of the model
+         */
+        function getMissileOrientation(position, velocity) {
+            // Convert velocity to a direction
+            const direction = Cesium.Cartesian3.normalize(velocity, new Cesium.Cartesian3());
+
+            // For the Stand_Off_Missile model, the front points in the +Z direction when correctly oriented
+
+            // Get the up vector at this position (for maintaining proper roll orientation)
+            const up = Cesium.Cartesian3.normalize(position, new Cesium.Cartesian3());
+
+            // Create right vector
+            const right = Cesium.Cartesian3.cross(direction, up, new Cesium.Cartesian3());
+            Cesium.Cartesian3.normalize(right, right);
+
+            // Recompute up to ensure orthogonality
+            const newUp = Cesium.Cartesian3.cross(right, direction, new Cesium.Cartesian3());
+            Cesium.Cartesian3.normalize(newUp, newUp);
+
+            // Create a rotation matrix from these orthogonal vectors
+            // The missile's +Z axis should align with velocity direction
+            const rotationMatrix = new Cesium.Matrix3();
+            Cesium.Matrix3.setColumn(rotationMatrix, 0, right, rotationMatrix);
+            Cesium.Matrix3.setColumn(rotationMatrix, 1, newUp, rotationMatrix);
+            Cesium.Matrix3.setColumn(rotationMatrix, 2, direction, rotationMatrix);
+
+            // Apply additional 90-degree pitch to correct the model orientation
+            // This accounts for the model's native orientation
+            const correctionRotation = Cesium.Matrix3.fromRotationZ(Cesium.Math.toRadians(90));
+            const finalRotation = Cesium.Matrix3.multiply(rotationMatrix, correctionRotation, new Cesium.Matrix3());
+
+            // Convert to quaternion
+            return Cesium.Quaternion.fromRotationMatrix(finalRotation);
+        }
+
+        /**
+         * Launch a hypersonic missile with plasma sheath
+         */
+        function launchHypersonicMissile() {
+            // Clear any existing missile
+            if (activeMissile) {
+                viewer.entities.remove(activeMissile);
+                activeMissile = null;
+            }
+
+            // Clear plasma sheath
+            if (plasmaSheath) {
+                if (plasmaSheath.plasmaEntity) viewer.entities.remove(plasmaSheath.plasmaEntity);
+                if (plasmaSheath.glowEntity) viewer.entities.remove(plasmaSheath.glowEntity);
+                plasmaSheath = null;
+            }
+
+            // Stop any existing telemetry updates
+            if (telemetryInterval) {
+                clearInterval(telemetryInterval);
+                telemetryInterval = null;
+            }
+
+            // Define start and end positions
+            const startPosition = Cesium.Cartesian3.fromDegrees(-123.0, 38.0, 20000);
+            const endPosition = Cesium.Cartesian3.fromDegrees(-121.9, 37.7, 500);
+
+            // Calculate direction and distance
+            const direction = Cesium.Cartesian3.subtract(
+                endPosition,
+                startPosition,
+                new Cesium.Cartesian3()
+            );
+
+            const distance = Cesium.Cartesian3.magnitude(direction);
+            Cesium.Cartesian3.normalize(direction, direction);
+
+            // Hypersonic speed (Mach 7 = ~2400 m/s)
+            const speed = 2400;
+
+            // Calculate flight time
+            const flightTimeSeconds = distance / speed;
+
+            // Define the start and end times
+            const start = Cesium.JulianDate.now();
+            const end = Cesium.JulianDate.addSeconds(start, flightTimeSeconds, new Cesium.JulianDate());
+
+            // Make the viewer timeline show this period
+            viewer.clock.startTime = start.clone();
+            viewer.clock.stopTime = end.clone();
+            viewer.clock.currentTime = start.clone();
+            viewer.clock.clockRange = Cesium.ClockRange.LOOP_STOP;
+            viewer.clock.multiplier = 1.0;
+
+            // Calculate initial velocity vector
+            const initialVelocity = Cesium.Cartesian3.multiplyByScalar(
+                direction,
+                speed,
+                new Cesium.Cartesian3()
+            );
+
+            // Add velocity property to the entity
+            const velocityProperty = new Cesium.SampledPositionProperty();
+
+            // Add the missile entity
+            activeMissile = viewer.entities.add({
+                name: "SOM Hypersonic Missile",
+                availability: new Cesium.TimeIntervalCollection([
+                    new Cesium.TimeInterval({
+                        start: start,
+                        stop: end
+                    })
+                ]),
+                model: {
+                    uri: 'assets/cesium_models/STAND_OFF_MISSILE.glb',
+                    minimumPixelSize: 64,
+                    maximumScale: 20000,
+                    scale: 3.657 / 20, // Scale to actual size (SOM missile: 3.657m length)
+                    color: Cesium.Color.WHITE,
+                    colorBlendMode: Cesium.ColorBlendMode.HIGHLIGHT
+                },
+                position: new Cesium.SampledPositionProperty(),
+                // Custom orientation that correctly aligns with velocity
+                orientation: new Cesium.CallbackProperty(function(time) {
+                    const position = activeMissile.position.getValue(time);
+                    if (!position) return Cesium.Quaternion.IDENTITY;
+
+                    // Get velocity at this time
+                    let velocity = activeMissile.velocity.getValue(time);
+                    if (!velocity) {
+                        // Fallback velocity calculation if the property isn't available
+                        const prevTime = Cesium.JulianDate.addSeconds(time, -0.1, new Cesium.JulianDate());
+                        const prevPos = activeMissile.position.getValue(prevTime);
+                        if (prevPos) {
+                            velocity = Cesium.Cartesian3.subtract(position, prevPos, new Cesium.Cartesian3());
+                            Cesium.Cartesian3.multiplyByScalar(velocity, 10, velocity); // scale to m/s
+                        } else {
+                            // Default to initial velocity as last resort
+                            velocity = initialVelocity;
+                        }
+                    }
+
+                    // Get orientation based on velocity
+                    return getMissileOrientation(position, velocity);
+                }, false),
+                // Make velocity accessible
+                velocity: new Cesium.SampledPositionProperty(),
+                path: {
+                    resolution: 1,
+                    material: new Cesium.PolylineGlowMaterialProperty({
+                        glowPower: 0.3,
+                        color: Cesium.Color.RED.withAlpha(0.7)
+                    }),
+                    width: 10,
+                    leadTime: 0,
+                    trailTime: flightTimeSeconds
+                },
+                // Add billboard for distant viewing
+                billboard: {
+                    image: 'data:image/svg+xml;base64,' + btoa(`
+                        <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32">
+                            <polygon points="16,2 20,12 30,16 20,20 16,30 12,20 2,16 12,12"
+                                    fill="#ff5e00"
+                                    stroke="white" stroke-width="1"/>
+                            <circle cx="16" cy="16" r="3" fill="white"/>
+                        </svg>
+                    `),
+                    scale: 0.5,
+                    show: false,
+                    horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
+                    verticalOrigin: Cesium.VerticalOrigin.CENTER,
+                    disableDepthTestDistance: Number.POSITIVE_INFINITY
+                },
+                // Add SOM missile properties
+                properties: {
+                    missileType: "SOM Cruise Missile (Hypersonic Variant)",
+                    manufacturer: "ROKETSAN / TÜBİTAK-SAGE",
+                    length: 3.657, // in meters
+                    wingspan: 2.6, // in meters
+                    mass: 620, // in kg
+                    warhead: 230, // in kg
+                    range: 250, // in km
+                    speed: 7.0, // in Mach
+                    engineType: "Scramjet"
+                }
+            });
+
+            // Create trajectory with slight arc
+            const positionProperty = activeMissile.position;
+            const samplesCount = 100;
+
+            for (let i = 0; i <= samplesCount; i++) {
+                const t = i / samplesCount;
+                const time = Cesium.JulianDate.addSeconds(
+                    start,
+                    t * flightTimeSeconds,
+                    new Cesium.JulianDate()
+                );
+
+                // Compute position along an arc
+                const pos = new Cesium.Cartesian3();
+                Cesium.Cartesian3.lerp(
+                    startPosition,
+                    endPosition,
+                    t,
+                    pos
+                );
+
+                // Add slight arc (less pronounced for hypersonic)
+                const arcFactor = t * (1.0 - t);
+                const upVector = Cesium.Cartesian3.normalize(pos, new Cesium.Cartesian3());
+                const arcVector = Cesium.Cartesian3.multiplyByScalar(
+                    upVector,
+                    arcFactor * 5000, // Less arc height for hypersonic
+                    new Cesium.Cartesian3()
+                );
+
+                Cesium.Cartesian3.add(pos, arcVector, pos);
+
+                // Add position sample
+                positionProperty.addSample(time, pos);
+
+                // Compute and store velocity
+                if (i > 0) {
+                    const prevTime = Cesium.JulianDate.addSeconds(
+                        start,
+                        (i-1) / samplesCount * flightTimeSeconds,
+                        new Cesium.JulianDate()
+                    );
+                    const prevPos = positionProperty.getValue(prevTime);
+                    const dt = Cesium.JulianDate.secondsDifference(time, prevTime);
+
+                    // Calculate velocity vector
+                    const velocity = Cesium.Cartesian3.subtract(pos, prevPos, new Cesium.Cartesian3());
+                    Cesium.Cartesian3.multiplyByScalar(velocity, 1/dt, velocity);
+
+                    // Store velocity
+                    activeMissile.velocity.addSample(time, velocity);
+                } else {
+                    // Initial velocity
+                    activeMissile.velocity.addSample(time, initialVelocity);
+                }
+            }
+
+            // Add plasma sheath
+            plasmaSheath = RF_SCYTHE.addPlasmaSheath(viewer, activeMissile, {
+                useGlow: true,
+                useParticles: true,
+                scale: 1.2
+            });
+
+            // Install safety watcher to detect and fix material errors
+            const safetyInterval = setInterval(function() {
+                if (!plasmaSheath || !plasmaSheath.plasmaEntity) return;
+
+                try {
+                    // Test if material is valid by getting its type
+                    const material = plasmaSheath.plasmaEntity.ellipsoid.material;
+
+                    if (material && !(material instanceof Cesium.ColorMaterialProperty) &&
+                        (!material.getType || typeof material.getType !== 'function')) {
+                        console.warn("Detected invalid material, fixing...");
+
+                        // Replace with valid material
+                        plasmaSheath.plasmaEntity.ellipsoid.material =
+                            new Cesium.ColorMaterialProperty(Cesium.Color.ORANGE.withAlpha(0.5));
+
+                        if (plasmaSheath.glowEntity) {
+                            plasmaSheath.glowEntity.ellipsoid.material =
+                                new Cesium.ColorMaterialProperty(Cesium.Color.fromCssColorString('#ffebcc').withAlpha(0.3));
+                        }
+                    }
+                } catch (e) {
+                    console.error("Error in material safety check:", e);
+                }
+            }, 1000);
+
+            // Clear safety watcher on missile completion
+            viewer.clock.onTick.addEventListener(function onCompletionCheck(clock) {
+                if (Cesium.JulianDate.greaterThanOrEquals(clock.currentTime, end)) {
+                    clearInterval(safetyInterval);
+                    viewer.clock.onTick.removeEventListener(onCompletionCheck);
+                }
+            });
+
+            // Start telemetry updates
+            startTelemetryUpdates();
+
+            // Set the status
+            document.getElementById('statusValue').innerText = 'Hypersonic Missile Launched';
+            document.getElementById('plasmaValue').innerText = 'Active - Fully Formed';
+
+            // Track the missile
+            viewer.trackedEntity = activeMissile;
+
+            // Detect impact
+            viewer.clock.onTick.addEventListener(function onTick(clock) {
+                if (Cesium.JulianDate.greaterThanOrEquals(clock.currentTime, end)) {
+                    viewer.clock.onTick.removeEventListener(onTick);
+
+                    // Create explosion effect
+                    const finalPos = activeMissile.position.getValue(end);
+
+                    viewer.entities.add({
+                        position: finalPos,
+                        point: {
+                            pixelSize: 100,
+                            color: Cesium.Color.ORANGE.withAlpha(0.9),
+                            outlineColor: Cesium.Color.YELLOW,
+                            outlineWidth: 5
+                        },
+                        label: {
+                            text: 'Hypersonic Impact!',
+                            font: '16pt sans-serif',
+                            style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+                            outlineWidth: 2,
+                            verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+                            pixelOffset: new Cesium.Cartesian2(0, -15)
+                        }
+                    });
+
+                    // Stop telemetry
+                    if (telemetryInterval) {
+                        clearInterval(telemetryInterval);
+                        telemetryInterval = null;
+                    }
+
+                    // Update status
+                    document.getElementById('statusValue').innerText = 'Target Destroyed';
+                    document.getElementById('plasmaValue').innerText = 'Inactive';
+                }
+            });
+
+            return activeMissile;
+        }
+
+        /**
+         * Start updates to the telemetry display
+         */
+        function startTelemetryUpdates() {
+            if (telemetryInterval) {
+                clearInterval(telemetryInterval);
+            }
+
+            telemetryInterval = setInterval(() => {
+                if (!activeMissile) return;
+
+                // Get current time and position
+                const time = viewer.clock.currentTime;
+                const position = activeMissile.position.getValue(time);
+                if (!position) return;
+
+                // Get velocity
+                let speed = 0;
+                if (activeMissile.velocity) {
+                    const velocity = activeMissile.velocity.getValue(time);
+                    if (velocity) {
+                        speed = Cesium.Cartesian3.magnitude(velocity);
+                    }
+                }
+
+                // Calculate plasma properties
+                const plasmaProps = RF_SCYTHE.calculatePlasmaProperties(speed);
+
+                // Update telemetry display
+                document.getElementById('speedValue').innerText =
+                    `${Math.round(speed)} m/s (Mach ${(speed/343).toFixed(1)})`;
+
+                if (plasmaProps.exists) {
+                    document.getElementById('plasmaValue').innerText =
+                        `Active - Intensity ${(plasmaProps.density / RF_SCYTHE.HYPERSONIC.PLASMA_DENSITY_MAX * 100).toFixed(1)}%`;
+                    document.getElementById('rfAttenuationValue').innerText =
+                        `${(plasmaProps.rfAttenuation * 100).toFixed(1)}%`;
+                    document.getElementById('tempValue').innerText =
+                        `${Math.round(plasmaProps.temperature)} K`;
+                } else {
+                    document.getElementById('plasmaValue').innerText = 'Inactive';
+                    document.getElementById('rfAttenuationValue').innerText = '0%';
+                    document.getElementById('tempValue').innerText = '0 K';
+                }
+            }, 200); // Update 5 times per second
+        }
+
+        // Button handlers
+        document.getElementById('placeMissileBtn').addEventListener('click', function() {
+            const position = Cesium.Cartesian3.fromDegrees(
+                -122.4 + (Math.random() * 0.5 - 0.25),
+                37.8 + (Math.random() * 0.5 - 0.25),
+                5000 + (Math.random() * 3000)
+            );
+
+            // Create with aerodynamic orientation and real-world scale (SOM missile length: 3.657m)
+            const entity = RF_SCYTHE.loadStandOffMissile(viewer, position, {
+                scale: 3.657 / 20, // Scale to actual size (model is ~20m in default scale)
+                heading: Math.random() * 360,
+                color: Cesium.Color.fromRandom({alpha: 1.0}),
+                showPath: Math.random() > 0.5
+            });
+
+            // Add SOM missile properties
+            entity.properties = entity.properties || {};
+            entity.properties.missileType = "SOM Cruise Missile";
+            entity.properties.manufacturer = "ROKETSAN / TÜBİTAK-SAGE";
+            entity.properties.length = 3.657; // in meters
+            entity.properties.wingspan = 2.6; // in meters
+            entity.properties.mass = 620; // in kg
+            entity.properties.warhead = 230; // in kg
+            entity.properties.range = 250; // in km
+            entity.properties.speed = 0.94; // in Mach
+
+            // Add billboard for distant viewing
+            entity.billboard = {
+                image: 'data:image/svg+xml;base64,' + btoa(`
+                    <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32">
+                        <polygon points="16,2 20,12 30,16 20,20 16,30 12,20 2,16 12,12"
+                                 fill="${entity.model.color.toCssColorString()}"
+                                 stroke="white" stroke-width="1"/>
+                        <circle cx="16" cy="16" r="3" fill="white"/>
+                    </svg>
+                `),
+                scale: 0.5,
+                show: false,
+                horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
+                verticalOrigin: Cesium.VerticalOrigin.CENTER,
+                disableDepthTestDistance: Number.POSITIVE_INFINITY
+            };
+
+            // Add distance-based display handler
+            viewer.scene.preRender.addEventListener(function updateDisplay() {
+                if (!entity.isDestroyed()) {
+                    const cameraPosition = viewer.camera.position;
+                    const entityPosition = entity.position.getValue(viewer.clock.currentTime);
+
+                    if (entityPosition) {
+                        const distance = Cesium.Cartesian3.distance(cameraPosition, entityPosition);
+
+                        // Switch between model and billboard based on distance
+                        if (distance > 20000) { // 20km switch threshold
+                            entity.model.show = false;
+                            entity.billboard.show = true;
+                        } else {
+                            entity.model.show = true;
+                            entity.billboard.show = false;
+                        }
+                    }
+                } else {
+                    // Remove this event handler if entity is destroyed
+                    viewer.scene.preRender.removeEventListener(updateDisplay);
+                }
+            });
+
+            // Transform the orientation to match the model
+            const position1 = entity.position.getValue(Cesium.JulianDate.now());
+            entity.orientation = Cesium.Transforms.headingPitchRollQuaternion(
+                position1,
+                new Cesium.HeadingPitchRoll(
+                    Cesium.Math.toRadians(entity.properties.heading),
+                    Cesium.Math.toRadians(-90),    // Pitch -90 to make missile point forward, not down
+                    Cesium.Math.toRadians(0)       // No roll needed with correct pitch
+                )
+            );
+
+            // Create missile info box on click
+            entity.description = `
+                <div style="background: rgba(40, 40, 80, 0.85); color: white; padding: 10px; border-radius: 5px; max-width: 300px;">
+                    <h3 style="margin: 0 0 10px 0;">${entity.properties.missileType}</h3>
+                    <div style="font-size: 12px; line-height: 1.5;">
+                        <div><b>Manufacturer:</b> ${entity.properties.manufacturer}</div>
+                        <div><b>Length:</b> ${entity.properties.length} m</div>
+                        <div><b>Wingspan:</b> ${entity.properties.wingspan} m</div>
+                        <div><b>Mass:</b> ${entity.properties.mass} kg</div>
+                        <div><b>Warhead:</b> ${entity.properties.warhead} kg</div>
+                        <div><b>Range:</b> ${entity.properties.range} km</div>
+                        <div><b>Speed:</b> Mach ${entity.properties.speed}</div>
+                    </div>
+                </div>
+            `;
+        });
+
+        document.getElementById('launchMissileBtn').addEventListener('click', function() {
+            const startPosition = Cesium.Cartesian3.fromDegrees(
+                -122.6, 37.9, 1000
+            );
+
+            const endPosition = Cesium.Cartesian3.fromDegrees(
+                -122.2, 37.7, 500
+            );
+
+            RF_SCYTHE.launchMissile(viewer, startPosition, endPosition, {
+                scale: 0.8,
+                color: Cesium.Color.RED,
+                arcHeight: 8000,
+                speed: 400,
+                onComplete: function(entity) {
+                    // Create explosion effect
+                    viewer.entities.add({
+                        position: entity.position.getValue(viewer.clock.currentTime),
+                        point: {
+                            pixelSize: 50,
+                            color: Cesium.Color.ORANGE.withAlpha(0.9),
+                            outlineColor: Cesium.Color.YELLOW,
+                            outlineWidth: 3
+                        },
+                        label: {
+                            text: 'Impact!',
+                            font: '14pt sans-serif',
+                            style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+                            outlineWidth: 2,
+                            verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+                            pixelOffset: new Cesium.Cartesian2(0, -10)
+                        }
+                    });
+                }
+            });
+        });
+
+        document.getElementById('multiLaunchBtn').addEventListener('click', function() {
+            // Create multiple launches
+            const targetPosition = Cesium.Cartesian3.fromDegrees(
+                -122.4, 37.8, 500
+            );
+
+            const launchCount = 5;
+            const launchPositions = [];
+
+            // Create launch positions in a circle around the target
+            for (let i = 0; i < launchCount; i++) {
+                const angle = (i / launchCount) * Math.PI * 2;
+                const radius = 0.3; // ~30km
+
+                launchPositions.push(Cesium.Cartesian3.fromDegrees(
+                    -122.4 + Math.cos(angle) * radius,
+                    37.8 + Math.sin(angle) * radius,
+                    1000
+                ));
+            }
+
+            RF_SCYTHE.launchMissileBarrage(viewer, targetPosition, launchPositions, {
+                sequential: true,
+                interval: 1000,
+                arcHeightVariation: 3000,
+                onComplete: function() {
+                    // Create larger explosion effect
+                    viewer.entities.add({
+                        position: targetPosition,
+                        point: {
+                            pixelSize: 80,
+                            color: Cesium.Color.ORANGE.withAlpha(0.9),
+                            outlineColor: Cesium.Color.YELLOW,
+                            outlineWidth: 5
+                        },
+                        label: {
+                            text: 'Multiple Impact!',
+                            font: '16pt sans-serif',
+                            style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+                            outlineWidth: 2,
+                            verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+                            pixelOffset: new Cesium.Cartesian2(0, -15)
+                        }
+                    });
+                }
+            });
+        });
+
+        document.getElementById('clearBtn').addEventListener('click', function() {
+            viewer.entities.removeAll();
+            document.getElementById('statusValue').innerText = 'Ready';
+            document.getElementById('plasmaValue').innerText = 'Inactive';
+            document.getElementById('rfAttenuationValue').innerText = '0%';
+            document.getElementById('tempValue').innerText = '0K';
+
+            // Clear references
+            activeMissile = null;
+            plasmaSheath = null;
+
+            // Stop telemetry
+            if (telemetryInterval) {
+                clearInterval(telemetryInterval);
+                telemetryInterval = null;
+            }
+        });
+
+        document.getElementById('hypersonicLaunchBtn').addEventListener('click', function() {
+            launchHypersonicMissile();
+        });
+
+        document.getElementById('plasmaToggleBtn').addEventListener('click', function() {
+            if (!activeMissile) {
+                alert('Launch a hypersonic missile first');
+                return;
+            }
+
+            if (plasmaSheath) {
+                // Toggle visibility
+                if (plasmaSheath.plasmaEntity) {
+                    const isVisible = plasmaSheath.plasmaEntity.ellipsoid.show;
+                    plasmaSheath.plasmaEntity.ellipsoid.show = !isVisible;
+                    if (plasmaSheath.glowEntity) {
+                        plasmaSheath.glowEntity.ellipsoid.show = !isVisible;
+                    }
+
+                    document.getElementById('plasmaValue').innerText =
+                        !isVisible ? 'Active - Visible' : 'Active - Hidden';
+                }
+            } else {
+                // Create new plasma sheath
+                plasmaSheath = RF_SCYTHE.addPlasmaSheath(viewer, activeMissile, {
+                    useGlow: true,
+                    useParticles: true,
+                    scale: 1.2
+                });
+
+                document.getElementById('plasmaValue').innerText = 'Active - Newly Created';
+            }
+        });
+
+        document.getElementById('disruptPlasmaBtn').addEventListener('click', function() {
+            if (!activeMissile) {
+                alert('Launch a hypersonic missile first');
+                return;
+            }
+
+            // Create disruption
+            RF_SCYTHE.disruptPlasmaSheath(viewer, activeMissile, plasmaSheath, {
+                duration: 5.0,
+                intensity: 1.0
+            });
+
+            document.getElementById('statusValue').innerText = 'Plasma Sheath Disrupted!';
+            document.getElementById('plasmaValue').innerText = 'Disrupted - Unstable';
+        });
+
+        document.getElementById('trackMissileBtn').addEventListener('click', function() {
+            if (activeMissile) {
+                viewer.trackedEntity = activeMissile;
+                document.getElementById('statusValue').innerText = 'Tracking Active Missile';
+            } else {
+                alert('No missile to track');
+            }
+        });
+
+        // Place initial missile with aerodynamic orientation and real-world scale
+        setTimeout(() => {
+            const position = Cesium.Cartesian3.fromDegrees(-122.4, 37.8, 5000);
+            const entity = RF_SCYTHE.loadStandOffMissile(viewer, position, {
+                scale: 3.657 / 20, // Scale to actual size (SOM missile: 3.657m length)
+                heading: 45,
+                showPath: false,
+                color: Cesium.Color.fromCssColorString('#3a6fc4')
+            });
+
+            // Add SOM missile properties
+            entity.properties = entity.properties || {};
+            entity.properties.missileType = "SOM Cruise Missile";
+            entity.properties.manufacturer = "ROKETSAN / TÜBİTAK-SAGE";
+            entity.properties.length = 3.657; // in meters
+            entity.properties.wingspan = 2.6; // in meters
+            entity.properties.mass = 620; // in kg
+            entity.properties.warhead = 230; // in kg
+            entity.properties.range = 250; // in km
+            entity.properties.speed = 0.94; // in Mach
+
+            // Add billboard for distant viewing
+            entity.billboard = {
+                image: 'data:image/svg+xml;base64,' + btoa(`
+                    <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32">
+                        <polygon points="16,2 20,12 30,16 20,20 16,30 12,20 2,16 12,12"
+                                 fill="#3a6fc4"
+                                 stroke="white" stroke-width="1"/>
+                        <circle cx="16" cy="16" r="3" fill="white"/>
+                    </svg>
+                `),
+                scale: 0.5,
+                show: false,
+                horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
+                verticalOrigin: Cesium.VerticalOrigin.CENTER,
+                disableDepthTestDistance: Number.POSITIVE_INFINITY
+            };
+
+            // Add distance-based display handler
+            viewer.scene.preRender.addEventListener(function updateDisplay() {
+                if (!entity.isDestroyed()) {
+                    const cameraPosition = viewer.camera.position;
+                    const entityPosition = entity.position.getValue(viewer.clock.currentTime);
+
+                    if (entityPosition) {
+                        const distance = Cesium.Cartesian3.distance(cameraPosition, entityPosition);
+
+                        // Switch between model and billboard based on distance
+                        if (distance > 20000) { // 20km switch threshold
+                            entity.model.show = false;
+                            entity.billboard.show = true;
+                        } else {
+                            entity.model.show = true;
+                            entity.billboard.show = false;
+                        }
+                    }
+                } else {
+                    // Remove this event handler if entity is destroyed
+                    viewer.scene.preRender.removeEventListener(updateDisplay);
+                }
+            });
+
+            // Adjust orientation for correct aerodynamics (model is oriented differently than expected)
+            entity.orientation = Cesium.Transforms.headingPitchRollQuaternion(
+                position,
+                new Cesium.HeadingPitchRoll(
+                    Cesium.Math.toRadians(45),      // Heading (direction)
+                    Cesium.Math.toRadians(-90),     // Pitch -90 degrees to align with horizontal flight
+                    Cesium.Math.toRadians(0)        // No roll needed with correct pitch
+                )
+            );
+
+            // Create missile info box on click
+            entity.description = `
+                <div style="background: rgba(40, 40, 80, 0.85); color: white; padding: 10px; border-radius: 5px; max-width: 300px;">
+                    <h3 style="margin: 0 0 10px 0;">${entity.properties.missileType}</h3>
+                    <div style="font-size: 12px; line-height: 1.5;">
+                        <div><b>Manufacturer:</b> ${entity.properties.manufacturer}</div>
+                        <div><b>Length:</b> ${entity.properties.length} m</div>
+                        <div><b>Wingspan:</b> ${entity.properties.wingspan} m</div>
+                        <div><b>Mass:</b> ${entity.properties.mass} kg</div>
+                        <div><b>Warhead:</b> ${entity.properties.warhead} kg</div>
+                        <div><b>Range:</b> ${entity.properties.range} km</div>
+                        <div><b>Speed:</b> Mach ${entity.properties.speed}</div>
+                    </div>
+                </div>
+            `;
+
+            document.getElementById('statusValue').innerText = 'Missile Ready';
+        }, 2000);
+    </script>
+</body>
+</html>

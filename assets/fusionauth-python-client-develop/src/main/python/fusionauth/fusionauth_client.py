@@ -1,0 +1,5467 @@
+#
+# Copyright (c) 2018-2026, FusionAuth, All Rights Reserved
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND,
+# either express or implied. See the License for the specific
+# language governing permissions and limitations under the License.
+#
+
+from deprecated import deprecated
+from fusionauth.rest_client import RESTClient, JSONBodyHandler, FormDataBodyHandler
+
+
+class FusionAuthClient:
+    """The FusionAuthClient provides easy access to the FusionAuth API."""
+
+    def __init__(self, api_key, base_url):
+        """Constructs a new FusionAuthClient.
+
+        Attributes:
+            api_key: A string representing the API used to authenticate the API call to FusionAuth
+            base_url: A string representing the URL use to access FusionAuth
+        """
+        self.api_key = api_key
+        self.base_url = base_url
+        self.tenant_id = None
+
+    def set_tenant_id(self, tenant_id):
+      """Sets the tenant_id on the client"""
+      self.tenant_id = tenant_id
+
+    def action_user(self, request):
+        """
+        Takes an action on a user. The user being actioned is called the "actionee" and the user taking the action is called the
+        "actioner". Both user ids are required in the request object.
+
+        Attributes:
+            request: The action request that includes all the information about the action being taken including
+                    the Id of the action, any options and the duration (if applicable).
+        """
+        return self.start().uri('/api/user/action') \
+            .body_handler(JSONBodyHandler(request)) \
+            .post() \
+            .go()
+
+    def activate_reactor(self, request):
+        """
+        Activates the FusionAuth Reactor using a license Id and optionally a license text (for air-gapped deployments)
+
+        Attributes:
+            request: An optional request that contains the license text to activate Reactor (useful for air-gap deployments of FusionAuth).
+        """
+        return self.start().uri('/api/reactor') \
+            .body_handler(JSONBodyHandler(request)) \
+            .post() \
+            .go()
+
+    def add_user_to_family(self, family_id, request):
+        """
+        Adds a user to an existing family. The family Id must be specified.
+
+        Attributes:
+            family_id: The Id of the family.
+            request: The request object that contains all the information used to determine which user to add to the family.
+        """
+        return self.start().uri('/api/user/family') \
+            .url_segment(family_id) \
+            .body_handler(JSONBodyHandler(request)) \
+            .put() \
+            .go()
+
+    def approve_device(self, token, user_code, client_id=None, client_secret=None):
+        """
+        Approve a device grant.
+
+        Attributes:
+            client_id: (Optional) The unique client identifier. The client Id is the Id of the FusionAuth Application in which you are attempting to authenticate.
+            client_secret: (Optional) The client secret. This value will be required if client authentication is enabled.
+            token: The access token used to identify the user.
+            user_code: The end-user verification code.
+        """
+        body = {
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "token": token,
+            "user_code": user_code,
+        }
+        return self.start().uri('/oauth2/device/approve') \
+            .body_handler(FormDataBodyHandler(body)) \
+            .post() \
+            .go()
+
+    def approve_device_with_request(self, request):
+        """
+        Approve a device grant.
+
+        Attributes:
+            request: The request object containing the device approval information and optional tenantId.
+        """
+        body = {
+            "client_id": request.client_id,
+            "client_secret": request.client_secret,
+            "tenantId": str(request.tenantId) if request.tenantId is not None else None,
+            "token": request.token,
+            "user_code": request.user_code,
+        }
+        return self.start().uri('/oauth2/device/approve') \
+            .body_handler(FormDataBodyHandler(body)) \
+            .post() \
+            .go()
+
+    def cancel_action(self, action_id, request):
+        """
+        Cancels the user action.
+
+        Attributes:
+            action_id: The action Id of the action to cancel.
+            request: The action request that contains the information about the cancellation.
+        """
+        return self.start().uri('/api/user/action') \
+            .url_segment(action_id) \
+            .body_handler(JSONBodyHandler(request)) \
+            .delete() \
+            .go()
+
+    def change_password(self, change_password_id, request):
+        """
+        Changes a user's password using the change password Id. This usually occurs after an email has been sent to the user
+        and they clicked on a link to reset their password.
+
+        As of version 1.32.2, prefer sending the changePasswordId in the request body. To do this, omit the first parameter, and set
+        the value in the request body.
+
+        Attributes:
+            change_password_id: The change password Id used to find the user. This value is generated by FusionAuth once the change password workflow has been initiated.
+            request: The change password request that contains all the information used to change the password.
+        """
+        return self.start_anonymous().uri('/api/user/change-password') \
+            .url_segment(change_password_id) \
+            .body_handler(JSONBodyHandler(request)) \
+            .post() \
+            .go()
+
+    @deprecated("This method has been renamed to change_password_using_jwt, use that method instead.")
+    def change_password_by_jwt(self, encoded_jwt, request):
+        """
+        Changes a user's password using their access token (JWT) instead of the changePasswordId
+        A common use case for this method will be if you want to allow the user to change their own password.
+
+        Remember to send refreshToken in the request body if you want to get a new refresh token when login using the returned oneTimePassword.
+
+        Attributes:
+            encoded_jwt: The encoded JWT (access token).
+            request: The change password request that contains all the information used to change the password.
+        """
+        return self.start_anonymous().uri('/api/user/change-password') \
+            .authorization("Bearer " + encoded_jwt) \
+            .body_handler(JSONBodyHandler(request)) \
+            .post() \
+            .go()
+
+    def change_password_by_identity(self, request):
+        """
+        Changes a user's password using their identity (loginId and password). Using a loginId instead of the changePasswordId
+        bypasses the email verification and allows a password to be changed directly without first calling the #forgotPassword
+        method.
+
+        Attributes:
+            request: The change password request that contains all the information used to change the password.
+        """
+        return self.start().uri('/api/user/change-password') \
+            .body_handler(JSONBodyHandler(request)) \
+            .post() \
+            .go()
+
+    def change_password_using_jwt(self, encoded_jwt, request):
+        """
+        Changes a user's password using their access token (JWT) instead of the changePasswordId
+        A common use case for this method will be if you want to allow the user to change their own password.
+
+        Remember to send refreshToken in the request body if you want to get a new refresh token when login using the returned oneTimePassword.
+
+        Attributes:
+            encoded_jwt: The encoded JWT (access token).
+            request: The change password request that contains all the information used to change the password.
+        """
+        return self.start_anonymous().uri('/api/user/change-password') \
+            .authorization("Bearer " + encoded_jwt) \
+            .body_handler(JSONBodyHandler(request)) \
+            .post() \
+            .go()
+
+    def check_change_password_using_id(self, change_password_id):
+        """
+        Check to see if the user must obtain a Trust Token Id in order to complete a change password request.
+        When a user has enabled Two-Factor authentication, before you are allowed to use the Change Password API to change
+        your password, you must obtain a Trust Token by completing a Two-Factor Step-Up authentication.
+
+        An HTTP status code of 400 with a general error code of [TrustTokenRequired] indicates that a Trust Token is required to make a POST request to this API.
+
+        Attributes:
+            change_password_id: The change password Id used to find the user. This value is generated by FusionAuth once the change password workflow has been initiated.
+        """
+        return self.start_anonymous().uri('/api/user/change-password') \
+            .url_segment(change_password_id) \
+            .get() \
+            .go()
+
+    def check_change_password_using_id_and_ip_address(self, change_password_id, ip_address=None):
+        """
+        Check to see if the user must obtain a Trust Token Id in order to complete a change password request.
+        When a user has enabled Two-Factor authentication, before you are allowed to use the Change Password API to change
+        your password, you must obtain a Trust Token by completing a Two-Factor Step-Up authentication.
+
+        An HTTP status code of 400 with a general error code of [TrustTokenRequired] indicates that a Trust Token is required to make a POST request to this API.
+
+        Attributes:
+            change_password_id: The change password Id used to find the user. This value is generated by FusionAuth once the change password workflow has been initiated.
+            ip_address: (Optional) IP address of the user changing their password. This is used for MFA risk assessment.
+        """
+        return self.start_anonymous().uri('/api/user/change-password') \
+            .url_segment(change_password_id) \
+            .url_parameter('ipAddress', self.convert_true_false(ip_address)) \
+            .get() \
+            .go()
+
+    def check_change_password_using_jwt(self, encoded_jwt):
+        """
+        Check to see if the user must obtain a Trust Token Id in order to complete a change password request.
+        When a user has enabled Two-Factor authentication, before you are allowed to use the Change Password API to change
+        your password, you must obtain a Trust Token by completing a Two-Factor Step-Up authentication.
+
+        An HTTP status code of 400 with a general error code of [TrustTokenRequired] indicates that a Trust Token is required to make a POST request to this API.
+
+        Attributes:
+            encoded_jwt: The encoded JWT (access token).
+        """
+        return self.start_anonymous().uri('/api/user/change-password') \
+            .authorization("Bearer " + encoded_jwt) \
+            .get() \
+            .go()
+
+    def check_change_password_using_jwt_and_ip_address(self, encoded_jwt, ip_address=None):
+        """
+        Check to see if the user must obtain a Trust Token Id in order to complete a change password request.
+        When a user has enabled Two-Factor authentication, before you are allowed to use the Change Password API to change
+        your password, you must obtain a Trust Token by completing a Two-Factor Step-Up authentication.
+
+        An HTTP status code of 400 with a general error code of [TrustTokenRequired] indicates that a Trust Token is required to make a POST request to this API.
+
+        Attributes:
+            encoded_jwt: The encoded JWT (access token).
+            ip_address: (Optional) IP address of the user changing their password. This is used for MFA risk assessment.
+        """
+        return self.start_anonymous().uri('/api/user/change-password') \
+            .authorization("Bearer " + encoded_jwt) \
+            .url_parameter('ipAddress', self.convert_true_false(ip_address)) \
+            .get() \
+            .go()
+
+    def check_change_password_using_login_id(self, login_id):
+        """
+        Check to see if the user must obtain a Trust Request Id in order to complete a change password request.
+        When a user has enabled Two-Factor authentication, before you are allowed to use the Change Password API to change
+        your password, you must obtain a Trust Request Id by completing a Two-Factor Step-Up authentication.
+
+        An HTTP status code of 400 with a general error code of [TrustTokenRequired] indicates that a Trust Token is required to make a POST request to this API.
+
+        Attributes:
+            login_id: The loginId (email or username) of the User that you intend to change the password for.
+        """
+        return self.start().uri('/api/user/change-password') \
+            .url_parameter('loginId', self.convert_true_false(login_id)) \
+            .get() \
+            .go()
+
+    def check_change_password_using_login_id_and_ip_address(self, login_id, ip_address=None):
+        """
+        Check to see if the user must obtain a Trust Request Id in order to complete a change password request.
+        When a user has enabled Two-Factor authentication, before you are allowed to use the Change Password API to change
+        your password, you must obtain a Trust Request Id by completing a Two-Factor Step-Up authentication.
+
+        An HTTP status code of 400 with a general error code of [TrustTokenRequired] indicates that a Trust Token is required to make a POST request to this API.
+
+        Attributes:
+            login_id: The loginId (email or username) of the User that you intend to change the password for.
+            ip_address: (Optional) IP address of the user changing their password. This is used for MFA risk assessment.
+        """
+        return self.start().uri('/api/user/change-password') \
+            .url_parameter('loginId', self.convert_true_false(login_id)) \
+            .url_parameter('ipAddress', self.convert_true_false(ip_address)) \
+            .get() \
+            .go()
+
+    def check_change_password_using_login_id_and_login_id_types(self, login_id, login_id_types):
+        """
+        Check to see if the user must obtain a Trust Request Id in order to complete a change password request.
+        When a user has enabled Two-Factor authentication, before you are allowed to use the Change Password API to change
+        your password, you must obtain a Trust Request Id by completing a Two-Factor Step-Up authentication.
+
+        An HTTP status code of 400 with a general error code of [TrustTokenRequired] indicates that a Trust Token is required to make a POST request to this API.
+
+        Attributes:
+            login_id: The loginId of the User that you intend to change the password for.
+            login_id_types: The identity types that FusionAuth will compare the loginId to.
+        """
+        return self.start().uri('/api/user/change-password') \
+            .url_parameter('loginId', self.convert_true_false(login_id)) \
+            .url_parameter('loginIdTypes', self.convert_true_false(login_id_types)) \
+            .get() \
+            .go()
+
+    def check_change_password_using_login_id_and_login_id_types_and_ip_address(self, login_id, login_id_types, ip_address=None):
+        """
+        Check to see if the user must obtain a Trust Request Id in order to complete a change password request.
+        When a user has enabled Two-Factor authentication, before you are allowed to use the Change Password API to change
+        your password, you must obtain a Trust Request Id by completing a Two-Factor Step-Up authentication.
+
+        An HTTP status code of 400 with a general error code of [TrustTokenRequired] indicates that a Trust Token is required to make a POST request to this API.
+
+        Attributes:
+            login_id: The loginId of the User that you intend to change the password for.
+            login_id_types: The identity types that FusionAuth will compare the loginId to.
+            ip_address: (Optional) IP address of the user changing their password. This is used for MFA risk assessment.
+        """
+        return self.start().uri('/api/user/change-password') \
+            .url_parameter('loginId', self.convert_true_false(login_id)) \
+            .url_parameter('loginIdTypes', self.convert_true_false(login_id_types)) \
+            .url_parameter('ipAddress', self.convert_true_false(ip_address)) \
+            .get() \
+            .go()
+
+    def client_credentials_grant(self, client_id=None, client_secret=None, scope=None):
+        """
+        Make a Client Credentials grant request to obtain an access token.
+
+        Attributes:
+            client_id: (Optional) The client identifier. The client Id is the Id of the FusionAuth Entity in which you are attempting to authenticate.
+                    This parameter is optional when Basic Authorization is used to authenticate this request.
+            client_secret: (Optional) The client secret used to authenticate this request.
+                    This parameter is optional when Basic Authorization is used to authenticate this request.
+            scope: (Optional) This parameter is used to indicate which target entity you are requesting access. To request access to an entity, use the format target-entity:&lt;target-entity-id&gt;:&lt;roles&gt;. Roles are an optional comma separated list.
+        """
+        body = {
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "grant_type": "client_credentials",
+            "scope": scope,
+        }
+        return self.start_anonymous().uri('/oauth2/token') \
+            .body_handler(FormDataBodyHandler(body)) \
+            .post() \
+            .go()
+
+    def client_credentials_grant_with_request(self, request):
+        """
+        Make a Client Credentials grant request to obtain an access token.
+
+        Attributes:
+            request: The client credentials grant request containing client authentication, scope and optional tenantId.
+        """
+        body = {
+            "client_id": request.client_id,
+            "client_secret": request.client_secret,
+            "grant_type": request.grant_type,
+            "scope": request.scope,
+            "tenantId": request.tenantId,
+        }
+        return self.start_anonymous().uri('/oauth2/token') \
+            .body_handler(FormDataBodyHandler(body)) \
+            .post() \
+            .go()
+
+    def comment_on_user(self, request):
+        """
+        Adds a comment to the user's account.
+
+        Attributes:
+            request: The request object that contains all the information used to create the user comment.
+        """
+        return self.start().uri('/api/user/comment') \
+            .body_handler(JSONBodyHandler(request)) \
+            .post() \
+            .go()
+
+    def complete_verify_identity(self, request):
+        """
+        Completes verification of an identity using verification codes from the Verify Start API.
+
+        Attributes:
+            request: The identity verify complete request that contains all the information used to verify the identity.
+        """
+        return self.start().uri('/api/identity/verify/complete') \
+            .body_handler(JSONBodyHandler(request)) \
+            .post() \
+            .go()
+
+    def complete_web_authn_assertion(self, request):
+        """
+        Complete a WebAuthn authentication ceremony by validating the signature against the previously generated challenge without logging the user in
+
+        Attributes:
+            request: An object containing data necessary for completing the authentication ceremony
+        """
+        return self.start_anonymous().uri('/api/webauthn/assert') \
+            .body_handler(JSONBodyHandler(request)) \
+            .post() \
+            .go()
+
+    def complete_web_authn_login(self, request):
+        """
+        Complete a WebAuthn authentication ceremony by validating the signature against the previously generated challenge and then login the user in
+
+        Attributes:
+            request: An object containing data necessary for completing the authentication ceremony
+        """
+        return self.start_anonymous().uri('/api/webauthn/login') \
+            .body_handler(JSONBodyHandler(request)) \
+            .post() \
+            .go()
+
+    def complete_web_authn_registration(self, request):
+        """
+        Complete a WebAuthn registration ceremony by validating the client request and saving the new credential
+
+        Attributes:
+            request: An object containing data necessary for completing the registration ceremony
+        """
+        return self.start().uri('/api/webauthn/register/complete') \
+            .body_handler(JSONBodyHandler(request)) \
+            .post() \
+            .go()
+
+    def create_api_key(self, request, key_id=None):
+        """
+        Creates an API key. You can optionally specify a unique Id for the key, if not provided one will be generated.
+        an API key can only be created with equal or lesser authority. An API key cannot create another API key unless it is granted
+        to that API key.
+
+        If an API key is locked to a tenant, it can only create API Keys for that same tenant.
+
+        Attributes:
+            key_id: (Optional) The unique Id of the API key. If not provided a secure random Id will be generated.
+            request: The request object that contains all the information needed to create the APIKey.
+        """
+        return self.start().uri('/api/api-key') \
+            .url_segment(key_id) \
+            .body_handler(JSONBodyHandler(request)) \
+            .post() \
+            .go()
+
+    def create_application(self, request, application_id=None):
+        """
+        Creates an application. You can optionally specify an Id for the application, if not provided one will be generated.
+
+        Attributes:
+            application_id: (Optional) The Id to use for the application. If not provided a secure random UUID will be generated.
+            request: The request object that contains all the information used to create the application.
+        """
+        return self.start().uri('/api/application') \
+            .url_segment(application_id) \
+            .body_handler(JSONBodyHandler(request)) \
+            .post() \
+            .go()
+
+    def create_application_role(self, application_id, request, role_id=None):
+        """
+        Creates a new role for an application. You must specify the Id of the application you are creating the role for.
+        You can optionally specify an Id for the role inside the ApplicationRole object itself, if not provided one will be generated.
+
+        Attributes:
+            application_id: The Id of the application to create the role on.
+            role_id: (Optional) The Id of the role. If not provided a secure random UUID will be generated.
+            request: The request object that contains all the information used to create the application role.
+        """
+        return self.start().uri('/api/application') \
+            .url_segment(application_id) \
+            .url_segment("role") \
+            .url_segment(role_id) \
+            .body_handler(JSONBodyHandler(request)) \
+            .post() \
+            .go()
+
+    def create_audit_log(self, request):
+        """
+        Creates an audit log with the message and user name (usually an email). Audit logs should be written anytime you
+        make changes to the FusionAuth database. When using the FusionAuth App web interface, any changes are automatically
+        written to the audit log. However, if you are accessing the API, you must write the audit logs yourself.
+
+        Attributes:
+            request: The request object that contains all the information used to create the audit log entry.
+        """
+        return self.start().uri('/api/system/audit-log') \
+            .body_handler(JSONBodyHandler(request)) \
+            .post() \
+            .go()
+
+    def create_connector(self, request, connector_id=None):
+        """
+        Creates a connector.  You can optionally specify an Id for the connector, if not provided one will be generated.
+
+        Attributes:
+            connector_id: (Optional) The Id for the connector. If not provided a secure random UUID will be generated.
+            request: The request object that contains all the information used to create the connector.
+        """
+        return self.start().uri('/api/connector') \
+            .url_segment(connector_id) \
+            .body_handler(JSONBodyHandler(request)) \
+            .post() \
+            .go()
+
+    def create_consent(self, request, consent_id=None):
+        """
+        Creates a user consent type. You can optionally specify an Id for the consent type, if not provided one will be generated.
+
+        Attributes:
+            consent_id: (Optional) The Id for the consent. If not provided a secure random UUID will be generated.
+            request: The request object that contains all the information used to create the consent.
+        """
+        return self.start().uri('/api/consent') \
+            .url_segment(consent_id) \
+            .body_handler(JSONBodyHandler(request)) \
+            .post() \
+            .go()
+
+    def create_email_template(self, request, email_template_id=None):
+        """
+        Creates an email template. You can optionally specify an Id for the template, if not provided one will be generated.
+
+        Attributes:
+            email_template_id: (Optional) The Id for the template. If not provided a secure random UUID will be generated.
+            request: The request object that contains all the information used to create the email template.
+        """
+        return self.start().uri('/api/email/template') \
+            .url_segment(email_template_id) \
+            .body_handler(JSONBodyHandler(request)) \
+            .post() \
+            .go()
+
+    def create_entity(self, request, entity_id=None):
+        """
+        Creates an Entity. You can optionally specify an Id for the Entity. If not provided one will be generated.
+
+        Attributes:
+            entity_id: (Optional) The Id for the Entity. If not provided a secure random UUID will be generated.
+            request: The request object that contains all the information used to create the Entity.
+        """
+        return self.start().uri('/api/entity') \
+            .url_segment(entity_id) \
+            .body_handler(JSONBodyHandler(request)) \
+            .post() \
+            .go()
+
+    def create_entity_type(self, request, entity_type_id=None):
+        """
+        Creates a Entity Type. You can optionally specify an Id for the Entity Type, if not provided one will be generated.
+
+        Attributes:
+            entity_type_id: (Optional) The Id for the Entity Type. If not provided a secure random UUID will be generated.
+            request: The request object that contains all the information used to create the Entity Type.
+        """
+        return self.start().uri('/api/entity/type') \
+            .url_segment(entity_type_id) \
+            .body_handler(JSONBodyHandler(request)) \
+            .post() \
+            .go()
+
+    def create_entity_type_permission(self, entity_type_id, request, permission_id=None):
+        """
+        Creates a new permission for an entity type. You must specify the Id of the entity type you are creating the permission for.
+        You can optionally specify an Id for the permission inside the EntityTypePermission object itself, if not provided one will be generated.
+
+        Attributes:
+            entity_type_id: The Id of the entity type to create the permission on.
+            permission_id: (Optional) The Id of the permission. If not provided a secure random UUID will be generated.
+            request: The request object that contains all the information used to create the permission.
+        """
+        return self.start().uri('/api/entity/type') \
+            .url_segment(entity_type_id) \
+            .url_segment("permission") \
+            .url_segment(permission_id) \
+            .body_handler(JSONBodyHandler(request)) \
+            .post() \
+            .go()
+
+    def create_family(self, request, family_id=None):
+        """
+        Creates a family with the user Id in the request as the owner and sole member of the family. You can optionally specify an Id for the
+        family, if not provided one will be generated.
+
+        Attributes:
+            family_id: (Optional) The Id for the family. If not provided a secure random UUID will be generated.
+            request: The request object that contains all the information used to create the family.
+        """
+        return self.start().uri('/api/user/family') \
+            .url_segment(family_id) \
+            .body_handler(JSONBodyHandler(request)) \
+            .post() \
+            .go()
+
+    def create_form(self, request, form_id=None):
+        """
+        Creates a form.  You can optionally specify an Id for the form, if not provided one will be generated.
+
+        Attributes:
+            form_id: (Optional) The Id for the form. If not provided a secure random UUID will be generated.
+            request: The request object that contains all the information used to create the form.
+        """
+        return self.start().uri('/api/form') \
+            .url_segment(form_id) \
+            .body_handler(JSONBodyHandler(request)) \
+            .post() \
+            .go()
+
+    def create_form_field(self, request, field_id=None):
+        """
+        Creates a form field.  You can optionally specify an Id for the form, if not provided one will be generated.
+
+        Attributes:
+            field_id: (Optional) The Id for the form field. If not provided a secure random UUID will be generated.
+            request: The request object that contains all the information used to create the form field.
+        """
+        return self.start().uri('/api/form/field') \
+            .url_segment(field_id) \
+            .body_handler(JSONBodyHandler(request)) \
+            .post() \
+            .go()
+
+    def create_group(self, request, group_id=None):
+        """
+        Creates a group. You can optionally specify an Id for the group, if not provided one will be generated.
+
+        Attributes:
+            group_id: (Optional) The Id for the group. If not provided a secure random UUID will be generated.
+            request: The request object that contains all the information used to create the group.
+        """
+        return self.start().uri('/api/group') \
+            .url_segment(group_id) \
+            .body_handler(JSONBodyHandler(request)) \
+            .post() \
+            .go()
+
+    def create_group_members(self, request):
+        """
+        Creates a member in a group.
+
+        Attributes:
+            request: The request object that contains all the information used to create the group member(s).
+        """
+        return self.start().uri('/api/group/member') \
+            .body_handler(JSONBodyHandler(request)) \
+            .post() \
+            .go()
+
+    def create_ip_access_control_list(self, request, access_control_list_id=None):
+        """
+        Creates an IP Access Control List. You can optionally specify an Id on this create request, if one is not provided one will be generated.
+
+        Attributes:
+            access_control_list_id: (Optional) The Id for the IP Access Control List. If not provided a secure random UUID will be generated.
+            request: The request object that contains all the information used to create the IP Access Control List.
+        """
+        return self.start().uri('/api/ip-acl') \
+            .url_segment(access_control_list_id) \
+            .body_handler(JSONBodyHandler(request)) \
+            .post() \
+            .go()
+
+    def create_identity_provider(self, request, identity_provider_id=None):
+        """
+        Creates an identity provider. You can optionally specify an Id for the identity provider, if not provided one will be generated.
+
+        Attributes:
+            identity_provider_id: (Optional) The Id of the identity provider. If not provided a secure random UUID will be generated.
+            request: The request object that contains all the information used to create the identity provider.
+        """
+        return self.start().uri('/api/identity-provider') \
+            .url_segment(identity_provider_id) \
+            .body_handler(JSONBodyHandler(request)) \
+            .post() \
+            .go()
+
+    def create_lambda(self, request, lambda_id=None):
+        """
+        Creates a Lambda. You can optionally specify an Id for the lambda, if not provided one will be generated.
+
+        Attributes:
+            lambda_id: (Optional) The Id for the lambda. If not provided a secure random UUID will be generated.
+            request: The request object that contains all the information used to create the lambda.
+        """
+        return self.start().uri('/api/lambda') \
+            .url_segment(lambda_id) \
+            .body_handler(JSONBodyHandler(request)) \
+            .post() \
+            .go()
+
+    def create_message_template(self, request, message_template_id=None):
+        """
+        Creates an message template. You can optionally specify an Id for the template, if not provided one will be generated.
+
+        Attributes:
+            message_template_id: (Optional) The Id for the template. If not provided a secure random UUID will be generated.
+            request: The request object that contains all the information used to create the message template.
+        """
+        return self.start().uri('/api/message/template') \
+            .url_segment(message_template_id) \
+            .body_handler(JSONBodyHandler(request)) \
+            .post() \
+            .go()
+
+    def create_messenger(self, request, messenger_id=None):
+        """
+        Creates a messenger.  You can optionally specify an Id for the messenger, if not provided one will be generated.
+
+        Attributes:
+            messenger_id: (Optional) The Id for the messenger. If not provided a secure random UUID will be generated.
+            request: The request object that contains all the information used to create the messenger.
+        """
+        return self.start().uri('/api/messenger') \
+            .url_segment(messenger_id) \
+            .body_handler(JSONBodyHandler(request)) \
+            .post() \
+            .go()
+
+    def create_o_auth_scope(self, application_id, request, scope_id=None):
+        """
+        Creates a new custom OAuth scope for an application. You must specify the Id of the application you are creating the scope for.
+        You can optionally specify an Id for the OAuth scope on the URL, if not provided one will be generated.
+
+        Attributes:
+            application_id: The Id of the application to create the OAuth scope on.
+            scope_id: (Optional) The Id of the OAuth scope. If not provided a secure random UUID will be generated.
+            request: The request object that contains all the information used to create the OAuth OAuth scope.
+        """
+        return self.start().uri('/api/application') \
+            .url_segment(application_id) \
+            .url_segment("scope") \
+            .url_segment(scope_id) \
+            .body_handler(JSONBodyHandler(request)) \
+            .post() \
+            .go()
+
+    def create_tenant(self, request, tenant_id=None):
+        """
+        Creates a tenant. You can optionally specify an Id for the tenant, if not provided one will be generated.
+
+        Attributes:
+            tenant_id: (Optional) The Id for the tenant. If not provided a secure random UUID will be generated.
+            request: The request object that contains all the information used to create the tenant.
+        """
+        return self.start().uri('/api/tenant') \
+            .url_segment(tenant_id) \
+            .body_handler(JSONBodyHandler(request)) \
+            .post() \
+            .go()
+
+    def create_tenant_manager_identity_provider_type_configuration(self, _type, request):
+        """
+        Creates a tenant manager identity provider type configuration for the given identity provider type.
+
+        Attributes:
+            _type: The type of the identity provider.
+            request: The request object that contains all the information used to create the tenant manager identity provider type configuration.
+        """
+        return self.start().uri('/api/tenant-manager/identity-provider') \
+            .url_segment(_type) \
+            .body_handler(JSONBodyHandler(request)) \
+            .post() \
+            .go()
+
+    def create_theme(self, request, theme_id=None):
+        """
+        Creates a Theme. You can optionally specify an Id for the theme, if not provided one will be generated.
+
+        Attributes:
+            theme_id: (Optional) The Id for the theme. If not provided a secure random UUID will be generated.
+            request: The request object that contains all the information used to create the theme.
+        """
+        return self.start().uri('/api/theme') \
+            .url_segment(theme_id) \
+            .body_handler(JSONBodyHandler(request)) \
+            .post() \
+            .go()
+
+    def create_user(self, request, user_id=None):
+        """
+        Creates a user. You can optionally specify an Id for the user, if not provided one will be generated.
+
+        Attributes:
+            user_id: (Optional) The Id for the user. If not provided a secure random UUID will be generated.
+            request: The request object that contains all the information used to create the user.
+        """
+        return self.start().uri('/api/user') \
+            .url_segment(user_id) \
+            .body_handler(JSONBodyHandler(request)) \
+            .post() \
+            .go()
+
+    def create_user_action(self, request, user_action_id=None):
+        """
+        Creates a user action. This action cannot be taken on a user until this call successfully returns. Anytime after
+        that the user action can be applied to any user.
+
+        Attributes:
+            user_action_id: (Optional) The Id for the user action. If not provided a secure random UUID will be generated.
+            request: The request object that contains all the information used to create the user action.
+        """
+        return self.start().uri('/api/user-action') \
+            .url_segment(user_action_id) \
+            .body_handler(JSONBodyHandler(request)) \
+            .post() \
+            .go()
+
+    def create_user_action_reason(self, request, user_action_reason_id=None):
+        """
+        Creates a user reason. This user action reason cannot be used when actioning a user until this call completes
+        successfully. Anytime after that the user action reason can be used.
+
+        Attributes:
+            user_action_reason_id: (Optional) The Id for the user action reason. If not provided a secure random UUID will be generated.
+            request: The request object that contains all the information used to create the user action reason.
+        """
+        return self.start().uri('/api/user-action-reason') \
+            .url_segment(user_action_reason_id) \
+            .body_handler(JSONBodyHandler(request)) \
+            .post() \
+            .go()
+
+    def create_user_consent(self, request, user_consent_id=None):
+        """
+        Creates a single User consent.
+
+        Attributes:
+            user_consent_id: (Optional) The Id for the User consent. If not provided a secure random UUID will be generated.
+            request: The request that contains the user consent information.
+        """
+        return self.start().uri('/api/user/consent') \
+            .url_segment(user_consent_id) \
+            .body_handler(JSONBodyHandler(request)) \
+            .post() \
+            .go()
+
+    def create_user_link(self, request):
+        """
+        Link an external user from a 3rd party identity provider to a FusionAuth user.
+
+        Attributes:
+            request: The request object that contains all the information used to link the FusionAuth user.
+        """
+        return self.start().uri('/api/identity-provider/link') \
+            .body_handler(JSONBodyHandler(request)) \
+            .post() \
+            .go()
+
+    def create_webhook(self, request, webhook_id=None):
+        """
+        Creates a webhook. You can optionally specify an Id for the webhook, if not provided one will be generated.
+
+        Attributes:
+            webhook_id: (Optional) The Id for the webhook. If not provided a secure random UUID will be generated.
+            request: The request object that contains all the information used to create the webhook.
+        """
+        return self.start().uri('/api/webhook') \
+            .url_segment(webhook_id) \
+            .body_handler(JSONBodyHandler(request)) \
+            .post() \
+            .go()
+
+    def deactivate_application(self, application_id):
+        """
+        Deactivates the application with the given Id.
+
+        Attributes:
+            application_id: The Id of the application to deactivate.
+        """
+        return self.start().uri('/api/application') \
+            .url_segment(application_id) \
+            .delete() \
+            .go()
+
+    def deactivate_reactor(self):
+        """
+        Deactivates the FusionAuth Reactor.
+
+        Attributes:
+        """
+        return self.start().uri('/api/reactor') \
+            .delete() \
+            .go()
+
+    def deactivate_user(self, user_id):
+        """
+        Deactivates the user with the given Id.
+
+        Attributes:
+            user_id: The Id of the user to deactivate.
+        """
+        return self.start().uri('/api/user') \
+            .url_segment(user_id) \
+            .delete() \
+            .go()
+
+    def deactivate_user_action(self, user_action_id):
+        """
+        Deactivates the user action with the given Id.
+
+        Attributes:
+            user_action_id: The Id of the user action to deactivate.
+        """
+        return self.start().uri('/api/user-action') \
+            .url_segment(user_action_id) \
+            .delete() \
+            .go()
+
+    @deprecated("This method has been renamed to deactivate_users_by_ids, use that method instead.")
+    def deactivate_users(self, user_ids):
+        """
+        Deactivates the users with the given Ids.
+
+        Attributes:
+            user_ids: The ids of the users to deactivate.
+        """
+        return self.start().uri('/api/user/bulk') \
+            .url_parameter('userId', self.convert_true_false(user_ids)) \
+            .url_parameter('dryRun', self.convert_true_false("false")) \
+            .url_parameter('hardDelete', self.convert_true_false("false")) \
+            .delete() \
+            .go()
+
+    def deactivate_users_by_ids(self, user_ids):
+        """
+        Deactivates the users with the given Ids.
+
+        Attributes:
+            user_ids: The ids of the users to deactivate.
+        """
+        return self.start().uri('/api/user/bulk') \
+            .url_parameter('userId', self.convert_true_false(user_ids)) \
+            .url_parameter('dryRun', self.convert_true_false("false")) \
+            .url_parameter('hardDelete', self.convert_true_false("false")) \
+            .delete() \
+            .go()
+
+    def delete_api_key(self, key_id):
+        """
+        Deletes the API key for the given Id.
+
+        Attributes:
+            key_id: The Id of the authentication API key to delete.
+        """
+        return self.start().uri('/api/api-key') \
+            .url_segment(key_id) \
+            .delete() \
+            .go()
+
+    def delete_application(self, application_id):
+        """
+        Hard deletes an application. This is a dangerous operation and should not be used in most circumstances. This will
+        delete the application, any registrations for that application, metrics and reports for the application, all the
+        roles for the application, and any other data associated with the application. This operation could take a very
+        long time, depending on the amount of data in your database.
+
+        Attributes:
+            application_id: The Id of the application to delete.
+        """
+        return self.start().uri('/api/application') \
+            .url_segment(application_id) \
+            .url_parameter('hardDelete', self.convert_true_false("true")) \
+            .delete() \
+            .go()
+
+    def delete_application_role(self, application_id, role_id):
+        """
+        Hard deletes an application role. This is a dangerous operation and should not be used in most circumstances. This
+        permanently removes the given role from all users that had it.
+
+        Attributes:
+            application_id: The Id of the application that the role belongs to.
+            role_id: The Id of the role to delete.
+        """
+        return self.start().uri('/api/application') \
+            .url_segment(application_id) \
+            .url_segment("role") \
+            .url_segment(role_id) \
+            .delete() \
+            .go()
+
+    def delete_connector(self, connector_id):
+        """
+        Deletes the connector for the given Id.
+
+        Attributes:
+            connector_id: The Id of the connector to delete.
+        """
+        return self.start().uri('/api/connector') \
+            .url_segment(connector_id) \
+            .delete() \
+            .go()
+
+    def delete_consent(self, consent_id):
+        """
+        Deletes the consent for the given Id.
+
+        Attributes:
+            consent_id: The Id of the consent to delete.
+        """
+        return self.start().uri('/api/consent') \
+            .url_segment(consent_id) \
+            .delete() \
+            .go()
+
+    def delete_email_template(self, email_template_id):
+        """
+        Deletes the email template for the given Id.
+
+        Attributes:
+            email_template_id: The Id of the email template to delete.
+        """
+        return self.start().uri('/api/email/template') \
+            .url_segment(email_template_id) \
+            .delete() \
+            .go()
+
+    def delete_entity(self, entity_id):
+        """
+        Deletes the Entity for the given Id.
+
+        Attributes:
+            entity_id: The Id of the Entity to delete.
+        """
+        return self.start().uri('/api/entity') \
+            .url_segment(entity_id) \
+            .delete() \
+            .go()
+
+    def delete_entity_grant(self, entity_id, recipient_entity_id=None, user_id=None):
+        """
+        Deletes an Entity Grant for the given User or Entity.
+
+        Attributes:
+            entity_id: The Id of the Entity that the Entity Grant is being deleted for.
+            recipient_entity_id: (Optional) The Id of the Entity that the Entity Grant is for.
+            user_id: (Optional) The Id of the User that the Entity Grant is for.
+        """
+        return self.start().uri('/api/entity') \
+            .url_segment(entity_id) \
+            .url_segment("grant") \
+            .url_parameter('recipientEntityId', self.convert_true_false(recipient_entity_id)) \
+            .url_parameter('userId', self.convert_true_false(user_id)) \
+            .delete() \
+            .go()
+
+    def delete_entity_type(self, entity_type_id):
+        """
+        Deletes the Entity Type for the given Id.
+
+        Attributes:
+            entity_type_id: The Id of the Entity Type to delete.
+        """
+        return self.start().uri('/api/entity/type') \
+            .url_segment(entity_type_id) \
+            .delete() \
+            .go()
+
+    def delete_entity_type_permission(self, entity_type_id, permission_id):
+        """
+        Hard deletes a permission. This is a dangerous operation and should not be used in most circumstances. This
+        permanently removes the given permission from all grants that had it.
+
+        Attributes:
+            entity_type_id: The Id of the entityType the the permission belongs to.
+            permission_id: The Id of the permission to delete.
+        """
+        return self.start().uri('/api/entity/type') \
+            .url_segment(entity_type_id) \
+            .url_segment("permission") \
+            .url_segment(permission_id) \
+            .delete() \
+            .go()
+
+    def delete_form(self, form_id):
+        """
+        Deletes the form for the given Id.
+
+        Attributes:
+            form_id: The Id of the form to delete.
+        """
+        return self.start().uri('/api/form') \
+            .url_segment(form_id) \
+            .delete() \
+            .go()
+
+    def delete_form_field(self, field_id):
+        """
+        Deletes the form field for the given Id.
+
+        Attributes:
+            field_id: The Id of the form field to delete.
+        """
+        return self.start().uri('/api/form/field') \
+            .url_segment(field_id) \
+            .delete() \
+            .go()
+
+    def delete_group(self, group_id):
+        """
+        Deletes the group for the given Id.
+
+        Attributes:
+            group_id: The Id of the group to delete.
+        """
+        return self.start().uri('/api/group') \
+            .url_segment(group_id) \
+            .delete() \
+            .go()
+
+    def delete_group_members(self, request):
+        """
+        Removes users as members of a group.
+
+        Attributes:
+            request: The member request that contains all the information used to remove members to the group.
+        """
+        return self.start().uri('/api/group/member') \
+            .body_handler(JSONBodyHandler(request)) \
+            .delete() \
+            .go()
+
+    def delete_ip_access_control_list(self, ip_access_control_list_id):
+        """
+        Deletes the IP Access Control List for the given Id.
+
+        Attributes:
+            ip_access_control_list_id: The Id of the IP Access Control List to delete.
+        """
+        return self.start().uri('/api/ip-acl') \
+            .url_segment(ip_access_control_list_id) \
+            .delete() \
+            .go()
+
+    def delete_identity_provider(self, identity_provider_id):
+        """
+        Deletes the identity provider for the given Id.
+
+        Attributes:
+            identity_provider_id: The Id of the identity provider to delete.
+        """
+        return self.start().uri('/api/identity-provider') \
+            .url_segment(identity_provider_id) \
+            .delete() \
+            .go()
+
+    def delete_key(self, key_id):
+        """
+        Deletes the key for the given Id.
+
+        Attributes:
+            key_id: The Id of the key to delete.
+        """
+        return self.start().uri('/api/key') \
+            .url_segment(key_id) \
+            .delete() \
+            .go()
+
+    def delete_lambda(self, lambda_id):
+        """
+        Deletes the lambda for the given Id.
+
+        Attributes:
+            lambda_id: The Id of the lambda to delete.
+        """
+        return self.start().uri('/api/lambda') \
+            .url_segment(lambda_id) \
+            .delete() \
+            .go()
+
+    def delete_message_template(self, message_template_id):
+        """
+        Deletes the message template for the given Id.
+
+        Attributes:
+            message_template_id: The Id of the message template to delete.
+        """
+        return self.start().uri('/api/message/template') \
+            .url_segment(message_template_id) \
+            .delete() \
+            .go()
+
+    def delete_messenger(self, messenger_id):
+        """
+        Deletes the messenger for the given Id.
+
+        Attributes:
+            messenger_id: The Id of the messenger to delete.
+        """
+        return self.start().uri('/api/messenger') \
+            .url_segment(messenger_id) \
+            .delete() \
+            .go()
+
+    def delete_o_auth_scope(self, application_id, scope_id):
+        """
+        Hard deletes a custom OAuth scope.
+        OAuth workflows that are still requesting the deleted OAuth scope may fail depending on the application's unknown scope policy.
+
+        Attributes:
+            application_id: The Id of the application that the OAuth scope belongs to.
+            scope_id: The Id of the OAuth scope to delete.
+        """
+        return self.start().uri('/api/application') \
+            .url_segment(application_id) \
+            .url_segment("scope") \
+            .url_segment(scope_id) \
+            .delete() \
+            .go()
+
+    def delete_registration(self, user_id, application_id):
+        """
+        Deletes the user registration for the given user and application.
+
+        Attributes:
+            user_id: The Id of the user whose registration is being deleted.
+            application_id: The Id of the application to remove the registration for.
+        """
+        return self.start().uri('/api/user/registration') \
+            .url_segment(user_id) \
+            .url_segment(application_id) \
+            .delete() \
+            .go()
+
+    def delete_registration_with_request(self, user_id, application_id, request):
+        """
+        Deletes the user registration for the given user and application along with the given JSON body that contains the event information.
+
+        Attributes:
+            user_id: The Id of the user whose registration is being deleted.
+            application_id: The Id of the application to remove the registration for.
+            request: The request body that contains the event information.
+        """
+        return self.start().uri('/api/user/registration') \
+            .url_segment(user_id) \
+            .url_segment(application_id) \
+            .body_handler(JSONBodyHandler(request)) \
+            .delete() \
+            .go()
+
+    def delete_tenant(self, tenant_id):
+        """
+        Deletes the tenant based on the given Id on the URL. This permanently deletes all information, metrics, reports and data associated
+        with the tenant and everything under the tenant (applications, users, etc).
+
+        Attributes:
+            tenant_id: The Id of the tenant to delete.
+        """
+        return self.start().uri('/api/tenant') \
+            .url_segment(tenant_id) \
+            .delete() \
+            .go()
+
+    def delete_tenant_async(self, tenant_id):
+        """
+        Deletes the tenant for the given Id asynchronously.
+        This method is helpful if you do not want to wait for the delete operation to complete.
+
+        Attributes:
+            tenant_id: The Id of the tenant to delete.
+        """
+        return self.start().uri('/api/tenant') \
+            .url_segment(tenant_id) \
+            .url_parameter('async', self.convert_true_false("true")) \
+            .delete() \
+            .go()
+
+    def delete_tenant_manager_identity_provider_type_configuration(self, _type):
+        """
+        Deletes the tenant manager identity provider type configuration for the given identity provider type.
+
+        Attributes:
+            _type: The type of the identity provider.
+        """
+        return self.start().uri('/api/tenant-manager/identity-provider') \
+            .url_segment(_type) \
+            .delete() \
+            .go()
+
+    def delete_tenant_with_request(self, tenant_id, request):
+        """
+        Deletes the tenant based on the given request (sent to the API as JSON). This permanently deletes all information, metrics, reports and data associated
+        with the tenant and everything under the tenant (applications, users, etc).
+
+        Attributes:
+            tenant_id: The Id of the tenant to delete.
+            request: The request object that contains all the information used to delete the user.
+        """
+        return self.start().uri('/api/tenant') \
+            .url_segment(tenant_id) \
+            .body_handler(JSONBodyHandler(request)) \
+            .delete() \
+            .go()
+
+    def delete_theme(self, theme_id):
+        """
+        Deletes the theme for the given Id.
+
+        Attributes:
+            theme_id: The Id of the theme to delete.
+        """
+        return self.start().uri('/api/theme') \
+            .url_segment(theme_id) \
+            .delete() \
+            .go()
+
+    def delete_user(self, user_id):
+        """
+        Deletes the user for the given Id. This permanently deletes all information, metrics, reports and data associated
+        with the user.
+
+        Attributes:
+            user_id: The Id of the user to delete.
+        """
+        return self.start().uri('/api/user') \
+            .url_segment(user_id) \
+            .url_parameter('hardDelete', self.convert_true_false("true")) \
+            .delete() \
+            .go()
+
+    def delete_user_action(self, user_action_id):
+        """
+        Deletes the user action for the given Id. This permanently deletes the user action and also any history and logs of
+        the action being applied to any users.
+
+        Attributes:
+            user_action_id: The Id of the user action to delete.
+        """
+        return self.start().uri('/api/user-action') \
+            .url_segment(user_action_id) \
+            .url_parameter('hardDelete', self.convert_true_false("true")) \
+            .delete() \
+            .go()
+
+    def delete_user_action_reason(self, user_action_reason_id):
+        """
+        Deletes the user action reason for the given Id.
+
+        Attributes:
+            user_action_reason_id: The Id of the user action reason to delete.
+        """
+        return self.start().uri('/api/user-action-reason') \
+            .url_segment(user_action_reason_id) \
+            .delete() \
+            .go()
+
+    def delete_user_link(self, identity_provider_id, identity_provider_user_id, user_id):
+        """
+        Remove an existing link that has been made from a 3rd party identity provider to a FusionAuth user.
+
+        Attributes:
+            identity_provider_id: The unique Id of the identity provider.
+            identity_provider_user_id: The unique Id of the user in the 3rd party identity provider to unlink.
+            user_id: The unique Id of the FusionAuth user to unlink.
+        """
+        return self.start().uri('/api/identity-provider/link') \
+            .url_parameter('identityProviderId', self.convert_true_false(identity_provider_id)) \
+            .url_parameter('identityProviderUserId', self.convert_true_false(identity_provider_user_id)) \
+            .url_parameter('userId', self.convert_true_false(user_id)) \
+            .delete() \
+            .go()
+
+    def delete_user_with_request(self, user_id, request):
+        """
+        Deletes the user based on the given request (sent to the API as JSON). This permanently deletes all information, metrics, reports and data associated
+        with the user.
+
+        Attributes:
+            user_id: The Id of the user to delete (required).
+            request: The request object that contains all the information used to delete the user.
+        """
+        return self.start().uri('/api/user') \
+            .url_segment(user_id) \
+            .body_handler(JSONBodyHandler(request)) \
+            .delete() \
+            .go()
+
+    @deprecated("This method has been renamed to delete_users_by_query, use that method instead.")
+    def delete_users(self, request):
+        """
+        Deletes the users with the given Ids, or users matching the provided JSON query or queryString.
+        The order of preference is Ids, query and then queryString, it is recommended to only provide one of the three for the request.
+
+        This method can be used to deactivate or permanently delete (hard-delete) users based upon the hardDelete boolean in the request body.
+        Using the dryRun parameter you may also request the result of the action without actually deleting or deactivating any users.
+
+        Attributes:
+            request: The UserDeleteRequest.
+        """
+        return self.start().uri('/api/user/bulk') \
+            .body_handler(JSONBodyHandler(request)) \
+            .delete() \
+            .go()
+
+    def delete_users_by_query(self, request):
+        """
+        Deletes the users with the given Ids, or users matching the provided JSON query or queryString.
+        The order of preference is Ids, query and then queryString, it is recommended to only provide one of the three for the request.
+
+        This method can be used to deactivate or permanently delete (hard-delete) users based upon the hardDelete boolean in the request body.
+        Using the dryRun parameter you may also request the result of the action without actually deleting or deactivating any users.
+
+        Attributes:
+            request: The UserDeleteRequest.
+        """
+        return self.start().uri('/api/user/bulk') \
+            .body_handler(JSONBodyHandler(request)) \
+            .delete() \
+            .go()
+
+    def delete_web_authn_credential(self, id):
+        """
+        Deletes the WebAuthn credential for the given Id.
+
+        Attributes:
+            id: The Id of the WebAuthn credential to delete.
+        """
+        return self.start().uri('/api/webauthn') \
+            .url_segment(id) \
+            .delete() \
+            .go()
+
+    def delete_web_authn_credentials_for_user(self, user_id):
+        """
+        Deletes all of the WebAuthn credentials for the given User Id.
+
+        Attributes:
+            user_id: The unique Id of the User to delete WebAuthn passkeys for.
+        """
+        return self.start().uri('/api/webauthn') \
+            .url_parameter('userId', self.convert_true_false(user_id)) \
+            .delete() \
+            .go()
+
+    def delete_webhook(self, webhook_id):
+        """
+        Deletes the webhook for the given Id.
+
+        Attributes:
+            webhook_id: The Id of the webhook to delete.
+        """
+        return self.start().uri('/api/webhook') \
+            .url_segment(webhook_id) \
+            .delete() \
+            .go()
+
+    def device_authorize(self, client_id, client_secret=None, scope=None):
+        """
+        Start the Device Authorization flow using form-encoded parameters
+
+        Attributes:
+            client_id: The unique client identifier. The client Id is the Id of the FusionAuth Application in which you are attempting to authenticate.
+            client_secret: (Optional) The client secret. This value may optionally be provided in the request body instead of the Authorization header.
+            scope: (Optional) A space-delimited string of the requested scopes. Defaults to all scopes configured in the Application's OAuth configuration.
+        """
+        body = {
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "scope": scope,
+        }
+        return self.start_anonymous().uri('/oauth2/device_authorize') \
+            .body_handler(FormDataBodyHandler(body)) \
+            .post() \
+            .go()
+
+    def device_authorize_with_request(self, request):
+        """
+        Start the Device Authorization flow using a request body
+
+        Attributes:
+            request: The device authorization request containing client authentication, scope, and optional device metadata.
+        """
+        body = {
+            "client_id": request.client_id,
+            "client_secret": request.client_secret,
+            "scope": request.scope,
+            "tenantId": str(request.tenantId) if request.tenantId is not None else None,
+        }
+        return self.start_anonymous().uri('/oauth2/device_authorize') \
+            .body_handler(FormDataBodyHandler(body)) \
+            .post() \
+            .go()
+
+    def disable_two_factor(self, user_id, method_id, code):
+        """
+        Disable two-factor authentication for a user.
+
+        Attributes:
+            user_id: The Id of the User for which you're disabling two-factor authentication.
+            method_id: The two-factor method identifier you wish to disable
+            code: The two-factor code used verify the the caller knows the two-factor secret.
+        """
+        return self.start().uri('/api/user/two-factor') \
+            .url_segment(user_id) \
+            .url_parameter('methodId', self.convert_true_false(method_id)) \
+            .url_parameter('code', self.convert_true_false(code)) \
+            .delete() \
+            .go()
+
+    def disable_two_factor_with_request(self, user_id, request):
+        """
+        Disable two-factor authentication for a user using a JSON body rather than URL parameters.
+
+        Attributes:
+            user_id: The Id of the User for which you're disabling two-factor authentication.
+            request: The request information that contains the code and methodId along with any event information.
+        """
+        return self.start().uri('/api/user/two-factor') \
+            .url_segment(user_id) \
+            .body_handler(JSONBodyHandler(request)) \
+            .delete() \
+            .go()
+
+    def enable_two_factor(self, user_id, request):
+        """
+        Enable two-factor authentication for a user.
+
+        Attributes:
+            user_id: The Id of the user to enable two-factor authentication.
+            request: The two-factor enable request information.
+        """
+        return self.start().uri('/api/user/two-factor') \
+            .url_segment(user_id) \
+            .body_handler(JSONBodyHandler(request)) \
+            .post() \
+            .go()
+
+    def exchange_o_auth_code_for_access_token(self, code, redirect_uri, client_id=None, client_secret=None):
+        """
+        Exchanges an OAuth authorization code for an access token.
+        Makes a request to the Token endpoint to exchange the authorization code returned from the Authorize endpoint for an access token.
+
+        Attributes:
+            code: The authorization code returned on the /oauth2/authorize response.
+            client_id: (Optional) The unique client identifier. The client Id is the Id of the FusionAuth Application in which you are attempting to authenticate.
+                    This parameter is optional when Basic Authorization is used to authenticate this request.
+            client_secret: (Optional) The client secret. This value will be required if client authentication is enabled.
+            redirect_uri: The URI to redirect to upon a successful request.
+        """
+        body = {
+            "code": code,
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "grant_type": "authorization_code",
+            "redirect_uri": redirect_uri,
+        }
+        return self.start_anonymous().uri('/oauth2/token') \
+            .body_handler(FormDataBodyHandler(body)) \
+            .post() \
+            .go()
+
+    def exchange_o_auth_code_for_access_token_using_pkce(self, code, redirect_uri, code_verifier, client_id=None, client_secret=None):
+        """
+        Exchanges an OAuth authorization code and code_verifier for an access token.
+        Makes a request to the Token endpoint to exchange the authorization code returned from the Authorize endpoint and a code_verifier for an access token.
+
+        Attributes:
+            code: The authorization code returned on the /oauth2/authorize response.
+            client_id: (Optional) The unique client identifier. The client Id is the Id of the FusionAuth Application in which you are attempting to authenticate. This parameter is optional when the Authorization header is provided.
+                    This parameter is optional when Basic Authorization is used to authenticate this request.
+            client_secret: (Optional) The client secret. This value may optionally be provided in the request body instead of the Authorization header.
+            redirect_uri: The URI to redirect to upon a successful request.
+            code_verifier: The random string generated previously. Will be compared with the code_challenge sent previously, which allows the OAuth provider to authenticate your app.
+        """
+        body = {
+            "code": code,
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "grant_type": "authorization_code",
+            "redirect_uri": redirect_uri,
+            "code_verifier": code_verifier,
+        }
+        return self.start_anonymous().uri('/oauth2/token') \
+            .body_handler(FormDataBodyHandler(body)) \
+            .post() \
+            .go()
+
+    def exchange_o_auth_code_for_access_token_using_pkce_with_request(self, request):
+        """
+        Exchanges an OAuth authorization code and code_verifier for an access token.
+        Makes a request to the Token endpoint to exchange the authorization code returned from the Authorize endpoint and a code_verifier for an access token.
+
+        Attributes:
+            request: The PKCE OAuth code access token exchange request.
+        """
+        body = {
+            "client_id": request.client_id,
+            "client_secret": request.client_secret,
+            "code": request.code,
+            "code_verifier": request.code_verifier,
+            "grant_type": request.grant_type,
+            "redirect_uri": request.redirect_uri,
+            "tenantId": str(request.tenantId) if request.tenantId is not None else None,
+        }
+        return self.start_anonymous().uri('/oauth2/token') \
+            .body_handler(FormDataBodyHandler(body)) \
+            .post() \
+            .go()
+
+    def exchange_o_auth_code_for_access_token_with_request(self, request):
+        """
+        Exchanges an OAuth authorization code for an access token.
+        Makes a request to the Token endpoint to exchange the authorization code returned from the Authorize endpoint for an access token.
+
+        Attributes:
+            request: The OAuth code access token exchange request.
+        """
+        body = {
+            "client_id": request.client_id,
+            "client_secret": request.client_secret,
+            "code": request.code,
+            "grant_type": request.grant_type,
+            "redirect_uri": request.redirect_uri,
+            "tenantId": request.tenantId,
+        }
+        return self.start_anonymous().uri('/oauth2/token') \
+            .body_handler(FormDataBodyHandler(body)) \
+            .post() \
+            .go()
+
+    def exchange_refresh_token_for_access_token(self, refresh_token, client_id=None, client_secret=None, scope=None, user_code=None):
+        """
+        Exchange a Refresh Token for an Access Token.
+        If you will be using the Refresh Token Grant, you will make a request to the Token endpoint to exchange the user’s refresh token for an access token.
+
+        Attributes:
+            refresh_token: The refresh token that you would like to use to exchange for an access token.
+            client_id: (Optional) The unique client identifier. The client Id is the Id of the FusionAuth Application in which you are attempting to authenticate. This parameter is optional when the Authorization header is provided.
+                    This parameter is optional when Basic Authorization is used to authenticate this request.
+            client_secret: (Optional) The client secret. This value may optionally be provided in the request body instead of the Authorization header.
+            scope: (Optional) This parameter is optional and if omitted, the same scope requested during the authorization request will be used. If provided the scopes must match those requested during the initial authorization request.
+            user_code: (Optional) The end-user verification code. This code is required if using this endpoint to approve the Device Authorization.
+        """
+        body = {
+            "refresh_token": refresh_token,
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "grant_type": "refresh_token",
+            "scope": scope,
+            "user_code": user_code,
+        }
+        return self.start_anonymous().uri('/oauth2/token') \
+            .body_handler(FormDataBodyHandler(body)) \
+            .post() \
+            .go()
+
+    def exchange_refresh_token_for_access_token_with_request(self, request):
+        """
+        Exchange a Refresh Token for an Access Token.
+        If you will be using the Refresh Token Grant, you will make a request to the Token endpoint to exchange the user’s refresh token for an access token.
+
+        Attributes:
+            request: The refresh token access token exchange request.
+        """
+        body = {
+            "client_id": request.client_id,
+            "client_secret": request.client_secret,
+            "grant_type": request.grant_type,
+            "refresh_token": request.refresh_token,
+            "scope": request.scope,
+            "tenantId": str(request.tenantId) if request.tenantId is not None else None,
+            "user_code": request.user_code,
+        }
+        return self.start_anonymous().uri('/oauth2/token') \
+            .body_handler(FormDataBodyHandler(body)) \
+            .post() \
+            .go()
+
+    def exchange_refresh_token_for_jwt(self, request):
+        """
+        Exchange a refresh token for a new JWT.
+
+        Attributes:
+            request: The refresh request.
+        """
+        return self.start_anonymous().uri('/api/jwt/refresh') \
+            .body_handler(JSONBodyHandler(request)) \
+            .post() \
+            .go()
+
+    def exchange_user_credentials_for_access_token(self, username, password, client_id=None, client_secret=None, scope=None, user_code=None):
+        """
+        Exchange User Credentials for a Token.
+        If you will be using the Resource Owner Password Credential Grant, you will make a request to the Token endpoint to exchange the user’s email and password for an access token.
+
+        Attributes:
+            username: The login identifier of the user. The login identifier can be either the email or the username.
+            password: The user’s password.
+            client_id: (Optional) The unique client identifier. The client Id is the Id of the FusionAuth Application in which you are attempting to authenticate. This parameter is optional when the Authorization header is provided.
+                    This parameter is optional when Basic Authorization is used to authenticate this request.
+            client_secret: (Optional) The client secret. This value may optionally be provided in the request body instead of the Authorization header.
+            scope: (Optional) This parameter is optional and if omitted, the same scope requested during the authorization request will be used. If provided the scopes must match those requested during the initial authorization request.
+            user_code: (Optional) The end-user verification code. This code is required if using this endpoint to approve the Device Authorization.
+        """
+        body = {
+            "username": username,
+            "password": password,
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "grant_type": "password",
+            "scope": scope,
+            "user_code": user_code,
+        }
+        return self.start_anonymous().uri('/oauth2/token') \
+            .body_handler(FormDataBodyHandler(body)) \
+            .post() \
+            .go()
+
+    def exchange_user_credentials_for_access_token_with_request(self, request):
+        """
+        Exchange User Credentials for a Token.
+        If you will be using the Resource Owner Password Credential Grant, you will make a request to the Token endpoint to exchange the user’s email and password for an access token.
+
+        Attributes:
+            request: The user credentials access token exchange request.
+        """
+        body = {
+            "client_id": request.client_id,
+            "client_secret": request.client_secret,
+            "grant_type": request.grant_type,
+            "password": request.password,
+            "scope": request.scope,
+            "tenantId": request.tenantId,
+            "user_code": request.user_code,
+            "username": request.username,
+        }
+        return self.start_anonymous().uri('/oauth2/token') \
+            .body_handler(FormDataBodyHandler(body)) \
+            .post() \
+            .go()
+
+    def forgot_password(self, request):
+        """
+        Begins the forgot password sequence, which kicks off an email to the user so that they can reset their password.
+
+        Attributes:
+            request: The request that contains the information about the user so that they can be emailed.
+        """
+        return self.start().uri('/api/user/forgot-password') \
+            .body_handler(JSONBodyHandler(request)) \
+            .post() \
+            .go()
+
+    def generate_email_verification_id(self, email):
+        """
+        Generate a new Email Verification Id to be used with the Verify Email API. This API will not attempt to send an
+        email to the User. This API may be used to collect the verificationId for use with a third party system.
+
+        Attributes:
+            email: The email address of the user that needs a new verification email.
+        """
+        return self.start().uri('/api/user/verify-email') \
+            .url_parameter('email', self.convert_true_false(email)) \
+            .url_parameter('sendVerifyEmail', self.convert_true_false("false")) \
+            .put() \
+            .go()
+
+    def generate_key(self, request, key_id=None):
+        """
+        Generate a new RSA or EC key pair or an HMAC secret.
+
+        Attributes:
+            key_id: (Optional) The Id for the key. If not provided a secure random UUID will be generated.
+            request: The request object that contains all the information used to create the key.
+        """
+        return self.start().uri('/api/key/generate') \
+            .url_segment(key_id) \
+            .body_handler(JSONBodyHandler(request)) \
+            .post() \
+            .go()
+
+    def generate_registration_verification_id(self, email, application_id):
+        """
+        Generate a new Application Registration Verification Id to be used with the Verify Registration API. This API will not attempt to send an
+        email to the User. This API may be used to collect the verificationId for use with a third party system.
+
+        Attributes:
+            email: The email address of the user that needs a new verification email.
+            application_id: The Id of the application to be verified.
+        """
+        return self.start().uri('/api/user/verify-registration') \
+            .url_parameter('email', self.convert_true_false(email)) \
+            .url_parameter('sendVerifyPasswordEmail', self.convert_true_false("false")) \
+            .url_parameter('applicationId', self.convert_true_false(application_id)) \
+            .put() \
+            .go()
+
+    def generate_two_factor_recovery_codes(self, user_id):
+        """
+        Generate two-factor recovery codes for a user. Generating two-factor recovery codes will invalidate any existing recovery codes.
+
+        Attributes:
+            user_id: The Id of the user to generate new Two Factor recovery codes.
+        """
+        return self.start().uri('/api/user/two-factor/recovery-code') \
+            .url_segment(user_id) \
+            .post() \
+            .go()
+
+    def generate_two_factor_secret(self):
+        """
+        Generate a Two Factor secret that can be used to enable Two Factor authentication for a User. The response will contain
+        both the secret and a Base32 encoded form of the secret which can be shown to a User when using a 2 Step Authentication
+        application such as Google Authenticator.
+
+        Attributes:
+        """
+        return self.start().uri('/api/two-factor/secret') \
+            .get() \
+            .go()
+
+    def generate_two_factor_secret_using_jwt(self, encoded_jwt):
+        """
+        Generate a Two Factor secret that can be used to enable Two Factor authentication for a User. The response will contain
+        both the secret and a Base32 encoded form of the secret which can be shown to a User when using a 2 Step Authentication
+        application such as Google Authenticator.
+
+        Attributes:
+            encoded_jwt: The encoded JWT (access token).
+        """
+        return self.start_anonymous().uri('/api/two-factor/secret') \
+            .authorization("Bearer " + encoded_jwt) \
+            .get() \
+            .go()
+
+    def identity_provider_login(self, request):
+        """
+        Handles login via third-parties including Social login, external OAuth and OpenID Connect, and other
+        login systems.
+
+        Attributes:
+            request: The third-party login request that contains information from the third-party login
+                    providers that FusionAuth uses to reconcile the user's account.
+        """
+        return self.start_anonymous().uri('/api/identity-provider/login') \
+            .body_handler(JSONBodyHandler(request)) \
+            .post() \
+            .go()
+
+    def import_key(self, request, key_id=None):
+        """
+        Import an existing RSA or EC key pair or an HMAC secret.
+
+        Attributes:
+            key_id: (Optional) The Id for the key. If not provided a secure random UUID will be generated.
+            request: The request object that contains all the information used to create the key.
+        """
+        return self.start().uri('/api/key/import') \
+            .url_segment(key_id) \
+            .body_handler(JSONBodyHandler(request)) \
+            .post() \
+            .go()
+
+    def import_refresh_tokens(self, request):
+        """
+        Bulk imports refresh tokens. This request performs minimal validation and runs batch inserts of refresh tokens with the
+        expectation that each token represents a user that already exists and is registered for the corresponding FusionAuth
+        Application. This is done to increases the insert performance.
+
+        Therefore, if you encounter an error due to a database key violation, the response will likely offer a generic
+        explanation. If you encounter an error, you may optionally enable additional validation to receive a JSON response
+        body with specific validation errors. This will slow the request down but will allow you to identify the cause of
+        the failure. See the validateDbConstraints request parameter.
+
+        Attributes:
+            request: The request that contains all the information about all the refresh tokens to import.
+        """
+        return self.start().uri('/api/user/refresh-token/import') \
+            .body_handler(JSONBodyHandler(request)) \
+            .post() \
+            .go()
+
+    def import_users(self, request):
+        """
+        Bulk imports users. This request performs minimal validation and runs batch inserts of users with the expectation
+        that each user does not yet exist and each registration corresponds to an existing FusionAuth Application. This is done to
+        increases the insert performance.
+
+        Therefore, if you encounter an error due to a database key violation, the response will likely offer
+        a generic explanation. If you encounter an error, you may optionally enable additional validation to receive a JSON response
+        body with specific validation errors. This will slow the request down but will allow you to identify the cause of the failure. See
+        the validateDbConstraints request parameter.
+
+        Attributes:
+            request: The request that contains all the information about all the users to import.
+        """
+        return self.start().uri('/api/user/import') \
+            .body_handler(JSONBodyHandler(request)) \
+            .post() \
+            .go()
+
+    def import_web_authn_credential(self, request):
+        """
+        Import a WebAuthn credential
+
+        Attributes:
+            request: An object containing data necessary for importing the credential
+        """
+        return self.start().uri('/api/webauthn/import') \
+            .body_handler(JSONBodyHandler(request)) \
+            .post() \
+            .go()
+
+    def introspect_access_token(self, client_id, token):
+        """
+        Inspect an access token issued as the result of the User based grant such as the Authorization Code Grant, Implicit Grant, the User Credentials Grant or the Refresh Grant.
+
+        Attributes:
+            client_id: The unique client identifier. The client Id is the Id of the FusionAuth Application for which this token was generated.
+            token: The access token returned by this OAuth provider as the result of a successful client credentials grant.
+        """
+        body = {
+            "client_id": client_id,
+            "token": token,
+        }
+        return self.start_anonymous().uri('/oauth2/introspect') \
+            .body_handler(FormDataBodyHandler(body)) \
+            .post() \
+            .go()
+
+    def introspect_access_token_with_request(self, request):
+        """
+        Inspect an access token issued as the result of the User based grant such as the Authorization Code Grant, Implicit Grant, the User Credentials Grant or the Refresh Grant.
+
+        Attributes:
+            request: The access token introspection request.
+        """
+        body = {
+            "client_id": request.client_id,
+            "tenantId": request.tenantId,
+            "token": request.token,
+            "token_type_hint": request.token_type_hint,
+        }
+        return self.start_anonymous().uri('/oauth2/introspect') \
+            .body_handler(FormDataBodyHandler(body)) \
+            .post() \
+            .go()
+
+    def introspect_client_credentials_access_token(self, token):
+        """
+        Inspect an access token issued as the result of the Client Credentials Grant.
+
+        Attributes:
+            token: The access token returned by this OAuth provider as the result of a successful client credentials grant.
+        """
+        body = {
+            "token": token,
+        }
+        return self.start_anonymous().uri('/oauth2/introspect') \
+            .body_handler(FormDataBodyHandler(body)) \
+            .post() \
+            .go()
+
+    def introspect_client_credentials_access_token_with_request(self, request):
+        """
+        Inspect an access token issued as the result of the Client Credentials Grant.
+
+        Attributes:
+            request: The client credentials access token.
+        """
+        body = {
+            "tenantId": request.tenantId,
+            "token": request.token,
+        }
+        return self.start_anonymous().uri('/oauth2/introspect') \
+            .body_handler(FormDataBodyHandler(body)) \
+            .post() \
+            .go()
+
+    def issue_jwt(self, application_id, encoded_jwt, refresh_token=None):
+        """
+        Issue a new access token (JWT) for the requested Application after ensuring the provided JWT is valid. A valid
+        access token is properly signed and not expired.
+        <p>
+        This API may be used in an SSO configuration to issue new tokens for another application after the user has
+        obtained a valid token from authentication.
+
+        Attributes:
+            application_id: The Application Id for which you are requesting a new access token be issued.
+            encoded_jwt: The encoded JWT (access token).
+            refresh_token: (Optional) An existing refresh token used to request a refresh token in addition to a JWT in the response.
+                    <p>The target application represented by the applicationId request parameter must have refresh
+                    tokens enabled in order to receive a refresh token in the response.</p>
+        """
+        return self.start_anonymous().uri('/api/jwt/issue') \
+            .authorization("Bearer " + encoded_jwt) \
+            .url_parameter('applicationId', self.convert_true_false(application_id)) \
+            .url_parameter('refreshToken', self.convert_true_false(refresh_token)) \
+            .get() \
+            .go()
+
+    def login(self, request):
+        """
+        Authenticates a user to FusionAuth.
+
+        This API optionally requires an API key. See <code>Application.loginConfiguration.requireAuthentication</code>.
+
+        Attributes:
+            request: The login request that contains the user credentials used to log them in.
+        """
+        return self.start().uri('/api/login') \
+            .body_handler(JSONBodyHandler(request)) \
+            .post() \
+            .go()
+
+    def login_ping(self, user_id, application_id, caller_ip_address=None):
+        """
+        Sends a ping to FusionAuth indicating that the user was automatically logged into an application. When using
+        FusionAuth's SSO or your own, you should call this if the user is already logged in centrally, but accesses an
+        application where they no longer have a session. This helps correctly track login counts, times and helps with
+        reporting.
+
+        Attributes:
+            user_id: The Id of the user that was logged in.
+            application_id: The Id of the application that they logged into.
+            caller_ip_address: (Optional) The IP address of the end-user that is logging in. If a null value is provided
+                    the IP address will be that of the client or last proxy that sent the request.
+        """
+        return self.start().uri('/api/login') \
+            .url_segment(user_id) \
+            .url_segment(application_id) \
+            .url_parameter('ipAddress', self.convert_true_false(caller_ip_address)) \
+            .put() \
+            .go()
+
+    def login_ping_with_request(self, request):
+        """
+        Sends a ping to FusionAuth indicating that the user was automatically logged into an application. When using
+        FusionAuth's SSO or your own, you should call this if the user is already logged in centrally, but accesses an
+        application where they no longer have a session. This helps correctly track login counts, times and helps with
+        reporting.
+
+        Attributes:
+            request: The login request that contains the user credentials used to log them in.
+        """
+        return self.start().uri('/api/login') \
+            .body_handler(JSONBodyHandler(request)) \
+            .put() \
+            .go()
+
+    def logout(self, _global, refresh_token=None):
+        """
+        The Logout API is intended to be used to remove the refresh token and access token cookies if they exist on the
+        client and revoke the refresh token stored. This API does nothing if the request does not contain an access
+        token or refresh token cookies.
+
+        Attributes:
+            _global: When this value is set to true all the refresh tokens issued to the owner of the
+                    provided token will be revoked.
+            refresh_token: (Optional) The refresh_token as a request parameter instead of coming in via a cookie.
+                    If provided this takes precedence over the cookie.
+        """
+        return self.start_anonymous().uri('/api/logout') \
+            .url_parameter('global', self.convert_true_false(_global)) \
+            .url_parameter('refreshToken', self.convert_true_false(refresh_token)) \
+            .post() \
+            .go()
+
+    def logout_with_request(self, request):
+        """
+        The Logout API is intended to be used to remove the refresh token and access token cookies if they exist on the
+        client and revoke the refresh token stored. This API takes the refresh token in the JSON body.
+
+        Attributes:
+            request: The request object that contains all the information used to logout the user.
+        """
+        return self.start_anonymous().uri('/api/logout') \
+            .body_handler(JSONBodyHandler(request)) \
+            .post() \
+            .go()
+
+    def lookup_identity_provider(self, domain):
+        """
+        Retrieves any global identity providers for the given domain. A 200 response code indicates the domain is managed
+        by a registered identity provider. A 404 indicates the domain is not managed.
+
+        Attributes:
+            domain: The domain or email address to lookup.
+        """
+        return self.start().uri('/api/identity-provider/lookup') \
+            .url_parameter('domain', self.convert_true_false(domain)) \
+            .get() \
+            .go()
+
+    def lookup_identity_provider_by_tenant_id(self, domain, tenant_id):
+        """
+        Retrieves the identity provider for the given domain and tenantId. A 200 response code indicates the domain is managed
+        by a registered identity provider. A 404 indicates the domain is not managed.
+
+        Attributes:
+            domain: The domain or email address to lookup.
+            tenant_id: If provided, the API searches for an identity provider scoped to the corresponding tenant that manages the requested domain.
+                    If no result is found, the API then searches for global identity providers.
+        """
+        return self.start().uri('/api/identity-provider/lookup') \
+            .url_parameter('domain', self.convert_true_false(domain)) \
+            .url_parameter('tenantId', self.convert_true_false(tenant_id)) \
+            .get() \
+            .go()
+
+    def modify_action(self, action_id, request):
+        """
+        Modifies a temporal user action by changing the expiration of the action and optionally adding a comment to the
+        action.
+
+        Attributes:
+            action_id: The Id of the action to modify. This is technically the user action log Id.
+            request: The request that contains all the information about the modification.
+        """
+        return self.start().uri('/api/user/action') \
+            .url_segment(action_id) \
+            .body_handler(JSONBodyHandler(request)) \
+            .put() \
+            .go()
+
+    def passwordless_login(self, request):
+        """
+        Complete a login request using a passwordless code
+
+        Attributes:
+            request: The passwordless login request that contains all the information used to complete login.
+        """
+        return self.start_anonymous().uri('/api/passwordless/login') \
+            .body_handler(JSONBodyHandler(request)) \
+            .post() \
+            .go()
+
+    def patch_api_key(self, key_id, request):
+        """
+        Updates an API key with the given Id.
+
+        Attributes:
+            key_id: The Id of the API key. If not provided a secure random api key will be generated.
+            request: The request object that contains all the information needed to create the API key.
+        """
+        return self.start().uri('/api/api-key') \
+            .url_segment(key_id) \
+            .body_handler(JSONBodyHandler(request)) \
+            .patch() \
+            .go()
+
+    def patch_application(self, application_id, request):
+        """
+        Updates, via PATCH, the application with the given Id.
+
+        Attributes:
+            application_id: The Id of the application to update.
+            request: The request that contains just the new application information.
+        """
+        return self.start().uri('/api/application') \
+            .url_segment(application_id) \
+            .body_handler(JSONBodyHandler(request)) \
+            .patch() \
+            .go()
+
+    def patch_application_role(self, application_id, role_id, request):
+        """
+        Updates, via PATCH, the application role with the given Id for the application.
+
+        Attributes:
+            application_id: The Id of the application that the role belongs to.
+            role_id: The Id of the role to update.
+            request: The request that contains just the new role information.
+        """
+        return self.start().uri('/api/application') \
+            .url_segment(application_id) \
+            .url_segment("role") \
+            .url_segment(role_id) \
+            .body_handler(JSONBodyHandler(request)) \
+            .patch() \
+            .go()
+
+    def patch_connector(self, connector_id, request):
+        """
+        Updates, via PATCH, the connector with the given Id.
+
+        Attributes:
+            connector_id: The Id of the connector to update.
+            request: The request that contains just the new connector information.
+        """
+        return self.start().uri('/api/connector') \
+            .url_segment(connector_id) \
+            .body_handler(JSONBodyHandler(request)) \
+            .patch() \
+            .go()
+
+    def patch_consent(self, consent_id, request):
+        """
+        Updates, via PATCH, the consent with the given Id.
+
+        Attributes:
+            consent_id: The Id of the consent to update.
+            request: The request that contains just the new consent information.
+        """
+        return self.start().uri('/api/consent') \
+            .url_segment(consent_id) \
+            .body_handler(JSONBodyHandler(request)) \
+            .patch() \
+            .go()
+
+    def patch_email_template(self, email_template_id, request):
+        """
+        Updates, via PATCH, the email template with the given Id.
+
+        Attributes:
+            email_template_id: The Id of the email template to update.
+            request: The request that contains just the new email template information.
+        """
+        return self.start().uri('/api/email/template') \
+            .url_segment(email_template_id) \
+            .body_handler(JSONBodyHandler(request)) \
+            .patch() \
+            .go()
+
+    def patch_entity(self, entity_id, request):
+        """
+        Updates, via PATCH, the Entity with the given Id.
+
+        Attributes:
+            entity_id: The Id of the Entity Type to update.
+            request: The request that contains just the new Entity information.
+        """
+        return self.start().uri('/api/entity') \
+            .url_segment(entity_id) \
+            .body_handler(JSONBodyHandler(request)) \
+            .patch() \
+            .go()
+
+    def patch_entity_type(self, entity_type_id, request):
+        """
+        Updates, via PATCH, the Entity Type with the given Id.
+
+        Attributes:
+            entity_type_id: The Id of the Entity Type to update.
+            request: The request that contains just the new Entity Type information.
+        """
+        return self.start().uri('/api/entity/type') \
+            .url_segment(entity_type_id) \
+            .body_handler(JSONBodyHandler(request)) \
+            .patch() \
+            .go()
+
+    def patch_entity_type_permission(self, entity_type_id, permission_id, request):
+        """
+        Patches the permission with the given Id for the entity type.
+
+        Attributes:
+            entity_type_id: The Id of the entityType that the permission belongs to.
+            permission_id: The Id of the permission to patch.
+            request: The request that contains the new permission information.
+        """
+        return self.start().uri('/api/entity/type') \
+            .url_segment(entity_type_id) \
+            .url_segment("permission") \
+            .url_segment(permission_id) \
+            .body_handler(JSONBodyHandler(request)) \
+            .patch() \
+            .go()
+
+    def patch_form(self, form_id, request):
+        """
+        Patches the form with the given Id.
+
+        Attributes:
+            form_id: The Id of the form to patch.
+            request: The request object that contains the new form information.
+        """
+        return self.start().uri('/api/form') \
+            .url_segment(form_id) \
+            .body_handler(JSONBodyHandler(request)) \
+            .patch() \
+            .go()
+
+    def patch_form_field(self, field_id, request):
+        """
+        Patches the form field with the given Id.
+
+        Attributes:
+            field_id: The Id of the form field to patch.
+            request: The request object that contains the new form field information.
+        """
+        return self.start().uri('/api/form/field') \
+            .url_segment(field_id) \
+            .body_handler(JSONBodyHandler(request)) \
+            .patch() \
+            .go()
+
+    def patch_group(self, group_id, request):
+        """
+        Updates, via PATCH, the group with the given Id.
+
+        Attributes:
+            group_id: The Id of the group to update.
+            request: The request that contains just the new group information.
+        """
+        return self.start().uri('/api/group') \
+            .url_segment(group_id) \
+            .body_handler(JSONBodyHandler(request)) \
+            .patch() \
+            .go()
+
+    def patch_ip_access_control_list(self, access_control_list_id, request):
+        """
+        Update the IP Access Control List with the given Id.
+
+        Attributes:
+            access_control_list_id: The Id of the IP Access Control List to patch.
+            request: The request that contains the new IP Access Control List information.
+        """
+        return self.start().uri('/api/ip-acl') \
+            .url_segment(access_control_list_id) \
+            .body_handler(JSONBodyHandler(request)) \
+            .patch() \
+            .go()
+
+    def patch_identity_provider(self, identity_provider_id, request):
+        """
+        Updates, via PATCH, the identity provider with the given Id.
+
+        Attributes:
+            identity_provider_id: The Id of the identity provider to update.
+            request: The request object that contains just the updated identity provider information.
+        """
+        return self.start().uri('/api/identity-provider') \
+            .url_segment(identity_provider_id) \
+            .body_handler(JSONBodyHandler(request)) \
+            .patch() \
+            .go()
+
+    def patch_integrations(self, request):
+        """
+        Updates, via PATCH, the available integrations.
+
+        Attributes:
+            request: The request that contains just the new integration information.
+        """
+        return self.start().uri('/api/integration') \
+            .body_handler(JSONBodyHandler(request)) \
+            .patch() \
+            .go()
+
+    def patch_lambda(self, lambda_id, request):
+        """
+        Updates, via PATCH, the lambda with the given Id.
+
+        Attributes:
+            lambda_id: The Id of the lambda to update.
+            request: The request that contains just the new lambda information.
+        """
+        return self.start().uri('/api/lambda') \
+            .url_segment(lambda_id) \
+            .body_handler(JSONBodyHandler(request)) \
+            .patch() \
+            .go()
+
+    def patch_message_template(self, message_template_id, request):
+        """
+        Updates, via PATCH, the message template with the given Id.
+
+        Attributes:
+            message_template_id: The Id of the message template to update.
+            request: The request that contains just the new message template information.
+        """
+        return self.start().uri('/api/message/template') \
+            .url_segment(message_template_id) \
+            .body_handler(JSONBodyHandler(request)) \
+            .patch() \
+            .go()
+
+    def patch_messenger(self, messenger_id, request):
+        """
+        Updates, via PATCH, the messenger with the given Id.
+
+        Attributes:
+            messenger_id: The Id of the messenger to update.
+            request: The request that contains just the new messenger information.
+        """
+        return self.start().uri('/api/messenger') \
+            .url_segment(messenger_id) \
+            .body_handler(JSONBodyHandler(request)) \
+            .patch() \
+            .go()
+
+    def patch_o_auth_scope(self, application_id, scope_id, request):
+        """
+        Updates, via PATCH, the custom OAuth scope with the given Id for the application.
+
+        Attributes:
+            application_id: The Id of the application that the OAuth scope belongs to.
+            scope_id: The Id of the OAuth scope to update.
+            request: The request that contains just the new OAuth scope information.
+        """
+        return self.start().uri('/api/application') \
+            .url_segment(application_id) \
+            .url_segment("scope") \
+            .url_segment(scope_id) \
+            .body_handler(JSONBodyHandler(request)) \
+            .patch() \
+            .go()
+
+    def patch_registration(self, user_id, request):
+        """
+        Updates, via PATCH, the registration for the user with the given Id and the application defined in the request.
+
+        Attributes:
+            user_id: The Id of the user whose registration is going to be updated.
+            request: The request that contains just the new registration information.
+        """
+        return self.start().uri('/api/user/registration') \
+            .url_segment(user_id) \
+            .body_handler(JSONBodyHandler(request)) \
+            .patch() \
+            .go()
+
+    def patch_system_configuration(self, request):
+        """
+        Updates, via PATCH, the system configuration.
+
+        Attributes:
+            request: The request that contains just the new system configuration information.
+        """
+        return self.start().uri('/api/system-configuration') \
+            .body_handler(JSONBodyHandler(request)) \
+            .patch() \
+            .go()
+
+    def patch_tenant(self, tenant_id, request):
+        """
+        Updates, via PATCH, the tenant with the given Id.
+
+        Attributes:
+            tenant_id: The Id of the tenant to update.
+            request: The request that contains just the new tenant information.
+        """
+        return self.start().uri('/api/tenant') \
+            .url_segment(tenant_id) \
+            .body_handler(JSONBodyHandler(request)) \
+            .patch() \
+            .go()
+
+    def patch_tenant_manager_configuration(self, request):
+        """
+        Updates, via PATCH, the Tenant Manager configuration.
+
+        Attributes:
+            request: The request that contains just the new Tenant Manager configuration information.
+        """
+        return self.start().uri('/api/tenant-manager') \
+            .body_handler(JSONBodyHandler(request)) \
+            .patch() \
+            .go()
+
+    def patch_tenant_manager_identity_provider_type_configuration(self, _type, request):
+        """
+        Patches the tenant manager identity provider type configuration for the given identity provider type.
+
+        Attributes:
+            _type: The type of the identity provider.
+            request: The request object that contains the new tenant manager identity provider type configuration information.
+        """
+        return self.start().uri('/api/tenant-manager/identity-provider') \
+            .url_segment(_type) \
+            .body_handler(JSONBodyHandler(request)) \
+            .patch() \
+            .go()
+
+    def patch_theme(self, theme_id, request):
+        """
+        Updates, via PATCH, the theme with the given Id.
+
+        Attributes:
+            theme_id: The Id of the theme to update.
+            request: The request that contains just the new theme information.
+        """
+        return self.start().uri('/api/theme') \
+            .url_segment(theme_id) \
+            .body_handler(JSONBodyHandler(request)) \
+            .patch() \
+            .go()
+
+    def patch_user(self, user_id, request):
+        """
+        Updates, via PATCH, the user with the given Id.
+
+        Attributes:
+            user_id: The Id of the user to update.
+            request: The request that contains just the new user information.
+        """
+        return self.start().uri('/api/user') \
+            .url_segment(user_id) \
+            .body_handler(JSONBodyHandler(request)) \
+            .patch() \
+            .go()
+
+    def patch_user_action(self, user_action_id, request):
+        """
+        Updates, via PATCH, the user action with the given Id.
+
+        Attributes:
+            user_action_id: The Id of the user action to update.
+            request: The request that contains just the new user action information.
+        """
+        return self.start().uri('/api/user-action') \
+            .url_segment(user_action_id) \
+            .body_handler(JSONBodyHandler(request)) \
+            .patch() \
+            .go()
+
+    def patch_user_action_reason(self, user_action_reason_id, request):
+        """
+        Updates, via PATCH, the user action reason with the given Id.
+
+        Attributes:
+            user_action_reason_id: The Id of the user action reason to update.
+            request: The request that contains just the new user action reason information.
+        """
+        return self.start().uri('/api/user-action-reason') \
+            .url_segment(user_action_reason_id) \
+            .body_handler(JSONBodyHandler(request)) \
+            .patch() \
+            .go()
+
+    def patch_user_consent(self, user_consent_id, request):
+        """
+        Updates, via PATCH, a single User consent by Id.
+
+        Attributes:
+            user_consent_id: The User Consent Id
+            request: The request that contains just the new user consent information.
+        """
+        return self.start().uri('/api/user/consent') \
+            .url_segment(user_consent_id) \
+            .body_handler(JSONBodyHandler(request)) \
+            .patch() \
+            .go()
+
+    def patch_webhook(self, webhook_id, request):
+        """
+        Patches the webhook with the given Id.
+
+        Attributes:
+            webhook_id: The Id of the webhook to update.
+            request: The request that contains the new webhook information.
+        """
+        return self.start().uri('/api/webhook') \
+            .url_segment(webhook_id) \
+            .body_handler(JSONBodyHandler(request)) \
+            .patch() \
+            .go()
+
+    def reactivate_application(self, application_id):
+        """
+        Reactivates the application with the given Id.
+
+        Attributes:
+            application_id: The Id of the application to reactivate.
+        """
+        return self.start().uri('/api/application') \
+            .url_segment(application_id) \
+            .url_parameter('reactivate', self.convert_true_false("true")) \
+            .put() \
+            .go()
+
+    def reactivate_user(self, user_id):
+        """
+        Reactivates the user with the given Id.
+
+        Attributes:
+            user_id: The Id of the user to reactivate.
+        """
+        return self.start().uri('/api/user') \
+            .url_segment(user_id) \
+            .url_parameter('reactivate', self.convert_true_false("true")) \
+            .put() \
+            .go()
+
+    def reactivate_user_action(self, user_action_id):
+        """
+        Reactivates the user action with the given Id.
+
+        Attributes:
+            user_action_id: The Id of the user action to reactivate.
+        """
+        return self.start().uri('/api/user-action') \
+            .url_segment(user_action_id) \
+            .url_parameter('reactivate', self.convert_true_false("true")) \
+            .put() \
+            .go()
+
+    def reconcile_jwt(self, request):
+        """
+        Reconcile a User to FusionAuth using JWT issued from another Identity Provider.
+
+        Attributes:
+            request: The reconcile request that contains the data to reconcile the User.
+        """
+        return self.start_anonymous().uri('/api/jwt/reconcile') \
+            .body_handler(JSONBodyHandler(request)) \
+            .post() \
+            .go()
+
+    def refresh_entity_search_index(self):
+        """
+        Request a refresh of the Entity search index. This API is not generally necessary and the search index will become consistent in a
+        reasonable amount of time. There may be scenarios where you may wish to manually request an index refresh. One example may be
+        if you are using the Search API or Delete Tenant API immediately following a Entity Create etc, you may wish to request a refresh to
+         ensure the index immediately current before making a query request to the search index.
+
+        Attributes:
+        """
+        return self.start().uri('/api/entity/search') \
+            .put() \
+            .go()
+
+    def refresh_user_search_index(self):
+        """
+        Request a refresh of the User search index. This API is not generally necessary and the search index will become consistent in a
+        reasonable amount of time. There may be scenarios where you may wish to manually request an index refresh. One example may be
+        if you are using the Search API or Delete Tenant API immediately following a User Create etc, you may wish to request a refresh to
+         ensure the index immediately current before making a query request to the search index.
+
+        Attributes:
+        """
+        return self.start().uri('/api/user/search') \
+            .put() \
+            .go()
+
+    def regenerate_reactor_keys(self):
+        """
+        Regenerates any keys that are used by the FusionAuth Reactor.
+
+        Attributes:
+        """
+        return self.start().uri('/api/reactor') \
+            .put() \
+            .go()
+
+    def register(self, request, user_id=None):
+        """
+        Registers a user for an application. If you provide the User and the UserRegistration object on this request, it
+        will create the user as well as register them for the application. This is called a Full Registration. However, if
+        you only provide the UserRegistration object, then the user must already exist and they will be registered for the
+        application. The user Id can also be provided and it will either be used to look up an existing user or it will be
+        used for the newly created User.
+
+        Attributes:
+            user_id: (Optional) The Id of the user being registered for the application and optionally created.
+            request: The request that optionally contains the User and must contain the UserRegistration.
+        """
+        return self.start().uri('/api/user/registration') \
+            .url_segment(user_id) \
+            .body_handler(JSONBodyHandler(request)) \
+            .post() \
+            .go()
+
+    def reindex(self, request):
+        """
+        Requests Elasticsearch to delete and rebuild the index for FusionAuth users or entities. Be very careful when running this request as it will
+        increase the CPU and I/O load on your database until the operation completes. Generally speaking you do not ever need to run this operation unless
+        instructed by FusionAuth support, or if you are migrating a database another system and you are not brining along the Elasticsearch index.
+
+        You have been warned.
+
+        Attributes:
+            request: The request that contains the index name.
+        """
+        return self.start().uri('/api/system/reindex') \
+            .body_handler(JSONBodyHandler(request)) \
+            .post() \
+            .go()
+
+    def remove_user_from_family(self, family_id, user_id):
+        """
+        Removes a user from the family with the given Id.
+
+        Attributes:
+            family_id: The Id of the family to remove the user from.
+            user_id: The Id of the user to remove from the family.
+        """
+        return self.start().uri('/api/user/family') \
+            .url_segment(family_id) \
+            .url_segment(user_id) \
+            .delete() \
+            .go()
+
+    def resend_email_verification(self, email):
+        """
+        Re-sends the verification email to the user.
+
+        Attributes:
+            email: The email address of the user that needs a new verification email.
+        """
+        return self.start().uri('/api/user/verify-email') \
+            .url_parameter('email', self.convert_true_false(email)) \
+            .put() \
+            .go()
+
+    def resend_email_verification_with_application_template(self, application_id, email):
+        """
+        Re-sends the verification email to the user. If the Application has configured a specific email template this will be used
+        instead of the tenant configuration.
+
+        Attributes:
+            application_id: The unique Application Id to used to resolve an application specific email template.
+            email: The email address of the user that needs a new verification email.
+        """
+        return self.start().uri('/api/user/verify-email') \
+            .url_parameter('applicationId', self.convert_true_false(application_id)) \
+            .url_parameter('email', self.convert_true_false(email)) \
+            .put() \
+            .go()
+
+    def resend_registration_verification(self, email, application_id):
+        """
+        Re-sends the application registration verification email to the user.
+
+        Attributes:
+            email: The email address of the user that needs a new verification email.
+            application_id: The Id of the application to be verified.
+        """
+        return self.start().uri('/api/user/verify-registration') \
+            .url_parameter('email', self.convert_true_false(email)) \
+            .url_parameter('applicationId', self.convert_true_false(application_id)) \
+            .put() \
+            .go()
+
+    def retrieve_api_key(self, key_id):
+        """
+        Retrieves an authentication API key for the given Id.
+
+        Attributes:
+            key_id: The Id of the API key to retrieve.
+        """
+        return self.start().uri('/api/api-key') \
+            .url_segment(key_id) \
+            .get() \
+            .go()
+
+    def retrieve_action(self, action_id):
+        """
+        Retrieves a single action log (the log of a user action that was taken on a user previously) for the given Id.
+
+        Attributes:
+            action_id: The Id of the action to retrieve.
+        """
+        return self.start().uri('/api/user/action') \
+            .url_segment(action_id) \
+            .get() \
+            .go()
+
+    def retrieve_actions(self, user_id):
+        """
+        Retrieves all the actions for the user with the given Id. This will return all time based actions that are active,
+        and inactive as well as non-time based actions.
+
+        Attributes:
+            user_id: The Id of the user to fetch the actions for.
+        """
+        return self.start().uri('/api/user/action') \
+            .url_parameter('userId', self.convert_true_false(user_id)) \
+            .get() \
+            .go()
+
+    def retrieve_actions_preventing_login(self, user_id):
+        """
+        Retrieves all the actions for the user with the given Id that are currently preventing the User from logging in.
+
+        Attributes:
+            user_id: The Id of the user to fetch the actions for.
+        """
+        return self.start().uri('/api/user/action') \
+            .url_parameter('userId', self.convert_true_false(user_id)) \
+            .url_parameter('preventingLogin', self.convert_true_false("true")) \
+            .get() \
+            .go()
+
+    def retrieve_active_actions(self, user_id):
+        """
+        Retrieves all the actions for the user with the given Id that are currently active.
+        An active action means one that is time based and has not been canceled, and has not ended.
+
+        Attributes:
+            user_id: The Id of the user to fetch the actions for.
+        """
+        return self.start().uri('/api/user/action') \
+            .url_parameter('userId', self.convert_true_false(user_id)) \
+            .url_parameter('active', self.convert_true_false("true")) \
+            .get() \
+            .go()
+
+    def retrieve_application(self, application_id=None):
+        """
+        Retrieves the application for the given Id or all the applications if the Id is null.
+
+        Attributes:
+            application_id: (Optional) The application Id.
+        """
+        return self.start().uri('/api/application') \
+            .url_segment(application_id) \
+            .get() \
+            .go()
+
+    def retrieve_applications(self):
+        """
+        Retrieves all the applications.
+
+        Attributes:
+        """
+        return self.start().uri('/api/application') \
+            .get() \
+            .go()
+
+    def retrieve_audit_log(self, audit_log_id):
+        """
+        Retrieves a single audit log for the given Id.
+
+        Attributes:
+            audit_log_id: The Id of the audit log to retrieve.
+        """
+        return self.start().uri('/api/system/audit-log') \
+            .url_segment(audit_log_id) \
+            .get() \
+            .go()
+
+    def retrieve_connector(self, connector_id):
+        """
+        Retrieves the connector with the given Id.
+
+        Attributes:
+            connector_id: The Id of the connector.
+        """
+        return self.start().uri('/api/connector') \
+            .url_segment(connector_id) \
+            .get() \
+            .go()
+
+    def retrieve_connectors(self):
+        """
+        Retrieves all the connectors.
+
+        Attributes:
+        """
+        return self.start().uri('/api/connector') \
+            .get() \
+            .go()
+
+    def retrieve_consent(self, consent_id):
+        """
+        Retrieves the Consent for the given Id.
+
+        Attributes:
+            consent_id: The Id of the consent.
+        """
+        return self.start().uri('/api/consent') \
+            .url_segment(consent_id) \
+            .get() \
+            .go()
+
+    def retrieve_consents(self):
+        """
+        Retrieves all the consent.
+
+        Attributes:
+        """
+        return self.start().uri('/api/consent') \
+            .get() \
+            .go()
+
+    def retrieve_daily_active_report(self, start, end, application_id=None):
+        """
+        Retrieves the daily active user report between the two instants. If you specify an application Id, it will only
+        return the daily active counts for that application.
+
+        Attributes:
+            application_id: (Optional) The application Id.
+            start: The start instant as UTC milliseconds since Epoch.
+            end: The end instant as UTC milliseconds since Epoch.
+        """
+        return self.start().uri('/api/report/daily-active-user') \
+            .url_parameter('applicationId', self.convert_true_false(application_id)) \
+            .url_parameter('start', self.convert_true_false(start)) \
+            .url_parameter('end', self.convert_true_false(end)) \
+            .get() \
+            .go()
+
+    def retrieve_email_template(self, email_template_id=None):
+        """
+        Retrieves the email template for the given Id. If you don't specify the Id, this will return all the email templates.
+
+        Attributes:
+            email_template_id: (Optional) The Id of the email template.
+        """
+        return self.start().uri('/api/email/template') \
+            .url_segment(email_template_id) \
+            .get() \
+            .go()
+
+    def retrieve_email_template_preview(self, request):
+        """
+        Creates a preview of the email template provided in the request. This allows you to preview an email template that
+        hasn't been saved to the database yet. The entire email template does not need to be provided on the request. This
+        will create the preview based on whatever is given.
+
+        Attributes:
+            request: The request that contains the email template and optionally a locale to render it in.
+        """
+        return self.start().uri('/api/email/template/preview') \
+            .body_handler(JSONBodyHandler(request)) \
+            .post() \
+            .go()
+
+    def retrieve_email_templates(self):
+        """
+        Retrieves all the email templates.
+
+        Attributes:
+        """
+        return self.start().uri('/api/email/template') \
+            .get() \
+            .go()
+
+    def retrieve_entity(self, entity_id):
+        """
+        Retrieves the Entity for the given Id.
+
+        Attributes:
+            entity_id: The Id of the Entity.
+        """
+        return self.start().uri('/api/entity') \
+            .url_segment(entity_id) \
+            .get() \
+            .go()
+
+    def retrieve_entity_grant(self, entity_id, recipient_entity_id=None, user_id=None):
+        """
+        Retrieves an Entity Grant for the given Entity and User/Entity.
+
+        Attributes:
+            entity_id: The Id of the Entity.
+            recipient_entity_id: (Optional) The Id of the Entity that the Entity Grant is for.
+            user_id: (Optional) The Id of the User that the Entity Grant is for.
+        """
+        return self.start().uri('/api/entity') \
+            .url_segment(entity_id) \
+            .url_segment("grant") \
+            .url_parameter('recipientEntityId', self.convert_true_false(recipient_entity_id)) \
+            .url_parameter('userId', self.convert_true_false(user_id)) \
+            .get() \
+            .go()
+
+    def retrieve_entity_type(self, entity_type_id):
+        """
+        Retrieves the Entity Type for the given Id.
+
+        Attributes:
+            entity_type_id: The Id of the Entity Type.
+        """
+        return self.start().uri('/api/entity/type') \
+            .url_segment(entity_type_id) \
+            .get() \
+            .go()
+
+    def retrieve_entity_types(self):
+        """
+        Retrieves all the Entity Types.
+
+        Attributes:
+        """
+        return self.start().uri('/api/entity/type') \
+            .get() \
+            .go()
+
+    def retrieve_event_log(self, event_log_id):
+        """
+        Retrieves a single event log for the given Id.
+
+        Attributes:
+            event_log_id: The Id of the event log to retrieve.
+        """
+        return self.start().uri('/api/system/event-log') \
+            .url_segment(event_log_id) \
+            .get() \
+            .go()
+
+    def retrieve_families(self, user_id):
+        """
+        Retrieves all the families that a user belongs to.
+
+        Attributes:
+            user_id: The User's id
+        """
+        return self.start().uri('/api/user/family') \
+            .url_parameter('userId', self.convert_true_false(user_id)) \
+            .get() \
+            .go()
+
+    def retrieve_family_members_by_family_id(self, family_id):
+        """
+        Retrieves all the members of a family by the unique Family Id.
+
+        Attributes:
+            family_id: The unique Id of the Family.
+        """
+        return self.start().uri('/api/user/family') \
+            .url_segment(family_id) \
+            .get() \
+            .go()
+
+    def retrieve_form(self, form_id):
+        """
+        Retrieves the form with the given Id.
+
+        Attributes:
+            form_id: The Id of the form.
+        """
+        return self.start().uri('/api/form') \
+            .url_segment(form_id) \
+            .get() \
+            .go()
+
+    def retrieve_form_field(self, field_id):
+        """
+        Retrieves the form field with the given Id.
+
+        Attributes:
+            field_id: The Id of the form field.
+        """
+        return self.start().uri('/api/form/field') \
+            .url_segment(field_id) \
+            .get() \
+            .go()
+
+    def retrieve_form_fields(self):
+        """
+        Retrieves all the forms fields
+
+        Attributes:
+        """
+        return self.start().uri('/api/form/field') \
+            .get() \
+            .go()
+
+    def retrieve_forms(self):
+        """
+        Retrieves all the forms.
+
+        Attributes:
+        """
+        return self.start().uri('/api/form') \
+            .get() \
+            .go()
+
+    def retrieve_group(self, group_id):
+        """
+        Retrieves the group for the given Id.
+
+        Attributes:
+            group_id: The Id of the group.
+        """
+        return self.start().uri('/api/group') \
+            .url_segment(group_id) \
+            .get() \
+            .go()
+
+    def retrieve_groups(self):
+        """
+        Retrieves all the groups.
+
+        Attributes:
+        """
+        return self.start().uri('/api/group') \
+            .get() \
+            .go()
+
+    def retrieve_ip_access_control_list(self, ip_access_control_list_id):
+        """
+        Retrieves the IP Access Control List with the given Id.
+
+        Attributes:
+            ip_access_control_list_id: The Id of the IP Access Control List.
+        """
+        return self.start().uri('/api/ip-acl') \
+            .url_segment(ip_access_control_list_id) \
+            .get() \
+            .go()
+
+    def retrieve_identity_provider(self, identity_provider_id):
+        """
+        Retrieves the identity provider for the given Id or all the identity providers if the Id is null.
+
+        Attributes:
+            identity_provider_id: The identity provider Id.
+        """
+        return self.start().uri('/api/identity-provider') \
+            .url_segment(identity_provider_id) \
+            .get() \
+            .go()
+
+    def retrieve_identity_provider_by_type(self, _type):
+        """
+        Retrieves one or more identity provider for the given type. For types such as Google, Facebook, Twitter and LinkedIn, only a single
+        identity provider can exist. For types such as OpenID Connect and SAMLv2 more than one identity provider can be configured so this request
+        may return multiple identity providers.
+
+        Attributes:
+            _type: The type of the identity provider.
+        """
+        return self.start().uri('/api/identity-provider') \
+            .url_parameter('type', self.convert_true_false(_type)) \
+            .get() \
+            .go()
+
+    def retrieve_identity_provider_connection_test_results(self, connection_test_id):
+        """
+        Retrieves the results for an identity provider connection test.
+
+        Attributes:
+            connection_test_id: The connection test id to retrieve results for.
+        """
+        return self.start().uri('/api/identity-provider/test') \
+            .url_parameter('connectionTestId', self.convert_true_false(connection_test_id)) \
+            .get() \
+            .go()
+
+    def retrieve_identity_providers(self):
+        """
+        Retrieves all the identity providers.
+
+        Attributes:
+        """
+        return self.start().uri('/api/identity-provider') \
+            .get() \
+            .go()
+
+    def retrieve_inactive_actions(self, user_id):
+        """
+        Retrieves all the actions for the user with the given Id that are currently inactive.
+        An inactive action means one that is time based and has been canceled or has expired, or is not time based.
+
+        Attributes:
+            user_id: The Id of the user to fetch the actions for.
+        """
+        return self.start().uri('/api/user/action') \
+            .url_parameter('userId', self.convert_true_false(user_id)) \
+            .url_parameter('active', self.convert_true_false("false")) \
+            .get() \
+            .go()
+
+    def retrieve_inactive_applications(self):
+        """
+        Retrieves all the applications that are currently inactive.
+
+        Attributes:
+        """
+        return self.start().uri('/api/application') \
+            .url_parameter('inactive', self.convert_true_false("true")) \
+            .get() \
+            .go()
+
+    def retrieve_inactive_user_actions(self):
+        """
+        Retrieves all the user actions that are currently inactive.
+
+        Attributes:
+        """
+        return self.start().uri('/api/user-action') \
+            .url_parameter('inactive', self.convert_true_false("true")) \
+            .get() \
+            .go()
+
+    def retrieve_integration(self):
+        """
+        Retrieves the available integrations.
+
+        Attributes:
+        """
+        return self.start().uri('/api/integration') \
+            .get() \
+            .go()
+
+    def retrieve_jwt_public_key(self, key_id):
+        """
+        Retrieves the Public Key configured for verifying JSON Web Tokens (JWT) by the key Id (kid).
+
+        Attributes:
+            key_id: The Id of the public key (kid).
+        """
+        return self.start_anonymous().uri('/api/jwt/public-key') \
+            .url_parameter('kid', self.convert_true_false(key_id)) \
+            .get() \
+            .go()
+
+    def retrieve_jwt_public_key_by_application_id(self, application_id):
+        """
+        Retrieves the Public Key configured for verifying the JSON Web Tokens (JWT) issued by the Login API by the Application Id.
+
+        Attributes:
+            application_id: The Id of the Application for which this key is used.
+        """
+        return self.start_anonymous().uri('/api/jwt/public-key') \
+            .url_parameter('applicationId', self.convert_true_false(application_id)) \
+            .get() \
+            .go()
+
+    def retrieve_jwt_public_keys(self):
+        """
+        Retrieves all Public Keys configured for verifying JSON Web Tokens (JWT).
+
+        Attributes:
+        """
+        return self.start_anonymous().uri('/api/jwt/public-key') \
+            .get() \
+            .go()
+
+    def retrieve_json_web_key_set(self):
+        """
+        Returns public keys used by FusionAuth to cryptographically verify JWTs using the JSON Web Key format.
+
+        Attributes:
+        """
+        return self.start_anonymous().uri('/.well-known/jwks.json') \
+            .get() \
+            .go()
+
+    def retrieve_key(self, key_id):
+        """
+        Retrieves the key for the given Id.
+
+        Attributes:
+            key_id: The Id of the key.
+        """
+        return self.start().uri('/api/key') \
+            .url_segment(key_id) \
+            .get() \
+            .go()
+
+    def retrieve_keys(self):
+        """
+        Retrieves all the keys.
+
+        Attributes:
+        """
+        return self.start().uri('/api/key') \
+            .get() \
+            .go()
+
+    def retrieve_lambda(self, lambda_id):
+        """
+        Retrieves the lambda for the given Id.
+
+        Attributes:
+            lambda_id: The Id of the lambda.
+        """
+        return self.start().uri('/api/lambda') \
+            .url_segment(lambda_id) \
+            .get() \
+            .go()
+
+    def retrieve_lambdas(self):
+        """
+        Retrieves all the lambdas.
+
+        Attributes:
+        """
+        return self.start().uri('/api/lambda') \
+            .get() \
+            .go()
+
+    def retrieve_lambdas_by_type(self, _type):
+        """
+        Retrieves all the lambdas for the provided type.
+
+        Attributes:
+            _type: The type of the lambda to return.
+        """
+        return self.start().uri('/api/lambda') \
+            .url_parameter('type', self.convert_true_false(_type)) \
+            .get() \
+            .go()
+
+    def retrieve_login_report(self, start, end, application_id=None):
+        """
+        Retrieves the login report between the two instants. If you specify an application Id, it will only return the
+        login counts for that application.
+
+        Attributes:
+            application_id: (Optional) The application Id.
+            start: The start instant as UTC milliseconds since Epoch.
+            end: The end instant as UTC milliseconds since Epoch.
+        """
+        return self.start().uri('/api/report/login') \
+            .url_parameter('applicationId', self.convert_true_false(application_id)) \
+            .url_parameter('start', self.convert_true_false(start)) \
+            .url_parameter('end', self.convert_true_false(end)) \
+            .get() \
+            .go()
+
+    def retrieve_message_template(self, message_template_id=None):
+        """
+        Retrieves the message template for the given Id. If you don't specify the Id, this will return all the message templates.
+
+        Attributes:
+            message_template_id: (Optional) The Id of the message template.
+        """
+        return self.start().uri('/api/message/template') \
+            .url_segment(message_template_id) \
+            .get() \
+            .go()
+
+    def retrieve_message_template_preview(self, request):
+        """
+        Creates a preview of the message template provided in the request, normalized to a given locale.
+
+        Attributes:
+            request: The request that contains the email template and optionally a locale to render it in.
+        """
+        return self.start().uri('/api/message/template/preview') \
+            .body_handler(JSONBodyHandler(request)) \
+            .post() \
+            .go()
+
+    def retrieve_message_templates(self):
+        """
+        Retrieves all the message templates.
+
+        Attributes:
+        """
+        return self.start().uri('/api/message/template') \
+            .get() \
+            .go()
+
+    def retrieve_messenger(self, messenger_id):
+        """
+        Retrieves the messenger with the given Id.
+
+        Attributes:
+            messenger_id: The Id of the messenger.
+        """
+        return self.start().uri('/api/messenger') \
+            .url_segment(messenger_id) \
+            .get() \
+            .go()
+
+    def retrieve_messengers(self):
+        """
+        Retrieves all the messengers.
+
+        Attributes:
+        """
+        return self.start().uri('/api/messenger') \
+            .get() \
+            .go()
+
+    def retrieve_monthly_active_report(self, start, end, application_id=None):
+        """
+        Retrieves the monthly active user report between the two instants. If you specify an application Id, it will only
+        return the monthly active counts for that application.
+
+        Attributes:
+            application_id: (Optional) The application Id.
+            start: The start instant as UTC milliseconds since Epoch.
+            end: The end instant as UTC milliseconds since Epoch.
+        """
+        return self.start().uri('/api/report/monthly-active-user') \
+            .url_parameter('applicationId', self.convert_true_false(application_id)) \
+            .url_parameter('start', self.convert_true_false(start)) \
+            .url_parameter('end', self.convert_true_false(end)) \
+            .get() \
+            .go()
+
+    def retrieve_o_auth_scope(self, application_id, scope_id):
+        """
+        Retrieves a custom OAuth scope.
+
+        Attributes:
+            application_id: The Id of the application that the OAuth scope belongs to.
+            scope_id: The Id of the OAuth scope to retrieve.
+        """
+        return self.start().uri('/api/application') \
+            .url_segment(application_id) \
+            .url_segment("scope") \
+            .url_segment(scope_id) \
+            .get() \
+            .go()
+
+    def retrieve_oauth_configuration(self, application_id):
+        """
+        Retrieves the Oauth2 configuration for the application for the given Application Id.
+
+        Attributes:
+            application_id: The Id of the Application to retrieve OAuth configuration.
+        """
+        return self.start().uri('/api/application') \
+            .url_segment(application_id) \
+            .url_segment("oauth-configuration") \
+            .get() \
+            .go()
+
+    def retrieve_open_id_configuration(self):
+        """
+        Returns the well known OpenID Configuration JSON document
+
+        Attributes:
+        """
+        return self.start_anonymous().uri('/.well-known/openid-configuration') \
+            .get() \
+            .go()
+
+    def retrieve_password_validation_rules(self):
+        """
+        Retrieves the password validation rules for a specific tenant. This method requires a tenantId to be provided
+        through the use of a Tenant scoped API key or an HTTP header X-FusionAuth-TenantId to specify the Tenant Id.
+
+        This API does not require an API key.
+
+        Attributes:
+        """
+        return self.start_anonymous().uri('/api/tenant/password-validation-rules') \
+            .get() \
+            .go()
+
+    def retrieve_password_validation_rules_with_tenant_id(self, tenant_id):
+        """
+        Retrieves the password validation rules for a specific tenant.
+
+        This API does not require an API key.
+
+        Attributes:
+            tenant_id: The Id of the tenant.
+        """
+        return self.start_anonymous().uri('/api/tenant/password-validation-rules') \
+            .url_segment(tenant_id) \
+            .get() \
+            .go()
+
+    def retrieve_pending_children(self, parent_email):
+        """
+        Retrieves all the children for the given parent email address.
+
+        Attributes:
+            parent_email: The email of the parent.
+        """
+        return self.start().uri('/api/user/family/pending') \
+            .url_parameter('parentEmail', self.convert_true_false(parent_email)) \
+            .get() \
+            .go()
+
+    def retrieve_pending_link(self, pending_link_id, user_id):
+        """
+        Retrieve a pending identity provider link. This is useful to validate a pending link and retrieve meta-data about the identity provider link.
+
+        Attributes:
+            pending_link_id: The pending link Id.
+            user_id: The optional userId. When provided additional meta-data will be provided to identify how many links if any the user already has.
+        """
+        return self.start().uri('/api/identity-provider/link/pending') \
+            .url_segment(pending_link_id) \
+            .url_parameter('userId', self.convert_true_false(user_id)) \
+            .get() \
+            .go()
+
+    def retrieve_reactor_metrics(self):
+        """
+        Retrieves the FusionAuth Reactor metrics.
+
+        Attributes:
+        """
+        return self.start().uri('/api/reactor/metrics') \
+            .get() \
+            .go()
+
+    def retrieve_reactor_status(self):
+        """
+        Retrieves the FusionAuth Reactor status.
+
+        Attributes:
+        """
+        return self.start().uri('/api/reactor') \
+            .get() \
+            .go()
+
+    def retrieve_recent_logins(self, offset, limit):
+        """
+        Retrieves the last number of login records.
+
+        Attributes:
+            offset: The initial record. e.g. 0 is the last login, 100 will be the 100th most recent login.
+            limit: (Optional, defaults to 10) The number of records to retrieve.
+        """
+        return self.start().uri('/api/user/recent-login') \
+            .url_parameter('offset', self.convert_true_false(offset)) \
+            .url_parameter('limit', self.convert_true_false(limit)) \
+            .get() \
+            .go()
+
+    def retrieve_refresh_token_by_id(self, token_id):
+        """
+        Retrieves a single refresh token by unique Id. This is not the same thing as the string value of the refresh token. If you have that, you already have what you need.
+
+        Attributes:
+            token_id: The Id of the token.
+        """
+        return self.start().uri('/api/jwt/refresh') \
+            .url_segment(token_id) \
+            .get() \
+            .go()
+
+    def retrieve_refresh_tokens(self, user_id):
+        """
+        Retrieves the refresh tokens that belong to the user with the given Id.
+
+        Attributes:
+            user_id: The Id of the user.
+        """
+        return self.start().uri('/api/jwt/refresh') \
+            .url_parameter('userId', self.convert_true_false(user_id)) \
+            .get() \
+            .go()
+
+    def retrieve_registration(self, user_id, application_id):
+        """
+        Retrieves the user registration for the user with the given Id and the given application Id.
+
+        Attributes:
+            user_id: The Id of the user.
+            application_id: The Id of the application.
+        """
+        return self.start().uri('/api/user/registration') \
+            .url_segment(user_id) \
+            .url_segment(application_id) \
+            .get() \
+            .go()
+
+    def retrieve_registration_report(self, start, end, application_id=None):
+        """
+        Retrieves the registration report between the two instants. If you specify an application Id, it will only return
+        the registration counts for that application.
+
+        Attributes:
+            application_id: (Optional) The application Id.
+            start: The start instant as UTC milliseconds since Epoch.
+            end: The end instant as UTC milliseconds since Epoch.
+        """
+        return self.start().uri('/api/report/registration') \
+            .url_parameter('applicationId', self.convert_true_false(application_id)) \
+            .url_parameter('start', self.convert_true_false(start)) \
+            .url_parameter('end', self.convert_true_false(end)) \
+            .get() \
+            .go()
+
+    def retrieve_reindex_status(self):
+        """
+        Retrieve the status of a re-index process. A status code of 200 indicates the re-index is in progress, a status code of
+        404 indicates no re-index is in progress.
+
+        Attributes:
+        """
+        return self.start().uri('/api/system/reindex') \
+            .get() \
+            .go()
+
+    def retrieve_system_configuration(self):
+        """
+        Retrieves the system configuration.
+
+        Attributes:
+        """
+        return self.start().uri('/api/system-configuration') \
+            .get() \
+            .go()
+
+    def retrieve_system_health(self):
+        """
+        Retrieves the FusionAuth system health. This API will return 200 if the system is healthy, and 500 if the system is un-healthy.
+
+        Attributes:
+        """
+        return self.start_anonymous().uri('/api/health') \
+            .get() \
+            .go()
+
+    def retrieve_system_status(self):
+        """
+        Retrieves the FusionAuth system status. This request is anonymous and does not require an API key. When an API key is not provided the response will contain a single value in the JSON response indicating the current health check.
+
+        Attributes:
+        """
+        return self.start_anonymous().uri('/api/status') \
+            .get() \
+            .go()
+
+    def retrieve_system_status_using_api_key(self):
+        """
+        Retrieves the FusionAuth system status using an API key. Using an API key will cause the response to include the product version, health checks and various runtime metrics.
+
+        Attributes:
+        """
+        return self.start().uri('/api/status') \
+            .get() \
+            .go()
+
+    def retrieve_tenant(self, tenant_id):
+        """
+        Retrieves the tenant for the given Id.
+
+        Attributes:
+            tenant_id: The Id of the tenant.
+        """
+        return self.start().uri('/api/tenant') \
+            .url_segment(tenant_id) \
+            .get() \
+            .go()
+
+    def retrieve_tenant_manager_configuration(self):
+        """
+        Retrieves the Tenant Manager configuration.
+
+        Attributes:
+        """
+        return self.start().uri('/api/tenant-manager') \
+            .get() \
+            .go()
+
+    def retrieve_tenants(self):
+        """
+        Retrieves all the tenants.
+
+        Attributes:
+        """
+        return self.start().uri('/api/tenant') \
+            .get() \
+            .go()
+
+    def retrieve_theme(self, theme_id):
+        """
+        Retrieves the theme for the given Id.
+
+        Attributes:
+            theme_id: The Id of the theme.
+        """
+        return self.start().uri('/api/theme') \
+            .url_segment(theme_id) \
+            .get() \
+            .go()
+
+    def retrieve_themes(self):
+        """
+        Retrieves all the themes.
+
+        Attributes:
+        """
+        return self.start().uri('/api/theme') \
+            .get() \
+            .go()
+
+    def retrieve_total_report(self):
+        """
+        Retrieves the totals report. This contains all the total counts for each application and the global registration
+        count.
+
+        Attributes:
+        """
+        return self.start().uri('/api/report/totals') \
+            .get() \
+            .go()
+
+    def retrieve_total_report_with_excludes(self, excludes):
+        """
+        Retrieves the totals report. This allows excluding applicationTotals from the report. An empty list will include the applicationTotals.
+
+        Attributes:
+            excludes: List of fields to exclude in the response. Currently only allows applicationTotals.
+        """
+        return self.start().uri('/api/report/totals') \
+            .url_parameter('excludes', self.convert_true_false(excludes)) \
+            .get() \
+            .go()
+
+    def retrieve_two_factor_recovery_codes(self, user_id):
+        """
+        Retrieve two-factor recovery codes for a user.
+
+        Attributes:
+            user_id: The Id of the user to retrieve Two Factor recovery codes.
+        """
+        return self.start().uri('/api/user/two-factor/recovery-code') \
+            .url_segment(user_id) \
+            .get() \
+            .go()
+
+    def retrieve_two_factor_status(self, user_id, application_id, two_factor_trust_id):
+        """
+        Retrieve a user's two-factor status.
+
+        This can be used to see if a user will need to complete a two-factor challenge to complete a login,
+        and optionally identify the state of the two-factor trust across various applications.
+
+        Attributes:
+            user_id: The user Id to retrieve the Two-Factor status.
+            application_id: The optional applicationId to verify.
+            two_factor_trust_id: The optional two-factor trust Id to verify.
+        """
+        return self.start().uri('/api/two-factor/status') \
+            .url_parameter('userId', self.convert_true_false(user_id)) \
+            .url_parameter('applicationId', self.convert_true_false(application_id)) \
+            .url_segment(two_factor_trust_id) \
+            .get() \
+            .go()
+
+    def retrieve_two_factor_status_with_request(self, request):
+        """
+        Retrieve a user's two-factor status.
+
+        This can be used to see if a user will need to complete a two-factor challenge to complete a login,
+        and optionally identify the state of the two-factor trust across various applications. This operation
+        provides more payload options than retrieveTwoFactorStatus.
+
+        Attributes:
+            request: The request object that contains all the information used to check the status.
+        """
+        return self.start().uri('/api/two-factor/status') \
+            .body_handler(JSONBodyHandler(request)) \
+            .post() \
+            .go()
+
+    def retrieve_user(self, user_id):
+        """
+        Retrieves the user for the given Id.
+
+        Attributes:
+            user_id: The Id of the user.
+        """
+        return self.start().uri('/api/user') \
+            .url_segment(user_id) \
+            .get() \
+            .go()
+
+    def retrieve_user_action(self, user_action_id=None):
+        """
+        Retrieves the user action for the given Id. If you pass in null for the Id, this will return all the user
+        actions.
+
+        Attributes:
+            user_action_id: (Optional) The Id of the user action.
+        """
+        return self.start().uri('/api/user-action') \
+            .url_segment(user_action_id) \
+            .get() \
+            .go()
+
+    def retrieve_user_action_reason(self, user_action_reason_id=None):
+        """
+        Retrieves the user action reason for the given Id. If you pass in null for the Id, this will return all the user
+        action reasons.
+
+        Attributes:
+            user_action_reason_id: (Optional) The Id of the user action reason.
+        """
+        return self.start().uri('/api/user-action-reason') \
+            .url_segment(user_action_reason_id) \
+            .get() \
+            .go()
+
+    def retrieve_user_action_reasons(self):
+        """
+        Retrieves all the user action reasons.
+
+        Attributes:
+        """
+        return self.start().uri('/api/user-action-reason') \
+            .get() \
+            .go()
+
+    def retrieve_user_actions(self):
+        """
+        Retrieves all the user actions.
+
+        Attributes:
+        """
+        return self.start().uri('/api/user-action') \
+            .get() \
+            .go()
+
+    def retrieve_user_by_change_password_id(self, change_password_id):
+        """
+        Retrieves the user by a change password Id. The intended use of this API is to retrieve a user after the forgot
+        password workflow has been initiated and you may not know the user's email or username.
+
+        Attributes:
+            change_password_id: The unique change password Id that was sent via email or returned by the Forgot Password API.
+        """
+        return self.start().uri('/api/user') \
+            .url_parameter('changePasswordId', self.convert_true_false(change_password_id)) \
+            .get() \
+            .go()
+
+    def retrieve_user_by_email(self, email):
+        """
+        Retrieves the user for the given email.
+
+        Attributes:
+            email: The email of the user.
+        """
+        return self.start().uri('/api/user') \
+            .url_parameter('email', self.convert_true_false(email)) \
+            .get() \
+            .go()
+
+    def retrieve_user_by_login_id(self, login_id):
+        """
+        Retrieves the user for the loginId. The loginId can be either the username or the email.
+
+        Attributes:
+            login_id: The email or username of the user.
+        """
+        return self.start().uri('/api/user') \
+            .url_parameter('loginId', self.convert_true_false(login_id)) \
+            .get() \
+            .go()
+
+    def retrieve_user_by_login_id_with_login_id_types(self, login_id, login_id_types):
+        """
+        Retrieves the user for the loginId, using specific loginIdTypes.
+
+        Attributes:
+            login_id: The email or username of the user.
+            login_id_types: The identity types that FusionAuth will compare the loginId to.
+        """
+        return self.start().uri('/api/user') \
+            .url_parameter('loginId', self.convert_true_false(login_id)) \
+            .url_parameter('loginIdTypes', self.convert_true_false(login_id_types)) \
+            .get() \
+            .go()
+
+    def retrieve_user_by_username(self, username):
+        """
+        Retrieves the user for the given username.
+
+        Attributes:
+            username: The username of the user.
+        """
+        return self.start().uri('/api/user') \
+            .url_parameter('username', self.convert_true_false(username)) \
+            .get() \
+            .go()
+
+    def retrieve_user_by_verification_id(self, verification_id):
+        """
+        Retrieves the user by a verificationId. The intended use of this API is to retrieve a user after the forgot
+        password workflow has been initiated and you may not know the user's email or username.
+
+        Attributes:
+            verification_id: The unique verification Id that has been set on the user object.
+        """
+        return self.start().uri('/api/user') \
+            .url_parameter('verificationId', self.convert_true_false(verification_id)) \
+            .get() \
+            .go()
+
+    def retrieve_user_code(self, client_id, client_secret, user_code):
+        """
+        Retrieve a user_code that is part of an in-progress Device Authorization Grant.
+
+        This API is useful if you want to build your own login workflow to complete a device grant.
+
+        Attributes:
+            client_id: The client Id.
+            client_secret: The client Id.
+            user_code: The end-user verification code.
+        """
+        body = {
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "user_code": user_code,
+        }
+        return self.start_anonymous().uri('/oauth2/device/user-code') \
+            .body_handler(FormDataBodyHandler(body)) \
+            .get() \
+            .go()
+
+    def retrieve_user_code_using_api_key(self, user_code):
+        """
+        Retrieve a user_code that is part of an in-progress Device Authorization Grant.
+
+        This API is useful if you want to build your own login workflow to complete a device grant.
+
+        This request will require an API key.
+
+        Attributes:
+            user_code: The end-user verification code.
+        """
+        body = {
+            "user_code": user_code,
+        }
+        return self.start_anonymous().uri('/oauth2/device/user-code') \
+            .body_handler(FormDataBodyHandler(body)) \
+            .get() \
+            .go()
+
+    def retrieve_user_code_using_api_key_with_request(self, request):
+        """
+        Retrieve a user_code that is part of an in-progress Device Authorization Grant.
+
+        This API is useful if you want to build your own login workflow to complete a device grant.
+
+        This request will require an API key.
+
+        Attributes:
+            request: The user code retrieval request including optional tenantId.
+        """
+        body = {
+            "tenantId": str(request.tenantId) if request.tenantId is not None else None,
+            "user_code": request.user_code,
+        }
+        return self.start_anonymous().uri('/oauth2/device/user-code') \
+            .body_handler(FormDataBodyHandler(body)) \
+            .post() \
+            .go()
+
+    def retrieve_user_code_with_request(self, request):
+        """
+        Retrieve a user_code that is part of an in-progress Device Authorization Grant.
+
+        This API is useful if you want to build your own login workflow to complete a device grant.
+
+        Attributes:
+            request: The user code retrieval request.
+        """
+        body = {
+            "client_id": request.client_id,
+            "client_secret": request.client_secret,
+            "tenantId": str(request.tenantId) if request.tenantId is not None else None,
+            "user_code": request.user_code,
+        }
+        return self.start_anonymous().uri('/oauth2/device/user-code') \
+            .body_handler(FormDataBodyHandler(body)) \
+            .post() \
+            .go()
+
+    def retrieve_user_comments(self, user_id):
+        """
+        Retrieves all the comments for the user with the given Id.
+
+        Attributes:
+            user_id: The Id of the user.
+        """
+        return self.start().uri('/api/user/comment') \
+            .url_segment(user_id) \
+            .get() \
+            .go()
+
+    def retrieve_user_consent(self, user_consent_id):
+        """
+        Retrieve a single User consent by Id.
+
+        Attributes:
+            user_consent_id: The User consent Id
+        """
+        return self.start().uri('/api/user/consent') \
+            .url_segment(user_consent_id) \
+            .get() \
+            .go()
+
+    def retrieve_user_consents(self, user_id):
+        """
+        Retrieves all the consents for a User.
+
+        Attributes:
+            user_id: The User's Id
+        """
+        return self.start().uri('/api/user/consent') \
+            .url_parameter('userId', self.convert_true_false(user_id)) \
+            .get() \
+            .go()
+
+    def retrieve_user_info_from_access_token(self, encoded_jwt):
+        """
+        Call the UserInfo endpoint to retrieve User Claims from the access token issued by FusionAuth.
+
+        Attributes:
+            encoded_jwt: The encoded JWT (access token).
+        """
+        return self.start_anonymous().uri('/oauth2/userinfo') \
+            .authorization("Bearer " + encoded_jwt) \
+            .get() \
+            .go()
+
+    def retrieve_user_link(self, identity_provider_id, identity_provider_user_id, user_id):
+        """
+        Retrieve a single Identity Provider user (link).
+
+        Attributes:
+            identity_provider_id: The unique Id of the identity provider.
+            identity_provider_user_id: The unique Id of the user in the 3rd party identity provider.
+            user_id: The unique Id of the FusionAuth user.
+        """
+        return self.start().uri('/api/identity-provider/link') \
+            .url_parameter('identityProviderId', self.convert_true_false(identity_provider_id)) \
+            .url_parameter('identityProviderUserId', self.convert_true_false(identity_provider_user_id)) \
+            .url_parameter('userId', self.convert_true_false(user_id)) \
+            .get() \
+            .go()
+
+    def retrieve_user_links_by_user_id(self, user_id, identity_provider_id=None):
+        """
+        Retrieve all Identity Provider users (links) for the user. Specify the optional identityProviderId to retrieve links for a particular IdP.
+
+        Attributes:
+            identity_provider_id: (Optional) The unique Id of the identity provider. Specify this value to reduce the links returned to those for a particular IdP.
+            user_id: The unique Id of the user.
+        """
+        return self.start().uri('/api/identity-provider/link') \
+            .url_parameter('identityProviderId', self.convert_true_false(identity_provider_id)) \
+            .url_parameter('userId', self.convert_true_false(user_id)) \
+            .get() \
+            .go()
+
+    def retrieve_user_login_report(self, user_id, start, end, application_id=None):
+        """
+        Retrieves the login report between the two instants for a particular user by Id. If you specify an application Id, it will only return the
+        login counts for that application.
+
+        Attributes:
+            application_id: (Optional) The application Id.
+            user_id: The userId Id.
+            start: The start instant as UTC milliseconds since Epoch.
+            end: The end instant as UTC milliseconds since Epoch.
+        """
+        return self.start().uri('/api/report/login') \
+            .url_parameter('applicationId', self.convert_true_false(application_id)) \
+            .url_parameter('userId', self.convert_true_false(user_id)) \
+            .url_parameter('start', self.convert_true_false(start)) \
+            .url_parameter('end', self.convert_true_false(end)) \
+            .get() \
+            .go()
+
+    def retrieve_user_login_report_by_login_id(self, login_id, start, end, application_id=None):
+        """
+        Retrieves the login report between the two instants for a particular user by login Id. If you specify an application Id, it will only return the
+        login counts for that application.
+
+        Attributes:
+            application_id: (Optional) The application Id.
+            login_id: The userId Id.
+            start: The start instant as UTC milliseconds since Epoch.
+            end: The end instant as UTC milliseconds since Epoch.
+        """
+        return self.start().uri('/api/report/login') \
+            .url_parameter('applicationId', self.convert_true_false(application_id)) \
+            .url_parameter('loginId', self.convert_true_false(login_id)) \
+            .url_parameter('start', self.convert_true_false(start)) \
+            .url_parameter('end', self.convert_true_false(end)) \
+            .get() \
+            .go()
+
+    def retrieve_user_login_report_by_login_id_and_login_id_types(self, login_id, start, end, login_id_types, application_id=None):
+        """
+        Retrieves the login report between the two instants for a particular user by login Id, using specific loginIdTypes. If you specify an application id, it will only return the
+        login counts for that application.
+
+        Attributes:
+            application_id: (Optional) The application id.
+            login_id: The userId id.
+            start: The start instant as UTC milliseconds since Epoch.
+            end: The end instant as UTC milliseconds since Epoch.
+            login_id_types: The identity types that FusionAuth will compare the loginId to.
+        """
+        return self.start().uri('/api/report/login') \
+            .url_parameter('applicationId', self.convert_true_false(application_id)) \
+            .url_parameter('loginId', self.convert_true_false(login_id)) \
+            .url_parameter('start', self.convert_true_false(start)) \
+            .url_parameter('end', self.convert_true_false(end)) \
+            .url_parameter('loginIdTypes', self.convert_true_false(login_id_types)) \
+            .get() \
+            .go()
+
+    def retrieve_user_recent_logins(self, user_id, offset, limit):
+        """
+        Retrieves the last number of login records for a user.
+
+        Attributes:
+            user_id: The Id of the user.
+            offset: The initial record. e.g. 0 is the last login, 100 will be the 100th most recent login.
+            limit: (Optional, defaults to 10) The number of records to retrieve.
+        """
+        return self.start().uri('/api/user/recent-login') \
+            .url_parameter('userId', self.convert_true_false(user_id)) \
+            .url_parameter('offset', self.convert_true_false(offset)) \
+            .url_parameter('limit', self.convert_true_false(limit)) \
+            .get() \
+            .go()
+
+    def retrieve_version(self):
+        """
+        Retrieves the FusionAuth version string.
+
+        Attributes:
+        """
+        return self.start().uri('/api/system/version') \
+            .get() \
+            .go()
+
+    def retrieve_web_authn_credential(self, id):
+        """
+        Retrieves the WebAuthn credential for the given Id.
+
+        Attributes:
+            id: The Id of the WebAuthn credential.
+        """
+        return self.start().uri('/api/webauthn') \
+            .url_segment(id) \
+            .get() \
+            .go()
+
+    def retrieve_web_authn_credentials_for_user(self, user_id):
+        """
+        Retrieves all WebAuthn credentials for the given user.
+
+        Attributes:
+            user_id: The user's ID.
+        """
+        return self.start().uri('/api/webauthn') \
+            .url_parameter('userId', self.convert_true_false(user_id)) \
+            .get() \
+            .go()
+
+    def retrieve_webhook(self, webhook_id=None):
+        """
+        Retrieves the webhook for the given Id. If you pass in null for the Id, this will return all the webhooks.
+
+        Attributes:
+            webhook_id: (Optional) The Id of the webhook.
+        """
+        return self.start().uri('/api/webhook') \
+            .url_segment(webhook_id) \
+            .get() \
+            .go()
+
+    def retrieve_webhook_attempt_log(self, webhook_attempt_log_id):
+        """
+        Retrieves a single webhook attempt log for the given Id.
+
+        Attributes:
+            webhook_attempt_log_id: The Id of the webhook attempt log to retrieve.
+        """
+        return self.start().uri('/api/system/webhook-attempt-log') \
+            .url_segment(webhook_attempt_log_id) \
+            .get() \
+            .go()
+
+    def retrieve_webhook_event_log(self, webhook_event_log_id):
+        """
+        Retrieves a single webhook event log for the given Id.
+
+        Attributes:
+            webhook_event_log_id: The Id of the webhook event log to retrieve.
+        """
+        return self.start().uri('/api/system/webhook-event-log') \
+            .url_segment(webhook_event_log_id) \
+            .get() \
+            .go()
+
+    def retrieve_webhooks(self):
+        """
+        Retrieves all the webhooks.
+
+        Attributes:
+        """
+        return self.start().uri('/api/webhook') \
+            .get() \
+            .go()
+
+    def revoke_refresh_token(self, token=None, user_id=None, application_id=None):
+        """
+        Revokes refresh tokens.
+
+        Usage examples:
+          - Delete a single refresh token, pass in only the token.
+              revokeRefreshToken(token)
+
+          - Delete all refresh tokens for a user, pass in only the userId.
+              revokeRefreshToken(null, userId)
+
+          - Delete all refresh tokens for a user for a specific application, pass in both the userId and the applicationId.
+              revokeRefreshToken(null, userId, applicationId)
+
+          - Delete all refresh tokens for an application
+              revokeRefreshToken(null, null, applicationId)
+
+        Note: <code>null</code> may be handled differently depending upon the programming language.
+
+        See also: (method names may vary by language... but you'll figure it out)
+
+         - revokeRefreshTokenById
+         - revokeRefreshTokenByToken
+         - revokeRefreshTokensByUserId
+         - revokeRefreshTokensByApplicationId
+         - revokeRefreshTokensByUserIdForApplication
+
+        Attributes:
+            token: (Optional) The refresh token to delete.
+            user_id: (Optional) The user Id whose tokens to delete.
+            application_id: (Optional) The application Id of the tokens to delete.
+        """
+        return self.start().uri('/api/jwt/refresh') \
+            .url_parameter('token', self.convert_true_false(token)) \
+            .url_parameter('userId', self.convert_true_false(user_id)) \
+            .url_parameter('applicationId', self.convert_true_false(application_id)) \
+            .delete() \
+            .go()
+
+    def revoke_refresh_token_by_id(self, token_id):
+        """
+        Revokes a single refresh token by the unique Id. The unique Id is not sensitive as it cannot be used to obtain another JWT.
+
+        Attributes:
+            token_id: The unique Id of the token to delete.
+        """
+        return self.start().uri('/api/jwt/refresh') \
+            .url_segment(token_id) \
+            .delete() \
+            .go()
+
+    def revoke_refresh_token_by_token(self, token):
+        """
+        Revokes a single refresh token by using the actual refresh token value. This refresh token value is sensitive, so  be careful with this API request.
+
+        Attributes:
+            token: The refresh token to delete.
+        """
+        return self.start().uri('/api/jwt/refresh') \
+            .url_parameter('token', self.convert_true_false(token)) \
+            .delete() \
+            .go()
+
+    def revoke_refresh_tokens_by_application_id(self, application_id):
+        """
+        Revoke all refresh tokens that belong to an application by applicationId.
+
+        Attributes:
+            application_id: The unique Id of the application that you want to delete all refresh tokens for.
+        """
+        return self.start().uri('/api/jwt/refresh') \
+            .url_parameter('applicationId', self.convert_true_false(application_id)) \
+            .delete() \
+            .go()
+
+    def revoke_refresh_tokens_by_user_id(self, user_id):
+        """
+        Revoke all refresh tokens that belong to a user by user Id.
+
+        Attributes:
+            user_id: The unique Id of the user that you want to delete all refresh tokens for.
+        """
+        return self.start().uri('/api/jwt/refresh') \
+            .url_parameter('userId', self.convert_true_false(user_id)) \
+            .delete() \
+            .go()
+
+    def revoke_refresh_tokens_by_user_id_for_application(self, user_id, application_id):
+        """
+        Revoke all refresh tokens that belong to a user by user Id for a specific application by applicationId.
+
+        Attributes:
+            user_id: The unique Id of the user that you want to delete all refresh tokens for.
+            application_id: The unique Id of the application that you want to delete refresh tokens for.
+        """
+        return self.start().uri('/api/jwt/refresh') \
+            .url_parameter('userId', self.convert_true_false(user_id)) \
+            .url_parameter('applicationId', self.convert_true_false(application_id)) \
+            .delete() \
+            .go()
+
+    def revoke_refresh_tokens_with_request(self, request):
+        """
+        Revokes refresh tokens using the information in the JSON body. The handling for this method is the same as the revokeRefreshToken method
+        and is based on the information you provide in the RefreshDeleteRequest object. See that method for additional information.
+
+        Attributes:
+            request: The request information used to revoke the refresh tokens.
+        """
+        return self.start().uri('/api/jwt/refresh') \
+            .body_handler(JSONBodyHandler(request)) \
+            .delete() \
+            .go()
+
+    def revoke_user_consent(self, user_consent_id):
+        """
+        Revokes a single User consent by Id.
+
+        Attributes:
+            user_consent_id: The User Consent Id
+        """
+        return self.start().uri('/api/user/consent') \
+            .url_segment(user_consent_id) \
+            .delete() \
+            .go()
+
+    def search_applications(self, request):
+        """
+        Searches applications with the specified criteria and pagination.
+
+        Attributes:
+            request: The search criteria and pagination information.
+        """
+        return self.start().uri('/api/application/search') \
+            .body_handler(JSONBodyHandler(request)) \
+            .post() \
+            .go()
+
+    def search_audit_logs(self, request):
+        """
+        Searches the audit logs with the specified criteria and pagination.
+
+        Attributes:
+            request: The search criteria and pagination information.
+        """
+        return self.start().uri('/api/system/audit-log/search') \
+            .body_handler(JSONBodyHandler(request)) \
+            .post() \
+            .go()
+
+    def search_consents(self, request):
+        """
+        Searches consents with the specified criteria and pagination.
+
+        Attributes:
+            request: The search criteria and pagination information.
+        """
+        return self.start().uri('/api/consent/search') \
+            .body_handler(JSONBodyHandler(request)) \
+            .post() \
+            .go()
+
+    def search_email_templates(self, request):
+        """
+        Searches email templates with the specified criteria and pagination.
+
+        Attributes:
+            request: The search criteria and pagination information.
+        """
+        return self.start().uri('/api/email/template/search') \
+            .body_handler(JSONBodyHandler(request)) \
+            .post() \
+            .go()
+
+    def search_entities(self, request):
+        """
+        Searches entities with the specified criteria and pagination.
+
+        Attributes:
+            request: The search criteria and pagination information.
+        """
+        return self.start().uri('/api/entity/search') \
+            .body_handler(JSONBodyHandler(request)) \
+            .post() \
+            .go()
+
+    def search_entities_by_ids(self, ids):
+        """
+        Retrieves the entities for the given Ids. If any Id is invalid, it is ignored.
+
+        Attributes:
+            ids: The entity ids to search for.
+        """
+        return self.start().uri('/api/entity/search') \
+            .url_parameter('ids', self.convert_true_false(ids)) \
+            .get() \
+            .go()
+
+    def search_entity_grants(self, request):
+        """
+        Searches Entity Grants with the specified criteria and pagination.
+
+        Attributes:
+            request: The search criteria and pagination information.
+        """
+        return self.start().uri('/api/entity/grant/search') \
+            .body_handler(JSONBodyHandler(request)) \
+            .post() \
+            .go()
+
+    def search_entity_types(self, request):
+        """
+        Searches the entity types with the specified criteria and pagination.
+
+        Attributes:
+            request: The search criteria and pagination information.
+        """
+        return self.start().uri('/api/entity/type/search') \
+            .body_handler(JSONBodyHandler(request)) \
+            .post() \
+            .go()
+
+    def search_event_logs(self, request):
+        """
+        Searches the event logs with the specified criteria and pagination.
+
+        Attributes:
+            request: The search criteria and pagination information.
+        """
+        return self.start().uri('/api/system/event-log/search') \
+            .body_handler(JSONBodyHandler(request)) \
+            .post() \
+            .go()
+
+    def search_group_members(self, request):
+        """
+        Searches group members with the specified criteria and pagination.
+
+        Attributes:
+            request: The search criteria and pagination information.
+        """
+        return self.start().uri('/api/group/member/search') \
+            .body_handler(JSONBodyHandler(request)) \
+            .post() \
+            .go()
+
+    def search_groups(self, request):
+        """
+        Searches groups with the specified criteria and pagination.
+
+        Attributes:
+            request: The search criteria and pagination information.
+        """
+        return self.start().uri('/api/group/search') \
+            .body_handler(JSONBodyHandler(request)) \
+            .post() \
+            .go()
+
+    def search_ip_access_control_lists(self, request):
+        """
+        Searches the IP Access Control Lists with the specified criteria and pagination.
+
+        Attributes:
+            request: The search criteria and pagination information.
+        """
+        return self.start().uri('/api/ip-acl/search') \
+            .body_handler(JSONBodyHandler(request)) \
+            .post() \
+            .go()
+
+    def search_identity_providers(self, request):
+        """
+        Searches identity providers with the specified criteria and pagination.
+
+        Attributes:
+            request: The search criteria and pagination information.
+        """
+        return self.start().uri('/api/identity-provider/search') \
+            .body_handler(JSONBodyHandler(request)) \
+            .post() \
+            .go()
+
+    def search_keys(self, request):
+        """
+        Searches keys with the specified criteria and pagination.
+
+        Attributes:
+            request: The search criteria and pagination information.
+        """
+        return self.start().uri('/api/key/search') \
+            .body_handler(JSONBodyHandler(request)) \
+            .post() \
+            .go()
+
+    def search_lambdas(self, request):
+        """
+        Searches lambdas with the specified criteria and pagination.
+
+        Attributes:
+            request: The search criteria and pagination information.
+        """
+        return self.start().uri('/api/lambda/search') \
+            .body_handler(JSONBodyHandler(request)) \
+            .post() \
+            .go()
+
+    def search_login_records(self, request):
+        """
+        Searches the login records with the specified criteria and pagination.
+
+        Attributes:
+            request: The search criteria and pagination information.
+        """
+        return self.start().uri('/api/system/login-record/search') \
+            .body_handler(JSONBodyHandler(request)) \
+            .post() \
+            .go()
+
+    def search_tenants(self, request):
+        """
+        Searches tenants with the specified criteria and pagination.
+
+        Attributes:
+            request: The search criteria and pagination information.
+        """
+        return self.start().uri('/api/tenant/search') \
+            .body_handler(JSONBodyHandler(request)) \
+            .post() \
+            .go()
+
+    def search_themes(self, request):
+        """
+        Searches themes with the specified criteria and pagination.
+
+        Attributes:
+            request: The search criteria and pagination information.
+        """
+        return self.start().uri('/api/theme/search') \
+            .body_handler(JSONBodyHandler(request)) \
+            .post() \
+            .go()
+
+    def search_user_comments(self, request):
+        """
+        Searches user comments with the specified criteria and pagination.
+
+        Attributes:
+            request: The search criteria and pagination information.
+        """
+        return self.start().uri('/api/user/comment/search') \
+            .body_handler(JSONBodyHandler(request)) \
+            .post() \
+            .go()
+
+    @deprecated("This method has been renamed to search_users_by_ids, use that method instead.")
+    def search_users(self, ids):
+        """
+        Retrieves the users for the given Ids. If any Id is invalid, it is ignored.
+
+        Attributes:
+            ids: The user ids to search for.
+        """
+        return self.start().uri('/api/user/search') \
+            .url_parameter('ids', self.convert_true_false(ids)) \
+            .get() \
+            .go()
+
+    def search_users_by_ids(self, ids):
+        """
+        Retrieves the users for the given Ids. If any Id is invalid, it is ignored.
+
+        Attributes:
+            ids: The user Ids to search for.
+        """
+        return self.start().uri('/api/user/search') \
+            .url_parameter('ids', self.convert_true_false(ids)) \
+            .get() \
+            .go()
+
+    def search_users_by_query(self, request):
+        """
+        Retrieves the users for the given search criteria and pagination.
+
+        Attributes:
+            request: The search criteria and pagination constraints. Fields used: ids, query, queryString, numberOfResults, orderBy, startRow,
+                    and sortFields.
+        """
+        return self.start().uri('/api/user/search') \
+            .body_handler(JSONBodyHandler(request)) \
+            .post() \
+            .go()
+
+    @deprecated("This method has been renamed to search_users_by_query, use that method instead.")
+    def search_users_by_query_string(self, request):
+        """
+        Retrieves the users for the given search criteria and pagination.
+
+        Attributes:
+            request: The search criteria and pagination constraints. Fields used: ids, query, queryString, numberOfResults, orderBy, startRow,
+                    and sortFields.
+        """
+        return self.start().uri('/api/user/search') \
+            .body_handler(JSONBodyHandler(request)) \
+            .post() \
+            .go()
+
+    def search_webhook_event_logs(self, request):
+        """
+        Searches the webhook event logs with the specified criteria and pagination.
+
+        Attributes:
+            request: The search criteria and pagination information.
+        """
+        return self.start().uri('/api/system/webhook-event-log/search') \
+            .body_handler(JSONBodyHandler(request)) \
+            .post() \
+            .go()
+
+    def search_webhooks(self, request):
+        """
+        Searches webhooks with the specified criteria and pagination.
+
+        Attributes:
+            request: The search criteria and pagination information.
+        """
+        return self.start().uri('/api/webhook/search') \
+            .body_handler(JSONBodyHandler(request)) \
+            .post() \
+            .go()
+
+    def send_email(self, email_template_id, request):
+        """
+        Send an email using an email template Id. You can optionally provide <code>requestData</code> to access key value
+        pairs in the email template.
+
+        Attributes:
+            email_template_id: The Id for the template.
+            request: The send email request that contains all the information used to send the email.
+        """
+        return self.start().uri('/api/email/send') \
+            .url_segment(email_template_id) \
+            .body_handler(JSONBodyHandler(request)) \
+            .post() \
+            .go()
+
+    def send_family_request_email(self, request):
+        """
+        Sends out an email to a parent that they need to register and create a family or need to log in and add a child to their existing family.
+
+        Attributes:
+            request: The request object that contains the parent email.
+        """
+        return self.start().uri('/api/user/family/request') \
+            .body_handler(JSONBodyHandler(request)) \
+            .post() \
+            .go()
+
+    def send_passwordless_code(self, request):
+        """
+        Send a passwordless authentication code in an email to complete login.
+
+        Attributes:
+            request: The passwordless send request that contains all the information used to send an email containing a code.
+        """
+        return self.start_anonymous().uri('/api/passwordless/send') \
+            .body_handler(JSONBodyHandler(request)) \
+            .post() \
+            .go()
+
+    @deprecated("This method has been renamed to send_two_factor_code_for_enable_disable, use that method instead.")
+    def send_two_factor_code(self, request):
+        """
+        Send a Two Factor authentication code to assist in setting up Two Factor authentication or disabling.
+
+        Attributes:
+            request: The request object that contains all the information used to send the code.
+        """
+        return self.start().uri('/api/two-factor/send') \
+            .body_handler(JSONBodyHandler(request)) \
+            .post() \
+            .go()
+
+    def send_two_factor_code_for_enable_disable(self, request):
+        """
+        Send a Two Factor authentication code to assist in setting up Two Factor authentication or disabling.
+
+        Attributes:
+            request: The request object that contains all the information used to send the code.
+        """
+        return self.start().uri('/api/two-factor/send') \
+            .body_handler(JSONBodyHandler(request)) \
+            .post() \
+            .go()
+
+    @deprecated("This method has been renamed to send_two_factor_code_for_login_using_method, use that method instead.")
+    def send_two_factor_code_for_login(self, two_factor_id):
+        """
+        Send a Two Factor authentication code to allow the completion of Two Factor authentication.
+
+        Attributes:
+            two_factor_id: The Id returned by the Login API necessary to complete Two Factor authentication.
+        """
+        return self.start_anonymous().uri('/api/two-factor/send') \
+            .url_segment(two_factor_id) \
+            .post() \
+            .go()
+
+    def send_two_factor_code_for_login_using_method(self, two_factor_id, request):
+        """
+        Send a Two Factor authentication code to allow the completion of Two Factor authentication.
+
+        Attributes:
+            two_factor_id: The Id returned by the Login API necessary to complete Two Factor authentication.
+            request: The Two Factor send request that contains all the information used to send the Two Factor code to the user.
+        """
+        return self.start_anonymous().uri('/api/two-factor/send') \
+            .url_segment(two_factor_id) \
+            .body_handler(JSONBodyHandler(request)) \
+            .post() \
+            .go()
+
+    def send_verify_identity(self, request):
+        """
+        Send a verification code using the appropriate transport for the identity type being verified.
+
+        Attributes:
+            request: The identity verify send request that contains all the information used send the code.
+        """
+        return self.start().uri('/api/identity/verify/send') \
+            .body_handler(JSONBodyHandler(request)) \
+            .post() \
+            .go()
+
+    def start_identity_provider_connection_test(self, request):
+        """
+        Begins an identity provider connection test.
+
+        Attributes:
+            request: The request that contains information on the connection test.
+        """
+        return self.start().uri('/api/identity-provider/test') \
+            .body_handler(JSONBodyHandler(request)) \
+            .post() \
+            .go()
+
+    def start_identity_provider_login(self, request):
+        """
+        Begins a login request for a 3rd party login that requires user interaction such as HYPR.
+
+        Attributes:
+            request: The third-party login request that contains information from the third-party login
+                    providers that FusionAuth uses to reconcile the user's account.
+        """
+        return self.start().uri('/api/identity-provider/start') \
+            .body_handler(JSONBodyHandler(request)) \
+            .post() \
+            .go()
+
+    def start_passwordless_login(self, request):
+        """
+        Start a passwordless login request by generating a passwordless code. This code can be sent to the User using the Send
+        Passwordless Code API or using a mechanism outside of FusionAuth. The passwordless login is completed by using the Passwordless Login API with this code.
+
+        Attributes:
+            request: The passwordless start request that contains all the information used to begin the passwordless login request.
+        """
+        return self.start().uri('/api/passwordless/start') \
+            .body_handler(JSONBodyHandler(request)) \
+            .post() \
+            .go()
+
+    def start_two_factor_login(self, request):
+        """
+        Start a Two-Factor login request by generating a two-factor identifier. This code can then be sent to the Two Factor Send
+        API (/api/two-factor/send)in order to send a one-time use code to a user. You can also use one-time use code returned
+        to send the code out-of-band. The Two-Factor login is completed by making a request to the Two-Factor Login
+        API (/api/two-factor/login). with the two-factor identifier and the one-time use code.
+
+        This API is intended to allow you to begin a Two-Factor login outside a normal login that originated from the Login API (/api/login).
+
+        Attributes:
+            request: The Two-Factor start request that contains all the information used to begin the Two-Factor login request.
+        """
+        return self.start().uri('/api/two-factor/start') \
+            .body_handler(JSONBodyHandler(request)) \
+            .post() \
+            .go()
+
+    def start_verify_identity(self, request):
+        """
+        Start a verification of an identity by generating a code. This code can be sent to the User using the Verify Send API
+        Verification Code API or using a mechanism outside of FusionAuth. The verification is completed by using the Verify Complete API with this code.
+
+        Attributes:
+            request: The identity verify start request that contains all the information used to begin the request.
+        """
+        return self.start().uri('/api/identity/verify/start') \
+            .body_handler(JSONBodyHandler(request)) \
+            .post() \
+            .go()
+
+    def start_web_authn_login(self, request):
+        """
+        Start a WebAuthn authentication ceremony by generating a new challenge for the user
+
+        Attributes:
+            request: An object containing data necessary for starting the authentication ceremony
+        """
+        return self.start().uri('/api/webauthn/start') \
+            .body_handler(JSONBodyHandler(request)) \
+            .post() \
+            .go()
+
+    def start_web_authn_registration(self, request):
+        """
+        Start a WebAuthn registration ceremony by generating a new challenge for the user
+
+        Attributes:
+            request: An object containing data necessary for starting the registration ceremony
+        """
+        return self.start().uri('/api/webauthn/register/start') \
+            .body_handler(JSONBodyHandler(request)) \
+            .post() \
+            .go()
+
+    def two_factor_login(self, request):
+        """
+        Complete login using a 2FA challenge
+
+        Attributes:
+            request: The login request that contains the user credentials used to log them in.
+        """
+        return self.start_anonymous().uri('/api/two-factor/login') \
+            .body_handler(JSONBodyHandler(request)) \
+            .post() \
+            .go()
+
+    def update_api_key(self, key_id, request):
+        """
+        Updates an API key with the given Id.
+
+        Attributes:
+            key_id: The Id of the API key to update.
+            request: The request that contains all the new API key information.
+        """
+        return self.start().uri('/api/api-key') \
+            .url_segment(key_id) \
+            .body_handler(JSONBodyHandler(request)) \
+            .put() \
+            .go()
+
+    def update_application(self, application_id, request):
+        """
+        Updates the application with the given Id.
+
+        Attributes:
+            application_id: The Id of the application to update.
+            request: The request that contains all the new application information.
+        """
+        return self.start().uri('/api/application') \
+            .url_segment(application_id) \
+            .body_handler(JSONBodyHandler(request)) \
+            .put() \
+            .go()
+
+    def update_application_role(self, application_id, role_id, request):
+        """
+        Updates the application role with the given Id for the application.
+
+        Attributes:
+            application_id: The Id of the application that the role belongs to.
+            role_id: The Id of the role to update.
+            request: The request that contains all the new role information.
+        """
+        return self.start().uri('/api/application') \
+            .url_segment(application_id) \
+            .url_segment("role") \
+            .url_segment(role_id) \
+            .body_handler(JSONBodyHandler(request)) \
+            .put() \
+            .go()
+
+    def update_connector(self, connector_id, request):
+        """
+        Updates the connector with the given Id.
+
+        Attributes:
+            connector_id: The Id of the connector to update.
+            request: The request object that contains all the new connector information.
+        """
+        return self.start().uri('/api/connector') \
+            .url_segment(connector_id) \
+            .body_handler(JSONBodyHandler(request)) \
+            .put() \
+            .go()
+
+    def update_consent(self, consent_id, request):
+        """
+        Updates the consent with the given Id.
+
+        Attributes:
+            consent_id: The Id of the consent to update.
+            request: The request that contains all the new consent information.
+        """
+        return self.start().uri('/api/consent') \
+            .url_segment(consent_id) \
+            .body_handler(JSONBodyHandler(request)) \
+            .put() \
+            .go()
+
+    def update_email_template(self, email_template_id, request):
+        """
+        Updates the email template with the given Id.
+
+        Attributes:
+            email_template_id: The Id of the email template to update.
+            request: The request that contains all the new email template information.
+        """
+        return self.start().uri('/api/email/template') \
+            .url_segment(email_template_id) \
+            .body_handler(JSONBodyHandler(request)) \
+            .put() \
+            .go()
+
+    def update_entity(self, entity_id, request):
+        """
+        Updates the Entity with the given Id.
+
+        Attributes:
+            entity_id: The Id of the Entity to update.
+            request: The request that contains all the new Entity information.
+        """
+        return self.start().uri('/api/entity') \
+            .url_segment(entity_id) \
+            .body_handler(JSONBodyHandler(request)) \
+            .put() \
+            .go()
+
+    def update_entity_type(self, entity_type_id, request):
+        """
+        Updates the Entity Type with the given Id.
+
+        Attributes:
+            entity_type_id: The Id of the Entity Type to update.
+            request: The request that contains all the new Entity Type information.
+        """
+        return self.start().uri('/api/entity/type') \
+            .url_segment(entity_type_id) \
+            .body_handler(JSONBodyHandler(request)) \
+            .put() \
+            .go()
+
+    def update_entity_type_permission(self, entity_type_id, permission_id, request):
+        """
+        Updates the permission with the given Id for the entity type.
+
+        Attributes:
+            entity_type_id: The Id of the entityType that the permission belongs to.
+            permission_id: The Id of the permission to update.
+            request: The request that contains all the new permission information.
+        """
+        return self.start().uri('/api/entity/type') \
+            .url_segment(entity_type_id) \
+            .url_segment("permission") \
+            .url_segment(permission_id) \
+            .body_handler(JSONBodyHandler(request)) \
+            .put() \
+            .go()
+
+    def update_family(self, family_id, request):
+        """
+        Updates a family with a given Id.
+
+        Attributes:
+            family_id: The Id of the family to update.
+            request: The request object that contains all the new family information.
+        """
+        return self.start().uri('/api/user/family') \
+            .url_segment(family_id) \
+            .body_handler(JSONBodyHandler(request)) \
+            .put() \
+            .go()
+
+    def update_form(self, form_id, request):
+        """
+        Updates the form with the given Id.
+
+        Attributes:
+            form_id: The Id of the form to update.
+            request: The request object that contains all the new form information.
+        """
+        return self.start().uri('/api/form') \
+            .url_segment(form_id) \
+            .body_handler(JSONBodyHandler(request)) \
+            .put() \
+            .go()
+
+    def update_form_field(self, field_id, request):
+        """
+        Updates the form field with the given Id.
+
+        Attributes:
+            field_id: The Id of the form field to update.
+            request: The request object that contains all the new form field information.
+        """
+        return self.start().uri('/api/form/field') \
+            .url_segment(field_id) \
+            .body_handler(JSONBodyHandler(request)) \
+            .put() \
+            .go()
+
+    def update_group(self, group_id, request):
+        """
+        Updates the group with the given Id.
+
+        Attributes:
+            group_id: The Id of the group to update.
+            request: The request that contains all the new group information.
+        """
+        return self.start().uri('/api/group') \
+            .url_segment(group_id) \
+            .body_handler(JSONBodyHandler(request)) \
+            .put() \
+            .go()
+
+    def update_group_members(self, request):
+        """
+        Creates a member in a group.
+
+        Attributes:
+            request: The request object that contains all the information used to create the group member(s).
+        """
+        return self.start().uri('/api/group/member') \
+            .body_handler(JSONBodyHandler(request)) \
+            .put() \
+            .go()
+
+    def update_ip_access_control_list(self, access_control_list_id, request):
+        """
+        Updates the IP Access Control List with the given Id.
+
+        Attributes:
+            access_control_list_id: The Id of the IP Access Control List to update.
+            request: The request that contains all the new IP Access Control List information.
+        """
+        return self.start().uri('/api/ip-acl') \
+            .url_segment(access_control_list_id) \
+            .body_handler(JSONBodyHandler(request)) \
+            .put() \
+            .go()
+
+    def update_identity_provider(self, identity_provider_id, request):
+        """
+        Updates the identity provider with the given Id.
+
+        Attributes:
+            identity_provider_id: The Id of the identity provider to update.
+            request: The request object that contains the updated identity provider.
+        """
+        return self.start().uri('/api/identity-provider') \
+            .url_segment(identity_provider_id) \
+            .body_handler(JSONBodyHandler(request)) \
+            .put() \
+            .go()
+
+    def update_integrations(self, request):
+        """
+        Updates the available integrations.
+
+        Attributes:
+            request: The request that contains all the new integration information.
+        """
+        return self.start().uri('/api/integration') \
+            .body_handler(JSONBodyHandler(request)) \
+            .put() \
+            .go()
+
+    def update_key(self, key_id, request):
+        """
+        Updates the key with the given Id.
+
+        Attributes:
+            key_id: The Id of the key to update.
+            request: The request that contains all the new key information.
+        """
+        return self.start().uri('/api/key') \
+            .url_segment(key_id) \
+            .body_handler(JSONBodyHandler(request)) \
+            .put() \
+            .go()
+
+    def update_lambda(self, lambda_id, request):
+        """
+        Updates the lambda with the given Id.
+
+        Attributes:
+            lambda_id: The Id of the lambda to update.
+            request: The request that contains all the new lambda information.
+        """
+        return self.start().uri('/api/lambda') \
+            .url_segment(lambda_id) \
+            .body_handler(JSONBodyHandler(request)) \
+            .put() \
+            .go()
+
+    def update_message_template(self, message_template_id, request):
+        """
+        Updates the message template with the given Id.
+
+        Attributes:
+            message_template_id: The Id of the message template to update.
+            request: The request that contains all the new message template information.
+        """
+        return self.start().uri('/api/message/template') \
+            .url_segment(message_template_id) \
+            .body_handler(JSONBodyHandler(request)) \
+            .put() \
+            .go()
+
+    def update_messenger(self, messenger_id, request):
+        """
+        Updates the messenger with the given Id.
+
+        Attributes:
+            messenger_id: The Id of the messenger to update.
+            request: The request object that contains all the new messenger information.
+        """
+        return self.start().uri('/api/messenger') \
+            .url_segment(messenger_id) \
+            .body_handler(JSONBodyHandler(request)) \
+            .put() \
+            .go()
+
+    def update_o_auth_scope(self, application_id, scope_id, request):
+        """
+        Updates the OAuth scope with the given Id for the application.
+
+        Attributes:
+            application_id: The Id of the application that the OAuth scope belongs to.
+            scope_id: The Id of the OAuth scope to update.
+            request: The request that contains all the new OAuth scope information.
+        """
+        return self.start().uri('/api/application') \
+            .url_segment(application_id) \
+            .url_segment("scope") \
+            .url_segment(scope_id) \
+            .body_handler(JSONBodyHandler(request)) \
+            .put() \
+            .go()
+
+    def update_registration(self, user_id, request):
+        """
+        Updates the registration for the user with the given Id and the application defined in the request.
+
+        Attributes:
+            user_id: The Id of the user whose registration is going to be updated.
+            request: The request that contains all the new registration information.
+        """
+        return self.start().uri('/api/user/registration') \
+            .url_segment(user_id) \
+            .body_handler(JSONBodyHandler(request)) \
+            .put() \
+            .go()
+
+    def update_system_configuration(self, request):
+        """
+        Updates the system configuration.
+
+        Attributes:
+            request: The request that contains all the new system configuration information.
+        """
+        return self.start().uri('/api/system-configuration') \
+            .body_handler(JSONBodyHandler(request)) \
+            .put() \
+            .go()
+
+    def update_tenant(self, tenant_id, request):
+        """
+        Updates the tenant with the given Id.
+
+        Attributes:
+            tenant_id: The Id of the tenant to update.
+            request: The request that contains all the new tenant information.
+        """
+        return self.start().uri('/api/tenant') \
+            .url_segment(tenant_id) \
+            .body_handler(JSONBodyHandler(request)) \
+            .put() \
+            .go()
+
+    def update_tenant_manager_configuration(self, request):
+        """
+        Updates the Tenant Manager configuration.
+
+        Attributes:
+            request: The request that contains all the new Tenant Manager configuration information.
+        """
+        return self.start().uri('/api/tenant-manager') \
+            .body_handler(JSONBodyHandler(request)) \
+            .put() \
+            .go()
+
+    def update_tenant_manager_identity_provider_type_configuration(self, _type, request):
+        """
+        Updates the tenant manager identity provider type configuration for the given identity provider type.
+
+        Attributes:
+            _type: The type of the identity provider.
+            request: The request object that contains the updated tenant manager identity provider type configuration.
+        """
+        return self.start().uri('/api/tenant-manager/identity-provider') \
+            .url_segment(_type) \
+            .body_handler(JSONBodyHandler(request)) \
+            .put() \
+            .go()
+
+    def update_theme(self, theme_id, request):
+        """
+        Updates the theme with the given Id.
+
+        Attributes:
+            theme_id: The Id of the theme to update.
+            request: The request that contains all the new theme information.
+        """
+        return self.start().uri('/api/theme') \
+            .url_segment(theme_id) \
+            .body_handler(JSONBodyHandler(request)) \
+            .put() \
+            .go()
+
+    def update_user(self, user_id, request):
+        """
+        Updates the user with the given Id.
+
+        Attributes:
+            user_id: The Id of the user to update.
+            request: The request that contains all the new user information.
+        """
+        return self.start().uri('/api/user') \
+            .url_segment(user_id) \
+            .body_handler(JSONBodyHandler(request)) \
+            .put() \
+            .go()
+
+    def update_user_action(self, user_action_id, request):
+        """
+        Updates the user action with the given Id.
+
+        Attributes:
+            user_action_id: The Id of the user action to update.
+            request: The request that contains all the new user action information.
+        """
+        return self.start().uri('/api/user-action') \
+            .url_segment(user_action_id) \
+            .body_handler(JSONBodyHandler(request)) \
+            .put() \
+            .go()
+
+    def update_user_action_reason(self, user_action_reason_id, request):
+        """
+        Updates the user action reason with the given Id.
+
+        Attributes:
+            user_action_reason_id: The Id of the user action reason to update.
+            request: The request that contains all the new user action reason information.
+        """
+        return self.start().uri('/api/user-action-reason') \
+            .url_segment(user_action_reason_id) \
+            .body_handler(JSONBodyHandler(request)) \
+            .put() \
+            .go()
+
+    def update_user_consent(self, user_consent_id, request):
+        """
+        Updates a single User consent by Id.
+
+        Attributes:
+            user_consent_id: The User Consent Id
+            request: The request that contains the user consent information.
+        """
+        return self.start().uri('/api/user/consent') \
+            .url_segment(user_consent_id) \
+            .body_handler(JSONBodyHandler(request)) \
+            .put() \
+            .go()
+
+    def update_webhook(self, webhook_id, request):
+        """
+        Updates the webhook with the given Id.
+
+        Attributes:
+            webhook_id: The Id of the webhook to update.
+            request: The request that contains all the new webhook information.
+        """
+        return self.start().uri('/api/webhook') \
+            .url_segment(webhook_id) \
+            .body_handler(JSONBodyHandler(request)) \
+            .put() \
+            .go()
+
+    def upsert_entity_grant(self, entity_id, request):
+        """
+        Creates or updates an Entity Grant. This is when a User/Entity is granted permissions to an Entity.
+
+        Attributes:
+            entity_id: The Id of the Entity that the User/Entity is being granted access to.
+            request: The request object that contains all the information used to create the Entity Grant.
+        """
+        return self.start().uri('/api/entity') \
+            .url_segment(entity_id) \
+            .url_segment("grant") \
+            .body_handler(JSONBodyHandler(request)) \
+            .post() \
+            .go()
+
+    def validate_device(self, user_code, client_id):
+        """
+        Validates the end-user provided user_code from the user-interaction of the Device Authorization Grant.
+        If you build your own activation form you should validate the user provided code prior to beginning the Authorization grant.
+
+        Attributes:
+            user_code: The end-user verification code.
+            client_id: The client Id.
+        """
+        return self.start_anonymous().uri('/oauth2/device/validate') \
+            .url_parameter('user_code', self.convert_true_false(user_code)) \
+            .url_parameter('client_id', self.convert_true_false(client_id)) \
+            .get() \
+            .go()
+
+    def validate_device_with_request(self, request):
+        """
+        Validates the end-user provided user_code from the user-interaction of the Device Authorization Grant.
+        If you build your own activation form you should validate the user provided code prior to beginning the Authorization grant.
+
+        Attributes:
+            request: The device validation request.
+        """
+        return self.start_anonymous().uri('/oauth2/device/validate') \
+            .url_parameter('client_id', request.client_id) \
+            .url_parameter('tenantId', str(request.tenantId) if request.tenantId is not None else None) \
+            .url_parameter('user_code', request.user_code) \
+            .get() \
+            .go()
+
+    def validate_jwt(self, encoded_jwt):
+        """
+        Validates the provided JWT (encoded JWT string) to ensure the token is valid. A valid access token is properly
+        signed and not expired.
+        <p>
+        This API may be used to verify the JWT as well as decode the encoded JWT into human readable identity claims.
+
+        Attributes:
+            encoded_jwt: The encoded JWT (access token).
+        """
+        return self.start_anonymous().uri('/api/jwt/validate') \
+            .authorization("Bearer " + encoded_jwt) \
+            .get() \
+            .go()
+
+    def vend_jwt(self, request):
+        """
+        It's a JWT vending machine!
+
+        Issue a new access token (JWT) with the provided claims in the request. This JWT is not scoped to a tenant or user, it is a free form
+        token that will contain what claims you provide.
+        <p>
+        The iat, exp and jti claims will be added by FusionAuth, all other claims must be provided by the caller.
+
+        If a TTL is not provided in the request, the TTL will be retrieved from the default Tenant or the Tenant specified on the request either
+        by way of the X-FusionAuth-TenantId request header, or a tenant scoped API key.
+
+        Attributes:
+            request: The request that contains all the claims for this JWT.
+        """
+        return self.start().uri('/api/jwt/vend') \
+            .body_handler(JSONBodyHandler(request)) \
+            .post() \
+            .go()
+
+    @deprecated("This method has been renamed to verify_email_address and changed to take a JSON request body, use that method instead.")
+    def verify_email(self, verification_id):
+        """
+        Confirms a email verification. The Id given is usually from an email sent to the user.
+
+        Attributes:
+            verification_id: The email verification Id sent to the user.
+        """
+        return self.start_anonymous().uri('/api/user/verify-email') \
+            .url_segment(verification_id) \
+            .post() \
+            .go()
+
+    def verify_email_address(self, request):
+        """
+        Confirms a user's email address.
+
+        The request body will contain the verificationId. You may also be required to send a one-time use code based upon your configuration. When
+        the tenant is configured to gate a user until their email address is verified, this procedures requires two values instead of one.
+        The verificationId is a high entropy value and the one-time use code is a low entropy value that is easily entered in a user interactive form. The
+        two values together are able to confirm a user's email address and mark the user's email address as verified.
+
+        Attributes:
+            request: The request that contains the verificationId and optional one-time use code paired with the verificationId.
+        """
+        return self.start_anonymous().uri('/api/user/verify-email') \
+            .body_handler(JSONBodyHandler(request)) \
+            .post() \
+            .go()
+
+    def verify_email_address_by_user_id(self, request):
+        """
+        Administratively verify a user's email address. Use this method to bypass email verification for the user.
+
+        The request body will contain the userId to be verified. An API key is required when sending the userId in the request body.
+
+        Attributes:
+            request: The request that contains the userId to verify.
+        """
+        return self.start().uri('/api/user/verify-email') \
+            .body_handler(JSONBodyHandler(request)) \
+            .post() \
+            .go()
+
+    def verify_identity(self, request):
+        """
+        Administratively verify a user identity.
+
+        Attributes:
+            request: The identity verify request that contains information to verify the identity.
+        """
+        return self.start().uri('/api/identity/verify') \
+            .body_handler(JSONBodyHandler(request)) \
+            .post() \
+            .go()
+
+    @deprecated("This method has been renamed to verify_user_registration and changed to take a JSON request body, use that method instead.")
+    def verify_registration(self, verification_id):
+        """
+        Confirms an application registration. The Id given is usually from an email sent to the user.
+
+        Attributes:
+            verification_id: The registration verification Id sent to the user.
+        """
+        return self.start_anonymous().uri('/api/user/verify-registration') \
+            .url_segment(verification_id) \
+            .post() \
+            .go()
+
+    def verify_user_registration(self, request):
+        """
+        Confirms a user's registration.
+
+        The request body will contain the verificationId. You may also be required to send a one-time use code based upon your configuration. When
+        the application is configured to gate a user until their registration is verified, this procedures requires two values instead of one.
+        The verificationId is a high entropy value and the one-time use code is a low entropy value that is easily entered in a user interactive form. The
+        two values together are able to confirm a user's registration and mark the user's registration as verified.
+
+        Attributes:
+            request: The request that contains the verificationId and optional one-time use code paired with the verificationId.
+        """
+        return self.start_anonymous().uri('/api/user/verify-registration') \
+            .body_handler(JSONBodyHandler(request)) \
+            .post() \
+            .go()
+
+    def convert_true_false(self,val):
+        if val == True:
+            return 'true'
+        if val == False:
+            return 'false'
+        return val
+
+    def start(self):
+        return self.start_anonymous().authorization(self.api_key)
+
+    def start_anonymous(self):
+        client = RESTClient().url(self.base_url)
+        if self.tenant_id is not None:
+            client.header("X-FusionAuth-TenantId", self.tenant_id)
+
+        return client

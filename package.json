@@ -1,0 +1,50 @@
+{
+  "name": "nerfengine",
+  "version": "1.0.0",
+  "main": "express-backend.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "test": "node run-tests.js",
+    "test:basic": "jest basic.test.js",
+    "test:coordination": "jest coordinate-validation.test.js",
+    "test:cesium": "jest cesium-patches.test.js",
+    "test:integration": "jest command-ops-integration.test.js",
+    "test:enhanced": "jest enhanced-command-ops-visualization.test.js",
+    "test:all": "jest --verbose",
+    "test:no-browser": "node run-no-browser-tests.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bgilbert1984/NerfEngine.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/bgilbert1984/NerfEngine/issues"
+  },
+  "homepage": "https://github.com/bgilbert1984/NerfEngine#readme",
+  "description": "",
+  "dependencies": {
+    "axios": "^1.9.0",
+    "bcrypt": "^5.1.1",
+    "bull": "^4.16.5",
+    "cors": "^2.8.5",
+    "dotenv": "^16.5.0",
+    "express": "^5.1.0",
+    "express-validator": "^7.2.1",
+    "helmet": "^8.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "mongoose": "^8.13.2",
+    "morgan": "^1.10.0",
+    "multer": "^1.4.5-lts.2",
+    "socket.io": "^4.8.1",
+    "uuid": "^11.1.0"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "puppeteer": "^21.11.0"
+  }
+}

@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>X-37B Space Plane Mission Simulation</title>
+    <link rel="stylesheet" href="https://cesium.com/downloads/cesiumjs/releases/1.95/Build/Cesium/Widgets/widgets.css" />
+    <script src="https://cesium.com/downloads/cesiumjs/releases/1.95/Build/Cesium/Cesium.js"></script>
+    <script src="cesium-minimal-globe.js"></script>
+    <script src="x37b-space-mission.js"></script>
+    <link rel="stylesheet" href="x37b-mission-styles.css" />
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            overflow: hidden;
+            background-color: #000;
+            color: #fff;
+            font-family: Arial, sans-serif;
+        }
+
+        #cesiumContainer {
+            width: 100%;
+            height: 100%;
+            position: absolute;
+            top: 0;
+            left: 0;
+        }
+
+        .info-box {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            background: rgba(0, 21, 64, 0.8);
+            padding: 15px;
+            border-radius: 5px;
+            max-width: 400px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
+            z-index: 1000;
+        }
+
+        .info-box h2 {
+            margin-top: 0;
+            color: #3498db;
+            border-bottom: 1px solid #3498db;
+            padding-bottom: 5px;
+        }
+
+        .info-box p {
+            margin: 10px 0;
+            font-size: 14px;
+            line-height: 1.4;
+        }
+
+        .source-info {
+            font-size: 12px;
+            color: #aaa;
+            margin-top: 15px;
+            border-top: 1px solid #555;
+            padding-top: 5px;
+        }
+
+        .credits {
+            position: absolute;
+            bottom: 10px;
+            right: 10px;
+            font-size: 12px;
+            color: #aaa;
+            text-align: right;
+            z-index: 1000;
+        }
+    </style>
+</head>
+<body>
+    <div id="cesiumContainer"></div>
+
+    <div class="info-box">
+        <h2>X-37B Space Debris Collection Mission</h2>
+        <p>This simulation shows how the X-37B Space Plane could collect the oldest known space objects in orbit and deliver them to the International Space Station (ISS) for raw materials processing.</p>
+        <p>The simulation includes real orbital data for some of the oldest objects still in Earth orbit, including Vanguard 1 (launched in 1958), which is the oldest artificial satellite still orbiting Earth.</p>
+        <p>Click "Start Mission" to begin the simulation and watch as the X-37B plots an optimal path to collect and deliver these objects.</p>
+        <div class="source-info">
+            <strong>Note:</strong> Objects and orbits based on real data, but collection mission is simulated for educational purposes.
+        </div>
+    </div>
+
+    <div class="credits">
+        <div>Created with Cesium</div>
+        <div>RF SCYTHE Project - 2025</div>
+    </div>
+
+    <script>
+        // Initialize Cesium viewer with minimal components
+        let viewer;
+
+        // Use RF_SCYTHE minimal viewer if available
+        if (typeof RF_SCYTHE !== 'undefined' && typeof RF_SCYTHE.initializeMinimalViewer === 'function') {
+            console.log('Using RF_SCYTHE minimal viewer');
+            viewer = RF_SCYTHE.initializeMinimalViewer('cesiumContainer');
+        } else {
+            // Fallback to standard initialization
+            console.log('Using standard Cesium viewer');
+            Cesium.Ion.defaultAccessToken = window.CESIUM_ION_TOKEN || window.SCYTHE_CESIUM_ION_TOKEN || '';
+
+            viewer = new Cesium.Viewer('cesiumContainer', {
+                // Use basic WGS84 ellipsoid instead of terrain
+                terrainProvider: new Cesium.EllipsoidTerrainProvider(),
+
+                // Basic configuration
+                sceneMode: Cesium.SceneMode.SCENE3D,
+                timeline: false,
+                animation: false,
+                baseLayerPicker: false,
+                geocoder: false,
+                homeButton: false,
+                sceneModePicker: false,
+                navigationHelpButton: false,
+                fullscreenButton: false,
+
+                // Optimize performance
+                shadows: false,
+                skyBox: false,
+                skyAtmosphere: true,
+
+                // Use basic imagery
+                imageryProvider: new Cesium.IonImageryProvider({ assetId: 3 })
+            });
+
+            // Basic Earth appearance
+            viewer.scene.globe.enableLighting = true;
+        }
+
+        // Set initial view
+        viewer.camera.flyTo({
+            destination: Cesium.Cartesian3.fromDegrees(-90, 0, 10000000),
+            orientation: {
+                heading: Cesium.Math.toRadians(0),
+                pitch: Cesium.Math.toRadians(-30),
+                roll: 0.0
+            }
+        });
+
+        // Initialize X-37B mission
+        document.addEventListener('DOMContentLoaded', function() {
+            // Initialize simulation when DOM is fully loaded
+            RF_SCYTHE.X37BMission.init(viewer);
+
+            // Set up event handlers
+            viewer.clock.onTick.addEventListener(function(clock) {
+                // Any per-frame updates can go here
+            });
+        });
+    </script>
+</body>
+</html>

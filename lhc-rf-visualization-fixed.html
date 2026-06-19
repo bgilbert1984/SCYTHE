@@ -1,0 +1,1514 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LHC RF Impact Visualization - RF SCYTHE</title>
+
+    <!-- Cesium for 3D visualization -->
+    <link rel="stylesheet" href="https://cesium.com/downloads/cesiumjs/releases/1.95/Build/Cesium/Widgets/widgets.css" />
+    <script src="https://cesium.com/downloads/cesiumjs/releases/1.95/Build/Cesium/Cesium.js"></script>
+
+    <!-- Chart.js for data visualization with date adapter -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@3.7.1/dist/chart.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/luxon@2.3.1/build/global/luxon.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-luxon@1.1.0/dist/chartjs-adapter-luxon.min.js"></script>
+
+    <!-- Import THREE.js for RF Hypergraph visualization -->
+    <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.158.0/examples/jsm/"
+      }
+    }
+    </script>
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+        // Make THREE.js available globally with all properties defined
+        window.THREE = THREE;
+        // Create a separate property for OrbitControls
+        window.ThreeOrbitControls = OrbitControls;
+    </script>
+
+    <!-- RF SCYTHE components - FIXED VERSION -->
+    <script src="lhc-rf-cesium-helper.js"></script>
+    <script src="rfScytheHypergraphMini.js"></script>
+
+    <!-- Unified CSS -->
+    <link rel="stylesheet" href="lhc-rf-visualization.css">
+    <script>
+    // Browser-compatible version of ionosphere_modeling.js
+    // Create namespace for ionosphere modeling
+    const IonoSphere = {};
+    IonoSphere.EventEmitter = class extends EventTarget {};
+
+    // Configuration for WebSDR integration
+    const WEBSDR_CONFIG = {
+        // WebSDR bridge WebSocket (connects to the Python WebSDR bridge)
+        bridgeUrl: "ws://localhost:8765",
+
+        // Time to wait before attempting to reconnect to the bridge
+        reconnectInterval: 5000,
+
+        // Maximum number of reconnection attempts
+        maxReconnectAttempts: 10
+    };
+
+    // Configuration for ionospheric modeling
+    const IONOSPHERE_CONFIG = {
+        // Space weather data API endpoints
+        spaceWeatherApi: "https://services.swpc.noaa.gov/json/goes/primary",
+
+        // Ionospheric data update interval (ms)
+        updateInterval: 60000,  // 1 minute
+
+        // Default ionospheric layer heights (km)
+        defaultLayers: {
+            D: { minHeight: 60, maxHeight: 90, active: true },
+            E: { minHeight: 90, maxHeight: 150, active: true },
+            F1: { minHeight: 150, maxHeight: 210, active: true },
+            F2: { minHeight: 210, maxHeight: 400, active: true }
+        },
+
+        // Frequency ranges for different propagation types
+        frequencyRanges: {
+            groundWave: { min: 0.3, max: 3.0 },      // MHz
+            skyWave: { min: 3.0, max: 30.0 },        // MHz
+            lineOfSight: { min: 30.0, max: 300.0 }   // MHz
+        },
+
+        // Default parameters for simulation
+        maxSkipDistance: 4000,   // km
+        maxReflections: 3,       // Maximum number of ionospheric reflections to model
+        rayTracingResolution: 1  // Degree resolution for ray tracing
+    };
+    </script>
+
+    <style>
+        body, html {
+            height: 100%;
+            margin: 0;
+            padding: 0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            overflow: hidden;
+            background-color: #0d1117;
+            color: #c9d1d9;
+        }
+
+        #app-container {
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+        }
+
+        #header {
+            background-color: #161b22;
+            padding: 10px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid #30363d;
+        }
+
+        #header h1 {
+            margin: 0;
+            font-size: 1.5rem;
+            color: #58a6ff;
+        }
+
+        #tabs {
+            display: flex;
+            background-color: #0d1117;
+            border-bottom: 1px solid #30363d;
+        }
+
+        .tab {
+            padding: 10px 20px;
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+            transition: all 0.3s;
+        }
+
+        .tab:hover {
+            background-color: #161b22;
+        }
+
+        .tab.active {
+            border-bottom-color: #58a6ff;
+            background-color: #161b22;
+            color: #58a6ff;
+        }
+
+        #content {
+            flex: 1;
+            display: flex;
+            position: relative;
+        }
+
+        .tab-content {
+            display: none;
+            width: 100%;
+            height: 100%;
+        }
+
+        .tab-content.active {
+            display: flex;
+        }
+
+        #cesiumContainer {
+            width: 100%;
+            height: 100%;
+        }
+
+        #chartsContainer {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-wrap: wrap;
+            padding: 20px;
+            overflow-y: auto;
+            gap: 20px;
+            justify-content: space-around;
+        }
+
+        .chart-wrapper {
+            background-color: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 5px;
+            padding: 15px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            width: calc(50% - 40px);
+            height: 300px;
+            max-width: 600px;
+        }
+
+        .chart-title {
+            font-size: 1rem;
+            margin-top: 0;
+            margin-bottom: 10px;
+            color: #58a6ff;
+            text-align: center;
+        }
+
+        .data-panel {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background-color: rgba(22, 27, 34, 0.85);
+            border: 1px solid #30363d;
+            border-radius: 5px;
+            width: 340px;
+            max-height: calc(100% - 40px);
+            overflow-y: auto;
+            padding: 15px;
+            z-index: 100;
+        }
+
+        .panel-section {
+            margin-bottom: 15px;
+            border-bottom: 1px solid #30363d;
+            padding-bottom: 15px;
+        }
+
+        .panel-section:last-child {
+            border-bottom: none;
+            margin-bottom: 0;
+            padding-bottom: 0;
+        }
+
+        .panel-title {
+            margin-top: 0;
+            margin-bottom: 10px;
+            font-size: 1.1rem;
+            color: #58a6ff;
+        }
+
+        .control-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+
+        .data-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 5px;
+            font-size: 0.9rem;
+        }
+
+        .data-label {
+            color: #8b949e;
+        }
+
+        .data-value {
+            font-weight: bold;
+        }
+
+        .highlight-value {
+            color: #58a6ff;
+        }
+
+        button {
+            background-color: #238636;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            transition: background-color 0.3s;
+        }
+
+        button:hover {
+            background-color: #2ea043;
+        }
+
+        button:disabled {
+            background-color: #3b4045;
+            cursor: not-allowed;
+        }
+
+        .slider-container {
+            width: 100%;
+            margin-bottom: 10px;
+        }
+
+        .slider-container label {
+            display: block;
+            margin-bottom: 5px;
+            font-size: 0.9rem;
+            color: #8b949e;
+        }
+
+        .slider-container input {
+            width: 100%;
+        }
+
+        .anomaly-indicator {
+            background-color: #1f6feb;
+            color: white;
+            padding: 3px 8px;
+            border-radius: 3px;
+            font-size: 0.8rem;
+            margin-left: 5px;
+        }
+
+        .warning-indicator {
+            background-color: #da3633;
+            color: white;
+            padding: 3px 8px;
+            border-radius: 3px;
+            font-size: 0.8rem;
+            margin-left: 5px;
+        }
+
+        .integration-status {
+            display: flex;
+            align-items: center;
+            margin: 5px 0;
+        }
+
+        .status-indicator {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            margin-right: 10px;
+        }
+
+        .status-active {
+            background-color: #238636;
+        }
+
+        .status-inactive {
+            background-color: #da3633;
+        }
+
+        .status-partial {
+            background-color: #f0883e;
+        }
+
+        #integratedAnalysisTab {
+            display: flex;
+            flex-direction: column;
+            width: 100%;
+            padding: 20px;
+            overflow-y: auto;
+        }
+
+        .analysis-card {
+            background-color: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 5px;
+            padding: 15px;
+            margin-bottom: 20px;
+        }
+
+        .analysis-title {
+            margin-top: 0;
+            font-size: 1.2rem;
+            color: #58a6ff;
+            margin-bottom: 15px;
+        }
+
+        .data-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 20px;
+        }
+
+        .data-table th, .data-table td {
+            text-align: left;
+            padding: 8px 12px;
+            border-bottom: 1px solid #30363d;
+        }
+
+        .data-table th {
+            background-color: #0d1117;
+            color: #8b949e;
+            font-weight: normal;
+        }
+
+        .data-table tr:hover {
+            background-color: #1c2128;
+        }
+
+        #loadingOverlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.8);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 9999;
+            color: white;
+            font-size: 24px;
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        .loading-spinner {
+            border: 5px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top: 5px solid #58a6ff;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+            margin-right: 20px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        @media (max-width: 768px) {
+            .chart-wrapper {
+                width: 100%;
+            }
+
+            .data-panel {
+                width: 100%;
+                max-width: 100%;
+                top: auto;
+                right: auto;
+                bottom: 0;
+                left: 0;
+                border-radius: 0;
+                max-height: 40%;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div id="app-container">
+        <div id="loadingOverlay">
+            <div style="display: flex; flex-direction: column; align-items: center;">
+                <div style="display: flex; align-items: center; margin-bottom: 20px;">
+                    <div class="loading-spinner"></div>
+                    <h2>Loading LHC RF Visualization...</h2>
+                </div>
+                <p>Initializing visualization components and data...</p>
+            </div>
+        </div>
+
+        <div id="header">
+            <h1>Large Hadron Collider RF Impact Visualization</h1>
+            <div id="time-display">2025-05-01 12:00:00</div>
+        </div>
+
+        <div id="tabs">
+            <div class="tab active" data-tab="visualization">3D Visualization</div>
+            <div class="tab" data-tab="data">Data Analysis</div>
+            <div class="tab" data-tab="hypergraph">RF Hypergraph</div>
+            <div class="tab" data-tab="integrated">Integrated Analysis</div>
+        </div>
+
+        <div id="content">
+            <div class="tab-content active" data-tab="visualization">
+                <div id="cesiumContainer"></div>
+
+                <div class="data-panel">
+                    <div class="panel-section">
+                        <h3 class="panel-title">LHC Status</h3>
+                        <div class="data-row">
+                            <span class="data-label">Operation Mode:</span>
+                            <span class="data-value" id="lhc-mode">Physics Data Taking</span>
+                        </div>
+                        <div class="data-row">
+                            <span class="data-label">Beam Energy:</span>
+                            <span class="data-value" id="beam-energy">6.8 TeV</span>
+                        </div>
+                        <div class="data-row">
+                            <span class="data-label">RF Frequency:</span>
+                            <span class="data-value" id="rf-frequency">400.8 MHz</span>
+                        </div>
+                        <div class="data-row">
+                            <span class="data-label">Current Luminosity:</span>
+                            <span class="data-value" id="luminosity">2.1e34 cm<sup>-2</sup>s<sup>-1</sup></span>
+                        </div>
+                        <div class="data-row">
+                            <span class="data-label">Collision Count:</span>
+                            <span class="data-value" id="collision-count">0</span>
+                        </div>
+                    </div>
+
+                    <div class="panel-section">
+                        <h3 class="panel-title">RF Impact Analysis</h3>
+                        <div class="data-row">
+                            <span class="data-label">RF Anomalies Detected:</span>
+                            <span class="data-value" id="anomaly-count">0</span>
+                        </div>
+                        <div class="data-row">
+                            <span class="data-label">Latest Anomaly:</span>
+                            <span class="data-value" id="latest-anomaly">None</span>
+                        </div>
+                        <div class="data-row">
+                            <span class="data-label">Correlation Factor:</span>
+                            <span class="data-value" id="correlation-factor">0.00</span>
+                        </div>
+                        <div class="data-row">
+                            <span class="data-label">Signal Classification:</span>
+                            <span class="data-value" id="signal-class">N/A</span>
+                        </div>
+                    </div>
+
+                    <div class="panel-section">
+                        <h3 class="panel-title">Simulation Controls</h3>
+                        <div class="slider-container">
+                            <label for="energy-slider">Beam Energy (TeV):</label>
+                            <input type="range" id="energy-slider" min="0.5" max="7" step="0.1" value="6.8">
+                        </div>
+                        <div class="slider-container">
+                            <label for="rf-power-slider">RF Power (MW):</label>
+                            <input type="range" id="rf-power-slider" min="0" max="16" step="0.1" value="16">
+                        </div>
+                        <div class="control-row">
+                            <button id="start-simulation">Start Simulation</button>
+                            <button id="trigger-collision" disabled>Trigger Collision</button>
+                        </div>
+                    </div>
+
+                    <div class="panel-section">
+                        <h3 class="panel-title">RF SCYTHE Integration</h3>
+                        <div class="integration-status">
+                            <div class="status-indicator status-active"></div>
+                            <span>Ionosphere Modeling</span>
+                        </div>
+                        <div class="integration-status">
+                            <div class="status-indicator status-active"></div>
+                            <span>Signal Processing</span>
+                        </div>
+                        <div class="integration-status">
+                            <div class="status-indicator status-partial"></div>
+                            <span>JWST Data Integration</span>
+                        </div>
+                        <div class="integration-status">
+                            <div class="status-indicator status-active"></div>
+                            <span>RF Hypergraph Analysis</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="tab-content" data-tab="data">
+                <div id="chartsContainer">
+                    <div class="chart-wrapper">
+                        <h3 class="chart-title">LHC-RF Event Correlation Timeline</h3>
+                        <canvas id="timelineChart"></canvas>
+                    </div>
+                    <div class="chart-wrapper">
+                        <h3 class="chart-title">RF Anomaly Frequency Distribution</h3>
+                        <canvas id="frequencyChart"></canvas>
+                    </div>
+                    <div class="chart-wrapper">
+                        <h3 class="chart-title">Beam Energy vs RF Effect Strength</h3>
+                        <canvas id="energyChart"></canvas>
+                    </div>
+                    <div class="chart-wrapper">
+                        <h3 class="chart-title">Quantum Effects on RF Propagation</h3>
+                        <canvas id="quantumChart"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <div class="tab-content" data-tab="hypergraph">
+                <div id="hypergraphContainer" style="width: 100%; height: 100%;"></div>
+
+                <div class="data-panel">
+                    <div class="panel-section">
+                        <h3 class="panel-title">RF Hypergraph Analysis</h3>
+                        <div class="data-row">
+                            <span class="data-label">Nodes:</span>
+                            <span class="data-value" id="hypergraph-node-count">0</span>
+                        </div>
+                        <div class="data-row">
+                            <span class="data-label">Edges:</span>
+                            <span class="data-value" id="hypergraph-edge-count">0</span>
+                        </div>
+                        <div class="data-row">
+                            <span class="data-label">Hyperedges:</span>
+                            <span class="data-value" id="hypergraph-hyperedge-count">0</span>
+                        </div>
+                        <div class="data-row">
+                            <span class="data-label">Network Density:</span>
+                            <span class="data-value" id="hypergraph-density">0.00</span>
+                        </div>
+                    </div>
+
+                    <div class="panel-section">
+                        <h3 class="panel-title">Controls</h3>
+                        <div class="control-row">
+                            <button id="generate-hypergraph">Generate Example</button>
+                            <button id="clear-hypergraph">Clear</button>
+                        </div>
+                        <div class="slider-container">
+                            <label for="node-count-slider">Node Count:</label>
+                            <input type="range" id="node-count-slider" min="5" max="50" step="1" value="20">
+                        </div>
+                        <div class="slider-container">
+                            <label for="hyperedge-count-slider">Hyperedge Count:</label>
+                            <input type="range" id="hyperedge-count-slider" min="0" max="20" step="1" value="10">
+                        </div>
+                    </div>
+
+                    <div class="panel-section">
+                        <h3 class="panel-title">Most Central Nodes</h3>
+                        <div id="central-nodes-list">
+                            <div class="data-row">
+                                <span class="data-label">No data available</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="tab-content" data-tab="integrated">
+                <div id="integratedAnalysisTab">
+                    <div class="analysis-card">
+                        <h3 class="analysis-title">LHC-Ionosphere Interaction Analysis</h3>
+                        <p>The Large Hadron Collider's high-energy particle collisions can produce minute effects on Earth's ionosphere, potentially affecting RF signal propagation in ways that can be detected by sensitive instruments.</p>
+
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Parameter</th>
+                                    <th>Pre-Collision</th>
+                                    <th>Post-Collision</th>
+                                    <th>Change</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td>F2 Layer Electron Density</td>
+                                    <td>2.43e11 e-/m³</td>
+                                    <td>2.47e11 e-/m³</td>
+                                    <td>+1.6%</td>
+                                </tr>
+                                <tr>
+                                    <td>D Layer Absorption</td>
+                                    <td>0.32 dB/km</td>
+                                    <td>0.33 dB/km</td>
+                                    <td>+3.1%</td>
+                                </tr>
+                                <tr>
+                                    <td>TEC Value</td>
+                                    <td>12.7 TECU</td>
+                                    <td>12.9 TECU</td>
+                                    <td>+1.6%</td>
+                                </tr>
+                                <tr>
+                                    <td>Local MUF</td>
+                                    <td>14.8 MHz</td>
+                                    <td>15.2 MHz</td>
+                                    <td>+2.7%</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <div class="analysis-card">
+                        <h3 class="analysis-title">Detected RF Anomalies</h3>
+                        <p>RF anomalies correlated with LHC collision events show distinctive patterns in frequency, timing, and signal characteristics. The table below highlights the most significant anomalies detected.</p>
+
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Time (UTC)</th>
+                                    <th>Frequency (MHz)</th>
+                                    <th>Amplitude (dBm)</th>
+                                    <th>Duration (ms)</th>
+                                    <th>Classification</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td>12:03:27.182</td>
+                                    <td>401.2</td>
+                                    <td>-72.4</td>
+                                    <td>14.3</td>
+                                    <td>Harmonic</td>
+                                </tr>
+                                <tr>
+                                    <td>12:17:54.729</td>
+                                    <td>386.5</td>
+                                    <td>-68.7</td>
+                                    <td>5.8</td>
+                                    <td>Impulse</td>
+                                </tr>
+                                <tr>
+                                    <td>12:42:19.035</td>
+                                    <td>415.9</td>
+                                    <td>-85.3</td>
+                                    <td>83.1</td>
+                                    <td>Quantum<span class="anomaly-indicator">Anomaly</span></td>
+                                </tr>
+                                <tr>
+                                    <td>13:11:08.574</td>
+                                    <td>400.8</td>
+                                    <td>-76.2</td>
+                                    <td>7.4</td>
+                                    <td>Normal</td>
+                                </tr>
+                                <tr>
+                                    <td>13:28:36.991</td>
+                                    <td>422.3</td>
+                                    <td>-59.1</td>
+                                    <td>31.6</td>
+                                    <td>Phase Shift<span class="warning-indicator">Warning</span></td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <div class="analysis-card">
+                        <h3 class="analysis-title">Space Weather Impact Assessment</h3>
+                        <p>Integration with JWST data allows correlation between LHC operations, ionospheric conditions, and space weather events, providing insight into how these factors combine to affect RF propagation.</p>
+
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Factor</th>
+                                    <th>Impact Level</th>
+                                    <th>LHC Contribution</th>
+                                    <th>Recommendation</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td>Signal Attenuation</td>
+                                    <td>Low</td>
+                                    <td>0.2%</td>
+                                    <td>No action required</td>
+                                </tr>
+                                <tr>
+                                    <td>GPS Accuracy</td>
+                                    <td>Negligible</td>
+                                    <td>0.05%</td>
+                                    <td>No action required</td>
+                                </tr>
+                                <tr>
+                                    <td>HF Communications</td>
+                                    <td>Moderate</td>
+                                    <td>1.8%</td>
+                                    <td>Monitor during high-energy collisions</td>
+                                </tr>
+                                <tr>
+                                    <td>VHF/UHF Links</td>
+                                    <td>Low</td>
+                                    <td>0.3%</td>
+                                    <td>No action required</td>
+                                </tr>
+                                <tr>
+                                    <td>Quantum RF Effects</td>
+                                    <td>Low-Moderate</td>
+                                    <td>3.2%</td>
+                                    <td>Schedule sensitive comms outside collision windows</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <div class="analysis-card">
+                        <h3 class="analysis-title">RF Hypergraph Network Analysis</h3>
+                        <p>The RF Hypergraph Network Reconstruction system provides advanced analysis of complex higher-order interactions between RF signals.</p>
+
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Network Parameter</th>
+                                    <th>Value</th>
+                                    <th>Change After Collision</th>
+                                    <th>Significance</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td>Network Centrality</td>
+                                    <td>0.78</td>
+                                    <td>+0.12</td>
+                                    <td>High</td>
+                                </tr>
+                                <tr>
+                                    <td>Hyperedge Cardinality</td>
+                                    <td>3.4</td>
+                                    <td>+1.2</td>
+                                    <td>High</td>
+                                </tr>
+                                <tr>
+                                    <td>Signal Coherence</td>
+                                    <td>0.67</td>
+                                    <td>+0.23</td>
+                                    <td>Very High<span class="anomaly-indicator">Key</span></td>
+                                </tr>
+                                <tr>
+                                    <td>Network Resilience</td>
+                                    <td>0.89</td>
+                                    <td>-0.14</td>
+                                    <td>Moderate</td>
+                                </tr>
+                                <tr>
+                                    <td>Quantum Coupling</td>
+                                    <td>0.11</td>
+                                    <td>+0.08</td>
+                                    <td>Low-Moderate</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Global variables
+        let viewer;
+        let simulationActive = false;
+        let collisionCount = 0;
+        let anomalyCount = 0;
+        let charts = {};
+        let timelineData = [];
+        let frequencyData = [];
+
+        // Initialize the application
+        document.addEventListener('DOMContentLoaded', function() {
+            // Initialize loading indicator
+            const loadingOverlay = document.getElementById('loadingOverlay');
+
+            // Initialize components asynchronously to improve performance
+            initializeTabs();
+
+            // Delay heavy initialization to let the UI render first
+            setTimeout(() => {
+                initializeCesium();
+
+                // Continue with other initializations after Cesium is loaded
+                setTimeout(() => {
+                    initializeCharts();
+                    initializeHypergraph();
+                    initializeEventListeners();
+                    updateClock();
+
+                    // Hide loading overlay when everything is initialized
+                    if (loadingOverlay) {
+                        loadingOverlay.classList.add('hidden');
+                    }
+                }, 500);
+            }, 100);
+        });
+
+        // Initialize tab functionality
+        function initializeTabs() {
+            const tabs = document.querySelectorAll('.tab');
+
+            tabs.forEach(tab => {
+                tab.addEventListener('click', () => {
+                    // Remove active class from all tabs
+                    tabs.forEach(t => t.classList.remove('active'));
+
+                    // Add active class to clicked tab
+                    tab.classList.add('active');
+
+                    // Hide all tab content
+                    const tabContents = document.querySelectorAll('.tab-content');
+                    tabContents.forEach(content => content.classList.remove('active'));
+
+                    // Show the corresponding tab content
+                    const tabName = tab.getAttribute('data-tab');
+                    const activeContent = document.querySelector(`.tab-content[data-tab="${tabName}"]`);
+                    activeContent.classList.add('active');
+
+                    // Special handling for different tabs
+                    if (tabName === 'visualization' && viewer) {
+                        // Give Cesium time to resize
+                        setTimeout(() => {
+                            viewer.resize();
+                        }, 100);
+                    } else if (tabName === 'hypergraph' && window.hypergraphViz) {
+                        // Force a resize of the hypergraph renderer
+                        if (window.hypergraphViz.renderer) {
+                            const container = document.getElementById('hypergraphContainer');
+                            if (container) {
+                                window.hypergraphViz.renderer.setSize(container.clientWidth, container.clientHeight);
+                                window.hypergraphViz.camera.aspect = container.clientWidth / container.clientHeight;
+                                window.hypergraphViz.camera.updateProjectionMatrix();
+                            }
+                        }
+                    }
+                });
+            });
+        }
+
+        // Initialize Cesium viewer
+        function initializeCesium() {
+            // Use our new CesiumHelper
+            if (typeof RF_SCYTHE !== 'undefined' && typeof RF_SCYTHE.CesiumHelper !== 'undefined') {
+                console.log('Using RF_SCYTHE CesiumHelper');
+                viewer = RF_SCYTHE.CesiumHelper.initializeViewer('cesiumContainer');
+
+                if (viewer) {
+                    // Fly to CERN
+                    RF_SCYTHE.CesiumHelper.flyToCERN(viewer);
+
+                    // Initialize LHC simulation if available
+                    if (typeof RF_SCYTHE.LHCSimulation !== 'undefined') {
+                        RF_SCYTHE.LHCSimulation.init(viewer);
+                    }
+                }
+            } else {
+                console.error('RF_SCYTHE CesiumHelper not available');
+            }
+        }
+
+        // Initialize charts
+        function initializeCharts() {
+            // Set default animation duration to 0 to improve performance
+            Chart.defaults.animation = false;
+
+            // Create charts with performance optimizations
+            createTimelineChart();
+            createFrequencyChart();
+            createEnergyChart();
+            createQuantumChart();
+        }
+
+        // Create individual charts
+        function createTimelineChart() {
+            const timelineCtx = document.getElementById('timelineChart').getContext('2d');
+            charts.timeline = new Chart(timelineCtx, {
+                type: 'scatter',
+                data: {
+                    datasets: [
+                        {
+                            label: 'LHC Collisions',
+                            data: [],
+                            backgroundColor: 'rgba(255, 99, 132, 0.7)',
+                            borderColor: 'rgba(255, 99, 132, 1)',
+                            borderWidth: 1,
+                            pointRadius: 5
+                        },
+                        {
+                            label: 'RF Anomalies',
+                            data: [],
+                            backgroundColor: 'rgba(54, 162, 235, 0.7)',
+                            borderColor: 'rgba(54, 162, 235, 1)',
+                            borderWidth: 1,
+                            pointRadius: 5
+                        },
+                        {
+                            label: 'Quantum Anomalies',
+                            data: [],
+                            backgroundColor: 'rgba(153, 102, 255, 0.7)',
+                            borderColor: 'rgba(153, 102, 255, 1)',
+                            borderWidth: 1,
+                            pointRadius: 6
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        x: {
+                            type: 'time',
+                            time: {
+                                unit: 'minute',
+                                displayFormats: {
+                                    minute: 'HH:mm:ss'
+                                },
+                                parser: 'yyyy-MM-dd HH:mm:ss'
+                            },
+                            adapters: {
+                                date: {
+                                    locale: 'en'
+                                }
+                            },
+                            title: {
+                                display: true,
+                                text: 'Time (UTC)'
+                            }
+                        },
+                        y: {
+                            title: {
+                                display: true,
+                                text: 'Event Type'
+                            },
+                            ticks: {
+                                callback: function(value) {
+                                    return ['', 'LHC Collision', 'RF Anomaly', 'Quantum Anomaly'][value];
+                                }
+                            },
+                            min: 0.5,
+                            max: 3.5
+                        }
+                    }
+                }
+            });
+        }
+
+        function createFrequencyChart() {
+            const frequencyCtx = document.getElementById('frequencyChart').getContext('2d');
+            charts.frequency = new Chart(frequencyCtx, {
+                type: 'bar',
+                data: {
+                    labels: generateFrequencyBins(380, 420, 10),
+                    datasets: [{
+                        label: 'RF Anomalies',
+                        data: Array(10).fill(0),
+                        backgroundColor: 'rgba(54, 162, 235, 0.5)',
+                        borderColor: 'rgba(54, 162, 235, 1)',
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: 'Number of Anomalies'
+                            }
+                        },
+                        x: {
+                            title: {
+                                display: true,
+                                text: 'Frequency (MHz)'
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        function createEnergyChart() {
+            const energyCtx = document.getElementById('energyChart').getContext('2d');
+            charts.energy = new Chart(energyCtx, {
+                type: 'scatter',
+                data: {
+                    datasets: [{
+                        label: 'RF Effects',
+                        data: [],
+                        backgroundColor: 'rgba(255, 159, 64, 0.7)',
+                        borderColor: 'rgba(255, 159, 64, 1)',
+                        borderWidth: 1,
+                        pointRadius: function(context) {
+                            // Handle empty data points or missing 'v' property
+                            if (!context.raw || typeof context.raw.v === 'undefined') {
+                                return 5; // default radius
+                            }
+                            const value = context.raw.v;
+                            return value * 3 + 4;
+                        }
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            title: {
+                                display: true,
+                                text: 'RF Effect Strength (dB)'
+                            }
+                        },
+                        x: {
+                            title: {
+                                display: true,
+                                text: 'Beam Energy (TeV)'
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        function createQuantumChart() {
+            const quantumCtx = document.getElementById('quantumChart').getContext('2d');
+            charts.quantum = new Chart(quantumCtx, {
+                type: 'line',
+                data: {
+                    labels: [...Array(24).keys()].map(h => `${h.toString().padStart(2, '0')}:00`),
+                    datasets: [
+                        {
+                            label: 'Normal RF Effects',
+                            data: generateRandomData(24, 10, 30),
+                            borderColor: 'rgba(54, 162, 235, 1)',
+                            backgroundColor: 'rgba(54, 162, 235, 0.1)',
+                            fill: true,
+                            tension: 0.4
+                        },
+                        {
+                            label: 'Quantum RF Effects',
+                            data: generateRandomData(24, 20, 60),
+                            borderColor: 'rgba(153, 102, 255, 1)',
+                            backgroundColor: 'rgba(153, 102, 255, 0.1)',
+                            fill: true,
+                            tension: 0.4
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            title: {
+                                display: true,
+                                text: 'Propagation Effect (relative)'
+                            }
+                        },
+                        x: {
+                            title: {
+                                display: true,
+                                text: 'Time of Day (UTC)'
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        // Initialize event listeners
+        function initializeEventListeners() {
+            // Start simulation button
+            document.getElementById('start-simulation').addEventListener('click', function() {
+                if (!simulationActive) {
+                    startSimulation();
+                } else {
+                    stopSimulation();
+                }
+            });
+
+            // Trigger collision button
+            document.getElementById('trigger-collision').addEventListener('click', function() {
+                triggerCollision();
+            });
+
+            // Energy slider
+            document.getElementById('energy-slider').addEventListener('input', function(e) {
+                const energyValue = parseFloat(e.target.value);
+                document.getElementById('beam-energy').textContent = `${energyValue.toFixed(1)} TeV`;
+
+                // Update LHC simulation if available
+                if (typeof RF_SCYTHE !== 'undefined' && typeof RF_SCYTHE.LHCSimulation !== 'undefined') {
+                    // This would update the energy in the simulation
+                }
+            });
+
+            // RF Power slider
+            document.getElementById('rf-power-slider').addEventListener('input', function(e) {
+                const powerValue = parseFloat(e.target.value);
+                document.getElementById('rf-frequency').textContent = `${(400.8 + (powerValue - 8) * 0.01).toFixed(2)} MHz`;
+
+                // Update LHC simulation if available
+                if (typeof RF_SCYTHE !== 'undefined' && typeof RF_SCYTHE.LHCSimulation !== 'undefined') {
+                    // This would update the RF power in the simulation
+                }
+            });
+        }
+
+        // Start the simulation
+        function startSimulation() {
+            simulationActive = true;
+            document.getElementById('start-simulation').textContent = 'Stop Simulation';
+            document.getElementById('trigger-collision').disabled = false;
+            document.getElementById('lhc-mode').textContent = 'Physics Data Taking';
+
+            // Start LHC simulation if available
+            if (typeof RF_SCYTHE !== 'undefined' && typeof RF_SCYTHE.LHCSimulation !== 'undefined') {
+                RF_SCYTHE.LHCSimulation.startSimulation();
+            }
+
+            // Start automatic collision generation
+            startAutomaticCollisions();
+
+            console.log('Simulation started');
+        }
+
+        // Stop the simulation
+        function stopSimulation() {
+            simulationActive = false;
+            document.getElementById('start-simulation').textContent = 'Start Simulation';
+            document.getElementById('trigger-collision').disabled = true;
+            document.getElementById('lhc-mode').textContent = 'Standby';
+
+            // Stop LHC simulation if available
+            if (typeof RF_SCYTHE !== 'undefined' && typeof RF_SCYTHE.LHCSimulation !== 'undefined') {
+                RF_SCYTHE.LHCSimulation.resetSimulation();
+            }
+
+            // Stop automatic collision generation
+            clearTimeout(window.collisionTimeout);
+
+            console.log('Simulation stopped');
+        }
+
+        // Trigger a collision event
+        function triggerCollision() {
+            if (!simulationActive) return;
+
+            collisionCount++;
+            document.getElementById('collision-count').textContent = collisionCount;
+
+            // Trigger LHC collision if available
+            if (typeof RF_SCYTHE !== 'undefined' && typeof RF_SCYTHE.LHCSimulation !== 'undefined') {
+                RF_SCYTHE.LHCSimulation.triggerCollision();
+            }
+
+            // Get current beam energy
+            const beamEnergy = parseFloat(document.getElementById('energy-slider').value);
+
+            // Record collision in timeline
+            const collisionTime = new Date();
+            charts.timeline.data.datasets[0].data.push({
+                x: collisionTime.toISOString(),
+                y: 1
+            });
+            charts.timeline.update();
+
+            // Determine if RF anomaly should occur (80% chance)
+            if (Math.random() < 0.8) {
+                // Delay the RF anomaly slightly (1-500 ms)
+                setTimeout(() => {
+                    generateRFAnomaly(collisionTime, beamEnergy);
+                }, Math.random() * 500 + 1);
+            }
+
+            console.log(`Collision #${collisionCount} triggered at beam energy ${beamEnergy.toFixed(1)} TeV`);
+        }
+
+        // Generate an RF anomaly from a collision
+        function generateRFAnomaly(collisionTime, beamEnergy) {
+            anomalyCount++;
+            document.getElementById('anomaly-count').textContent = anomalyCount;
+
+            // Calculate anomaly parameters based on beam energy
+            const baseFrequency = 400.8; // MHz
+            const frequencyOffset = (Math.random() - 0.5) * 20 * (beamEnergy / 7.0);
+            const frequency = baseFrequency + frequencyOffset;
+
+            // Calculate amplitude (higher energy = stronger effect)
+            const amplitude = -85 + (beamEnergy * 3);
+
+            // Determine if this is a quantum anomaly (rare, higher chance with higher energy)
+            const isQuantumAnomaly = Math.random() < (0.05 + (beamEnergy / 7.0) * 0.1);
+
+            // Record anomaly time (slightly after collision)
+            const anomalyTime = new Date(collisionTime.getTime() + Math.random() * 200);
+
+            // Add to appropriate dataset
+            if (isQuantumAnomaly) {
+                charts.timeline.data.datasets[2].data.push({
+                    x: anomalyTime.toISOString(),
+                    y: 3
+                });
+            } else {
+                charts.timeline.data.datasets[1].data.push({
+                    x: anomalyTime.toISOString(),
+                    y: 2
+                });
+            }
+            charts.timeline.update();
+
+            // Update frequency histogram
+            updateFrequencyHistogram(frequency);
+
+            // Update energy vs effect chart
+            charts.energy.data.datasets[0].data.push({
+                x: beamEnergy,
+                y: amplitude,
+                v: isQuantumAnomaly ? 1.5 : 1.0 // Size variable for point radius
+            });
+            charts.energy.update();
+
+            // Update latest anomaly display
+            document.getElementById('latest-anomaly').textContent =
+                `${frequency.toFixed(1)} MHz @ ${anomalyTime.toLocaleTimeString()}`;
+
+            // Update correlation factor (simplified)
+            const correlation = 0.3 + (beamEnergy / 7.0) * 0.5 + Math.random() * 0.2;
+            document.getElementById('correlation-factor').textContent = correlation.toFixed(2);
+
+            // Update signal classification
+            const classifications = ['Harmonic', 'Impulse', 'Phase Shift', 'Normal'];
+            const signalClass = isQuantumAnomaly ?
+                'Quantum Anomaly' :
+                classifications[Math.floor(Math.random() * classifications.length)];
+            document.getElementById('signal-class').textContent = signalClass;
+
+            console.log(`RF Anomaly #${anomalyCount} detected at ${frequency.toFixed(1)} MHz, ${amplitude.toFixed(1)} dBm, ${isQuantumAnomaly ? 'Quantum' : 'Normal'}`);
+        }
+
+        // Start automatic collision generation
+        function startAutomaticCollisions() {
+            const scheduleNextCollision = () => {
+                // Random interval between 5-15 seconds
+                const interval = Math.random() * 10000 + 5000;
+
+                window.collisionTimeout = setTimeout(() => {
+                    if (simulationActive) {
+                        triggerCollision();
+                        scheduleNextCollision();
+                    }
+                }, interval);
+            };
+
+            scheduleNextCollision();
+        }
+
+        // Update frequency histogram
+        function updateFrequencyHistogram(frequency) {
+            // Find bin index
+            const min = 380;
+            const max = 420;
+            const binCount = 10;
+            const binSize = (max - min) / binCount;
+            const binIndex = Math.floor((frequency - min) / binSize);
+
+            // Update bin count if in range
+            if (binIndex >= 0 && binIndex < binCount) {
+                charts.frequency.data.datasets[0].data[binIndex]++;
+                charts.frequency.update();
+            }
+        }
+
+        // Generate frequency bins for histogram
+        function generateFrequencyBins(min, max, count) {
+            const binSize = (max - min) / count;
+            return Array(count).fill().map((_, i) => {
+                const start = min + i * binSize;
+                return `${start.toFixed(1)}-${(start + binSize).toFixed(1)}`;
+            });
+        }
+
+        // Generate random data for charts
+        function generateRandomData(count, min, max) {
+            return Array(count).fill().map(() => Math.random() * (max - min) + min);
+        }
+
+        // Update clock display
+        function updateClock() {
+            const now = new Date();
+            document.getElementById('time-display').textContent = now.toISOString().slice(0, 19).replace('T', ' ');
+            setTimeout(updateClock, 1000);
+        }
+
+        // Initialize RF Hypergraph visualization
+        function initializeHypergraph() {
+            // Check if RF_SCYTHE Hypergraph module is available
+            if (typeof RF_SCYTHE !== 'undefined' && typeof RF_SCYTHE.Hypergraph !== 'undefined') {
+                console.log('Initializing RF Hypergraph visualization');
+
+                // Initialize with the container element
+                const container = document.getElementById('hypergraphContainer');
+                if (container) {
+                    // Initialize Three.js for the hypergraph
+                    window.hypergraphViz = RF_SCYTHE.Hypergraph.init(container);
+
+                    // Add event listeners for hypergraph controls
+                    document.getElementById('generate-hypergraph').addEventListener('click', generateHypergraphData);
+                    document.getElementById('clear-hypergraph').addEventListener('click', clearHypergraphData);
+
+                    // Add event listeners for sliders
+                    document.getElementById('node-count-slider').addEventListener('input', updateHypergraphControls);
+                    document.getElementById('hyperedge-count-slider').addEventListener('input', updateHypergraphControls);
+
+                    // Update controls display
+                    updateHypergraphControls();
+                } else {
+                    console.error('Hypergraph container element not found');
+                }
+            } else {
+                console.warn('RF_SCYTHE Hypergraph module not available');
+            }
+        }
+
+        // Generate example RF Hypergraph data
+        function generateHypergraphData() {
+            if (!window.hypergraphViz) return;
+
+            // Get values from sliders
+            const nodeCount = parseInt(document.getElementById('node-count-slider').value);
+            const hyperedgeCount = parseInt(document.getElementById('hyperedge-count-slider').value);
+
+            // Generate data
+            const data = window.hypergraphViz.generateExampleData(
+                nodeCount,
+                Math.floor(nodeCount * 1.5), // Generate more edges than nodes
+                hyperedgeCount
+            );
+
+            // Load data into visualization
+            window.hypergraphViz.loadData(data);
+
+            // Update stats display
+            updateHypergraphStats(data);
+            updateCentralNodes(data);
+        }
+
+        // Clear RF Hypergraph data
+        function clearHypergraphData() {
+            if (window.hypergraphViz) {
+                window.hypergraphViz.clearAll();
+
+                // Reset stats
+                document.getElementById('hypergraph-node-count').textContent = '0';
+                document.getElementById('hypergraph-edge-count').textContent = '0';
+                document.getElementById('hypergraph-hyperedge-count').textContent = '0';
+                document.getElementById('hypergraph-density').textContent = '0.00';
+
+                // Reset central nodes list
+                const centralNodesList = document.getElementById('central-nodes-list');
+                centralNodesList.innerHTML = '<div class="data-row"><span class="data-label">No data available</span></div>';
+            }
+        }
+
+        // Update RF Hypergraph controls display
+        function updateHypergraphControls() {
+            const nodeCount = document.getElementById('node-count-slider').value;
+            const hyperedgeCount = document.getElementById('hyperedge-count-slider').value;
+
+            // Update labels or other UI elements if needed
+        }
+
+        // Update RF Hypergraph statistics
+        function updateHypergraphStats(data) {
+            if (!data) return;
+
+            // Update node count
+            document.getElementById('hypergraph-node-count').textContent = data.nodes.length;
+
+            // Update edge count
+            document.getElementById('hypergraph-edge-count').textContent = data.edges.length;
+
+            // Update hyperedge count
+            document.getElementById('hypergraph-hyperedge-count').textContent = data.hyperedges.length;
+
+            // Calculate and update network density
+            const n = data.nodes.length;
+            const potentialEdges = n * (n - 1) / 2;
+            const actualEdges = data.edges.length + data.hyperedges.length;
+            const density = potentialEdges > 0 ? actualEdges / potentialEdges : 0;
+            document.getElementById('hypergraph-density').textContent = density.toFixed(3);
+        }
+
+        // Update list of central nodes
+        function updateCentralNodes(data) {
+            if (!data || !data.nodes || !data.edges) return;
+
+            // Calculate node centrality (simplified)
+            const centrality = new Map();
+
+            // Initialize centrality to 0 for all nodes
+            data.nodes.forEach(node => {
+                centrality.set(node.id, 0);
+            });
+
+            // Count edges for each node
+            data.edges.forEach(edge => {
+                const sourceId = edge.sourceId;
+                const targetId = edge.targetId;
+
+                centrality.set(sourceId, (centrality.get(sourceId) || 0) + 1);
+                centrality.set(targetId, (centrality.get(targetId) || 0) + 1);
+            });
+
+            // Count hyperedge participations for each node
+            data.hyperedges.forEach(edge => {
+                edge.nodeIds.forEach(nodeId => {
+                    centrality.set(nodeId, (centrality.get(nodeId) || 0) + edge.nodeIds.length - 1);
+                });
+            });
+
+            // Convert to array and sort by centrality
+            const centralityArray = Array.from(centrality.entries())
+                .map(([id, value]) => {
+                    const node = data.nodes.find(n => n.id === id);
+                    return { id, value, node };
+                })
+                .sort((a, b) => b.value - a.value);
+
+            // Update the display with top 5 central nodes
+            const centralNodesList = document.getElementById('central-nodes-list');
+            centralNodesList.innerHTML = '';
+
+            // Take top 5 or fewer
+            const topNodes = centralityArray.slice(0, 5);
+
+            topNodes.forEach((entry, index) => {
+                const node = entry.node;
+                if (!node) return;
+
+                const row = document.createElement('div');
+                row.className = 'data-row';
+
+                const freqValue = node.frequency.toFixed(1);
+                const centralityValue = entry.value;
+
+                row.innerHTML = `
+                    <span class="data-label">${index + 1}. ${node.id}</span>
+                    <span class="data-value">${freqValue} MHz (${centralityValue})</span>
+                `;
+
+                centralNodesList.appendChild(row);
+            });
+
+            // If no nodes, show message
+            if (topNodes.length === 0) {
+                centralNodesList.innerHTML = '<div class="data-row"><span class="data-label">No data available</span></div>';
+            }
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Remora Autonomous Space Fleet Demo</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #000;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            color: #00f0ff;
+        }
+
+        #hud {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background: rgba(0, 20, 40, 0.7);
+            border: 1px solid #00f0ff;
+            padding: 20px;
+            pointer-events: none;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            box-shadow: 0 0 20px rgba(0, 240, 255, 0.2);
+            backdrop-filter: blur(5px);
+        }
+
+        #hud h1 {
+            margin: 0 0 10px 0;
+            font-size: 1.2rem;
+            border-bottom: 1px solid #00f0ff;
+            padding-bottom: 5px;
+        }
+
+        .metric {
+            margin: 10px 0;
+            font-size: 0.9rem;
+        }
+
+        .metric span {
+            font-weight: bold;
+            color: #fff;
+        }
+
+        #phase-indicator {
+            margin-top: 15px;
+            font-weight: bold;
+            color: #ffde00;
+            animation: blink 2s infinite;
+        }
+
+        @keyframes blink {
+            0% { opacity: 0.5; }
+            50% { opacity: 1; }
+            100% { opacity: 0.5; }
+        }
+
+        #controls-hint {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 0.8rem;
+            color: rgba(0, 240, 255, 0.6);
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div id="hud">
+        <h1>REMORA FLEET COMMAND</h1>
+        <div class="metric">FLEET STATUS: <span>OPERATIONAL</span></div>
+        <div class="metric">REMORA UNITS: <span id="unit-count">100</span></div>
+        <div class="metric">UNITS ATTACHED: <span id="attached-count">0</span></div>
+        <div id="phase-indicator">PHASE: INITIALIZING SWARM...</div>
+    </div>
+
+    <div id="controls-hint">
+        LEFT CLICK: ROTATE | RIGHT CLICK: PAN | SCROLL: ZOOM
+    </div>
+
+    <!-- Three.js Libraries -->
+    <script async src="https://unpkg.com/es-module-shims@1.8.0/dist/es-module-shims.js"></script>
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://unpkg.com/three@0.156.1/build/three.module.js",
+            "three/addons/": "https://unpkg.com/three@0.156.1/examples/jsm/"
+        }
+    }
+    </script>
+
+    <script type="module" src="remora-fleet-app.js"></script>
+</body>
+</html>

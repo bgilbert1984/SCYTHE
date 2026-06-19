@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RF SCYTHE | User Account</title>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@300;400&family=Titillium+Web:wght@400;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="assets/css/rf-scythe-styles.css">
+    <script src="assets/js/shared_auth.js"></script>
+    <style>
+        body { background: #050a14; color: #e0e0e0; font-family: 'Roboto Mono', monospace; padding: 40px; }
+        .account-container { max-width: 600px; margin: 0 auto; background: #0d1117; border: 1px solid #333; border-radius: 10px; padding: 32px; }
+        h2 { font-family: 'Titillium Web', sans-serif; color: #00cec9; letter-spacing: 1px; margin-bottom: 24px; }
+        .form-group { margin-bottom: 20px; }
+        label { display: block; color: #888; font-size: 0.8rem; margin-bottom: 6px; }
+        input { width: 100%; padding: 10px 14px; background: #1a1a2e; border: 1px solid #333; border-radius: 5px; color: #eee; box-sizing: border-box; }
+        .btn { padding: 12px 24px; border: none; border-radius: 5px; font-family: 'Titillium Web', sans-serif; cursor: pointer; text-transform: uppercase; }
+        .btn-save { background: #00cec9; color: #000; }
+        .btn-edit { background: #2196F3; color: #fff; }
+        .hidden { display: none; }
+        #status-msg { margin-top: 15px; font-size: 0.9rem; }
+    </style>
+</head>
+<body>
+    <div class="account-container">
+        <h2>User Account</h2>
+        <div id="view-mode">
+            <div class="form-group">
+                <label>Callsign</label>
+                <div id="view-callsign" style="padding: 10px; background: #1a1a2e;">-</div>
+            </div>
+            <div class="form-group">
+                <label>Email</label>
+                <div id="view-email" style="padding: 10px; background: #1a1a2e;">-</div>
+            </div>
+            <button class="btn btn-edit" onclick="toggleEdit()">Edit Profile</button>
+        </div>
+
+        <div id="edit-mode" class="hidden">
+            <div class="form-group">
+                <label>Callsign</label>
+                <input type="text" id="edit-callsign">
+            </div>
+            <div class="form-group">
+                <label>Email</label>
+                <input type="email" id="edit-email">
+            </div>
+            <button class="btn btn-save" onclick="saveChanges()">Save Changes</button>
+            <button class="btn" onclick="toggleEdit()">Cancel</button>
+        </div>
+        <div id="status-msg"></div>
+    </div>
+
+    <script>
+        let currentOperator = null;
+
+        async function init() {
+            const token = SCYTHE_AUTH.restoreSession();
+            const { valid, operator } = await SCYTHE_AUTH.validateSession(token);
+            if (!valid) { window.location.href = 'rf_scythe_home.html'; return; }
+            currentOperator = operator;
+            document.getElementById('view-callsign').textContent = operator.callsign;
+            document.getElementById('view-email').textContent = operator.email;
+        }
+
+        function toggleEdit() {
+            document.getElementById('view-mode').classList.toggle('hidden');
+            document.getElementById('edit-mode').classList.toggle('hidden');
+            if (!document.getElementById('edit-mode').classList.contains('hidden')) {
+                document.getElementById('edit-callsign').value = currentOperator.callsign;
+                document.getElementById('edit-email').value = currentOperator.email;
+            }
+        }
+
+        async function saveChanges() {
+            const callsign = document.getElementById('edit-callsign').value;
+            const email = document.getElementById('edit-email').value;
+            const token = SCYTHE_AUTH.restoreSession();
+
+            const response = await fetch(`${SCYTHE_AUTH.getApiBase()}/api/operator/update`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json', 'X-Session-Token': token },
+                body: JSON.stringify({ callsign, email })
+            });
+
+            if (response.ok) {
+                document.getElementById('status-msg').innerHTML = '<span style="color:#00cec9;">Saved successfully!</span>';
+                currentOperator = { ...currentOperator, callsign, email };
+                document.getElementById('view-callsign').textContent = callsign;
+                document.getElementById('view-email').textContent = email;
+                toggleEdit();
+            } else {
+                document.getElementById('status-msg').innerHTML = '<span style="color:#e74c3c;">Failed to save.</span>';
+            }
+        }
+
+        init();
+    </script>
+</body>
+</html>

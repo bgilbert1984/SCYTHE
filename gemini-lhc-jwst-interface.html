@@ -1,0 +1,882 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gemini IMM-RF: LHC &amp; JWST Integration</title>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.126.0/build/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.126.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/plotly.js@2.11.1/dist/plotly.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            color: #333;
+            background-color: #f0f2f5;
+        }
+        .container {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+        .header {
+            background: linear-gradient(135deg, #1a2a6c, #b21f1f, #fdbb2d);
+            color: white;
+            padding: 1rem;
+            text-align: center;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+        }
+        .content {
+            display: flex;
+            flex: 1;
+            overflow: hidden;
+        }
+        .visualization {
+            flex: 3;
+            position: relative;
+            overflow: hidden;
+        }
+        .controls {
+            flex: 1;
+            min-width: 300px;
+            padding: 1rem;
+            background-color: white;
+            box-shadow: -2px 0 5px rgba(0,0,0,0.1);
+            overflow-y: auto;
+        }
+        #visualization-container {
+            width: 100%;
+            height: 100%;
+        }
+        #correlation-graph {
+            width: 100%;
+            height: 200px;
+            margin-top: 1rem;
+        }
+        .control-group {
+            margin-bottom: 1.5rem;
+            padding-bottom: 1rem;
+            border-bottom: 1px solid #eee;
+        }
+        .control-group h3 {
+            margin-top: 0;
+            color: #1a2a6c;
+        }
+        .slider-container {
+            margin: 0.5rem 0;
+        }
+        label {
+            display: block;
+            margin-bottom: 0.3rem;
+            font-weight: 500;
+        }
+        input[type="range"] {
+            width: 100%;
+        }
+        input[type="checkbox"] {
+            margin-right: 0.5rem;
+        }
+        button {
+            background-color: #1a2a6c;
+            color: white;
+            border: none;
+            padding: 0.5rem 1rem;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-right: 0.5rem;
+            transition: background-color 0.3s;
+        }
+        button:hover {
+            background-color: #2a3a7c;
+        }
+        .value-display {
+            display: inline-block;
+            margin-left: 0.5rem;
+            font-weight: 500;
+            min-width: 40px;
+        }
+        .data-source {
+            display: flex;
+            align-items: center;
+            margin-bottom: 0.5rem;
+        }
+        .loading-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.7);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            color: white;
+            font-size: 1.5rem;
+            z-index: 1000;
+        }
+        .tooltip {
+            position: absolute;
+            background-color: rgba(0,0,0,0.8);
+            color: white;
+            padding: 0.5rem;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            pointer-events: none;
+            z-index: 1001;
+            display: none;
+        }
+        .status-indicator {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            margin-right: 0.5rem;
+        }
+        .status-active {
+            background-color: #4CAF50;
+        }
+        .status-inactive {
+            background-color: #F44336;
+        }
+        .tabs {
+            display: flex;
+            margin-bottom: 1rem;
+        }
+        .tab {
+            padding: 0.5rem 1rem;
+            background-color: #eee;
+            cursor: pointer;
+            border-radius: 4px 4px 0 0;
+            margin-right: 0.5rem;
+        }
+        .tab.active {
+            background-color: #1a2a6c;
+            color: white;
+        }
+        .tab-content {
+            display: none;
+        }
+        .tab-content.active {
+            display: block;
+        }
+        .hypothesis {
+            background-color: #f9f9f9;
+            padding: 0.8rem;
+            border-radius: 4px;
+            margin-bottom: 0.8rem;
+            border-left: 3px solid #1a2a6c;
+        }
+        .hypothesis-title {
+            font-weight: 600;
+            margin-bottom: 0.3rem;
+        }
+        .correlation-value {
+            font-weight: bold;
+            color: #b21f1f;
+        }
+        .legend-item {
+            display: flex;
+            align-items: center;
+            margin-bottom: 0.3rem;
+        }
+        .legend-color {
+            width: 15px;
+            height: 15px;
+            margin-right: 0.5rem;
+            border-radius: 3px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Gemini IMM-RF: LHC &amp; JWST Cross-Domain Integration</h1>
+            <p>Real-time visualization of RF patterns with quantum effects from LHC and ionospheric data from JWST</p>
+        </div>
+        <div class="content">
+            <div class="visualization">
+                <div id="visualization-container"></div>
+                <div class="tooltip" id="tooltip"></div>
+                <div class="loading-overlay" id="loading-overlay">
+                    <div>Generating visualization...</div>
+                </div>
+            </div>
+            <div class="controls">
+                <div class="tabs">
+                    <div class="tab active" data-tab="controls-tab">Controls</div>
+                    <div class="tab" data-tab="analysis-tab">Analysis</div>
+                    <div class="tab" data-tab="hypotheses-tab">Hypotheses</div>
+                </div>
+
+                <div class="tab-content active" id="controls-tab">
+                    <div class="control-group">
+                        <h3>Data Sources</h3>
+                        <div class="data-source">
+                            <input type="checkbox" id="use-lhc-data" checked>
+                            <label for="use-lhc-data">LHC Quantum Field Data</label>
+                            <span class="status-indicator status-active" id="lhc-status"></span>
+                        </div>
+                        <div class="data-source">
+                            <input type="checkbox" id="use-jwst-data" checked>
+                            <label for="use-jwst-data">JWST Ionospheric Data</label>
+                            <span class="status-indicator status-active" id="jwst-status"></span>
+                        </div>
+                    </div>
+
+                    <div class="control-group">
+                        <h3>RF Signal Parameters</h3>
+                        <div class="slider-container">
+                            <label for="frequency-slider">Center Frequency (MHz)</label>
+                            <input type="range" id="frequency-slider" min="100" max="5000" value="2400">
+                            <span class="value-display" id="frequency-value">2400</span>
+                        </div>
+                        <div class="slider-container">
+                            <label for="bandwidth-slider">Bandwidth (MHz)</label>
+                            <input type="range" id="bandwidth-slider" min="1" max="100" value="20">
+                            <span class="value-display" id="bandwidth-value">20</span>
+                        </div>
+                        <div class="slider-container">
+                            <label for="power-slider">Signal Power (dBm)</label>
+                            <input type="range" id="power-slider" min="-90" max="-20" value="-50">
+                            <span class="value-display" id="power-value">-50</span>
+                        </div>
+                    </div>
+
+                    <div class="control-group">
+                        <h3>IMM Sampling Parameters</h3>
+                        <div class="slider-container">
+                            <label for="steps-slider">Sampling Steps</label>
+                            <input type="range" id="steps-slider" min="1" max="10" value="1">
+                            <span class="value-display" id="steps-value">1</span>
+                        </div>
+                        <div class="slider-container">
+                            <label for="resolution-slider">Grid Resolution</label>
+                            <input type="range" id="resolution-slider" min="16" max="64" step="8" value="32">
+                            <span class="value-display" id="resolution-value">32</span>
+                        </div>
+                    </div>
+
+                    <div class="control-group">
+                        <h3>Visualization Controls</h3>
+                        <div class="slider-container">
+                            <label for="density-slider">Density Threshold</label>
+                            <input type="range" id="density-slider" min="0.01" max="0.2" step="0.01" value="0.05">
+                            <span class="value-display" id="density-value">0.05</span>
+                        </div>
+                        <div class="slider-container">
+                            <label for="opacity-slider">Visualization Opacity</label>
+                            <input type="range" id="opacity-slider" min="0.1" max="1" step="0.05" value="0.8">
+                            <span class="value-display" id="opacity-value">0.8</span>
+                        </div>
+                    </div>
+
+                    <button id="generate-btn">Generate Visualization</button>
+                    <button id="reset-btn">Reset Parameters</button>
+                </div>
+
+                <div class="tab-content" id="analysis-tab">
+                    <div class="control-group">
+                        <h3>Cross-Domain Correlation Analysis</h3>
+                        <div id="correlation-graph"></div>
+                        <div class="legend">
+                            <div class="legend-item">
+                                <div class="legend-color" style="background-color: #1a2a6c;"></div>
+                                <span>RF-LHC Correlation</span>
+                            </div>
+                            <div class="legend-item">
+                                <div class="legend-color" style="background-color: #b21f1f;"></div>
+                                <span>RF-JWST Correlation</span>
+                            </div>
+                            <div class="legend-item">
+                                <div class="legend-color" style="background-color: #fdbb2d;"></div>
+                                <span>LHC-JWST Correlation</span>
+                            </div>
+                        </div>
+                        <p>Current RF-LHC correlation: <span class="correlation-value" id="rf-lhc-correlation">0.72</span></p>
+                        <p>Current RF-JWST correlation: <span class="correlation-value" id="rf-jwst-correlation">0.58</span></p>
+                        <p>Current LHC-JWST correlation: <span class="correlation-value" id="lhc-jwst-correlation">0.36</span></p>
+                    </div>
+
+                    <div class="control-group">
+                        <h3>Quantum Effect Detection</h3>
+                        <p>Detected quantum field effects: <span id="quantum-effects">Medium (42% confidence)</span></p>
+                        <p>Ionospheric disturbance level: <span id="ionospheric-level">Low (27% confidence)</span></p>
+                        <p>Signal propagation anomalies: <span id="anomaly-level">Present (63% confidence)</span></p>
+                    </div>
+                </div>
+
+                <div class="tab-content" id="hypotheses-tab">
+                    <div class="control-group">
+                        <h3>Generated Research Hypotheses</h3>
+                        <div class="hypothesis">
+                            <div class="hypothesis-title">H1: Quantum Vacuum Fluctuations</div>
+                            <p>LHC-induced quantum vacuum fluctuations may cause subtle RF propagation variations in the 2.4-2.5 GHz band through momentary changes in the vacuum permittivity.</p>
+                        </div>
+                        <div class="hypothesis">
+                            <div class="hypothesis-title">H2: Ionospheric Coupling</div>
+                            <p>High-energy particle interactions from the LHC may create transient ionosphere condition changes detectable by JWST, which correlate with unexpected RF signal behavior.</p>
+                        </div>
+                        <div class="hypothesis">
+                            <div class="hypothesis-title">H3: Phase Coherence Effects</div>
+                            <p>Quantum field perturbations may induce phase coherence changes in RF signals that are most pronounced during specific LHC collision events and ionospheric conditions.</p>
+                        </div>
+                    </div>
+
+                    <div class="control-group">
+                        <h3>Suggested Research Directions</h3>
+                        <ul>
+                            <li>Investigate frequency-selective fading correlated with LHC beam intensity</li>
+                            <li>Analyze temporal delay patterns during high-energy collision events</li>
+                            <li>Study polarization changes in RF signals during ionospheric disturbances</li>
+                            <li>Develop quantum field models for RF propagation in disturbed conditions</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Main application state
+        const appState = {
+            // Visualization parameters
+            frequency: 2400,
+            bandwidth: 20,
+            power: -50,
+            steps: 1,
+            resolution: 32,
+            densityThreshold: 0.05,
+            opacity: 0.8,
+
+            // Data sources
+            useLHCData: true,
+            useJWSTData: true,
+
+            // Three.js objects
+            scene: null,
+            camera: null,
+            renderer: null,
+            controls: null,
+            pointCloud: null,
+
+            // Analysis data
+            correlationData: {
+                rfLHC: Array(50).fill(0).map(() => 0.5 + 0.3 * Math.random()),
+                rfJWST: Array(50).fill(0).map(() => 0.4 + 0.25 * Math.random()),
+                lhcJWST: Array(50).fill(0).map(() => 0.3 + 0.15 * Math.random())
+            },
+
+            // Application state
+            isLoading: false
+        };
+
+        // Initialize the visualization and controls
+        document.addEventListener('DOMContentLoaded', () => {
+            initThreeJS();
+            initControls();
+            initCorrelationGraph();
+            hideLoadingOverlay();
+
+            // Generate initial visualization
+            generateVisualization();
+        });
+
+        // Initialize Three.js scene
+        function initThreeJS() {
+            // Create scene
+            appState.scene = new THREE.Scene();
+            appState.scene.background = new THREE.Color(0x111111);
+
+            // Create camera
+            appState.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            appState.camera.position.set(2, 2, 2);
+            appState.camera.lookAt(0, 0, 0);
+
+            // Create renderer
+            appState.renderer = new THREE.WebGLRenderer({ antialias: true });
+            appState.renderer.setSize(document.getElementById('visualization-container').clientWidth,
+                                      document.getElementById('visualization-container').clientHeight);
+            document.getElementById('visualization-container').appendChild(appState.renderer.domElement);
+
+            // Add orbit controls
+            appState.controls = new THREE.OrbitControls(appState.camera, appState.renderer.domElement);
+            appState.controls.enableDamping = true;
+            appState.controls.dampingFactor = 0.2;
+
+            // Add lights
+            const ambientLight = new THREE.AmbientLight(0x404040);
+            appState.scene.add(ambientLight);
+
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            directionalLight.position.set(1, 1, 1);
+            appState.scene.add(directionalLight);
+
+            // Add coordinate axes
+            const axesHelper = new THREE.AxesHelper(1);
+            appState.scene.add(axesHelper);
+
+            // Start animation loop
+            animate();
+
+            // Handle window resize
+            window.addEventListener('resize', onWindowResize);
+        }
+
+        // Animation loop
+        function animate() {
+            requestAnimationFrame(animate);
+            appState.controls.update();
+
+            // Add subtle rotation to the point cloud if it exists
+            if (appState.pointCloud) {
+                appState.pointCloud.rotation.y += 0.001;
+            }
+
+            appState.renderer.render(appState.scene, appState.camera);
+        }
+
+        // Window resize handler
+        function onWindowResize() {
+            const container = document.getElementById('visualization-container');
+            appState.camera.aspect = container.clientWidth / container.clientHeight;
+            appState.camera.updateProjectionMatrix();
+            appState.renderer.setSize(container.clientWidth, container.clientHeight);
+        }
+
+        // Initialize controls
+        function initControls() {
+            // Tab switching
+            document.querySelectorAll('.tab').forEach(tab => {
+                tab.addEventListener('click', () => {
+                    // Remove active class from all tabs and tab contents
+                    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+                    document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+
+                    // Add active class to clicked tab and its content
+                    tab.classList.add('active');
+                    document.getElementById(tab.dataset.tab).classList.add('active');
+                });
+            });
+
+            // Sliders
+            document.getElementById('frequency-slider').addEventListener('input', (e) => {
+                appState.frequency = parseInt(e.target.value);
+                document.getElementById('frequency-value').textContent = appState.frequency;
+            });
+
+            document.getElementById('bandwidth-slider').addEventListener('input', (e) => {
+                appState.bandwidth = parseInt(e.target.value);
+                document.getElementById('bandwidth-value').textContent = appState.bandwidth;
+            });
+
+            document.getElementById('power-slider').addEventListener('input', (e) => {
+                appState.power = parseInt(e.target.value);
+                document.getElementById('power-value').textContent = appState.power;
+            });
+
+            document.getElementById('steps-slider').addEventListener('input', (e) => {
+                appState.steps = parseInt(e.target.value);
+                document.getElementById('steps-value').textContent = appState.steps;
+            });
+
+            document.getElementById('resolution-slider').addEventListener('input', (e) => {
+                appState.resolution = parseInt(e.target.value);
+                document.getElementById('resolution-value').textContent = appState.resolution;
+            });
+
+            document.getElementById('density-slider').addEventListener('input', (e) => {
+                appState.densityThreshold = parseFloat(e.target.value);
+                document.getElementById('density-value').textContent = appState.densityThreshold.toFixed(2);
+            });
+
+            document.getElementById('opacity-slider').addEventListener('input', (e) => {
+                appState.opacity = parseFloat(e.target.value);
+                document.getElementById('opacity-value').textContent = appState.opacity.toFixed(2);
+
+                // Update material opacity if point cloud exists
+                if (appState.pointCloud) {
+                    appState.pointCloud.material.opacity = appState.opacity;
+                }
+            });
+
+            // Checkboxes
+            document.getElementById('use-lhc-data').addEventListener('change', (e) => {
+                appState.useLHCData = e.target.checked;
+                updateDataSourceStatus();
+            });
+
+            document.getElementById('use-jwst-data').addEventListener('change', (e) => {
+                appState.useJWSTData = e.target.checked;
+                updateDataSourceStatus();
+            });
+
+            // Buttons
+            document.getElementById('generate-btn').addEventListener('click', () => {
+                generateVisualization();
+            });
+
+            document.getElementById('reset-btn').addEventListener('click', () => {
+                resetParameters();
+            });
+
+            // Initialize status indicators
+            updateDataSourceStatus();
+        }
+
+        // Update data source status indicators
+        function updateDataSourceStatus() {
+            const lhcStatus = document.getElementById('lhc-status');
+            const jwstStatus = document.getElementById('jwst-status');
+
+            lhcStatus.className = 'status-indicator ' + (appState.useLHCData ? 'status-active' : 'status-inactive');
+            jwstStatus.className = 'status-indicator ' + (appState.useJWSTData ? 'status-active' : 'status-inactive');
+        }
+
+        // Reset parameters to defaults
+        function resetParameters() {
+            appState.frequency = 2400;
+            document.getElementById('frequency-slider').value = appState.frequency;
+            document.getElementById('frequency-value').textContent = appState.frequency;
+
+            appState.bandwidth = 20;
+            document.getElementById('bandwidth-slider').value = appState.bandwidth;
+            document.getElementById('bandwidth-value').textContent = appState.bandwidth;
+
+            appState.power = -50;
+            document.getElementById('power-slider').value = appState.power;
+            document.getElementById('power-value').textContent = appState.power;
+
+            appState.steps = 1;
+            document.getElementById('steps-slider').value = appState.steps;
+            document.getElementById('steps-value').textContent = appState.steps;
+
+            appState.resolution = 32;
+            document.getElementById('resolution-slider').value = appState.resolution;
+            document.getElementById('resolution-value').textContent = appState.resolution;
+
+            appState.densityThreshold = 0.05;
+            document.getElementById('density-slider').value = appState.densityThreshold;
+            document.getElementById('density-value').textContent = appState.densityThreshold.toFixed(2);
+
+            appState.opacity = 0.8;
+            document.getElementById('opacity-slider').value = appState.opacity;
+            document.getElementById('opacity-value').textContent = appState.opacity.toFixed(2);
+
+            appState.useLHCData = true;
+            document.getElementById('use-lhc-data').checked = appState.useLHCData;
+
+            appState.useJWSTData = true;
+            document.getElementById('use-jwst-data').checked = appState.useJWSTData;
+
+            updateDataSourceStatus();
+        }
+
+        // Generate visualization based on current parameters
+        function generateVisualization() {
+            showLoadingOverlay();
+
+            // Prepare request parameters based on current UI state
+            const params = {
+                rf_params: {
+                    frequency: appState.frequency,
+                    bandwidth: appState.bandwidth,
+                    power: appState.power
+                },
+                include_lhc: appState.useLHCData,
+                include_jwst: appState.useJWSTData,
+                steps: appState.steps,
+                grid_resolution: [appState.resolution, appState.resolution, appState.resolution],
+                density_threshold: appState.densityThreshold
+            };
+
+            // Call the Python backend using fetch API
+            fetch('/api/generate_visualization', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(params)
+            })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error(`HTTP error ${response.status}`);
+                }
+                return response.json();
+            })
+            .then(data => {
+                // Update visualization with real IMM-generated data
+                updateVisualization(data);
+
+                // Update correlation analysis with real data
+                if (data.crossCorrelation) {
+                    updateAnalysisDataFromServer(data.crossCorrelation);
+                } else {
+                    // Fallback to local analysis
+                    updateAnalysisData();
+                }
+
+                hideLoadingOverlay();
+            })
+            .catch(error => {
+                console.error('Error fetching visualization data:', error);
+
+                // Fallback to mock data if server call fails
+                console.log('Falling back to mock data generation');
+                const visualizationData = generateMockNeRFData();
+                updateVisualization(visualizationData);
+                updateAnalysisData();
+
+                hideLoadingOverlay();
+            });
+        }
+
+        // Generate mock NeRF data for visualization
+        function generateMockNeRFData() {
+            // In a real implementation, this would come from the IMM-RF-NeRF integration
+
+            // Create parameters that would influence the visualization
+            const effectMultiplier = 1.0 +
+                (appState.useLHCData ? 0.2 : 0) +
+                (appState.useJWSTData ? 0.15 : 0);
+
+            // Scale complexity with steps (in real IMM, more steps = smoother/better results)
+            const stepsFactor = 0.8 + 0.2 * Math.min(appState.steps, 5) / 5;
+
+            // Signal characteristics affect pattern
+            const freqNormalized = appState.frequency / 5000; // 0-1 range
+            const bandwidthNormalized = appState.bandwidth / 100; // 0-1 range
+            const powerNormalized = (appState.power + 90) / 70; // 0-1 range
+
+            // Number of points to generate
+            const numPoints = Math.floor(10000 * effectMultiplier * stepsFactor *
+                (0.5 + 0.5 * (powerNormalized + bandwidthNormalized) / 2));
+
+            // Generate points
+            const vertices = [];
+            const colors = [];
+
+            // Base color influenced by frequency
+            const baseColor = new THREE.Color();
+            baseColor.setHSL(freqNormalized * 0.8, 0.8, 0.5);
+
+            // LHC influence - quantum fluctuation patterns (more crystalline structure)
+            const lhcInfluence = appState.useLHCData ? 0.4 : 0;
+
+            // JWST influence - ionospheric patterns (more wave-like structures)
+            const jwstInfluence = appState.useJWSTData ? 0.35 : 0;
+
+            for (let i = 0; i < numPoints; i++) {
+                // Basic RF signal visualization (toroidal shape)
+                const t = Math.random() * Math.PI * 2;
+                const r = 0.2 + 0.1 * bandwidthNormalized + (Math.random() * 0.1);
+                let x = Math.cos(t) * r;
+                let y = Math.sin(t) * r;
+                let z = (Math.random() - 0.5) * (0.05 + 0.1 * bandwidthNormalized);
+
+                // Apply LHC quantum field effects (crystalline perturbations)
+                if (appState.useLHCData) {
+                    // Quantum lattice effect
+                    const quantumPhase = 8 * Math.PI * (x * y * z);
+                    const quantumEffect = lhcInfluence * Math.sin(quantumPhase);
+
+                    x += quantumEffect * 0.1;
+                    y += quantumEffect * 0.08;
+                    z += quantumEffect * 0.12;
+                }
+
+                // Apply JWST ionospheric effects (wave patterns)
+                if (appState.useJWSTData) {
+                    // Ionospheric wave effect
+                    const wavePhase = 6 * Math.PI * (x + y);
+                    const waveEffect = jwstInfluence * Math.sin(wavePhase);
+
+                    x += waveEffect * 0.07;
+                    y += waveEffect * 0.05;
+                    z += waveEffect * 0.15 * Math.sin(5 * Math.PI * x);
+                }
+
+                // Add position jitter based on steps (more steps = less jitter)
+                const jitterScale = 0.1 * (1 - stepsFactor);
+                x += (Math.random() - 0.5) * jitterScale;
+                y += (Math.random() - 0.5) * jitterScale;
+                z += (Math.random() - 0.5) * jitterScale;
+
+                // Add vertex
+                vertices.push(x, y, z);
+
+                // Color based on position and parameters
+                const color = new THREE.Color(baseColor.r, baseColor.g, baseColor.b);
+
+                // Modulate color based on position and effects
+                if (appState.useLHCData) {
+                    // Quantum effect coloration
+                    const quantumColorPhase = Math.sin(8 * Math.PI * (x * x + y * y + z * z));
+                    color.r += lhcInfluence * 0.2 * quantumColorPhase;
+                    color.b += lhcInfluence * 0.3 * Math.abs(quantumColorPhase);
+                }
+
+                if (appState.useJWSTData) {
+                    // Ionospheric effect coloration
+                    const ionoColorPhase = Math.cos(6 * Math.PI * z);
+                    color.g += jwstInfluence * 0.25 * ionoColorPhase;
+                    color.r += jwstInfluence * 0.15 * Math.abs(ionoColorPhase);
+                }
+
+                colors.push(color.r, color.g, color.b);
+            }
+
+            return {
+                vertices: vertices,
+                colors: colors,
+                numPoints: numPoints
+            };
+        }
+
+        // Update the 3D visualization with new data
+        function updateVisualization(data) {
+            // Remove existing point cloud if it exists
+            if (appState.pointCloud) {
+                appState.scene.remove(appState.pointCloud);
+                appState.pointCloud.geometry.dispose();
+                appState.pointCloud.material.dispose();
+            }
+
+            // Create geometry
+            const geometry = new THREE.BufferGeometry();
+            geometry.setAttribute('position', new THREE.Float32BufferAttribute(data.vertices, 3));
+            geometry.setAttribute('color', new THREE.Float32BufferAttribute(data.colors, 3));
+
+            // Create material
+            const material = new THREE.PointsMaterial({
+                size: 0.02,
+                vertexColors: true,
+                transparent: true,
+                opacity: appState.opacity,
+                blending: THREE.AdditiveBlending
+            });
+
+            // Create point cloud
+            appState.pointCloud = new THREE.Points(geometry, material);
+            appState.scene.add(appState.pointCloud);
+
+            // Reset camera position
+            appState.camera.position.set(2, 2, 2);
+            appState.controls.update();
+        }
+
+        // Initialize correlation graph
+        function initCorrelationGraph() {
+            const rfLHCTrace = {
+                y: appState.correlationData.rfLHC,
+                type: 'scatter',
+                name: 'RF-LHC',
+                line: {color: '#1a2a6c'}
+            };
+
+            const rfJWSTTrace = {
+                y: appState.correlationData.rfJWST,
+                type: 'scatter',
+                name: 'RF-JWST',
+                line: {color: '#b21f1f'}
+            };
+
+            const lhcJWSTTrace = {
+                y: appState.correlationData.lhcJWST,
+                type: 'scatter',
+                name: 'LHC-JWST',
+                line: {color: '#fdbb2d'}
+            };
+
+            const layout = {
+                title: 'Cross-Domain Correlations',
+                height: 200,
+                margin: {l: 40, r: 10, t: 30, b: 30},
+                showlegend: false,
+                yaxis: {
+                    title: 'Correlation',
+                    range: [0, 1]
+                }
+            };
+
+            Plotly.newPlot('correlation-graph', [rfLHCTrace, rfJWSTTrace, lhcJWSTTrace], layout);
+        }
+
+        // Update analysis data
+        function updateAnalysisData() {
+            // Update correlation data with new values
+            const newRfLhc = appState.useLHCData ?
+                0.6 + 0.2 * Math.random() :
+                0.3 + 0.1 * Math.random();
+
+            const newRfJwst = appState.useJWSTData ?
+                0.5 + 0.15 * Math.random() :
+                0.25 + 0.1 * Math.random();
+
+            const newLhcJwst = (appState.useLHCData && appState.useJWSTData) ?
+                0.3 + 0.15 * Math.random() :
+                0.1 + 0.1 * Math.random();
+
+            // Add new values to charts
+            appState.correlationData.rfLHC.push(newRfLhc);
+            appState.correlationData.rfLHC.shift();
+
+            appState.correlationData.rfJWST.push(newRfJwst);
+            appState.correlationData.rfJWST.shift();
+
+            appState.correlationData.lhcJWST.push(newLhcJwst);
+            appState.correlationData.lhcJWST.shift();
+
+            // Update correlation graph
+            Plotly.update('correlation-graph',
+                {y: [appState.correlationData.rfLHC, appState.correlationData.rfJWST, appState.correlationData.lhcJWST]},
+                {}, [0, 1, 2]);
+
+            // Update correlation text
+            document.getElementById('rf-lhc-correlation').textContent = newRfLhc.toFixed(2);
+            document.getElementById('rf-jwst-correlation').textContent = newRfJwst.toFixed(2);
+            document.getElementById('lhc-jwst-correlation').textContent = newLhcJwst.toFixed(2);
+
+            // Update effect detection
+            const quantumEffectLevels = ['None', 'Low', 'Medium', 'High'];
+            const quantumEffectLevel = appState.useLHCData ?
+                Math.floor(Math.random() * 3) + 1 :
+                Math.floor(Math.random() * 2);
+
+            const quantumConfidence = Math.floor(20 + 60 * Math.random());
+            document.getElementById('quantum-effects').textContent =
+                `${quantumEffectLevels[quantumEffectLevel]} (${quantumConfidence}% confidence)`;
+
+            const ionoEffectLevels = ['None', 'Low', 'Medium', 'High'];
+            const ionoEffectLevel = appState.useJWSTData ?
+                Math.floor(Math.random() * 3) + 1 :
+                Math.floor(Math.random() * 2);
+
+            const ionoConfidence = Math.floor(20 + 60 * Math.random());
+            document.getElementById('ionospheric-level').textContent =
+                `${ionoEffectLevels[ionoEffectLevel]} (${ionoConfidence}% confidence)`;
+
+            const anomalyLevels = ['None', 'Minimal', 'Present', 'Significant'];
+            const anomalyLevel = (appState.useLHCData || appState.useJWSTData) ?
+                Math.floor(Math.random() * 2) + 2 :
+                Math.floor(Math.random() * 2);
+
+            const anomalyConfidence = Math.floor(20 + 60 * Math.random());
+            document.getElementById('anomaly-level').textContent =
+                `${anomalyLevels[anomalyLevel]} (${anomalyConfidence}% confidence)`;
+        }
+
+        // Show loading overlay
+        function showLoadingOverlay() {
+            appState.isLoading = true;
+            document.getElementById('loading-overlay').style.display = 'flex';
+        }
+
+        // Hide loading overlay
+        function hideLoadingOverlay() {
+            appState.isLoading = false;
+            document.getElementById('loading-overlay').style.display = 'none';
+        }
+    </script>
+</body>
+</html>

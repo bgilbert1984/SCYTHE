@@ -2012,7 +2012,7 @@
     <link rel="stylesheet" href="urh-integration.css">
     <script>
         // Set your Cesium Ion access token
-        Cesium.Ion.defaultAccessToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiJlNjM1OWQzMS01ZGQ1LTQwMDAtOGZlZC1hMDlhZGY3YTZjYTYiLCJpZCI6MjU0MDE2LCJpYXQiOjE3MzExNDEyNDN9.geHijTptoG3E8aZAYFAZltD9LkPGAiljQ01uW9JdKYQ';
+        Cesium.Ion.defaultAccessToken = window.CESIUM_ION_TOKEN || window.SCYTHE_CESIUM_ION_TOKEN || '';
     </script>
     <link rel="stylesheet" href="styles.css">
     <style>
@@ -10271,7 +10271,7 @@ const originalComplete = options.complete;
                     // Track if imagery loads successfully
                     let imageryLoaded = false;
                     // STADIA API key used for both primary and fallback tile requests
-                    const STADIA_API_KEY = '053a8c7a-f84d-4413-b461-95b1f93b58cd';
+                    const STADIA_API_KEY = window.STADIA_API_KEY || window.SCYTHE_STADIA_API_KEY || '';
                     
                     // ── Vector basemap path (MapLibre GL vector tiles) ──────────────────
                     if (USE_VECTOR_BASEMAP && window.MapLibreDeckCesium) {

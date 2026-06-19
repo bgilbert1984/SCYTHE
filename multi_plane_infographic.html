@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Multi-Plane Intelligence Fabric - Infographic</title>
+    <script type="module">
+      import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+      mermaid.initialize({
+        startOnLoad: true,
+        theme: 'dark',
+        flowchart: { useMaxWidth: false, htmlLabels: true, curve: 'basis' }
+      });
+    </script>
+    <style>
+        body {
+            background-color: #0d1117;
+            color: #c9d1d9;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 40px;
+            margin: 0;
+        }
+        h1 {
+            color: #58a6ff;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            margin-bottom: 30px;
+        }
+        .mermaid {
+            background-color: #161b22;
+            padding: 20px;
+            border-radius: 8px;
+            border: 1px solid #30363d;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+        }
+    </style>
+</head>
+<body>
+    <h1>RF SCYTHE: Multi-Plane Architecture</h1>
+    <div class="mermaid">
+    graph TD
+        %% Control Plane
+        subgraph Control_Plane [1. Control Plane: The Spine]
+            A[gRPC Services] -->|Protobuf| B(State Authority)
+            A --> C(Auth Interceptors)
+            B -->|Typed Contracts| D
+        end
+
+        %% Data Plane
+        subgraph Data_Plane [2. Data Plane: The Distribution]
+            D{Voxel Stream Engine} -->|Binary Fan-Out| E[Float32Array Packets]
+            D -->|Ring Buffer| F[WebSocket Relay]
+        end
+
+        %% Render Plane
+        subgraph Render_Plane [3. Render Plane: The Surface]
+            E --> G((Unified Render<br/>Scheduler))
+            F --> G
+            G -->|Volumetrics| H[deck.gl GPU Texture]
+            G -->|Symbolic| I[Three.js Hypergraph]
+            G -->|Geo Anchoring| J[Cesium Globe]
+        end
+
+        %% Future Tier
+        subgraph Future [Road to Tier ∞]
+            K[CUDA / Triton Workers] -.->|Zero-Copy Synthesis| D
+            L[Temporal Model] -.->|Predictive State| B
+            M[GPU Arbitration Shader] -.->|Dominance Computation| H
+        end
+
+        %% Styling
+        classDef control fill:#1f2937,stroke:#3b82f6,stroke-width:2px,color:#bfdbfe;
+        classDef data fill:#1e1b4b,stroke:#8b5cf6,stroke-width:2px,color:#ddd6fe;
+        classDef render fill:#064e3b,stroke:#10b981,stroke-width:2px,color:#a7f3d0;
+        classDef future fill:#450a0a,stroke:#f43f5e,stroke-width:2px,color:#fecdd3,stroke-dasharray: 5 5;
+
+        class A,B,C control;
+        class D,E,F data;
+        class G,H,I,J render;
+        class K,L,M future;
+    </div>
+</body>
+</html>

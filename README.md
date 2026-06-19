@@ -6,7 +6,7 @@
 
 SCYTHE is a high-density operational interface for turning signal, network, and geospatial telemetry into an explorable command picture. It blends a 3D globe, hypergraph overlays, packet-derived entities, RF activity, route intelligence, and live backend streams into one operator-facing workspace.
 
-This repository contains the command operations visualization bundle: the browser experience, render schedulers, Cesium/MapLibre/deck.gl integrations, RF overlays, PCAP graph tooling, and supporting UI modules used by the SCYTHE runtime.
+This repository contains the command operations visualization bundle and runtime surface: the browser experience, orchestrator, API server, render schedulers, Cesium/MapLibre/deck.gl integrations, RF overlays, PCAP graph tooling, WriteBus-backed graph coordination, and supporting UI modules used by the SCYTHE runtime.
 
 ## Why SCYTHE
 
@@ -43,7 +43,7 @@ The bundle is intentionally browser-native and modular:
 
 ## Quick Start
 
-For a static preview:
+For a static preview of the command operations UI:
 
 ```bash
 python3 -m http.server 8080
@@ -57,10 +57,26 @@ http://localhost:8080/command-ops-visualization.html
 
 The static page can load the UI shell, but live telemetry, authentication, graph writes, PCAP workflows, and instance bootstrap features require a running SCYTHE backend that serves the expected `/api/*`, `/stream/*`, and Socket.IO endpoints.
 
+For the orchestrated runtime:
+
+```bash
+python3 -m venv .venv
+. .venv/bin/activate
+pip install -r requirements.txt
+python3 scythe_orchestrator.py --host 0.0.0.0 --port 5000
+```
+
+The orchestrator serves `rf_scythe_home.html`, spawns isolated child instances with `rf_scythe_api_server.py`, and routes instance traffic through stable `/scythe/i/<instance_id>/...` URLs. Optional live-data integrations use environment variables such as `AISSTREAM_API_KEY`, `N2YO_API_KEY`, `FUSIONAUTH_API_KEY`, and `OLLAMA_URL`.
+
 ## Repository Map
 
 ```text
 command-ops-visualization.html  Main command center entry point
+rf_scythe_home.html             Orchestrator home and instance launcher
+scythe_orchestrator.py          Multi-instance supervisor and reverse proxy
+rf_scythe_api_server.py         Child instance API, Socket.IO, graph, and RF server
+writebus.py                     Canonical single-writer commit coordinator
+registries/                     PCAP, recon, and detection registry modules
 assets/js/                      Shared SCYTHE transport and auth helpers
 cesium-*.js                     Cesium integrations, safety patches, and visualization helpers
 maplibre-deck-cesium.js         MapLibre, deck.gl, and Cesium bridge
