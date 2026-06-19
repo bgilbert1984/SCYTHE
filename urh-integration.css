@@ -1,0 +1,311 @@
+/* URH Integration CSS for RF SCYTHE */
+
+.urh-settings-group {
+    margin: 15px 0;
+    padding: 10px;
+    background-color: rgba(40, 40, 80, 0.3);
+    border-radius: 5px;
+}
+
+.urh-settings-item {
+    margin-bottom: 10px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.urh-settings-item label {
+    color: #aaddff;
+    margin-right: 10px;
+    flex-shrink: 0;
+    width: 100px;
+}
+
+.urh-settings-input {
+    flex-grow: 1;
+    background-color: rgba(30, 30, 60, 0.5);
+    color: white;
+    border: 1px solid #455a79;
+    border-radius: 3px;
+    padding: 5px;
+    font-size: 12px;
+}
+
+.urh-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    margin: 15px 0;
+}
+
+.urh-actions button {
+    margin-bottom: 5px;
+    flex-basis: 48%;
+}
+
+.urh-tab-buttons {
+    display: flex;
+    background-color: rgba(40, 40, 80, 0.3);
+    border-radius: 5px 5px 0 0;
+    margin-top: 15px;
+}
+
+.urh-tab-button {
+    background-color: transparent;
+    border: none;
+    color: #ddd;
+    padding: 8px 12px;
+    cursor: pointer;
+    font-size: 12px;
+    border-bottom: 3px solid transparent;
+}
+
+.urh-tab-button:hover {
+    background-color: rgba(60, 60, 120, 0.3);
+}
+
+.urh-tab-button.active {
+    color: #fff;
+    border-bottom: 3px solid #00aaff;
+    font-weight: bold;
+}
+
+.urh-tab-panel {
+    display: none;
+    background-color: rgba(30, 30, 60, 0.3);
+    border-radius: 0 0 5px 5px;
+    padding: 15px;
+    margin-bottom: 15px;
+}
+
+.urh-tab-panel.active {
+    display: block;
+}
+
+.urh-list {
+    max-height: 300px;
+    overflow-y: auto;
+    margin-bottom: 15px;
+    padding-right: 5px;
+}
+
+.urh-list-item {
+    background-color: rgba(40, 40, 80, 0.5);
+    border-radius: 3px;
+    margin-bottom: 5px;
+    padding: 8px;
+    cursor: pointer;
+    border-left: 3px solid #333366;
+    transition: all 0.2s ease;
+}
+
+.urh-list-item:hover {
+    background-color: rgba(60, 60, 100, 0.5);
+    transform: translateX(3px);
+}
+
+.urh-list-item.selected {
+    background-color: rgba(60, 60, 120, 0.7);
+    border-left: 3px solid #00aaff;
+}
+
+.urh-list-item-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 5px;
+}
+
+.urh-list-item-title {
+    font-weight: bold;
+    color: #fff;
+}
+
+.urh-list-item-badge {
+    background-color: #3a6fc4;
+    color: white;
+    font-size: 11px;
+    padding: 2px 6px;
+    border-radius: 3px;
+}
+
+.urh-list-item-detail {
+    font-size: 11px;
+    color: #aaa;
+    display: flex;
+    justify-content: space-between;
+}
+
+.urh-details-container {
+    background-color: rgba(20, 20, 40, 0.5);
+    border-radius: 5px;
+    padding: 10px;
+    margin-top: 15px;
+}
+
+.urh-details-container h3 {
+    font-size: 14px;
+    margin-top: 0;
+    margin-bottom: 10px;
+    color: #aaddff;
+}
+
+.urh-detail-item {
+    display: flex;
+    justify-content: space-between;
+    border-bottom: 1px dotted rgba(100, 100, 150, 0.3);
+    padding: 5px 0;
+    font-size: 12px;
+}
+
+.urh-detail-label {
+    color: #aaddff;
+}
+
+.urh-detail-value {
+    color: white;
+}
+
+.urh-detail-actions {
+    margin-top: 10px;
+    display: flex;
+    justify-content: space-between;
+}
+
+.urh-detail-actions button {
+    flex: 1;
+    margin: 0 5px;
+    font-size: 11px;
+}
+
+.urh-detail-actions button:first-child {
+    margin-left: 0;
+}
+
+.urh-detail-actions button:last-child {
+    margin-right: 0;
+}
+
+.urh-messages-container {
+    margin: 10px 0;
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+.urh-message {
+    background-color: rgba(30, 30, 60, 0.5);
+    margin-bottom: 5px;
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+.urh-message-header {
+    background-color: rgba(40, 40, 80, 0.7);
+    padding: 3px 5px;
+    font-size: 11px;
+    color: #aaddff;
+}
+
+.urh-message-bits {
+    padding: 5px;
+    font-family: monospace;
+    font-size: 11px;
+    overflow-x: auto;
+    white-space: nowrap;
+    color: #ddd;
+}
+
+.urh-progress-container {
+    margin: 10px 0;
+}
+
+.urh-progress-label {
+    font-size: 12px;
+    margin-bottom: 5px;
+    text-align: center;
+}
+
+.urh-progress-bar {
+    height: 12px;
+    background-color: rgba(30, 30, 60, 0.5);
+    border-radius: 6px;
+    overflow: hidden;
+}
+
+.urh-progress-fill {
+    height: 100%;
+    background-color: #00aaff;
+    transition: width 0.3s ease;
+}
+
+.urh-fuzzing-stats {
+    text-align: center;
+    font-size: 12px;
+    margin: 5px 0 15px 0;
+    color: #aaa;
+}
+
+.urh-fuzzing-summary {
+    display: flex;
+    justify-content: space-between;
+    font-size: 12px;
+    margin-bottom: 10px;
+    padding: 5px;
+    background-color: rgba(40, 40, 80, 0.5);
+    border-radius: 3px;
+}
+
+.urh-fuzzing-results-list {
+    max-height: 250px;
+    overflow-y: auto;
+}
+
+.urh-fuzzing-result {
+    background-color: rgba(30, 30, 60, 0.5);
+    margin-bottom: 8px;
+    border-radius: 3px;
+    overflow: hidden;
+    border-left: 3px solid #3a6fc4;
+}
+
+.urh-fuzzing-result-header {
+    background-color: rgba(40, 40, 80, 0.7);
+    padding: 4px 8px;
+    font-size: 11px;
+    display: flex;
+    justify-content: space-between;
+}
+
+.urh-fuzzing-timestamp {
+    color: #aaa;
+    font-size: 10px;
+}
+
+.urh-fuzzing-message {
+    padding: 5px 8px;
+    font-family: monospace;
+    font-size: 11px;
+    background-color: rgba(20, 20, 40, 0.5);
+    white-space: nowrap;
+    overflow-x: auto;
+}
+
+.urh-modified-bit {
+    color: #ff5555;
+    font-weight: bold;
+    background-color: rgba(255, 0, 0, 0.2);
+    padding: 0 2px;
+}
+
+.urh-fuzzing-response {
+    padding: 5px 8px;
+    font-size: 11px;
+    color: #ffaa00;
+}
+
+.list-placeholder {
+    padding: 15px;
+    text-align: center;
+    color: #666;
+    font-style: italic;
+}

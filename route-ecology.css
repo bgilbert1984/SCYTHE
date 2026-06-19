@@ -1,0 +1,230 @@
+/* route-ecology.css - High-density NOC styling for the Executive Ecosystem Layer */
+
+#ecology-dashboard-container {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    padding: 12px;
+    background: #060c1a;
+    color: #cde;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    overflow-y: auto;
+}
+
+.ecology-header {
+    margin-bottom: 12px;
+    border-bottom: 1px solid rgba(0, 180, 255, 0.3);
+    padding-bottom: 10px;
+    background: linear-gradient(90deg, rgba(0,20,50,0.8) 0%, transparent 100%);
+}
+
+.ecology-header h2 {
+    color: #0cf;
+    margin: 0 0 8px 0;
+    font-size: 16px;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+}
+
+.ecology-metrics-row {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 10px;
+}
+
+.eco-metric-box {
+    background: rgba(0, 40, 80, 0.3);
+    border: 1px solid rgba(0, 180, 255, 0.2);
+    border-radius: 4px;
+    padding: 8px;
+    text-align: left;
+}
+
+.eco-metric-box .label {
+    font-size: 9px;
+    color: #8ab4f8;
+    text-transform: uppercase;
+    display: block;
+    margin-bottom: 4px;
+}
+
+.eco-metric-box .value {
+    font-size: 18px;
+    font-weight: 700;
+    color: #fff;
+    text-shadow: 0 0 10px rgba(0, 212, 255, 0.5);
+}
+
+.ecology-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    grid-gap: 12px;
+    flex-grow: 1;
+}
+
+.ecology-card {
+    background: rgba(10, 20, 40, 0.7);
+    border: 1px solid rgba(0, 160, 255, 0.15);
+    border-radius: 4px;
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    box-shadow: inset 0 0 20px rgba(0,0,0,0.5);
+}
+
+.ecology-card.full-width {
+    grid-column: 1 / -1;
+}
+
+.threat-board-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 15px;
+    align-items: center;
+}
+
+.threat-board-grid .metric {
+    display: flex;
+    flex-direction: column;
+    padding: 10px;
+    background: rgba(0,0,0,0.4);
+    border: 1px solid #333;
+    border-radius: 4px;
+}
+.threat-board-grid .metric span.label { font-size: 10px; color: #888; text-transform: uppercase; margin-bottom: 5px; }
+.threat-board-grid .metric span.value { font-size: 18px; font-weight: bold; color: #0cf; }
+.threat-board-grid .metric span.value.warning { color: #f44; }
+
+.prog-bar-container {
+    height: 8px;
+    background: #222;
+    border-radius: 4px;
+    overflow: hidden;
+    margin-top: 5px;
+    width: 100%;
+}
+.prog-bar-fill {
+    height: 100%;
+    background: #0cf;
+    transition: width 0.3s;
+}
+.prog-bar-fill.high { background: #f44; }
+.prog-bar-fill.medium { background: #ff9f1c; }
+
+.phylo-tree-container {
+    padding: 15px;
+    background: #080c12;
+    font-family: monospace;
+    font-size: 11px;
+    overflow-x: auto;
+    white-space: pre;
+    color: #ccc;
+    min-height: 150px;
+}
+
+.ecology-card h3 {
+    color: #0cf;
+    margin: 0 0 10px 0;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    border-bottom: 1px solid rgba(0, 180, 255, 0.1);
+    padding-bottom: 6px;
+}
+
+/* Tables */
+.table-container {
+    overflow-x: hidden;
+    flex-grow: 1;
+}
+
+#ecology-niche-table, #ecology-phenotype-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 11px;
+}
+
+#ecology-niche-table th, #ecology-phenotype-table th {
+    text-align: left;
+    color: #5795e2;
+    padding: 4px;
+    font-weight: normal;
+    text-transform: uppercase;
+    font-size: 9px;
+}
+
+#ecology-niche-table td, #ecology-phenotype-table td {
+    padding: 4px;
+    border-bottom: 1px solid rgba(255,255,255,0.03);
+}
+
+.trend-up { color: #0f8; }
+.trend-down { color: #f44; }
+.trend-stable { color: #888; }
+
+/* Activity Feed */
+.activity-feed {
+    flex-grow: 1;
+    overflow-y: auto;
+    max-height: 200px;
+    font-size: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.eco-log-entry {
+    padding: 4px 8px;
+    border-left: 2px solid #333;
+    background: rgba(0,0,0,0.2);
+}
+.eco-log-entry.speciation { border-color: #00d4ff; background: rgba(0,212,255,0.05); }
+.eco-log-entry.divergence { border-color: #ff9f1c; }
+.eco-log-entry.extinction { border-color: #ff3c38; background: rgba(255,60,56,0.05); }
+.eco-log-entry.vacancy { border-color: #d81159; }
+
+.eco-log-title { font-weight: bold; margin-bottom: 2px; display:block; color: #eee; }
+.eco-log-detail { color: #888; }
+
+/* Geo Pressure Indicators */
+.geo-pressure-container {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(80px, 1fr));
+    gap: 8px;
+}
+.geo-p-box {
+    padding: 6px;
+    background: #000;
+    border: 1px solid #222;
+    text-align: center;
+}
+.geo-p-box .loc { font-size: 9px; display: block; color: #666; }
+.geo-p-box .val { font-size: 14px; font-weight: bold; }
+.geo-p-box.high .val { color: #f44; text-shadow: 0 0 5px #f44; }
+
+/* Genome Viewer Overlay */
+.genome-viewer-overlay {
+    position: fixed;
+    top: 50px; right: 50px; bottom: 50px; left: 50px;
+    background: rgba(0, 10, 20, 0.95);
+    z-index: 10000;
+    border: 1px solid #0cf;
+    box-shadow: 0 0 40px rgba(0,0,0,0.8);
+    display: flex;
+    flex-direction: column;
+}
+.genome-viewer-content { padding: 20px; display: flex; flex-direction: column; height: 100%; }
+.gv-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #333; padding-bottom: 10px; margin-bottom: 15px; }
+.gv-header h3 { margin: 0; color: #0cf; }
+.gv-header button { background: none; border: none; color: #f44; font-size: 24px; cursor: pointer; }
+.gv-body { overflow-y: auto; flex-grow: 1; }
+
+.gv-stat-row { display: flex; gap: 20px; margin-bottom: 15px; }
+.gv-stat { flex: 1; padding: 10px; background: rgba(255,255,255,0.03); border-radius: 4px; }
+.gv-stat .l { font-size: 10px; color: #666; text-transform: uppercase; }
+.gv-stat .v { font-size: 16px; font-weight: bold; color: #fff; }
+
+@media (max-width: 1000px) {
+    .ecology-grid { grid-template-columns: 1fr; }
+    .ecology-metrics-row { grid-template-columns: repeat(3, 1fr); }
+}

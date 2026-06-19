@@ -1,0 +1,99 @@
+/* Missile operation styles for RF SCYTHE */
+.entity-list {
+    max-height: 300px;
+    overflow-y: auto;
+    margin-top: 10px;
+    border: 1px solid var(--accent-blue);
+    border-radius: 4px;
+    background-color: rgba(20, 26, 36, 0.8);
+}
+
+.entity-item {
+    display: flex;
+    padding: 8px;
+    border-bottom: 1px solid var(--accent-blue);
+    align-items: center;
+}
+
+.entity-item:last-child {
+    border-bottom: none;
+}
+
+.entity-icon {
+    width: 30px;
+    height: 30px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background-color: var(--accent-blue);
+    border-radius: 50%;
+    margin-right: 10px;
+    flex-shrink: 0;
+}
+
+.entity-icon.launched {
+    background-color: var(--alert-red);
+    animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+    0% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.6;
+    }
+    100% {
+        opacity: 1;
+    }
+}
+
+.entity-info {
+    flex: 1;
+}
+
+.entity-name {
+    font-size: 12px;
+    font-weight: bold;
+    margin-bottom: 4px;
+}
+
+.entity-details {
+    font-size: 10px;
+    color: #b0b8c0;
+}
+
+.entity-status {
+    display: inline-block;
+    padding: 1px 4px;
+    border-radius: 2px;
+    font-size: 9px;
+}
+
+.entity-status.idle {
+    background-color: var(--highlight-blue);
+    color: white;
+}
+
+.entity-status.active {
+    background-color: var(--alert-red);
+    color: white;
+}
+
+.entity-actions {
+    display: flex;
+    gap: 5px;
+}
+
+.action-button.small {
+    padding: 2px 6px;
+    font-size: 10px;
+}
+
+.list-placeholder {
+    padding: 15px;
+    text-align: center;
+    color: #6a7682;
+    font-style: italic;
+    font-size: 12px;
+}

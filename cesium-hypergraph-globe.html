@@ -1,0 +1,4348 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <title>Scythe — Hypergraph Globe Intelligence Surface</title>
+  <!-- Inline SVG favicon — eliminates the 404 console noise -->
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><circle cx='16' cy='16' r='14' fill='%23060c1a' stroke='%2300d4ff' stroke-width='2'/><circle cx='16' cy='16' r='5' fill='%2300d4ff' opacity='.8'/><line x1='16' y1='2' x2='16' y2='8' stroke='%2300d4ff' stroke-width='1.5'/><line x1='16' y1='24' x2='16' y2='30' stroke='%2300d4ff' stroke-width='1.5'/><line x1='2' y1='16' x2='8' y2='16' stroke='%2300d4ff' stroke-width='1.5'/><line x1='24' y1='16' x2='30' y2='16' stroke='%2300d4ff' stroke-width='1.5'/></svg>" />
+
+  <!-- Cesium -->
+  <script src="https://cesium.com/downloads/cesiumjs/releases/1.114/Build/Cesium/Cesium.js"></script>
+  <link  href="https://cesium.com/downloads/cesiumjs/releases/1.114/Build/Cesium/Widgets/widgets.css" rel="stylesheet" />
+
+  <!-- Three.js r149 -->
+  <script src="https://unpkg.com/three@0.149.0/build/three.min.js"></script>
+
+  <!-- Unified Render Scheduler — single loop for Cesium + Three.js globe -->
+  <script src="unified-render-scheduler.js"></script>
+
+  <!-- Socket.IO (polling+ws) -->
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+
+  <!-- msgpack — binary arc warm-boot decoding (~70% smaller payloads) -->
+  <script src="https://cdn.jsdelivr.net/npm/@msgpack/msgpack@3/dist.es5+umd/msgpack.min.js"></script>
+
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body, html {
+      width: 100%; height: 100%;
+      overflow: hidden;
+      background: #000;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      color: #cde;
+      touch-action: none;
+      overscroll-behavior: none;
+    }
+
+    /* ── Globe container ───────────────────────────────────────────────── */
+    #globe-root {
+      position: relative;
+      width: 100vw;
+      height: 100vh;
+    }
+
+    #cesiumContainer {
+      width: 100%;
+      height: 100%;
+      touch-action: none;
+    }
+
+    /* Three.js canvas overlaid via JS (pointer-events:none) */
+
+    /* ── HUD ───────────────────────────────────────────────────────────── */
+    #hud {
+      position: absolute;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      pointer-events: none;
+      z-index: 20;
+    }
+
+    /* ── Top bar ───────────────────────────────────────────────────────── */
+    #topbar {
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 48px;
+      background: linear-gradient(90deg, rgba(0,10,30,.9) 0%, rgba(0,20,50,.8) 100%);
+      border-bottom: 1px solid rgba(0,180,255,.25);
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 0 16px;
+      pointer-events: none;
+      z-index: 30;
+    }
+    #topbar > * {
+      pointer-events: auto;
+    }
+
+    #topbar .logo {
+      font-size: 18px;
+      font-weight: 700;
+      letter-spacing: .12em;
+      color: #0cf;
+      text-transform: uppercase;
+    }
+
+    #topbar .sep { flex: 1; }
+
+    .hud-badge {
+      padding: 4px 10px;
+      border-radius: 3px;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: .06em;
+      border: 1px solid rgba(0,200,255,.3);
+      background: rgba(0,30,60,.7);
+      color: #7df;
+    }
+
+    #live-dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: #0f0;
+      box-shadow: 0 0 6px #0f0;
+      animation: blink 1.5s infinite;
+    }
+
+    @keyframes blink {
+      0%,100% { opacity: 1; } 50% { opacity: .3; }
+    }
+
+    /* ── Sidebar panels ────────────────────────────────────────────────── */
+    #sidebar-left {
+      position: absolute;
+      top: 56px; left: 8px;
+      width: 270px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      pointer-events: none;
+      max-height: calc(100vh - 70px);
+      overflow-y: auto;
+      touch-action: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    #sidebar-right {
+      position: absolute;
+      top: 56px; right: 8px;
+      width: 290px;
+      pointer-events: none;
+      max-height: calc(100vh - 70px);
+      overflow-y: auto;
+      touch-action: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    .panel {
+      pointer-events: auto;
+      background: rgba(0,10,30,.82);
+      border: 1px solid rgba(0,160,255,.2);
+      border-radius: 6px;
+      padding: 10px 12px;
+      backdrop-filter: blur(4px);
+    }
+
+    .panel h3 {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: .1em;
+      color: #0cf;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+      border-bottom: 1px solid rgba(0,180,255,.15);
+      padding-bottom: 5px;
+    }
+
+    /* ── Stats ─────────────────────────────────────────────────────────── */
+    .stat-row {
+      display: flex;
+      justify-content: space-between;
+      font-size: 12px;
+      padding: 2px 0;
+      color: #9bc;
+    }
+    .stat-row span { color: #fff; font-weight: 600; }
+
+    /* ── Controls ──────────────────────────────────────────────────────── */
+    .ctrl-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 4px 0;
+      font-size: 12px;
+    }
+
+    .ctrl-row label { flex: 1; color: #9bc; }
+
+    input[type=range] {
+      width: 90px;
+      accent-color: #0cf;
+    }
+
+    .select-control {
+      min-width: 126px;
+      background: rgba(0,20,50,.85);
+      border: 1px solid rgba(0,180,255,.3);
+      color: #7df;
+      font-size: 11px;
+      font-weight: 600;
+      padding: 4px 8px;
+      border-radius: 3px;
+      outline: none;
+    }
+    .select-control option {
+      background: #081321;
+      color: #d8f0ff;
+    }
+
+    .toggle-btn {
+      background: rgba(0,80,160,.6);
+      border: 1px solid rgba(0,150,255,.4);
+      color: #7df;
+      font-size: 11px;
+      font-weight: 600;
+      padding: 4px 8px;
+      border-radius: 3px;
+      cursor: pointer;
+      letter-spacing: .06em;
+      transition: background .15s;
+    }
+    .toggle-btn:hover    { background: rgba(0,120,220,.7); }
+    .toggle-btn.active   { background: rgba(0,180,80,.5); border-color: #0f8; color: #0f8; }
+
+    /* ── Event feed ────────────────────────────────────────────────────── */
+    #event-feed {
+      font-size: 11px;
+      max-height: 180px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      touch-action: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    .event-item {
+      padding: 3px 6px;
+      border-radius: 2px;
+      border-left: 2px solid #0cf;
+      background: rgba(0,30,70,.5);
+      animation: fadeIn .3s ease;
+    }
+    .event-item.warn { border-color: #fa0; }
+    .event-item.alert{ border-color: #f44; }
+    .event-item.conv { border-color: #0f8; }
+
+    @keyframes fadeIn { from { opacity:0; transform: translateX(-4px); } to { opacity:1; transform: none; } }
+
+    /* ── Node info panel ───────────────────────────────────────────────── */
+    #node-info {
+      position: absolute;
+      bottom: 20px; left: 50%;
+      transform: translateX(-50%);
+      width: 480px;
+      pointer-events: none;
+      display: none;
+    }
+    #node-info.visible { display: block; pointer-events: auto; }
+
+    #node-info .close-btn {
+      float: right;
+      cursor: pointer;
+      color: #f66;
+      font-size: 14px;
+      font-weight: 700;
+      line-height: 1;
+    }
+
+    .node-id {
+      font-size: 13px;
+      font-weight: 700;
+      color: #0cf;
+      margin-bottom: 4px;
+      word-break: break-all;
+    }
+    .node-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      font-size: 11px;
+    }
+    .node-tag {
+      padding: 2px 6px;
+      border-radius: 2px;
+      background: rgba(0,100,200,.4);
+      border: 1px solid rgba(0,160,255,.3);
+      color: #adf;
+    }
+    .node-tag.violation { background: rgba(180,30,30,.4); border-color: #f55; color: #faa; }
+
+    /* ── Suggested prompts ─────────────────────────────────────────────── */
+    #prompt-bar {
+      position: absolute;
+      bottom: 8px; left: 8px; right: 8px;
+      pointer-events: none;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      padding: 6px 8px;
+      background: rgba(0,8,22,.8);
+      border-top: 1px solid rgba(0,160,255,.2);
+      border-radius: 4px;
+    }
+    #prompt-bar > * {
+      pointer-events: auto;
+    }
+
+    .prompt-chip {
+      padding: 3px 10px;
+      background: rgba(0,40,90,.7);
+      border: 1px solid rgba(0,160,255,.3);
+      border-radius: 12px;
+      font-size: 11px;
+      color: #7df;
+      cursor: pointer;
+      transition: background .12s, border-color .12s;
+      white-space: nowrap;
+    }
+    .prompt-chip:hover {
+      background: rgba(0,80,160,.8);
+      border-color: #0cf;
+      color: #fff;
+    }
+
+    /* ── Convergence bloom overlay ─────────────────────────────────────── */
+    #bloom-overlay {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      background: radial-gradient(ellipse at center, rgba(0,255,100,.18) 0%, transparent 70%);
+      opacity: 0;
+      transition: opacity .4s;
+      z-index: 25;
+    }
+    #bloom-overlay.active { opacity: 1; animation: bloomPulse 2s ease forwards; }
+
+    @keyframes bloomPulse {
+      0%   { opacity: 0; }
+      15%  { opacity: 1; }
+      70%  { opacity: 0.5; }
+      100% { opacity: 0; }
+    }
+
+    /* ── Classification badge ──────────────────────────────────────────── */
+    #classification-badge {
+      position: absolute;
+      top: 56px; left: 50%;
+      transform: translateX(-50%);
+      padding: 6px 20px;
+      border-radius: 4px;
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: .1em;
+      text-transform: uppercase;
+      background: rgba(0,200,80,.2);
+      border: 1px solid #0f8;
+      color: #0f8;
+      opacity: 0;
+      transition: opacity .4s;
+      pointer-events: none;
+    }
+    #classification-badge.visible { opacity: 1; }
+
+    /* ── Cesium credit bar hide ────────────────────────────────────────── */
+    .cesium-credit-logoContainer { display: none !important; }
+    .cesium-credit-expand        { display: none !important; }
+
+    /* ── PCAP stream panel ─────────────────────────────────────────────── */
+    #pcap-drop {
+      border: 1px dashed rgba(0,200,255,.35);
+      border-radius: 4px;
+      padding: 10px 8px;
+      text-align: center;
+      font-size: 11px;
+      color: #7df;
+      cursor: pointer;
+      transition: background .15s;
+      margin-bottom: 6px;
+    }
+    #pcap-drop:hover, #pcap-drop.drag-over { background: rgba(0,80,180,.35); border-color: #0cf; }
+    #pcap-drop input { display: none; }
+
+    #pcap-sessions { max-height: 120px; overflow-y: auto; margin-bottom: 6px; touch-action: auto; -webkit-overflow-scrolling: touch; }
+    .pcap-session-row {
+      display: flex; align-items: center; gap: 4px;
+      font-size: 11px; padding: 3px 4px; border-radius: 3px;
+      cursor: pointer; transition: background .12s;
+    }
+    .pcap-session-row:hover { background: rgba(0,80,180,.35); }
+    .pcap-session-row.active { background: rgba(0,160,80,.25); border-left: 2px solid #0f8; }
+    .pcap-session-row .s-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #adf; }
+    .pcap-session-row .s-count { font-size: 10px; color: #6a9; }
+
+    #pcap-status { font-size: 10px; color: #6a9; min-height: 14px; }
+    #pcap-ws-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+      background: #888; margin-right: 4px; vertical-align: middle; }
+    #pcap-ws-dot.live { background: #0f0; box-shadow: 0 0 5px #0f0; }
+    #pcap-ws-dot.err  { background: #f44; }
+
+    /* ── Time Scrubber ─────────────────────────────────────────────────── */
+    #time-scrubber {
+      position: absolute;
+      bottom: 52px;   /* float above the prompt-bar */
+      left: 50%; transform: translateX(-50%);
+      width: min(720px, calc(100vw - 32px));
+      background: rgba(0,8,22,.94);
+      border: 1px solid rgba(0,180,255,.28);
+      border-radius: 6px;
+      padding: 7px 12px;
+      pointer-events: none;
+      z-index: 28;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font: 11px/1 monospace;
+      color: #7df;
+      box-shadow: 0 0 20px rgba(0,160,255,.12);
+    }
+    #time-scrubber > * {
+      pointer-events: auto;
+    }
+    #time-scrubber button {
+      background: rgba(0,40,90,.8);
+      border: 1px solid rgba(0,180,255,.35);
+      color: #7df;
+      padding: 4px 9px;
+      border-radius: 3px;
+      cursor: pointer;
+      font: inherit;
+      transition: background .12s, border-color .12s;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+    #time-scrubber button:hover { background: rgba(0,80,180,.8); border-color: #0cf; color: #fff; }
+    #time-scrubber button.live-active {
+      background: rgba(0,120,60,.5);
+      border-color: #0f8;
+      color: #0f8;
+      box-shadow: 0 0 8px rgba(0,255,128,.2);
+    }
+    #time-scrubber button.play-active {
+      background: rgba(80,40,0,.6);
+      border-color: #fa0;
+      color: #fa0;
+    }
+    #ts-slider {
+      flex: 1;
+      height: 4px;
+      accent-color: #0cf;
+      cursor: pointer;
+      min-width: 60px;
+    }
+    #ts-label {
+      min-width: 74px;
+      text-align: right;
+      color: #adf;
+      letter-spacing: .04em;
+      flex-shrink: 0;
+    }
+    #ts-burst {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: #444;
+      transition: background .2s, box-shadow .2s;
+      flex-shrink: 0;
+    }
+    #ts-burst.active {
+      background: #f80;
+      box-shadow: 0 0 10px #f80;
+      animation: tsBurstPulse .45s ease forwards;
+    }
+    @keyframes tsBurstPulse {
+      0%   { transform: scale(1); }
+      45%  { transform: scale(2.4); }
+      100% { transform: scale(1); }
+    }
+    #ts-window {
+      background: rgba(0,20,50,.8);
+      border: 1px solid rgba(0,180,255,.3);
+      color: #7df;
+      font: inherit;
+      padding: 3px 5px;
+      border-radius: 3px;
+      flex-shrink: 0;
+    }
+    #ts-store-size {
+      font-size: 10px;
+      color: #468;
+      flex-shrink: 0;
+      white-space: nowrap;
+    }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: rgba(0,180,255,.3); border-radius: 2px; }
+
+    /* ── Intelligence Panel ─────────────────────────────────── */
+    #intel-panel { font-size: 11px; }
+    .intel-section { margin-bottom: 8px; }
+    .intel-section h4 { margin: 0 0 4px; font-size: 11px; color: #7df; text-transform: uppercase; }
+    .intel-row { display: flex; align-items: center; gap: 6px; margin: 2px 0; }
+    .intel-label { flex: 0 0 110px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #aaa; }
+    .intel-bar-bg { flex: 1; height: 5px; background: rgba(255,255,255,.08); border-radius: 2px; overflow: hidden; }
+    .intel-bar { height: 100%; border-radius: 2px; transition: width .4s; }
+    .intel-score { flex: 0 0 28px; text-align: right; color: #cdf; font-size: 10px; }
+    .intel-badge { font-size: 9px; padding: 1px 4px; border-radius: 2px; background: rgba(255,255,255,.1); }
+    .intel-badge.FORMING   { background: rgba(244,63,94,.25);  color: #f87191; }
+    .intel-badge.COVERT    { background: rgba(168,85,247,.25); color: #d8b4fe; }
+    .intel-badge.MONITORING{ background: rgba(245,158,11,.25); color: #fcd34d; }
+    .intel-badge.BENIGN    { background: rgba(100,116,139,.2); color: #94a3b8; }
+    .intel-badge.IMMINENT  { background: rgba(239,68,68,.3);   color: #fca5a5; }
+    .intel-badge.ESCALATING{ background: rgba(251,146,60,.25); color: #fdba74; }
+    .intel-badge.DECLINING { background: rgba(34,211,238,.2);  color: #67e8f9; }
+    .intel-badge.IDLE      { background: rgba(100,116,139,.2); color: #94a3b8; }
+    .intel-badge.SNAPPING  { background: rgba(244,63,94,.25);  color: #f87191; }
+    .intel-badge.DRIFTING  { background: rgba(245,158,11,.2);  color: #fcd34d; }
+    .intel-badge.OSCILLATING{ background: rgba(168,85,247,.2); color: #d8b4fe; }
+    .intel-badge.STABLE    { background: rgba(34,197,94,.2);   color: #86efac; }
+    .intel-badge.CLOUD_AUTOSCALE{ background: rgba(148,163,184,.15); color: #94a3b8; }
+    .intel-badge.PHASE_DRIFT_LOCK{ background: rgba(139,92,246,.3); color: #c4b5fd; }
+    .intel-replay-canvas { width: 100%; height: 60px; border-radius: 3px; cursor: crosshair; }
+    .phantom-card { padding: 5px 7px; background: rgba(168,85,247,.08); border: 1px solid rgba(168,85,247,.3); border-radius: 4px; margin-bottom: 4px; }
+    .phantom-card .ph-title { font-size: 11px; color: #d8b4fe; font-weight: bold; }
+    .phantom-card .ph-meta  { font-size: 10px; color: #888; margin-top: 2px; }
+    @keyframes phantom-pulse { 0%,100%{box-shadow:0 0 0 0 rgba(168,85,247,.7)} 50%{box-shadow:0 0 0 5px rgba(168,85,247,0)} }
+    #phantom-badge { animation: phantom-pulse 2s ease-in-out infinite; }
+    @keyframes timing-pulse { 0%,100%{box-shadow:0 0 0 0 rgba(239,68,68,.7)} 50%{box-shadow:0 0 0 5px rgba(239,68,68,0)} }
+    #timing-badge { animation: timing-pulse 1.6s ease-in-out infinite; }
+    @keyframes slope-pulse  { 0%,100%{box-shadow:0 0 0 0 rgba(249,115,22,.7)} 50%{box-shadow:0 0 0 5px rgba(249,115,22,0)} }
+    #slope-badge  { animation: slope-pulse  2.2s ease-in-out infinite; }
+    @keyframes drift-pulse  { 0%,100%{box-shadow:0 0 0 0 rgba(168,85,247,.7)} 50%{box-shadow:0 0 0 5px rgba(168,85,247,0)} }
+    #drift-badge  { animation: drift-pulse  2.8s ease-in-out infinite; }
+    @keyframes intent-pulse { 0%,100%{box-shadow:0 0 0 0 rgba(239,68,68,.7)} 50%{box-shadow:0 0 0 5px rgba(239,68,68,0)} }
+    #intent-badge { animation: intent-pulse 1.4s ease-in-out infinite; }
+    @keyframes replay-pulse { 0%,100%{box-shadow:0 0 0 0 rgba(249,115,22,.7)} 50%{box-shadow:0 0 0 5px rgba(249,115,22,0)} }
+    #replay-badge { animation: replay-pulse 2.5s ease-in-out infinite; }
+    .ping-row { display:flex; gap:5px; margin-top:4px; align-items:center; }
+    .ping-row input { flex:1; background:#0a1525; border:1px solid #1e4070; color:#cdf; padding:3px 6px; border-radius:3px; font:11px monospace; }
+    .ping-result { font-size:11px; margin-top:5px; padding:4px 7px; border-radius:3px; }
+    .ping-result.ok   { background:rgba(34,197,94,.15);  border:1px solid rgba(34,197,94,.4);  color:#86efac; }
+    .ping-result.fail { background:rgba(239,68,68,.15);  border:1px solid rgba(239,68,68,.4);  color:#fca5a5; }
+    .auto-investigation-copy {
+      margin-top: 6px;
+      font-size: 11px;
+      line-height: 1.4;
+      color: #cfe8ff;
+    }
+    .auto-investigation-copy.muted { color: #8fb1cc; }
+
+    /* ── GraphOps Bot HUD ─────────────────────────────────── */
+    #graphops-hud {
+      position: absolute;
+      bottom: 110px; right: 12px;
+      width: 320px;
+      background: rgba(0, 10, 30, 0.85);
+      border: 1px solid rgba(0, 180, 255, 0.3);
+      border-radius: 8px;
+      backdrop-filter: blur(10px);
+      display: flex;
+      flex-direction: column;
+      z-index: 40;
+      pointer-events: none;
+      transition: height 0.25s, width 0.25s;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+    }
+    #graphops-hud > * {
+      pointer-events: auto;
+    }
+    #graphops-hud.collapsed {
+      height: 38px;
+      width: 220px;
+      overflow: hidden;
+    }
+    #graphops-hud .hud-header {
+      padding: 10px 14px;
+      background: rgba(0, 40, 90, 0.4);
+      border-bottom: 1px solid rgba(0, 180, 255, 0.15);
+      display: flex;
+      align-items: center;
+      cursor: pointer;
+      user-select: none;
+    }
+    #graphops-hud .hud-header .title {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      color: #0cf;
+      text-transform: uppercase;
+      flex: 1;
+    }
+    #graphops-hud .hud-header .chevron {
+      color: #7df;
+      font-size: 14px;
+      transition: transform 0.25s;
+    }
+    #graphops-hud.collapsed .hud-header .chevron { transform: rotate(180deg); }
+
+    #graphops-messages {
+      flex: 1;
+      height: 280px;
+      overflow-y: auto;
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      font-size: 12px;
+      line-height: 1.5;
+      touch-action: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+    .msg-row { margin-bottom: 4px; }
+    .msg-row b { display: block; font-size: 10px; text-transform: uppercase; margin-bottom: 2px; }
+    .msg-row.bot b { color: #d7b4f3; }
+    .msg-row.user b { color: #0cf; text-align: right; }
+    .msg-row.user .text { text-align: right; }
+    .msg-row .text { color: #cde; }
+
+    #graphops-input-bar {
+      padding: 10px;
+      border-top: 1px solid rgba(0, 180, 255, 0.15);
+      display: flex;
+      gap: 6px;
+    }
+    #graphops-input {
+      flex: 1;
+      background: rgba(0, 20, 50, 0.8);
+      border: 1px solid rgba(0, 180, 255, 0.3);
+      border-radius: 4px;
+      padding: 6px 10px;
+      color: #fff;
+      font-size: 12px;
+      outline: none;
+    }
+    #graphops-send {
+      background: #005588;
+      color: #fff;
+      border: none;
+      padding: 4px 12px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 11px;
+      font-weight: 700;
+    }
+    #graphops-send:hover { background: #0077aa; }
+
+    #graphops-status-bar {
+      padding: 4px 12px;
+      background: rgba(0, 0, 0, 0.3);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 9px;
+      color: #666;
+      border-bottom: 1px solid rgba(0, 180, 255, 0.1);
+    }
+    #graphops-status-bar span { display: flex; align-items: center; gap: 4px; }
+    .status-dot { width: 6px; height: 6px; border-radius: 50%; background: #444; }
+    .status-dot.online { background: #0f8; box-shadow: 0 0 4px #0f8; }
+
+    /* ── Responsive Mobile Controls ────────────────────────────────────── */
+    @media (max-width: 800px) {
+      #topbar { padding: 0 8px; gap: 6px; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+      #topbar .logo { font-size: 14px; letter-spacing: .05em; }
+      .hud-badge { padding: 4px 6px; font-size: 9px; white-space: nowrap; }
+      .desktop-only { display: none !important; }
+      .nav-btn .desktop-text { display: none; }
+      .nav-btn .mobile-text { display: inline !important; }
+
+      #sidebar-left {
+        width: calc(100% - 16px);
+        max-height: 55vh;
+        z-index: 100;
+        display: none; /* Toggled via .mobile-open */
+        pointer-events: none;
+      }
+      #sidebar-left.mobile-open { display: flex; }
+      
+      #sidebar-left .panel {
+        pointer-events: auto;
+      }
+
+      #sidebar-right {
+        width: calc(100% - 16px);
+        top: auto;
+        bottom: 160px;
+        max-height: 30vh;
+        z-index: 90;
+        pointer-events: none;
+      }
+      #sidebar-right .panel {
+        pointer-events: auto;
+      }
+
+      #time-scrubber {
+        width: calc(100% - 16px);
+        bottom: 50px;
+        flex-wrap: wrap;
+        padding: 6px 8px;
+        gap: 6px;
+        pointer-events: none;
+      }
+      #time-scrubber > * {
+        pointer-events: auto;
+      }
+      #ts-slider { width: 100%; flex: 1 1 100%; order: -1; margin-bottom: 4px; }
+      #ts-label, #ts-window, #ts-store-size { font-size: 9px; }
+
+      #prompt-bar {
+        bottom: 8px;
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        padding-bottom: 6px;
+      }
+      .prompt-chip { font-size: 10px; padding: 3px 8px; }
+      
+      #node-info { width: calc(100% - 16px); bottom: 120px; }
+
+      #graphops-hud {
+        bottom: 120px;
+        right: 8px;
+        width: calc(100% - 16px);
+        max-height: 40vh;
+      }
+      #graphops-hud.collapsed { width: 180px; }
+
+      .mobile-menu-toggle { display: block !important; margin-left: auto; }
+    }
+  </style>
+</head>
+<body>
+
+<div id="globe-root">
+  <div id="cesiumContainer"></div>
+
+  <!-- HUD elements -->
+  <div id="hud">
+
+    <!-- Top bar -->
+    <div id="topbar">
+      <div class="logo">⚔ Scythe</div>
+      <button onclick="window.location.href='./command-ops-visualization.html'" class="hud-badge nav-btn" style="cursor:pointer; background:rgba(0,100,200,0.4); border-color:#0cf; color:#fff; font-weight:bold; margin-left:8px;">
+        <span class="desktop-text">← COMMAND CENTER</span>
+        <span class="mobile-text" style="display:none;">← CMD</span>
+      </button>
+      <button id="mobile-menu-btn" class="hud-badge mobile-menu-toggle" style="display:none; cursor:pointer; background:rgba(0,180,80,0.5); border-color:#0f8; color:#fff;">☰ MENU</button>
+      <div class="hud-badge desktop-only" id="badge-nodes">Nodes: 0</div>
+      <div class="hud-badge desktop-only" id="badge-edges">Edges: 0</div>
+      <div class="hud-badge desktop-only" id="badge-clusters">Clusters: 0</div>
+      <div class="sep"></div>
+      <div id="live-dot" title="Live stream"></div>
+      <div class="hud-badge" id="badge-conf">Conf: –</div>
+    </div>
+
+    <!-- Left sidebar -->
+    <div id="sidebar-left">
+
+      <div class="panel">
+        <h3>Graph Stats</h3>
+        <div class="stat-row">Active nodes    <span id="st-nodes">0</span></div>
+        <div class="stat-row">Active edges    <span id="st-edges">0</span></div>
+        <div class="stat-row">Hyperedges      <span id="st-he">0</span></div>
+        <div class="stat-row">Shadow graph    <span id="st-shadow">hidden</span></div>
+        <div class="stat-row">Belief conf     <span id="st-conf">–</span></div>
+      </div>
+
+      <div class="panel">
+        <h3>Visualization</h3>
+        <div class="ctrl-row">
+          <label>Conf threshold</label>
+          <input type="range" id="ctrl-conf" min="0" max="80" value="20" step="5" />
+          <span id="ctrl-conf-val">0.20</span>
+        </div>
+        <div class="ctrl-row">
+          <label>Map type</label>
+          <select id="map-type-select" class="select-control" title="Choose the globe basemap provider">
+            <option value="ion">Satellite</option>
+            <option value="osm">OpenStreetMap</option>
+            <option value="proxy_osm">Proxied OSM (24h)</option>
+            <option value="stadia_bright">Stadia Bright</option>
+            <option value="stadia_dark">Stadia Dark</option>
+            <option value="offline">Offline Dark</option>
+          </select>
+        </div>
+        <div class="ctrl-row">
+          <label>Shadow reveal</label>
+          <button class="toggle-btn" id="btn-shadow">OFF</button>
+        </div>
+        <div class="ctrl-row">
+          <label>Cluster flare</label>
+          <button class="toggle-btn active" id="btn-cluster-flare">ON</button>
+        </div>
+        <div class="ctrl-row">
+          <label>Suggested prompts</label>
+          <button class="toggle-btn active" id="btn-prompts">ON</button>
+        </div>
+        <div class="ctrl-row">
+          <label>Auto-investigate</label>
+          <button class="toggle-btn" id="btn-auto">OFF</button>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h3>Auto Investigation</h3>
+        <div class="stat-row">Mode            <span id="ai-mode">idle</span></div>
+        <div class="stat-row">Confidence      <span id="ai-confidence">–</span></div>
+        <div class="stat-row">Posture         <span id="ai-posture">unknown</span></div>
+        <div class="stat-row">Classification  <span id="ai-classification">–</span></div>
+        <div class="stat-row">Grounding       <span id="ai-grounding">standby</span></div>
+        <div class="stat-row">Last run        <span id="ai-last-run">never</span></div>
+        <div id="ai-credibility" class="auto-investigation-copy">Awaiting GraphOps report.</div>
+        <div id="ai-assessment" class="auto-investigation-copy muted">UNKNOWN — no grounded investigation has been applied yet.</div>
+        <div id="ai-direction" class="auto-investigation-copy muted">Enable Auto-investigate or run a suggested prompt to populate this panel.</div>
+      </div>
+
+      <div class="panel">
+        <h3>Live Events</h3>
+        <div id="event-feed"></div>
+      </div>
+
+      <!-- ── PCAP Remote Stream ─────────────────────────────────────── -->
+      <div class="panel">
+        <h3><span id="pcap-ws-dot"></span>PCAP Stream</h3>
+
+        <!-- Drop / pick PCAP file -->
+        <div id="pcap-drop" title="Click or drag a .pcap/.pcapng file to upload">
+          <input type="file" id="pcap-file-input" accept=".pcap,.pcapng,.cap" />
+          ⬆ Drop or click to upload .pcap
+        </div>
+
+        <!-- Session list -->
+        <div id="pcap-sessions"></div>
+
+        <!-- Controls row -->
+        <div class="ctrl-row" style="gap:6px">
+          <button class="toggle-btn" id="btn-pcap-refresh" title="Refresh session list">⟳ Sessions</button>
+          <button class="toggle-btn" id="btn-pcap-clear" title="Remove PCAP nodes from globe">✕ Clear</button>
+        </div>
+
+        <div id="pcap-status">No session loaded</div>
+      </div>
+
+      <!-- ── Intelligence Layer ─────────────────────────────────────── -->
+      <div class="panel" id="intel-layer-panel">
+        <h3>Intelligence</h3>
+        <div class="ctrl-row" style="flex-wrap:wrap;gap:4px;margin-bottom:6px">
+          <button class="toggle-btn" id="btn-replay" onclick="globeIntel.toggleReplayPanel()" title="Conflict replay — auto-monitored. Click to open scrubber.">⏮ REPLAY<span id="replay-badge" style="display:none;background:#f97316;color:#fff;border-radius:10px;padding:1px 5px;font-size:10px;font-weight:bold;margin-left:4px;min-width:18px;text-align:center;vertical-align:middle">0</span></button>
+          <button class="toggle-btn" id="btn-timing" onclick="globeIntel.toggleTimingPanel()" title="RF signal timing — auto-monitored. Click to view details.">📡 TIMING<span id="timing-badge" style="display:none;background:#ef4444;color:#fff;border-radius:10px;padding:1px 5px;font-size:10px;font-weight:bold;margin-left:4px;min-width:18px;text-align:center;vertical-align:middle">0</span></button>
+          <button class="toggle-btn" id="btn-swarm"   onclick="globeIntel.spawnSwarm()"          title="Simulate UAV swarm">🚁 SWARM</button>
+          <button class="toggle-btn" id="btn-sitrep" onclick="globeIntel.spawnRFSimulation()"  title="Simulate a random RF coordination scenario (C2 relay / sync burst / phantom / EW sweep) — press again to cancel">🔴 RF DRILL</button>
+          <button class="toggle-btn" id="btn-vol-rf" onclick="window._rfVolRenderer?.toggle()" title="Toggle 3D volumetric RF atmosphere (WebGL2 raymarcher — activates on first rf_field3d_update)">🌐 VOL RF</button>
+          <button class="toggle-btn" id="btn-clr-swarm" onclick="globe.clearUAVSwarm?.();addFeedItem('🚁 UAV swarm cleared','info')" title="Clear all UAVs">✕ UAVs</button>
+          <button class="toggle-btn" id="btn-ping"    onclick="globeIntel.togglePingPanel()"     title="Ping a node or host">📡 PING</button>
+        </div>
+        <div id="intel-panel"></div>
+      </div>
+
+    </div>
+
+    <!-- Right sidebar — node detail -->
+    <div id="sidebar-right">
+      <div class="panel" id="node-detail" style="display:none">
+        <h3>Selected Entity <span class="close-btn" id="close-detail">✕</span></h3>
+        <div class="node-id" id="nd-id">–</div>
+        <div class="node-meta" id="nd-meta"></div>
+      </div>
+    </div>
+
+    <!-- Bottom node info -->
+    <div class="panel" id="node-info">
+      <span class="close-btn" id="close-node-info">✕</span>
+      <div class="node-id" id="ni-id">–</div>
+      <div class="node-meta" id="ni-meta"></div>
+    </div>
+
+    <!-- Suggested prompts bar -->
+    <div id="prompt-bar"></div>
+
+    <!-- Convergence bloom overlay -->
+    <div id="bloom-overlay"></div>
+
+    <!-- Classification badge -->
+    <div id="classification-badge"></div>
+
+    <!-- GraphOps Bot HUD -->
+    <div id="graphops-hud" class="collapsed">
+      <div class="hud-header" id="graphops-toggle">
+        <span class="title">GraphOps Analyst</span>
+        <span class="chevron">▲</span>
+      </div>
+      <div id="graphops-status-bar">
+        <span><div class="status-dot online"></div> EVE: ACTIVE</span>
+        <span id="graphops-memory">MEM: EMPTY</span>
+      </div>
+      <div id="graphops-messages">
+        <div class="msg-row bot">
+          <b>GraphOps</b>
+          <div class="text">Intelligence surface ready. Ask about behavioral clusters, node provenance, or spatial anomalies. I'm aware of what you see on the globe.</div>
+        </div>
+      </div>
+      <div id="graphops-input-bar">
+        <input type="text" id="graphops-input" placeholder="Inquire about visible entities..." autocomplete="off" />
+        <button id="graphops-send">SEND</button>
+      </div>
+    </div>
+
+    <!-- Time Scrubber -->
+    <div id="time-scrubber">
+      <button id="ts-play" title="Play timeline from oldest event">▶</button>
+      <button id="ts-live" class="live-active" title="Jump to live stream">⬤ LIVE</button>
+      <span id="ts-burst" title="Burst activity indicator"></span>
+      <input id="ts-slider" type="range" min="0" max="1000" value="1000" step="1" title="Scrub time" />
+      <span id="ts-label">LIVE</span>
+      <select id="ts-window" title="Visible time window">
+        <option value="30">30s</option>
+        <option value="60">1m</option>
+        <option value="120" selected>2m</option>
+        <option value="300">5m</option>
+        <option value="600">10m</option>
+        <option value="3600">1h</option>
+      </select>
+      <span id="ts-store-size">0 events</span>
+    </div>
+
+  </div><!-- /hud -->
+</div><!-- /globe-root -->
+
+<!-- Globe module -->
+<script src="cesium-hypergraph-globe.js"></script>
+
+<script>
+/* ═══════════════════════════════════════════════════════════════════════════
+ * App bootstrap
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+// ── Config ──────────────────────────────────────────────────────────────────
+const CESIUM_TOKEN = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiJlNjM1OWQzMS01ZGQ1LTQwMDAtOGZlZC1hMDlhZGY3YTZjYTYiLCJpZCI6MjU0MDE2LCJpYXQiOjE3MzExNDEyNDN9.geHijTptoG3E8aZAYFAZltD9LkPGAiljQ01uW9JdKYQ';
+window.STADIA_API_KEY = '053a8c7a-f84d-4413-b461-95b1f93b58cd';
+
+// Resolve API base — priority:
+//   1. window.SCYTHE_API_BASE (manual override, set before this script)
+//   2. location.origin  — when page is served by the orchestrator on any port
+//                         OR via Tailscale HTTPS (https://neurosphere-*.ts.net)
+//   3. LAN fallback      — only for file:// or known standalone dev-server ports
+//
+// Mixed-content rule: if the page is HTTPS we MUST use HTTPS for all fetches.
+// Tailscale `serve` proxies the orchestrator at https://<machine>.ts.net → OK.
+(function _resolveApiBase() {
+  const isHttps    = location.protocol === 'https:';
+  const isFile     = location.protocol === 'file:';
+  // Ports used by live-server / vite / create-react-app style dev servers
+  // that serve the HTML but do NOT run the Flask API.
+  const DEV_ONLY_PORTS = new Set(['5500', '5173', '3000', '4200']);
+
+  const manual = window.SCYTHE_API_BASE;
+  if (manual) {
+    // Honour explicit override; strip trailing slash for safety
+    window.SCYTHE_API_BASE = manual.replace(/\/$/, '');
+  } else if (isFile || DEV_ONLY_PORTS.has(location.port)) {
+    // file:// or pure-frontend dev server → use LAN host
+    // If somehow reached over HTTPS in this branch, still use HTTPS on LAN host
+    const scheme = isHttps ? 'https' : 'http';
+    const lanHost = 'http://192.168.1.185:5001';
+    window.SCYTHE_API_BASE = isFile ? lanHost : `${scheme}://${location.hostname}:5001`;
+    console.warn('[Globe] Dev context — API_BASE =', window.SCYTHE_API_BASE,
+                 '  Override via window.SCYTHE_API_BASE before page load.');
+  } else {
+    // Served by orchestrator on any port (includes :44791, :5001, :443)
+    // or via Tailscale HTTPS on port 443 — use same origin so browser
+    // never has to do a cross-origin or mixed-content request.
+
+    // Support for orchestrated instance paths (e.g. /scythe/i/scythe-abc12345/)
+    const instanceMatch = location.pathname.match(/^\/scythe\/i\/([^\/]+)/);
+    if (instanceMatch) {
+      const prefix = instanceMatch[0];
+      window.SCYTHE_API_BASE = location.origin + prefix;
+      // Also ensure bootstrap info is available for Socket.IO paths
+      if (!window.__SCYTHE_BOOTSTRAP__) window.__SCYTHE_BOOTSTRAP__ = {};
+      if (!window.__SCYTHE_BOOTSTRAP__.socketio_path) {
+        window.__SCYTHE_BOOTSTRAP__.socketio_path = prefix + '/socket.io/';
+      }
+    } else {
+      window.SCYTHE_API_BASE = location.origin;
+    }
+  }
+
+  // WS URL must share the same scheme as API_BASE to avoid mixed-content on Socket.IO polling.
+  if (!window.SCYTHE_WS_URL) window.SCYTHE_WS_URL = window.SCYTHE_API_BASE;
+})();
+
+const API_BASE = window.SCYTHE_API_BASE;
+const WS_URL   = window.SCYTHE_WS_URL;
+
+// Mixed-content guard: warn if page is HTTPS but API_BASE is HTTP.
+// This means all XHR/SSE/Socket.IO will be blocked by the browser.
+// Fix: run `tailscale serve https / http://127.0.0.1:<ORCH_PORT>` on the host.
+if (location.protocol === 'https:' && API_BASE.startsWith('http:')) {
+  const msg = `⚠ Mixed content: page is HTTPS but API_BASE is HTTP (${API_BASE}). ` +
+              `All API calls will be blocked. ` +
+              `Run: tailscale serve https / ${API_BASE} — or set window.SCYTHE_API_BASE to an HTTPS URL.`;
+  console.error('[Globe]', msg);
+  // Surface in the feed once the DOM is ready
+  window.addEventListener('DOMContentLoaded', () => {
+    const feedEl = document.getElementById('event-feed');
+    if (feedEl) {
+      const item = document.createElement('div');
+      item.className = 'feed-item warn';
+      item.style.cssText = 'color:#ff6b35;font-weight:bold;';
+      item.textContent = msg;
+      feedEl.prepend(item);
+    }
+  });
+}
+
+// ── Globe singleton ─────────────────────────────────────────────────────────
+const globe = new CesiumHypergraphGlobe();
+window.globe = globe;   // expose globally so globeIntel + external tools can reach it
+globe.init('cesiumContainer', CESIUM_TOKEN);
+
+// Async-load full geo label database (250 countries + 5k cities) from local assets.
+// Falls back to built-in hardcoded list if assets unavailable.
+globe._loadGeoData(API_BASE);
+
+// ── Auth bootstrap → connectStream ──────────────────────────────────────────
+// Resolves a valid session token before opening the WebSocket connection so
+// the server's ws_connect() handler doesn't kick us out immediately.
+//
+// Flow:
+//   1. If localStorage has a token, validate it locally using JWT claims.
+//      On success → connectStream(token).
+//   2. If no token or token is expired → auto-register a guest operator derived
+//      from the browser's fingerprint, then login to get a fresh token.
+//   3. If operator_manager is unavailable (server returns 503/404) → connect
+//      anonymously; server's dev-mode path will accept it.
+(async function _authBootstrap() {
+  const TOKEN_KEY = 'scythe_session_token';
+  const CALLSIGN_KEY = 'scythe_callsign';
+
+  async function tryValidate(token) {
+    try {
+      if (!token || !window.SCYTHE_AUTH) return null;
+      
+      // Use local JWT-native validation
+      const { valid } = await window.SCYTHE_AUTH.validateSession(token);
+      if (valid) return token;
+      
+      return null;
+    } catch (e) {
+      console.warn('[Globe Auth] Validation error:', e);
+      return null;
+    }
+  }
+
+  async function autoLogin(callsign, password) {
+    try {
+      const r = await fetch(`${API_BASE}/api/operator/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ callsign, password })
+      });
+      if (r.ok) {
+        const d = await r.json();
+        return d?.session?.session_token || null;
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  async function autoRegister(callsign, password) {
+    try {
+      const r = await fetch(`${API_BASE}/api/operator/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          callsign, email: `${callsign}@scythe.local`, password, role: 'operator'
+        })
+      });
+      // 409 = already exists, which is fine — just fall through to login
+      if (r.ok || r.status === 409) return true;
+    } catch (_) {}
+    return false;
+  }
+
+  let token = localStorage.getItem(TOKEN_KEY);
+  if (token) token = await tryValidate(token);
+
+  if (!token) {
+    // Derive a stable guest callsign from hostname + browser entropy
+    let callsign = localStorage.getItem(CALLSIGN_KEY);
+    if (!callsign) {
+      const rnd = Math.random().toString(36).slice(2, 7).toUpperCase();
+      callsign = `SCYTHE-${rnd}`;
+      localStorage.setItem(CALLSIGN_KEY, callsign);
+    }
+    const password = `auto-${callsign.toLowerCase()}`;
+
+    // Try register (idempotent) then login
+    await autoRegister(callsign, password);
+    token = await autoLogin(callsign, password);
+
+    if (token) {
+      localStorage.setItem(TOKEN_KEY, token);
+      console.log('[Globe] 🔑 Session established for', callsign);
+    } else {
+      console.warn('[Globe] Auth unavailable — connecting anonymously (dev mode)');
+    }
+  }
+
+  globe.connectStream(WS_URL, API_BASE, token || null);
+})();
+
+// ── Geolocation soft-acquisition ─────────────────────────────────────────────
+// Phase 1: passive — no prompt.  Phase 2: opportunistic prompt with context
+// banner (not a raw browser dialog).  Phase 3: watchPosition for live updates.
+(function _geoBootstrap() {
+  if (!navigator.geolocation) return;
+
+  const GEO_KEY = 'scythe_geo_granted';
+  const $geoBar = document.createElement('div');
+  $geoBar.id = 'geo-prompt-bar';
+  $geoBar.style.cssText = [
+    'position:fixed;bottom:12px;left:50%;transform:translateX(-50%)',
+    'background:rgba(0,20,40,0.92);border:1px solid #00aaff44',
+    'color:#aaddff;font:13px/1.4 monospace;padding:8px 14px',
+    'border-radius:6px;z-index:9999;display:flex;gap:10px;align-items:center',
+    'box-shadow:0 0 18px #00aaff22',
+  ].join(';');
+  $geoBar.innerHTML =
+    '<span>📡 Enable local signal resolution?</span>' +
+    '<button id="geo-allow" style="background:#005588;color:#fff;border:none;' +
+    'padding:3px 10px;border-radius:4px;cursor:pointer;font:inherit">Allow</button>' +
+    '<button id="geo-deny" style="background:transparent;color:#aaa;border:none;' +
+    'padding:3px 8px;cursor:pointer;font:inherit">Not now</button>';
+
+  let _hasInitialGeoFlown = false;
+
+  function applyPosition(coords) {
+    globe._observerLat = coords.latitude;
+    globe._observerLon = coords.longitude;
+    globe._observerAlt = coords.altitude || 0;
+    console.log('[Globe] 📍 Observer position acquired:',
+      coords.latitude.toFixed(4), coords.longitude.toFixed(4));
+    // Soft-fly to observer only once
+    if (globe._viewer && !_hasInitialGeoFlown) {
+      _hasInitialGeoFlown = true;
+      globe._viewer.camera.flyTo({
+        destination: Cesium.Cartesian3.fromDegrees(
+          coords.longitude, coords.latitude, 800000),
+        duration: 2.5,
+      });
+    }
+  }
+
+  function startWatch() {
+    navigator.geolocation.getCurrentPosition(
+      pos => applyPosition(pos.coords),
+      () => {},
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
+    );
+    navigator.geolocation.watchPosition(
+      pos => applyPosition(pos.coords),
+      () => {},
+      { enableHighAccuracy: true, maximumAge: 5000, timeout: 15000 }
+    );
+  }
+
+  // If already granted in a prior session, start immediately
+  if (localStorage.getItem(GEO_KEY) === '1') {
+    startWatch();
+    return;
+  }
+
+  // Otherwise show the soft banner after a 3s delay (page fully loaded)
+  setTimeout(() => {
+    document.body.appendChild($geoBar);
+    document.getElementById('geo-allow').addEventListener('click', () => {
+      localStorage.setItem(GEO_KEY, '1');
+      $geoBar.remove();
+      startWatch();
+    });
+    document.getElementById('geo-deny').addEventListener('click', () => {
+      $geoBar.remove();
+    });
+  }, 3000);
+}());
+
+// ── Time Scrubber wiring ─────────────────────────────────────────────────────
+(function _initTimeScrubber() {
+  const $slider    = document.getElementById('ts-slider');
+  const $label     = document.getElementById('ts-label');
+  const $play      = document.getElementById('ts-play');
+  const $liveBtn   = document.getElementById('ts-live');
+  const $burst     = document.getElementById('ts-burst');
+  const $winSelect = document.getElementById('ts-window');
+  const $storeSize = document.getElementById('ts-store-size');
+
+  let _dragging = false;
+  let _playing  = false;
+
+  function fmtTs(ts) {
+    if (!ts || ts <= 0) return 'LIVE';
+    const d = new Date(ts * 1000);
+    return d.toLocaleTimeString([], { hour12: false }) +
+           '.' + String(d.getMilliseconds()).padStart(3, '0');
+  }
+
+  function setLiveMode() {
+    _dragging = false;
+    if (_playing) stopPlay();
+    globe.setTimeCursor(0, true);
+    $slider.value      = 1000;
+    $label.textContent = 'LIVE';
+    $liveBtn.classList.add('live-active');
+  }
+
+  function stopPlay() {
+    _playing = false;
+    globe.stopTimeline();
+    $play.textContent = '▶';
+    $play.classList.remove('play-active');
+  }
+
+  // Slider → scrub
+  $slider.addEventListener('mousedown',  () => { _dragging = true; $liveBtn.classList.remove('live-active'); });
+  $slider.addEventListener('touchstart', () => { _dragging = true; $liveBtn.classList.remove('live-active'); }, { passive: true });
+  $slider.addEventListener('mouseup',    () => { _dragging = false; });
+  $slider.addEventListener('touchend',   () => { _dragging = false; }, { passive: true });
+
+  $slider.addEventListener('input', () => {
+    const stats  = globe.getTemporalStats();
+    const minTs  = stats.oldest  || (stats.newest - globe._timeWindow);
+    const maxTs  = stats.newest  || (Date.now() / 1000);
+    const t      = $slider.value / 1000;
+    // Nonlinear mapping — slows down near edges, speeds through quiet bands
+    const tMapped = Math.pow(t, 1.6);
+    const ts      = minTs + (maxTs - minTs) * tMapped;
+    globe.setTimeCursor(ts, false);
+    $label.textContent = fmtTs(ts);
+  });
+
+  // Play button — toggle auto-play
+  $play.addEventListener('click', () => {
+    if (_playing) {
+      stopPlay();
+    } else {
+      _playing = true;
+      $liveBtn.classList.remove('live-active');
+      $play.textContent = '⏸';
+      $play.classList.add('play-active');
+      globe.playTimeline(2.0);   // 2× real-time
+      // Poll for playback end (globe snaps _isLive=true when it reaches now)
+      const checkDone = setInterval(() => {
+        if (globe._isLive || !_playing) {
+          clearInterval(checkDone);
+          if (globe._isLive) {
+            $liveBtn.classList.add('live-active');
+            $slider.value      = 1000;
+            $label.textContent = 'LIVE';
+          }
+          stopPlay();
+        }
+      }, 300);
+    }
+  });
+
+  // Live button
+  $liveBtn.addEventListener('click', setLiveMode);
+
+  // Window size
+  $winSelect.addEventListener('change', () => {
+    globe._timeWindow = parseInt($winSelect.value, 10);
+    if (!globe._isLive) { globe._arcDirty = true; globe._rebuildArcBuffers(); }
+  });
+
+  // Ticker: update slider + label + burst + store size every 200ms
+  let _prevBurst = false;
+  setInterval(() => {
+    const stats   = globe.getTemporalStats();
+    const density = globe.getBurstDensity(10);
+    const isBurst = density > 80;
+
+    if (isBurst && !_prevBurst) {
+      $burst.classList.add('active');
+      setTimeout(() => $burst.classList.remove('active'), 800);
+    }
+    _prevBurst = isBurst;
+
+    $storeSize.textContent = stats.storeSize.toLocaleString() + ' ev';
+
+    if (globe._isLive && !_dragging) {
+      $slider.value      = 1000;
+      $label.textContent = 'LIVE';
+      $liveBtn.classList.add('live-active');
+    } else if (!_dragging && !_playing) {
+      // Keep slider in sync during non-interactive scrub
+      const minTs  = stats.oldest || 0;
+      const maxTs  = stats.newest || 1;
+      const cursor = stats.cursor;
+      const t      = maxTs > minTs ? (cursor - minTs) / (maxTs - minTs) : 1;
+      const tSlider = Math.pow(Math.max(0, Math.min(1, t)), 1 / 1.6);  // inverse of input mapping
+      $slider.value      = Math.round(tSlider * 1000);
+      $label.textContent = fmtTs(cursor);
+    }
+  }, 200);
+}());
+
+// ── UI element refs ──────────────────────────────────────────────────────────
+const $nodes    = document.getElementById('badge-nodes');
+const $edges    = document.getElementById('badge-edges');
+const $clusters = document.getElementById('badge-clusters');
+const $conf     = document.getElementById('badge-conf');
+const $stNodes  = document.getElementById('st-nodes');
+const $stEdges  = document.getElementById('st-edges');
+const $stHE     = document.getElementById('st-he');
+const $stShadow = document.getElementById('st-shadow');
+const $stConf   = document.getElementById('st-conf');
+const $feed     = document.getElementById('event-feed');
+const $promptBar= document.getElementById('prompt-bar');
+const $bloom    = document.getElementById('bloom-overlay');
+const $clsBadge = document.getElementById('classification-badge');
+const $nodeDetail   = document.getElementById('node-detail');
+const $ndId         = document.getElementById('nd-id');
+const $ndMeta       = document.getElementById('nd-meta');
+const $mapType      = document.getElementById('map-type-select');
+const $aiMode       = document.getElementById('ai-mode');
+const $aiConfidence = document.getElementById('ai-confidence');
+const $aiPosture    = document.getElementById('ai-posture');
+const $aiClass      = document.getElementById('ai-classification');
+const $aiGrounding  = document.getElementById('ai-grounding');
+const $aiLastRun    = document.getElementById('ai-last-run');
+const $aiCred       = document.getElementById('ai-credibility');
+const $aiAssessment = document.getElementById('ai-assessment');
+const $aiDirection  = document.getElementById('ai-direction');
+
+const AUTO_INVESTIGATION_QUERY =
+  'Assess the current graph state for the operator. Use only grounded graph evidence and known entities already present in the graph. If evidence is sparse, unstable, or unsupported, return UNKNOWN and give the next best investigation step.';
+const MAP_MODE_STORAGE_KEY = 'scythe_globe_map_type';
+const MAP_MODE_LABELS = {
+  [ImageryMode.ION]: 'Satellite',
+  [ImageryMode.OSM]: 'OpenStreetMap',
+  [ImageryMode.PROXY_OSM]: 'Proxied OSM (24h)',
+  [ImageryMode.STADIA_BRIGHT]: 'Stadia Bright',
+  [ImageryMode.STADIA_DARK]: 'Stadia Dark',
+  [ImageryMode.OFFLINE]: 'Offline Dark'
+};
+const MAP_MODE_CYCLE = [
+  ImageryMode.ION,
+  ImageryMode.OSM,
+  ImageryMode.PROXY_OSM,
+  ImageryMode.STADIA_BRIGHT,
+  ImageryMode.STADIA_DARK,
+  ImageryMode.OFFLINE
+];
+const STADIA_MAP_MODES = new Set([
+  ImageryMode.STADIA_BRIGHT,
+  ImageryMode.STADIA_DARK
+]);
+
+function getStoredMapMode() {
+  const stored = localStorage.getItem(MAP_MODE_STORAGE_KEY);
+  return MAP_MODE_LABELS[stored] ? stored : ImageryMode.ION;
+}
+
+function hasStadiaKey() {
+  const key = window.STADIA_API_KEY || window.SCYTHE_STADIA_API_KEY || localStorage.getItem('scythe_stadia_api_key') || '';
+  return typeof key === 'string' && key.trim().length > 0;
+}
+
+function getMapModeLabel(mode) {
+  return MAP_MODE_LABELS[mode] || mode || 'Unknown';
+}
+
+function syncMapTypeControl(mode) {
+  if ($mapType && MAP_MODE_LABELS[mode]) $mapType.value = mode;
+  localStorage.setItem(MAP_MODE_STORAGE_KEY, mode);
+}
+
+function formatAutoRunTime(ts) {
+  return ts ? new Date(ts).toLocaleTimeString([], { hour12: false }) : 'never';
+}
+
+function resolveGroundingStatus(reflexiveGrounding) {
+  const actions = Array.isArray(reflexiveGrounding)
+    ? reflexiveGrounding
+    : (reflexiveGrounding ? [reflexiveGrounding] : []);
+  if (!actions.length) return 'not-requested';
+  const statuses = actions
+    .map(a => a?.tool_result?.status || (a?.triggered ? 'triggered' : ''))
+    .filter(Boolean);
+  return statuses[0] || 'triggered';
+}
+
+function updateAutoInvestigationPanel(report, options = {}) {
+  const now = options.timestamp || Date.now();
+  if (!report) {
+    $aiMode.textContent = options.mode || (autoInvestigate ? 'active' : 'idle');
+    $aiConfidence.textContent = options.confidence ?? '–';
+    $aiPosture.textContent = options.posture || 'unknown';
+    $aiClass.textContent = options.classification || '–';
+    $aiGrounding.textContent = options.grounding || 'standby';
+    $aiLastRun.textContent = formatAutoRunTime(now);
+    $aiCred.textContent = options.credibility || 'Awaiting GraphOps report.';
+    $aiAssessment.textContent = options.assessment || 'UNKNOWN — no grounded investigation is available.';
+    $aiDirection.textContent = options.direction || 'Wait for more evidence or run a focused prompt.';
+    return;
+  }
+
+  const confidence = Number.isFinite(report.confidence)
+    ? report.confidence
+    : (report.belief_state?.confidence_history?.slice(-1)[0] ?? 0);
+  const posture = report.evidence_posture || report.report?.credibility?.split(',')[0] || 'unknown';
+  const classification = report.classification || report.belief_state?.classification || 'UNKNOWN';
+  const grounding = resolveGroundingStatus(report.reflexive_grounding);
+  const groundedCount = report.grounded_entity_count ?? report.entities?.length ?? 0;
+  const skippedCount = report.ungrounded_entity_count ?? 0;
+
+  $aiMode.textContent = options.mode || (options.source === 'manual' ? 'manual' : (autoInvestigate ? 'active' : 'idle'));
+  $aiConfidence.textContent = confidence.toFixed(2);
+  $aiPosture.textContent = posture;
+  $aiClass.textContent = classification;
+  $aiGrounding.textContent = grounding;
+  $aiLastRun.textContent = formatAutoRunTime(now);
+  $aiCred.textContent = report.report?.credibility || `${posture} — credibility unavailable`;
+  $aiAssessment.textContent = report.report?.assessment || report.report?.verdict || 'UNKNOWN';
+  $aiDirection.textContent =
+    `${report.report?.direction || 'Continue monitoring'} · grounded entities ${groundedCount}` +
+    (skippedCount > 0 ? ` · skipped ${skippedCount} ungrounded` : '');
+}
+
+function normalizePromptEntry(prompt, fallbackNote = '') {
+  if (!prompt) return null;
+  if (typeof prompt === 'string') {
+    return { text: prompt, signal_note: fallbackNote };
+  }
+  const text = prompt.text || prompt.prompt || prompt.query || prompt.title || '';
+  if (!text) return null;
+  return {
+    text,
+    signal_note: prompt.signal_note || prompt.signal || fallbackNote || '',
+    confidence: Number.isFinite(prompt.confidence) ? prompt.confidence : null,
+  };
+}
+
+function collectPromptEntries(...sources) {
+  return sources
+    .flat()
+    .map(item => normalizePromptEntry(item))
+    .filter(Boolean);
+}
+
+// ── Stats ticker (pre-URS fallback; cancelled when URS starts) ───────────────
+const _statsTimerPre = setInterval(() => {
+  const snap = globe.getGraphSnapshot();
+  $nodes.textContent    = 'Nodes: '    + snap.nodeCount;
+  $edges.textContent    = 'Edges: '    + snap.edgeCount;
+  $clusters.textContent = 'Clusters: ' + snap.hyperedgeCount;
+  $stNodes.textContent  = snap.nodeCount;
+  $stEdges.textContent  = snap.edgeCount;
+  $stHE.textContent     = snap.hyperedgeCount;
+}, 1000);
+
+// ── Confidence threshold slider ──────────────────────────────────────────────
+const ctrlConf = document.getElementById('ctrl-conf');
+const ctrlConfVal = document.getElementById('ctrl-conf-val');
+ctrlConf.addEventListener('input', () => {
+  const v = ctrlConf.value / 100;
+  ctrlConfVal.textContent = v.toFixed(2);
+  globe.setConfidenceCull(v);
+});
+
+// ── Shadow reveal toggle ──────────────────────────────────────────────────────
+const btnShadow = document.getElementById('btn-shadow');
+let shadowOn = false;
+btnShadow.addEventListener('click', () => {
+  shadowOn = !shadowOn;
+  globe.setShadowReveal(shadowOn);
+  btnShadow.textContent = shadowOn ? 'ON' : 'OFF';
+  btnShadow.classList.toggle('active', shadowOn);
+  $stShadow.textContent = shadowOn ? 'visible' : 'hidden';
+});
+
+// ── Cluster flare toggle ──────────────────────────────────────────────────────
+const btnClusterFlare = document.getElementById('btn-cluster-flare');
+let clusterFlareOn = true;
+btnClusterFlare.addEventListener('click', () => {
+  clusterFlareOn = !clusterFlareOn;
+  globe.setClusterFlareVisible(clusterFlareOn);
+  btnClusterFlare.textContent = clusterFlareOn ? 'ON' : 'OFF';
+  btnClusterFlare.classList.toggle('active', clusterFlareOn);
+});
+
+// ── Auto-investigate toggle ───────────────────────────────────────────────────
+const btnAuto = document.getElementById('btn-auto');
+let autoInvestigate = false;
+let autoTimer = null;
+btnAuto.addEventListener('click', () => {
+  autoInvestigate = !autoInvestigate;
+  btnAuto.textContent = autoInvestigate ? 'ON' : 'OFF';
+  btnAuto.classList.toggle('active', autoInvestigate);
+  if (autoInvestigate) {
+    updateAutoInvestigationPanel(null, {
+      mode: 'active',
+      posture: 'warming',
+      grounding: 'pending',
+      assessment: 'Launching grounded GraphOps auto-investigation.',
+      direction: 'Collecting the latest belief state and suggested prompts.'
+    });
+    autoTimer = setInterval(runAutoInvestigate, 15000);
+    runAutoInvestigate();
+  } else {
+    clearInterval(autoTimer);
+    updateAutoInvestigationPanel(null, {
+      mode: 'idle',
+      posture: $aiPosture.textContent || 'unknown',
+      grounding: $aiGrounding.textContent || 'standby',
+      assessment: 'Auto-investigate paused.',
+      direction: 'Manual suggested prompts remain available.'
+    });
+  }
+});
+
+function applyInvestigationPayload(data, source) {
+  const prompts = collectPromptEntries(
+    data?.suggested_prompts || [],
+    data?.prompts || [],
+    (data?.suggestions || []).map(s => normalizePromptEntry(s, data?.state || ''))
+  );
+  if (prompts.length > 0) renderPrompts(prompts);
+
+  const report = data?.report
+    ? globe.applyGraphOpsReport(data.report, { source })
+    : null;
+  if (report) {
+    updateConfBadge(report.belief_state);
+    return true;
+  }
+  return false;
+}
+
+// Auto-investigate: runs a bounded GraphOps investigation and surfaces grounded status.
+// Falls back to tutorial guidance when the investigation endpoint is unavailable.
+async function runAutoInvestigate() {
+  const nodeCount = globe._nodeCount || 0;
+  const edgeCount = globe._arcEdges?.length || 0;
+  try {
+    const res = await fetch(`${API_BASE}/api/graphops/investigate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        query: `${AUTO_INVESTIGATION_QUERY} Current graph size: ${nodeCount} nodes, ${edgeCount} edges.`,
+        max_steps: 2
+      })
+    });
+    if (!res.ok) throw new Error(`${res.status}`);
+    const data = await res.json();
+    const applied = applyInvestigationPayload(data, 'auto');
+    if (!applied) {
+      updateAutoInvestigationPanel(null, {
+        mode: 'active',
+        posture: 'unknown',
+        grounding: 'not-requested',
+        assessment: 'UNKNOWN — GraphOps returned no grounded report for the current graph state.',
+        direction: 'Wait for more evidence or trigger a focused prompt.',
+      });
+    } else {
+      const verdict = data.report?.report?.assessment || data.report?.report?.verdict || 'UNKNOWN';
+      if (verdict !== runAutoInvestigate._lastVerdict) {
+        addFeedItem(`⬡ AUTO: ${verdict}`, 'info');
+        runAutoInvestigate._lastVerdict = verdict;
+      }
+    }
+  } catch (e) {
+    try {
+      const tutorialRes = await fetch(`${API_BASE}/api/graphops/tutorial`);
+      if (!tutorialRes.ok) throw new Error(`${tutorialRes.status}`);
+      const tutorial = await tutorialRes.json();
+      applyInvestigationPayload(tutorial, 'tutorial');
+      updateAutoInvestigationPanel(null, {
+        mode: autoInvestigate ? 'active' : 'idle',
+        posture: tutorial.state || 'tutorial',
+        grounding: 'unavailable',
+        credibility: 'Tutorial fallback only — investigate endpoint unavailable.',
+        assessment: tutorial.guidance || 'No grounded report available.',
+        direction: 'Use a suggested prompt or restore the GraphOps investigate API.',
+      });
+      if (tutorial.guidance && tutorial.state !== runAutoInvestigate._lastState) {
+        addFeedItem(`⬡ ${tutorial.state || 'T?'}: ${tutorial.guidance}`, 'warn');
+        runAutoInvestigate._lastState = tutorial.state;
+      }
+      return;
+    } catch (_) {}
+
+    const staticPrompts = [
+      { text: 'identify high-confidence emitter clusters',  signal_note: `${nodeCount} nodes loaded` },
+      { text: 'find nodes with anomalous proximity arcs',   signal_note: `${edgeCount} edges` },
+      { text: 'correlate TLS reuse across rotating IPs',    signal_note: 'behavioral pattern' },
+      { text: 'detect emerging k-core clusters',            signal_note: 'topology analysis' },
+      { text: 'flag RF-correlated beacon sequences',        signal_note: 'rf_available' },
+      { text: 'trace lateral movement via short-TTL edges', signal_note: 'temporal_entropy' },
+    ];
+    renderPrompts(staticPrompts);
+    updateAutoInvestigationPanel(null, {
+      mode: autoInvestigate ? 'active' : 'idle',
+      posture: 'offline',
+      grounding: 'unavailable',
+      credibility: 'Client-side fallback prompts only.',
+      assessment: 'UNKNOWN — GraphOps investigation endpoints are offline.',
+      direction: 'Reconnect the API to restore grounded auto-investigation.'
+    });
+  }
+}
+runAutoInvestigate._lastState = null;
+runAutoInvestigate._lastVerdict = null;
+
+// ── Suggested prompts toggle ──────────────────────────────────────────────────
+const btnPrompts = document.getElementById('btn-prompts');
+let promptsOn = true;
+btnPrompts.addEventListener('click', () => {
+  promptsOn = !promptsOn;
+  btnPrompts.textContent = promptsOn ? 'ON' : 'OFF';
+  btnPrompts.classList.toggle('active', promptsOn);
+  $promptBar.style.display = promptsOn ? '' : 'none';
+});
+
+syncMapTypeControl(getStoredMapMode());
+
+function applySelectedMapMode(mode, options = {}) {
+  const resolvedMode = MAP_MODE_LABELS[mode] ? mode : ImageryMode.ION;
+  const urs = window.__URS_GLOBE__;
+
+  syncMapTypeControl(resolvedMode);
+
+  if (urs) urs.setImageryMode(resolvedMode);
+  if (!options.silent) addFeedItem(`🗺 Map → ${getMapModeLabel(resolvedMode)}`, 'info');
+}
+
+$mapType.addEventListener('change', () => {
+  applySelectedMapMode($mapType.value);
+});
+
+// ── Prompt bar rendering ─────────────────────────────────────────────────────
+function renderPrompts(prompts) {
+  if (!promptsOn) return;
+  $promptBar.innerHTML = '';
+  collectPromptEntries(prompts || []).slice(0, 8).forEach(p => {
+    const chip = document.createElement('div');
+    chip.className = 'prompt-chip';
+    chip.textContent = p.text;
+    const titleBits = [];
+    if (p.signal_note) titleBits.push(p.signal_note);
+    if (Number.isFinite(p.confidence)) titleBits.push(`confidence ${(p.confidence * 100).toFixed(0)}%`);
+    chip.title = titleBits.join(' • ');
+    chip.addEventListener('click', () => executePrompt(p.text));
+    $promptBar.appendChild(chip);
+  });
+}
+
+async function executePrompt(prompt) {
+  addFeedItem(`▶ ${prompt}`, 'info');
+  try {
+    const res = await fetch(`${API_BASE}/api/graphops/investigate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query: prompt, max_steps: 3 })
+    });
+    if (!res.ok) throw new Error(`${res.status}`);
+    const data = await res.json();
+    const applied = applyInvestigationPayload(data, 'manual');
+    if (!applied) {
+      updateAutoInvestigationPanel(null, {
+        mode: 'manual',
+        posture: 'unknown',
+        grounding: 'not-requested',
+        assessment: 'UNKNOWN — manual GraphOps request returned no grounded report.',
+        direction: 'Refine the prompt or wait for stronger evidence.'
+      });
+    }
+    if (data.verdict) addFeedItem(`✓ ${data.verdict}`, 'conv');
+  } catch (e) {
+    // investigate endpoint not yet wired — show tutorial context instead
+    try {
+      const tr = await fetch(`${API_BASE}/api/graphops/tutorial`);
+      if (tr.ok) {
+        const td = await tr.json();
+        addFeedItem(`⬡ ${td.state || 'T?'}: ${td.guidance || 'No guidance available'}`, 'info');
+        applyInvestigationPayload(td, 'tutorial');
+        updateAutoInvestigationPanel(null, {
+          mode: 'manual',
+          posture: td.state || 'tutorial',
+          grounding: 'unavailable',
+          credibility: 'Tutorial fallback only — investigation endpoint unavailable.',
+          assessment: td.guidance || 'No guidance available',
+          direction: 'Use a suggested prompt once GraphOps investigate is available.'
+        });
+      } else {
+        addFeedItem(`⬡ Prompt queued: "${prompt}" (investigate offline)`, 'warn');
+        updateAutoInvestigationPanel(null, {
+          mode: 'manual',
+          posture: 'offline',
+          grounding: 'unavailable',
+          assessment: 'UNKNOWN — investigation endpoint offline.',
+          direction: 'Prompt queued locally; retry when the API is reachable.'
+        });
+      }
+    } catch (_) {
+      addFeedItem(`⬡ Prompt queued: "${prompt}" (API offline)`, 'warn');
+      updateAutoInvestigationPanel(null, {
+        mode: 'manual',
+        posture: 'offline',
+        grounding: 'unavailable',
+        assessment: 'UNKNOWN — GraphOps API offline.',
+        direction: 'Reconnect the API to execute this prompt.'
+      });
+    }
+  }
+}
+
+function updateConfBadge(beliefState) {
+  if (!beliefState) return;
+  const conf = beliefState.confidence_history?.slice(-1)[0] ?? 0;
+  $conf.textContent     = 'Conf: ' + conf.toFixed(2);
+  $stConf.textContent   = conf.toFixed(2);
+}
+
+// ── Event feed ────────────────────────────────────────────────────────────────
+function addFeedItem(text, type = 'info') {
+  const item = document.createElement('div');
+  item.className = `event-item ${type}`;
+  item.textContent = `[${new Date().toLocaleTimeString()}] ${text}`;
+  $feed.insertBefore(item, $feed.firstChild);
+  while ($feed.children.length > 50) $feed.removeChild($feed.lastChild);
+}
+
+// ── Node selection event ──────────────────────────────────────────────────────
+window.addEventListener('globe:node_selected', (e) => {
+  const { entityId, node } = e.detail;
+  if (!entityId || !node) {
+    $nodeDetail.style.display = 'none';
+    return;
+  }
+
+  $ndId.textContent  = entityId;
+  $ndMeta.innerHTML  = '';
+  $nodeDetail.style.display = '';
+
+  const fields = [
+    { label: 'Conf',    value: node.conf?.toFixed(3) },
+    { label: 'Lat/Lon', value: `${node.lat?.toFixed(3)}, ${node.lon?.toFixed(3)}` },
+    { label: 'Shadow',  value: node.shadow ? '⚠ YES' : 'No' }
+  ];
+
+  fields.forEach(f => {
+    const tag = document.createElement('span');
+    tag.className = 'node-tag';
+    tag.textContent = `${f.label}: ${f.value ?? '–'}`;
+    $ndMeta.appendChild(tag);
+  });
+
+  // Fly to node
+  globe.flyToNode(entityId, 1.5);
+  addFeedItem(`● Selected: ${entityId} (conf ${node.conf?.toFixed(2)})`, 'info');
+});
+
+document.getElementById('close-detail').addEventListener('click', () => {
+  $nodeDetail.style.display = 'none';
+  globe.selectNode(null);
+});
+
+// ── Convergence bloom ─────────────────────────────────────────────────────────
+window.addEventListener('globe:convergence', (e) => {
+  const { classification, confidence } = e.detail;
+  $bloom.classList.add('active');
+  setTimeout(() => $bloom.classList.remove('active'), 3000);
+
+  $clsBadge.textContent = `◉ ${classification || 'PATTERN LOCKED'}  ${confidence ? '@ ' + (confidence * 100).toFixed(0) + '%' : ''}`;
+  $clsBadge.classList.add('visible');
+  setTimeout(() => $clsBadge.classList.remove('visible'), 8000);
+
+  addFeedItem(`⬡ CONVERGENCE: ${classification} (${(confidence * 100).toFixed(0)}%)`, 'conv');
+});
+
+/**
+ * initGraphOpsBot — Holographic Analyst Bridge
+ * Ported and enhanced with spatial awareness for the globe.
+ */
+function initGraphOpsBot() {
+  const $hud     = document.getElementById('graphops-hud');
+  const $toggle  = document.getElementById('graphops-toggle');
+  const $msgs    = document.getElementById('graphops-messages');
+  const $input   = document.getElementById('graphops-input');
+  const $send    = document.getElementById('graphops-send');
+  const $mem     = document.getElementById('graphops-memory');
+
+  if (!$hud || !$toggle) return;
+
+  $toggle.addEventListener('click', () => {
+    $hud.classList.toggle('collapsed');
+  });
+
+  $input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') sendMessage();
+  });
+  $send.addEventListener('click', sendMessage);
+
+  // Auto-expand on focus
+  $input.addEventListener('focus', () => {
+    $hud.classList.remove('collapsed');
+  });
+
+  function appendMsg(sender, text, isBot = false) {
+    const row = document.createElement('div');
+    row.className = `msg-row ${isBot ? 'bot' : 'user'}`;
+    row.innerHTML = `<b>${sender}</b><div class="text">${text.replace(/</g, '&lt;').replace(/\n/g, '<br>')}</div>`;
+    $msgs.appendChild(row);
+    $msgs.scrollTop = $msgs.scrollHeight;
+  }
+
+  async function sendMessage() {
+    const msg = $input.value.trim();
+    if (!msg) return;
+    $input.value = '';
+
+    appendMsg('Operator', msg, false);
+
+    // ── Spatial Enrichment ──
+    const selected = globe.getSelectionContext();
+    const visible  = globe.getViewContext(10);
+    
+    let contextStr = "\n\n[SPATIAL_CONTEXT]";
+    if (selected) {
+      contextStr += `\nSELECTED_ENTITY: ${selected.id} (kind: ${selected.kind}, conf: ${selected.conf.toFixed(2)})`;
+    }
+    if (visible.length > 0) {
+      contextStr += `\nVISIBLE_ENTITIES: ${visible.map(v => `${v.id}(${v.kind})`).join(', ')}`;
+    } else {
+      contextStr += "\nVISIBLE_ENTITIES: None resolved at this altitude";
+    }
+
+    const body = {
+      message: msg + contextStr,
+      model: 'gemma3:1b',
+      instance_id: window._scytheInstanceId || 'unknown'
+    };
+
+    const thinkRow = document.createElement('div');
+    thinkRow.className = 'msg-row bot';
+    thinkRow.innerHTML = '<b>GraphOps</b><div class="text"><i>Analyzing spatial patterns...</i></div>';
+    $msgs.appendChild(thinkRow);
+    $msgs.scrollTop = $msgs.scrollHeight;
+
+    try {
+      const resp = await fetch(`${API_BASE}/api/tak-gpt/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      
+      const data = await resp.json();
+      if (thinkRow.parentNode) thinkRow.remove();
+
+      if (data.status === 'error') throw new Error(data.message);
+
+      const reply = data.response || data.message || 'Analyst core did not return a narrative.';
+      appendMsg('GraphOps', reply, true);
+
+      // ── Action Bridge: Camera driving ──
+      const navMatch = reply.match(/\[NAVIGATE:\s*([a-zA-Z0-9_:-]+)\]/);
+      if (navMatch && navMatch[1]) {
+        const targetId = navMatch[1];
+        addFeedItem(`🔭 Analyst requested navigation to ${targetId}`, 'info');
+        globe.flyToNode(targetId);
+      }
+
+    } catch (e) {
+      if (thinkRow.parentNode) thinkRow.remove();
+      appendMsg('System', `Inference error: ${e.message}`, false);
+    }
+  }
+
+  // Periodic instance sync
+  setInterval(async () => {
+    try {
+      const r = await fetch(`${API_BASE}/api/instance/info`);
+      if (r.ok) {
+        const info = await r.json();
+        $mem.textContent = `MEM: ${info.instance_id.slice(0,8)} (${info.node_count}N)`;
+        window._scytheInstanceId = info.instance_id;
+      }
+    } catch (_) {}
+  }, 10000);
+}
+
+// ── Suggested prompts from backend ───────────────────────────────────────────
+window.addEventListener('globe:suggested_prompts', (e) => {
+  renderPrompts(e.detail.prompts || []);
+});
+
+window.addEventListener('globe:graphops_report', (e) => {
+  const detail = e.detail || {};
+  updateAutoInvestigationPanel(detail.report, {
+    source: detail.source || 'graphops',
+    mode: detail.source === 'manual' ? 'manual' : (autoInvestigate ? 'active' : 'idle'),
+  });
+});
+
+// ── Bootstrap: load initial graph state ──────────────────────────────────────
+async function loadInitialState() {
+  // Map a raw recon entity → globe node
+  function _entityToNode(e) {
+    const loc  = e.location || {};
+    const lat  = loc.lat  ?? e.lat;
+    const lon  = loc.lon  ?? e.lon;
+    const conf = e.confidence ?? e.conf ?? 0.5;
+    if (lat == null || lon == null) return null;
+    const disp = (e.disposition || '').toLowerCase();
+    const kind = e.entity_type || e.kind ||
+      (e.entity_id?.startsWith('PCAP-') ? 'host' :
+       e.entity_id?.startsWith('recon:') ? 'recon' : 'host');
+    return { id: e.entity_id || e.id, lat, lon, conf, kind,
+             shadow: disp.includes('hostile') || conf < 0.3, ...e };
+  }
+
+  // ── Warm-boot from cache: inject persisted arcs before SSE connects ──────
+  // Survives orchestrator restarts — arcs flow in immediately, not after
+  // entities re-establish via stream.
+  try {
+    // Prefer binary msgpack (faster parse, smaller payload) with JSON fallback
+    const _msgpackAvail = typeof MessagePack !== 'undefined';
+    const arcHeaders = _msgpackAvail
+      ? { 'Accept': 'application/msgpack' }
+      : { 'Accept': 'application/json' };
+
+    const cacheRes = await fetch(`${API_BASE}/api/cache/arcs?max_age=90`, { headers: arcHeaders });
+    if (cacheRes.ok) {
+      let cacheData;
+      const ct = cacheRes.headers.get('Content-Type') || '';
+      if (ct.includes('msgpack') && _msgpackAvail) {
+        const buf = await cacheRes.arrayBuffer();
+        cacheData = MessagePack.decode(new Uint8Array(buf));
+      } else {
+        cacheData = await cacheRes.json();
+      }
+      const cachedEdges = cacheData.edges || [];
+      if (cachedEdges.length > 0) {
+        cachedEdges.forEach(e => globe._queueUpdate({ type: 'edge_update', ...e }));
+        const enc = ct.includes('msgpack') ? ' (msgpack)' : '';
+        addFeedItem(`⚡ ${cachedEdges.length} arcs restored from cache${enc}`, 'info');
+      }
+    }
+  } catch (_) { /* cache miss — non-fatal */ }
+
+  // ── Seed node geo positions from persistent index ─────────────────────────
+  // Populates globe nodes with last-known positions before SSE stream arrives.
+  try {
+    const nodeRes = await fetch(`${API_BASE}/api/cache/nodes?min_conf=0.5`);
+    if (nodeRes.ok) {
+      const nodeData = await nodeRes.json();
+      const nodes = nodeData.nodes || [];
+      if (nodes.length > 0) {
+        nodes.forEach(n => {
+          if (n.lat != null && n.lon != null)
+            globe.upsertNode(n.node_id, n.lat, n.lon, n.confidence, { kind: 'cached' });
+        });
+        addFeedItem(`📍 ${nodes.length} node positions seeded from geo index`, 'info');
+      }
+    }
+  } catch (_) {}
+
+  // ── Restore last camera position ─────────────────────────────────────────
+  try {
+    const camRes = await fetch(`${API_BASE}/api/cache/camera`);
+    if (camRes.ok) {
+      const camData = await camRes.json();
+      if (camData.camera?.lat != null && typeof globe.flyToCoords === 'function') {
+        globe.flyToCoords(camData.camera.lat, camData.camera.lon,
+                          camData.camera.height ?? 8_000_000, 0);
+      }
+    }
+  } catch (_) {}
+
+  // Try recon entities (primary — always available when server is up)
+  try {
+    const res = await fetch(`${API_BASE}/api/recon/entities`);
+    if (!res.ok) throw new Error(res.statusText);
+    const data = await res.json();
+    const entities = data.entities || data.items || [];
+    let loaded = 0;
+    entities.forEach(e => {
+      const n = _entityToNode(e);
+      if (n) { globe.upsertNode(n.id, n.lat, n.lon, n.conf, n); loaded++; }
+    });
+    if (loaded > 0) {
+      addFeedItem(`✓ Loaded ${loaded} geo-located entities`, 'info');
+      const sample = entities.find(e => (e.location?.lat ?? e.lat) != null);
+      if (sample) {
+        const lat = sample.location?.lat ?? sample.lat;
+        const lon = sample.location?.lon ?? sample.lon;
+        if (typeof globe.flyToCoords === 'function') globe.flyToCoords(lat, lon, 5_000_000, 3);
+      }
+      // Build proximity arcs between geo-located entities (500ms delay lets
+      // upsertNode calls finish draining through the batch flush queue)
+      const geoNodes = entities
+        .map(e => ({ id: e.entity_id || e.id,
+                     lat: e.location?.lat ?? e.lat,
+                     lon: e.location?.lon ?? e.lon,
+                     conf: e.confidence ?? 0.5 }))
+        .filter(n => n.lat != null && n.lon != null && n.id);
+      setTimeout(() => buildProximityEdges(geoNodes, { maxKm: 3000, maxPerNode: 4, maxEdges: 400 }), 500);
+      return;
+    }
+    // API is up but no entities have geo — load demo seed so globe isn't empty,
+    // then let PCAP panel / SSE stream add real nodes on top.
+    addFeedItem(`ℹ API up (${entities.length} entities, none geo-located) — showing demo seed`, 'info');
+  } catch (err) {
+    addFeedItem(`ℹ Recon entities unavailable (${err.message}) — awaiting stream`, 'info');
+  }
+
+  // Demo seed data when API is offline or returned no geo entities
+  loadDemoData();
+}
+
+// ── Demo seed data (shown when API is offline) ────────────────────────────────
+function loadDemoData() {
+  const demoNodes = [
+    { id: 'host:192.168.1.1',       lat: 37.77,  lon: -122.41, conf: 0.8,  kind: 'host' },
+    { id: 'host:10.0.0.5',          lat: 51.50,  lon:   -0.12, conf: 0.6,  kind: 'host' },
+    { id: 'tls_sni:chatgpt.com',    lat: 37.38,  lon: -122.08, conf: 0.9,  kind: 'tls' },
+    { id: 'recon:185.220.101.50',   lat: 52.52,  lon:   13.40, conf: 0.55, kind: 'recon', clusterSize: 12 },
+    { id: 'recon:185.220.101.51',   lat: 52.52,  lon:   13.40, conf: 0.50, kind: 'recon', clusterSize: 8 },
+    { id: 'service:dns.google',     lat: 39.05,  lon:  -77.47, conf: 0.7,  kind: 'service' },
+    { id: 'host:203.0.113.45',      lat: 35.68,  lon:  139.69, conf: 0.45, kind: 'host', violations: { c2_beacon: true } },
+    { id: 'host:1.1.1.1',          lat: -33.87,  lon:  151.21, conf: 0.75, kind: 'host' },
+    { id: 'host:8.8.8.8',           lat: 37.38,  lon: -122.08, conf: 0.65, kind: 'service' },
+  ];
+
+  const demoEdges = [
+    { id: 'e1', src: 'host:192.168.1.1', dst: 'tls_sni:chatgpt.com', conf: 0.8, entropy: 0.9 },
+    { id: 'e2', src: 'host:192.168.1.1', dst: 'service:dns.google',  conf: 0.7, entropy: 0.8 },
+    { id: 'e3', src: 'host:10.0.0.5',    dst: 'tls_sni:chatgpt.com', conf: 0.6, entropy: 0.85 },
+    { id: 'e4', src: 'recon:185.220.101.50', dst: 'host:10.0.0.5',   conf: 0.45, entropy: 0.2, rfCorr: 0.7 },
+    { id: 'e5', src: 'host:203.0.113.45',dst: 'host:192.168.1.1',   conf: 0.35, entropy: 0.15, shadow: true },
+    { id: 'e6', src: 'host:1.1.1.1',     dst: 'host:8.8.8.8',       conf: 0.55, entropy: 0.6 },
+  ];
+
+  demoNodes.forEach(n => globe.upsertNode(n.id, n.lat, n.lon, n.conf, n));
+  setTimeout(() => {
+    demoEdges.forEach(e => globe.upsertEdge(e.id, e.src, e.dst, e.conf, e));
+    // Also build proximity arcs for the demo nodes (supplements explicit edges)
+    buildProximityEdges(demoNodes, { maxKm: 12000, maxPerNode: 3, maxEdges: 30 });
+  }, 500);
+  setTimeout(() => {
+    globe.upsertHyperedge('he:beacons', ['host:203.0.113.45', 'recon:185.220.101.50', 'recon:185.220.101.51'], 0.72, 'beaconing_cluster');
+  }, 1000);
+
+  // Demo suggested prompts
+  renderPrompts([
+    { text: 'identify low-entropy beacon clusters',     signal_note: 'temporal_entropy signal active' },
+    { text: 'correlate TLS reuse across rotating IPs',  signal_note: 'stitch_identities candidate' },
+    { text: 'detect emerging k-core clusters',          signal_note: 'graph_delta rising' },
+    { text: 'analyze RF-correlated graph anomalies',    signal_note: 'rf_available' },
+    { text: 'find high-betweenness relays',             signal_note: 'betweenness probe' },
+    { text: 'identify geo-dense recon stacks',          signal_note: 'cluster_size > 5' }
+  ]);
+
+  addFeedItem('ℹ Demo data loaded (API offline)', 'warn');
+}
+
+// ── Proximity edge builder — creates arcs between geo-located nodes ───────────
+// Runs after nodes are inserted; haversine distance < maxKm → arc.
+// Limits each node to maxPerNode nearest neighbours to avoid O(n²) explosion.
+function buildProximityEdges(nodes, { maxKm = 2000, maxPerNode = 5, maxEdges = 500 } = {}) {
+  if (!nodes || nodes.length < 2) return;
+
+  function haversineKm(a, b) {
+    const R = 6371;
+    const dLat = (b.lat - a.lat) * Math.PI / 180;
+    const dLon = (b.lon - a.lon) * Math.PI / 180;
+    const sinDLat = Math.sin(dLat / 2);
+    const sinDLon = Math.sin(dLon / 2);
+    const s = sinDLat * sinDLat +
+              Math.cos(a.lat * Math.PI / 180) *
+              Math.cos(b.lat * Math.PI / 180) *
+              sinDLon * sinDLon;
+    return R * 2 * Math.atan2(Math.sqrt(s), Math.sqrt(1 - s));
+  }
+
+  let edgeCount = 0;
+  // For each node find nearest neighbours within maxKm
+  for (let i = 0; i < nodes.length && edgeCount < maxEdges; i++) {
+    const a = nodes[i];
+    if (a.lat == null || a.lon == null) continue;
+
+    // Build sorted candidate list
+    const candidates = [];
+    for (let j = 0; j < nodes.length; j++) {
+      if (j === i) continue;
+      const b = nodes[j];
+      if (b.lat == null || b.lon == null) continue;
+      const km = haversineKm(a, b);
+      if (km <= maxKm) candidates.push({ node: b, km });
+    }
+    candidates.sort((x, y) => x.km - y.km);
+
+    const neighbours = candidates.slice(0, maxPerNode);
+    for (const { node: b, km } of neighbours) {
+      if (edgeCount >= maxEdges) break;
+      // Use canonical ordering so we don't duplicate a↔b and b↔a
+      const [lo, hi] = a.id < b.id ? [a, b] : [b, a];
+      const eid = `prox:${lo.id}→${hi.id}`;
+      const conf = Math.max(0.25, 1 - km / maxKm);
+      globe.upsertEdge(eid, lo.id, hi.id, conf, {
+        kind: 'PROXIMITY',
+        entropy: 0.4,
+        shadow: conf < 0.35
+      });
+      edgeCount++;
+    }
+  }
+
+  if (edgeCount > 0) addFeedItem(`⬡ ${edgeCount} proximity arcs generated`, 'info');
+}
+
+// ── Keyboard shortcuts ────────────────────────────────────────────────────────
+window.addEventListener('keydown', (e) => {
+  if (e.key === 's' || e.key === 'S') {
+    // Toggle shadow reveal
+    btnShadow.click();
+  }
+  if (e.key === 'Escape') {
+    globe.selectNode(null);
+    $nodeDetail.style.display = 'none';
+  }
+  // Q / quality debug
+  if (e.key === 'q' || e.key === 'Q') {
+    const urs = window.__URS_GLOBE__;
+    if (urs) addFeedItem(`URS: ${urs.statusLine()}`, 'info');
+  }
+  // I / imagery toggle
+  if (e.key === 'i' || e.key === 'I') {
+    const current = $mapType?.value || getStoredMapMode();
+    const next = MAP_MODE_CYCLE[(MAP_MODE_CYCLE.indexOf(current) + 1) % MAP_MODE_CYCLE.length];
+    applySelectedMapMode(next);
+  }
+});
+
+// ── Boot ──────────────────────────────────────────────────────────────────────
+
+// Globe owns its own render loop; hand it over to URS for shared frame budget
+function _bootstrapURS() {
+  if (!window.UnifiedRenderScheduler) return;
+
+  const urs = new UnifiedRenderScheduler({
+    cesiumViewer: globe._viewer,
+    targetFps: 60,
+    rfDepthTest: true,
+    imageryMode: getStoredMapMode()
+  });
+  window.__URS_GLOBE__ = urs;
+  urs.attachGlobe(globe);
+  urs.onImageryChange((mode) => {
+    syncMapTypeControl(mode);
+  });
+  urs.start();
+  syncMapTypeControl(urs.imageryMode);
+
+  // URS drives quality; push to HUD
+  urs.onQualityChange((q) => {
+    if ($conf) $conf.textContent = `Conf/Q: ${q.toFixed(2)}`;
+  });
+
+  // URS status tick — single authoritative HUD ticker (replaces pre-URS fallback)
+  clearInterval(_statsTimerPre);
+  setInterval(() => {
+    const nodeCount  = globe._nodeCount;
+    const arcCount   = globe._arcGeo ? globe._arcGeo.instanceCount : globe._arcEdges.length;
+    const heCount    = globe._heList.length;
+    $nodes.textContent    = 'Nodes: '    + nodeCount;
+    $edges.textContent    = 'Arcs: '     + arcCount;      // GPU-rendered count
+    $clusters.textContent = 'Clusters: ' + heCount;
+    if ($stNodes) $stNodes.textContent = nodeCount;
+    if ($stEdges) $stEdges.textContent = globe._arcEdges.length; // logical edge count
+    if ($stHE)    $stHE.textContent    = heCount;
+  }, 1000);
+
+  // ── Periodic camera state save (every 30s) — enables warm-boot restore ───
+  setInterval(async () => {
+    try {
+      const cam   = globe._viewer?.camera;
+      if (!cam) return;
+      const carto = Cesium.Ellipsoid.WGS84.cartesianToCartographic(cam.position);
+      if (!carto) return;
+      await fetch(`${API_BASE}/api/cache/camera`, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({
+          lat:    Cesium.Math.toDegrees(carto.latitude),
+          lon:    Cesium.Math.toDegrees(carto.longitude),
+          height: carto.height
+        })
+      });
+    } catch (_) {}
+  }, 30_000);
+
+  addFeedItem(`⚡ URS online — q=${urs.dynamicQuality.toFixed(2)} imagery=${getMapModeLabel(urs.imageryMode)}`, 'info');
+}
+
+// ── SSE live-entity fallback (activates when Socket.IO can't connect) ─────────
+let _sseActive = false;
+function _startEntitySSE() {
+  if (_sseActive || !window.EventSource) return;
+  _sseActive = true;
+  const es = new EventSource(`${API_BASE}/api/recon/entities/stream`);
+  es.onopen = () => addFeedItem('↯ SSE entity stream connected', 'info');
+  es.onmessage = (ev) => {
+    try {
+      const d = JSON.parse(ev.data);
+      if (!d?.entity_id) return;
+      const lat = d.lat ?? d.location?.lat;
+      const lon = d.lon ?? d.location?.lon;
+      if (lat == null || lon == null) return;
+      const conf = d.confidence ?? d.conf ?? 0.5;
+      globe.upsertNode(d.entity_id, lat, lon, conf, {
+        kind: d.kind || d.entity_type || 'host',
+        shadow: conf < 0.35,
+        ...d
+      });
+    } catch (_) {}
+  };
+  es.onerror = () => {
+    _sseActive = false;
+    es.close();
+    // Retry after 10 s
+    setTimeout(() => _startEntitySSE(), 10_000);
+  };
+  window.__ENTITY_SSE__ = es;
+}
+
+// Start SSE fallback 3 s after boot if Socket.IO hasn't connected
+setTimeout(() => {
+  if (globe._socket && globe._socket.connected) return; // Socket.IO won
+  addFeedItem('ℹ Socket.IO offline — using SSE entity stream', 'warn');
+  _startEntitySSE();
+
+  // Periodically build proximity edges from SSE-streamed nodes.
+  // First pass at 8 s (lets initial entity burst land), then every 60 s.
+  function _buildSSEProximityEdges() {
+    const nodes = [];
+    if (globe._graph?.nodes) {
+      globe._graph.nodes.forEach((n, id) => {
+        if (n.lat != null && n.lon != null) nodes.push({ id, ...n });
+      });
+    }
+    if (nodes.length >= 2) buildProximityEdges(nodes, { maxKm: 3000, maxPerNode: 3, maxEdges: 300 });
+  }
+  setTimeout(_buildSSEProximityEdges, 8_000);
+  setInterval(_buildSSEProximityEdges, 60_000);
+}, 3000);
+
+// ── PCAP Remote Stream ────────────────────────────────────────────────────────
+
+const _pcap = {
+  activeSessionId: null,
+  injectedNodes:   new Set(),   // ids pushed to globe so we can clear them
+  injectedEdges:   new Set(),
+
+  $drop:      document.getElementById('pcap-drop'),
+  $input:     document.getElementById('pcap-file-input'),
+  $sessions:  document.getElementById('pcap-sessions'),
+  $status:    document.getElementById('pcap-status'),
+  $wsDot:     document.getElementById('pcap-ws-dot'),
+
+  _setStatus(msg, ok = true) {
+    this.$status.textContent = msg;
+    this.$status.style.color = ok ? '#6a9' : '#f88';
+  },
+
+  // ── Live-stream dot wired to the same Socket.IO connection ──────────────
+  _bindSocketStatus() {
+    if (!globe._socket) return;
+    globe._socket.on('connect',    () => { this.$wsDot.className = 'live'; });
+    globe._socket.on('disconnect', () => { this.$wsDot.className = 'err'; });
+    if (globe._socket.connected)    this.$wsDot.className = 'live';
+  },
+
+  // ── PCAP file upload ─────────────────────────────────────────────────────
+  async _uploadFile(file) {
+    this._setStatus(`⬆ Uploading ${file.name}…`);
+    const fd = new FormData();
+    fd.append('file', file);
+    try {
+      const res  = await fetch(`${API_BASE}/api/pcap/upload`, { method: 'POST', body: fd });
+      const data = await res.json();
+      if (!data.ok && !data.session_id) throw new Error(data.message || 'upload failed');
+      addFeedItem(`⬆ PCAP uploaded: ${data.session_id || data.filename || file.name}`, 'info');
+      this._setStatus(`✓ Uploaded — loading sessions…`);
+      await this._loadSessions();
+      // Auto-load the newly uploaded session
+      const sid = data.session_id || data.pcap_session_id;
+      if (sid) this._loadSession(sid);
+    } catch (e) {
+      this._setStatus(`✗ Upload failed: ${e.message}`, false);
+      addFeedItem(`⚠ PCAP upload: ${e.message}`, 'warn');
+    }
+  },
+
+  // ── List PCAP sessions from server ───────────────────────────────────────
+  async _loadSessions() {
+    try {
+      // Fetch both sources in parallel: registry (uploaded) + graph (FTP ingested)
+      const [uploadRes, ftpRes] = await Promise.allSettled([
+        fetch(`${API_BASE}/api/pcap/sessions`),
+        fetch(`${API_BASE}/api/pcap/ftp_sessions`),
+      ]);
+
+      const uploadSessions = [];
+      const ftpSessions    = [];
+
+      if (uploadRes.status === 'fulfilled' && uploadRes.value.ok) {
+        const d = await uploadRes.value.json();
+        if (d.ok && d.sessions) {
+          d.sessions.forEach(s => {
+            s._source = 'upload';
+            uploadSessions.push(s);
+          });
+        }
+      }
+
+      if (ftpRes.status === 'fulfilled' && ftpRes.value.ok) {
+        const d = await ftpRes.value.json();
+        if (d.ok) {
+          // ftp_sessions groups by artifact → flatten to individual sessions
+          const artifacts = d.artifacts || [];
+          artifacts.forEach(art => {
+            const artSessions = art.sessions || [];
+            if (artSessions.length) {
+              artSessions.forEach(s => {
+                s._source = 'ftp';
+                s._artifact = art.name || art.artifact_id || '';
+                ftpSessions.push(s);
+              });
+            } else {
+              // Artifact with no child sessions — expose it directly
+              const proxy = {
+                session_id:   art.artifact_id || art.name,
+                id:           art.artifact_id || art.name,
+                name:         art.name || art.artifact_id,
+                display_name: art.display_name || art.name || art.artifact_id,
+                packet_count: art.packet_count,
+                flow_count:   art.flow_count,
+                _source:      'ftp',
+                _artifact:    art.name || art.artifact_id || '',
+              };
+              ftpSessions.push(proxy);
+            }
+          });
+        }
+      }
+
+      // Deduplicate: uploaded entry wins if same session_id appears in both
+      const seen = new Set(uploadSessions.map(s => s.session_id || s.id));
+      const merged = [
+        ...uploadSessions,
+        ...ftpSessions.filter(s => !seen.has(s.session_id || s.id)),
+      ];
+
+      this._renderSessions(merged);
+      if (!merged.length) this._setStatus('No sessions found', true);
+    } catch (e) {
+      this._setStatus(`Sessions unavailable: ${e.message}`, false);
+    }
+  },
+
+  _renderSessions(sessions) {
+    this.$sessions.innerHTML = '';
+    if (!sessions.length) {
+      this.$sessions.innerHTML = '<div style="font-size:10px;color:#678;padding:2px 0">No sessions</div>';
+      return;
+    }
+    sessions.forEach(s => {
+      const sid  = s.session_id || s.id || s.name;
+      const name = s.display_name || s.name || sid;
+      const cnt  = s.packet_count ? `${s.packet_count} pkts` : (s.flow_count ? `${s.flow_count} flows` : '');
+      const isFtp = s._source === 'ftp';
+      const badge = isFtp
+        ? `<span style="font-size:9px;background:rgba(0,180,120,.25);color:#0c9;border-radius:2px;padding:0 3px;margin-left:3px" title="FTP ingested${s._artifact ? ': ' + s._artifact : ''}">FTP</span>`
+        : '';
+      const row  = document.createElement('div');
+      row.className = 'pcap-session-row' + (sid === this.activeSessionId ? ' active' : '');
+      row.innerHTML = `<span class="s-name" title="${sid}">${name}${badge}</span><span class="s-count">${cnt}</span>`;
+      row.addEventListener('click', () => this._loadSession(sid));
+      this.$sessions.appendChild(row);
+    });
+  },
+
+  // ── Load a session's talker map into the globe ───────────────────────────
+  async _loadSession(sessionId) {
+    if (!sessionId) return;
+    this.activeSessionId = sessionId;
+    this._setStatus(`Loading ${sessionId}…`);
+    // Highlight active row
+    this.$sessions.querySelectorAll('.pcap-session-row').forEach(r => {
+      r.classList.toggle('active', r.querySelector('.s-name')?.title === sessionId);
+    });
+    try {
+      const res  = await fetch(`${API_BASE}/api/pcap/${encodeURIComponent(sessionId)}/globe`);
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.message || 'globe load failed');
+      this._injectGlobeData(sessionId, data);
+    } catch (e) {
+      this._setStatus(`✗ Load failed: ${e.message}`, false);
+      addFeedItem(`⚠ PCAP load: ${e.message}`, 'warn');
+    }
+  },
+
+  // ── Map API response → globe nodes + edges ───────────────────────────────
+  _injectGlobeData(sessionId, data) {
+    const capture = data.capture_site;
+    const hubs    = data.hubs || [];
+    let nodeCount = 0;
+    const pendingEdges = [];  // collect edges; upsert after batch-flush gives geoCache time to populate
+
+    // Capture-site anchor node
+    const capId = `pcap-capture:${sessionId}`;
+    if (capture && capture.lat != null && capture.lon != null) {
+      globe.upsertNode(capId, capture.lat, capture.lon, 0.9, {
+        kind: 'pcap_capture', label: capture.label || 'Capture Site',
+        shadow: false, conf: 0.9, pcap_session: sessionId
+      });
+      this.injectedNodes.add(capId);
+      nodeCount++;
+    }
+
+    hubs.forEach(hub => {
+      const talkers = hub.top_talkers || [];
+      talkers.forEach(t => {
+        const geo = t.geo;
+        if (!geo || geo.lat == null || geo.lon == null) return;
+        const nid  = t.endpoint_id || `pcap-host:${t.ip}`;
+        const conf = Math.max(0.1, 1.0 - (t.scanner_like_mean ?? 0.3));
+        globe.upsertNode(nid, geo.lat, geo.lon, conf, {
+          kind:    t.role === 'scanner' ? 'recon' : 'host',
+          ip:      t.ip,
+          bytes:   t.bytes_total,
+          flows:   t.flows,
+          country: geo.country_iso,
+          city:    geo.city,
+          conf,
+          shadow:  (t.scanner_like_mean ?? 0) > 0.7,
+          pcap_session: sessionId,
+        });
+        this.injectedNodes.add(nid);
+        nodeCount++;
+
+        // Queue edge for deferred upsert (geoCache populated at next batch flush ~100ms)
+        if (capture && capture.lat != null) {
+          const eid = `pcap-edge:${nid}→${capId}`;
+          pendingEdges.push({ eid, nid, capId, conf, hub, t });
+        }
+      });
+    });
+
+    // Flush edges after batch interval so geoCache is warm
+    const self = this;
+    setTimeout(() => {
+      let edgeCount = 0;
+      for (const { eid, nid, capId, conf, hub, t } of pendingEdges) {
+        globe.upsertEdge(eid, nid, capId, conf, {
+          proto: hub.proto, port: hub.port, flows: t.flows,
+          bytes: t.bytes_total, pcap_session: sessionId
+        });
+        self.injectedEdges.add(eid);
+        edgeCount++;
+      }
+
+      // Also run proximity arcs between PCAP talkers (catches cross-hub hops)
+      const pcapNodes = Array.from(self.injectedNodes)
+        .map(id => { const n = globe._graph?.nodes?.get(id); return n ? { id, ...n } : null; })
+        .filter(n => n && n.lat != null && n.lon != null);
+      buildProximityEdges(pcapNodes, { maxKm: 5000, maxPerNode: 3, maxEdges: 200 });
+
+      const label = data.session?.display_name || sessionId;
+      self._setStatus(`✓ ${label}: ${nodeCount} nodes, ${edgeCount} edges`);
+      addFeedItem(`⬡ PCAP loaded: ${label} (${nodeCount} hosts, ${edgeCount} arcs)`, 'conv');
+    }, 250);
+
+    // Fly to capture site immediately (doesn't need geoCache)
+    if (capture?.lat != null && capture?.lon != null) {
+      if (typeof globe.flyToCoords === 'function') {
+        globe.flyToCoords(capture.lat, capture.lon, 2_000_000, 2.0);
+      } else if (globe._viewer?.camera?.flyTo) {
+        globe._viewer.camera.flyTo({
+          destination: Cesium.Cartesian3.fromDegrees(capture.lon, capture.lat, 2_500_000),
+          duration: 2
+        });
+      }
+    }
+  },
+
+  // ── Clear all PCAP-injected nodes/edges ──────────────────────────────────
+  clear() {
+    this.injectedNodes.forEach(id => globe.removeNode?.(id));
+    this.injectedEdges.forEach(id => globe.removeEdge?.(id));
+    this.injectedNodes.clear();
+    this.injectedEdges.clear();
+    this.activeSessionId = null;
+    this._setStatus('Cleared');
+    this.$sessions.querySelectorAll('.pcap-session-row').forEach(r => r.classList.remove('active'));
+    addFeedItem('✕ PCAP nodes cleared from globe', 'info');
+  },
+
+  // ── Init ──────────────────────────────────────────────────────────────────
+  init() {
+    // Drag & drop
+    this.$drop.addEventListener('click', () => this.$input.click());
+    this.$drop.addEventListener('dragover',  e => { e.preventDefault(); this.$drop.classList.add('drag-over'); });
+    this.$drop.addEventListener('dragleave', () => this.$drop.classList.remove('drag-over'));
+    this.$drop.addEventListener('drop', e => {
+      e.preventDefault();
+      this.$drop.classList.remove('drag-over');
+      const f = e.dataTransfer.files?.[0];
+      if (f) this._uploadFile(f);
+    });
+    this.$input.addEventListener('change', e => {
+      const f = e.target.files?.[0];
+      if (f) { this._uploadFile(f); this.$input.value = ''; }
+    });
+
+    document.getElementById('btn-pcap-refresh').addEventListener('click', () => this._loadSessions());
+    document.getElementById('btn-pcap-clear').addEventListener('click',   () => this.clear());
+
+    // Bind Socket.IO live-dot after connectStream has had a tick
+    setTimeout(() => this._bindSocketStatus(), 800);
+
+    // Wire live-stream PCAP entity events
+    if (globe._socket) {
+      globe._socket.on('pcap_entity', ev => {
+        if (!ev?.entity_id) return;
+        const lat = ev.lat ?? ev.location?.lat;
+        const lon = ev.lon ?? ev.location?.lon;
+        if (lat == null || lon == null) return;
+        const conf = ev.confidence ?? 0.5;
+        globe.upsertNode(ev.entity_id, lat, lon, conf, { kind: 'host', ...ev, shadow: conf < 0.35 });
+        this.injectedNodes.add(ev.entity_id);
+      });
+
+      // T3-B: live graph_event push from server GraphEventBus
+      globe._socket.on('graph_event', ev => {
+        if (!ev?.event_type) return;
+        const et = ev.event_type.toUpperCase();
+        const d  = ev.data || {};
+        const loc = d.location || {};
+        const lat = loc.lat ?? d.lat ?? d.latitude;
+        const lon = loc.lon ?? d.lon ?? d.longitude;
+        const conf = d.confidence ?? d.weight ?? 0.5;
+
+        if (et === 'NODE_DELETE') {
+          globe.removeNode?.(ev.entity_id);
+        } else if (et.startsWith('NODE') && lat != null && lon != null) {
+          globe.upsertNode(ev.entity_id, lat, lon, conf, {
+            kind: ev.entity_kind || d.kind || 'host',
+            shadow: conf < 0.35,
+            ...d,
+          });
+        } else if (et.startsWith('EDGE') && et !== 'EDGE_DELETE') {
+          // Route edge events through the existing queue mechanism
+          globe._queueUpdate?.({ type: 'edge_update', ...d, edge_id: ev.entity_id });
+        }
+      });
+    }
+
+    // Pre-load session list
+    this._loadSessions();
+  }
+};
+
+loadInitialState();
+_pcap.init();
+initGraphOpsBot();
+// URS bootstrap runs after globe.init() completes (same tick, globe just registers Cesium)
+_bootstrapURS();
+addFeedItem('⚡ Scythe Globe Intelligence Surface online', 'info');
+console.log('[Globe] API_BASE =', API_BASE);
+
+/* ═══════════════════════════════════════════════════════════════════════
+ * GLOBE INTELLIGENCE MODULE
+ * Provides staging implementations of all 7 intelligence panels
+ * mirroring command-ops-visualization.html InfraFlow.
+ * Uses window.globe instead of window._globe.
+ * All state is in globeIntel.{}_section vars for easy teardown.
+ * ═══════════════════════════════════════════════════════════════════════ */
+const globeIntel = (() => {
+  const $ = id => document.getElementById(id);
+  const panel = () => $('intel-panel');
+  const LABEL_COLORS = { FORMING: '#f43f5e', COVERT: '#a855f7', MONITORING: '#f59e0b', BENIGN: '#64748b' };
+  const STAGE_COLORS = { IMMINENT: '#ef4444', ESCALATING: '#f97316', DECLINING: '#22d3ee', IDLE: '#64748b' };
+  const DRIFT_COLORS = { SNAPPING: '#f43f5e', DRIFTING: '#f59e0b', OSCILLATING: '#a855f7', STABLE: '#22c55e', CLOUD_AUTOSCALE: '#94a3b8' };
+
+  function setBtn(id, active) {
+    const b = $(id);
+    if (b) b.classList.toggle('active', active);
+  }
+
+  function status(msg) {
+    addFeedItem(msg, 'info');
+  }
+
+  function renderHTML(html) {
+    panel().innerHTML = html;
+  }
+
+  // ── PHANTOM IX (PASSIVE MONITOR) ────────────────────────────────────────
+  // Polls /api/infrastructure/phantom-ix every 45 s.
+  // Only fires feed notifications for new/changed phantoms (delta by cell_key).
+  // Renders via globe.renderPhantomIX() — the canonical renderer.
+  // Badge count stays live; panel shows cached state on click.
+  const _PHANTOM_POLL_MS   = 45_000;
+  const _PHANTOM_CONF_MIN  = 0.40;   // ignore very low-confidence candidates
+
+  let _phantomState     = new Map();  // cell_key → phantom object (last confirmed)
+  let _phantomPollTimer = null;
+  let _phantomPanelOpen = false;
+
+  // Derive a stable canonical key regardless of ID instability across server restarts.
+  function _phantomKey(p) {
+    return p.cell_key ||
+      `${(+p.lat).toFixed(1)}_${(+p.lon).toFixed(1)}_${p.type || 'UNK'}`;
+  }
+
+  function _updateBadge(count) {
+    const btn   = $('btn-phantom');
+    const badge = $('phantom-badge');
+    if (!badge) return;
+    badge.textContent = count;
+    badge.style.display = count > 0 ? 'inline-block' : 'none';
+    if (btn) btn.classList.toggle('active', count > 0);
+  }
+
+  function _renderPhantomPanel() {
+    const phantoms = [..._phantomState.values()];
+    if (!phantoms.length) {
+      renderHTML('<div class="intel-section"><h4>👻 Phantom IX</h4><div style="color:#666">No phantoms detected</div></div>');
+      return;
+    }
+    let html = `<div class="intel-section"><h4>👻 Phantom IX (${phantoms.length})</h4>`;
+    for (const p of phantoms) {
+      const conf = (p.confidence ?? 0);
+      const typeLabel = p.type || 'UNKNOWN';
+      const label = p.label || '';
+      html += `<div class="phantom-card">
+        <div class="ph-title">${p.lat?.toFixed(2) ?? '?'}°, ${p.lon?.toFixed(2) ?? '?'}°
+          — <span class="intel-badge">${typeLabel}</span>
+          ${label === 'CONFIRMED_PHANTOM' ? '<span style="color:#ff55ff;font-size:9px"> ✓CONFIRMED</span>' : ''}
+        </div>
+        <div class="ph-meta">
+          Conf: ${(conf * 100).toFixed(0)}% | Pull: ${((p.phantom_pull||0)*100).toFixed(0)}%
+          | ${p.latency_violation_type || p.latency_violation || ''}
+          | ASNs: ${p.asn_convergence_count ?? '?'}
+          | IX: ${p.nearest_ix_km ?? '?'} km
+        </div>
+        <div class="intel-row" style="margin-top:3px">
+          <div class="intel-bar-bg"><div class="intel-bar" style="width:${(conf*100).toFixed(0)}%;background:#a855f7"></div></div>
+        </div>
+      </div>`;
+    }
+    html += '</div>';
+    renderHTML(html);
+  }
+
+  async function _pollPhantomServer() {
+    try {
+      const r = await fetch(`${API_BASE}/api/infrastructure/phantom-ix`);
+      if (!r.ok) return;
+      const d = await r.json();
+      const incoming = (d.phantom_nodes || d.phantoms || [])
+        .filter(p => (p.confidence ?? 0) >= _PHANTOM_CONF_MIN && p.lat != null);
+
+      const newKeys    = new Set(incoming.map(_phantomKey));
+      const prevKeys   = new Set(_phantomState.keys());
+      const addedKeys  = [...newKeys].filter(k => !prevKeys.has(k));
+      const removedKeys = [...prevKeys].filter(k => !newKeys.has(k));
+
+      // Update state map
+      for (const k of removedKeys) _phantomState.delete(k);
+      for (const p of incoming)    _phantomState.set(_phantomKey(p), p);
+
+      // Badge always reflects current count
+      _updateBadge(_phantomState.size);
+
+      // Re-render globe via the canonical renderer (handles clear + redraw atomically)
+      if (window.globe?.renderPhantomIX) {
+        window.globe.renderPhantomIX([..._phantomState.values()]);
+      }
+
+      // Feed notification only for genuinely new phantoms
+      for (const k of addedKeys) {
+        const p = _phantomState.get(k);
+        if (!p) continue;
+        const conf = ((p.confidence ?? 0) * 100).toFixed(0);
+        addFeedItem(
+          `👻 New Phantom IX — ${p.type || 'UNKNOWN'} @ ${p.lat?.toFixed(2)}°,${p.lon?.toFixed(2)}° conf:${conf}% pull:${((p.phantom_pull||0)*100).toFixed(0)}%`,
+          'warn'
+        );
+      }
+      if (removedKeys.length) {
+        addFeedItem(`👻 ${removedKeys.length} phantom(s) resolved`, 'info');
+      }
+
+      // If panel is open, keep it current
+      if (_phantomPanelOpen) _renderPhantomPanel();
+    } catch (_) {
+      // Silently absorb — network errors shouldn't spam the feed
+    }
+  }
+
+  function _startPhantomMonitor() {
+    if (_phantomPollTimer) return;   // already running
+    _phantomPollTimer = setInterval(_pollPhantomServer, _PHANTOM_POLL_MS);
+    // First poll after 8 s so globe has time to finish initialising
+    setTimeout(_pollPhantomServer, 8_000);
+  }
+
+  function togglePhantomPanel() {
+    _phantomPanelOpen = !_phantomPanelOpen;
+    setBtn('btn-phantom', _phantomPanelOpen);
+    if (_phantomPanelOpen) {
+      _renderPhantomPanel();
+      // Trigger an immediate refresh so the panel shows fresh data
+      _pollPhantomServer();
+    } else {
+      renderHTML('');
+    }
+  }
+
+  // Keep fetchPhantomIX as a backwards-compatible alias
+  const fetchPhantomIX = togglePhantomPanel;
+
+  // ── IX HEATMAP (PASSIVE MONITOR) ────────────────────────────────────────
+  // Polls /api/infrastructure/ix/heatmap every 60 s.
+  // Fires feed alerts only on tier escalation (ACTIVE→ELEVATED or →CRITICAL).
+  // Renders via globe.renderIxHeatmap() + globe.renderConflictArcs().
+  // Badge shows count of ELEVATED + CRITICAL IX nodes.
+  const _IX_HEAT_POLL_MS = 60_000;
+  const _IX_TIER_ORDER   = ['QUIET', 'ACTIVE', 'ELEVATED', 'CRITICAL'];
+
+  let _ixHeatState  = new Map();  // ix.name → last heat entry
+  let _ixHeatTimer  = null;
+  let _ixPanelOpen  = false;
+  let _ixConflicts  = [];
+
+  function _ixHotCount(map) {
+    let n = 0;
+    for (const h of map.values())
+      if (h.tier === 'CRITICAL' || h.tier === 'ELEVATED') n++;
+    return n;
+  }
+
+  function _updateIxBadge(count) {
+    const btn   = $('btn-ixheat');
+    const badge = $('ixheat-badge');
+    if (!badge) return;
+    badge.textContent = count;
+    badge.style.display = count > 0 ? 'inline-block' : 'none';
+    if (btn) btn.classList.toggle('active', count > 0);
+  }
+
+  function _renderIxPanel() {
+    const heats = [..._ixHeatState.values()]
+      .filter(h => h.heat > 0.01)
+      .sort((a, b) => b.heat - a.heat);
+    if (!heats.length) {
+      renderHTML('<div class="intel-section"><h4>🔥 IX Heat</h4><div style="color:#666">All IX nodes quiet</div></div>');
+      return;
+    }
+    let html = `<div class="intel-section"><h4>🔥 IX Heat — ${heats.length} active · ${_ixConflicts.length} conflict(s)</h4>`;
+    for (const ix of heats.slice(0, 12)) {
+      const heat = ix.heat ?? 0;
+      const tc   = ix.tier === 'CRITICAL' ? '#ef4444' :
+                   ix.tier === 'ELEVATED' ? '#f97316' :
+                   ix.tier === 'ACTIVE'   ? '#eab308' : '#22c55e';
+      const fc  = ix.forecast || {};
+      const fcTag = fc.label && fc.label !== 'UNLIKELY'
+        ? `<span style="color:#fbbf24;font-size:9px"> ⚠${fc.label}</span>` : '';
+      const vel = ix.trend?.velocity ?? 0;
+      const arr = vel > 0.001 ? '↑' : vel < -0.001 ? '↓' : '';
+      html += `<div class="intel-row">
+        <div class="intel-label" style="color:${tc}">${ix.name}${fcTag}
+          <small style="color:#555">${ix.tier}${arr}</small>
+        </div>
+        <div class="intel-bar-bg"><div class="intel-bar" style="width:${(heat*100).toFixed(0)}%;background:${tc}"></div></div>
+        <div class="intel-score" style="color:${tc}">${(heat*100).toFixed(0)}%</div>
+      </div>`;
+    }
+    if (_ixConflicts.length) {
+      html += `<div style="margin-top:5px;color:#f97316;font-size:10px">
+        ⚡ ${_ixConflicts.length} peering conflict(s) — ${
+          Object.entries(
+            _ixConflicts.reduce((acc,c) => { acc[c.type||'?']=(acc[c.type||'?']||0)+1; return acc; }, {})
+          ).map(([t,n]) => `${t}×${n}`).join(', ')
+        }
+      </div>`;
+    }
+    html += '</div>';
+    renderHTML(html);
+  }
+
+  async function _pollIxHeatServer() {
+    try {
+      const r = await fetch(`${API_BASE}/api/infrastructure/ix/heatmap`);
+      if (!r.ok) return;
+      const d = await r.json();
+      const incoming = d.ix_heats || [];
+      _ixConflicts = d.conflicts || [];
+
+      for (const ix of incoming) {
+        const prev     = _ixHeatState.get(ix.name);
+        const prevTier = prev?.tier || 'QUIET';
+        const newTier  = ix.tier    || 'QUIET';
+        const prevIdx  = _IX_TIER_ORDER.indexOf(prevTier);
+        const newIdx   = _IX_TIER_ORDER.indexOf(newTier);
+
+        // Alert only on upward tier transition to ELEVATED or CRITICAL
+        if (newIdx > prevIdx && newIdx >= 2) {
+          const imm = ix.forecast?.label === 'IMMINENT' ? ' ⚠ IMMINENT' : '';
+          addFeedItem(
+            `🔥 ${ix.name} → ${newTier} heat:${(ix.heat*100).toFixed(0)}%${imm}`,
+            newTier === 'CRITICAL' ? 'warn' : 'info'
+          );
+        }
+        _ixHeatState.set(ix.name, ix);
+      }
+
+      _updateIxBadge(_ixHotCount(_ixHeatState));
+
+      if (window.globe?.renderIxHeatmap) {
+        window.globe.renderIxHeatmap(incoming);
+      }
+      if (window.globe?.renderConflictArcs && _ixConflicts.length) {
+        window.globe.renderConflictArcs(_ixConflicts, incoming);
+      }
+
+      if (_ixPanelOpen) _renderIxPanel();
+    } catch (_) {
+      // Silently absorb — no feed spam on network errors
+    }
+  }
+
+  function _startIxHeatMonitor() {
+    if (_ixHeatTimer) return;
+    _ixHeatTimer = setInterval(_pollIxHeatServer, _IX_HEAT_POLL_MS);
+    // First poll at 10 s — offset from phantom (8 s) to stagger server load
+    setTimeout(_pollIxHeatServer, 10_000);
+  }
+
+  function toggleIxHeatPanel() {
+    _ixPanelOpen = !_ixPanelOpen;
+    setBtn('btn-ixheat', _ixPanelOpen);
+    if (_ixPanelOpen) {
+      _renderIxPanel();
+      _pollIxHeatServer();
+    } else {
+      renderHTML('');
+    }
+  }
+
+  // Backwards-compatible alias
+  const fetchIxHeatmap = toggleIxHeatPanel;
+
+  // ── CONFLICT REPLAY ──────────────────────────────────────────────────────
+  let _replayData = null;
+  let _replayScrub = 0;
+
+  // ── CONFLICT REPLAY (PARTIAL PASSIVE) ────────────────────────────────────
+  // Data refreshes silently every 120 s. Badge = CRITICAL IX lane count.
+  // Panel stays interactive (canvas + scrubber). Click opens/closes panel.
+  const _REPLAY_POLL_MS = 120_000;
+  let _replayTimer     = null;
+  let _replayPanelOpen = false;
+
+  function _updateReplayBadge() {
+    const badge = $('replay-badge');
+    if (!badge || !_replayData) return;
+    let crit = 0;
+    for (const series of Object.values(_replayData.replay || {})) {
+      const last = series[series.length - 1];
+      if (last?.tier === 'CRITICAL') crit++;
+    }
+    badge.textContent = crit > 9 ? '9+' : crit;
+    badge.style.display = crit > 0 ? 'inline-block' : 'none';
+    const btn = $('btn-replay');
+    if (btn) btn.classList.toggle('active', crit > 0);
+  }
+
+  async function _pollReplayServer() {
+    try {
+      const r = await fetch(`${API_BASE}/api/infrastructure/ix-conflict-replay`);
+      if (!r.ok) return;
+      const fresh = await r.json();
+      // Alert on new CRITICAL tier IX lanes
+      if (_replayData) {
+        const oldR = _replayData.replay || {};
+        for (const [ixName, series] of Object.entries(fresh.replay || {})) {
+          const latest = series[series.length - 1];
+          if (latest?.tier === 'CRITICAL') {
+            const oldSeries = oldR[ixName] || [];
+            if (oldSeries[oldSeries.length - 1]?.tier !== 'CRITICAL')
+              addFeedItem(`⏮ ${ixName} IX lane → CRITICAL tier`, 'warn');
+          }
+        }
+      }
+      _replayData = fresh;
+      _updateReplayBadge();
+      if (_replayPanelOpen) _drawReplayCanvas(_replayScrub);
+    } catch (_) {}
+  }
+
+  function _startReplayMonitor() {
+    if (_replayTimer) return;
+    _replayTimer = setInterval(_pollReplayServer, _REPLAY_POLL_MS);
+    setTimeout(_pollReplayServer, 20_000);
+  }
+
+  function toggleReplayPanel() {
+    _replayPanelOpen = !_replayPanelOpen;
+    setBtn('btn-replay', _replayPanelOpen);
+    if (!_replayPanelOpen) { renderHTML(''); return; }
+    const ixList = Object.keys(_replayData?.replay || {});
+    const html = `<div class="intel-section">
+      <h4>⏮ Conflict Replay (${ixList.length} IX)</h4>
+      <canvas class="intel-replay-canvas" id="globe-replay-canvas"></canvas>
+      <div class="intel-row" style="gap:6px;margin-top:4px">
+        <input type="range" min="0" max="1" step="0.01" value="${_replayScrub}"
+          id="globe-replay-scrub" style="flex:1;height:14px;cursor:pointer"
+          oninput="globeIntel._onReplayScrub(this.value)">
+        <span id="globe-replay-mode" style="font-size:10px;color:#22d3ee">${_replayScrub >= 0.99 ? 'LIVE' : 'SCRUB'}</span>
+      </div>
+    </div>`;
+    renderHTML(html);
+    setTimeout(() => {
+      if (!_replayData) _pollReplayServer().then(() => _drawReplayCanvas(_replayScrub));
+      else _drawReplayCanvas(_replayScrub);
+    }, 50);
+  }
+
+  // Backwards-compatible alias
+  const fetchConflictReplay = toggleReplayPanel;
+
+  function _onReplayScrub(val) {
+    _replayScrub = parseFloat(val);
+    const el = $('globe-replay-mode');
+    if (el) el.textContent = _replayScrub >= 0.99 ? 'LIVE' : 'SCRUB';
+    _drawReplayCanvas(_replayScrub);
+  }
+
+  function _drawReplayCanvas(t) {
+    const canvas = $('globe-replay-canvas');
+    if (!canvas || !_replayData) return;
+    const ctx = canvas.getContext('2d');
+    const W = canvas.offsetWidth || 220, H = 60;
+    canvas.width = W; canvas.height = H;
+    ctx.clearRect(0, 0, W, H);
+
+    const replay = _replayData.replay || {};
+    const ixKeys = Object.keys(replay);
+    if (!ixKeys.length) { ctx.fillStyle='#555'; ctx.fillText('No data',10,30); return; }
+
+    const rowH = Math.min(14, Math.floor((H - 4) / ixKeys.length));
+    let prevHeat = {};
+
+    ixKeys.forEach((ixName, ri) => {
+      const series = replay[ixName] || [];
+      const len = series.length;
+      const cutIdx = Math.max(1, Math.round(t * len));
+      const slice = series.slice(0, cutIdx);
+
+      const maxH = Math.max(...slice.map(s => s.heat ?? s), 0.01);
+      const y0 = 2 + ri * rowH;
+
+      slice.forEach((s, i) => {
+        const heat = (s.heat ?? s) / maxH;
+        const tier = s.tier;
+        const c = tier === 'CRITICAL' ? `rgba(239,68,68,${0.6+heat*0.4})` :
+                  tier === 'HIGH'     ? `rgba(249,115,22,${0.5+heat*0.4})` :
+                                        `rgba(34,197,94,${0.3+heat*0.4})`;
+        const x = Math.floor((i / len) * W);
+        const bw = Math.max(1, Math.floor(W / len));
+        ctx.fillStyle = c;
+        ctx.fillRect(x, y0, bw, rowH - 1);
+      });
+
+      // dd_heat spikes (second derivative)
+      for (let i = 2; i < slice.length; i++) {
+        const h0 = slice[i-2].heat ?? slice[i-2];
+        const h1 = slice[i-1].heat ?? slice[i-1];
+        const h2 = slice[i].heat   ?? slice[i];
+        const dh  = h2 - h1;
+        const ddh = dh - (h1 - h0);
+        if (Math.abs(ddh) > 0.08) {
+          const x = Math.floor((i / len) * W);
+          ctx.strokeStyle = (slice[i].phase_inverted || ddh > 0.12) ? '#f0abfc' : '#67e8f9';
+          ctx.lineWidth = 1;
+          ctx.beginPath(); ctx.moveTo(x, y0 + rowH - 1); ctx.lineTo(x, y0); ctx.stroke();
+        }
+      }
+    });
+  }
+
+  // ── SIGNAL TIMING (PASSIVE MONITOR) ─────────────────────────────────────
+  // Polls /api/signals/timing every 45 s.
+  // Alerts on RF coordination pattern transitions: SYNCHRONISED / SEQUENTIAL_RELAY.
+  // Badge = count of clusters with intent_score > 0.5 (coordination forming).
+  // No lat/lon in cluster data — globe impact via feed + badge only.
+  const _TIMING_POLL_MS   = 45_000;
+  const _TIMING_HOT_SCORE = 0.5;
+  const _TIMING_ALERT_PATTERNS = new Set(['SYNCHRONISED', 'SEQUENTIAL_RELAY', 'PHASE_DRIFT_LOCK']);
+  const _TIMING_PATTERN_COLOR  = {
+    SYNCHRONISED:    '#ef4444',
+    SEQUENTIAL_RELAY:'#f97316',
+    COORDINATED:     '#fbbf24',
+    PHASE_DRIFT_LOCK:'#a855f7',
+    SCATTERED:       '#64748b',
+  };
+
+  let _timingState    = new Map();  // cluster_id → last entry
+  let _timingTimer    = null;
+  let _timingPanelOpen = false;
+
+  // Map energy bucket 0-max to 8-level Unicode block chars
+  function _sparkline(buckets) {
+    const bars = '▁▂▃▄▅▆▇█';
+    const max = Math.max(...buckets, 0.001);
+    return buckets.map(v => bars[Math.min(7, Math.floor(v / max * 8))]).join('');
+  }
+
+  function _updateTimingBadge(count) {
+    const btn   = $('btn-timing');
+    const badge = $('timing-badge');
+    if (!badge) return;
+    badge.textContent = count;
+    badge.style.display = count > 0 ? 'inline-block' : 'none';
+    if (btn) btn.classList.toggle('active', count > 0);
+  }
+
+  function _renderTimingPanel() {
+    const clusters = [..._timingState.values()]
+      .filter(c => c.intent_score > 0)
+      .sort((a, b) => b.intent_score - a.intent_score);
+    if (!clusters.length) {
+      renderHTML('<div class="intel-section"><h4>📡 Signal Timing</h4><div style="color:#666">No active clusters</div></div>');
+      return;
+    }
+    let html = `<div class="intel-section"><h4>📡 Signal Timing — ${clusters.length} cluster(s)</h4>`;
+    for (const cl of clusters.slice(0, 8)) {
+      const patt  = cl.propagation_pattern || 'SCATTERED';
+      const pCol  = _TIMING_PATTERN_COLOR[patt] || '#64748b';
+      const intent = cl.intent_score ?? 0;
+      const spark  = cl.energy_timeline?.length ? _sparkline(cl.energy_timeline) : '';
+      html += `<div class="phantom-card" style="border-color:${pCol}33">
+        <div class="ph-title" style="color:${pCol}">${cl.cluster_id || '?'}
+          <span class="intel-badge">${patt.replace(/_/g,' ')}</span>
+        </div>
+        <div class="ph-meta">
+          Intent: ${(intent*100).toFixed(0)}% | KC slope: ${cl.kc_slope > 0 ? '+' : ''}${(cl.kc_slope*100).toFixed(1)}
+          | Phase: ${(cl.phase_coherence*100).toFixed(0)}% | Events: ${cl.event_count ?? '?'}
+        </div>
+        <div style="font-family:monospace;font-size:9px;color:${pCol};letter-spacing:0;margin-top:2px">${spark}</div>
+        <div class="intel-row" style="margin-top:2px">
+          <div class="intel-bar-bg"><div class="intel-bar" style="width:${(intent*100).toFixed(0)}%;background:${pCol}"></div></div>
+        </div>
+      </div>`;
+    }
+    html += '</div>';
+    renderHTML(html);
+  }
+
+  async function _pollTimingServer() {
+    try {
+      const r = await fetch(`${API_BASE}/api/signals/timing`);
+      if (!r.ok) return;
+      const d = await r.json();
+      const incoming = d.clusters || [];
+
+      for (const cl of incoming) {
+        const prev    = _timingState.get(cl.cluster_id);
+        const prevPat = prev?.propagation_pattern || 'SCATTERED';
+        const newPat  = cl.propagation_pattern    || 'SCATTERED';
+
+        // Alert on transition into an alert-worthy pattern
+        if (newPat !== prevPat && _TIMING_ALERT_PATTERNS.has(newPat)) {
+          const col = _TIMING_PATTERN_COLOR[newPat] || '';
+          addFeedItem(
+            `📡 ${cl.cluster_id} → ${newPat.replace(/_/g,' ')} intent:${(cl.intent_score*100).toFixed(0)}% kc_slope:${cl.kc_slope > 0 ? '+' : ''}${(cl.kc_slope*100).toFixed(1)}`,
+            newPat === 'SYNCHRONISED' ? 'warn' : 'info'
+          );
+        }
+        _timingState.set(cl.cluster_id, cl);
+      }
+
+      // Prune clusters no longer in the window
+      const activeIds = new Set(incoming.map(c => c.cluster_id));
+      for (const id of _timingState.keys())
+        if (!activeIds.has(id)) _timingState.delete(id);
+
+      const hotCount = [..._timingState.values()].filter(c => c.intent_score >= _TIMING_HOT_SCORE).length;
+      _updateTimingBadge(hotCount);
+
+      if (_timingPanelOpen) _renderTimingPanel();
+    } catch (_) {
+      // Silently absorb
+    }
+  }
+
+  function _startTimingMonitor() {
+    if (_timingTimer) return;
+    _timingTimer = setInterval(_pollTimingServer, _TIMING_POLL_MS);
+    // First poll at 12 s — offset from phantom (8 s) and IX heat (10 s)
+    setTimeout(_pollTimingServer, 12_000);
+  }
+
+  function toggleTimingPanel() {
+    _timingPanelOpen = !_timingPanelOpen;
+    setBtn('btn-timing', _timingPanelOpen);
+    if (_timingPanelOpen) {
+      _renderTimingPanel();
+      _pollTimingServer();
+    } else {
+      renderHTML('');
+    }
+  }
+
+  // Backwards-compatible alias
+  const fetchSignalTiming = toggleTimingPanel;
+
+  // ── KC SLOPE (PASSIVE MONITOR) ───────────────────────────────────────────
+  // Polls /api/killchain/slope every 60 s.
+  // Alerts on stage transitions into IMMINENT. Badge = IMMINENT + ESCALATING count.
+  const _SLOPE_POLL_MS      = 60_000;
+  const _SLOPE_HOT_STAGES   = new Set(['IMMINENT', 'ESCALATING']);
+  const _SLOPE_ALERT_STAGES = new Set(['IMMINENT']);
+
+  let _slopeState     = new Map();  // cluster_id → last entry
+  let _slopeTimer     = null;
+  let _slopePanelOpen = false;
+
+  function _updateSlopeBadge(count) {
+    const badge = $('slope-badge');
+    if (!badge) return;
+    badge.textContent = count > 9 ? '9+' : count;
+    badge.style.display = count > 0 ? 'inline-block' : 'none';
+    const btn = $('btn-slope');
+    if (btn) btn.classList.toggle('active', count > 0);
+  }
+
+  function _renderSlopePanel() {
+    const clusters = [..._slopeState.values()]
+      .filter(c => c.stage !== 'IDLE')
+      .sort((a, b) => Math.abs(b.slope) - Math.abs(a.slope));
+    if (!clusters.length) {
+      renderHTML('<div class="intel-section"><h4>⚡ KC Slope</h4><div style="color:#666">No active escalation</div></div>');
+      return;
+    }
+    let html = `<div class="intel-section"><h4>⚡ KC Escalation Slope</h4>`;
+    for (const cl of clusters.slice(0, 10)) {
+      const stage    = cl.stage || 'IDLE';
+      const sc       = STAGE_COLORS[stage] || '#64748b';
+      const slopeBar = Math.min(100, Math.abs(cl.slope) * 500);
+      const spark    = cl.scores?.length ? _sparkline(cl.scores) : '';
+      html += `<div class="intel-row">
+        <div class="intel-label">${cl.cluster_id || '?'}</div>
+        <div class="intel-bar-bg"><div class="intel-bar" style="width:${slopeBar.toFixed(0)}%;background:${sc}"></div></div>
+        <span class="intel-badge ${stage}">${stage}</span>
+      </div>
+      <div style="font-family:monospace;font-size:9px;color:${sc};margin:-2px 0 4px 0">${spark}</div>`;
+    }
+    html += '</div>';
+    renderHTML(html);
+  }
+
+  async function _pollSlopeServer() {
+    try {
+      const r = await fetch(`${API_BASE}/api/killchain/slope`);
+      if (!r.ok) return;
+      const d = await r.json();
+      for (const cl of (d.clusters || [])) {
+        const prev = _slopeState.get(cl.cluster_id);
+        if (cl.stage !== (prev?.stage || 'IDLE') && _SLOPE_ALERT_STAGES.has(cl.stage))
+          addFeedItem(
+            `⚡ ${cl.cluster_id} KC → ${cl.stage} slope:${cl.slope > 0 ? '+' : ''}${(cl.slope * 100).toFixed(1)} score:${(cl.current * 100).toFixed(0)}%`,
+            'warn'
+          );
+        _slopeState.set(cl.cluster_id, cl);
+      }
+      const activeIds = new Set((d.clusters || []).map(c => c.cluster_id));
+      for (const id of _slopeState.keys()) if (!activeIds.has(id)) _slopeState.delete(id);
+      _updateSlopeBadge([..._slopeState.values()].filter(c => _SLOPE_HOT_STAGES.has(c.stage)).length);
+      if (_slopePanelOpen) _renderSlopePanel();
+    } catch (_) {}
+  }
+
+  function _startSlopeMonitor() {
+    if (_slopeTimer) return;
+    _slopeTimer = setInterval(_pollSlopeServer, _SLOPE_POLL_MS);
+    setTimeout(_pollSlopeServer, 14_000);
+  }
+
+  function toggleSlopePanel() {
+    _slopePanelOpen = !_slopePanelOpen;
+    setBtn('btn-slope', _slopePanelOpen);
+    if (_slopePanelOpen) { _renderSlopePanel(); _pollSlopeServer(); }
+    else renderHTML('');
+  }
+
+  // Backwards-compatible alias
+  const fetchKillchainSlope = toggleSlopePanel;
+
+  // ── FINGERPRINT DRIFT (PASSIVE MONITOR) ──────────────────────────────────
+  // Polls /api/signals/fingerprint-drift every 60 s.
+  // Backend returns `behavior` + `drift_mag`; old frontend used `drift_class` +
+  // `drift_magnitude` — both spellings accepted for resilience.
+  // Alerts on SNAPPING (discrete node swap) and OSCILLATING (active obfuscation).
+  const _DRIFT_POLL_MS      = 60_000;
+  const _DRIFT_ALERT_CLASSES = new Set(['SNAPPING', 'OSCILLATING']);
+  const _DRIFT_HOT_CLASSES   = new Set(['SNAPPING', 'OSCILLATING']);
+
+  let _driftState     = new Map();
+  let _driftTimer     = null;
+  let _driftPanelOpen = false;
+
+  function _updateDriftBadge(count) {
+    const badge = $('drift-badge');
+    if (!badge) return;
+    badge.textContent = count > 9 ? '9+' : count;
+    badge.style.display = count > 0 ? 'inline-block' : 'none';
+    const btn = $('btn-drift');
+    if (btn) btn.classList.toggle('active', count > 0);
+  }
+
+  function _renderDriftPanel() {
+    const _cls  = c => c.behavior  || c.drift_class     || 'STABLE';
+    const _mag  = c => c.drift_mag ?? c.drift_magnitude ?? 0;
+    const clusters = [..._driftState.values()]
+      .filter(c => _cls(c) !== 'STABLE')
+      .sort((a, b) => _mag(b) - _mag(a));
+    if (!clusters.length) {
+      renderHTML('<div class="intel-section"><h4>🧬 Fingerprint Drift</h4><div style="color:#666">All emitters stable</div></div>');
+      return;
+    }
+    let html = `<div class="intel-section"><h4>🧬 Fingerprint Drift</h4>`;
+    for (const cl of clusters.slice(0, 10)) {
+      const cls  = _cls(cl);
+      const mag  = _mag(cl);
+      const dc   = DRIFT_COLORS[cls] || '#64748b';
+      html += `<div class="intel-row">
+        <div class="intel-label">${cl.cluster_id || '?'}</div>
+        <div class="intel-bar-bg"><div class="intel-bar" style="width:${Math.min(100, mag * 300).toFixed(0)}%;background:${dc}"></div></div>
+        <span class="intel-badge ${cls}">${cls === 'CLOUD_AUTOSCALE' ? '☁ AUTO' : cls}</span>
+      </div>`;
+    }
+    html += '</div>';
+    renderHTML(html);
+  }
+
+  async function _pollDriftServer() {
+    try {
+      const r = await fetch(`${API_BASE}/api/signals/fingerprint-drift`);
+      if (!r.ok) return;
+      const d = await r.json();
+      const _cls = c => c.behavior || c.drift_class || 'STABLE';
+      const _mag = c => c.drift_mag ?? c.drift_magnitude ?? 0;
+      for (const cl of (d.clusters || [])) {
+        const prev   = _driftState.get(cl.cluster_id);
+        const newCls = _cls(cl);
+        if (newCls !== _cls(prev || {}) && _DRIFT_ALERT_CLASSES.has(newCls))
+          addFeedItem(
+            `🧬 ${cl.cluster_id} drift → ${newCls} mag:${(_mag(cl) * 100).toFixed(0)} events:${cl.event_count ?? '?'}`,
+            newCls === 'SNAPPING' ? 'warn' : 'info'
+          );
+        _driftState.set(cl.cluster_id, cl);
+      }
+      const activeIds = new Set((d.clusters || []).map(c => c.cluster_id));
+      for (const id of _driftState.keys()) if (!activeIds.has(id)) _driftState.delete(id);
+      _updateDriftBadge([..._driftState.values()].filter(c => _DRIFT_HOT_CLASSES.has(c.behavior || c.drift_class)).length);
+      if (_driftPanelOpen) _renderDriftPanel();
+    } catch (_) {}
+  }
+
+  function _startDriftMonitor() {
+    if (_driftTimer) return;
+    _driftTimer = setInterval(_pollDriftServer, _DRIFT_POLL_MS);
+    setTimeout(_pollDriftServer, 16_000);
+  }
+
+  function toggleDriftPanel() {
+    _driftPanelOpen = !_driftPanelOpen;
+    setBtn('btn-drift', _driftPanelOpen);
+    if (_driftPanelOpen) { _renderDriftPanel(); _pollDriftServer(); }
+    else renderHTML('');
+  }
+
+  // Backwards-compatible alias
+  const fetchFingerprintDrift = toggleDriftPanel;
+
+  // ── INTENT FIELD (PASSIVE MONITOR) ───────────────────────────────────────
+  // Polls /api/intent/field every 45 s.
+  // Alerts on label transitions into FORMING or COVERT.
+  // Globe heat injection runs on every poll for points with score > 0.25 and lat/lon.
+  const _INTENT_POLL_MS      = 45_000;
+  const _INTENT_ALERT_LABELS = new Set(['FORMING', 'COVERT']);
+  const _INTENT_HOT_LABELS   = new Set(['FORMING', 'COVERT']);
+
+  let _intentState     = new Map();
+  let _intentTimer     = null;
+  let _intentPanelOpen = false;
+
+  function _updateIntentBadge(count) {
+    const badge = $('intent-badge');
+    if (!badge) return;
+    badge.textContent = count > 9 ? '9+' : count;
+    badge.style.display = count > 0 ? 'inline-block' : 'none';
+    const btn = $('btn-intent');
+    if (btn) btn.classList.toggle('active', count > 0);
+  }
+
+  function _renderIntentPanel() {
+    const points = [..._intentState.values()]
+      .filter(p => p.intent_score > 0)
+      .sort((a, b) => b.intent_score - a.intent_score);
+    if (!points.length) {
+      renderHTML('<div class="intel-section"><h4>🎯 Intent Field</h4><div style="color:#666">No active intent clusters</div></div>');
+      return;
+    }
+    let html = `<div class="intel-section"><h4>🎯 Intent Field (${points.length})</h4>`;
+    for (const p of points.slice(0, 12)) {
+      const score = p.intent_score ?? 0;
+      const label = p.label || 'BENIGN';
+      const color = LABEL_COLORS[label] || '#64748b';
+      html += `<div class="intel-row">
+        <div class="intel-label">${p.cluster_id || p.id || '?'}</div>
+        <div class="intel-bar-bg"><div class="intel-bar" style="width:${(score * 100).toFixed(0)}%;background:${color}"></div></div>
+        <span class="intel-badge ${label}">${label}</span>
+      </div>`;
+    }
+    html += '</div>';
+    renderHTML(html);
+  }
+
+  async function _pollIntentServer() {
+    try {
+      const r = await fetch(`${API_BASE}/api/intent/field`);
+      if (!r.ok) return;
+      const d = await r.json();
+      for (const p of (d.points || [])) {
+        const prev = _intentState.get(p.cluster_id);
+        if (p.label !== (prev?.label || 'BENIGN') && _INTENT_ALERT_LABELS.has(p.label))
+          addFeedItem(
+            `🎯 ${p.cluster_id} intent → ${p.label} score:${(p.intent_score * 100).toFixed(0)}% pat:${(p.propagation_pattern || '').replace(/_/g, ' ')}`,
+            p.label === 'COVERT' ? 'warn' : 'info'
+          );
+        _intentState.set(p.cluster_id, p);
+        // Continuous globe heat injection — keeps intent field live on every poll
+        if (p.lat != null && window.globe?.injectHeatPoint && p.intent_score > 0.25)
+          window.globe.injectHeatPoint(p.lat, p.lon, p.intent_score, LABEL_COLORS[p.label] || '#64748b');
+      }
+      const activeIds = new Set((d.points || []).map(p => p.cluster_id));
+      for (const id of _intentState.keys()) if (!activeIds.has(id)) _intentState.delete(id);
+      _updateIntentBadge([..._intentState.values()].filter(p => _INTENT_HOT_LABELS.has(p.label)).length);
+      if (_intentPanelOpen) _renderIntentPanel();
+    } catch (_) {}
+  }
+
+  function _startIntentMonitor() {
+    if (_intentTimer) return;
+    _intentTimer = setInterval(_pollIntentServer, _INTENT_POLL_MS);
+    setTimeout(_pollIntentServer, 18_000);
+  }
+
+  function toggleIntentPanel() {
+    _intentPanelOpen = !_intentPanelOpen;
+    setBtn('btn-intent', _intentPanelOpen);
+    if (_intentPanelOpen) { _renderIntentPanel(); _pollIntentServer(); }
+    else renderHTML('');
+  }
+
+  // Backwards-compatible alias
+  const fetchIntentField = toggleIntentPanel;
+
+  // ── NODE PING ─────────────────────────────────────────────────────────────
+  let _pingPanelOpen = false;
+
+  function togglePingPanel() {
+    _pingPanelOpen = !_pingPanelOpen;
+    setBtn('btn-ping', _pingPanelOpen);
+    if (!_pingPanelOpen) { renderHTML(''); return; }
+
+    // Try to pre-fill from selected node
+    let prefill = '';
+    if (window.globe?._graph?.nodes) {
+      const sel = window.globe._uSelectedId?.value;
+      if (sel != null && sel >= 0) {
+        for (const [id, node] of window.globe._graph.nodes) {
+          if (node.idx === sel) { prefill = id; break; }
+        }
+      }
+    }
+
+    renderHTML(`<div class="intel-section">
+      <h4>📡 Node Ping</h4>
+      <div style="font-size:10px;color:#888;margin-bottom:4px">
+        Enter an IP, hostname, or URL. Uses HTTP HEAD probe via backend.
+      </div>
+      <div class="ping-row">
+        <input id="ping-target-input" type="text" placeholder="192.168.1.1 or https://example.com"
+          value="${prefill}" onkeydown="if(event.key==='Enter')globeIntel._executePing()">
+        <button class="toggle-btn" onclick="globeIntel._executePing()">PING</button>
+        <button class="toggle-btn" style="opacity:.6" onclick="globeIntel._pingSelected()" title="Ping currently selected node">SEL</button>
+      </div>
+      <div id="ping-result-area"></div>
+    </div>`);
+  }
+
+  function _pingSelected() {
+    if (!window.globe?._graph?.nodes) { addFeedItem('⚠ No globe graph available','warn'); return; }
+    const selIdx = window.globe._uSelectedId?.value;
+    if (selIdx == null || selIdx < 0) { addFeedItem('⚠ No node selected — click a node first','warn'); return; }
+    for (const [id] of window.globe._graph.nodes) {
+      const node = window.globe._graph.nodes.get(id);
+      if (node?.idx === selIdx) {
+        const inp = document.getElementById('ping-target-input');
+        if (inp) inp.value = id;
+        _executePing();
+        return;
+      }
+    }
+    addFeedItem('⚠ Selected node not found in graph','warn');
+  }
+
+  async function _executePing() {
+    const inp = document.getElementById('ping-target-input');
+    const res = document.getElementById('ping-result-area');
+    if (!inp || !res) return;
+    const target = inp.value.trim();
+    if (!target) { res.innerHTML = '<div class="ping-result fail">Enter a target first</div>'; return; }
+
+    res.innerHTML = `<div class="ping-result" style="color:#888;border:1px solid #333">⏳ Pinging ${target}…</div>`;
+    try {
+      const r  = await fetch(`${API_BASE}/api/ping?target=${encodeURIComponent(target)}&timeout=4`);
+      const d  = await r.json();
+      if (d.success) {
+        res.innerHTML = `<div class="ping-result ok">✓ Reachable — HTTP ${d.status_code} · ${d.latency_ms} ms</div>`;
+        addFeedItem(`📡 PING ${target}: ✓ HTTP ${d.status_code} (${d.latency_ms} ms)`, 'info');
+      } else {
+        res.innerHTML = `<div class="ping-result fail">✗ Unreachable — ${d.error || 'no response'} · ${d.latency_ms} ms</div>`;
+        addFeedItem(`📡 PING ${target}: ✗ ${d.error || 'timeout'}`, 'warn');
+      }
+    } catch (e) {
+      res.innerHTML = `<div class="ping-result fail">✗ Request failed: ${e.message}</div>`;
+    }
+  }
+
+  // ── UAV SWARM UI ────────────────────────────────────────────────────────
+  function spawnSwarm() {
+    const cityNames = MAJOR_CITIES?.map(c => c.name) || [];
+    const options = ['Random', ...cityNames];
+    const choice  = options[Math.floor(Math.random() * options.length)];
+    const city    = choice === 'Random' ? null : choice;
+    const count   = 8 + Math.floor(Math.random() * 8);  // 8–15
+    const speed   = 150 + Math.floor(Math.random() * 100);
+    if (window.globe?.simulateUAVSwarm) {
+      window.globe.simulateUAVSwarm(city, count, speed);
+      addFeedItem(`🚁 UAV swarm: ${count} drones near ${city || 'random city'} @ ${speed} km/h`, 'info');
+    } else {
+      addFeedItem('⚠ globe.simulateUAVSwarm not available', 'warn');
+    }
+  }
+
+  // ── RF COORDINATION DRILL (SIMULATION) ───────────────────────────────────
+  // Picks one of four scenarios at random and plays a sequenced visual event
+  // on the globe using live rendering methods.
+  //   • C2_RELAY       – sequential relay chain between two distant cities
+  //   • SYNC_BURST     – simultaneous burst from a 6-emitter ring
+  //   • PHANTOM_EMERGE – phantom IX materialises in open ocean + recon swarm
+  //   • EW_SWEEP       – EW jammer sweeps a geographic corridor
+  // Press button again mid-run to cancel immediately.
+  const _SIM_DURATION_MS = 45_000;
+  let _simRunning = false;
+  let _simTimers  = [];   // all setTimeout handles so we can cancel cleanly
+
+  function _at(ms, fn) { _simTimers.push(setTimeout(fn, ms)); }
+
+  function _simStop() {
+    for (const t of _simTimers) clearTimeout(t);
+    _simTimers = [];
+    window.globe?.clearUAVSwarm?.();
+    // Clear any Cesium entities created by phantom/path/KC/conflict renderers
+    ['_phantomEntities', '_pathEntities', '_kcEntities', '_conflictEntities'].forEach(key => {
+      const list = window.globe?.[key];
+      if (!list?.length) return;
+      list.forEach(e => { try { window.globe._viewer?.entities?.remove(e); } catch (_) {} });
+      window.globe[key] = [];
+    });
+    _simRunning = false;
+    setBtn('btn-sitrep', false);
+    addFeedItem('⚡ [DRILL] Scenario ended — system nominal', 'info');
+  }
+
+  // Inject a synthetic recon entity through the globe's own pipeline
+  function _simReconNode(id, lat, lon, type, conf = 0.88) {
+    window.globe?._reconEntityPipeline?.({
+      entity_id: id, lat, lon, alt: 60000,
+      cluster_size: 4, anomaly: 0.82,
+      velocity: type === 'mobile' ? 20e-6 : 0,
+      confidence: conf,
+      rfDNA: `${type}-sim-${id.slice(-4)}`,
+    });
+  }
+
+  // Return two MAJOR_CITIES at least minDeg apart
+  function _cityPair(minDeg = 55) {
+    const c = MAJOR_CITIES || [];
+    for (let i = 0; i < 40; i++) {
+      const a = c[Math.floor(Math.random() * c.length)];
+      const b = c[Math.floor(Math.random() * c.length)];
+      if (a !== b && Math.hypot(a.lat - b.lat, a.lon - b.lon) >= minDeg) return [a, b];
+    }
+    return [c[0], c[3]]; // London / Beijing fallback
+  }
+
+  // Scenario 1 — C2 relay chain between two distant cities
+  function _drillC2Relay() {
+    const [a, b] = _cityPair();
+    const ts     = Date.now();
+    const relays = [1, 2, 3].map(i => ({
+      id:  `sim-r${i}-${ts}`,
+      lat: a.lat + (b.lat - a.lat) * (i / 4),
+      lon: a.lon + (b.lon - a.lon) * (i / 4),
+    }));
+    const mid = { lat: (a.lat + b.lat) / 2, lon: (a.lon + b.lon) / 2 };
+
+    addFeedItem(`⚡ [DRILL] Scenario: C2 Relay — ${a.name} → ${b.name}`, 'warn');
+    window.globe?.flyToCoords(mid.lat, mid.lon, 9_000_000, 2.5);
+
+    _at(600,  () => window.globe?.simulateUAVSwarm(a.name, 6, 220));
+    _at(1500, () => window.globe?.injectStrobe({ lat: a.lat, lon: a.lon, energy: 2.1, type: STROBE_TYPE.C2, alt: 80000 }));
+
+    relays.forEach((r, i) => _at(3000 + i * 2500, () => {
+      _simReconNode(r.id, r.lat, r.lon, 'relay');
+      window.globe?.injectStrobe({ lat: r.lat, lon: r.lon, energy: 1.7, type: STROBE_TYPE.RF, alt: 70000, bearingDeg: 45 + i * 40 });
+      if (i === 1) addFeedItem(`📡 [DRILL] Relay chain forming — SEQUENTIAL_RELAY pattern`, 'info');
+    }));
+
+    _at(10500, () => {
+      const pts = [a, ...relays, b];
+      window.globe?.renderPathArcs(pts.slice(0, -1).map((p, i) => ({
+        centroids: [[p.lat, p.lon], [pts[i + 1].lat, pts[i + 1].lon]],
+        is_synthetic: true,
+        cable_alignment: { aligned: false, distance_km: 2800 },
+        src_asn: `SIM-${i}`, dst_asn: `SIM-${i + 1}`,
+        hop_path: [`SIM-${i}`, `SIM-${i + 1}`], path_score: 0.88,
+      })));
+    });
+
+    _at(14000, () => {
+      window.globe?.injectStrobe({ lat: b.lat, lon: b.lon, energy: 2.6, type: STROBE_TYPE.C2, alt: 80000 });
+      window.globe?.renderKillChainGraph([{
+        phantom_lat: mid.lat, phantom_lon: mid.lon,
+        kill_chain_type: 'FULL_SPECTRUM_COORDINATION', kill_chain_score: 0.81, nearby_clusters: [{}],
+      }]);
+      addFeedItem(`⚡ [DRILL] C2 link confirmed: ${a.name}→${b.name} — FULL_SPECTRUM_COORDINATION`, 'warn');
+    });
+  }
+
+  // Scenario 2 — Six emitters fire simultaneously (SYNCHRONISED pattern)
+  function _drillSyncBurst() {
+    const city = (MAJOR_CITIES || [])[Math.floor(Math.random() * 12)];
+    const ts   = Date.now();
+    const N    = 6;
+    const R    = 0.42;  // degrees (~47 km)
+    const emitters = Array.from({ length: N }, (_, i) => {
+      const θ = (i / N) * Math.PI * 2;
+      return {
+        id:        `sim-e${i}-${ts}`,
+        lat:       city.lat + Math.sin(θ) * R,
+        lon:       city.lon + Math.cos(θ) * R,
+        bearingDeg: (θ * 180 / Math.PI + 90) % 360,
+      };
+    });
+
+    addFeedItem(`⚡ [DRILL] Scenario: Synchronized Burst — ${city.name}`, 'warn');
+    window.globe?.flyToCoords(city.lat, city.lon, 1_400_000, 1.8);
+
+    _at(1000, () => {
+      emitters.forEach(e => _simReconNode(e.id, e.lat, e.lon, 'static', 0.85));
+      addFeedItem(`📡 [DRILL] ${N} emitters positioned in ring formation`, 'info');
+    });
+
+    // Cluster strobe at centre, then simultaneous burst from all emitters
+    _at(4200, () => {
+      window.globe?.injectStrobe({ lat: city.lat, lon: city.lon, energy: 3.0, type: STROBE_TYPE.CLUSTER, alt: 120000 });
+      emitters.forEach(e => window.globe?.injectStrobe({ lat: e.lat, lon: e.lon, energy: 2.0, type: STROBE_TYPE.RF, alt: 50000, bearingDeg: e.bearingDeg }));
+      addFeedItem(`⚡ [DRILL] SYNCHRONISED burst — ${N} emitters fired simultaneously`, 'warn');
+    });
+
+    // Second-pulse anomaly ring + phantom node
+    _at(8500, () => {
+      emitters.forEach((e, i) => setTimeout(() => window.globe?.injectStrobe({ lat: e.lat, lon: e.lon, energy: 1.5, type: STROBE_TYPE.ANOMALY, alt: 45000 }), i * 110));
+      window.globe?.renderPhantomIX([{
+        lat: city.lat, lon: city.lon, confidence: 0.82,
+        label: 'CONFIRMED_PHANTOM', type: 'SYNC_EMITTER_NODE',
+        phantom_pull: 0.68, synthetic_ratio: 0.62,
+      }]);
+      addFeedItem(`👻 [DRILL] Phantom convergence node at ${city.name} — no physical IX anchor`, 'warn');
+    });
+  }
+
+  // Scenario 3 — Phantom IX emergence in open ocean + investigative swarm
+  function _drillPhantomEmerge() {
+    const OCEAN = [
+      { name: 'North Atlantic', lat: 44.0, lon: -34.0 },
+      { name: 'Mid-Pacific',    lat: 27.0, lon: -162.0 },
+      { name: 'Indian Ocean',   lat: -13.0, lon: 76.0 },
+    ];
+    const loc  = OCEAN[Math.floor(Math.random() * OCEAN.length)];
+    const ts   = Date.now();
+    const near = (MAJOR_CITIES || []).reduce((b, c) =>
+      Math.hypot(c.lat - loc.lat, c.lon - loc.lon) < Math.hypot(b.lat - loc.lat, b.lon - loc.lon) ? c : b
+    );
+
+    addFeedItem(`⚡ [DRILL] Scenario: Phantom Emergence — ${loc.name}`, 'warn');
+    window.globe?.flyToCoords(loc.lat, loc.lon, 5_500_000, 2.5);
+
+    // Three network nodes converging toward the phantom point
+    [[-7, -13], [6, -9], [1, 14]].forEach(([dLat, dLon], i) =>
+      _at(800 + i * 1100, () => {
+        _simReconNode(`sim-ghost${i}-${ts}`, loc.lat + dLat, loc.lon + dLon, 'C2', 0.71);
+        window.globe?.injectStrobe({ lat: loc.lat + dLat, lon: loc.lon + dLon, energy: 1.5, type: STROBE_TYPE.NETWORK, alt: 90000 });
+      })
+    );
+
+    _at(5200, () => {
+      window.globe?.renderPhantomIX([{
+        lat: loc.lat, lon: loc.lon, confidence: 0.84,
+        label: 'CONFIRMED_PHANTOM', type: 'HYPERSCALER_EDGE',
+        phantom_pull: 0.73, synthetic_ratio: 0.70,
+      }]);
+      window.globe?.injectStrobe({ lat: loc.lat, lon: loc.lon, energy: 2.8, type: STROBE_TYPE.PHANTOM, alt: 160000 });
+      addFeedItem(`👻 [DRILL] Phantom IX materialised: ${loc.name} — no cable/IX, high coherence`, 'warn');
+    });
+
+    _at(7800, () => {
+      window.globe?.simulateUAVSwarm(near.name, 5, 250);
+      addFeedItem(`🚁 [DRILL] Recon swarm launched from ${near.name} toward phantom node`, 'info');
+    });
+
+    _at(12500, () => {
+      window.globe?.renderKillChainGraph([{
+        phantom_lat: loc.lat, phantom_lon: loc.lon,
+        kill_chain_type: 'RF_NETWORK_COUPLING', kill_chain_score: 0.76, nearby_clusters: [{}],
+      }]);
+      addFeedItem(`⚡ [DRILL] Kill chain: RF_NETWORK_COUPLING — phantom IX bridging RF + network layers`, 'warn');
+    });
+  }
+
+  // Scenario 4 — EW jammer platform sweeps a geographic corridor
+  function _drillEWSweep() {
+    const city    = (MAJOR_CITIES || [])[Math.floor(Math.random() * 12)];
+    const bearRad = Math.random() * Math.PI * 2;
+    const STEPS   = 7;
+    const REACH   = 2.8;  // degrees (~310 km)
+
+    addFeedItem(`⚡ [DRILL] Scenario: EW Sweep from ${city.name}`, 'warn');
+    window.globe?.flyToCoords(city.lat, city.lon, 2_200_000, 2.0);
+
+    _at(800,  () => { window.globe?.simulateUAVSwarm(city.name, 1, 320); addFeedItem(`📡 [DRILL] EW platform airborne from ${city.name}`, 'info'); });
+    _at(1800, () => window.globe?.injectStrobe({ lat: city.lat, lon: city.lon, energy: 2.0, type: STROBE_TYPE.INTERFERENCE, alt: 40000 }));
+
+    Array.from({ length: STEPS }, (_, i) => _at(2500 + i * 2200, () => {
+      const t   = (i + 1) / STEPS;
+      const lat = city.lat + Math.sin(bearRad) * REACH * t;
+      const lon = city.lon + Math.cos(bearRad) * REACH * t;
+      window.globe?.injectStrobe({ lat, lon, energy: 1.9, type: STROBE_TYPE.INTERFERENCE, alt: 30000 });
+      window.globe?.injectStrobe({ lat: lat + (Math.random() - 0.5) * 0.4, lon: lon + (Math.random() - 0.5) * 0.4, energy: 1.3, type: STROBE_TYPE.ANOMALY, alt: 20000 });
+      if (i === 2) addFeedItem(`📡 [DRILL] Jamming corridor active — INTERFERENCE expanding`, 'warn');
+      if (i === 5) addFeedItem(`⚡ [DRILL] Peak sweep intensity — BARRAGE_JAMMER profile confirmed`, 'warn');
+    }));
+
+    _at(18500, () => {
+      const endLat = city.lat + Math.sin(bearRad) * REACH;
+      const endLon = city.lon + Math.cos(bearRad) * REACH;
+      window.globe?.injectStrobe({ lat: endLat, lon: endLon, energy: 3.2, type: STROBE_TYPE.CONFLICT, alt: 60000 });
+      addFeedItem(`⚡ [DRILL] EW sweep complete — ${STEPS}-node corridor recorded`, 'warn');
+    });
+  }
+
+  // Scenario 5 — RECON_EXFIL: UAV collection sweep → data burst → exfil arcs
+  function _drillReconExfil() {
+    const cities = MAJOR_CITIES || [];
+    const hub    = cities[Math.floor(Math.random() * cities.length)];
+    const ts     = Date.now();
+    const SPREAD = 2.2;   // degrees
+    const reconPos = [0, 90, 180, 270].map((deg, i) => ({
+      id:  `sim-exfil-r${i}-${ts}`,
+      lat: hub.lat + Math.sin(deg * Math.PI / 180) * SPREAD,
+      lon: hub.lon + Math.cos(deg * Math.PI / 180) * SPREAD,
+    }));
+
+    addFeedItem(`🔴 [DRILL] Scenario: RECON_EXFIL — ${hub.name} collection hub`, 'warn');
+
+    // Phase 1 — deploy 4 recon UAVs (simulateUAVSwarm handles camera fly-to)
+    _at(500, () => {
+      window.globe?.simulateUAVSwarm(hub.name, 4, 120);
+      addFeedItem(`🚁 [DRILL] 4 recon UAVs deployed from ${hub.name}`, 'info');
+    });
+
+    // Phase 2 — recon nodes light up at spread positions
+    reconPos.forEach((r, i) => {
+      _at(5000 + i * 1100, () => {
+        _simReconNode(r.id, r.lat, r.lon, 'static', 0.72);
+        window.globe?.injectStrobe({ lat: r.lat, lon: r.lon, energy: 1.6, type: STROBE_TYPE.ANOMALY, alt: 800 });
+      });
+    });
+    _at(9600, () => addFeedItem(`📡 [DRILL] 4 collection nodes active — signals acquired`, 'info'));
+
+    // Phase 3 — convergence signal at hub (UAVs returning with data)
+    _at(12000, () => {
+      window.globe?.injectStrobe({ lat: hub.lat, lon: hub.lon, energy: 1.7, type: STROBE_TYPE.C2, alt: 35000 });
+      addFeedItem(`🚁 [DRILL] UAVs converging on exfil point — data inbound`, 'warn');
+    });
+
+    // Phase 4 — rapid data burst at hub (escalating pulses, max 2.0)
+    _at(15500, () => window.globe?.injectStrobe({ lat: hub.lat, lon: hub.lon, energy: 1.7, type: STROBE_TYPE.CLUSTER, alt: 40000 }));
+    _at(16800, () => window.globe?.injectStrobe({ lat: hub.lat, lon: hub.lon, energy: 1.9, type: STROBE_TYPE.CLUSTER, alt: 50000 }));
+    _at(18000, () => {
+      window.globe?.injectStrobe({ lat: hub.lat, lon: hub.lon, energy: 2.0, type: STROBE_TYPE.RF, alt: 65000 });
+      addFeedItem(`💥 [DRILL] Exfil burst — ${reconPos.length} feeds combined at ${hub.name}`, 'warn');
+    });
+
+    // Phase 5 — path arcs fan out to 2 remote endpoints (explicitly exclude hub)
+    _at(21000, () => {
+      const others  = cities.filter(c => c !== hub);
+      const ep1     = others[Math.floor(Math.random() * others.length)];
+      const ep2     = others.filter(c => c !== ep1)[Math.floor(Math.random() * (others.length - 1))];
+      const paths   = [ep1, ep2].filter(Boolean).map(ep => ({
+        centroids:       [[hub.lat, hub.lon], [ep.lat, ep.lon]],
+        is_synthetic:    true,
+        cable_alignment: { aligned: false, distance_km: 0 },
+        src_asn: 64512, dst_asn: 64513 + Math.floor(Math.random() * 8),
+        hop_path: [hub.lon, ep.lon], path_score: 0.88,
+      }));
+      window.globe?.renderPathArcs({ paths });
+      addFeedItem(`🌐 [DRILL] Exfil channels: ${hub.name} → ${ep1?.name || '?'} + ${ep2?.name || '?'}`, 'info');
+    });
+
+    // Phase 6 — kill chain completes
+    _at(27000, () => {
+      window.globe?.renderKillChainGraph({
+        phantom_lat: hub.lat, phantom_lon: hub.lon,
+        kill_chain_type:  'FULL_SPECTRUM_COORDINATION',
+        kill_chain_score: 0.93,
+        nearby_clusters: reconPos.map(r => ({ lat: r.lat, lon: r.lon, id: r.id, coherence: 0.85 })),
+      });
+      addFeedItem(`🎯 [DRILL] RECON_EXFIL complete — KC: FULL_SPECTRUM_COORDINATION 93%`, 'warn');
+    });
+  }
+
+  // Main trigger — press once to start a random scenario, press again to cancel
+  function spawnRFSimulation() {
+    if (!window.globe) { addFeedItem('⚠ Globe not ready', 'warn'); return; }
+    if (_simRunning) { _simStop(); return; }
+
+    _simRunning = true;
+    setBtn('btn-sitrep', true);
+
+    const scenarios = [_drillC2Relay, _drillSyncBurst, _drillPhantomEmerge, _drillEWSweep, _drillReconExfil];
+    scenarios[Math.floor(Math.random() * scenarios.length)]();
+
+    // Auto-cleanup after scenario duration
+    _simTimers.push(setTimeout(_simStop, _SIM_DURATION_MS));
+  }
+
+  return { fetchPhantomIX, togglePhantomPanel, _startPhantomMonitor,
+           fetchIxHeatmap, toggleIxHeatPanel, _startIxHeatMonitor,
+           fetchSignalTiming, toggleTimingPanel, _startTimingMonitor,
+           fetchConflictReplay, toggleReplayPanel, _startReplayMonitor,
+           fetchKillchainSlope, toggleSlopePanel, _startSlopeMonitor,
+           fetchFingerprintDrift, toggleDriftPanel, _startDriftMonitor,
+           fetchIntentField, toggleIntentPanel, _startIntentMonitor,
+           _onReplayScrub, spawnSwarm, spawnRFSimulation, togglePingPanel, _executePing, _pingSelected };
+})();
+
+// Passive monitors — staggered first polls to avoid server burst:
+//   Phantom IX  → first poll at  8 s, then every 45 s
+//   IX Heat     → first poll at 10 s, then every 60 s
+//   RF Timing   → first poll at 12 s, then every 45 s
+//   KC Slope    → first poll at 14 s, then every 60 s
+//   Drift       → first poll at 16 s, then every 60 s
+//   Intent      → first poll at 18 s, then every 45 s  (+ globe heat injection)
+//   Replay      → first load  at 20 s, then every 120 s
+setTimeout(() => globeIntel._startPhantomMonitor(), 2_000);
+setTimeout(() => globeIntel._startIxHeatMonitor(),  4_000);
+setTimeout(() => globeIntel._startTimingMonitor(),  6_000);
+setTimeout(() => globeIntel._startSlopeMonitor(),   8_000);
+setTimeout(() => globeIntel._startDriftMonitor(),  10_000);
+setTimeout(() => globeIntel._startIntentMonitor(), 12_000);
+setTimeout(() => globeIntel._startReplayMonitor(), 14_000);
+
+/* ═══════════════════════════════════════════════════════════════════════
+ * RF FIELD RENDERER  — T4-5
+ * Temporal Field Predictor visualizer.
+ *
+ * Listens for `rf_field_update` Socket.IO events from the server's drain
+ * thread (only emitted when rf_node graph events flow through).
+ *
+ * Two layers:
+ *   1. Cesium ImageryLayer  — heat-map texture projected onto the globe
+ *      • real RF  → blue/cyan tones
+ *      • predicted RF → orange tones
+ *   2. Canvas overlay (rAF, 60fps) — animated expanding pulse rings
+ *      • real emitters → solid cyan rings
+ *      • predicted emitters → dashed orange ghost rings
+ * ═══════════════════════════════════════════════════════════════════════ */
+class RFFieldRenderer {
+  constructor(viewer, socket) {
+    this._viewer   = viewer;
+    this._socket   = socket;
+    this._snap     = null;
+    this._heatLayer = null;
+    this._frameId  = null;
+    this._t0       = performance.now();
+
+    // Overlay canvas (screen-space pulse rings, pointer-events:none)
+    this._oc = document.createElement('canvas');
+    this._oc.id = 'rfOverlayCanvas';
+    this._oc.style.cssText = 'position:absolute;top:0;left:0;pointer-events:none;z-index:10;';
+    (document.getElementById('cesiumContainer') || document.body).appendChild(this._oc);
+    this._octx = this._oc.getContext('2d');
+    this._resize();
+    window.addEventListener('resize', () => this._resize());
+
+    // Socket listener
+    this._socket.on('rf_field_update', snap => this._onUpdate(snap));
+
+    // Start rAF loop
+    this._loop();
+
+    console.log('[RFField] Renderer ready — listening for rf_field_update');
+  }
+
+  _resize() {
+    this._oc.width  = window.innerWidth;
+    this._oc.height = window.innerHeight;
+  }
+
+  _onUpdate(snap) {
+    this._snap = snap;
+    this._updateHeatLayer(snap);
+  }
+
+  _updateHeatLayer(snap) {
+    const G   = snap.grid_size || 128;
+    const fc  = document.createElement('canvas');
+    fc.width  = fc.height = G;
+    const ctx = fc.getContext('2d');
+    const img = ctx.createImageData(G, G);
+    const F   = snap.field;
+    const P   = snap.prediction;
+
+    // Flip rows: Cesium ImageryLayer expects bottom-left origin, canvas is top-left
+    for (let r = 0; r < G; r++) {
+      const fr = G - 1 - r;  // flip Y
+      for (let c = 0; c < G; c++) {
+        const f  = F[fr]?.[c] ?? 0;
+        const p  = P[fr]?.[c] ?? 0;
+        const i  = (r * G + c) * 4;
+        // Real RF: blue/cyan | Predicted RF: orange
+        img.data[i]     = Math.min(255, f * 25  + p * 255);  // R
+        img.data[i + 1] = Math.min(255, f * 180 + p * 100);  // G
+        img.data[i + 2] = Math.min(255, f * 255 + p * 0);    // B
+        img.data[i + 3] = Math.min(255, (f + p * 0.6) * 220);// A
+      }
+    }
+    ctx.putImageData(img, 0, 0);
+
+    // Rebuild Cesium imagery layer
+    if (this._heatLayer) {
+      try { this._viewer.imageryLayers.remove(this._heatLayer); } catch (_) {}
+      this._heatLayer = null;
+    }
+    const [minLon, minLat, maxLon, maxLat] = snap.bounds;
+    try {
+      const provider = new Cesium.SingleTileImageryProvider({
+        url: fc.toDataURL(),
+        rectangle: Cesium.Rectangle.fromDegrees(minLon, minLat, maxLon, maxLat),
+      });
+      this._heatLayer       = this._viewer.imageryLayers.addImageryProvider(provider);
+      this._heatLayer.alpha = 0.55;
+    } catch (e) {
+      console.warn('[RFField] imagery layer:', e.message);
+    }
+  }
+
+  _loop() {
+    this._frameId = requestAnimationFrame(() => this._loop());
+    const ctx  = this._octx;
+    const W    = this._oc.width;
+    const H    = this._oc.height;
+    const t    = (performance.now() - this._t0) / 1000;
+    ctx.clearRect(0, 0, W, H);
+    if (!this._snap) return;
+
+    for (const e of this._snap.real_emitters || []) {
+      const p = this._toScreen(e.lat, e.lon);
+      if (p) this._pulse(ctx, p.x, p.y, t, false);
+    }
+    for (const e of this._snap.predicted_emitters || []) {
+      const p = this._toScreen(e.lat, e.lon);
+      if (p) this._pulse(ctx, p.x, p.y, t + (e.step || 0) * 0.4, true);
+    }
+  }
+
+  _pulse(ctx, x, y, t, ghost) {
+    const rings = 3;
+    const maxR  = ghost ? 36 : 54;
+    ctx.setLineDash(ghost ? [4, 4] : []);
+    for (let i = 0; i < rings; i++) {
+      const phase = ((t * 1.4 + i / rings) % 1.0);
+      const r     = phase * maxR;
+      const a     = (1 - phase) * (ghost ? 0.45 : 0.75);
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.strokeStyle = ghost ? `rgba(255,140,0,${a})` : `rgba(0,210,255,${a})`;
+      ctx.lineWidth   = ghost ? 1.5 : 2;
+      ctx.stroke();
+    }
+    ctx.setLineDash([]);
+    ctx.beginPath();
+    ctx.arc(x, y, ghost ? 3 : 5, 0, Math.PI * 2);
+    ctx.fillStyle = ghost ? 'rgba(255,140,0,0.7)' : 'rgba(0,210,255,1.0)';
+    ctx.fill();
+  }
+
+  _toScreen(lat, lon) {
+    try {
+      const cart = Cesium.Cartesian3.fromDegrees(lon, lat);
+      const sp   = Cesium.SceneTransforms.wgs84ToWindowCoordinates(this._viewer.scene, cart);
+      if (!sp) return null;
+      const dot = Cesium.Cartesian3.dot(
+        Cesium.Cartesian3.normalize(cart, new Cesium.Cartesian3()),
+        Cesium.Cartesian3.normalize(this._viewer.scene.camera.position, new Cesium.Cartesian3())
+      );
+      return dot < 0 ? null : sp;
+    } catch (_) { return null; }
+  }
+
+  destroy() {
+    if (this._frameId) cancelAnimationFrame(this._frameId);
+    try { this._viewer.imageryLayers.remove(this._heatLayer); } catch (_) {}
+    this._oc?.remove();
+  }
+}
+
+// Instantiate after globe is fully initialised (viewer + socket ready)
+setTimeout(() => {
+  try {
+    const viewer = globe?._viewer;
+    const sock   = globe?._socket;
+    if (viewer && sock) {
+      window._rfFieldRenderer = new RFFieldRenderer(viewer, sock);
+    } else {
+      console.warn('[RFField] globe viewer or socket not ready — RF field renderer skipped');
+    }
+  } catch (e) {
+    console.warn('[RFField] init error:', e.message);
+  }
+}, 3_000);
+
+/* ═══════════════════════════════════════════════════════════════════════
+ * RF VOLUMETRIC RENDERER  — T5
+ * True 3D raymarching of RF field tensors via WebGL2.
+ *
+ * Architecture:
+ *   • Separate overlay canvas (pointer-events:none) on top of Cesium
+ *   • Two TEXTURE_3D (R8, UNSIGNED_BYTE) — real field + predicted field
+ *   • Fragment shader casts per-pixel rays from Cesium camera through
+ *     the atmosphere shell [EARTH_R, EARTH_R+20km], sampling textures
+ *     in ECEF→geographic texture-space transform
+ *   • Cesium camera frustum corner rays sync each frame
+ *   • Textures reused via texSubImage3D (no realloc on update)
+ *
+ * Known limitations:
+ *   • Sphere (not WGS84 ellipsoid) for ray-atmosphere intersection
+ *   • No terrain depth occlusion (overlay is independent of Cesium GL ctx)
+ *   • Antimeridian-crossing bounds not supported
+ * ═══════════════════════════════════════════════════════════════════════ */
+
+const _VOL_VERT = `#version 300 es
+in  vec2 a_pos;
+out vec2 v_uv;
+void main() {
+  v_uv        = a_pos * 0.5 + 0.5;
+  gl_Position = vec4(a_pos, 0.0, 1.0);
+}`;
+
+const _VOL_FRAG = `#version 300 es
+precision highp float;
+precision highp sampler3D;
+
+uniform sampler3D u_fieldTex;
+uniform sampler3D u_predTex;
+uniform vec3      u_camPos;           // ECEF metres
+uniform vec3      u_rayBL, u_rayBR;   // bottom frustum corner directions
+uniform vec3      u_rayTL, u_rayTR;   // top    frustum corner directions
+uniform vec4      u_bounds;           // [minLon, minLat, maxLon, maxLat] degrees
+
+in  vec2 v_uv;
+out vec4 fragColor;
+
+const float EARTH_R = 6371000.0;
+const float ALT_MAX = 20000.0;
+const float PI      = 3.14159265359;
+const int   STEPS   = 48;
+
+// Returns (tNear, tFar); miss when tNear > tFar
+vec2 raySphere(vec3 ro, vec3 rd, float r) {
+  float b  = dot(ro, rd);
+  float c  = dot(ro, ro) - r * r;
+  float d  = b * b - c;
+  if (d < 0.0) return vec2(1e10, -1e10);
+  float sq = sqrt(d);
+  return vec2(-b - sq, -b + sq);
+}
+
+// ECEF position → (u, v, w) texture coords [0,1]³
+// u=lon axis, v=lat axis (ascending), w=altitude axis
+vec3 ecefToTex(vec3 p) {
+  float alt = length(p) - EARTH_R;
+  vec3  n   = normalize(p);
+  float lat = degrees(asin(clamp(n.z, -1.0, 1.0)));
+  float lon = degrees(atan(n.y, n.x));
+  float u   = (lon - u_bounds.x) / (u_bounds.z - u_bounds.x);
+  float v   = (lat - u_bounds.y) / (u_bounds.w - u_bounds.y);
+  float w   = alt / ALT_MAX;
+  return vec3(u, v, w);
+}
+
+void main() {
+  // Bilinear interpolation across frustum corners
+  // v_uv.y=0 → screen bottom → u_rayBL/BR ; v_uv.y=1 → screen top → u_rayTL/TR
+  vec3 rayDir = normalize(mix(
+    mix(u_rayBL, u_rayBR, v_uv.x),
+    mix(u_rayTL, u_rayTR, v_uv.x),
+    v_uv.y
+  ));
+
+  // Atmosphere shell: outer at EARTH_R+ALT_MAX, inner at EARTH_R
+  vec2 atmHit = raySphere(u_camPos, rayDir, EARTH_R + ALT_MAX);
+  vec2 gndHit = raySphere(u_camPos, rayDir, EARTH_R);
+
+  if (atmHit.x > atmHit.y) discard;   // ray misses atmosphere entirely
+
+  float t0 = max(atmHit.x, 0.0);      // clamp behind camera
+  // stop at globe surface if it's in front and inside the atmosphere shell
+  float t1 = (gndHit.x > t0 && gndHit.x < atmHit.y) ? gndHit.x : atmHit.y;
+  if (t1 <= t0) discard;
+
+  float stepLen = (t1 - t0) / float(STEPS);
+  vec3  col     = vec3(0.0);
+  float alpha   = 0.0;
+
+  for (int i = 0; i < STEPS; i++) {
+    float t   = t0 + (float(i) + 0.5) * stepLen;
+    vec3  pos = u_camPos + rayDir * t;
+    vec3  tc  = ecefToTex(pos);
+
+    // Skip samples outside the geographic field volume
+    if (any(lessThan(tc, vec3(0.0))) || any(greaterThan(tc, vec3(1.0)))) continue;
+
+    float f       = texture(u_fieldTex, tc).r;
+    float p       = texture(u_predTex,  tc).r;
+    float density = f + p * 0.6;
+    if (density < 0.005) continue;
+
+    vec3  cReal = vec3(0.0, 0.55, 1.0);    // blue-cyan  — real
+    vec3  cPred = vec3(1.0, 0.45, 0.0);    // orange     — predicted
+    vec3  c     = (f * cReal + p * 0.6 * cPred) / max(density, 0.001);
+
+    float a = density * 0.12 * (1.0 - alpha);
+    col   += c * a;
+    alpha += a;
+
+    if (alpha > 0.95) break;
+  }
+
+  if (alpha < 0.005) discard;
+  fragColor = vec4(col, alpha * 0.9);
+}`;
+
+class RFVolumetricRenderer {
+  constructor(viewer, socket) {
+    this._viewer  = viewer;
+    this._socket  = socket;
+    this._gl      = null;
+    this._prog    = null;
+    this._vao     = null;
+    this._uloc    = {};
+    this._texDims = null;   // [W, H, D] of allocated textures
+    this._fieldTex = null;
+    this._predTex  = null;
+    this._snap    = null;
+    this._frameId = null;
+    this._active  = false;
+
+    this._canvas = this._createCanvas();
+    if (this._initGL()) {
+      this._socket.on('rf_field3d_update', snap => this._onUpdate(snap));
+      console.log('[RFVol] Renderer ready — listening for rf_field3d_update');
+    }
+  }
+
+  _createCanvas() {
+    const c = document.createElement('canvas');
+    c.id = 'rfVolCanvas';
+    c.style.cssText = 'position:absolute;top:0;left:0;pointer-events:none;z-index:11;display:none;';
+    (document.getElementById('cesiumContainer') || document.body).appendChild(c);
+    const sc = this._viewer.scene.canvas;
+    c.width  = sc.width  || window.innerWidth;
+    c.height = sc.height || window.innerHeight;
+    window.addEventListener('resize', () => {
+      c.width  = this._viewer.scene.canvas.width  || window.innerWidth;
+      c.height = this._viewer.scene.canvas.height || window.innerHeight;
+      if (this._gl) this._gl.viewport(0, 0, c.width, c.height);
+    });
+    return c;
+  }
+
+  _initGL() {
+    const gl = this._canvas.getContext('webgl2', {
+      alpha: true, premultipliedAlpha: false, antialias: false,
+    });
+    if (!gl) { console.warn('[RFVol] WebGL2 not available'); return false; }
+    this._gl = gl;
+
+    const compile = (type, src) => {
+      const s = gl.createShader(type);
+      gl.shaderSource(s, src);
+      gl.compileShader(s);
+      if (!gl.getShaderParameter(s, gl.COMPILE_STATUS))
+        console.error('[RFVol] shader compile:', gl.getShaderInfoLog(s));
+      return s;
+    };
+
+    const prog = gl.createProgram();
+    gl.attachShader(prog, compile(gl.VERTEX_SHADER,   _VOL_VERT));
+    gl.attachShader(prog, compile(gl.FRAGMENT_SHADER, _VOL_FRAG));
+    gl.linkProgram(prog);
+    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
+      console.error('[RFVol] link:', gl.getProgramInfoLog(prog));
+      return false;
+    }
+    this._prog = prog;
+
+    // Fullscreen quad VAO
+    this._vao = gl.createVertexArray();
+    gl.bindVertexArray(this._vao);
+    const vb = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, vb);
+    gl.bufferData(gl.ARRAY_BUFFER,
+      new Float32Array([-1,-1, 1,-1, -1,1, 1,1]), gl.STATIC_DRAW);
+    const loc = gl.getAttribLocation(prog, 'a_pos');
+    gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+    gl.enableVertexAttribArray(loc);
+    gl.bindVertexArray(null);
+
+    this._uloc = {
+      fieldTex: gl.getUniformLocation(prog, 'u_fieldTex'),
+      predTex:  gl.getUniformLocation(prog, 'u_predTex'),
+      camPos:   gl.getUniformLocation(prog, 'u_camPos'),
+      rayBL:    gl.getUniformLocation(prog, 'u_rayBL'),
+      rayBR:    gl.getUniformLocation(prog, 'u_rayBR'),
+      rayTL:    gl.getUniformLocation(prog, 'u_rayTL'),
+      rayTR:    gl.getUniformLocation(prog, 'u_rayTR'),
+      bounds:   gl.getUniformLocation(prog, 'u_bounds'),
+    };
+
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+    return true;
+  }
+
+  _makeTex() {
+    const gl = this._gl;
+    const t  = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_3D, t);
+    gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MIN_FILTER,   gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MAG_FILTER,   gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_S,       gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_T,       gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_R,       gl.CLAMP_TO_EDGE);
+    return t;
+  }
+
+  _uploadTex(tex, data, W, H, D, reuse) {
+    const gl = this._gl;
+    gl.bindTexture(gl.TEXTURE_3D, tex);
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+    if (reuse) {
+      // Reuse existing allocation — no GPU realloc
+      gl.texSubImage3D(gl.TEXTURE_3D, 0, 0, 0, 0, W, H, D,
+                       gl.RED, gl.UNSIGNED_BYTE, data);
+    } else {
+      gl.texImage3D(gl.TEXTURE_3D, 0, gl.R8, W, H, D, 0,
+                    gl.RED, gl.UNSIGNED_BYTE, data);
+    }
+  }
+
+  _decode(b64) {
+    const bin = atob(b64);
+    const buf = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
+    return buf;
+  }
+
+  _onUpdate(snap) {
+    if (!this._gl) return;
+    const [W, H, D] = snap.dims;
+    const reuse = this._texDims &&
+                  this._texDims[0] === W &&
+                  this._texDims[1] === H &&
+                  this._texDims[2] === D;
+
+    if (!this._fieldTex) this._fieldTex = this._makeTex();
+    if (!this._predTex)  this._predTex  = this._makeTex();
+
+    this._uploadTex(this._fieldTex, this._decode(snap.field),      W, H, D, reuse);
+    this._uploadTex(this._predTex,  this._decode(snap.prediction), W, H, D, reuse);
+    this._texDims = [W, H, D];
+    this._snap = snap;
+
+    // Auto-activate on first data
+    if (!this._active) this.toggle(true);
+  }
+
+  toggle(state) {
+    this._active = state !== undefined ? state : !this._active;
+    this._canvas.style.display = this._active ? 'block' : 'none';
+    const btn = document.getElementById('btn-vol-rf');
+    if (btn) btn.classList.toggle('active', this._active);
+    if (this._active) {
+      // Bootstrap from REST if no texture loaded yet
+      if (!this._fieldTex) {
+        fetch('/api/rf/field3d').then(r => r.ok ? r.json() : null).then(snap => {
+          if (snap) this._onUpdate(snap);
+        }).catch(e => console.warn('[RFVol] initial fetch failed:', e));
+      }
+      if (!this._frameId) this._loop();
+    } else if (!this._active && this._frameId) {
+      cancelAnimationFrame(this._frameId);
+      this._frameId = null;
+    }
+  }
+
+  _loop() {
+    if (!this._active) return;
+    this._frameId = requestAnimationFrame(() => this._loop());
+    if (!this._gl || !this._fieldTex || !this._snap) return;
+    this._render();
+  }
+
+  _render() {
+    const gl    = this._gl;
+    const cam   = this._viewer.scene.camera;
+    const sc    = this._viewer.scene.canvas;
+    const W     = sc.width  || this._canvas.width;
+    const H     = sc.height || this._canvas.height;
+
+    const _dir = (px, py) => {
+      try {
+        const r = cam.getPickRay(new Cesium.Cartesian2(px, py));
+        return r?.direction ?? null;
+      } catch (_) { return null; }
+    };
+
+    const rBL = _dir(0, H);
+    const rBR = _dir(W, H);
+    const rTL = _dir(0, 0);
+    const rTR = _dir(W, 0);
+    if (!rBL || !rBR || !rTL || !rTR) return;
+
+    const cp = cam.positionWC;
+
+    gl.viewport(0, 0, this._canvas.width, this._canvas.height);
+    gl.clearColor(0, 0, 0, 0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+
+    gl.useProgram(this._prog);
+    gl.bindVertexArray(this._vao);
+
+    gl.uniform3f(this._uloc.camPos, cp.x, cp.y, cp.z);
+    gl.uniform3f(this._uloc.rayBL,  rBL.x, rBL.y, rBL.z);
+    gl.uniform3f(this._uloc.rayBR,  rBR.x, rBR.y, rBR.z);
+    gl.uniform3f(this._uloc.rayTL,  rTL.x, rTL.y, rTL.z);
+    gl.uniform3f(this._uloc.rayTR,  rTR.x, rTR.y, rTR.z);
+
+    const b = this._snap.bounds;
+    gl.uniform4f(this._uloc.bounds, b[0], b[1], b[2], b[3]);
+
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_3D, this._fieldTex);
+    gl.uniform1i(this._uloc.fieldTex, 0);
+
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_3D, this._predTex);
+    gl.uniform1i(this._uloc.predTex, 1);
+
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    gl.bindVertexArray(null);
+  }
+
+  destroy() {
+    if (this._frameId) cancelAnimationFrame(this._frameId);
+    if (this._gl) {
+      if (this._fieldTex) this._gl.deleteTexture(this._fieldTex);
+      if (this._predTex)  this._gl.deleteTexture(this._predTex);
+    }
+    this._canvas?.remove();
+  }
+}
+
+// Instantiate after globe is fully initialised
+setTimeout(() => {
+  try {
+    const viewer = globe?._viewer;
+    const sock   = globe?._socket;
+    if (viewer && sock) {
+      window._rfVolRenderer = new RFVolumetricRenderer(viewer, sock);
+    } else {
+      console.warn('[RFVol] globe viewer or socket not ready — volumetric renderer skipped');
+    }
+  } catch (e) {
+    console.warn('[RFVol] init error:', e.message);
+  }
+}, 3_500);
+
+document.addEventListener('DOMContentLoaded', () => {
+  const mobBtn = document.getElementById('mobile-menu-btn');
+  const sideLeft = document.getElementById('sidebar-left');
+  if (mobBtn && sideLeft) {
+    mobBtn.addEventListener('click', () => {
+      sideLeft.classList.toggle('mobile-open');
+    });
+  }
+});
+
+</script>
+</body>
+</html>
