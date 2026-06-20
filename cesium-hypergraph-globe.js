@@ -1956,6 +1956,7 @@ class CesiumHypergraphGlobe {
     this._renderer.setSize(cw, ch, false);
     this._renderer.setPixelRatio(window.devicePixelRatio);
     this._renderer.autoClear = false;
+    this._renderer.setClearColor(0x000000, 0);
 
     // Overlay the Three.js canvas exactly over the Cesium canvas.
     // inset: 0 + width/height 100% keeps it anchored to the parent
@@ -2052,6 +2053,7 @@ class CesiumHypergraphGlobe {
     this._renderer.setSize(cw, ch, false);
     this._renderer.setPixelRatio(window.devicePixelRatio);
     this._renderer.autoClear = false;
+    this._renderer.setClearColor(0x000000, 0);
 
     const threeCanvas = this._renderer.domElement;
     threeCanvas.style.cssText = [
@@ -2321,7 +2323,8 @@ class CesiumHypergraphGlobe {
 
     this.updateUAVMovement();
 
-    this._renderer.clearDepth();
+    this._renderer.setRenderTarget(null);
+    this._renderer.clear(true, true, true);
     this._renderer.render(this._scene, this._camera);
 
     // Heatmap runs at ~30 Hz (every other frame) — halves fill-rate cost with

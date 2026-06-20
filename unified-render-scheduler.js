@@ -60,7 +60,9 @@ function buildImageryProvider(mode, localUrl) {
   switch (mode) {
     case ImageryMode.OSM:
       return new Cesium.OpenStreetMapImageryProvider({
-        url: 'https://a.tile.openstreetmap.org/'
+        url: 'https://tile.openstreetmap.org/',
+        maximumLevel: 17,
+        credit: 'Map data © OpenStreetMap contributors'
       });
     case ImageryMode.PROXY_OSM:
       // Uses the new server-side tile proxy with 24-hour persistence
@@ -83,16 +85,36 @@ function buildImageryProvider(mode, localUrl) {
       });
     case ImageryMode.ION:
     default: {
+      const cesiumIonAccessToken = (typeof Cesium !== 'undefined' && Cesium.Ion)
+        ? Cesium.Ion.defaultAccessToken
+        : '';
+      const ionToken = String(
+        cesiumIonAccessToken ||
+        (typeof window !== 'undefined' ? (window.CESIUM_ION_TOKEN || window.SCYTHE_CESIUM_ION_TOKEN || '') : '')
+      ).trim();
+      if (!ionToken) {
+        console.warn('[URS] Cesium Ion token missing — using OSM fallback');
+        return new Cesium.OpenStreetMapImageryProvider({
+          url: 'https://tile.openstreetmap.org/',
+          maximumLevel: 17,
+          credit: 'Map data © OpenStreetMap contributors'
+        });
+      }
+
       // Cesium ≥1.104 deprecated the sync constructor; fromAssetId returns a Promise.
       // Return a sentinel so setImageryMode handles the async path.
-      if (typeof Cesium?.IonImageryProvider?.fromAssetId === 'function') {
+      if (Cesium.IonImageryProvider && typeof Cesium.IonImageryProvider.fromAssetId === 'function') {
         return { _ionAssetId: 2, _asyncPromise: Cesium.IonImageryProvider.fromAssetId(2) };
       }
       // Legacy Cesium <1.104 sync constructor
       try { return new Cesium.IonImageryProvider({ assetId: 2 }); } catch (_) { /* fall through */ }
       // Ultimate fallback: OSM (always synchronous)
       console.warn('[URS] IonImageryProvider unavailable — using OSM fallback');
-      return new Cesium.OpenStreetMapImageryProvider({ url: 'https://a.tile.openstreetmap.org/' });
+      return new Cesium.OpenStreetMapImageryProvider({
+        url: 'https://tile.openstreetmap.org/',
+        maximumLevel: 17,
+        credit: 'Map data © OpenStreetMap contributors'
+      });
     }
   }
 }
@@ -207,6 +229,7 @@ class UnifiedRenderScheduler {
     this._minQuality    = opts.minQuality ?? 0.15;
     this._maxQuality    = opts.maxQuality ?? 1.5;
     this._rfDepthTest   = opts.rfDepthTest ?? true;
+    this._enableLighting = opts.enableLighting ?? true;
 
     this.dynamicQuality = 1.0;
     this.imageryMode    = opts.imageryMode || ImageryMode.ION;
@@ -365,7 +388,7 @@ class UnifiedRenderScheduler {
     }
 
     v.scene.fog.enabled           = false;
-    v.scene.globe.enableLighting  = true;
+    v.scene.globe.enableLighting  = this._enableLighting;
 
     // Apply initial imagery mode
     this.setImageryMode(this.imageryMode);
@@ -452,6 +475,7 @@ class UnifiedRenderScheduler {
           return;
         }
         this._imageryLayer = layers.addImageryProvider(p);
+        this._attachImageryFallback(p, layers, mode);
         console.log(`[URS] Imagery mode → ${mode}`);
       };
 
@@ -467,6 +491,29 @@ class UnifiedRenderScheduler {
     } catch (e) {
       console.warn('[URS] Imagery provider switch failed:', e.message);
     }
+  }
+
+  _attachImageryFallback(provider, layers, mode) {
+    if (!provider?.errorEvent || mode === ImageryMode.OFFLINE) return;
+
+    let errors = 0;
+    provider.errorEvent.addEventListener((error) => {
+      errors += 1;
+      console.warn('[URS] Imagery tile load error:', error);
+      if (errors < 3 || this.imageryMode !== mode) return;
+
+      try {
+        while (layers.length > 0) layers.remove(layers.get(0), false);
+        const fallback = buildImageryProvider(ImageryMode.OFFLINE, this._offlineTileUrl);
+        if (fallback) this._imageryLayer = layers.addImageryProvider(fallback);
+        if (this._viewer?.scene?.globe) {
+          this._viewer.scene.globe.baseColor = Cesium.Color.fromCssColorString('#2f6f9f');
+        }
+        console.warn('[URS] Falling back to offline diagnostic imagery');
+      } catch (e) {
+        console.warn('[URS] Offline imagery fallback failed:', e?.message || e);
+      }
+    });
   }
 
   /* ───────────────────────────────────────────────────────────────────────

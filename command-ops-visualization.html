@@ -2011,7 +2011,7 @@
     <link rel="stylesheet" href="missile-operations.css">
     <link rel="stylesheet" href="urh-integration.css">
     <script>
-        // Set your Cesium Ion access token
+        // Set your Cesium Ion access token at runtime.
         Cesium.Ion.defaultAccessToken = window.CESIUM_ION_TOKEN || window.SCYTHE_CESIUM_ION_TOKEN || '';
     </script>
     <link rel="stylesheet" href="styles.css">
@@ -10181,6 +10181,8 @@ const originalComplete = options.complete;
                 const viewerOptions = {
                     timeline: false,
                     animation: false,
+                    baseLayer: false,
+                    imageryProvider: false,
                     baseLayerPicker: false,
                     geocoder: false,
                     homeButton: false,
@@ -10197,9 +10199,19 @@ const originalComplete = options.complete;
                 // For older versions, use terrainProvider
                 let terrainConfigured = false;
                 
+                const cesiumIonToken = String(
+                    Cesium.Ion.defaultAccessToken ||
+                    window.CESIUM_ION_TOKEN ||
+                    window.SCYTHE_CESIUM_ION_TOKEN ||
+                    ''
+                ).trim();
+
                 try {
+                    if (!cesiumIonToken) {
+                        console.warn('[TERRAIN] Cesium Ion token missing; using EllipsoidTerrainProvider');
+                    }
                     // CesiumJS 1.108+ uses Cesium.Terrain.fromWorldTerrain() with 'terrain' option
-                    if (Cesium.Terrain && typeof Cesium.Terrain.fromWorldTerrain === 'function') {
+                    else if (Cesium.Terrain && typeof Cesium.Terrain.fromWorldTerrain === 'function') {
                         viewerOptions.terrain = Cesium.Terrain.fromWorldTerrain({
                             requestVertexNormals: true,
                             requestWaterMask: true
@@ -10268,8 +10280,9 @@ const originalComplete = options.complete;
                     cameraController.maximumZoomDistance = 150000000; // 150,000km max (in meters)
                     console.log('[INIT] Camera zoom limits set: 0.1km - 150,000km');
                     
-                    // Track if imagery loads successfully
-                    let imageryLoaded = false;
+                    // Track actual tile errors, not just provider creation.
+                    let imageryFallbackActive = false;
+                    let imageryErrorCount = 0;
                     // STADIA API key used for both primary and fallback tile requests
                     const STADIA_API_KEY = window.STADIA_API_KEY || window.SCYTHE_STADIA_API_KEY || '';
                     
@@ -10300,7 +10313,6 @@ const originalComplete = options.complete;
                                 if (window.__URS__) window.__URS__.attachMapLibre(mldc);
                                 if (window.__URS__) window.__URS__.setImageryMode(ImageryMode.VECTOR_DARK);
                                 console.log('[INIT] MapLibre vector basemap active');
-                                imageryLoaded = true;
                             });
                         } catch (mlErr) {
                             console.warn('[INIT] MapLibre vector basemap failed, falling through to raster:', mlErr);
@@ -10314,17 +10326,17 @@ const originalComplete = options.complete;
                         // OpenStreetMap raster tiles (free, no API key, no rate limit)
                         try {
                             const osmProvider = new Cesium.OpenStreetMapImageryProvider({
-                                url: 'https://a.tile.openstreetmap.org/',
+                                url: 'https://tile.openstreetmap.org/',
                                 maximumLevel: 17,
                                 credit: 'Map data © OpenStreetMap contributors'
                             });
                             const osmLayer = viewer.imageryLayers.addImageryProvider(osmProvider);
-                            imageryLoaded = true;
                             console.log('[INIT] Using OpenStreetMap raster tiles (no API key)');
 
                             osmProvider.errorEvent?.addEventListener(function(error) {
                                 console.warn('[IMAGERY] OSM tile load error:', error);
-                                if (!imageryLoaded) setupFallbackImagery();
+                                imageryErrorCount += 1;
+                                if (imageryErrorCount >= 3) setupFallbackImagery();
                             });
 
                             setTimeout(function() {
@@ -10343,12 +10355,16 @@ const originalComplete = options.complete;
                     } // end raster path
 
                     function setupFallbackImagery() {
-                        if (imageryLoaded) return;
-                        console.log('[IMAGERY] Setting up fallback imagery (solid base color)...');
-                        // Solid navy — no network requests, always available
-                        viewer.scene.globe.baseColor = Cesium.Color.fromCssColorString('#0a1e3a');
-                        imageryLoaded = true;
-                        console.log('[IMAGERY] Solid base color applied');
+                        if (imageryFallbackActive) return;
+                        console.log('[IMAGERY] Setting up fallback imagery (diagnostic solid base color)...');
+                        try {
+                            viewer.imageryLayers.removeAll();
+                        } catch (e) {}
+                        // Visible diagnostic ocean-blue, so failed tiles do not look like a black globe.
+                        viewer.scene.globe.baseColor = Cesium.Color.fromCssColorString('#2f6f9f');
+                        imageryFallbackActive = true;
+                        viewer.scene.requestRender();
+                        console.log('[IMAGERY] Diagnostic solid base color applied');
                     }
                 })();
                 
@@ -10376,14 +10392,11 @@ const originalComplete = options.complete;
                     }
                 });
                 
-                // Enable lighting
-                viewer.scene.globe.enableLighting = true;
-                
                 // Enhanced globe and atmosphere configuration for proper rendering
-                viewer.scene.globe.enableLighting = true;
+                viewer.scene.globe.enableLighting = false;
                 viewer.scene.globe.depthTestAgainstTerrain = false;
                 viewer.scene.globe.translucency.enabled = false;
-                viewer.scene.globe.baseColor = Cesium.Color.DARKSLATEGRAY; // was #000000
+                viewer.scene.globe.baseColor = Cesium.Color.fromCssColorString('#2f6f9f');
                 viewer.scene.skyBox.show = true;
                 viewer.scene.skyAtmosphere.show = true;
                 viewer.scene.fog.enabled = true;
@@ -40121,6 +40134,7 @@ tr:hover td{background:rgba(74,158,255,0.06)}
                     deck: deckInstance,
                     targetFps: 60,
                     rfDepthTest: true,
+                    enableLighting: false,
                     imageryMode: ImageryMode.OSM
                 });
                 window.__URS__ = urs;
