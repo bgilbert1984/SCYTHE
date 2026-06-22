@@ -12666,9 +12666,51 @@ if FLASK_AVAILABLE:
                 'staging_dir': staging,
             }
 
+            def _pcap_graph_counts(hg):
+                ki = getattr(hg, 'kind_index', {}) or {}
+                eki = getattr(hg, 'edge_kind_index', {}) or {}
+                sessions = set(ki.get('session', set()) or set())
+                sessions.update(ki.get('pcap_session', set()) or set())
+                artifacts = set(ki.get('pcap_artifact', set()) or set())
+                derived_edges = set(
+                    eki.get('SESSION_DERIVED_FROM_PCAP', set()) or set()
+                )
+                return {
+                    'graph_epoch': getattr(hg, 'trace_id', None),
+                    'sessions': len(sessions),
+                    'artifacts': len(artifacts),
+                    'derived_edges': len(derived_edges),
+                    'nodes_total': len(getattr(hg, 'nodes', {}) or {}),
+                    'edges_total': len(getattr(hg, 'edges', {}) or {}),
+                }
+
             result = handle_mcp_pcap_ingest(engine, ledger, params)
             result['ftp_host'] = host
             result['ftp_port'] = port
+            graph_counts = _pcap_graph_counts(engine)
+            result['graph_counts_after_ingest'] = graph_counts
+
+            expected_sessions = int(result.get('total_sessions') or 0)
+            result['pcap_graph_verify_ok'] = (
+                expected_sessions <= 0 or graph_counts['sessions'] > 0
+            )
+            if expected_sessions > 0 and graph_counts['sessions'] == 0:
+                message = (
+                    f"PCAP ingest sessionized {expected_sessions} sessions but "
+                    "the graph has 0 session nodes after materialization"
+                )
+                logger.error("[PCAP][VERIFY] %s. graph_counts=%s",
+                             message, graph_counts)
+                warnings = result.get('warnings') or []
+                if not isinstance(warnings, list):
+                    warnings = [str(warnings)]
+                warnings.append(
+                    "Graph materialization is empty after PCAP ingest; "
+                    "check WriteBus idempotency replay and graph binding."
+                )
+                result['warnings'] = warnings
+                if result.get('status') == 'ok':
+                    result['status'] = 'partial_failure'
 
             # ── Mirror ingest to InstanceDB (Postgres/SQLite authority) ──
             if instance_db and hasattr(instance_db, 'mirror_ingest_result'):

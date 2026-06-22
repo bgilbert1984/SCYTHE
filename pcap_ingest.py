@@ -124,6 +124,17 @@ def _get_writebus_instance() -> Optional[Any]:
         return None
 
 
+def _pcap_graph_epoch(engine: Any) -> str:
+    """Scope PCAP idempotency to the current materialized graph lifecycle."""
+    epoch = (
+        getattr(engine, "trace_id", None)
+        or os.environ.get("SCYTHE_GRAPH_EPOCH")
+        or os.environ.get("SCYTHE_INSTANCE_ID")
+        or "default"
+    )
+    return re.sub(r"[^A-Za-z0-9_.:-]+", "_", str(epoch))
+
+
 class _DirectGraphWriter:
     """Compatibility writer for CLI/tests where WriteBus is not initialized."""
 
@@ -132,6 +143,7 @@ class _DirectGraphWriter:
     def __init__(self, engine: Any, config: IngestConfig):
         self._engine = engine
         self._config = config
+        self.graph_epoch = _pcap_graph_epoch(engine)
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._engine, name)
@@ -174,6 +186,7 @@ class _WriteBusGraphWriter:
         self._config = config
         self._writebus = writebus_instance
         self._ops: List[Any] = []
+        self.graph_epoch = _pcap_graph_epoch(engine)
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._engine, name)
@@ -242,6 +255,19 @@ class _WriteBusGraphWriter:
             persist=False,
             audit=True,
             idempotency_key=idempotency_key,
+        )
+        logger.info(
+            "[pcap_ingest][WriteBus] flush entity=%s type=%s ops=%d "
+            "ok=%s status=%s graph_applied=%s persisted=%s replay=%s errors=%s",
+            entity_id,
+            entity_type,
+            len(ops),
+            getattr(result, "ok", None),
+            getattr(result, "commit_status", None),
+            getattr(result, "graph_applied", None),
+            getattr(result, "persisted", None),
+            (getattr(result, "debug", None) or {}).get("idempotent_replay"),
+            getattr(result, "errors", None),
         )
         if not result.ok:
             raise RuntimeError("; ".join(result.errors) or result.commit_status)
@@ -906,6 +932,13 @@ class HypergraphEmitter:
             evidence_refs=evidence_refs,
             idempotency_key=idempotency_key,
         )
+
+    @property
+    def graph_epoch(self) -> str:
+        return getattr(self.engine, "graph_epoch", _pcap_graph_epoch(self.engine))
+
+    def idempotency_key(self, entity_id: str, phase: str, version: str = "v2") -> str:
+        return f"pcap-ingest:{entity_id}:{phase}:{self.graph_epoch}:{version}"
 
     def discard_pending(self) -> None:
         self.engine.discard_pending()
@@ -1708,7 +1741,9 @@ class PcapIngestPipeline:
                 },
                 request_id=f"pcap_ingest:{artifact_id}:materialize",
                 evidence_refs=[artifact_id, filename],
-                idempotency_key=f"pcap-ingest:{artifact_id}:materialize:v1",
+                idempotency_key=self.emitter.idempotency_key(
+                    artifact_id, "materialize"
+                ),
             )
 
             # ── 4b. BSG detection (post-sessionization) ──────────────
@@ -1738,7 +1773,9 @@ class PcapIngestPipeline:
                         },
                         request_id=f"pcap_ingest:{artifact_id}:bsg",
                         evidence_refs=[artifact_id, filename],
-                        idempotency_key=f"pcap-ingest:{artifact_id}:bsg:v1",
+                        idempotency_key=self.emitter.idempotency_key(
+                            artifact_id, "bsg"
+                        ),
                     )
                     result.nodes_emitted += bsg_result.groups_created
                     result.edges_emitted += bsg_result.edges_created
@@ -1866,7 +1903,9 @@ class PcapIngestPipeline:
                     },
                     request_id=f"pcap_ingest:batch:bsg:{evidence_hash}",
                     evidence_refs=evidence_refs,
-                    idempotency_key=f"pcap-ingest:batch:bsg:{evidence_hash}:v1",
+                    idempotency_key=self.emitter.idempotency_key(
+                        f"batch:bsg:{evidence_hash}", "materialize"
+                    ),
                 )
                 batch.bsg_summary = bsg_result.to_dict()
                 batch.total_nodes += bsg_result.groups_created
@@ -2038,6 +2077,7 @@ def handle_mcp_pcap_ingest(
             "status": "ok",
             "files_processed": len(results),
             "total_sessions": total_sessions,
+            "graph_epoch": pipeline.emitter.graph_epoch,
             "geo_points": all_geo,
             "dpi_stats": pipeline.emitter.dpi_stats,
             "results": results,
@@ -2050,6 +2090,7 @@ def handle_mcp_pcap_ingest(
         return {
             "status": "ok" if result.ok else "partial_failure",
             "summary": result.summary(),
+            "graph_epoch": pipeline.emitter.graph_epoch,
             "geo_points": result.geo_points,
             "dpi_stats": result.dpi_stats,
             "geoip_warning": geoip_warning,
