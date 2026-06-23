@@ -5018,6 +5018,153 @@
                             <div id="pcap-progress-bar" style="width: 0%; height: 100%; background: #4a9eff; transition: width 0.3s;"></div>
                         </div>
                     </div>
+
+                    <!-- Cloud Evidence Ingress + Hypergraph Bundles -->
+                    <div class="settings-group" id="cloud-evidence-ingress" style="margin-top: 12px;">
+                        <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:8px;">
+                            <h4 style="margin:0; color:#55efc4;">Cloud Evidence Ingress</h4>
+                            <span id="cloud-ingress-status-badge" style="font-size:10px; color:#777; border:1px solid #333; border-radius:999px; padding:2px 8px;">Drop-zone mode</span>
+                        </div>
+                        <div style="font-size:10px; color:#888; line-height:1.45; margin-bottom:10px;">
+                            OneDrive and Google Drive are artifact lanes only. SCYTHE pulls captures locally, hashes them, materializes through WriteBus, then emits replayable Hypergraph Bundles.
+                        </div>
+                        <details id="cloud-lane-config-details" style="border:1px solid #333; border-radius:4px; padding:8px; margin-bottom:10px; background:rgba(255,255,255,0.02);">
+                            <summary style="cursor:pointer; color:#55efc4; font-size:11px; font-weight:700;">Configure Storage Lanes</summary>
+                            <div style="font-size:10px; color:#777; line-height:1.45; margin:8px 0;">
+                                FusionAuth-style auth settings use host/client/API-key references. Secrets stay server-side; this form stores lane policy and credential references only.
+                            </div>
+                            <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:8px;">
+                                <div>
+                                    <label style="display:block; font-size:11px; color:#aaa; margin-bottom:4px;">Lane Name</label>
+                                    <input id="cloud-lane-name" type="text" value="primary-drive-dropzone" style="width:100%; background:#111; color:white; border:1px solid #444; padding:4px; border-radius:3px;" />
+                                </div>
+                                <div>
+                                    <label style="display:block; font-size:11px; color:#aaa; margin-bottom:4px;">Auth Mode</label>
+                                    <select id="cloud-lane-auth-mode" style="width:100%; background:#111; color:white; border:1px solid #444; padding:4px; border-radius:3px;">
+                                        <option value="rclone_remote">rclone remote</option>
+                                        <option value="fusionauth_oauth">FusionAuth OAuth broker</option>
+                                        <option value="service_account">Service/app identity</option>
+                                        <option value="server_profile">Existing server profile</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:8px;">
+                                <div>
+                                    <label style="display:block; font-size:11px; color:#aaa; margin-bottom:4px;">Remote/Profile</label>
+                                    <input id="cloud-lane-remote" type="text" value="gdrive:SCYTHE" placeholder="gdrive:SCYTHE or profile name" style="width:100%; background:#111; color:white; border:1px solid #444; padding:4px; border-radius:3px;" />
+                                </div>
+                                <div>
+                                    <label style="display:block; font-size:11px; color:#aaa; margin-bottom:4px;">FusionAuth Host</label>
+                                    <input id="cloud-lane-fusionauth-host" type="text" value="http://localhost:9011" placeholder="FUSIONAUTH_HOST" style="width:100%; background:#111; color:white; border:1px solid #444; padding:4px; border-radius:3px;" />
+                                </div>
+                            </div>
+                            <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:8px;">
+                                <div>
+                                    <label style="display:block; font-size:11px; color:#aaa; margin-bottom:4px;">FusionAuth API Key Ref</label>
+                                    <input id="cloud-lane-fusionauth-api-key-ref" type="text" value="FUSIONAUTH_API_KEY" placeholder="env: FUSIONAUTH_API_KEY" style="width:100%; background:#111; color:white; border:1px solid #444; padding:4px; border-radius:3px;" />
+                                </div>
+                                <div>
+                                    <label style="display:block; font-size:11px; color:#aaa; margin-bottom:4px;">OAuth Client ID</label>
+                                    <input id="cloud-lane-oauth-client-id" type="text" placeholder="FusionAuth application/client id" style="width:100%; background:#111; color:white; border:1px solid #444; padding:4px; border-radius:3px;" />
+                                </div>
+                            </div>
+                            <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:8px;">
+                                <div>
+                                    <label style="display:block; font-size:11px; color:#aaa; margin-bottom:4px;">OAuth Client Secret Ref</label>
+                                    <input id="cloud-lane-oauth-secret-ref" type="text" value="SCYTHE_CLOUD_CLIENT_SECRET" placeholder="env secret reference" style="width:100%; background:#111; color:white; border:1px solid #444; padding:4px; border-radius:3px;" />
+                                </div>
+                                <div>
+                                    <label style="display:block; font-size:11px; color:#aaa; margin-bottom:4px;">OAuth Scopes</label>
+                                    <input id="cloud-lane-oauth-scopes" type="text" value="offline_access files.readwrite" style="width:100%; background:#111; color:white; border:1px solid #444; padding:4px; border-radius:3px;" />
+                                </div>
+                            </div>
+                            <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:8px;">
+                                <div>
+                                    <label style="display:block; font-size:11px; color:#aaa; margin-bottom:4px;">Incoming Folder</label>
+                                    <input id="cloud-lane-incoming" type="text" value="SCYTHE/incoming/pcapng" style="width:100%; background:#111; color:white; border:1px solid #444; padding:4px; border-radius:3px;" />
+                                </div>
+                                <div>
+                                    <label style="display:block; font-size:11px; color:#aaa; margin-bottom:4px;">Manifest Folder</label>
+                                    <input id="cloud-lane-manifests" type="text" value="SCYTHE/incoming/manifests" style="width:100%; background:#111; color:white; border:1px solid #444; padding:4px; border-radius:3px;" />
+                                </div>
+                            </div>
+                            <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:8px;">
+                                <div>
+                                    <label style="display:block; font-size:11px; color:#aaa; margin-bottom:4px;">Processed Folder</label>
+                                    <input id="cloud-lane-processed" type="text" value="SCYTHE/processed/pcapng" style="width:100%; background:#111; color:white; border:1px solid #444; padding:4px; border-radius:3px;" />
+                                </div>
+                                <div>
+                                    <label style="display:block; font-size:11px; color:#aaa; margin-bottom:4px;">Bundle Output Folder</label>
+                                    <input id="cloud-lane-bundles" type="text" value="SCYTHE/bundles/hypergraph" style="width:100%; background:#111; color:white; border:1px solid #444; padding:4px; border-radius:3px;" />
+                                </div>
+                            </div>
+                            <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:8px;">
+                                <div>
+                                    <label style="display:block; font-size:11px; color:#aaa; margin-bottom:4px;">Failed Folder</label>
+                                    <input id="cloud-lane-failed" type="text" value="SCYTHE/failed" style="width:100%; background:#111; color:white; border:1px solid #444; padding:4px; border-radius:3px;" />
+                                </div>
+                                <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px;">
+                                    <div>
+                                        <label style="display:block; font-size:11px; color:#aaa; margin-bottom:4px;">Poll Sec</label>
+                                        <input id="cloud-lane-poll-sec" type="number" value="60" min="10" max="3600" style="width:100%; background:#111; color:white; border:1px solid #444; padding:4px; border-radius:3px;" />
+                                    </div>
+                                    <div>
+                                        <label style="display:block; font-size:11px; color:#aaa; margin-bottom:4px;">Stable Checks</label>
+                                        <input id="cloud-lane-stable-checks" type="number" value="2" min="1" max="12" style="width:100%; background:#111; color:white; border:1px solid #444; padding:4px; border-radius:3px;" />
+                                    </div>
+                                </div>
+                            </div>
+                            <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px; margin-bottom:8px;">
+                                <label style="display:flex; align-items:center; gap:6px; font-size:11px; color:#aaa;"><input id="cloud-lane-enabled" type="checkbox" checked> Enabled</label>
+                                <label style="display:flex; align-items:center; gap:6px; font-size:11px; color:#aaa;"><input id="cloud-lane-writebus-required" type="checkbox" checked> WriteBus required</label>
+                                <label style="display:flex; align-items:center; gap:6px; font-size:11px; color:#aaa;"><input id="cloud-lane-emit-bundle" type="checkbox" checked> Emit bundle after ingest</label>
+                                <label style="display:flex; align-items:center; gap:6px; font-size:11px; color:#aaa;"><input id="cloud-lane-encrypted-output" type="checkbox"> Encrypted output lane</label>
+                            </div>
+                            <div style="display:grid; grid-template-columns:repeat(4, 1fr); gap:6px; margin-bottom:8px;">
+                                <button id="cloud-lane-load-btn" class="action-button" style="font-size:10px; padding:5px 6px;">Load Lanes</button>
+                                <button id="cloud-lane-save-btn" class="action-button" style="font-size:10px; padding:5px 6px; background:rgba(85,239,196,0.12); border-color:#55efc4; color:#55efc4;">Save Lane</button>
+                                <button id="cloud-lane-test-btn" class="action-button" style="font-size:10px; padding:5px 6px;">Test Lane</button>
+                                <button id="cloud-lane-authorize-btn" class="action-button" style="font-size:10px; padding:5px 6px;">Authorize</button>
+                            </div>
+                            <div id="cloud-lane-config-status" style="display:none; font-size:11px; padding:6px; border:1px solid #333; border-radius:4px; margin-bottom:8px;"></div>
+                            <div id="cloud-lane-list" style="max-height:180px; overflow-y:auto; font-size:11px;">
+                                <div class="list-placeholder">No storage lanes loaded.</div>
+                            </div>
+                        </details>
+                        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:8px;">
+                            <div>
+                                <label style="display:block; font-size:11px; color:#aaa; margin-bottom:4px;">Provider</label>
+                                <select id="cloud-ingress-provider" style="width:100%; background:#111; color:white; border:1px solid #444; padding:4px; border-radius:3px;">
+                                    <option value="all">All configured lanes</option>
+                                    <option value="google_drive">Google Drive</option>
+                                    <option value="onedrive">OneDrive</option>
+                                    <option value="rclone">rclone remotes</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label style="display:block; font-size:11px; color:#aaa; margin-bottom:4px;">Drop-zone Path</label>
+                                <input id="cloud-ingress-path" type="text" value="SCYTHE/incoming/pcapng" style="width:100%; background:#111; color:white; border:1px solid #444; padding:4px; border-radius:3px;" />
+                            </div>
+                        </div>
+                        <label style="display:flex; align-items:center; gap:6px; font-size:11px; color:#aaa; margin-bottom:8px;">
+                            <input id="cloud-ingress-manifest-required" type="checkbox" checked>
+                            Require .scythe-ingest.json sidecar before ingest
+                        </label>
+                        <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:6px; margin-bottom:8px;">
+                            <button id="cloud-ingress-scan-btn" class="action-button" style="font-size:10px; padding:5px 6px; background:rgba(85,239,196,0.12); border-color:#55efc4; color:#55efc4;">Scan Drop-Zones</button>
+                            <button id="cloud-ingress-status-btn" class="action-button" style="font-size:10px; padding:5px 6px;">Status</button>
+                            <button id="cloud-ingress-load-artifacts-btn" class="action-button" style="font-size:10px; padding:5px 6px;">Artifacts</button>
+                        </div>
+                        <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px; margin-bottom:8px;">
+                            <button id="hypergraph-bundle-export-btn" class="action-button" style="font-size:10px; padding:5px 6px; background:rgba(138,43,226,0.15); border-color:#9b59b6; color:#d7b8ff;">Export Bundle</button>
+                            <button id="hypergraph-bundle-import-btn" class="action-button" style="font-size:10px; padding:5px 6px;">Load Bundle</button>
+                            <input id="hypergraph-bundle-import-input" type="file" accept=".zip,.json,.jsonl" style="display:none;" />
+                        </div>
+                        <div id="cloud-ingress-status" style="display:none; font-size:11px; padding:6px; background:rgba(85,239,196,0.08); border:1px solid #55efc430; border-radius:4px; margin-bottom:8px; color:#55efc4;"></div>
+                        <div id="cloud-ingress-artifact-list" style="max-height:220px; overflow-y:auto; font-size:11px;">
+                            <div class="list-placeholder">No cloud artifacts loaded. Scan drop-zones or fetch artifact status.</div>
+                        </div>
+                    </div>
                     
                     <div class="settings-group" style="margin-top: 12px;">
                         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
@@ -34473,6 +34620,690 @@ document.addEventListener('DOMContentLoaded', () => {
         uploadBtn.textContent = "Upload & Ingest";
         uploadBtn.disabled = true;
     }
+
+    // Cloud Evidence Ingress: browser controls only. The backend must claim
+    // custody, hash artifacts, materialize through WriteBus, and emit bundles.
+    function initCloudEvidenceIngress() {
+        const providerEl = document.getElementById('cloud-ingress-provider');
+        const pathEl = document.getElementById('cloud-ingress-path');
+        const manifestEl = document.getElementById('cloud-ingress-manifest-required');
+        const statusEl = document.getElementById('cloud-ingress-status');
+        const badgeEl = document.getElementById('cloud-ingress-status-badge');
+        const listEl = document.getElementById('cloud-ingress-artifact-list');
+        const scanBtn = document.getElementById('cloud-ingress-scan-btn');
+        const statusBtn = document.getElementById('cloud-ingress-status-btn');
+        const artifactsBtn = document.getElementById('cloud-ingress-load-artifacts-btn');
+        const exportBtn = document.getElementById('hypergraph-bundle-export-btn');
+        const importBtn = document.getElementById('hypergraph-bundle-import-btn');
+        const importInput = document.getElementById('hypergraph-bundle-import-input');
+        const laneNameEl = document.getElementById('cloud-lane-name');
+        const laneAuthModeEl = document.getElementById('cloud-lane-auth-mode');
+        const laneRemoteEl = document.getElementById('cloud-lane-remote');
+        const laneFusionHostEl = document.getElementById('cloud-lane-fusionauth-host');
+        const laneFusionApiKeyRefEl = document.getElementById('cloud-lane-fusionauth-api-key-ref');
+        const laneOAuthClientIdEl = document.getElementById('cloud-lane-oauth-client-id');
+        const laneOAuthSecretRefEl = document.getElementById('cloud-lane-oauth-secret-ref');
+        const laneOAuthScopesEl = document.getElementById('cloud-lane-oauth-scopes');
+        const laneIncomingEl = document.getElementById('cloud-lane-incoming');
+        const laneManifestsEl = document.getElementById('cloud-lane-manifests');
+        const laneProcessedEl = document.getElementById('cloud-lane-processed');
+        const laneBundlesEl = document.getElementById('cloud-lane-bundles');
+        const laneFailedEl = document.getElementById('cloud-lane-failed');
+        const lanePollSecEl = document.getElementById('cloud-lane-poll-sec');
+        const laneStableChecksEl = document.getElementById('cloud-lane-stable-checks');
+        const laneEnabledEl = document.getElementById('cloud-lane-enabled');
+        const laneWriteBusRequiredEl = document.getElementById('cloud-lane-writebus-required');
+        const laneEmitBundleEl = document.getElementById('cloud-lane-emit-bundle');
+        const laneEncryptedOutputEl = document.getElementById('cloud-lane-encrypted-output');
+        const laneLoadBtn = document.getElementById('cloud-lane-load-btn');
+        const laneSaveBtn = document.getElementById('cloud-lane-save-btn');
+        const laneTestBtn = document.getElementById('cloud-lane-test-btn');
+        const laneAuthorizeBtn = document.getElementById('cloud-lane-authorize-btn');
+        const laneConfigStatusEl = document.getElementById('cloud-lane-config-status');
+        const laneListEl = document.getElementById('cloud-lane-list');
+
+        if (!providerEl || !scanBtn || !statusEl || !listEl) return;
+
+        function apiPath(path) {
+            if (/^https?:\/\//i.test(path)) return path;
+            const base = (window.API_BASE || window.SCYTHE_API_BASE || '').replace(/\/$/, '');
+            return base + (path.startsWith('/') ? path : '/' + path);
+        }
+
+        function sessionToken() {
+            return window.OperatorSession?.sessionToken || window.SCYTHE_AUTH?.getSessionToken?.() || '';
+        }
+
+        function jsonHeaders() {
+            return {
+                'Content-Type': 'application/json',
+                'X-Session-Token': sessionToken(),
+            };
+        }
+
+        function payload() {
+            return {
+                provider: providerEl.value || 'all',
+                path: (pathEl?.value || 'SCYTHE/incoming/pcapng').trim(),
+                manifest_required: !!manifestEl?.checked,
+                accepted_extensions: ['.pcap', '.pcapng', '.pcapng.gz'],
+                emit_hypergraph_bundle: true,
+            };
+        }
+
+        function laneConfigPayload() {
+            const provider = providerEl.value || 'google_drive';
+            const incoming = (laneIncomingEl?.value || pathEl?.value || 'SCYTHE/incoming/pcapng').trim();
+            return {
+                name: (laneNameEl?.value || `${provider}-lane`).trim(),
+                provider,
+                enabled: !!laneEnabledEl?.checked,
+                remote: (laneRemoteEl?.value || '').trim(),
+                auth: {
+                    mode: laneAuthModeEl?.value || 'rclone_remote',
+                    fusionauth_host: (laneFusionHostEl?.value || '').trim(),
+                    fusionauth_api_key_ref: (laneFusionApiKeyRefEl?.value || '').trim(),
+                    oauth_client_id: (laneOAuthClientIdEl?.value || '').trim(),
+                    oauth_client_secret_ref: (laneOAuthSecretRefEl?.value || '').trim(),
+                    oauth_scopes: (laneOAuthScopesEl?.value || '').split(/[,\s]+/).map(s => s.trim()).filter(Boolean),
+                },
+                folders: {
+                    incoming,
+                    manifests: (laneManifestsEl?.value || '').trim(),
+                    processed: (laneProcessedEl?.value || '').trim(),
+                    failed: (laneFailedEl?.value || '').trim(),
+                    bundles: (laneBundlesEl?.value || '').trim(),
+                },
+                policy: {
+                    manifest_required: !!manifestEl?.checked,
+                    writebus_required: !!laneWriteBusRequiredEl?.checked,
+                    emit_hypergraph_bundle: !!laneEmitBundleEl?.checked,
+                    encrypted_output: !!laneEncryptedOutputEl?.checked,
+                    accepted_extensions: ['.pcap', '.pcapng', '.pcapng.gz'],
+                },
+                polling: {
+                    interval_seconds: Math.max(10, parseInt(lanePollSecEl?.value || '60', 10) || 60),
+                    stable_checks: Math.max(1, parseInt(laneStableChecksEl?.value || '2', 10) || 2),
+                },
+            };
+        }
+
+        function setBusy(btn, text) {
+            if (!btn) return function noop() {};
+            const oldText = btn.textContent;
+            btn.textContent = text;
+            btn.disabled = true;
+            return function restore() {
+                btn.textContent = oldText;
+                btn.disabled = false;
+            };
+        }
+
+        function showStatus(html, tone) {
+            statusEl.style.display = 'block';
+            statusEl.style.background = tone === 'error' ? 'rgba(231,76,60,0.08)' :
+                tone === 'warn' ? 'rgba(230,126,34,0.08)' : 'rgba(85,239,196,0.08)';
+            statusEl.style.border = tone === 'error' ? '1px solid #e74c3c33' :
+                tone === 'warn' ? '1px solid #e67e2233' : '1px solid #55efc430';
+            statusEl.style.color = tone === 'error' ? '#e74c3c' :
+                tone === 'warn' ? '#e67e22' : '#55efc4';
+            statusEl.innerHTML = html;
+        }
+
+        function setBadge(text, tone) {
+            if (!badgeEl) return;
+            badgeEl.textContent = text;
+            badgeEl.style.color = tone === 'error' ? '#e74c3c' :
+                tone === 'warn' ? '#e67e22' : '#55efc4';
+            badgeEl.style.borderColor = tone === 'error' ? '#e74c3c66' :
+                tone === 'warn' ? '#e67e2266' : '#55efc466';
+        }
+
+        function showLaneConfigStatus(html, tone) {
+            if (!laneConfigStatusEl) return;
+            laneConfigStatusEl.style.display = 'block';
+            laneConfigStatusEl.style.background = tone === 'error' ? 'rgba(231,76,60,0.08)' :
+                tone === 'warn' ? 'rgba(230,126,34,0.08)' : 'rgba(85,239,196,0.08)';
+            laneConfigStatusEl.style.border = tone === 'error' ? '1px solid #e74c3c33' :
+                tone === 'warn' ? '1px solid #e67e2233' : '1px solid #55efc430';
+            laneConfigStatusEl.style.color = tone === 'error' ? '#e74c3c' :
+                tone === 'warn' ? '#e67e22' : '#55efc4';
+            laneConfigStatusEl.innerHTML = html;
+        }
+
+        async function fetchJson(path, options) {
+            const resp = await fetch(apiPath(path), options);
+            const text = await resp.text();
+            let data = {};
+            try {
+                data = text ? JSON.parse(text) : {};
+            } catch (_e) {
+                data = { raw: text };
+            }
+            if (!resp.ok) {
+                const msg = data.error || data.message || data.raw || `HTTP ${resp.status}`;
+                if (resp.status === 404) {
+                    throw new Error(`Cloud ingress endpoint not installed: ${path}`);
+                }
+                throw new Error(msg);
+            }
+            return data;
+        }
+
+        function summaryCounts(data) {
+            const seen = data.seen ?? data.artifacts_seen ?? data.total ?? data.count ?? 0;
+            const downloaded = data.downloaded ?? data.claimed ?? 0;
+            const ingested = data.ingested ?? data.pcaps_processed ?? data.processed ?? 0;
+            const skipped = data.skipped ?? data.pcaps_skipped ?? 0;
+            const sessions = data.sessions ?? data.total_sessions ?? data.session_count ?? 0;
+            const nodes = data.nodes ?? data.total_nodes ?? data.node_count ?? 0;
+            const edges = data.edges ?? data.total_edges ?? data.edge_count ?? 0;
+            const bundles = Array.isArray(data.bundles) ? data.bundles.length : (data.bundle_id ? 1 : (data.bundle_count || 0));
+            return { seen, downloaded, ingested, skipped, sessions, nodes, edges, bundles };
+        }
+
+        function showSummary(label, data, tone) {
+            const c = summaryCounts(data || {});
+            showStatus(`
+                <strong>${escapeHtml(label)}</strong><br>
+                seen ${c.seen} | downloaded ${c.downloaded} | ingested ${c.ingested} | skipped ${c.skipped}<br>
+                sessions ${c.sessions} | nodes ${c.nodes} | edges ${c.edges} | bundles ${c.bundles}
+            `, tone || 'ok');
+        }
+
+        function artifactRows(data) {
+            if (!data) return [];
+            if (Array.isArray(data.artifacts)) return data.artifacts;
+            if (Array.isArray(data.items)) return data.items;
+            if (Array.isArray(data.files)) return data.files;
+            if (Array.isArray(data.bundles)) return data.bundles;
+            return [];
+        }
+
+        function appendBundleDownloadButton(container, bundleId, label) {
+            if (!bundleId) return;
+            const btn = document.createElement('button');
+            btn.className = 'action-button';
+            btn.textContent = label || 'Download Bundle';
+            btn.style.cssText = 'padding:3px 6px; font-size:9px; white-space:nowrap; background:rgba(138,43,226,0.15); border-color:#9b59b6; color:#d7b8ff;';
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const a = document.createElement('a');
+                a.href = apiPath(`/api/hypergraph/bundles/${encodeURIComponent(bundleId)}/download`);
+                a.download = `scythe_bundle_${bundleId}.zip`;
+                a.click();
+            });
+            container.appendChild(btn);
+        }
+
+        function renderArtifacts(data) {
+            const rows = artifactRows(data);
+            listEl.innerHTML = '';
+            if (!rows.length) {
+                listEl.innerHTML = '<div class="list-placeholder">No cloud artifacts reported by the backend.</div>';
+                return;
+            }
+
+            rows.slice(0, 80).forEach((artifact) => {
+                const provider = artifact.provider || artifact.source_provider || providerEl.value || 'cloud';
+                const name = artifact.name || artifact.filename || artifact.source_name || artifact.bundle_id || 'unnamed artifact';
+                const status = artifact.status || artifact.ingest_status || 'reported';
+                const sha = artifact.sha256 || artifact.source_sha256 || artifact.bundle_sha256 || artifact.artifact_sha256 || '';
+                const size = artifact.size_bytes || artifact.size || artifact.file_size || 0;
+                const bundleId = artifact.bundle_id || artifact.hypergraph_bundle_id || artifact.bundle?.bundle_id ||
+                    (artifact.type === 'bundle' ? artifact.id : '');
+                const counts = artifact.counts || {};
+                const sessions = artifact.sessions ?? artifact.session_count ?? counts.sessions ?? 0;
+                const nodes = artifact.nodes ?? artifact.node_count ?? counts.nodes ?? 0;
+                const edges = artifact.edges ?? artifact.edge_count ?? counts.edges ?? 0;
+
+                const div = document.createElement('div');
+                div.style.cssText = 'border:1px solid #333; border-radius:4px; margin-bottom:6px; padding:8px; background:rgba(255,255,255,0.02); display:flex; justify-content:space-between; gap:8px; align-items:flex-start;';
+
+                const info = document.createElement('div');
+                info.style.cssText = 'flex:1; min-width:0;';
+                info.innerHTML = `
+                    <div style="font-weight:bold; color:#55efc4; font-size:11px; word-break:break-all;">${escapeHtml(name)}</div>
+                    <div style="color:#888; font-size:10px; margin-top:2px;">
+                        ${escapeHtml(provider)} | ${escapeHtml(status)}
+                        ${size ? ` | ${(size / (1024 * 1024)).toFixed(2)} MB` : ''}
+                    </div>
+                    <div style="color:#666; font-size:10px; margin-top:2px;">
+                        sessions ${sessions} | nodes ${nodes} | edges ${edges}
+                        ${sha ? ` | SHA ${escapeHtml(String(sha).slice(0, 12))}...` : ''}
+                    </div>
+                `;
+                div.appendChild(info);
+
+                const actions = document.createElement('div');
+                actions.style.cssText = 'display:flex; flex-direction:column; gap:4px;';
+                appendBundleDownloadButton(actions, bundleId, 'Bundle');
+                div.appendChild(actions);
+                listEl.appendChild(div);
+            });
+
+            if (rows.length > 80) {
+                const more = document.createElement('div');
+                more.className = 'list-placeholder';
+                more.textContent = `Showing first 80 of ${rows.length} artifacts`;
+                listEl.appendChild(more);
+            }
+        }
+
+        function laneRows(data) {
+            if (!data) return [];
+            if (Array.isArray(data.lanes)) return data.lanes;
+            if (Array.isArray(data.items)) return data.items;
+            if (Array.isArray(data.configs)) return data.configs;
+            if (data.lane) return [data.lane];
+            if (Array.isArray(data)) return data;
+            return [];
+        }
+
+        function applyLaneConfig(lane) {
+            if (!lane) return;
+            const auth = lane.auth || {};
+            const folders = lane.folders || {};
+            const policy = lane.policy || {};
+            const polling = lane.polling || {};
+
+            if (laneNameEl) laneNameEl.value = lane.name || lane.id || '';
+            if (providerEl) providerEl.value = lane.provider || providerEl.value || 'google_drive';
+            if (laneAuthModeEl) laneAuthModeEl.value = auth.mode || lane.auth_mode || 'rclone_remote';
+            if (laneRemoteEl) laneRemoteEl.value = lane.remote || lane.profile || '';
+            if (laneFusionHostEl) laneFusionHostEl.value = auth.fusionauth_host || lane.fusionauth_host || laneFusionHostEl.value || '';
+            if (laneFusionApiKeyRefEl) laneFusionApiKeyRefEl.value = auth.fusionauth_api_key_ref || lane.fusionauth_api_key_ref || laneFusionApiKeyRefEl.value || '';
+            if (laneOAuthClientIdEl) laneOAuthClientIdEl.value = auth.oauth_client_id || lane.oauth_client_id || '';
+            if (laneOAuthSecretRefEl) laneOAuthSecretRefEl.value = auth.oauth_client_secret_ref || lane.oauth_client_secret_ref || laneOAuthSecretRefEl.value || '';
+            if (laneOAuthScopesEl) {
+                const scopes = auth.oauth_scopes || lane.oauth_scopes || [];
+                laneOAuthScopesEl.value = Array.isArray(scopes) ? scopes.join(' ') : String(scopes || '');
+            }
+
+            const incoming = folders.incoming || lane.path || lane.incoming || pathEl?.value || 'SCYTHE/incoming/pcapng';
+            if (laneIncomingEl) laneIncomingEl.value = incoming;
+            if (pathEl) pathEl.value = incoming;
+            if (laneManifestsEl) laneManifestsEl.value = folders.manifests || lane.manifests || laneManifestsEl.value || '';
+            if (laneProcessedEl) laneProcessedEl.value = folders.processed || lane.processed || laneProcessedEl.value || '';
+            if (laneBundlesEl) laneBundlesEl.value = folders.bundles || lane.bundles || laneBundlesEl.value || '';
+            if (laneFailedEl) laneFailedEl.value = folders.failed || lane.failed || laneFailedEl.value || '';
+            if (manifestEl) manifestEl.checked = policy.manifest_required ?? lane.manifest_required ?? manifestEl.checked;
+            if (laneEnabledEl) laneEnabledEl.checked = lane.enabled !== false;
+            if (laneWriteBusRequiredEl) laneWriteBusRequiredEl.checked = policy.writebus_required !== false;
+            if (laneEmitBundleEl) laneEmitBundleEl.checked = policy.emit_hypergraph_bundle !== false;
+            if (laneEncryptedOutputEl) laneEncryptedOutputEl.checked = !!policy.encrypted_output;
+            if (lanePollSecEl) lanePollSecEl.value = polling.interval_seconds || lane.poll_interval_seconds || lanePollSecEl.value || 60;
+            if (laneStableChecksEl) laneStableChecksEl.value = polling.stable_checks || lane.stable_checks || laneStableChecksEl.value || 2;
+        }
+
+        function renderCloudLanes(data) {
+            if (!laneListEl) return;
+            const rows = laneRows(data);
+            laneListEl.innerHTML = '';
+            if (!rows.length) {
+                laneListEl.innerHTML = '<div class="list-placeholder">No storage lanes configured by the backend.</div>';
+                return;
+            }
+
+            rows.slice(0, 60).forEach((lane) => {
+                const auth = lane.auth || {};
+                const folders = lane.folders || {};
+                const name = lane.name || lane.id || 'unnamed lane';
+                const provider = lane.provider || 'cloud';
+                const mode = auth.mode || lane.auth_mode || 'server_profile';
+                const incoming = folders.incoming || lane.path || lane.incoming || '';
+                const enabled = lane.enabled !== false;
+
+                const div = document.createElement('div');
+                div.style.cssText = 'border:1px solid #333; border-radius:4px; margin-bottom:6px; padding:8px; background:rgba(255,255,255,0.02); display:flex; justify-content:space-between; gap:8px; align-items:flex-start;';
+
+                const info = document.createElement('div');
+                info.style.cssText = 'flex:1; min-width:0;';
+                info.innerHTML = `
+                    <div style="font-weight:bold; color:#55efc4; font-size:11px; word-break:break-all;">${escapeHtml(name)}</div>
+                    <div style="color:#888; font-size:10px; margin-top:2px;">${escapeHtml(provider)} | ${escapeHtml(mode)} | ${enabled ? 'enabled' : 'disabled'}</div>
+                    <div style="color:#666; font-size:10px; margin-top:2px; word-break:break-all;">${escapeHtml(incoming || 'no incoming folder')}</div>
+                `;
+                div.appendChild(info);
+
+                const actions = document.createElement('div');
+                actions.style.cssText = 'display:flex; flex-direction:column; gap:4px;';
+                const editBtn = document.createElement('button');
+                editBtn.className = 'action-button';
+                editBtn.textContent = 'Edit';
+                editBtn.style.cssText = 'padding:3px 6px; font-size:9px;';
+                editBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    applyLaneConfig(lane);
+                    showLaneConfigStatus(`Loaded lane <strong>${escapeHtml(name)}</strong> into the editor.`, 'ok');
+                });
+                actions.appendChild(editBtn);
+
+                const scanLaneBtn = document.createElement('button');
+                scanLaneBtn.className = 'action-button';
+                scanLaneBtn.textContent = 'Scan';
+                scanLaneBtn.style.cssText = 'padding:3px 6px; font-size:9px; background:rgba(85,239,196,0.12); border-color:#55efc4; color:#55efc4;';
+                scanLaneBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    applyLaneConfig(lane);
+                    scanCloudIngress();
+                });
+                actions.appendChild(scanLaneBtn);
+
+                div.appendChild(actions);
+                laneListEl.appendChild(div);
+            });
+
+            if (rows.length > 60) {
+                const more = document.createElement('div');
+                more.className = 'list-placeholder';
+                more.textContent = `Showing first 60 of ${rows.length} storage lanes`;
+                laneListEl.appendChild(more);
+            }
+        }
+
+        async function loadCloudLanes() {
+            const restore = setBusy(laneLoadBtn, 'Loading...');
+            try {
+                const p = new URLSearchParams({ provider: providerEl.value || 'all' });
+                const data = await fetchJson(`/api/cloud/lanes?${p.toString()}`);
+                renderCloudLanes(data);
+                showLaneConfigStatus('Storage lane configuration loaded.', 'ok');
+                addConsoleMessage('Cloud storage lane configuration loaded', 'info');
+            } catch (e) {
+                showLaneConfigStatus(escapeHtml(e.message), e.message.includes('not installed') ? 'warn' : 'error');
+                addConsoleMessage(`Cloud lane config unavailable: ${e.message}`, 'alert');
+            } finally {
+                restore();
+            }
+        }
+
+        async function saveCloudLane() {
+            const restore = setBusy(laneSaveBtn, 'Saving...');
+            const lane = laneConfigPayload();
+            try {
+                if (pathEl) pathEl.value = lane.folders.incoming;
+                const data = await fetchJson('/api/cloud/lanes', {
+                    method: 'POST',
+                    headers: jsonHeaders(),
+                    body: JSON.stringify({ lane }),
+                });
+                showLaneConfigStatus(`Saved lane <strong>${escapeHtml(lane.name)}</strong>.`, 'ok');
+                renderCloudLanes(data);
+                addConsoleMessage(`Cloud storage lane saved: ${lane.name}`, 'success');
+            } catch (e) {
+                showLaneConfigStatus(escapeHtml(e.message), e.message.includes('not installed') ? 'warn' : 'error');
+                addConsoleMessage(`Cloud lane save unavailable: ${e.message}`, 'alert');
+            } finally {
+                restore();
+            }
+        }
+
+        async function testCloudLane() {
+            const restore = setBusy(laneTestBtn, 'Testing...');
+            const lane = laneConfigPayload();
+            try {
+                const data = await fetchJson('/api/cloud/lanes/test', {
+                    method: 'POST',
+                    headers: jsonHeaders(),
+                    body: JSON.stringify({ lane }),
+                });
+                const status = data.ok === false ? 'warn' : 'ok';
+                showLaneConfigStatus(`
+                    <strong>${escapeHtml(lane.name)}</strong> test ${data.ok === false ? 'returned warnings' : 'passed'}<br>
+                    ${escapeHtml(data.message || data.detail || 'Backend accepted the lane configuration.')}
+                `, status);
+                addConsoleMessage(`Cloud lane test ${data.ok === false ? 'warned' : 'passed'}: ${lane.name}`, status === 'ok' ? 'success' : 'alert');
+            } catch (e) {
+                showLaneConfigStatus(escapeHtml(e.message), e.message.includes('not installed') ? 'warn' : 'error');
+                addConsoleMessage(`Cloud lane test unavailable: ${e.message}`, 'alert');
+            } finally {
+                restore();
+            }
+        }
+
+        async function authorizeCloudLane() {
+            const restore = setBusy(laneAuthorizeBtn, 'Authorizing...');
+            const lane = laneConfigPayload();
+            try {
+                const data = await fetchJson('/api/cloud/lanes/authorize', {
+                    method: 'POST',
+                    headers: jsonHeaders(),
+                    body: JSON.stringify({ lane }),
+                });
+                const authUrl = data.authorization_url || data.auth_url || data.url;
+                const deviceCode = data.user_code || data.device_code;
+                if (authUrl) {
+                    window.open(apiPath(authUrl), '_blank', 'noopener,noreferrer');
+                    showLaneConfigStatus(`Authorization opened for <strong>${escapeHtml(lane.name)}</strong>.`, 'ok');
+                } else if (deviceCode) {
+                    showLaneConfigStatus(`
+                        <strong>${escapeHtml(lane.name)}</strong> device authorization pending<br>
+                        Code: <code style="color:#fff;">${escapeHtml(deviceCode)}</code>
+                        ${data.verification_uri ? `<br>Open: ${escapeHtml(data.verification_uri)}` : ''}
+                    `, 'ok');
+                } else {
+                    showLaneConfigStatus(escapeHtml(data.message || 'Authorization request accepted.'), 'ok');
+                }
+                addConsoleMessage(`Cloud lane authorization started: ${lane.name}`, 'info');
+            } catch (e) {
+                showLaneConfigStatus(escapeHtml(e.message), e.message.includes('not installed') ? 'warn' : 'error');
+                addConsoleMessage(`Cloud lane authorization unavailable: ${e.message}`, 'alert');
+            } finally {
+                restore();
+            }
+        }
+
+        async function rebindAfterCloudMutation(data) {
+            const c = summaryCounts(data || {});
+            if (c.ingested <= 0 && c.sessions <= 0 && c.nodes <= 0 && c.edges <= 0) return;
+            try {
+                if (typeof window._scytheSetEvidencePresent === 'function') {
+                    window._scytheSetEvidencePresent(true);
+                }
+                if (typeof window.GraphOpsBotRebind === 'function') {
+                    await window.GraphOpsBotRebind();
+                }
+                if (typeof loadBSGs === 'function') {
+                    await loadBSGs();
+                }
+            } catch (e) {
+                console.warn('[CloudEvidence] post-ingest rebind failed:', e);
+            }
+        }
+
+        async function scanCloudIngress() {
+            const restore = setBusy(scanBtn, 'Scanning...');
+            try {
+                const data = await fetchJson('/api/cloud/ingress/scan', {
+                    method: 'POST',
+                    headers: jsonHeaders(),
+                    body: JSON.stringify(payload()),
+                });
+                setBadge('Scan complete', 'ok');
+                showSummary('Cloud drop-zone scan complete', data);
+                renderArtifacts(data);
+                addConsoleMessage('Cloud ingress scan complete. WriteBus-owned materialization remains server-side.', 'success');
+                await rebindAfterCloudMutation(data);
+            } catch (e) {
+                setBadge('Backend pending', 'warn');
+                showStatus(escapeHtml(e.message), e.message.includes('not installed') ? 'warn' : 'error');
+                addConsoleMessage(`Cloud ingress scan unavailable: ${e.message}`, 'alert');
+            } finally {
+                restore();
+            }
+        }
+
+        async function loadCloudStatus() {
+            const restore = setBusy(statusBtn, 'Checking...');
+            try {
+                const p = new URLSearchParams(payload());
+                const data = await fetchJson(`/api/cloud/ingress/status?${p.toString()}`);
+                setBadge('Status loaded', 'ok');
+                showSummary('Cloud ingress status', data);
+                renderArtifacts(data);
+            } catch (e) {
+                setBadge('Backend pending', 'warn');
+                showStatus(escapeHtml(e.message), e.message.includes('not installed') ? 'warn' : 'error');
+                addConsoleMessage(`Cloud ingress status unavailable: ${e.message}`, 'alert');
+            } finally {
+                restore();
+            }
+        }
+
+        async function loadCloudArtifacts() {
+            const restore = setBusy(artifactsBtn, 'Loading...');
+            try {
+                const p = new URLSearchParams(payload());
+                const data = await fetchJson(`/api/cloud/artifacts?${p.toString()}`);
+                setBadge('Artifacts loaded', 'ok');
+                showSummary('Cloud artifact ledger', data);
+                renderArtifacts(data);
+            } catch (e) {
+                setBadge('Backend pending', 'warn');
+                showStatus(escapeHtml(e.message), e.message.includes('not installed') ? 'warn' : 'error');
+                addConsoleMessage(`Cloud artifacts unavailable: ${e.message}`, 'alert');
+            } finally {
+                restore();
+            }
+        }
+
+        function filenameFromDisposition(header, fallback) {
+            const match = /filename="?([^"]+)"?/i.exec(header || '');
+            return match ? match[1] : fallback;
+        }
+
+        function downloadBlob(blob, filename) {
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            a.click();
+            setTimeout(() => URL.revokeObjectURL(url), 5000);
+        }
+
+        async function exportHypergraphBundle() {
+            const restore = setBusy(exportBtn, 'Exporting...');
+            try {
+                const resp = await fetch(apiPath('/api/hypergraph/bundles/export'), {
+                    method: 'POST',
+                    headers: jsonHeaders(),
+                    body: JSON.stringify(payload()),
+                });
+                const contentType = resp.headers.get('content-type') || '';
+                if (!resp.ok) {
+                    let msg = `HTTP ${resp.status}`;
+                    try {
+                        const data = await resp.json();
+                        msg = data.error || data.message || msg;
+                    } catch (_e) {}
+                    if (resp.status === 404) msg = 'Hypergraph bundle export endpoint not installed';
+                    throw new Error(msg);
+                }
+                if (contentType.includes('application/zip') || contentType.includes('application/octet-stream')) {
+                    const blob = await resp.blob();
+                    const name = filenameFromDisposition(resp.headers.get('content-disposition'), `scythe_bundle_${Date.now()}.zip`);
+                    downloadBlob(blob, name);
+                    showStatus(`Exported bundle <strong>${escapeHtml(name)}</strong>`, 'ok');
+                    addConsoleMessage(`Hypergraph Bundle exported: ${name}`, 'success');
+                    return;
+                }
+
+                const data = await resp.json();
+                showSummary('Hypergraph bundle export queued', data);
+                renderArtifacts(data);
+                const downloadUrl = data.download_url || data.url || data.bundle?.download_url;
+                const bundleId = data.bundle_id || data.bundle?.bundle_id || (data.bundles && data.bundles[0]?.bundle_id);
+                if (downloadUrl) {
+                    const a = document.createElement('a');
+                    a.href = apiPath(downloadUrl);
+                    a.download = '';
+                    a.click();
+                } else if (bundleId) {
+                    const a = document.createElement('a');
+                    a.href = apiPath(`/api/hypergraph/bundles/${encodeURIComponent(bundleId)}/download`);
+                    a.download = `scythe_bundle_${bundleId}.zip`;
+                    a.click();
+                }
+                addConsoleMessage('Hypergraph Bundle export requested', 'success');
+            } catch (e) {
+                showStatus(escapeHtml(e.message), e.message.includes('not installed') ? 'warn' : 'error');
+                addConsoleMessage(`Hypergraph Bundle export unavailable: ${e.message}`, 'alert');
+            } finally {
+                restore();
+            }
+        }
+
+        async function importHypergraphBundle(file) {
+            if (!file) return;
+            const restore = setBusy(importBtn, 'Loading...');
+            try {
+                const form = new FormData();
+                form.append('bundle', file);
+                form.append('provider', providerEl.value || 'local_bundle');
+                form.append('path', pathEl?.value || '');
+                const resp = await fetch(apiPath('/api/hypergraph/bundles/import'), {
+                    method: 'POST',
+                    headers: { 'X-Session-Token': sessionToken() },
+                    body: form,
+                });
+                const data = await resp.json().catch(() => ({}));
+                if (!resp.ok) {
+                    const msg = resp.status === 404 ? 'Hypergraph bundle import endpoint not installed' :
+                        (data.error || data.message || `HTTP ${resp.status}`);
+                    throw new Error(msg);
+                }
+                setBadge('Bundle loaded', 'ok');
+                showSummary(`Loaded bundle ${file.name}`, data);
+                renderArtifacts(data);
+                addConsoleMessage(`Hypergraph Bundle loaded: ${file.name}`, 'success');
+                await rebindAfterCloudMutation(data);
+            } catch (e) {
+                showStatus(escapeHtml(e.message), e.message.includes('not installed') ? 'warn' : 'error');
+                addConsoleMessage(`Hypergraph Bundle import unavailable: ${e.message}`, 'alert');
+            } finally {
+                restore();
+                if (importInput) importInput.value = '';
+            }
+        }
+
+        scanBtn.addEventListener('click', scanCloudIngress);
+        statusBtn?.addEventListener('click', loadCloudStatus);
+        artifactsBtn?.addEventListener('click', loadCloudArtifacts);
+        exportBtn?.addEventListener('click', exportHypergraphBundle);
+        importBtn?.addEventListener('click', () => importInput?.click());
+        importInput?.addEventListener('change', (e) => importHypergraphBundle(e.target.files?.[0]));
+        laneLoadBtn?.addEventListener('click', loadCloudLanes);
+        laneSaveBtn?.addEventListener('click', saveCloudLane);
+        laneTestBtn?.addEventListener('click', testCloudLane);
+        laneAuthorizeBtn?.addEventListener('click', authorizeCloudLane);
+        laneIncomingEl?.addEventListener('input', () => {
+            if (pathEl) pathEl.value = laneIncomingEl.value;
+        });
+        pathEl?.addEventListener('input', () => {
+            if (laneIncomingEl) laneIncomingEl.value = pathEl.value;
+        });
+        providerEl?.addEventListener('change', () => {
+            const provider = providerEl.value;
+            if (laneRemoteEl && (!laneRemoteEl.value || /^(gdrive|onedrive):SCYTHE$/.test(laneRemoteEl.value))) {
+                if (provider === 'google_drive') laneRemoteEl.value = 'gdrive:SCYTHE';
+                if (provider === 'onedrive') laneRemoteEl.value = 'onedrive:SCYTHE';
+            }
+        });
+
+        window.SCYTHE_CLOUD_EVIDENCE_INGRESS = {
+            scan: scanCloudIngress,
+            status: loadCloudStatus,
+            artifacts: loadCloudArtifacts,
+            exportBundle: exportHypergraphBundle,
+            loadLanes: loadCloudLanes,
+            saveLane: saveCloudLane,
+            testLane: testCloudLane,
+            authorizeLane: authorizeCloudLane,
+        };
+    }
+
+    initCloudEvidenceIngress();
     
     function addHistoryItem(session, fromServer) {
         const list = document.getElementById('pcap-history-list');
