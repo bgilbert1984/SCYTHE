@@ -1,0 +1,25 @@
+version: '3.8'
+
+services:
+  ftp_server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: scythe-ftp-server:latest
+    container_name: scythe-ftp
+    restart: unless-stopped
+    ports:
+      - "2121:2121"
+      - "60000-60010:60000-60010"
+    environment:
+      FTP_ALLOW_ANONYMOUS: "true"
+      FTP_PORT: "2121"
+      FTP_DIR: /data
+      FTP_PASV_PORTS: 60000-60010
+    volumes:
+      - ./pcapng:/data:rw
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "3"

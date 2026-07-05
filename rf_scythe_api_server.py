@@ -231,12 +231,16 @@ except ImportError:
 
 # Check for Flask availability
 try:
-    from flask import Flask, request, jsonify, send_from_directory, Response, make_response, has_request_context
+    from flask import Flask, request, jsonify, send_from_directory, Response, make_response, has_request_context, redirect
     from flask_cors import CORS
     FLASK_AVAILABLE = True
 except ImportError:
     FLASK_AVAILABLE = False
     print("Flask not installed. Install with: pip install flask flask-cors")
+
+import uuid
+import time
+from urllib.parse import quote
 
 # Check for Flask-SocketIO availability
 try:
@@ -3668,6 +3672,12 @@ if FLASK_AVAILABLE:
             "error": "Internal Server Error",
             "message": str(e)
         }), 500
+
+    # In-memory OAuth broker stores (simple, non-persistent stub)
+    # state -> { provider, fusionauth_host, client_id, scopes, created }
+    CLOUD_OAUTH_STATES = {}
+    # state -> token/code/etc
+    CLOUD_OAUTH_TOKENS = {}
 
     # Initialize SocketIO for WebSocket support
     socketio = None
@@ -12590,6 +12600,161 @@ if FLASK_AVAILABLE:
             return jsonify(result)
         except Exception as e:
             logger.error(f"PCAP list FTP failed: {e}")
+            return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+    # ------------------------------------------------------------------------
+    # Cloud OAuth Broker Endpoints (FusionAuth-backed stub)
+    # ------------------------------------------------------------------------
+    @app.route('/api/cloud/oauth/start', methods=['POST'])
+    def cloud_oauth_start():
+        """Start an OAuth flow via configured FusionAuth broker.
+
+        POST JSON:
+            provider: str (google_drive|onedrive)
+            fusionauth_host: str
+            client_id: str
+            scopes: str
+        """
+        try:
+            data = request.get_json(silent=True) or {}
+            provider = (data.get('provider') or 'google_drive').strip()
+            fusionauth_host = (data.get('fusionauth_host') or 'http://localhost:9011').strip()
+            client_id = (data.get('client_id') or '').strip()
+            scopes = (data.get('scopes') or 'openid email profile https://www.googleapis.com/auth/drive.file').strip()
+
+            if not client_id:
+                return jsonify({'status': 'error', 'message': 'client_id is required'}), 400
+
+            redirect_uri = request.host_url.rstrip('/') + '/api/cloud/oauth/callback'
+            state = str(uuid.uuid4())
+            CLOUD_OAUTH_STATES[state] = {
+                'provider': provider,
+                'fusionauth_host': fusionauth_host,
+                'client_id': client_id,
+                'scopes': scopes,
+                'created': time.time()
+            }
+
+            authorize_url = f"{fusionauth_host.rstrip('/')}/oauth2/authorize?client_id={quote(client_id)}&response_type=code&redirect_uri={quote(redirect_uri)}&scope={quote(scopes)}&state={quote(state)}"
+
+            return jsonify({'status': 'ok', 'authorize_url': authorize_url, 'state': state})
+        except Exception as e:
+            logger.error(f"cloud_oauth_start failed: {e}")
+            return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+    @app.route('/api/cloud/oauth/callback', methods=['GET'])
+    def cloud_oauth_callback():
+        """OAuth callback endpoint for FusionAuth broker. Stores code in memory and redirects to UI."""
+        try:
+            code = request.args.get('code')
+            state = request.args.get('state')
+            if not state or state not in CLOUD_OAUTH_STATES:
+                return jsonify({'status': 'error', 'message': 'invalid or expired state'}), 400
+
+            info = CLOUD_OAUTH_STATES.get(state, {})
+            # Store code as a minimal token record; in production exchange code for token server-side.
+            CLOUD_OAUTH_TOKENS[state] = {
+                'code': code,
+                'provider': info.get('provider'),
+                'client_id': info.get('client_id'),
+                'received_at': time.time()
+            }
+
+            # Redirect back to the UI with a success indicator and opaque state
+            ui_path = '/command-ops-visualization.html?cloud_oauth=success&state=' + quote(state)
+            return redirect(ui_path)
+        except Exception as e:
+            logger.error(f"cloud_oauth_callback failed: {e}")
+            return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+    @app.route('/api/cloud/oauth/status', methods=['GET'])
+    def cloud_oauth_status():
+        """Pollable status endpoint to check whether the OAuth flow completed for a given state."""
+        try:
+            state = request.args.get('state')
+            if not state:
+                return jsonify({'status': 'error', 'message': 'state param required'}), 400
+            token = CLOUD_OAUTH_TOKENS.get(state)
+            if token:
+                return jsonify({'status': 'ok', 'connected': True, 'token': token})
+            return jsonify({'status': 'ok', 'connected': False})
+        except Exception as e:
+            logger.error(f"cloud_oauth_status failed: {e}")
+            return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+    @app.route('/api/cloud/oauth/token', methods=['POST'])
+    def cloud_oauth_token_exchange():
+        """Exchange an authorization code for tokens and store them server-side.
+
+        POST JSON:
+            state: str (required)
+            client_secret: str (optional) — raw secret
+            client_secret_ref: str (optional) — env var name holding secret
+        """
+        try:
+            body = request.get_json(silent=True) or {}
+            state = (body.get('state') or '').strip()
+            if not state:
+                return jsonify({'status': 'error', 'message': 'state is required'}), 400
+
+            if state not in CLOUD_OAUTH_STATES:
+                return jsonify({'status': 'error', 'message': 'unknown state'}), 400
+
+            info = CLOUD_OAUTH_STATES.get(state, {})
+            token_record = CLOUD_OAUTH_TOKENS.get(state) or {}
+            code = token_record.get('code')
+            if not code:
+                return jsonify({'status': 'error', 'message': 'authorization code not found; ensure callback completed'}), 400
+
+            fusionauth_host = info.get('fusionauth_host') or 'http://localhost:9011'
+            client_id = info.get('client_id')
+
+            client_secret = body.get('client_secret')
+            client_secret_ref = body.get('client_secret_ref')
+            if not client_secret and client_secret_ref:
+                client_secret = os.environ.get(client_secret_ref)
+
+            token_url = fusionauth_host.rstrip('/') + '/oauth2/token'
+            redirect_uri = request.host_url.rstrip('/') + '/api/cloud/oauth/callback'
+
+            data = {
+                'grant_type': 'authorization_code',
+                'code': code,
+                'redirect_uri': redirect_uri,
+                'client_id': client_id,
+            }
+            if client_secret:
+                data['client_secret'] = client_secret
+
+            try:
+                resp = _requests.post(token_url, data=data, timeout=10)
+                resp.raise_for_status()
+                j = resp.json()
+            except Exception as e:
+                logger.error(f"token exchange failed for state={state}: {e}")
+                return jsonify({'status': 'error', 'message': f'token exchange failed: {e}'}), 502
+
+            # Store token info securely in memory (production: persistent secret storage)
+            now = time.time()
+            access_token = j.get('access_token')
+            refresh_token = j.get('refresh_token')
+            expires_in = int(j.get('expires_in') or 0)
+            CLOUD_OAUTH_TOKENS[state].update({
+                'access_token': access_token,
+                'refresh_token': refresh_token,
+                'token_type': j.get('token_type'),
+                'scope': j.get('scope'),
+                'expires_at': (now + expires_in) if expires_in else None,
+                'received_at': now,
+            })
+
+            return jsonify({'status': 'ok', 'connected': True, 'scope': j.get('scope'), 'expires_at': CLOUD_OAUTH_TOKENS[state].get('expires_at')})
+        except Exception as e:
+            logger.error(f"cloud_oauth_token_exchange failed: {e}")
             return jsonify({'status': 'error', 'message': str(e)}), 500
 
     # ── Configurable FTP Ingest (operator-defined host/creds) ──────────

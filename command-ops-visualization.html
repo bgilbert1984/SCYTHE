@@ -5028,6 +5028,24 @@
                         <div style="font-size:10px; color:#888; line-height:1.45; margin-bottom:10px;">
                             OneDrive and Google Drive are artifact lanes only. SCYTHE pulls captures locally, hashes them, materializes through WriteBus, then emits replayable Hypergraph Bundles.
                         </div>
+                        <!-- Provider Connect Cards -->
+                        <div style="display:flex; gap:8px; margin-bottom:10px;">
+                            <div style="flex:1; border:1px solid #333; padding:10px; border-radius:6px; background:rgba(255,255,255,0.02);">
+                                <div style="font-weight:700; color:#fff; margin-bottom:6px;">Google Drive</div>
+                                <div style="font-size:11px; color:#aaa; margin-bottom:8px;">Connect with limited Drive scopes (drive.file recommended)</div>
+                                <button id="cloud-connect-gdrive-btn" class="action-button" style="width:100%;">Connect Google Drive</button>
+                            </div>
+                            <div style="flex:1; border:1px solid #333; padding:10px; border-radius:6px; background:rgba(255,255,255,0.02);">
+                                <div style="font-weight:700; color:#fff; margin-bottom:6px;">Microsoft OneDrive</div>
+                                <div style="font-size:11px; color:#aaa; margin-bottom:8px;">Connect via Microsoft Graph (delegated scopes)</div>
+                                <button id="cloud-connect-onedrive-btn" class="action-button" style="width:100%;">Connect OneDrive</button>
+                            </div>
+                            <div style="flex:1; border:1px solid #333; padding:10px; border-radius:6px; background:rgba(255,255,255,0.02);">
+                                <div style="font-weight:700; color:#fff; margin-bottom:6px;">rclone / Server Remote</div>
+                                <div style="font-size:11px; color:#aaa; margin-bottom:8px;">Advanced: configure server-side remotes</div>
+                                <button id="cloud-configure-rclone-btn" class="action-button" style="width:100%;">Configure Remote</button>
+                            </div>
+                        </div>
                         <details id="cloud-lane-config-details" style="border:1px solid #333; border-radius:4px; padding:8px; margin-bottom:10px; background:rgba(255,255,255,0.02);">
                             <summary style="cursor:pointer; color:#55efc4; font-size:11px; font-weight:700;">Configure Storage Lanes</summary>
                             <div style="font-size:10px; color:#777; line-height:1.45; margin:8px 0;">
@@ -34662,7 +34680,84 @@ document.addEventListener('DOMContentLoaded', () => {
         const laneConfigStatusEl = document.getElementById('cloud-lane-config-status');
         const laneListEl = document.getElementById('cloud-lane-list');
 
+        const connectGdriveBtn = document.getElementById('cloud-connect-gdrive-btn');
+        const connectOnedriveBtn = document.getElementById('cloud-connect-onedrive-btn');
+        const configureRcloneBtn = document.getElementById('cloud-configure-rclone-btn');
+
         if (!providerEl || !scanBtn || !statusEl || !listEl) return;
+
+        // Wire provider Connect buttons
+        function startOAuthFlow(provider) {
+            const payload = {
+                provider: provider === 'onedrive' ? 'onedrive' : 'google_drive',
+                fusionauth_host: (laneFusionHostEl?.value || 'http://localhost:9011').trim(),
+                client_id: (laneOAuthClientIdEl?.value || '').trim(),
+                scopes: (laneOAuthScopesEl?.value || '').trim() || (provider === 'onedrive' ? 'offline_access Files.ReadWrite' : 'openid email profile https://www.googleapis.com/auth/drive.file')
+            };
+            if (!payload.client_id) {
+                addConsoleMessage('OAuth client id missing in advanced settings', 'error');
+                // open advanced panel so operator can provide client id
+                try { document.getElementById('cloud-lane-config-details').open = true; } catch (e) {}
+                return;
+            }
+
+            fetch(apiPath('/api/cloud/oauth/start'), {
+                method: 'POST',
+                headers: jsonHeaders(),
+                body: JSON.stringify(payload),
+            }).then(r => r.json()).then(async (j) => {
+                if (!j || j.status !== 'ok') {
+                    addConsoleMessage('OAuth start failed: ' + (j && j.message) , 'error');
+                    return;
+                }
+                const authorizeUrl = j.authorize_url;
+                const state = j.state;
+                const popup = window.open(authorizeUrl, 'scythe_oauth', 'width=900,height=700');
+
+                // Poll for completion
+                const poll = setInterval(async () => {
+                    try {
+                        const sres = await fetch(apiPath('/api/cloud/oauth/status') + '?state=' + encodeURIComponent(state), {headers: jsonHeaders()});
+                        const sj = await sres.json();
+                        if (sj && sj.status === 'ok' && sj.connected) {
+                            clearInterval(poll);
+                            try { if (popup) popup.close(); } catch (e) {}
+                            addConsoleMessage((provider === 'onedrive' ? 'OneDrive' : 'Google Drive') + ' connected successfully', 'info');
+                            badgeEl.textContent = (provider === 'onedrive' ? 'OneDrive: Connected' : 'Google Drive: Connected');
+                            // If backend only has an authorization code, request server-side token exchange
+                            try {
+                                if (sj.token && !sj.token.access_token) {
+                                    const exBody = { state };
+                                    const secretRef = (laneOAuthSecretRefEl?.value || '').trim();
+                                    if (secretRef) exBody.client_secret_ref = secretRef;
+                                    const exRes = await fetch(apiPath('/api/cloud/oauth/token'), {
+                                        method: 'POST', headers: jsonHeaders(), body: JSON.stringify(exBody)
+                                    });
+                                    const exJ = await exRes.json();
+                                    if (exJ && exJ.status === 'ok') {
+                                        addConsoleMessage('Token exchange completed; cloud provider connected', 'info');
+                                    } else {
+                                        addConsoleMessage('Token exchange failed: ' + (exJ && exJ.message), 'error');
+                                    }
+                                }
+                            } catch (e) { console.warn('token exchange error', e); }
+                            // Optionally refresh lane list or show browse button
+                        }
+                    } catch (e) {
+                        console.warn('oauth poll error', e);
+                    }
+                }, 1500);
+            }).catch(e => {
+                addConsoleMessage('OAuth start network error: ' + e.message, 'error');
+            });
+        }
+
+        if (connectGdriveBtn) connectGdriveBtn.addEventListener('click', () => startOAuthFlow('google'));
+        if (connectOnedriveBtn) connectOnedriveBtn.addEventListener('click', () => startOAuthFlow('onedrive'));
+        if (configureRcloneBtn) configureRcloneBtn.addEventListener('click', () => {
+            laneAuthModeEl.value = 'rclone_remote';
+            try { document.getElementById('cloud-lane-config-details').open = true; } catch (e) {}
+        });
 
         function apiPath(path) {
             if (/^https?:\/\//i.test(path)) return path;

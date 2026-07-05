@@ -1,0 +1,16 @@
+[Unit]
+Description=SCYTHE FTP Server
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/workspaces/codespaces-blank/ftp_server
+ExecStart=/workspaces/codespaces-blank/ftp_server/start_ftp.sh
+Restart=on-failure
+Environment=FTP_ALLOW_ANONYMOUS=true
+Environment=FTP_PORT=2121
+Environment=FTP_DIR=/workspaces/codespaces-blank/ftp_server/pcapng
+Environment=FTP_PASV_PORTS=60000-60010
+
+[Install]
+WantedBy=multi-user.target
