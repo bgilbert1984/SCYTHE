@@ -6,7 +6,14 @@ import json
 import os
 from queue import Queue
 from dataclasses import dataclass, field
-from typing import Dict, List, Any, Optional, Tuple, Union
+from pathlib import Path
+from typing import Dict, List, Any, Mapping, Optional, Sequence, Tuple, Union
+
+from biohub_cellops.submission_guard import (
+    KAGGLE_SUBMISSION_COLUMNS,
+    KaggleSubmissionCompiler,
+    KaggleSubmissionValidationError,
+)
 
 logger = logging.getLogger("BiohubCellOps")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
@@ -97,6 +104,7 @@ class CellTrackLink:
             "source_run": self.source_run,
             "metadata": self.metadata
         }
+
 
 @dataclass
 class CellTrajectoryPoint:
@@ -883,8 +891,9 @@ class CellLineageIntelligenceSystem:
         
         self.cell_queue = Queue()
         self.processed_cells: List[CellDetection] = []
+        self.processed_links: List[CellTrackLink] = []
         self.active_tracks: Dict[int, List[CellDetection]] = {}
-        self.cell_id_to_track_id: Dict[str, int] = {}
+        self.cell_id_to_track_id: Dict[Tuple[str, str], int] = {}
         self.track_counter = 0
         self.lineage_warnings: List[Dict[str, Any]] = []
         
@@ -997,8 +1006,10 @@ class CellLineageIntelligenceSystem:
                 child_cell = next((c for c in pruned_candidates if c.id == link.target_cell_id), None)
                 
                 if parent_cell and child_cell:
-                    track_id = self.cell_id_to_track_id[parent_cell.id]
-                    self.cell_id_to_track_id[child_cell.id] = track_id
+                    parent_key = (parent_cell.embryo_id, parent_cell.id)
+                    child_key = (child_cell.embryo_id, child_cell.id)
+                    track_id = self.cell_id_to_track_id[parent_key]
+                    self.cell_id_to_track_id[child_key] = track_id
                     self.active_tracks[track_id].append(child_cell)
                     
                     # Update Motion Model state
@@ -1028,6 +1039,7 @@ class CellLineageIntelligenceSystem:
                         self.comm_network.publish("lineage_warning", warn)
                         
                     self.comm_network.publish("track_link_created", link.to_dict())
+                    self.processed_links.append(link)
 
             # Initialize unlinked targets as new tracks
             for child_cell in pruned_candidates:
@@ -1069,7 +1081,7 @@ class CellLineageIntelligenceSystem:
     def _initialize_new_track(self, cell: CellDetection):
         self.track_counter += 1
         track_id = self.track_counter
-        self.cell_id_to_track_id[cell.id] = track_id
+        self.cell_id_to_track_id[(cell.embryo_id, cell.id)] = track_id
         self.active_tracks[track_id] = [cell]
         
         pt = CellTrajectoryPoint(
@@ -1102,6 +1114,25 @@ class CellLineageIntelligenceSystem:
         }
         self.comm_network.publish("lineage_analysis", analysis)
         return analysis
+
+    def compile_kaggle_submission(self) -> List[Dict[str, Any]]:
+        """Return validated rows using Kaggle's node/edge competition schema."""
+        return KaggleSubmissionCompiler.compile(self.processed_cells, self.processed_links)
+
+    def write_kaggle_submission(
+        self,
+        file_path: Union[str, Path] = "/kaggle/working/submission.csv",
+        sample_submission_path: Optional[Union[str, Path]] = None,
+        dataset_shapes: Optional[Mapping[str, Sequence[int]]] = None,
+    ) -> Path:
+        """Write and read-back validate a Kaggle-compatible ``submission.csv``."""
+        rows = self.compile_kaggle_submission()
+        return KaggleSubmissionCompiler.write_csv(
+            rows,
+            file_path,
+            sample_submission_path,
+            dataset_shapes,
+        )
 
 class LineageRiskAPI:
     """FastAPI interface supporting local human operator validation and recomputation."""
@@ -1225,26 +1256,18 @@ class LineageRiskAPI:
 
         @self.app.get("/api/biohub/export_submission")
         async def export_submission():
-            records = []
-            for track_id, track_list in self.system.active_tracks.items():
-                for idx, cell in enumerate(track_list):
-                    parent_id = track_list[idx - 1].id if idx > 0 else ""
-                    records.append({
-                        "cell_id": cell.id,
-                        "parent_id": parent_id,
-                        "embryo_id": cell.embryo_id,
-                        "t": cell.t,
-                        "z": cell.z,
-                        "y": cell.y,
-                        "x": cell.x
-                    })
-            return JSONResponse(content={
-                "submission_status": "COMPILED",
-                "total_rows": len(records),
-                "columns": ["cell_id", "parent_id", "embryo_id", "t", "z", "y", "x"],
-                "preview_records": records[:100],
-                "filename": "submission_cellops_validation.csv"
-            })
+            try:
+                records = self.system.compile_kaggle_submission()
+                return JSONResponse(content={
+                    "submission_status": "VALIDATED_PREVIEW",
+                    "total_rows": len(records),
+                    "columns": KAGGLE_SUBMISSION_COLUMNS,
+                    "preview_records": records[:100],
+                    "filename": "submission.csv",
+                    "writes_file": False,
+                })
+            except KaggleSubmissionValidationError as exc:
+                raise HTTPException(status_code=422, detail=str(exc))
 
     def run(self, host: str = "0.0.0.0", port: int = 8000):
         if FASTAPI_AVAILABLE:

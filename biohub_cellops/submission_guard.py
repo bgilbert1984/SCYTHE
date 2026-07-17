@@ -1,198 +1,331 @@
+"""Canonical Kaggle node/edge submission compilation and validation."""
+
 import csv
-import logging
-import math
-from typing import List, Dict, Any, Tuple
+from pathlib import Path
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple, Union
 
-logger = logging.getLogger("BiohubCellOps.SubmissionGuard")
+import numpy as np
 
-class SubmissionValidationException(Exception):
-    """Raised when a lineage graph or submission violates a hard competition invariant."""
-    pass
 
-class SubmissionGuard:
+KAGGLE_SUBMISSION_COLUMNS = [
+    "id",
+    "dataset",
+    "row_type",
+    "node_id",
+    "t",
+    "z",
+    "y",
+    "x",
+    "source_id",
+    "target_id",
+]
+
+
+class KaggleSubmissionValidationError(ValueError):
+    """Raised when CellOps state cannot satisfy the competition CSV contract."""
+
+
+# Backward-compatible exception name for callers that imported the old guard.
+SubmissionValidationException = KaggleSubmissionValidationError
+
+
+class KaggleSubmissionCompiler:
+    """Compile CellOps detections and links into Kaggle node/edge submission rows.
+
+    Cell objects must expose ``id``, ``embryo_id``, ``t``, ``z``, ``y``, and ``x``.
+    Link objects must expose ``id``, ``embryo_id``, ``source_cell_id``, and
+    ``target_cell_id``. ``embryo_id`` is treated as Kaggle's exact dataset value.
     """
-    Asserts absolute biological and schema invariants on cell lineage graph data
-    before submission to Kaggle, acting as a final automated gatekeeper.
-    """
-    
-    REQUIRED_COLUMNS = ["cell_id", "parent_id", "embryo_id", "t", "z", "y", "x"]
 
-    def __init__(self, check_biological_invariants: bool = True):
-        self.check_biological_invariants = check_biological_invariants
+    columns = KAGGLE_SUBMISSION_COLUMNS
 
-    def validate_rows(self, rows: List[Dict[str, Any]]) -> bool:
-        """
-        Validates a list of cell records (dictionaries) against all schema and physical invariants.
-        Raises SubmissionValidationException if any invariant is violated.
-        """
+    @classmethod
+    def compile(
+        cls,
+        cells: Sequence[Any],
+        links: Sequence[Any],
+    ) -> List[Dict[str, Any]]:
+        if not cells:
+            raise KaggleSubmissionValidationError("Cannot compile an empty Kaggle submission.")
+
+        cells_by_key: Dict[Tuple[str, str], Any] = {}
+        for cell in cells:
+            dataset = str(cell.embryo_id).strip()
+            cell_id = str(cell.id).strip()
+            if not dataset:
+                raise KaggleSubmissionValidationError(f"Cell '{cell.id}' has an empty dataset identifier.")
+            if not cell_id:
+                raise KaggleSubmissionValidationError("A cell has an empty internal ID.")
+            key = (dataset, cell_id)
+            if key in cells_by_key:
+                raise KaggleSubmissionValidationError(
+                    f"Duplicate cell ID '{cell_id}' in dataset '{dataset}'."
+                )
+            if not all(np.isfinite(float(value)) for value in (cell.z, cell.y, cell.x)):
+                raise KaggleSubmissionValidationError(
+                    f"Cell '{cell_id}' in dataset '{dataset}' has non-finite coordinates."
+                )
+            cells_by_key[key] = cell
+
+        ordered_keys = sorted(
+            cells_by_key,
+            key=lambda key: (key[0], int(cells_by_key[key].t), key[1]),
+        )
+        node_ids = {key: node_id for node_id, key in enumerate(ordered_keys, start=1)}
+
+        rows: List[Dict[str, Any]] = []
+        for key in ordered_keys:
+            cell = cells_by_key[key]
+            rows.append({
+                "id": len(rows),
+                "dataset": key[0],
+                "row_type": "node",
+                "node_id": node_ids[key],
+                "t": int(cell.t),
+                "z": int(round(float(cell.z))),
+                "y": int(round(float(cell.y))),
+                "x": int(round(float(cell.x))),
+                "source_id": -1,
+                "target_id": -1,
+            })
+
+        edge_keys = set()
+        ordered_links = sorted(
+            links,
+            key=lambda link: (
+                str(link.embryo_id),
+                str(link.source_cell_id),
+                str(link.target_cell_id),
+            ),
+        )
+        for link in ordered_links:
+            dataset = str(link.embryo_id).strip()
+            source_key = (dataset, str(link.source_cell_id).strip())
+            target_key = (dataset, str(link.target_cell_id).strip())
+            if source_key not in node_ids or target_key not in node_ids:
+                raise KaggleSubmissionValidationError(
+                    f"Edge '{link.id}' references a cell missing from dataset '{dataset}'."
+                )
+            edge_key = (dataset, node_ids[source_key], node_ids[target_key])
+            if edge_key in edge_keys:
+                raise KaggleSubmissionValidationError(
+                    f"Duplicate edge in dataset '{dataset}': {edge_key[1]} -> {edge_key[2]}."
+                )
+            edge_keys.add(edge_key)
+            rows.append({
+                "id": len(rows),
+                "dataset": dataset,
+                "row_type": "edge",
+                "node_id": -1,
+                "t": -1,
+                "z": -1,
+                "y": -1,
+                "x": -1,
+                "source_id": node_ids[source_key],
+                "target_id": node_ids[target_key],
+            })
+
+        cls.validate(rows)
+        return rows
+
+    @classmethod
+    def validate(cls, rows: Sequence[Dict[str, Any]]) -> bool:
         if not rows:
-            logger.warning("Empty rows submitted for validation.")
-            return True
+            raise KaggleSubmissionValidationError("Kaggle submission has no rows.")
 
-        self._validate_schema_columns(rows)
-        self._validate_no_nan_coordinates(rows)
-        self._validate_unique_cell_ids(rows)
+        if [row.get("id") for row in rows] != list(range(len(rows))):
+            raise KaggleSubmissionValidationError("Submission row IDs must be consecutive from zero.")
 
-        if self.check_biological_invariants:
-            self._validate_unique_track_per_time(rows)
-            self._validate_edge_references(rows)
-            self._validate_acyclic_lineage(rows)
-            self._validate_temporal_monotonicity(rows)
-            self._validate_mitosis_signatures(rows)
+        node_ids = set()
+        node_datasets: Dict[int, str] = {}
+        node_times: Dict[int, int] = {}
+        edge_keys = set()
+        outgoing_counts: Dict[Tuple[str, int], int] = {}
+        for row in rows:
+            if list(row.keys()) != cls.columns:
+                raise KaggleSubmissionValidationError(
+                    f"Submission columns must be exactly {cls.columns}."
+                )
+            if not str(row["dataset"]).strip():
+                raise KaggleSubmissionValidationError("Every row must have a dataset identifier.")
+            if row["row_type"] == "node":
+                if row["node_id"] in node_ids or row["node_id"] < 1:
+                    raise KaggleSubmissionValidationError(
+                        f"Invalid or duplicate node_id: {row['node_id']}."
+                    )
+                if row["source_id"] != -1 or row["target_id"] != -1:
+                    raise KaggleSubmissionValidationError("Node rows require -1 edge placeholders.")
+                if any(
+                    not isinstance(row[column], int) or row[column] < 0
+                    for column in ("t", "z", "y", "x")
+                ):
+                    raise KaggleSubmissionValidationError(
+                        "Node time and coordinates must be non-negative integers."
+                    )
+                node_ids.add(row["node_id"])
+                node_datasets[row["node_id"]] = row["dataset"]
+                node_times[row["node_id"]] = row["t"]
+            elif row["row_type"] == "edge":
+                if any(row[column] != -1 for column in ("node_id", "t", "z", "y", "x")):
+                    raise KaggleSubmissionValidationError("Edge rows require -1 node placeholders.")
+                edge_key = (row["dataset"], row["source_id"], row["target_id"])
+                if edge_key in edge_keys:
+                    raise KaggleSubmissionValidationError(f"Duplicate edge: {edge_key}.")
+                edge_keys.add(edge_key)
+            else:
+                raise KaggleSubmissionValidationError(f"Unknown row_type: {row['row_type']}.")
 
-        logger.info(f"SubmissionGuard: Successfully validated {len(rows)} records. All invariants intact.")
+        for row in rows:
+            if row["row_type"] != "edge":
+                continue
+            if row["source_id"] not in node_ids or row["target_id"] not in node_ids:
+                raise KaggleSubmissionValidationError("An edge references an unknown node_id.")
+            if (
+                node_datasets[row["source_id"]] != row["dataset"]
+                or node_datasets[row["target_id"]] != row["dataset"]
+            ):
+                raise KaggleSubmissionValidationError("An edge crosses dataset boundaries.")
+            if node_times[row["source_id"]] >= node_times[row["target_id"]]:
+                raise KaggleSubmissionValidationError("An edge must point forward in time.")
+            source_key = (row["dataset"], row["source_id"])
+            outgoing_counts[source_key] = outgoing_counts.get(source_key, 0) + 1
+            if outgoing_counts[source_key] > 2:
+                raise KaggleSubmissionValidationError(
+                    f"Node {row['source_id']} has more than two outgoing edges."
+                )
         return True
 
-    def validate_csv(self, file_path: str) -> bool:
-        """
-        Reads a serialized CSV file from disk and parses/validates it.
-        This captures silent serialization issues (such as field truncation or bad float parses).
-        """
-        rows = []
-        try:
-            with open(file_path, mode='r', newline='', encoding='utf-8') as f:
-                reader = csv.DictReader(f)
-                
-                # Check header columns
-                if reader.fieldnames is None:
-                    raise SubmissionValidationException("CSV has no header row.")
-                    
-                for col in self.REQUIRED_COLUMNS:
-                    if col not in reader.fieldnames:
-                        raise SubmissionValidationException(f"CSV header missing required column: '{col}'")
-                
-                for line_num, raw_row in enumerate(reader, start=2):
-                    try:
-                        row = {
-                            "cell_id": raw_row["cell_id"].strip(),
-                            "parent_id": raw_row["parent_id"].strip(),
-                            "embryo_id": raw_row["embryo_id"].strip(),
-                            "t": int(raw_row["t"]),
-                            "z": float(raw_row["z"]),
-                            "y": float(raw_row["y"]),
-                            "x": float(raw_row["x"])
-                        }
-                        rows.append(row)
-                    except ValueError as ve:
-                        raise SubmissionValidationException(
-                            f"CSV Line {line_num}: Failed to parse numeric values (t, z, y, x). Error: {ve}"
-                        )
-        except IOError as ioe:
-            raise SubmissionValidationException(f"Failed to read CSV file: {ioe}")
-
-        return self.validate_rows(rows)
-
-    def _validate_schema_columns(self, rows: List[Dict[str, Any]]):
-        """Ensures all required metadata columns are present in every dictionary."""
-        for idx, row in enumerate(rows):
-            for col in self.REQUIRED_COLUMNS:
-                if col not in row:
-                    raise SubmissionValidationException(
-                        f"Record at index {idx} is missing required submission column: '{col}'"
-                    )
-
-    def _validate_no_nan_coordinates(self, rows: List[Dict[str, Any]]):
-        """Ensures coordinates are valid floats and do not contain NaN or infinite values."""
-        for idx, row in enumerate(rows):
-            for col in ["z", "y", "x"]:
-                val = row[col]
+    @classmethod
+    def read_csv(cls, file_path: Union[str, Path]) -> List[Dict[str, Any]]:
+        with Path(file_path).open(newline="", encoding="utf-8") as input_file:
+            reader = csv.DictReader(input_file)
+            if reader.fieldnames != cls.columns:
+                raise KaggleSubmissionValidationError(
+                    f"CSV columns {reader.fieldnames} do not match {cls.columns}."
+                )
+            rows = []
+            for line_number, raw_row in enumerate(reader, start=2):
                 try:
-                    val_f = float(val)
-                    if math.isnan(val_f) or math.isinf(val_f):
-                        raise SubmissionValidationException(
-                            f"Record '{row['cell_id']}' has an illegal non-finite '{col}' coordinate: {val_f}"
-                        )
-                except (ValueError, TypeError):
-                    raise SubmissionValidationException(
-                        f"Record '{row['cell_id']}' has an unparseable '{col}' coordinate: {val}"
-                    )
+                    rows.append({
+                        "id": int(raw_row["id"]),
+                        "dataset": raw_row["dataset"],
+                        "row_type": raw_row["row_type"],
+                        "node_id": int(raw_row["node_id"]),
+                        "t": int(raw_row["t"]),
+                        "z": int(raw_row["z"]),
+                        "y": int(raw_row["y"]),
+                        "x": int(raw_row["x"]),
+                        "source_id": int(raw_row["source_id"]),
+                        "target_id": int(raw_row["target_id"]),
+                    })
+                except (TypeError, ValueError) as exc:
+                    raise KaggleSubmissionValidationError(
+                        f"CSV line {line_number} contains an invalid integer: {exc}"
+                    ) from exc
+        cls.validate(rows)
+        return rows
 
-    def _validate_unique_cell_ids(self, rows: List[Dict[str, Any]]):
-        """Ensures every cell candidate record has a completely unique ID."""
-        seen = set()
-        for row in rows:
-            cell_id = row["cell_id"]
-            if cell_id in seen:
-                raise SubmissionValidationException(
-                    f"Duplicate cell_id found: '{cell_id}'. Every detection row must have a unique cell_id."
+    @classmethod
+    def validate_dataset_context(
+        cls,
+        rows: Sequence[Dict[str, Any]],
+        dataset_shapes: Mapping[str, Sequence[int]],
+    ) -> Dict[str, Dict[str, Any]]:
+        """Validate dataset coverage and node bounds against ``(T, Z, Y, X)`` shapes."""
+        cls.validate(rows)
+        normalized_shapes = {}
+        for dataset, shape in dataset_shapes.items():
+            if len(shape) != 4:
+                raise KaggleSubmissionValidationError(
+                    f"Dataset '{dataset}' shape must be (T, Z, Y, X), got {tuple(shape)}."
                 )
-            seen.add(cell_id)
+            normalized = tuple(int(value) for value in shape)
+            if any(value <= 0 for value in normalized):
+                raise KaggleSubmissionValidationError(
+                    f"Dataset '{dataset}' has a non-positive volume dimension: {normalized}."
+                )
+            normalized_shapes[str(dataset)] = normalized
 
-    def _validate_unique_track_per_time(self, rows: List[Dict[str, Any]]):
-        """
-        Validates spatial co-existence. A single lineage track cannot teleport to or exist at
-        multiple coordinate centroids at the exact same time point.
-        """
-        # We trace tracks backwards from parent connections
-        # Let's map parent-child connections to see if any cell splits/branches and rejoins, 
-        # or if a single physical path is represented as multiple overlapping rows.
-        # Alternatively: we trace lineage track lineages and assert that for any track, there are no duplicates of (track_id, t).
-        pass
+        expected = set(normalized_shapes)
+        actual = {str(row["dataset"]) for row in rows}
+        missing = sorted(expected - actual)
+        extra = sorted(actual - expected)
+        if missing or extra:
+            raise KaggleSubmissionValidationError(
+                f"Dataset coverage mismatch; missing={missing}, unexpected={extra}."
+            )
 
-    def _validate_edge_references(self, rows: List[Dict[str, Any]]):
-        """Ensures all non-empty parent_id references point to an existing valid cell_id."""
-        cell_ids = {row["cell_id"] for row in rows}
+        report = {
+            dataset: {
+                "shape_tzyx": shape,
+                "nodes": 0,
+                "edges": 0,
+                "edge_node_ratio": 0.0,
+            }
+            for dataset, shape in normalized_shapes.items()
+        }
         for row in rows:
-            p_id = row["parent_id"]
-            if p_id and p_id not in cell_ids:
-                raise SubmissionValidationException(
-                    f"Dangling edge reference: Cell '{row['cell_id']}' points to parent_id '{p_id}', "
-                    f"but '{p_id}' does not exist in the submission."
+            dataset = str(row["dataset"])
+            if row["row_type"] == "edge":
+                report[dataset]["edges"] += 1
+                continue
+            t_size, z_size, y_size, x_size = normalized_shapes[dataset]
+            limits = {"t": t_size, "z": z_size, "y": y_size, "x": x_size}
+            for coordinate, upper_bound in limits.items():
+                if row[coordinate] >= upper_bound:
+                    raise KaggleSubmissionValidationError(
+                        f"Node {row['node_id']} in dataset '{dataset}' has {coordinate}="
+                        f"{row[coordinate]} outside [0, {upper_bound})."
+                    )
+            report[dataset]["nodes"] += 1
+
+        for dataset, counts in report.items():
+            if counts["nodes"] == 0:
+                raise KaggleSubmissionValidationError(
+                    f"Dataset '{dataset}' has no node rows."
+                )
+            counts["edge_node_ratio"] = round(counts["edges"] / counts["nodes"], 6)
+        return report
+
+    @classmethod
+    def write_csv(
+        cls,
+        rows: Sequence[Dict[str, Any]],
+        file_path: Union[str, Path],
+        sample_submission_path: Optional[Union[str, Path]] = None,
+        dataset_shapes: Optional[Mapping[str, Sequence[int]]] = None,
+    ) -> Path:
+        cls.validate(rows)
+        if dataset_shapes is not None:
+            cls.validate_dataset_context(rows, dataset_shapes)
+        if sample_submission_path is not None:
+            with Path(sample_submission_path).open(newline="", encoding="utf-8") as sample_file:
+                sample_columns = next(csv.reader(sample_file), None)
+            if sample_columns != cls.columns:
+                raise KaggleSubmissionValidationError(
+                    f"Sample submission columns {sample_columns} do not match {cls.columns}."
                 )
 
-    def _validate_temporal_monotonicity(self, rows: List[Dict[str, Any]]):
-        """Verifies arrow-of-time monotonicity: child t must be strictly greater than parent t."""
-        cell_map = {row["cell_id"]: row for row in rows}
-        for row in rows:
-            p_id = row["parent_id"]
-            if p_id:
-                parent = cell_map[p_id]
-                if row["t"] <= parent["t"]:
-                    raise SubmissionValidationException(
-                        f"Temporal violation: Child '{row['cell_id']}' (t={row['t']}) is at or before "
-                        f"its parent '{p_id}' (t={parent['t']}). Monotonic arrow of time is violated."
-                    )
+        output_path = Path(file_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        with output_path.open("w", newline="", encoding="utf-8") as output_file:
+            writer = csv.DictWriter(output_file, fieldnames=cls.columns)
+            writer.writeheader()
+            writer.writerows(rows)
 
-    def _validate_acyclic_lineage(self, rows: List[Dict[str, Any]]):
-        """Ensures the lineage tree contains zero cycles/loops (Directed Acyclic Graph invariant)."""
-        cell_map = {row["cell_id"]: row for row in rows}
-        
-        # Simple DFS cycle detection for each node
-        visited = {}  # cell_id -> state (0 = unvisited, 1 = visiting, 2 = visited)
-        
-        def has_cycle(cell_id: str) -> bool:
-            visited[cell_id] = 1  # visiting
-            row = cell_map[cell_id]
-            p_id = row["parent_id"]
-            
-            if p_id:
-                state = visited.get(p_id, 0)
-                if state == 1:
-                    return True  # Found cycle back to node currently in the call stack
-                elif state == 0:
-                    if has_cycle(p_id):
-                        return True
-            
-            visited[cell_id] = 2  # visited
-            return False
+        if len(cls.read_csv(output_path)) != len(rows):
+            raise KaggleSubmissionValidationError("Serialized submission failed row-count validation.")
+        return output_path
 
-        for row in rows:
-            cell_id = row["cell_id"]
-            if visited.get(cell_id, 0) == 0:
-                if has_cycle(cell_id):
-                    raise SubmissionValidationException(
-                        f"Lineage cycle detected! There is a circular relationship involving cell_id '{cell_id}'."
-                    )
 
-    def _validate_mitosis_signatures(self, rows: List[Dict[str, Any]]):
-        """Ensures a parent cell divides into AT MOST 2 daughter cells (no triple or multi-divisions)."""
-        parent_counts = {}
-        for row in rows:
-            p_id = row["parent_id"]
-            if p_id:
-                parent_counts[p_id] = parent_counts.get(p_id, 0) + 1
-                if parent_counts[p_id] > 2:
-                    raise SubmissionValidationException(
-                        f"Mitotic division violation: Parent cell '{p_id}' splits into {parent_counts[p_id]} "
-                        f"daughter cells. Biological limit is at most 2 daughters per division."
-                    )
+class SubmissionGuard:
+    """Compatibility facade over the canonical Kaggle submission compiler."""
+
+    REQUIRED_COLUMNS = KAGGLE_SUBMISSION_COLUMNS
+
+    def validate_rows(self, rows: Sequence[Dict[str, Any]]) -> bool:
+        return KaggleSubmissionCompiler.validate(rows)
+
+    def validate_csv(self, file_path: Union[str, Path]) -> bool:
+        KaggleSubmissionCompiler.read_csv(file_path)
+        return True

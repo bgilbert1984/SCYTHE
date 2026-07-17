@@ -1,111 +1,121 @@
-import unittest
-import tempfile
-import os
 import csv
-from biohub_cellops.submission_guard import SubmissionGuard, SubmissionValidationException
+import tempfile
+import unittest
+from pathlib import Path
+
+from biohub_cellops.submission_guard import (
+    KAGGLE_SUBMISSION_COLUMNS,
+    KaggleSubmissionCompiler,
+    SubmissionGuard,
+    SubmissionValidationException,
+)
+
+
+def node(row_id, dataset, node_id, t, z=10, y=20, x=30):
+    return {
+        "id": row_id,
+        "dataset": dataset,
+        "row_type": "node",
+        "node_id": node_id,
+        "t": t,
+        "z": z,
+        "y": y,
+        "x": x,
+        "source_id": -1,
+        "target_id": -1,
+    }
+
+
+def edge(row_id, dataset, source_id, target_id):
+    return {
+        "id": row_id,
+        "dataset": dataset,
+        "row_type": "edge",
+        "node_id": -1,
+        "t": -1,
+        "z": -1,
+        "y": -1,
+        "x": -1,
+        "source_id": source_id,
+        "target_id": target_id,
+    }
+
 
 class TestSubmissionGuard(unittest.TestCase):
     def setUp(self):
         self.guard = SubmissionGuard()
 
-    def test_valid_single_track(self):
-        """Verifies validation passes on a perfectly normal sequential track."""
+    def test_valid_node_edge_rows(self):
+        rows = [node(0, "movie", 1, 0), node(1, "movie", 2, 1), edge(2, "movie", 1, 2)]
+        self.assertTrue(self.guard.validate_rows(rows))
+
+    def test_valid_binary_division(self):
         rows = [
-            {"cell_id": "c1", "parent_id": "", "embryo_id": "emb1", "t": 1, "z": 10.0, "y": 20.0, "x": 30.0},
-            {"cell_id": "c2", "parent_id": "c1", "embryo_id": "emb1", "t": 2, "z": 10.5, "y": 20.1, "x": 29.8},
-            {"cell_id": "c3", "parent_id": "c2", "embryo_id": "emb1", "t": 3, "z": 10.9, "y": 20.3, "x": 29.5}
+            node(0, "movie", 1, 0),
+            node(1, "movie", 2, 1),
+            node(2, "movie", 3, 1),
+            edge(3, "movie", 1, 2),
+            edge(4, "movie", 1, 3),
         ]
         self.assertTrue(self.guard.validate_rows(rows))
 
-    def test_valid_mitosis(self):
-        """Verifies validation passes on a healthy, mass-conserved cellular binary split."""
+    def test_rejects_third_outgoing_edge(self):
         rows = [
-            {"cell_id": "parent", "parent_id": "", "embryo_id": "emb1", "t": 1, "z": 10.0, "y": 20.0, "x": 30.0},
-            {"cell_id": "d1", "parent_id": "parent", "embryo_id": "emb1", "t": 2, "z": 10.5, "y": 18.5, "x": 30.1},
-            {"cell_id": "d2", "parent_id": "parent", "embryo_id": "emb1", "t": 2, "z": 9.5, "y": 21.5, "x": 29.9}
+            node(0, "movie", 1, 0),
+            node(1, "movie", 2, 1),
+            node(2, "movie", 3, 1),
+            node(3, "movie", 4, 1),
+            edge(4, "movie", 1, 2),
+            edge(5, "movie", 1, 3),
+            edge(6, "movie", 1, 4),
         ]
-        self.assertTrue(self.guard.validate_rows(rows))
-
-    def test_duplicate_cell_id(self):
-        """Asserts that duplicate cell_id values within the submission throw an exception."""
-        rows = [
-            {"cell_id": "c1", "parent_id": "", "embryo_id": "emb1", "t": 1, "z": 10.0, "y": 20.0, "x": 30.0},
-            {"cell_id": "c1", "parent_id": "", "embryo_id": "emb1", "t": 2, "z": 11.0, "y": 21.0, "x": 31.0}
-        ]
-        with self.assertRaises(SubmissionValidationException) as context:
+        with self.assertRaises(SubmissionValidationException):
             self.guard.validate_rows(rows)
-        self.assertIn("Duplicate cell_id", str(context.exception))
 
-    def test_missing_edge_source(self):
-        """Asserts that pointing to a non-existent parent_id fails validation."""
-        rows = [
-            {"cell_id": "c2", "parent_id": "non_existent", "embryo_id": "emb1", "t": 2, "z": 10.5, "y": 20.1, "x": 29.8}
-        ]
-        with self.assertRaises(SubmissionValidationException) as context:
+    def test_rejects_cross_dataset_edge(self):
+        rows = [node(0, "a", 1, 0), node(1, "b", 2, 1), edge(2, "a", 1, 2)]
+        with self.assertRaises(SubmissionValidationException):
             self.guard.validate_rows(rows)
-        self.assertIn("Dangling edge reference", str(context.exception))
 
-    def test_cycle(self):
-        """Asserts that circular tracking connections throw an exception."""
-        rows = [
-            {"cell_id": "c1", "parent_id": "c3", "embryo_id": "emb1", "t": 4, "z": 10.0, "y": 20.0, "x": 30.0},
-            {"cell_id": "c2", "parent_id": "c1", "embryo_id": "emb1", "t": 5, "z": 10.5, "y": 20.1, "x": 29.8},
-            {"cell_id": "c3", "parent_id": "c2", "embryo_id": "emb1", "t": 6, "z": 10.9, "y": 20.3, "x": 29.5}
-        ]
-        with self.assertRaises(SubmissionValidationException) as context:
+    def test_rejects_non_forward_edge(self):
+        rows = [node(0, "movie", 1, 1), node(1, "movie", 2, 1), edge(2, "movie", 1, 2)]
+        with self.assertRaises(SubmissionValidationException):
             self.guard.validate_rows(rows)
-        self.assertIn("Lineage cycle detected", str(context.exception))
 
-    def test_triple_mitosis(self):
-        """Asserts that a parent splitting into 3 daughter cells is flagged as a biological violation."""
-        rows = [
-            {"cell_id": "parent", "parent_id": "", "embryo_id": "emb1", "t": 1, "z": 10.0, "y": 20.0, "x": 30.0},
-            {"cell_id": "d1", "parent_id": "parent", "embryo_id": "emb1", "t": 2, "z": 10.5, "y": 18.5, "x": 30.1},
-            {"cell_id": "d2", "parent_id": "parent", "embryo_id": "emb1", "t": 2, "z": 9.5, "y": 21.5, "x": 29.9},
-            {"cell_id": "d3", "parent_id": "parent", "embryo_id": "emb1", "t": 2, "z": 10.0, "y": 20.0, "x": 30.0}
-        ]
-        with self.assertRaises(SubmissionValidationException) as context:
-            self.guard.validate_rows(rows)
-        self.assertIn("Mitotic division violation", str(context.exception))
+    def test_csv_round_trip(self):
+        rows = [node(0, "movie", 1, 0), node(1, "movie", 2, 1), edge(2, "movie", 1, 2)]
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "submission.csv"
+            KaggleSubmissionCompiler.write_csv(rows, path)
+            self.assertTrue(self.guard.validate_csv(path))
+            with path.open(newline="", encoding="utf-8") as output_file:
+                self.assertEqual(next(csv.reader(output_file)), KAGGLE_SUBMISSION_COLUMNS)
 
-    def test_nan_coordinate(self):
-        """Asserts that non-finite coordinates (NaN or Inf) fail validation."""
-        rows = [
-            {"cell_id": "c1", "parent_id": "", "embryo_id": "emb1", "t": 1, "z": float('nan'), "y": 20.0, "x": 30.0}
-        ]
-        with self.assertRaises(SubmissionValidationException) as context:
-            self.guard.validate_rows(rows)
-        self.assertIn("illegal non-finite", str(context.exception))
+    def test_dataset_context_reports_coverage_and_counts(self):
+        rows = [node(0, "movie", 1, 0), node(1, "movie", 2, 1), edge(2, "movie", 1, 2)]
+        report = KaggleSubmissionCompiler.validate_dataset_context(
+            rows,
+            {"movie": (2, 11, 21, 31)},
+        )
+        self.assertEqual(report["movie"]["nodes"], 2)
+        self.assertEqual(report["movie"]["edges"], 1)
+        self.assertEqual(report["movie"]["edge_node_ratio"], 0.5)
 
-    def test_bad_timing(self):
-        """Asserts that a child having a timestamp at or before its parent fails validation."""
-        rows = [
-            {"cell_id": "parent", "parent_id": "", "embryo_id": "emb1", "t": 3, "z": 10.0, "y": 20.0, "x": 30.0},
-            {"cell_id": "child", "parent_id": "parent", "embryo_id": "emb1", "t": 2, "z": 10.5, "y": 20.1, "x": 29.8}
-        ]
-        with self.assertRaises(SubmissionValidationException) as context:
-            self.guard.validate_rows(rows)
-        self.assertIn("Temporal violation", str(context.exception))
+    def test_dataset_context_rejects_missing_dataset_and_out_of_bounds_node(self):
+        rows = [node(0, "movie", 1, 0)]
+        with self.assertRaises(SubmissionValidationException):
+            KaggleSubmissionCompiler.validate_dataset_context(
+                rows,
+                {"movie": (2, 11, 21, 31), "missing": (2, 11, 21, 31)},
+            )
 
-    def test_csv_serialization_read_write(self):
-        """Ensures the guard can successfully read and validate exported CSV files on disk."""
-        rows = [
-            {"cell_id": "c1", "parent_id": "", "embryo_id": "emb1", "t": "1", "z": "10.0", "y": "20.0", "x": "30.0"},
-            {"cell_id": "c2", "parent_id": "c1", "embryo_id": "emb1", "t": "2", "z": "10.5", "y": "20.1", "x": "29.8"}
-        ]
-        
-        # Write to temp file
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False, newline='', encoding='utf-8') as tmp:
-            writer = csv.DictWriter(tmp, fieldnames=SubmissionGuard.REQUIRED_COLUMNS)
-            writer.writeheader()
-            writer.writerows(rows)
-            tmp_path = tmp.name
-            
-        try:
-            # Validate CSV file
-            self.assertTrue(self.guard.validate_csv(tmp_path))
-        finally:
-            os.remove(tmp_path)
+        out_of_bounds = [node(0, "movie", 1, 0, z=11)]
+        with self.assertRaises(SubmissionValidationException):
+            KaggleSubmissionCompiler.validate_dataset_context(
+                out_of_bounds,
+                {"movie": (2, 11, 21, 31)},
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

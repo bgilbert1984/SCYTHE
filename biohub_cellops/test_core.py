@@ -1,4 +1,7 @@
 import unittest
+import csv
+import tempfile
+from pathlib import Path
 import numpy as np
 from biohub_cellops.core import (
     CellDetection,
@@ -11,7 +14,10 @@ from biohub_cellops.core import (
     LineageAnomalyDetector,
     SimpleKalmanFilter3D,
     CellMotionTracker,
-    CellLineageIntelligenceSystem
+    CellLineageIntelligenceSystem,
+    KAGGLE_SUBMISSION_COLUMNS,
+    KaggleSubmissionCompiler,
+    KaggleSubmissionValidationError,
 )
 
 class TestBiohubCellOps(unittest.TestCase):
@@ -44,6 +50,51 @@ class TestBiohubCellOps(unittest.TestCase):
         self.assertEqual(d["t"], 10)
         self.assertIsInstance(d["z"], float)
         self.assertIsInstance(d["t"], int)
+
+    def test_kaggle_submission_compiler_uses_node_edge_schema(self):
+        cells = [
+            CellDetection("c1", "dataset_b", 0, 1.2, 2.5, 3.6, 0.9),
+            CellDetection("c2", "dataset_b", 1, 2.0, 3.0, 4.0, 0.9),
+            # Internal IDs may repeat in a different dataset.
+            CellDetection("c1", "dataset_a", 0, 5.0, 6.0, 7.0, 0.9),
+        ]
+        links = [CellTrackLink("e1", "dataset_b", "c1", "c2", 0.95)]
+
+        rows = KaggleSubmissionCompiler.compile(cells, links)
+
+        self.assertEqual([row["id"] for row in rows], list(range(4)))
+        self.assertTrue(all(list(row) == KAGGLE_SUBMISSION_COLUMNS for row in rows))
+        self.assertEqual([row["row_type"] for row in rows], ["node", "node", "node", "edge"])
+        self.assertEqual(len({row["node_id"] for row in rows[:3]}), 3)
+        self.assertEqual(rows[-1]["dataset"], "dataset_b")
+        self.assertEqual(rows[-1]["node_id"], -1)
+        self.assertEqual((rows[-1]["t"], rows[-1]["z"], rows[-1]["y"], rows[-1]["x"]), (-1, -1, -1, -1))
+
+    def test_kaggle_submission_csv_round_trip_and_sample_contract(self):
+        cells = [CellDetection("c1", "dataset_a", 0, 1.0, 2.0, 3.0, 0.9)]
+        rows = KaggleSubmissionCompiler.compile(cells, [])
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            sample_path = Path(tmp_dir) / "sample_submission.csv"
+            output_path = Path(tmp_dir) / "submission.csv"
+            with sample_path.open("w", newline="", encoding="utf-8") as sample_file:
+                csv.writer(sample_file).writerow(KAGGLE_SUBMISSION_COLUMNS)
+
+            result = KaggleSubmissionCompiler.write_csv(rows, output_path, sample_path)
+            with result.open(newline="", encoding="utf-8") as output_file:
+                reader = csv.DictReader(output_file)
+                written_rows = list(reader)
+
+            self.assertEqual(reader.fieldnames, KAGGLE_SUBMISSION_COLUMNS)
+            self.assertEqual(len(written_rows), 1)
+            self.assertEqual(written_rows[0]["row_type"], "node")
+
+    def test_kaggle_submission_rejects_dangling_edges(self):
+        cells = [CellDetection("c1", "dataset_a", 0, 1.0, 2.0, 3.0, 0.9)]
+        links = [CellTrackLink("e1", "dataset_a", "c1", "missing", 0.5)]
+
+        with self.assertRaises(KaggleSubmissionValidationError):
+            KaggleSubmissionCompiler.compile(cells, links)
 
     def test_candidate_dropout(self):
         """Verifies that Gumbel candidate dropout filters low-confidence candidates correctly."""
