@@ -560,6 +560,7 @@ def register_sensor_stream_tool(engine: Any, mcp_handler: Any) -> None:
             "required": [],
         },
         fn=lambda p: sensor_stream_tool(p, engine),
+        mutates_state=True,
     )
 
     logger.info("[eve_sensor_mcp] registered graphops_sensor_stream tool")

@@ -244,10 +244,18 @@ class InvestigativeDSLExecutor:
     persists across run() calls within the same agent step.
     """
 
-    def __init__(self, engine=None, topology_detector=None, fanin_detector=None):
+    def __init__(self, engine=None, topology_detector=None, fanin_detector=None,
+                 rf_observation_provider=None):
         self.engine   = engine
         self._topo    = topology_detector
         self._fanin   = fanin_detector
+        if rf_observation_provider is None:
+            try:
+                from rf_bridge import get_rf_observation_store
+                rf_observation_provider = get_rf_observation_store()
+            except Exception:
+                rf_observation_provider = None
+        self._rf_observations = rf_observation_provider
         self.reset()
 
     def reset(self) -> None:
@@ -1875,83 +1883,30 @@ class InvestigativeDSLExecutor:
         freq_str = m_freq.group(1) if m_freq else None
         window   = _parse_duration(m_win.group(1)) if m_win else 2.0
 
-        # Attempt to pull RF anomaly timestamps from rf_scythe_api_server module
-        rf_events: List[float] = []
-        try:
-            import sys
-            for mod_name, mod in sys.modules.items():
-                if 'rf_scythe' in mod_name or mod_name == '__main__':
-                    # Try common attribute names for recent RF anomaly timestamps
-                    for attr in ('_rf_anomaly_ts', 'rf_anomaly_timestamps',
-                                 '_last_anomalies', 'recent_rf_events'):
-                        obj = getattr(mod, attr, None)
-                        if obj is not None:
-                            try:
-                                rf_events = list(obj)[-200:]
-                            except Exception:
-                                pass
-                            if rf_events:
-                                break
-                if rf_events:
-                    break
-        except Exception:
-            pass
+        frequency_hz = None
+        if freq_str:
+            match = re.match(r'([\d.]+)\s*([kmg]?)', freq_str, re.I)
+            if match:
+                scale = {"": 1.0, "k": 1e3, "m": 1e6, "g": 1e9}[match.group(2).lower()]
+                frequency_hz = float(match.group(1)) * scale
 
-        if not rf_events:
-            # No RF telemetry available — return topology snapshot with note
-            if self.engine is None:
-                return {"error": "no engine and no RF data"}
-            import time as _time
-            now   = _time.time()
-            edges = [
-                e.to_dict() if hasattr(e, 'to_dict') else {}
-                for e in list(self.engine.edges.values())[-50:]
-            ]
-            return {
-                "verb":          "RF_CORRELATE",
-                "freq":          freq_str,
-                "window_s":      window,
-                "rf_events":     0,
-                "note":          "No RF telemetry available; showing recent edge snapshot",
-                "recent_edges":  edges[:20],
-            }
+        if self._rf_observations is None:
+            return {"verb": "RF_CORRELATE", "freq": freq_str, "window_s": window,
+                    "rf_events": 0, "note": "RF observation provider unavailable",
+                    "raw_iq_exposed": False}
 
-        import time as _time
-        now    = _time.time()
-        cutoff = now - 600.0  # look back 10 min for graph events
-
-        correlated_nodes: List[Dict[str, Any]] = []
-        seen = set()
-        for rf_ts in rf_events:
-            lo, hi = rf_ts - window, rf_ts + window
-            for eid, edge in self.engine.edges.items():
-                created = _edge_ts(edge)
-                if created is None or not (lo <= created <= hi):
-                    continue
-                for nid in (_edge_src(edge), _edge_dst(edge)):
-                    if nid and nid not in seen:
-                        seen.add(nid)
-                        n = self.engine.get_node(nid)
-                        nd = n.to_dict() if n and hasattr(n,'to_dict') else {}
-                        correlated_nodes.append({
-                            "entity_id":   nid,
-                            "labels":      nd.get("labels", {}),
-                            "rf_ts":       rf_ts,
-                            "edge_ts":     created,
-                            "delta_s":     round(created - rf_ts, 4),
-                        })
-
-        correlated_nodes.sort(key=lambda r: abs(r["delta_s"]))
-        logger.info("[RF_CORRELATE] freq=%s rf_events=%d correlated_nodes=%d",
-                    freq_str, len(rf_events), len(correlated_nodes))
-        return {
-            "verb":             "RF_CORRELATE",
-            "freq":             freq_str,
-            "window_s":         window,
-            "rf_events":        len(rf_events),
-            "correlated_nodes": correlated_nodes[:30],
-            "hit_count":        len(correlated_nodes),
-        }
+        query = {"since": time.time() - 600.0, "limit": 200}
+        if frequency_hz is not None:
+            query.update({"frequency_hz": frequency_hz, "tolerance_hz": 25_000.0})
+        observations = self._rf_observations.query(**query)
+        from rf_mcp import correlate_rf_graph
+        result = correlate_rf_graph(self.engine, observations, window_s=window, limit=30)
+        result.update({"verb": "RF_CORRELATE", "freq": freq_str,
+                       "frequency_hz": frequency_hz, "window_s": window,
+                       "rf_events": len(observations)})
+        logger.info("[RF_CORRELATE] freq=%s rf_events=%d correlations=%d",
+                    freq_str, len(observations), len(result["correlations"]))
+        return result
 
     def _do_bsg_map(self, line: str) -> Dict[str, Any]:
         """
@@ -2669,14 +2624,19 @@ class GraphOpsAgent:
                  topology_detector=None,
                  fanin_detector=None,
                  ollama_url: str = "http://localhost:11434",
-                 embedding_engine=None):
+                 embedding_engine=None,
+                 rf_observation_provider=None,
+                 allow_sensor_mutation: bool = True):
         self.engine          = engine
         self.extractor       = EntityExtractor()
-        self.executor        = InvestigativeDSLExecutor(engine, topology_detector, fanin_detector)
+        self.executor        = InvestigativeDSLExecutor(
+            engine, topology_detector, fanin_detector, rf_observation_provider
+        )
         self._ollama         = ollama_url
         self._models         = self._pick_models()
         self._model          = self._models[0]
         self._embedding_engine = embedding_engine  # optional EmbeddingEngine for RAG
+        self._allow_sensor_mutation = allow_sensor_mutation
 
     def _pick_models(self) -> List[str]:
         """Select the best available Ollama chat models in preference order."""
@@ -3434,6 +3394,8 @@ class GraphOpsAgent:
         result_summary: Dict[str, Any],
         interpretation: Dict[str, Any],
     ) -> Optional[Dict[str, Any]]:
+        if not self._allow_sensor_mutation:
+            return None
         request = self._grounding_request(question, result_summary, interpretation)
         if not request.get("trigger"):
             return None
@@ -3521,21 +3483,15 @@ class GraphOpsAgent:
 
         # ── 5. RF telemetry availability ──────────────────────────────────────
         try:
-            import sys
-            for mod_name, mod in sys.modules.items():
-                if "rf_scythe" in mod_name or mod_name == "__main__":
-                    for attr in ("_rf_anomaly_ts", "rf_anomaly_timestamps", "_last_anomalies"):
-                        obj = getattr(mod, attr, None)
-                        if obj:
-                            rf_n = len(list(obj))
-                            signals["rf_available"] = {
-                                "strength": 0.9 if rf_n > 5 else 0.5 if rf_n > 0 else 0.0,
-                                "value":    rf_n,
-                                "note":     f"{rf_n} RF anomaly events for cross-domain correlation",
-                            }
-                            break
-                if "rf_available" in signals:
-                    break
+            stats = ex._rf_observations.stats() if ex._rf_observations else None
+            if stats:
+                rf_n = int(stats["count"])
+                signals["rf_available"] = {
+                    "strength": 0.9 if rf_n > 5 else 0.5 if rf_n > 0 else 0.0,
+                    "value": rf_n,
+                    "evidence_class": "OBSERVED",
+                    "note": f"{rf_n} bounded RF observations for cross-domain correlation",
+                }
         except Exception:
             pass
 
@@ -3723,7 +3679,8 @@ class GraphOpsAgent:
 
 # ─── MCP tool registration ────────────────────────────────────────────────────
 
-def register_graphops_tools(engine, mcp_handler, embedding_engine=None) -> None:
+def register_graphops_tools(engine, mcp_handler, embedding_engine=None,
+                            rf_observation_provider=None) -> None:
     """Register GraphOps Copilot tools into an MCPHandler instance.
 
     Three tools:
@@ -3733,7 +3690,9 @@ def register_graphops_tools(engine, mcp_handler, embedding_engine=None) -> None:
     """
     from mcp_server import ToolDef
 
-    _agent = GraphOpsAgent(engine, embedding_engine=embedding_engine)
+    _agent = GraphOpsAgent(engine, embedding_engine=embedding_engine,
+                           rf_observation_provider=rf_observation_provider,
+                           allow_sensor_mutation=False)
 
     def _investigate(params: dict) -> dict:
         question = params.get("question", "")
@@ -3747,6 +3706,8 @@ def register_graphops_tools(engine, mcp_handler, embedding_engine=None) -> None:
         plan = params.get("plan", [])
         if not plan:
             return {"error": "plan (list of DSL strings) is required"}
+        if any(str(step).strip().upper().startswith("SENSOR_STREAM") for step in plan):
+            return {"error": "SENSOR_STREAM is mutating and requires the orchestrator proposal flow"}
         _agent.executor.reset()
         return _agent.executor.run(plan)
 

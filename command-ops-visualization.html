@@ -7690,7 +7690,7 @@
                                 <div style="display: flex; gap: 5px; font-size: 11px;">
                                     <label><input type="checkbox" id="nmap-service-detection" checked> Service Detection</label>
                                     <label><input type="checkbox" id="nmap-os-detection"> OS Detection</label>
-                                    <label><input type="checkbox" id="nmap-rf-correlation" checked> RF Correlation</label>
+                                    <label><input type="checkbox" id="nmap-hypergraph-rf-correlation" checked> RF Correlation</label>
                                 </div>
                             </div>
                             
@@ -8893,6 +8893,13 @@
             <div class="spec-control">
                 <span id="currentFrequency">Freq: 0.00 MHz</span>
             </div>
+            <div class="spec-control" style="display:flex;align-items:center;gap:6px;">
+                <span id="sdrpp-live-dot" style="width:8px;height:8px;border-radius:50%;background:#7b8494;display:inline-block;"></span>
+                <span id="sdrpp-live-status">SDR++ OFFLINE</span>
+            </div>
+            <input id="sdrpp-frequency-input" class="spec-control" value="145.350M" aria-label="SDR++ tune frequency" style="width:92px;" />
+            <button class="spec-control" id="sdrpp-tune-btn" title="Tune SDR++ through Rigctl">Tune</button>
+            <button class="spec-control" id="sdrpp-disconnect-btn" title="Disconnect the RF bridge">Disconnect</button>
             <div id="zoomControls">
                 <button class="spec-control" id="zoomInBtn">+</button>
                 <button class="spec-control" id="zoomOutBtn">-</button>
@@ -8950,6 +8957,7 @@
     <script src="ionosphere-data-enhancer.js"></script>
 	    <!-- Essential RF SCYTHE components only (loaded once) -->
 	    <script src="mock-api.js"></script>
+	    <script src="sdrpp-bridge.js"></script>
     <script src="network-infrastructure.js"></script>
     <!-- Cognition stack: simulation authority before visualization sampling -->
     <script src="IngressEventModel.js"></script>
@@ -21604,6 +21612,31 @@ API TIMING (avg ms):
             assignments: {},    // { entity_id: [sensor_id, ...] }
             markers: {},        // Cesium entity markers for sensors
             groupOrder: [],     // Order of entity groups for UI
+
+            _normalize: function(sensor) {
+                const s = { ...(sensor || {}) };
+                s.label = s.label || s.name || s.sensor_id;
+                if (Array.isArray(s.position)) {
+                    s.position = { lat: s.position[0], lon: s.position[1], alt_m: s.position[2] || 0 };
+                } else if (!s.position && s.location) {
+                    s.position = {
+                        lat: s.location.lat,
+                        lon: s.location.lon ?? s.location.lng,
+                        alt_m: s.location.alt_m ?? s.location.alt ?? 0
+                    };
+                }
+                const firstBand = radio => radio?.bands_mhz?.[0]?.[0] ?? null;
+                s.tx_config = s.tx_config || {
+                    frequency_mhz: firstBand(s.tx),
+                    power_dbm: s.tx?.max_eirp_dbm ?? null
+                };
+                s.rx_config = s.rx_config || {
+                    frequency_mhz: firstBand(s.rx),
+                    sensitivity_dbm: s.rx?.sensitivity_dbm ?? null,
+                    sample_rate_hz: s.rx?.sample_rate_hz ?? null
+                };
+                return s;
+            },
             
             /**
              * Load all sensors from the API
@@ -21621,7 +21654,8 @@ API TIMING (avg ms):
                     const data = await resp.json();
                     this.sensors = {};
                     (data.sensors || []).forEach(s => {
-                        this.sensors[s.sensor_id] = s;
+                        const normalized = this._normalize(s);
+                        this.sensors[normalized.sensor_id] = normalized;
                     });
                     
                     this._updateUI();
@@ -21656,13 +21690,14 @@ API TIMING (avg ms):
                     }
                     
                     const data = await resp.json();
-                    this.sensors[data.sensor.sensor_id] = data.sensor;
+                    const normalized = this._normalize(data.sensor);
+                    this.sensors[normalized.sensor_id] = normalized;
                     
                     this._updateUI();
                     this._visualize();
-                    addConsoleMessage(`Sensor ${data.sensor.label} ${data.created ? 'created' : 'updated'}`, 'response');
+                    addConsoleMessage(`Sensor ${normalized.label} ${data.created ? 'created' : 'updated'}`, 'response');
                     
-                    return data.sensor;
+                    return normalized;
                     
                 } catch (err) {
                     console.error('[SensorManager] Upsert error:', err);
@@ -22124,8 +22159,8 @@ API TIMING (avg ms):
                 // Fallback to sensor position if no assigned entity or entity has no position
                 if (!targetPos && sensor.position) {
                     const pos = sensor.position;
-                    const lat = parseFloat(pos.lat || pos.latitude);
-                    const lon = parseFloat(pos.lon || pos.longitude);
+                    const lat = parseFloat(pos.lat ?? pos.latitude);
+                    const lon = parseFloat(pos.lon ?? pos.longitude);
                     if (!isNaN(lat) && !isNaN(lon)) {
                         targetPos = Cesium.Cartesian3.fromDegrees(lon, lat, 10000); // 10km alt
                         addConsoleMessage(`Tracking sensor: ${targetLabel}`, 'response');
@@ -22180,8 +22215,8 @@ API TIMING (avg ms):
                     if (!sensor.position) return;
                     
                     const pos = sensor.position;
-                    const lat = parseFloat(pos.lat || pos.latitude);
-                    const lon = parseFloat(pos.lon || pos.longitude);
+                    const lat = parseFloat(pos.lat ?? pos.latitude);
+                    const lon = parseFloat(pos.lon ?? pos.longitude);
                     
                     if (isNaN(lat) || isNaN(lon)) return;
                     
@@ -22260,8 +22295,8 @@ API TIMING (avg ms):
                         const sensor = this.sensors[sid];
                         if (!sensor || !sensor.position) return;
 
-                        const sLat = parseFloat(sensor.position.lat || sensor.position.latitude);
-                        const sLon = parseFloat(sensor.position.lon || sensor.position.longitude);
+                        const sLat = parseFloat(sensor.position.lat ?? sensor.position.latitude);
+                        const sLon = parseFloat(sensor.position.lon ?? sensor.position.longitude);
                         
                         if (isNaN(sLat) || isNaN(sLon)) return;
                         
@@ -24289,14 +24324,18 @@ API TIMING (avg ms):
             
             // Add event listeners for spectrogram controls
             if (scanSpectrumBtn) {
-                scanSpectrumBtn.addEventListener('click', () => {
+                scanSpectrumBtn.addEventListener('click', async () => {
                     spectrogramContainer.style.display = 'block';
-                    showNotification('Spectrum Scan', 'Starting RF spectrum scan. Visualizing signal environment.', 'info');
+                    if (window.SDRPPBridge) {
+                        const handled = await window.SDRPPBridge.startSpectrum(spectrogramContainer);
+                        if (handled) return;
+                    }
+                    showNotification('Spectrum Simulation', 'SDR++ bridge unavailable; displaying simulated RF data.', 'info');
                     
                     // Add console message
                     addConsoleMessage('Starting RF spectrum scan...', 'command');
                     setTimeout(() => {
-                        addConsoleMessage('SDR tuned to 100-1000 MHz range', 'response');
+                        addConsoleMessage('Simulation active: SDR++ bridge endpoint unavailable', 'response');
                         initializeSpectrogram();
                     }, 500);
                 });
@@ -27125,7 +27164,7 @@ API TIMING (avg ms):
             const scanType = document.getElementById('nmap-scan-type')?.value || 'SYN';
             const serviceDetection = document.getElementById('nmap-service-detection')?.checked || false;
             const osDetection = document.getElementById('nmap-os-detection')?.checked || false;
-            const rfCorrelation = document.getElementById('nmap-rf-correlation')?.checked || false;
+            const rfCorrelation = document.getElementById('nmap-hypergraph-rf-correlation')?.checked || false;
             
             const statusElement = document.getElementById('nmap-status');
             const progressElement = document.getElementById('nmap-progress');

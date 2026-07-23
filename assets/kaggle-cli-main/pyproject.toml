@@ -1,0 +1,112 @@
+[build-system]
+requires = [
+    "hatchling",
+]
+build-backend = "hatchling.build"
+
+[project]
+name = "kaggle"
+dynamic = [
+    "version",
+]
+description = "Access Kaggle resources anywhere"
+authors = [
+    { name = "Kaggle", email = "support@kaggle.com" },
+]
+license = { file = "LICENSE.txt" }
+readme = "README.md"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+]
+keywords = ["Kaggle", "API"]
+requires-python = ">= 3.11"
+dependencies = [
+    "bleach",
+    "kagglesdk >= 0.1.34, < 1.0", # sync with kagglehub
+    "python-slugify",
+    "requests",
+    "python-dateutil",
+    "tqdm",
+    "urllib3 >= 1.15.1",
+    "packaging",
+    "protobuf",
+    "jupytext",
+    "python-dotenv",
+]
+
+[project.scripts]
+kaggle = "kaggle.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/Kaggle/kaggle-cli"
+Issues = "https://github.com/Kaggle/kaggle-cli/issues"
+
+[tool.hatch.version]
+path = "src/kaggle/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/kaggle"]
+
+[tool.hatch.envs.test]
+dependencies = [
+    "pytest",
+    "pytest-cov"
+]
+
+[tool.hatch.envs.test.scripts]
+local = "source tools/use-localhost.sh; cd tests/backend; python backend_tests.py --failfast"
+prod = "source tools/use-prod.sh; cd tests/backend; python backend_tests.py --failfast"
+integration = "pytest tests/integration"
+cov = "pytest --cov=src/kaggle --cov-report=xml --cov-report=html --cov-report=term-missing tests/unit"
+
+[tool.hatch.envs.lint]
+detached = true
+dependencies = [
+    "black >= 24.10.0",
+    "mypy >= 1.15.0",
+    # Pre-install `types-*` packages to speed up lint:typing command.
+    "types-requests",
+    "types-tqdm",
+    "types-python-slugify",
+    # Needed for the `typing` lint command to find the `pytest` types.
+    "pytest"
+]
+
+[tool.hatch.envs.lint.scripts]
+typing = "mypy --install-types --non-interactive {args:src/kaggle tests}"
+style = [
+  "black --check --diff {args:.}",
+]
+fmt = [
+  "black {args:.}",
+  "style",
+]
+all = [
+  "style",
+  "typing",
+]
+
+[tool.docformatter]
+recursive = true
+
+[tool.black]
+target-version = ["py311"]
+line-length = 120
+
+[[tool.mypy.overrides]]
+module = [
+    # TODO(b/505845982): Generate type hints for kagglesdk
+    "kagglesdk.*",
+    "kaggle_api_extended.*",
+    "jupytext.*",
+    "dotenv.*"
+]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = [
+    "tests/unit",
+]
+pythonpath = ["src"]

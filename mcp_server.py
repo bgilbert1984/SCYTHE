@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import json
 import logging
+import hmac
+import os
 import threading
 from collections import defaultdict
 from typing import Any, Dict
@@ -24,11 +26,13 @@ MCP_SERVER_VERSION = "1.3.0"
 
 
 class ToolDef:
-    def __init__(self, name, description, input_schema, fn):
+    def __init__(self, name, description, input_schema, fn, mutates_state=False):
         self.name = name
         self.description = description
         self.input_schema = input_schema
         self.fn = fn
+        self.mutates_state = mutates_state
+        self.side_effect = mutates_state
 
     def to_mcp(self):
         return {"name": self.name, "description": self.description, "inputSchema": self.input_schema}
@@ -210,9 +214,6 @@ class MCPHandler:
     def _handle_tools_call(self, params: Dict[str, Any]):
         name = params.get("name", "")
         arguments = params.get("arguments", {}) or {}
-        agent_mode = params.get("agent_mode", "observe")
-        mutation_budget = params.get("mutation_budget", None)
-
         tool = self._tools.get(name)
         if tool is None:
             raise ValueError(f"Unknown tool: {name}")
@@ -221,14 +222,23 @@ class MCPHandler:
         # Fall back to direct ToolDef.fn for tools registered outside the
         # registry (e.g. graphops_* tools registered by register_graphops_tools).
         if hasattr(self, '_registry') and name in self._registry._tools:
+            registered = self._registry._tools[name]
+            if registered.mutates_state:
+                raise RuntimeError(
+                    f"Direct execution of mutating tool {name} is disabled; "
+                    "use orchestrate/propose, orchestrate/decide, and orchestrate/execute"
+                )
             return self._registry.execute(
                 self.engine,
                 name,
                 arguments,
-                agent_mode=agent_mode,
-                mutation_budget=mutation_budget,
+                agent_mode="observe",
             )
 
+        if getattr(tool, 'mutates_state', False) or getattr(tool, 'side_effect', False):
+            raise RuntimeError(
+                f"Direct execution of mutating tool {name} is disabled; use the orchestrator proposal flow"
+            )
         if hasattr(tool, 'fn'):
             result = tool.fn(arguments)
         elif callable(tool):
@@ -315,6 +325,10 @@ class MCPHandler:
         """Set autonomy phase (0=observe, 1=shadow, 2=limited, 3=adaptive)."""
         if not self._orchestrator:
             raise RuntimeError("Orchestrator not initialized")
+        if os.getenv("MCP_ALLOW_REMOTE_PHASE_CONTROL", "").lower() not in {"1", "true", "yes"}:
+            raise RuntimeError(
+                "Remote autonomy phase changes are disabled; an operator must explicitly enable them"
+            )
 
         phase = params.get("phase", 0)
         dry_run = params.get("dry_run", False)
@@ -374,7 +388,7 @@ class MCPHandler:
 
 
 # -------------------- Register Flask routes --------------------
-def register_mcp_routes(app, engine, use_orchestrator: bool = False):
+def register_mcp_routes(app, engine, use_orchestrator: bool = False, auth_validator=None):
     try:
         handler = MCPHandler(engine, use_orchestrator=use_orchestrator)
     except Exception as exc:
@@ -395,10 +409,36 @@ def register_mcp_routes(app, engine, use_orchestrator: bool = False):
     except Exception as exc:
         logger.warning("[mcp] GraphOps Autopilot registration failed: %s", exc)
 
+    try:
+        from rf_mcp import register_rf_tools
+        register_rf_tools(engine, handler)
+        logger.info("[mcp] RF evidence and guarded control tools registered")
+    except Exception as exc:
+        logger.warning("[mcp] RF tool registration failed: %s", exc)
+
     from flask import request, jsonify
+
+    def _authorized():
+        if auth_validator is not None:
+            try:
+                return bool(auth_validator())
+            except Exception:
+                logger.exception("[mcp] auth validator failed")
+                return False
+        configured = os.getenv("MCP_INTERNAL_TOKEN", "")
+        supplied = request.headers.get("X-Internal-Token", "")
+        if configured:
+            return bool(supplied) and hmac.compare_digest(configured, supplied)
+        return request.remote_addr in {"127.0.0.1", "::1"}
+
+    def _unauthorized():
+        return jsonify({"jsonrpc": "2.0", "id": None,
+                        "error": {"code": -32001, "message": "MCP authentication required"}}), 401
 
     @app.route('/mcp', methods=['POST'])
     def mcp_jsonrpc():
+        if not _authorized():
+            return _unauthorized()
         body = request.get_json(silent=True)
         if not body:
             return jsonify({"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "Parse error"}}), 400
@@ -409,6 +449,8 @@ def register_mcp_routes(app, engine, use_orchestrator: bool = False):
 
     @app.route('/mcp', methods=['GET'])
     def mcp_info():
+        if not _authorized():
+            return _unauthorized()
         return jsonify({
             "name": MCP_SERVER_NAME,
             "version": MCP_SERVER_VERSION,

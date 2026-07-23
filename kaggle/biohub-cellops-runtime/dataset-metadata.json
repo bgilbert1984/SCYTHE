@@ -1,0 +1,15 @@
+{
+  "title": "Biohub CellOps Runtime",
+  "id": "benspectrcydegilbert/biohub-cellops-runtime",
+  "licenses": [
+    {
+      "name": "other"
+    }
+  ],
+  "subtitle": "Offline CellOps schema guards and Trackastra adapter",
+  "description": "Private runtime bundle for the Biohub cell-tracking Kaggle notebook. Contains the CellOps core, canonical node/edge submission guard, and Trackastra adapter.",
+  "keywords": [
+    "biology",
+    "cell-biology"
+  ]
+}

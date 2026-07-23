@@ -75,6 +75,8 @@ class EventCard:
     ip_entropy:        float         = 0.0
     ts:                float         = field(default_factory=time.time)
     suggested_actions: List[str]     = field(default_factory=list)
+    metadata:          Dict[str, Any] = field(default_factory=dict)
+    evidence_refs:     List[str]     = field(default_factory=list)
     investigation:     Optional[Dict[str, Any]] = None  # filled by Tier 3
     # TAK-ML fields
     card_id:           str           = field(default_factory=lambda: _new_card_id())
@@ -101,6 +103,8 @@ class EventCard:
             lines.append(f"Temporal Sync     {self.temporal_sync:.2f}")
         if self.ip_entropy:
             lines.append(f"IP Entropy        {self.ip_entropy:.2f}")
+        if self.evidence_refs:
+            lines.append(f"Evidence          {', '.join(self.evidence_refs[:5])}")
 
         if self.suggested_actions:
             lines.append("")
@@ -265,7 +269,15 @@ class InvestigatorAgent:
         return self._agent
 
     def investigate(self, card: EventCard) -> Dict[str, Any]:
-        if card.source_type == "fanin":
+        if card.source_type == "rf":
+            frequency = card.metadata.get("peak_frequency_hz", "unknown")
+            snr = card.metadata.get("snr_db", "unknown")
+            question = (
+                f"RF evidence {', '.join(card.evidence_refs)} observed a spectral peak at "
+                f"{frequency} Hz with SNR {snr} dB. Correlate it with graph activity in "
+                f"the {card.window_ms}ms window. Clearly distinguish observations from inferences."
+            )
+        elif card.source_type == "fanin":
             question = (
                 f"I detected {card.nodes} sources fanning into a destination node "
                 f"with temporal sync {card.temporal_sync:.2f} and "
@@ -369,6 +381,7 @@ class SentinelLoop:
                     "nodes":     c.nodes,
                     "window_ms": c.window_ms,
                     "ts":        c.ts,
+                    "evidence_refs": list(c.evidence_refs),
                 }
                 for c in self._suggestion_queue
             ]
@@ -424,7 +437,10 @@ class SentinelLoop:
 
     def _route(self, *, source_type: str, pattern: str, nodes: int,
                window_ms: int, confidence: float, node_ids: List[str],
-               temporal_sync: float, ip_entropy: float) -> None:
+               temporal_sync: float, ip_entropy: float,
+               metadata: Optional[Dict[str, Any]] = None,
+               evidence_refs: Optional[List[str]] = None,
+               suggested_actions: Optional[List[str]] = None) -> None:
 
         tier = TierRouter.tier(confidence)
         if tier < 0:
@@ -443,7 +459,9 @@ class SentinelLoop:
                          source_type, pattern, confidence)
             return
 
-        if source_type == "attractor":
+        if suggested_actions is not None:
+            actions = suggested_actions
+        elif source_type == "attractor":
             actions = _ATTRACTOR_ACTIONS.get(pattern, ["Investigate further"])
         elif source_type == "fanin":
             actions = _FANIN_ACTIONS.get(pattern, ["Investigate further"])
@@ -461,6 +479,8 @@ class SentinelLoop:
             temporal_sync     = temporal_sync,
             ip_entropy        = ip_entropy,
             suggested_actions = actions,
+            metadata          = dict(metadata or {}),
+            evidence_refs     = list(evidence_refs or []),
         )
 
         if tier == 0:
@@ -470,6 +490,7 @@ class SentinelLoop:
                     "pattern":    pattern,
                     "confidence": confidence,
                     "source":     source_type,
+                    "evidence_refs": list(card.evidence_refs),
                 })
             logger.debug("[Sentinel] observation %s score=%.2f", pattern, confidence)
             return
@@ -615,7 +636,29 @@ class GraphOpsAutopilot:
                 score, tier, model,
             )
         elif tier == 1:
-            self.sentinel._suggestion_queue.append(card.__dict__)
+            self.sentinel._suggestion_queue.append(card)
+
+    def handle_rf_observation(self, observation: Dict[str, Any]) -> None:
+        """Route an edge-derived RF evidence record through confidence tiers."""
+        snr_db = max(0.0, float(observation.get("snr_db", 0.0)))
+        confidence = min(0.95, 0.60 + snr_db / 100.0)
+        self.sentinel._route(
+            source_type="rf",
+            pattern="rf_strong_signal" if snr_db >= 30.0 else "rf_peak",
+            nodes=0,
+            window_ms=2000,
+            confidence=confidence,
+            node_ids=[str(observation.get("sensor_id", "unknown"))],
+            temporal_sync=0.0,
+            ip_entropy=0.0,
+            metadata=dict(observation),
+            evidence_refs=[str(observation.get("evidence_id", ""))],
+            suggested_actions=[
+                "Query RF observations near this frequency",
+                "Run RF_CORRELATE against graph timestamps",
+                "Verify emitter identity before operational action",
+            ],
+        )
 
     def submit_feedback(self, card_id: str, verdict: str,
                         notes: str = "") -> dict:
@@ -702,6 +745,11 @@ def register_autopilot_tools(engine, mcp_handler,
     if autopilot is None:
         autopilot = GraphOpsAutopilot(engine)
         autopilot.start()
+    try:
+        from rf_bridge import get_rf_observation_store
+        get_rf_observation_store().subscribe(autopilot.handle_rf_observation)
+    except Exception as exc:
+        logger.warning("[GraphOpsAutopilot] RF observation subscription unavailable: %s", exc)
 
     def _status(params: dict) -> dict:
         return autopilot.status()

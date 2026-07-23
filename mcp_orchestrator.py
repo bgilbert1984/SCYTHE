@@ -103,9 +103,9 @@ class AliasMCPOrchestrator:
             logger.info("[orchestrator] Phase 0: Observe-only baseline")
         elif phase == 1:
             self.phase = Phase.PHASE_1_SHADOW_MUTATION
-            self.dry_run = dry_run
+            self.dry_run = True
             self.shadow_mode.enabled = True
-            logger.info("[orchestrator] Phase 1: Shadow mutations (dry_run=%s)", dry_run)
+            logger.info("[orchestrator] Phase 1: Shadow mutations (dry_run=True)")
         elif phase == 2:
             self.phase = Phase.PHASE_2_LIMITED_MUTATION
             self.dry_run = False
@@ -198,6 +198,12 @@ class AliasMCPOrchestrator:
         tool_name = proposal["tool_name"]
         params = proposal["params"]
 
+        if (self.phase == Phase.PHASE_0_OBSERVE_ONLY
+                and tool_name in self._mutation_tools()):
+            proposal["status"] = "blocked"
+            proposal["error"] = "Phase 0 is observe-only; mutation execution is disabled"
+            return {"ok": False, "error": proposal["error"], "phase": self.phase.value}
+
         # Get adaptive budget for this phase
         if self.phase in (Phase.PHASE_2_LIMITED_MUTATION, Phase.PHASE_3_ADAPTIVE_BUDGET):
             mutation_budget = self.dual_agent.executor_trust.adaptive_budget(
@@ -208,7 +214,7 @@ class AliasMCPOrchestrator:
 
         # Execute via registry
         try:
-            if self.shadow_mode.enabled and self.dry_run:
+            if self.phase == Phase.PHASE_1_SHADOW_MUTATION:
                 # Phase 1: shadow mutation
                 current_metrics = {
                     "edge_count": len(getattr(self.engine, "edges", [])),

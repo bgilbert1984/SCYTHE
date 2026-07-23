@@ -1,0 +1,653 @@
+# Benchmarks Commands
+
+Commands for interacting with Kaggle Benchmarks. Benchmarks let you define evaluation tasks as Python scripts, run them against one or more LLM models via the Kaggle Model Proxy, and download the results.
+
+The top-level command is `kaggle benchmarks` (alias: `kaggle b`), which has the following subcommands and groups:
+
+*   **`auth`** — Fetch Model Proxy credentials.
+*   **`init`** — Fetch credentials and default environment variables for local development.
+*   **`leaderboard`** — Get benchmark leaderboard information.
+*   **`tasks`** (alias: `t`) — Manage benchmark tasks (push, run, list, status, download, log, models, delete, publish).
+*   **`topics`** — Browse discussion topics for a benchmark.
+
+## `kaggle benchmarks auth`
+
+Fetches a Model Proxy token and persists the credential environment variables to a file.
+
+**Usage:**
+
+```bash
+kaggle benchmarks auth [options]
+```
+
+**Options:**
+
+*   `-y, --yes`: Automatically confirm without prompting.
+*   `--env-file <FILE>`: File to write environment variables to (default: `.env`).
+
+**Example:**
+
+Write Model Proxy credentials to the default `.env` file, confirming automatically:
+
+```bash
+kaggle b auth -y
+```
+
+**Purpose:**
+
+This command fetches a short-lived Model Proxy API key and URL from Kaggle and appends them to your environment file. The variables written are:
+
+*   `MODEL_PROXY_URL`
+*   `MODEL_PROXY_API_KEY`
+*   `MODEL_PROXY_EXPIRY_TIME`
+
+## `kaggle benchmarks init`
+
+Fetches Model Proxy credentials **and** additional default environment variables useful for local benchmark development. Also generates a starter example task file and a syntax reference document.
+
+**Usage:**
+
+```bash
+kaggle benchmarks init [options]
+```
+
+**Options:**
+
+*   `-y, --yes`: Automatically confirm without prompting.
+*   `--env-file <FILE>`: File to write environment variables to (default: `.env`).
+*   `--example-file <FILE>`: File to write the example benchmark task to (default: `example_task.py`).
+
+**Examples:**
+
+1.  Initialize with defaults (writes `.env`, `example_task.py`, and `kaggle_benchmarks_reference.md`):
+
+    ```bash
+    kaggle b init -y
+    ```
+
+2.  Initialize with a custom env file and example file:
+
+    ```bash
+    kaggle b init -y --env-file my_project/.env --example-file my_project/my_task.py
+    ```
+
+**Purpose:**
+
+In addition to the three credential variables written by `auth`, `init` also writes:
+
+*   `LLM_DEFAULT` — Default model slug for tasks.
+*   `LLM_DEFAULT_EVAL` — Default model slug for evaluation.
+*   `LLMS_AVAILABLE` — Comma-separated list of available model slugs.
+
+> **Note:** `LLMS_AVAILABLE` is a curated subset of models intended for local development and testing — it is **not** the full set of available models, and the Model Proxy token itself is not restricted to these models. To see all available models, use `kaggle benchmarks tasks models`. To run a task against any model (including those not in `LLMS_AVAILABLE`), use `kaggle benchmarks tasks run`, which executes on Kaggle's infrastructure with access to the full model catalog.
+
+`init` also creates two files alongside the example file:
+
+*   **`example_task.py`** (or custom name via `--example-file`) — A starter Python script demonstrating how to define a benchmark task using `@task` decorators and the `kaggle_benchmarks` library.
+*   **`kaggle_benchmarks_reference.md`** — A syntax reference document for the `kaggle-benchmarks` task API.
+
+If either file already exists, it is skipped without overwriting.
+
+---
+
+## `kaggle benchmarks leaderboard`
+
+Get benchmark leaderboard information.
+
+**Usage:**
+
+```bash
+kaggle benchmarks leaderboard <BENCHMARK> [options]
+```
+
+**Arguments:**
+
+*   `<BENCHMARK>`: Benchmark slug (e.g., `owner/benchmark-slug`).
+
+**Options:**
+
+*   `--version <VERSION>`: Benchmark version (optional).
+*   `-s, --show`: Show the leaderboard in the terminal.
+*   `-d, --download`: Download the leaderboard as a CSV file.
+*   `-p, --path <DIRECTORY>`: Folder where the leaderboard will be downloaded (defaults to current working directory).
+*   `-v, --csv`: Print results in CSV format (when used with `--show`).
+*   `--format <FORMAT>`: Print results in a specific format (e.g., `json`).
+
+**Examples:**
+
+1.  Show the leaderboard for a benchmark:
+
+    ```bash
+    kaggle b leaderboard owner/my-benchmark --show
+    ```
+
+2.  Download the leaderboard as CSV:
+
+    ```bash
+    kaggle b leaderboard owner/my-benchmark --download
+    ```
+
+3.  Show a specific version of the leaderboard in JSON format:
+
+    ```bash
+    kaggle b leaderboard owner/my-benchmark --version 2 --show --format json
+    ```
+
+**Purpose:**
+
+Displays or downloads the evaluation results for all models that have run tasks in the specified benchmark. The leaderboard is represented as a table where rows are model versions and columns are benchmark tasks, showing the score achieved by each model on each task.
+
+---
+
+## Tasks Commands
+
+All tasks commands live under `kaggle benchmarks tasks` (alias: `kaggle b t`).
+
+### `kaggle benchmarks tasks push`
+
+Creates or updates a benchmark task from a local Python source file. The file must contain at least one function decorated with `@task`.
+
+**Usage:**
+
+```bash
+kaggle benchmarks tasks push <TASK> -f <FILE> [options]
+```
+
+**Arguments:**
+
+*   `<TASK>`: Task name. Automatically normalized to a URL-safe slug (e.g., `my_task` or `My Task` becomes `my-task`).
+
+**Options:**
+
+*   `-f, --file <FILE>` *(required)*: Path to the source Python file defining the task.
+*   `--wait [TIMEOUT]`: Wait for the task creation to complete. Optionally specify a timeout in seconds (`0` or omit value = wait indefinitely).
+*   `--poll-interval <SECONDS>`: Maximum seconds between status polls (default: `60`). Polling starts at 5s and increases by 50% each iteration until reaching this value.
+*   `-v, --verbose`: Enable verbose polling logs.
+*   `-d, --kaggle-dataset <DATASET>`: Kaggle dataset to attach to the task's underlying notebook (format: `owner/dataset-slug`). Repeat for multiple datasets (e.g. `-d kaggle/titanic -d user/my-dataset`). Mounted at `/kaggle/input/<dataset-slug>/` by default. If a naming conflict occurs, the fully qualified mount path `/kaggle/input/<owner>/<dataset-slug>/` is used instead.
+
+
+**Examples:**
+
+1.  Push a task and return immediately:
+
+    ```bash
+    kaggle b t push my-task -f benchmark.py
+    ```
+
+2.  Push a task and wait for creation to finish:
+
+    ```bash
+    kaggle b t push my-task -f benchmark.py --wait
+    ```
+
+3.  Push a task and wait with a 60-second timeout, polling every 5 seconds:
+ 
+     ```bash
+     kaggle b t push my-task -f benchmark.py --wait 60 --poll-interval 5
+     ```
+ 
+4.  Push a task with Kaggle datasets attached:
+ 
+     ```bash
+     kaggle b t push my-task -f benchmark.py -d kaggle/titanic -d user/my-dataset
+     ```
+ 
+5.  Push a task with datasets and wait:
+ 
+     ```bash
+     kaggle b t push my-task -f benchmark.py --wait -d kaggle/titanic
+     ```
+
+**Purpose:**
+
+This command reads a `.py` file, converts it to a Jupyter notebook format, and uploads it to Kaggle as a benchmark task. If a task with the same slug already exists, a new version is created. The file is validated to ensure it contains a `@task` decorator matching the given task name.
+ 
+**Note on dataset attachment:** When `--kaggle-dataset` / `-d` is specified, the listed datasets are attached to the task's underlying notebook kernel. During execution, they are accessible at `/kaggle/input/<dataset-slug>/` by default, falling back to `/kaggle/input/<owner>/<dataset-slug>/` in the event of a naming conflict. If you re-push without `-d`, all previously-attached datasets are detached (a warning is printed). To preserve datasets across pushes, re-specify them each time. If any specified dataset is invalid, non-existent, or inaccessible, the push command will **fail** with an error: `Failed to push task: Failed to attach the following data sources (not found or inaccessible): <dataset>`.
+
+---
+
+### `kaggle benchmarks tasks run`
+
+Runs a previously pushed task against one or more models.
+
+**Usage:**
+
+```bash
+kaggle benchmarks tasks run <TASK> [options]
+```
+
+**Arguments:**
+
+*   `<TASK>`: Task name (slug, e.g. `my-task`).
+
+**Options:**
+
+*   `-m, --model <MODEL>`: Model slug (e.g. `gemini-2.5-pro`) to run against. Repeat for multiple models (e.g. `-m gemini-2.5-pro -m claude-sonnet-4`). If omitted, an interactive model picker is displayed.
+*   `--wait [TIMEOUT]`: Wait for runs to complete. Optionally specify a timeout in seconds (`0` or omit value = wait indefinitely).
+*   `--poll-interval <SECONDS>`: Maximum seconds between status polls (default: `60`). Polling starts at 5s and increases by 50% each iteration until reaching this value.
+*   `-v, --verbose`: Enable verbose polling logs.
+
+**Examples:**
+
+1.  Run a task with interactive model selection:
+
+    ```bash
+    kaggle b t run my-task
+    ```
+
+2.  Run a task against specific models:
+
+    ```bash
+    kaggle b t run my-task -m gemini-2.5-pro -m claude-sonnet-4
+    ```
+
+3.  Run a task and wait for all runs to finish:
+
+    ```bash
+    kaggle b t run my-task -m gemini-2.5-pro --wait
+    ```
+
+**Purpose:**
+
+This command schedules benchmark runs on the server. The task must be in a `COMPLETED` creation state before it can be run. If no models are specified, the CLI presents a paginated list of available models for interactive selection.
+
+---
+
+### `kaggle benchmarks tasks list`
+
+Lists benchmark tasks owned by the current user.
+
+**Usage:**
+
+```bash
+kaggle benchmarks tasks list [options]
+```
+
+**Options:**
+
+*   `--name-regex <REGEX>`: Filter task names by regular expression.
+*   `--status <STATUS>`: Filter tasks by creation status. Valid values: `queued`, `running`, `completed`, `errored`.
+
+**Examples:**
+
+1.  List all your tasks:
+
+    ```bash
+    kaggle b t list
+    ```
+
+2.  List only completed tasks whose names contain "gemini":
+
+    ```bash
+    kaggle b t list --name-regex gemini --status completed
+    ```
+
+**Purpose:**
+
+Displays a table of your benchmark tasks showing the task slug, current version (or `unset` if unavailable), creation status, and creation timestamp.
+
+---
+
+### `kaggle benchmarks tasks status`
+
+Shows task details and per-model run status.
+
+**Usage:**
+
+```bash
+kaggle benchmarks tasks status <TASK> [options]
+```
+
+**Arguments:**
+
+*   `<TASK>`: Task name (slug, e.g. `my-task`).
+
+**Options:**
+
+*   `-m, --model <MODEL>`: Filter the run table to a specific model slug (e.g. `gemini-2.5-pro`). Repeat for multiple models.
+
+**Examples:**
+
+1.  Show full status for a task:
+
+    ```bash
+    kaggle b t status my-task
+    ```
+
+2.  Show status for specific models only:
+
+    ```bash
+    kaggle b t status my-task -m gemini-2.5-pro
+    ```
+
+**Purpose:**
+
+Prints the task's metadata (slug, creation status, creation time, URL) followed by a table of all runs. Each run row shows the model name, run state, start time, and end time. Any errored runs display their error messages below the table.
+
+If task creation itself failed, the `Status:` line shows the failure *kind* — the cleaned creation-state enum, titlecased (e.g. `Kernel_Without_Run`, `No_Model_Specified`, `Validation_Failed`, `Errored`) — and an `Error:` line is appended below it with the server-provided `creation_error_message` explaining what went wrong.
+
+---
+
+### `kaggle benchmarks tasks download`
+
+Downloads output files for completed benchmark runs.
+
+**Usage:**
+
+```bash
+kaggle benchmarks tasks download <TASK> [options]
+```
+
+**Arguments:**
+
+*   `<TASK>`: Task name (slug, e.g. `my-task`).
+
+**Options:**
+
+*   `-m, --model <MODEL>`: Download outputs only for a specific model slug (e.g. `gemini-2.5-pro`). Repeat for multiple models.
+*   `-o, --output <DIRECTORY>`: Directory to download output files into (defaults to current working directory).
+*   `-s, --include-source`: Also download the kernel session's source notebooks.
+*   `-f, --force`: Force re-download of already completed runs, overwriting local files.
+
+**Examples:**
+
+1.  Download all completed run outputs for a task:
+
+    ```bash
+    kaggle b t download my-task
+    ```
+
+2.  Download outputs for a specific model into a custom directory:
+
+    ```bash
+    kaggle b t download my-task -m gemini-2.5-pro -o ./results
+    ```
+
+3.  Download outputs with source notebooks included:
+
+    ```bash
+    kaggle b t download my-task --include-source
+    ```
+
+4.  Force re-download of previously downloaded runs:
+
+    ```bash
+    kaggle b t download my-task --force
+    ```
+
+**Purpose:**
+
+Downloads and extracts the output zip archive for each completed run. Files are organized in a hierarchical layout that includes the task's version number (or `unset` if unavailable):
+
+```
+<output>/<task>/<version>/<model>/<run_id>/
+   ├── output files...
+```
+
+Progress is rendered as a table with one row per run:
+
+```
+Model                File                                     Size       Progress
+──────────────────── ──────────────────────────────────────── ────────── ──────────
+gemini-2.5-pro       gemini-2.5-pro/12345/                    1.24MB     Done
+claude-sonnet-4      claude-sonnet-4/12346/                   2.10MB     Cached
+```
+
+The `Size` column reports the extracted on-disk size of the run's output directory. The `Progress` column is one of `Done` (freshly downloaded), `Cached` (output directory already on disk from a previous download), or `Bad zip` (downloaded archive was corrupt).
+
+Already-downloaded runs (where the output directory exists) are automatically skipped — they appear as `Cached` rows — unless the `-f` / `--force` flag is used, in which case they are overwritten.
+
+When `--include-source` is used, the downloaded zip also contains the kernel session's source files (e.g., `__notebook__.ipynb` and `__notebook_source__.ipynb`).
+
+If you re-run with `-s` after a previous download that omitted source notebooks, the cached directories are not re-fetched and the `-s` flag is effectively ignored. The CLI detects this and prints a tip after the summary:
+
+```
+Tip: 2 cached run(s) lack source notebooks. Re-run with -f -s to fetch them.
+```
+
+Use `-f -s` together to force re-download and backfill the source notebooks into the cached runs.
+
+---
+
+### `kaggle benchmarks tasks log`
+
+Get execution logs for benchmark task run(s).
+
+**Usage:**
+
+```bash
+kaggle benchmarks tasks log <TASK> [options]
+```
+
+**Arguments:**
+
+*   `<TASK>`: Task name (slug, e.g. `my-task`).
+
+**Options:**
+
+*   `-m, --model <MODEL>`: Filter logs to a specific model slug (e.g. `gemini-2.5-pro`). Repeat for multiple models. If omitted, logs for all runs are shown.
+
+**Aliases:** `log`, `logs`
+
+**Examples:**
+
+1.  Show logs for all runs of a task:
+
+    ```bash
+    kaggle b t log my-task
+    ```
+
+2.  Show logs for a specific model's run(s):
+
+    ```bash
+    kaggle b t log my-task -m gemini-2.5-pro
+    ```
+
+3.  Show logs for multiple models:
+
+    ```bash
+    kaggle b t logs my-task -m gemini-2.5-pro -m claude-sonnet-4
+    ```
+
+**Purpose:**
+
+Fetches and displays execution logs for benchmark task runs. Each run's logs are printed with a structured header and footer for clear identification:
+
+```
+═══ Logs for gemini-2.5-pro (Run 123) [COMPLETED] ═══
+<log output>
+═══ (42 lines) ═══
+
+═══ Logs for claude-sonnet-4 (Run 456) [ERRORED] ═══
+<log output>
+═══ (18 lines) ═══
+
+Showed logs for 2 run(s) across 2 model(s).
+```
+
+*   **Header**: Shows model name, run ID, and run state (`COMPLETED`, `ERRORED`, `RUNNING`, etc.).
+*   **Footer**: Shows the line count for each run's log output.
+*   **Summary**: Printed at the end with total run and model counts.
+
+The command handles two response types from the server:
+
+*   **Active runs**: Logs are streamed in real-time via Server-Sent Events (SSE).
+*   **Completed runs**: The persisted log file is returned and printed.
+
+### Concurrency & Streaming Order
+
+When viewing logs for multiple concurrent model runs, the CLI processes and outputs them **sequentially** to prevent logs from interleaving and garbling your terminal output:
+1. The CLI prints the header for the first model run in the queue.
+2. If that run is currently active, the CLI blocks and streams its log output in real-time via SSE until it completes.
+3. The log output for the next model run will **only** be printed once the previous model run's log stream finishes and closes.
+4. Any model runs that complete in the background while you are watching the first stream will print instantly as completed persisted logs once their turn in the sequence is reached.
+
+### Model Slug Normalization
+
+Benchmark model names are automatically normalized on both input and output. This makes it easy to pass various formats interchangeably while keeping displays and directories clean.
+
+*   **Flexible Inputs**: The CLI accepts model names in several formats:
+    *   **Canonical Slugs (recommended)**: `gemini-2.5-pro` or `claude-sonnet-4`
+    *   **With Provider Prefix**: `google/gemini-2.5-pro` or `anthropic/claude-sonnet-4`
+    *   **With Version/Proxy `@` symbols**: `anthropic/claude-haiku-4-5@20251001` or `claude-sonnet-4-6@default`
+*   **Unified Normalization**: The client automatically strips any provider prefix (e.g., `google/` or `anthropic/`) and replaces `@` characters with `-` to match the server's canonical database slug format.
+*   **Clean Outputs**:
+    *   **Status Display**: Tables and error logs display the canonical, hyphenated slugs (e.g., `claude-haiku-4-5-20251001` and `gemini-2.0-flash-lite-001`) for readability.
+    *   **Hierarchical Downloads**: Run outputs are extracted into clean folders using the canonical slugs (e.g., `./<task>/<version>/claude-haiku-4-5-20251001/<run_id>/`), with no `@` or `/` symbols in folder names.
+
+---
+
+### `kaggle benchmarks tasks models`
+
+Lists all available benchmark models.
+
+**Usage:**
+
+```bash
+kaggle benchmarks tasks models
+```
+
+**Example:**
+
+```bash
+kaggle b t models
+```
+
+**Purpose:**
+
+Prints a table of all models available for benchmark runs, showing each model's slug and display name. This is useful for discovering valid model slugs to pass to `run`, `status`, or `download` commands.
+
+---
+
+### `kaggle benchmarks tasks delete`
+
+Removes a benchmark task.
+
+**Usage:**
+
+```bash
+kaggle benchmarks tasks delete <TASK> [options]
+```
+
+**Arguments:**
+
+*   `<TASK>`: Task name (slug, e.g. `my-task`).
+
+**Options:**
+
+*   `-y, --yes`: Automatically confirm deletion without prompting.
+
+**Example:**
+
+```bash
+kaggle b t delete my-task -y
+```
+
+**Purpose:**
+
+Deletes a benchmark task and all associated runs. **Note:** This command is not yet supported by the server.
+ 
+---
+ 
+### `kaggle benchmarks tasks publish`
+ 
+Publishes a benchmark task, making it publicly visible. By default, the backing notebook is also published.
+ 
+**Usage:**
+ 
+```bash
+kaggle benchmarks tasks publish <TASK> [options]
+```
+ 
+**Arguments:**
+ 
+*   `<TASK>`: Task name (slug, e.g. `my-task`).
+ 
+**Options:**
+ 
+*   `--no-publish-backing-notebook`: Do not publish the backing notebook (it is published by default).
+ 
+**Examples:**
+ 
+1.  Publish a task and its backing notebook (default):
+ 
+    ```bash
+    kaggle b t publish my-task
+    ```
+ 
+2.  Publish a task without its backing notebook:
+ 
+    ```bash
+    kaggle b t publish my-task --no-publish-backing-notebook
+    ```
+ 
+**Purpose:**
+ 
+This command changes the task's visibility from private to public. By default, the backing notebook (the kernel associated with the task) is also published. Use `--no-publish-backing-notebook` to publish only the task metadata. Publishing is idempotent — re-publishing an already-public task prints a message and returns successfully. Unpublishing is not supported through this command.
+
+## `kaggle benchmarks topics list`
+
+Lists discussion topics for a benchmark.
+
+**Usage:**
+
+```bash
+kaggle benchmarks topics list <BENCHMARK> [options]
+```
+
+**Arguments:**
+
+*   `<BENCHMARK>`: Benchmark slug (e.g., `kaggle/chess`).
+
+**Options:**
+
+*   `--sort-by <SORT_BY>`: Sort order. Valid options: `hot`, `top`, `new`, `recent`, `active`, `relevance`.
+*   `-s, --search <SEARCH_TERM>`: Search query to filter topics.
+*   `--page-size <PAGE_SIZE>`: Number of items per page.
+*   `--page-token <PAGE_TOKEN>`: Page token for pagination.
+*   `-v, --csv`: Print results in CSV format.
+*   `-q, --quiet`: Suppress verbose output.
+
+**Example:**
+
+```bash
+kaggle benchmarks topics list kaggle/chess
+```
+
+**Purpose:**
+
+This command lets you browse discussion topics for a specific benchmark.
+
+## `kaggle benchmarks topics show`
+
+Displays a benchmark discussion topic with all comments in tree form.
+
+**Usage:**
+
+```bash
+kaggle benchmarks topics show <TOPIC_REF> [options]
+```
+
+**Arguments:**
+
+*   `<TOPIC_REF>`: A topic reference, which can be:
+    *   `<benchmark>/<topic-id>` (e.g., `kaggle/chess/614080` - note that this supports multi-slash benchmark slugs)
+    *   `<benchmark> <topic-id>` (two separate arguments, where `<topic-id>` is passed as second argument)
+    *   `<topic-id>` (bare numeric ID)
+
+**Options:**
+
+*   `--page-size <PAGE_SIZE>`: Number of comments to show per page.
+*   `--page-token <PAGE_TOKEN>`: Page token for comment pagination.
+*   `-v, --csv`: Print results in CSV format.
+*   `-q, --quiet`: Suppress verbose output.
+
+**Example:**
+
+```bash
+kaggle benchmarks topics show kaggle/chess/614080
+```
+
+**Purpose:**
+
+This command displays a full discussion topic along with all of its comments rendered in an indented tree structure.

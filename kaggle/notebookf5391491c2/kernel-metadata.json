@@ -1,0 +1,22 @@
+{
+  "id": "benspectrcydegilbert/notebookf5391491c2",
+  "id_no": 125993970,
+  "title": "notebookf5391491c2",
+  "code_file": "notebookf5391491c2.ipynb",
+  "language": "python",
+  "kernel_type": "notebook",
+  "is_private": true,
+  "enable_gpu": true,
+  "enable_internet": false,
+  "machine_shape": "NvidiaTeslaT4",
+  "dataset_sources": [
+    "benspectrcydegilbert/biohub-cellops-runtime"
+  ],
+  "competition_sources": [
+    "biohub-cell-tracking-during-development"
+  ],
+  "kernel_sources": [],
+  "model_sources": [
+    "jirkaborovec/biohubcelltrack-trackastra-artifact-and-packages/pytorch/default/1"
+  ]
+}

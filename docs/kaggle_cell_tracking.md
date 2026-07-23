@@ -128,7 +128,45 @@ Once you run **Save Version / Commit**, navigate to the notebook's **Output** pa
 
 ---
 
-## 5. Common Causes of "Submission CSV Not Found"
+## 5. Submit the Saved Notebook Version
+
+For this code competition, submit the output of a completed saved Notebook Version.
+The current Kaggle CLI documents the competition slug as a positional argument;
+`-k/--kernel` selects the notebook and `-v/--version` selects its integer version.
+
+First confirm that the selected version completed and exposes the required file:
+
+```bash
+kaggle kernels status benspectrcydegilbert/notebookf5391491c2
+kaggle kernels files benspectrcydegilbert/notebookf5391491c2
+```
+
+Then submit that version:
+
+```bash
+kaggle competitions submit biohub-cell-tracking-during-development \
+  -f submission.csv \
+  -k benspectrcydegilbert/notebookf5391491c2 \
+  -v <integer-version> \
+  -m "CellOps schema-guarded Trackastra submission"
+```
+
+Finally, confirm that Kaggle accepted the request and inspect its scoring state:
+
+```bash
+kaggle competitions submissions biohub-cell-tracking-during-development
+```
+
+Do not run the submit command with literal placeholder values. The notebook slug is
+the URL slug after the Kaggle username, and the version must be the completed saved
+version containing `/kaggle/working/submission.csv`. The `-f submission.csv` argument
+names that notebook output; it is not a substitute for a successful notebook rerun.
+
+Official reference: [Kaggle CLI competition submission documentation](https://github.com/Kaggle/kaggle-cli/blob/main/docs/competitions.md#kaggle-competitions-submit).
+
+---
+
+## 6. Common Causes of "Submission CSV Not Found"
 
 Your private evaluation run can fail to produce the CSV due to any of the following:
 * **Directory Drift:** Writing to a relative path (e.g., `./submission.csv`) instead of `/kaggle/working/submission.csv`.

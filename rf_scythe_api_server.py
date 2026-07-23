@@ -3673,6 +3673,179 @@ if FLASK_AVAILABLE:
             "message": str(e)
         }), 500
 
+    # ── SDR++ edge bridge -------------------------------------------------
+    # SDR++ remains a separate native process.  These routes are the only
+    # browser-facing boundary for its local IQ Exporter and Rigctl sockets.
+    try:
+        from rf_bridge import get_rf_bridge
+        RF_BRIDGE_AVAILABLE = True
+    except Exception as _rf_bridge_import_error:
+        get_rf_bridge = None
+        RF_BRIDGE_AVAILABLE = False
+        logger.warning("SDR++ bridge unavailable: %s", _rf_bridge_import_error)
+
+    def _rf_bridge_authorized(require_identity=False):
+        """Validate operator or internal credentials for SDR control routes."""
+        import hmac
+
+        configured_internal = app.config.get('INTERNAL_TOKEN', '')
+        supplied_internal = request.headers.get('X-Internal-Token', '')
+        if configured_internal and supplied_internal and hmac.compare_digest(
+            str(configured_internal), str(supplied_internal)
+        ):
+            return True
+
+        manager = globals().get('operator_manager')
+        # Browser SDR routes preserve anonymous development mode. MCP requires
+        # an identity unless the caller is loopback on a development instance.
+        if not manager:
+            return (not require_identity) or request.remote_addr in ('127.0.0.1', '::1')
+
+        token = (
+            request.headers.get('X-Session-Token')
+            or request.headers.get('Authorization', '').replace('Bearer ', '').strip()
+        )
+        if not token:
+            return False
+        try:
+            if hasattr(manager, 'validate_session'):
+                return bool(manager.validate_session(token))
+            return bool(manager.get_operator_for_session(token))
+        except Exception:
+            return False
+
+    def _rf_bridge_or_error():
+        if not RF_BRIDGE_AVAILABLE or get_rf_bridge is None:
+            return None, (jsonify({
+                'status': 'error',
+                'message': 'SDR++ edge bridge is unavailable',
+            }), 503)
+        try:
+            return get_rf_bridge(), None
+        except Exception as exc:
+            logger.exception("Failed to initialize SDR++ bridge")
+            return None, (jsonify({'status': 'error', 'message': str(exc)}), 503)
+
+    @app.route('/api/sdr/status', methods=['GET'])
+    def sdr_bridge_status():
+        if not _rf_bridge_authorized():
+            return jsonify({'status': 'error', 'message': 'Authentication required'}), 401
+        bridge, error = _rf_bridge_or_error()
+        if error:
+            return error
+        include_control = request.args.get('control', '').lower() in ('1', 'true', 'yes')
+        return jsonify(bridge.status(include_control=include_control))
+
+    @app.route('/api/sdr/start', methods=['POST'])
+    def sdr_bridge_start():
+        if not _rf_bridge_authorized():
+            return jsonify({'status': 'error', 'message': 'Authentication required'}), 401
+        bridge, error = _rf_bridge_or_error()
+        if error:
+            return error
+        started = bridge.start()
+        return jsonify({'status': 'ok', 'started': started, 'bridge': bridge.status()})
+
+    @app.route('/api/sdr/stop', methods=['POST'])
+    def sdr_bridge_stop():
+        if not _rf_bridge_authorized():
+            return jsonify({'status': 'error', 'message': 'Authentication required'}), 401
+        bridge, error = _rf_bridge_or_error()
+        if error:
+            return error
+        stopped = bridge.stop()
+        return jsonify({'status': 'ok', 'stopped': stopped, 'bridge': bridge.status()})
+
+    @app.route('/api/sdr/tune', methods=['POST'])
+    def sdr_bridge_tune():
+        if not _rf_bridge_authorized():
+            return jsonify({'status': 'error', 'message': 'Authentication required'}), 401
+        bridge, error = _rf_bridge_or_error()
+        if error:
+            return error
+        body = request.get_json(silent=True) or {}
+        try:
+            frequency_hz = float(body['frequency_hz'])
+            mode = body.get('mode')
+            bandwidth_hz = int(body.get('bandwidth_hz', 0))
+            control = bridge.tune(frequency_hz, mode=mode, bandwidth_hz=bandwidth_hz)
+            return jsonify({'status': 'ok', 'control': control, 'bridge': bridge.status()})
+        except KeyError:
+            return jsonify({'status': 'error', 'message': 'frequency_hz is required'}), 400
+        except ValueError as exc:
+            return jsonify({'status': 'error', 'message': str(exc)}), 400
+        except Exception as exc:
+            logger.warning("SDR++ tune failed: %s", exc)
+            return jsonify({'status': 'error', 'message': str(exc)}), 503
+
+    @app.route('/api/sdr/config', methods=['POST'])
+    def sdr_bridge_configure():
+        if not _rf_bridge_authorized():
+            return jsonify({'status': 'error', 'message': 'Authentication required'}), 401
+        bridge, error = _rf_bridge_or_error()
+        if error:
+            return error
+        body = request.get_json(silent=True) or {}
+        try:
+            status = bridge.configure_stream(**body)
+            return jsonify({'status': 'ok', 'bridge': status})
+        except (TypeError, ValueError) as exc:
+            return jsonify({'status': 'error', 'message': str(exc)}), 400
+
+    @app.route('/api/sdr/spectrum/latest', methods=['GET'])
+    def sdr_bridge_latest_spectrum():
+        if not _rf_bridge_authorized():
+            return jsonify({'status': 'error', 'message': 'Authentication required'}), 401
+        bridge, error = _rf_bridge_or_error()
+        if error:
+            return error
+        frame = bridge.latest_frame()
+        if frame is None:
+            return jsonify({
+                'status': 'waiting',
+                'message': 'No SDR++ spectrum frame has been received',
+                'bridge': bridge.status(),
+            }), 202
+        return jsonify({'status': 'ok', 'frame': frame})
+
+    @app.route('/api/sdr/spectrum/stream', methods=['GET'])
+    def sdr_bridge_spectrum_stream():
+        """Stream newline-delimited FFT frames; fetch() supplies auth headers."""
+        if not _rf_bridge_authorized():
+            return jsonify({'status': 'error', 'message': 'Authentication required'}), 401
+        bridge, error = _rf_bridge_or_error()
+        if error:
+            return error
+        try:
+            after = max(0, int(request.args.get('after', '0')))
+        except ValueError:
+            return jsonify({'status': 'error', 'message': 'after must be an integer'}), 400
+
+        from flask import stream_with_context
+
+        @stream_with_context
+        def generate():
+            sequence = after
+            while True:
+                frame = bridge.wait_for_frame(sequence, timeout_s=15.0)
+                if frame is None:
+                    if not bridge.status().get('running'):
+                        yield json.dumps({'type': 'bridge_stopped', 'sequence': sequence}) + '\n'
+                        break
+                    yield json.dumps({'type': 'heartbeat', 'sequence': sequence}) + '\n'
+                    continue
+                sequence = int(frame['sequence'])
+                yield json.dumps({'type': 'spectrum', 'frame': frame}, separators=(',', ':')) + '\n'
+
+        return Response(
+            generate(),
+            mimetype='application/x-ndjson',
+            headers={
+                'Cache-Control': 'no-store',
+                'X-Accel-Buffering': 'no',
+            },
+        )
+
     # In-memory OAuth broker stores (simple, non-persistent stub)
     # state -> { provider, fusionauth_host, client_id, scopes, created }
     CLOUD_OAUTH_STATES = {}
@@ -10720,9 +10893,9 @@ if FLASK_AVAILABLE:
             logger.error(f"Error getting entity {entity_id}: {e}")
             return jsonify({'status': 'error', 'message': str(e)}), 500
 
-    @app.route('/api/sensors', methods=['GET'])
+    @app.route('/api/sensors/registry', methods=['GET'])
     def get_sensors():
-        """Get all registered sensors."""
+        """Inspect the legacy sensor registry without shadowing canonical sensors."""
         try:
             if not sensor_registry_instance:
                  return jsonify({'status': 'error', 'message': 'Sensor registry not initialized'}), 503
@@ -12216,6 +12389,29 @@ if FLASK_AVAILABLE:
             lon = float(location.get('lon', location.get('lng', 0)))
             alt = float(location.get('alt_m', location.get('alt', 0)))
 
+            # Accept the browser's legacy tx_config/rx_config shape while the
+            # canonical API converges on tx/rx band descriptions.
+            legacy_tx = data.get('tx_config') or {}
+            legacy_rx = data.get('rx_config') or {}
+            tx = data.get('tx')
+            if tx is None and legacy_tx:
+                tx_frequency = legacy_tx.get('frequency_mhz')
+                tx = {
+                    'enabled': tx_frequency is not None,
+                    'bands_mhz': [[tx_frequency, tx_frequency]] if tx_frequency is not None else [],
+                    'max_eirp_dbm': legacy_tx.get('power_dbm', 0),
+                    'waveforms': legacy_tx.get('waveforms', []),
+                }
+            rx = data.get('rx')
+            if rx is None and legacy_rx:
+                rx_frequency = legacy_rx.get('frequency_mhz')
+                rx = {
+                    'enabled': True,
+                    'bands_mhz': [[rx_frequency, rx_frequency]] if rx_frequency is not None else [[30, 6000]],
+                    'sensitivity_dbm': legacy_rx.get('sensitivity_dbm', -110),
+                    'sample_rate_hz': legacy_rx.get('sample_rate_hz', 2400000),
+                }
+
             # Build sensor object
             sensor = {
                 'sensor_id': sensor_id,
@@ -12223,16 +12419,17 @@ if FLASK_AVAILABLE:
                 'entity_type': 'SENSOR',
                 'type': 'SENSOR',
                 'name': data.get('name') or data.get('label') or sensor_id,
+                'label': data.get('label') or data.get('name') or sensor_id,
                 'kind': 'sensor',
                 'position': [lat, lon, alt],  # Normalized for hypergraph/UI
                 'location': {'lat': lat, 'lon': lon, 'alt_m': alt},
-                'tx': data.get('tx') or {
+                'tx': tx or {
                     'enabled': False,
                     'bands_mhz': [],
                     'max_eirp_dbm': 0,
                     'waveforms': []
                 },
-                'rx': data.get('rx') or {
+                'rx': rx or {
                     'enabled': True,
                     'bands_mhz': [[30, 6000]],  # Default wideband
                     'sensitivity_dbm': -110,
@@ -12259,6 +12456,22 @@ if FLASK_AVAILABLE:
                 },
                 'last_update': time.time(),
                 'created': sensor_store.get(node_id, {}).get('created') or time.time()
+            }
+            # Compatibility projections for clients still using one tuned
+            # frequency rather than a band list.
+            def _first_band_frequency(radio):
+                bands = radio.get('bands_mhz') or []
+                first = bands[0] if bands else []
+                return first[0] if first else None
+
+            sensor['tx_config'] = legacy_tx or {
+                'frequency_mhz': _first_band_frequency(sensor['tx']),
+                'power_dbm': sensor['tx'].get('max_eirp_dbm'),
+            }
+            sensor['rx_config'] = legacy_rx or {
+                'frequency_mhz': _first_band_frequency(sensor['rx']),
+                'sensitivity_dbm': sensor['rx'].get('sensitivity_dbm'),
+                'sample_rate_hz': sensor['rx'].get('sample_rate_hz'),
             }
 
             # Get operator for provenance
@@ -20409,7 +20622,12 @@ def main():
 
         eng = globals().get('hypergraph_engine')
         if eng is not None:
-            mcp_handler = register_mcp_routes(app, eng)
+            mcp_handler = register_mcp_routes(
+                app,
+                eng,
+                use_orchestrator=True,
+                auth_validator=lambda: _rf_bridge_authorized(require_identity=True),
+            )
             logger.info('MCP server registered at /mcp (%d tools, %d resources)',
                         len(mcp_handler._tools), len(mcp_handler._resources))
 
