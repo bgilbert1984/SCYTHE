@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://scythe.local/schemas/optical-dataset-1.0.json",
+  "title": "SCYTHE Optical Dataset Metadata",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "wavelengthNm",
+    "sampleSpacingMeters",
+    "coordinateSystem",
+    "phaseUnits",
+    "intensityUnits",
+    "intensityNormalization",
+    "polarizationRepresentation",
+    "solver",
+    "solverVersion",
+    "provenance",
+    "generatedUtc",
+    "depthPlanePositionsMeters",
+    "laneMaskSemantics"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "1.0"
+    },
+    "wavelengthNm": {
+      "type": "number",
+      "exclusiveMinimum": 0
+    },
+    "sampleSpacingMeters": {
+      "type": "number",
+      "exclusiveMinimum": 0
+    },
+    "coordinateSystem": {
+      "type": "string",
+      "description": "For example: right-handed, x-right, y-up, z-forward."
+    },
+    "phaseUnits": {
+      "const": "radians"
+    },
+    "intensityUnits": {
+      "type": "string",
+      "enum": ["W/m^2", "normalized"]
+    },
+    "intensityNormalization": {
+      "type": "string",
+      "description": "Required even for physical values; use 'none' when no scaling was applied."
+    },
+    "polarizationRepresentation": {
+      "type": "string",
+      "enum": ["stokes-IQUV", "jones-ExEy-complex", "none"]
+    },
+    "solver": {
+      "type": "string"
+    },
+    "solverVersion": {
+      "type": "string"
+    },
+    "provenance": {
+      "type": "string",
+      "description": "Who produced the dataset, input configuration, and source revision."
+    },
+    "generatedUtc": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "depthPlanePositionsMeters": {
+      "type": "array",
+      "items": {
+        "type": "number"
+      }
+    },
+    "laneMaskSemantics": {
+      "type": "string",
+      "description": "Meaning of each integer label or 'none'."
+    }
+  }
+}

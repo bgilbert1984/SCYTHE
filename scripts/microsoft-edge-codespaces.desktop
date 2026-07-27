@@ -1,0 +1,12 @@
+[Desktop Entry]
+Version=1.0
+Name=Microsoft Edge (Codespaces)
+GenericName=Web Browser
+Comment=Edge with virtual-desktop compatibility flags
+Exec=/usr/local/bin/microsoft-edge-codespaces %U
+Terminal=false
+Type=Application
+Icon=microsoft-edge
+Categories=Network;WebBrowser;
+MimeType=text/html;x-scheme-handler/http;x-scheme-handler/https;
+StartupNotify=true

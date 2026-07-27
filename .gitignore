@@ -27,3 +27,15 @@ ftp_share/
 *.pcapng*
 
 .DS_Store
+
+# Unity generated content
+UnityProject/[Ll]ibrary/
+UnityProject/[Tt]emp/
+UnityProject/[Oo]bj/
+UnityProject/[Ll]ogs/
+UnityProject/[Uu]ser[Ss]ettings/
+UnityProject/[Mm]emoryCaptures/
+UnityProject/Builds/
+*.alf
+*.ulf
+.unity-desktop/

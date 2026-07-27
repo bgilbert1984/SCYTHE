@@ -1,0 +1,26 @@
+{
+  "schemaVersion": "1.0",
+  "scenarioId": "rf-milestone-01",
+  "displayName": "Single RF Link",
+  "description": "A mobile first-person RF probe traverses one deterministic transmitter-to-receiver complex-baseband link with selectable ASK, FSK, BPSK, and QPSK modulation. The channel is an explicitly approximate free-space amplitude model with additive white Gaussian noise and one-way motion-derived Doppler.",
+  "seed": 424242,
+  "fixedStepSeconds": 0.016666667,
+  "carrierFrequencyHz": 2400000000.0,
+  "symbolRateBaud": 1000.0,
+  "samplesPerSymbol": 16,
+  "transmitterPowerWatts": 1.0,
+  "channelNoiseStdDev": 0.00002,
+  "linkFrameIntervalSeconds": 0.5,
+  "transmitterPositionMeters": {
+    "x": -4.0,
+    "y": 0.25,
+    "z": 1.5
+  },
+  "probeStartPositionMeters": {
+    "x": 4.0,
+    "y": 0.05,
+    "z": -2.0
+  },
+  "probeWalkSpeedMetersPerSecond": 3.5,
+  "probeSprintSpeedMetersPerSecond": 6.0
+}
