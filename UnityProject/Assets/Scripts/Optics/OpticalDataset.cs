@@ -34,6 +34,8 @@ namespace SCYTHE.Optics
             Require(solver, nameof(solver));
             Require(solverVersion, nameof(solverVersion));
             Require(provenance, nameof(provenance));
+            Require(generatedUtc, nameof(generatedUtc));
+            Require(laneMaskSemantics, nameof(laneMaskSemantics));
 
             if (wavelengthNm <= 0f || sampleSpacingMeters <= 0f)
             {
@@ -43,6 +45,38 @@ namespace SCYTHE.Optics
             if (!string.Equals(phaseUnits, "radians", StringComparison.OrdinalIgnoreCase))
             {
                 throw new InvalidDataException("SCYTHE optical phase assets must use radians.");
+            }
+
+            if (!string.Equals(schemaVersion, "1.0", StringComparison.Ordinal))
+            {
+                throw new InvalidDataException($"Unsupported optical schemaVersion {schemaVersion}.");
+            }
+
+            if (!string.Equals(intensityUnits, "W/m^2", StringComparison.Ordinal)
+                && !string.Equals(intensityUnits, "normalized", StringComparison.Ordinal))
+            {
+                throw new InvalidDataException("Optical intensity units must be W/m^2 or normalized.");
+            }
+
+            if (!string.Equals(polarizationRepresentation, "stokes-IQUV", StringComparison.Ordinal)
+                && !string.Equals(polarizationRepresentation, "jones-ExEy-complex", StringComparison.Ordinal)
+                && !string.Equals(polarizationRepresentation, "none", StringComparison.Ordinal))
+            {
+                throw new InvalidDataException("Unsupported optical polarization representation.");
+            }
+
+            if (!DateTime.TryParse(
+                generatedUtc,
+                null,
+                System.Globalization.DateTimeStyles.AdjustToUniversal,
+                out _))
+            {
+                throw new InvalidDataException("Optical generatedUtc must be an ISO-compatible timestamp.");
+            }
+
+            if (depthPlanePositionsMeters == null)
+            {
+                throw new InvalidDataException("Optical depthPlanePositionsMeters cannot be null.");
             }
         }
 
@@ -74,6 +108,43 @@ namespace SCYTHE.Optics
 
             OpticalMetadata metadata = JsonUtility.FromJson<OpticalMetadata>(metadataJson.text);
             metadata.Validate();
+            return metadata;
+        }
+
+        public OpticalMetadata ValidateCompleteDataset()
+        {
+            OpticalMetadata metadata = ParseAndValidateMetadata();
+            if (phaseRadians == null || intensity == null)
+            {
+                throw new InvalidDataException(
+                    "A complete optical dataset requires phase.exr and intensity.exr.");
+            }
+
+            if (phaseRadians.width != intensity.width || phaseRadians.height != intensity.height)
+            {
+                throw new InvalidDataException(
+                    "Optical phase and intensity textures must have matching dimensions.");
+            }
+
+            if (depthPlanes == null
+                || depthPlanes.Count != metadata.depthPlanePositionsMeters.Count)
+            {
+                throw new InvalidDataException(
+                    "Optical depth-plane texture count must match metadata positions.");
+            }
+
+            for (int index = 0; index < depthPlanes.Count; index++)
+            {
+                Texture2D plane = depthPlanes[index];
+                if (plane == null
+                    || plane.width != phaseRadians.width
+                    || plane.height != phaseRadians.height)
+                {
+                    throw new InvalidDataException(
+                        $"Optical depth plane {index} is missing or dimensionally inconsistent.");
+                }
+            }
+
             return metadata;
         }
     }

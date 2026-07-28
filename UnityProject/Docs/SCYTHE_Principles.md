@@ -62,6 +62,38 @@ f_d = v_radial * f_carrier / c
 ```
 
 Positive radial velocity means motion toward the transmitter. The channel applies this offset as a
-complex-baseband phase rotation before deterministic AWGN. The model still excludes antenna patterns,
-polarization, occlusion, reflection, diffraction, and multipath; obstacles are spatial references rather
+complex-baseband phase rotation before deterministic AWGN. The v0.3 model excluded antenna patterns,
+polarization, occlusion, reflection, diffraction, and multipath; obstacles were spatial references rather
 than RF propagation geometry.
+
+## Multi-emitter environment milestone
+
+Each transmitter has its own stable id, carrier frequency, symbol rate, modulation, power, position,
+motion definition, and radiating state. The HUD reports links independently. The field map adds
+isotropic power densities as an **incoherent visualization**; it does not model phase-coherent
+interference between emitters.
+
+Static colliders explicitly marked as RF occluders contribute a configurable scalar loss in dB:
+
+```text
+L_occlusion = blocker_count * loss_dB_per_blocker
+amplitude_multiplier = 10 ^ (-L_occlusion / 20)
+```
+
+This is a geometric line-of-sight attenuation approximation. It is not a material model and does not
+claim reflection, transmission coefficients, edge diffraction, scattering, multipath, or full-wave
+electromagnetic behavior. The HUD and scenario manifest identify the approximation directly.
+
+Transmitter motion and events are functions of deterministic simulation time. Events execute once in
+manifest order and are not scheduled from rendering frame time.
+
+## Optical ingestion and fusion boundary
+
+A scenario may declare a solver-produced dataset below `Assets/OpticalDatasets/`. A declared dataset
+must contain valid metadata plus matching `phase.exr` and `intensity.exr` assets; invalid or incomplete
+declared data stops the build. If no dataset is declared, the runtime states
+`NO SOLVER DATASET BUNDLED` and does not invent fallback physics.
+
+The first fusion overlay is explicitly labeled **dataset space / unregistered**. Displaying an optical
+texture over the monocle does not establish camera calibration, depth registration, pose registration,
+or physical alignment with RF samples.

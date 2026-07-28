@@ -23,12 +23,39 @@ namespace Scythe.Editor
 
         public static void ValidateCoreModels()
         {
+            ValidateScenarioContract();
             ValidateRfRoundTrips();
             ValidateDeterminism();
             ValidateSpatialRfModel();
+            ValidateOcclusionApproximation();
             ValidateWrappedPhaseGradient();
             ValidateOpticalMetadataContract();
-            Debug.Log("[SCYTHE VALIDATION] PASS: RF round trips, deterministic channel, spatial attenuation, one-way Doppler, wrapped optical gradient, and optical metadata contract.");
+            ValidateDeclaredOpticalDataset();
+            Debug.Log(
+                "[SCYTHE VALIDATION] PASS: scenario v2, multi-emitter RF round trips, "
+                + "deterministic channel and motion, spatial attenuation, one-way Doppler, "
+                + "explicit geometric occlusion loss, wrapped optical gradient, and optical "
+                + "dataset contract.");
+        }
+
+        private static void ValidateScenarioContract()
+        {
+            ScenarioManifest manifest = ScenarioManifest.Load(
+                "Scenarios/rf_milestone_01.json");
+            Require(manifest.transmitters.Count >= 3, "Multi-emitter scenario requires at least three emitters.");
+            Require(manifest.events.Count >= 1, "Scenario v2 requires at least one scripted event.");
+
+            ScenarioTransmitter moving = manifest.transmitters.Find(
+                transmitter => string.Equals(
+                    transmitter.motion.type,
+                    "pingPong",
+                    StringComparison.OrdinalIgnoreCase));
+            Require(moving != null, "Scenario does not declare deterministic transmitter motion.");
+            Vector3 anchor = moving.positionMeters.ToVector3();
+            Vector3 first = RFTransmitter.EvaluatePosition(anchor, moving.motion, 2.5d);
+            Vector3 second = RFTransmitter.EvaluatePosition(anchor, moving.motion, 2.5d);
+            Require(first == second, "Scripted transmitter motion is not deterministic.");
+            Require(first != anchor, "Scripted moving transmitter remained at its anchor.");
         }
 
         private static void ValidateRfRoundTrips()
@@ -115,6 +142,43 @@ namespace Scythe.Editor
             Require(moving.IsExactMatch, "ASK magnitude demodulation should tolerate the tested Doppler shift.");
         }
 
+        private static void ValidateOcclusionApproximation()
+        {
+            float loss = RFOcclusionModel.AttenuationDbForBlockers(2, 9f);
+            Require(Mathf.Abs(loss - 18f) < 0.0001f, "Blocker attenuation did not add in dB.");
+
+            float amplitude = RFOcclusionModel.AmplitudeMultiplierFromLossDb(20f);
+            Require(Mathf.Abs(amplitude - 0.1f) < 0.0001f, "20 dB loss did not produce 0.1 amplitude.");
+
+            RFLinkResult clear = RFLinkPipeline.Run(
+                KnownBits,
+                ModulationType.Ask,
+                16,
+                1000f,
+                8.5f,
+                2.4e9f,
+                0f,
+                91,
+                0f,
+                0f);
+            RFLinkResult blocked = RFLinkPipeline.Run(
+                KnownBits,
+                ModulationType.Ask,
+                16,
+                1000f,
+                8.5f,
+                2.4e9f,
+                0f,
+                91,
+                0f,
+                18f);
+            float measuredRatio = blocked.AmplitudeGain / clear.AmplitudeGain;
+            float expectedRatio = RFOcclusionModel.AmplitudeMultiplierFromLossDb(18f);
+            Require(
+                Mathf.Abs(measuredRatio - expectedRatio) < 0.000001f,
+                "RF pipeline did not carry configured occlusion loss.");
+        }
+
         private static void ValidateWrappedPhaseGradient()
         {
             float[] phase =
@@ -166,6 +230,17 @@ namespace Scythe.Editor
             }
 
             Require(rejectedInvalidUnits, "Optical metadata accepted non-radian phase units.");
+        }
+
+        private static void ValidateDeclaredOpticalDataset()
+        {
+            ScenarioManifest manifest = ScenarioManifest.Load(
+                "Scenarios/rf_milestone_01.json");
+            OpticalDataset dataset = BuildCommand.LoadDeclaredOpticalDataset(manifest);
+            if (manifest.opticalDatasetRequired)
+            {
+                Require(dataset != null, "Required optical dataset was not loaded.");
+            }
         }
 
         private static void Require(bool condition, string message)

@@ -27,7 +27,8 @@ namespace SCYTHE.RF
             float noiseStdDev,
             int seed,
             float dopplerHz = 0f,
-            float sampleRate = 1f)
+            float sampleRate = 1f,
+            float additionalAttenuationDb = 0f)
         {
             if (input == null || input.Length == 0)
             {
@@ -39,7 +40,8 @@ namespace SCYTHE.RF
                 throw new ArgumentOutOfRangeException(nameof(sampleRate));
             }
 
-            float gain = FreeSpaceAmplitudeGain(distanceMeters, carrierFrequencyHz);
+            float gain = FreeSpaceAmplitudeGain(distanceMeters, carrierFrequencyHz)
+                * RFOcclusionModel.AmplitudeMultiplierFromLossDb(additionalAttenuationDb);
             var random = new System.Random(seed);
             var output = new ComplexSample[input.Length];
             double signalPower = 0d;

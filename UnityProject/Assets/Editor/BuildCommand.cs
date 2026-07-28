@@ -1,6 +1,8 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using SCYTHE.Core;
+using SCYTHE.Optics;
 using SCYTHE.Presentation;
 using SCYTHE.RF;
 using SCYTHE.World;
@@ -62,7 +64,7 @@ namespace Scythe.Editor
         {
             PlayerSettings.companyName = "SCYTHE";
             PlayerSettings.productName = "SCYTHE RF Sim";
-            PlayerSettings.bundleVersion = "0.3.0";
+            PlayerSettings.bundleVersion = "0.4.0";
             PlayerSettings.SetApplicationIdentifier(NamedBuildTarget.Standalone, "dev.scythe.rfsim");
             PlayerSettings.defaultScreenWidth = 1280;
             PlayerSettings.defaultScreenHeight = 720;
@@ -105,41 +107,71 @@ namespace Scythe.Editor
             keyLight.intensity = 1.7f;
             keyLight.transform.rotation = Quaternion.Euler(48f, -32f, 0f);
 
-            GameObject emitter = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
-            emitter.name = "RF Emitter";
-            emitter.transform.position = manifest.transmitterPositionMeters.ToVector3();
-            emitter.transform.localScale = new Vector3(1.2f, 0.12f, 1.2f);
-            RFTransmitter transmitter = emitter.AddComponent<RFTransmitter>();
+            var transmitters = new List<RFTransmitter>();
+            for (int index = 0; index < manifest.transmitters.Count; index++)
+            {
+                ScenarioTransmitter definition = manifest.transmitters[index];
+                GameObject emitter = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+                emitter.name = $"RF Emitter {definition.id} // {definition.displayName}";
+                emitter.transform.position = definition.positionMeters.ToVector3();
+                emitter.transform.localScale = new Vector3(1.15f, 0.12f, 1.15f);
+                RFTransmitter transmitter = emitter.AddComponent<RFTransmitter>();
+                transmitter.SetEmitterId(definition.id);
+                transmitters.Add(transmitter);
 
-            GameObject mast = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
-            mast.name = "Antenna Mast";
-            mast.transform.SetParent(emitter.transform);
-            mast.transform.localPosition = new Vector3(0f, 6f, 0f);
-            mast.transform.localScale = new Vector3(0.1f, 6f, 0.1f);
+                GameObject mast = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+                mast.name = $"Antenna Mast {definition.id}";
+                mast.transform.SetParent(emitter.transform);
+                mast.transform.localPosition = new Vector3(0f, 6f, 0f);
+                mast.transform.localScale = new Vector3(0.08f, 6f, 0.08f);
+
+                GameObject rings = new GameObject($"RF Range Rings {definition.id}");
+                rings.transform.SetParent(emitter.transform, false);
+                rings.AddComponent<RFRangeRingRenderer>();
+            }
 
             GameObject ground = GameObject.CreatePrimitive(PrimitiveType.Plane);
             ground.name = "Operations Grid";
             ground.transform.position = new Vector3(0f, -0.1f, 0f);
             ground.transform.localScale = new Vector3(6f, 1f, 6f);
 
-            CreateLabObstacle("Calibration Block A", new Vector3(-9f, 1f, -7f), new Vector3(3f, 2f, 2f));
-            CreateLabObstacle("Calibration Block B", new Vector3(10f, 1.5f, 6f), new Vector3(2f, 3f, 4f));
-            CreateLabObstacle("Calibration Wall", new Vector3(0f, 1.25f, 12f), new Vector3(10f, 2.5f, 0.5f));
-
-            GameObject rings = new GameObject("RF Range Rings");
-            rings.transform.position = new Vector3(emitter.transform.position.x, 0f, emitter.transform.position.z);
-            rings.AddComponent<RFRangeRingRenderer>();
+            CreateLabObstacle(
+                "RF Shield Alpha",
+                new Vector3(-1f, 1.6f, 1f),
+                new Vector3(0.65f, 3.2f, 8f));
+            CreateLabObstacle(
+                "RF Shield Bravo",
+                new Vector3(7f, 1.4f, 2f),
+                new Vector3(5f, 2.8f, 0.65f));
+            CreateLabObstacle(
+                "Calibration Block",
+                new Vector3(-8f, 1f, -7f),
+                new Vector3(3f, 2f, 2f));
+            CreateLabObstacle(
+                "Calibration Wall",
+                new Vector3(0f, 1.25f, 12f),
+                new Vector3(10f, 2.5f, 0.5f));
 
             GameObject systems = new GameObject("SCYTHE Systems");
-            systems.AddComponent<SimulationClock>();
+            SimulationClock clock = systems.AddComponent<SimulationClock>();
+            clock.FixedStepSeconds = manifest.fixedStepSeconds;
+            RFOcclusionModel occlusionModel = systems.AddComponent<RFOcclusionModel>();
+            occlusionModel.Configure(manifest.occlusion);
             RFSimulationController simulation = systems.AddComponent<RFSimulationController>();
-            simulation.Bind(transmitter, receiver);
+            simulation.Bind(transmitters, receiver, occlusionModel);
             RFFieldSampler sampler = operatorObject.AddComponent<RFFieldSampler>();
             sampler.Bind(simulation, camera);
             RFFieldVisualizer fieldVisualizer = systems.AddComponent<RFFieldVisualizer>();
             fieldVisualizer.Bind(simulation);
+            ScenarioDirector director = systems.AddComponent<ScenarioDirector>();
+            director.Bind(simulation);
+            OpticalDatasetLoader opticalLoader = systems.AddComponent<OpticalDatasetLoader>();
+            opticalLoader.Bind(
+                LoadDeclaredOpticalDataset(manifest),
+                manifest.opticalDatasetRelativeDirectory,
+                manifest.opticalDatasetRequired);
             MonocleHUD hud = systems.AddComponent<MonocleHUD>();
-            hud.Bind(simulation, fieldVisualizer, sampler);
+            hud.Bind(simulation, fieldVisualizer, sampler, opticalLoader, director);
 
             EditorSceneManager.MarkSceneDirty(scene);
             EditorSceneManager.SaveScene(scene, GeneratedScenePath);
@@ -152,6 +184,102 @@ namespace Scythe.Editor
             obstacle.name = name;
             obstacle.transform.position = position;
             obstacle.transform.localScale = scale;
+            obstacle.AddComponent<RFOccluder>();
+        }
+
+        internal static OpticalDataset LoadDeclaredOpticalDataset(ScenarioManifest manifest)
+        {
+            if (string.IsNullOrWhiteSpace(manifest.opticalDatasetRelativeDirectory))
+            {
+                Debug.Log(
+                    "[SCYTHE] No optical dataset declared; fusion HUD will report "
+                    + "NO SOLVER DATASET BUNDLED.");
+                return null;
+            }
+
+            string relativeDirectory = manifest.opticalDatasetRelativeDirectory
+                .Trim()
+                .Trim('/', '\\')
+                .Replace('\\', '/');
+            string assetDirectory = $"Assets/OpticalDatasets/{relativeDirectory}";
+            string absoluteDirectory = Path.GetFullPath(
+                Path.Combine(Application.dataPath, "OpticalDatasets", relativeDirectory));
+            if (!Directory.Exists(absoluteDirectory))
+            {
+                throw new InvalidDataException(
+                    $"Declared optical dataset directory does not exist: {assetDirectory}");
+            }
+
+            string metadataPath = $"{assetDirectory}/metadata.json";
+            string phasePath = $"{assetDirectory}/phase.exr";
+            string intensityPath = $"{assetDirectory}/intensity.exr";
+            RequireFile(metadataPath);
+            RequireFile(phasePath);
+            RequireFile(intensityPath);
+            AssetDatabase.ImportAsset(metadataPath, ImportAssetOptions.ForceUpdate);
+            AssetDatabase.ImportAsset(phasePath, ImportAssetOptions.ForceUpdate);
+            AssetDatabase.ImportAsset(intensityPath, ImportAssetOptions.ForceUpdate);
+
+            var dataset = new OpticalDataset
+            {
+                metadataJson = AssetDatabase.LoadAssetAtPath<TextAsset>(metadataPath),
+                phaseRadians = AssetDatabase.LoadAssetAtPath<Texture2D>(phasePath),
+                intensity = AssetDatabase.LoadAssetAtPath<Texture2D>(intensityPath),
+                polarization = AssetDatabase.LoadAssetAtPath<Texture2D>(
+                    $"{assetDirectory}/polarization.exr"),
+                depthPlanes = LoadTextureDirectory(
+                    assetDirectory,
+                    absoluteDirectory,
+                    "depth_planes"),
+                laneMasks = LoadTextureDirectory(
+                    assetDirectory,
+                    absoluteDirectory,
+                    "lane_masks"),
+            };
+            dataset.ValidateCompleteDataset();
+            Debug.Log($"[SCYTHE VALIDATION] Optical dataset PASS: {assetDirectory}");
+            return dataset;
+        }
+
+        private static List<Texture2D> LoadTextureDirectory(
+            string assetDirectory,
+            string absoluteDirectory,
+            string childDirectory)
+        {
+            var textures = new List<Texture2D>();
+            string absoluteChild = Path.Combine(absoluteDirectory, childDirectory);
+            if (!Directory.Exists(absoluteChild))
+            {
+                return textures;
+            }
+
+            string[] files = Directory.GetFiles(absoluteChild, "*.exr");
+            Array.Sort(files, StringComparer.Ordinal);
+            foreach (string file in files)
+            {
+                string assetPath =
+                    $"{assetDirectory}/{childDirectory}/{Path.GetFileName(file)}";
+                AssetDatabase.ImportAsset(assetPath, ImportAssetOptions.ForceUpdate);
+                Texture2D texture = AssetDatabase.LoadAssetAtPath<Texture2D>(assetPath);
+                if (texture == null)
+                {
+                    throw new InvalidDataException($"Could not import optical texture {assetPath}.");
+                }
+
+                textures.Add(texture);
+            }
+
+            return textures;
+        }
+
+        private static void RequireFile(string assetPath)
+        {
+            string projectRoot = Path.GetFullPath(Path.Combine(Application.dataPath, ".."));
+            string absolutePath = Path.GetFullPath(Path.Combine(projectRoot, assetPath));
+            if (!File.Exists(absolutePath))
+            {
+                throw new InvalidDataException($"Required optical asset is missing: {assetPath}");
+            }
         }
 
         private static string GetArgument(string name)

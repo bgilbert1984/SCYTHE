@@ -13,6 +13,7 @@ namespace SCYTHE.RF
         public float SnrDb { get; internal set; }
         public float DopplerHz { get; internal set; }
         public float RadialVelocityMetersPerSecond { get; internal set; }
+        public float OcclusionAttenuationDb { get; internal set; }
         public float AmplitudeGain { get; internal set; }
         public int ErrorCount { get; internal set; }
         public float BitErrorRate => InputBits.Length == 0 ? 0f : ErrorCount / (float)InputBits.Length;
@@ -30,7 +31,8 @@ namespace SCYTHE.RF
             float carrierFrequencyHz,
             float noiseStdDev,
             int seed,
-            float radialVelocityTowardTransmitter = 0f)
+            float radialVelocityTowardTransmitter = 0f,
+            float occlusionAttenuationDb = 0f)
         {
             bool[] bits = CopyBits(inputBits);
             float sampleRate = symbolRate * samplesPerSymbol;
@@ -43,7 +45,8 @@ namespace SCYTHE.RF
                 noiseStdDev,
                 seed,
                 dopplerHz,
-                sampleRate);
+                sampleRate,
+                occlusionAttenuationDb);
 
             var equalized = new ComplexSample[channel.Samples.Length];
             float inverseGain = 1f / Math.Max(channel.AmplitudeGain, 1e-12f);
@@ -79,6 +82,7 @@ namespace SCYTHE.RF
                 SnrDb = channel.SnrDb,
                 DopplerHz = dopplerHz,
                 RadialVelocityMetersPerSecond = radialVelocityTowardTransmitter,
+                OcclusionAttenuationDb = occlusionAttenuationDb,
                 AmplitudeGain = channel.AmplitudeGain,
                 ErrorCount = errors,
             };

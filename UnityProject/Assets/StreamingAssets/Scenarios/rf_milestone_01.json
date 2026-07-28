@@ -1,26 +1,107 @@
 {
-  "schemaVersion": "1.0",
-  "scenarioId": "rf-milestone-01",
-  "displayName": "Single RF Link",
-  "description": "A mobile first-person RF probe traverses one deterministic transmitter-to-receiver complex-baseband link with selectable ASK, FSK, BPSK, and QPSK modulation. The channel is an explicitly approximate free-space amplitude model with additive white Gaussian noise and one-way motion-derived Doppler.",
+  "schemaVersion": "2.0",
+  "scenarioId": "rf-milestone-02",
+  "displayName": "SCYTHE Multi-Emitter Walk-Around",
+  "description": "Three deterministic transmitter links share one mobile probe. Friis free-space attenuation, seeded AWGN, one-way radial Doppler, and static-collider line-of-sight loss are explicitly reduced-order models. One emitter follows deterministic ping-pong motion and manifest events alter the environment.",
   "seed": 424242,
   "fixedStepSeconds": 0.016666667,
-  "carrierFrequencyHz": 2400000000.0,
-  "symbolRateBaud": 1000.0,
-  "samplesPerSymbol": 16,
-  "transmitterPowerWatts": 1.0,
   "channelNoiseStdDev": 0.00002,
   "linkFrameIntervalSeconds": 0.5,
-  "transmitterPositionMeters": {
-    "x": -4.0,
-    "y": 0.25,
-    "z": 1.5
-  },
   "probeStartPositionMeters": {
     "x": 4.0,
     "y": 0.05,
     "z": -2.0
   },
   "probeWalkSpeedMetersPerSecond": 3.5,
-  "probeSprintSpeedMetersPerSecond": 6.0
+  "probeSprintSpeedMetersPerSecond": 6.0,
+  "transmitters": [
+    {
+      "id": "TX-A",
+      "displayName": "ALPHA",
+      "enabled": true,
+      "modulation": "Bpsk",
+      "carrierFrequencyHz": 2400000000.0,
+      "symbolRateBaud": 1000.0,
+      "samplesPerSymbol": 16,
+      "powerWatts": 1.0,
+      "positionMeters": { "x": -8.0, "y": 0.25, "z": 2.0 },
+      "motion": {
+        "type": "static",
+        "direction": { "x": 1.0, "y": 0.0, "z": 0.0 },
+        "speedMetersPerSecond": 0.0,
+        "extentMeters": 0.0
+      }
+    },
+    {
+      "id": "TX-B",
+      "displayName": "BRAVO",
+      "enabled": true,
+      "modulation": "Qpsk",
+      "carrierFrequencyHz": 915000000.0,
+      "symbolRateBaud": 1200.0,
+      "samplesPerSymbol": 16,
+      "powerWatts": 0.65,
+      "positionMeters": { "x": 9.0, "y": 0.25, "z": 7.0 },
+      "motion": {
+        "type": "static",
+        "direction": { "x": 0.0, "y": 0.0, "z": 1.0 },
+        "speedMetersPerSecond": 0.0,
+        "extentMeters": 0.0
+      }
+    },
+    {
+      "id": "TX-C",
+      "displayName": "CHARLIE",
+      "enabled": true,
+      "modulation": "Fsk",
+      "carrierFrequencyHz": 5800000000.0,
+      "symbolRateBaud": 800.0,
+      "samplesPerSymbol": 16,
+      "powerWatts": 1.4,
+      "positionMeters": { "x": 1.0, "y": 0.25, "z": -10.0 },
+      "motion": {
+        "type": "pingPong",
+        "direction": { "x": 1.0, "y": 0.0, "z": 0.0 },
+        "speedMetersPerSecond": 0.75,
+        "extentMeters": 8.0
+      }
+    }
+  ],
+  "occlusion": {
+    "enabled": true,
+    "lossDbPerBlocker": 18.0,
+    "maximumBlockers": 4
+  },
+  "events": [
+    {
+      "timeSeconds": 20.0,
+      "action": "setPowerWatts",
+      "transmitterId": "TX-B",
+      "numericValue": 0.2,
+      "textValue": ""
+    },
+    {
+      "timeSeconds": 30.0,
+      "action": "setModulation",
+      "transmitterId": "TX-C",
+      "numericValue": 0.0,
+      "textValue": "Ask"
+    },
+    {
+      "timeSeconds": 40.0,
+      "action": "setEnabled",
+      "transmitterId": "TX-B",
+      "numericValue": 0.0,
+      "textValue": ""
+    },
+    {
+      "timeSeconds": 50.0,
+      "action": "setEnabled",
+      "transmitterId": "TX-B",
+      "numericValue": 1.0,
+      "textValue": ""
+    }
+  ],
+  "opticalDatasetRelativeDirectory": "",
+  "opticalDatasetRequired": false
 }

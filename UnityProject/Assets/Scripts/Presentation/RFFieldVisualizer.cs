@@ -4,8 +4,9 @@ using UnityEngine;
 namespace SCYTHE.Presentation
 {
     /// <summary>
-    /// Scientific overlay for the explicitly approximate isotropic free-space
-    /// power-density model. This is not a full-wave electromagnetic solver.
+    /// Scientific overlay for the incoherent sum of explicitly approximate
+    /// isotropic free-space power densities. It intentionally excludes geometric
+    /// occlusion and coherent inter-emitter interference.
     /// </summary>
     public sealed class RFFieldVisualizer : MonoBehaviour
     {
@@ -56,9 +57,25 @@ namespace SCYTHE.Presentation
                 GUI.DrawTexture(rectangle, fieldTexture, ScaleMode.StretchToFill, false);
             }
 
-            if (simulation?.Transmitter != null)
+            if (simulation != null)
             {
-                DrawMapMarker(rectangle, simulation.Transmitter.transform.position, new Color(1f, 0.25f, 0.06f), "TX");
+                for (int index = 0; index < simulation.Transmitters.Count; index++)
+                {
+                    RFTransmitter transmitter = simulation.Transmitters[index];
+                    Color color = transmitter == simulation.Transmitter
+                        ? new Color(1f, 0.3f, 0.05f)
+                        : new Color(1f, 0.72f, 0.08f);
+                    if (!transmitter.IsRadiating)
+                    {
+                        color = new Color(0.35f, 0.35f, 0.35f);
+                    }
+
+                    DrawMapMarker(
+                        rectangle,
+                        transmitter.transform.position,
+                        color,
+                        transmitter.EmitterId);
+                }
             }
 
             if (simulation?.Receiver != null)
@@ -69,19 +86,31 @@ namespace SCYTHE.Presentation
 
         private void RenderField()
         {
-            Transform transmitter = simulation.Transmitter.transform;
-            float powerWatts = simulation.Transmitter.PowerWatts;
-
             for (int y = 0; y < textureHeight; y++)
             {
                 float worldZ = Mathf.Lerp(-extentMeters, extentMeters, y / (float)(textureHeight - 1));
                 for (int x = 0; x < textureWidth; x++)
                 {
                     float worldX = Mathf.Lerp(-extentMeters, extentMeters, x / (float)(textureWidth - 1));
-                    float dx = worldX - transmitter.position.x;
-                    float dz = worldZ - transmitter.position.z;
-                    float distance = Mathf.Sqrt(dx * dx + dz * dz);
-                    float density = RFChannel.PowerDensityWattsPerSquareMeter(powerWatts, distance);
+                    float density = 0f;
+                    for (int transmitterIndex = 0;
+                        transmitterIndex < simulation.Transmitters.Count;
+                        transmitterIndex++)
+                    {
+                        RFTransmitter transmitter = simulation.Transmitters[transmitterIndex];
+                        if (!transmitter.IsRadiating)
+                        {
+                            continue;
+                        }
+
+                        float dx = worldX - transmitter.transform.position.x;
+                        float dz = worldZ - transmitter.transform.position.z;
+                        float distance = Mathf.Sqrt(dx * dx + dz * dz);
+                        density += RFChannel.PowerDensityWattsPerSquareMeter(
+                            transmitter.PowerWatts,
+                            distance);
+                    }
+
                     float dbmPerSquareMeter = 10f * Mathf.Log10(Mathf.Max(density * 1000f, 1e-12f));
                     float normalized = Mathf.InverseLerp(-55f, 5f, dbmPerSquareMeter);
                     pixels[y * textureWidth + x] = ColorRamp(normalized);
