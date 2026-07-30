@@ -1,0 +1,38 @@
+{
+    "Workspace_Formatter.excludePattern": [
+        "**/build",
+        "**/.*",
+        "**/.vscode",
+        "**/target",
+        "*.js",
+        "*.xml",
+        "*.js.map",
+        "**/node_modules",
+        "*.svg",
+        "*.scss"
+    ],
+    "[typescript]": {
+        "editor.tabSize": 4,
+        "editor.codeActionsOnSave": {
+            "source.organizeImports": "explicit",
+            "source.removeUnusedImports": "explicit"
+        },
+        "js/ts.inlayHints.parameterNames.enabled": "all"
+    },
+    "cSpell.enabled": false,
+    "editor.defaultFormatter": "esbenp.prettier-vscode",
+    "editor.detectIndentation": false,
+    "editor.formatOnSave": true,
+    "editor.wordWrap": "on",
+    "eslint.format.enable": true,
+    "files.eol": "\n",
+    "files.insertFinalNewline": true,
+    "files.watcherExclude": {
+        "**/.git/objects/**": true,
+        "**/node_modules/**": true
+    },
+    "i18n-ally-next.keystyle": "nested",
+    "i18n-ally-next.localesPaths": [
+        "src/**/i18n"
+    ]
+}

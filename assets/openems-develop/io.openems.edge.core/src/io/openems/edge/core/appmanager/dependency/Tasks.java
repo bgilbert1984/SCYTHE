@@ -1,0 +1,219 @@
+package io.openems.edge.core.appmanager.dependency;
+
+import java.util.List;
+import java.util.Set;
+
+import io.openems.common.types.EdgeConfig;
+import io.openems.edge.core.appmanager.InterfaceConfiguration;
+import io.openems.edge.core.appmanager.OpenemsAppInstance;
+import io.openems.edge.core.appmanager.dependency.aggregatetask.AggregateTask;
+import io.openems.edge.core.appmanager.dependency.aggregatetask.ClusterConfiguration;
+import io.openems.edge.core.appmanager.dependency.aggregatetask.ComponentAggregateTask;
+import io.openems.edge.core.appmanager.dependency.aggregatetask.ComponentConfiguration;
+import io.openems.edge.core.appmanager.dependency.aggregatetask.ComponentDef;
+import io.openems.edge.core.appmanager.dependency.aggregatetask.EnergySchedulerVersionAggregateTask;
+import io.openems.edge.core.appmanager.dependency.aggregatetask.EnergySchedulerVersionConfiguration;
+import io.openems.edge.core.appmanager.dependency.aggregatetask.EvseClusterTask;
+import io.openems.edge.core.appmanager.dependency.aggregatetask.PersistencePredictorAggregateTask;
+import io.openems.edge.core.appmanager.dependency.aggregatetask.PersistencePredictorConfiguration;
+import io.openems.edge.core.appmanager.dependency.aggregatetask.PredictorManagerByCentralOrderAggregateTask;
+import io.openems.edge.core.appmanager.dependency.aggregatetask.PredictorManagerByCentralOrderConfiguration;
+import io.openems.edge.core.appmanager.dependency.aggregatetask.SchedulerAggregateTask;
+import io.openems.edge.core.appmanager.dependency.aggregatetask.SchedulerByCentralOrderAggregateTask;
+import io.openems.edge.core.appmanager.dependency.aggregatetask.SchedulerByCentralOrderConfiguration;
+import io.openems.edge.core.appmanager.dependency.aggregatetask.SchedulerByCentralOrderConfiguration.SchedulerComponent;
+import io.openems.edge.core.appmanager.dependency.aggregatetask.SchedulerConfiguration;
+import io.openems.edge.core.appmanager.dependency.aggregatetask.StaticIpAggregateTask;
+import io.openems.edge.core.appmanager.dependency.aggregatetask.StaticIpConfiguration;
+import io.openems.edge.energy.api.Version;
+
+public class Tasks {
+
+	/**
+	 * Creates a {@link Task} for setting the {@link ComponentConfiguration}.
+	 * 
+	 * @param components the components to create or update
+	 * @return the {@link Task}
+	 */
+	public static Task<ComponentConfiguration> component(List<EdgeConfig.Component> components) {
+		return Tasks.component(components.toArray(EdgeConfig.Component[]::new));
+	}
+
+	/**
+	 * Creates a {@link Task} for setting the {@link ComponentConfiguration}.
+	 * 
+	 * @param components the components to create or update
+	 * @return the {@link Task}
+	 */
+	public static Task<ComponentConfiguration> component(EdgeConfig.Component... components) {
+		return createTask(ComponentAggregateTask.class, new ComponentConfiguration(components));
+	}
+
+	/**
+	 * Creates a {@link Task} for setting the {@link ComponentConfiguration}.
+	 * 
+	 * @param components the components to create or update
+	 * @return the {@link Task}
+	 */
+	public static Task<ComponentConfiguration> component(ComponentDef... components) {
+		return createTask(ComponentAggregateTask.class, new ComponentConfiguration(components));
+	}
+
+	/**
+	 * Creates a {@link Task} for setting the {@link ComponentConfiguration}.
+	 * 
+	 * @param components the components to create or update
+	 * @return the {@link Task}
+	 */
+	public static Task<ComponentConfiguration> componentFromComponentConfig(List<ComponentDef> components) {
+		return Tasks.component(components.toArray(ComponentDef[]::new));
+	}
+
+	/**
+	 * Creates a {@link Task} for setting the {@link StaticIpConfiguration}.
+	 * 
+	 * @param interfaceConfiguration the {@link InterfaceConfiguration} to set
+	 * @return the {@link Task}
+	 */
+	public static Task<StaticIpConfiguration> staticIp(List<InterfaceConfiguration> interfaceConfiguration) {
+		return createTask(StaticIpAggregateTask.class, new StaticIpConfiguration(interfaceConfiguration));
+	}
+
+	/**
+	 * Creates a {@link Task} for setting the {@link StaticIpConfiguration}.
+	 * 
+	 * @param interfaceConfiguration the {@link InterfaceConfiguration} to set
+	 * @return the {@link Task}
+	 */
+	public static Task<StaticIpConfiguration> staticIp(InterfaceConfiguration... interfaceConfiguration) {
+		return createTask(StaticIpAggregateTask.class, new StaticIpConfiguration(interfaceConfiguration));
+	}
+
+	/**
+	 * Creates a Task for setting the {@link SchedulerConfiguration}.
+	 * 
+	 * @param componentOrder the order of the components in the scheduler
+	 * @return the {@link Task} to run when creating the {@link OpenemsAppInstance}
+	 */
+	public static Task<SchedulerConfiguration> scheduler(List<String> componentOrder) {
+		return createTask(SchedulerAggregateTask.class, new SchedulerConfiguration(componentOrder));
+	}
+
+	/**
+	 * Creates a Task for setting the {@link SchedulerConfiguration}.
+	 * 
+	 * @param componentOrder the order of the components in the scheduler
+	 * @return the {@link Task} to run when creating the {@link OpenemsAppInstance}
+	 */
+	public static Task<SchedulerConfiguration> scheduler(String... componentOrder) {
+		return createTask(SchedulerAggregateTask.class, new SchedulerConfiguration(componentOrder));
+	}
+
+	/**
+	 * Creates a Task for setting the {@link ClusterConfiguration}.
+	 * 
+	 * @param evseIds evseIds of app
+	 * @return the {@link Task} to run when create the {@link OpenemsAppInstance}
+	 */
+	public static Task<ClusterConfiguration> cluster(List<String> evseIds) {
+		return createTask(EvseClusterTask.class, new ClusterConfiguration(evseIds));
+	}
+
+	/**
+	 * Creates a Task for setting the {@link ClusterConfiguration}.
+	 * 
+	 * @param evseIds evseIds of app
+	 * @return the {@link Task} to run when create the {@link OpenemsAppInstance}
+	 */
+	public static Task<ClusterConfiguration> cluster(String... evseIds) {
+		return createTask(EvseClusterTask.class, new ClusterConfiguration(evseIds));
+	}
+
+	/**
+	 * Creates a Task for setting the
+	 * {@link PredictorManagerByCentralOrderConfiguration}.
+	 *
+	 * @param component the order of the components in the predictor manager
+	 * @return the {@link Task} to run when creating the {@link OpenemsAppInstance}
+	 */
+	public static Task<PredictorManagerByCentralOrderConfiguration> predictorManagerByCentralOrder(
+			List<PredictorManagerByCentralOrderConfiguration.PredictorManagerComponent> component) {
+		return createTask(PredictorManagerByCentralOrderAggregateTask.class,
+				new PredictorManagerByCentralOrderConfiguration(component));
+	}
+
+	/**
+	 * Creates a Task for setting the
+	 * {@link PredictorManagerByCentralOrderConfiguration}.
+	 *
+	 * @param component the order of the components in the scheduler
+	 * @return the {@link Task} to run when creating the {@link OpenemsAppInstance}
+	 */
+	public static Task<PredictorManagerByCentralOrderConfiguration> predictorManagerByCentralOrder(
+			PredictorManagerByCentralOrderConfiguration.PredictorManagerComponent... component) {
+		return createTask(PredictorManagerByCentralOrderAggregateTask.class,
+				new PredictorManagerByCentralOrderConfiguration(component));
+	}
+
+	/**
+	 * Creates a Task for setting the {@link SchedulerByCentralOrderConfiguration}.
+	 * 
+	 * @param componentOrder the order of the components in the scheduler
+	 * @return the {@link Task} to run when creating the {@link OpenemsAppInstance}
+	 */
+	public static Task<SchedulerByCentralOrderConfiguration> schedulerByCentralOrder(
+			List<SchedulerComponent> componentOrder) {
+		return createTask(SchedulerByCentralOrderAggregateTask.class,
+				new SchedulerByCentralOrderConfiguration(componentOrder));
+	}
+
+	/**
+	 * Creates a Task for setting the {@link SchedulerByCentralOrderConfiguration}.
+	 * 
+	 * @param componentOrder the order of the components in the scheduler
+	 * @return the {@link Task} to run when creating the {@link OpenemsAppInstance}
+	 */
+	public static Task<SchedulerByCentralOrderConfiguration> schedulerByCentralOrder(
+			SchedulerComponent... componentOrder) {
+		return createTask(SchedulerByCentralOrderAggregateTask.class,
+				new SchedulerByCentralOrderConfiguration(componentOrder));
+	}
+
+	/**
+	 * Creates a Task for setting the {@link PersistencePredictorConfiguration}.
+	 * 
+	 * @param channels the channels that need to be in the predictor
+	 * @return the {@link Task} to run when creating the {@link OpenemsAppInstance}
+	 */
+	public static Task<PersistencePredictorConfiguration> persistencePredictor(Set<String> channels) {
+		return createTask(PersistencePredictorAggregateTask.class, new PersistencePredictorConfiguration(channels));
+	}
+
+	/**
+	 * Creates a Task for setting the {@link PersistencePredictorConfiguration}.
+	 * 
+	 * @param channels the channels that need to be in the predictor
+	 * @return the {@link Task} to run when creating the {@link OpenemsAppInstance}
+	 */
+	public static Task<PersistencePredictorConfiguration> persistencePredictor(String... channels) {
+		return createTask(PersistencePredictorAggregateTask.class, new PersistencePredictorConfiguration(channels));
+	}
+
+	/**
+	 * Creates a Task for setting the {@link EnergySchedulerVersionConfiguration}.
+	 *
+	 * @param version the desired {@link Version} to apply to the EnergyScheduler
+	 * @return the {@link Task} to run when creating the {@link OpenemsAppInstance}
+	 */
+	public static Task<EnergySchedulerVersionConfiguration> energySchedulerVersion(Version version) {
+		return createTask(EnergySchedulerVersionAggregateTask.class, new EnergySchedulerVersionConfiguration(version));
+	}
+
+	private static <C, T extends AggregateTask<C>> Task<C> createTask(Class<T> clazz, C configuration) {
+		return new Task<>(//
+				clazz, //
+				configuration //
+		);
+	}
+
+}

@@ -1,0 +1,369 @@
+package io.openems.edge.controller.api.rest;
+
+import static io.openems.common.utils.JettyUtils.parseJson;
+import static io.openems.common.utils.JettyUtils.sendErrorResponse;
+import static io.openems.common.utils.JettyUtils.sendOkResponse;
+import static io.openems.common.utils.JsonUtils.getAsJsonObject;
+import static io.openems.common.utils.JsonUtils.toJsonArray;
+
+import java.io.IOException;
+import java.util.Arrays;
+import java.util.List;
+import java.util.UUID;
+import java.util.concurrent.ExecutionException;
+import java.util.regex.Pattern;
+import java.util.regex.PatternSyntaxException;
+
+import org.eclipse.jetty.http.HttpStatus;
+import org.eclipse.jetty.server.Handler;
+import org.eclipse.jetty.server.Request;
+import org.eclipse.jetty.server.Response;
+import org.eclipse.jetty.util.Callback;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import com.google.gson.JsonObject;
+
+import io.openems.common.channel.AccessMode;
+import io.openems.common.exceptions.OpenemsError;
+import io.openems.common.exceptions.OpenemsError.OpenemsNamedException;
+import io.openems.common.exceptions.OpenemsException;
+import io.openems.common.jsonrpc.base.JsonrpcMessage;
+import io.openems.common.jsonrpc.base.JsonrpcRequest;
+import io.openems.common.jsonrpc.base.JsonrpcResponseSuccess;
+import io.openems.common.jsonrpc.request.SetChannelValueRequest;
+import io.openems.common.session.Role;
+import io.openems.common.types.ChannelAddress;
+import io.openems.common.utils.JettyUtils;
+import io.openems.common.utils.JsonUtils;
+import io.openems.common.utils.StringUtils;
+import io.openems.edge.common.channel.Channel;
+import io.openems.edge.common.component.OpenemsComponent;
+import io.openems.edge.common.user.User;
+
+public class RestHandler extends Handler.Abstract {
+
+	private final Logger log = LoggerFactory.getLogger(RestHandler.class);
+	private final AbstractRestApi parent;
+
+	public RestHandler(AbstractRestApi parent) {
+		this.parent = parent;
+	}
+
+	@Override
+	public boolean handle(Request request, Response response, Callback callback) throws Exception {
+		try {
+			// Extract the raw request URI
+			final var target = request.getHttpURI().getDecodedPath();
+
+			// Special handling for favicon.ico requests
+			if (target.endsWith("/favicon.ico")) {
+				response.setStatus(HttpStatus.NOT_FOUND_404);
+				callback.succeeded();
+				return true;
+			}
+
+			if (target.isEmpty() || "/".equals(target)) {
+				throw new OpenemsException("Missing arguments to handle request");
+			}
+
+			// Debug log for URIs with square brackets
+			if (target.contains("[") || target.contains("]")) {
+				if (this.parent.isDebugModeEnabled()) {
+					this.parent.logInfo(this.log, "Processing URI with square brackets: " + target);
+				}
+			}
+
+			// Split path segments preserving brackets
+			final var targets = splitPathPreservingBrackets(target.substring(1));
+
+			if (targets.isEmpty()) {
+				throw new OpenemsException("Missing arguments to handle request");
+			}
+
+			// Authenticate the user
+			var user = this.authenticate(request);
+
+			var thisTarget = targets.get(0);
+			var remainingTargets = targets.subList(1, targets.size());
+
+			// Dispatch based on the first path token
+			switch (thisTarget) {
+			case "rest" -> this.handleRest(user, remainingTargets, request, response);
+			case "jsonrpc" -> {
+				switch (this.parent.getAccessMode()) {
+				case READ_ONLY -> throw new OpenemsException("REST-Api is in Read-Only mode");
+				case READ_WRITE, WRITE_ONLY -> this.handleJsonRpc(user, request, response);
+				}
+			}
+			default -> throw new OpenemsException("Unknown REST endpoint: " + target);
+			}
+			callback.succeeded();
+			return true;
+
+		} catch (Exception e) {
+			if (this.parent.isDebugModeEnabled()) {
+				this.parent.logError(this.log, "REST call failed: " + e.getMessage());
+			}
+			callback.failed(e);
+			return false;
+		}
+	}
+
+	/**
+	 * Split a path string into segments while preserving square brackets.
+	 *
+	 * @param path The path string without leading slash
+	 * @return List of path segments
+	 */
+	public static List<String> splitPathPreservingBrackets(String path) {
+		// Count open brackets to avoid splitting inside bracket patterns
+		int bracketDepth = 0;
+		StringBuilder processedPath = new StringBuilder();
+
+		// Replace slashes inside brackets with a temporary marker
+		for (int i = 0; i < path.length(); i++) {
+			char c = path.charAt(i);
+			if (c == '[') {
+				bracketDepth++;
+				processedPath.append(c);
+			} else if (c == ']') {
+				bracketDepth--;
+				processedPath.append(c);
+			} else if (c == '/' && bracketDepth > 0) {
+				// Replace slashes inside brackets with a temporary marker
+				processedPath.append('\u001F'); // ASCII unit separator as temporary marker
+			} else {
+				processedPath.append(c);
+			}
+		}
+
+		// Split by slashes, then restore internal slashes if needed
+		return Arrays.stream(processedPath.toString().split("/")) //
+				.map(segment -> segment.replace('\u001F', '/')) //
+				.toList();
+	}
+
+	private User authenticate(Request request) throws OpenemsNamedException {
+		var credentials = JettyUtils.parseCredentials(request);
+		if (credentials != null) {
+			// First try to authenticate using username and password.
+			var userOpt = this.parent.getUserService().authenticate(credentials.username(), credentials.password());
+			if (userOpt.isPresent()) {
+				return userOpt.get();
+			}
+
+			// Fallback: authenticate using password only.
+			userOpt = this.parent.getUserService().authenticate(credentials.password());
+			if (userOpt.isPresent()) {
+				return userOpt.get();
+			}
+		}
+		throw OpenemsError.COMMON_AUTHENTICATION_FAILED.exception();
+	}
+
+	private boolean handleRest(User user, List<String> targets, Request request, Response response)
+			throws IOException, OpenemsNamedException {
+		if (targets.isEmpty()) {
+			throw new OpenemsException("Missing arguments to handle REST-request");
+		}
+
+		var thisTarget = targets.get(0);
+		var remainingTargets = targets.subList(1, targets.size());
+
+		return switch (thisTarget) {
+		case "channel" //
+			-> this.handleChannel(user, remainingTargets, request, response);
+		default //
+			-> throw new OpenemsException("Unhandled REST target [" + thisTarget + "]");
+		};
+	}
+
+	private boolean handleChannel(User user, List<String> targets, Request request, Response response)
+			throws OpenemsNamedException {
+		if (targets.size() != 2) {
+			throw new OpenemsException("Missing arguments to handle Channel");
+		}
+
+		// Extract componentId and channelId preserving special characters
+		final var componentId = targets.get(0);
+		final var channelId = targets.get(1);
+
+		if (this.parent.isDebugModeEnabled()) {
+			this.parent.logInfo(this.log,
+					"Processing channel request - componentId: [" + componentId + "], channelId: [" + channelId + "]");
+		}
+
+		var channelAddress = new ChannelAddress(componentId, channelId);
+
+		return switch (request.getMethod()) {
+		case "GET" //
+			-> this.handleGet(user, channelAddress, request, response);
+		case "POST" //
+			-> switch (this.parent.getAccessMode()) {
+			case READ_ONLY //
+				-> throw new OpenemsException("REST-Api is in Read-Only mode");
+			case READ_WRITE, WRITE_ONLY //
+				-> this.handlePost(user, channelAddress, request, response);
+			};
+		default //
+			-> throw new OpenemsException("Unhandled REST Channel request method [" + request.getMethod() + "]");
+		};
+	}
+
+	private boolean handleGet(User user, ChannelAddress channelAddress, Request request, Response response)
+			throws OpenemsNamedException {
+		user.assertRoleIsAtLeast("HTTP GET", Role.GUEST);
+		var components = this.parent.getComponentManager().getEnabledComponents();
+
+		if (this.parent.isDebugModeEnabled()) {
+			this.parent.logInfo(this.log, "Looking for channels matching [" + channelAddress.toString() + "]");
+		}
+
+		// Get channels with proper handling of square brackets
+		List<Channel<?>> channels;
+		try {
+			channels = this.getChannels(components, channelAddress);
+		} catch (PatternSyntaxException e) {
+			response.setStatus(HttpStatus.BAD_REQUEST_400);
+			return true;
+		}
+
+		// If no channel matches, send a 404.
+		if (channels.isEmpty()) {
+			if (this.parent.isDebugModeEnabled()) {
+				this.parent.logWarn(this.log, "REST call by User [" + user.getName() + "]: GET Channel ["
+						+ channelAddress.toString() + "] Result [No Match]");
+			}
+			response.setStatus(HttpStatus.NOT_FOUND_404);
+			return false;
+		}
+
+		final var channeljson = channels.stream() //
+				.map(channel -> JsonUtils.buildJsonObject() //
+						.addProperty("address", channel.address().toString()) //
+						.addProperty("type", channel.getType().name()) //
+						.addProperty("accessMode", channel.channelDoc().getAccessMode().getAbbreviation()) //
+						.addProperty("text", channel.channelDoc().getText()) //
+						.addProperty("unit", channel.channelDoc().getUnit().symbol) //
+						.onlyIf(channel.channelDoc().getAccessMode() != AccessMode.WRITE_ONLY,
+								b -> b.add("value", channel.value().asJson())) //
+						.build()) //
+				.collect(toJsonArray());
+
+		var result = channeljson.size() == 1 //
+				? channeljson.get(0) //
+				: channeljson;
+
+		if (this.parent.isDebugModeEnabled()) {
+			this.parent.logInfo(this.log, "REST call by User [" + user.getName() + "]: GET " //
+					+ "Channel [" + channelAddress + "] " //
+					+ "Result [" + result.toString() + "]");
+		}
+
+		return sendOkResponse(response, result);
+	}
+
+	/**
+	 * Gets all channels for a given address, handling both exact matches and regex
+	 * patterns. This version gracefully handles square brackets in patterns.
+	 *
+	 * @param components     The list of components to search
+	 * @param channelAddress The channel address to match
+	 * @return A list of matching channels
+	 * @throws PatternSyntaxException if the pattern is invalid
+	 */
+	protected List<Channel<?>> getChannels(List<OpenemsComponent> components, ChannelAddress channelAddress)
+			throws PatternSyntaxException {
+		final var componentId = channelAddress.getComponentId();
+		final var channelId = channelAddress.getChannelId();
+
+		return components.stream() //
+				.filter(component -> Pattern.matches(componentId, component.id())) //
+				.flatMap(component -> component.channels().stream()) //
+				.filter(channel -> Pattern.matches(channelId, channel.channelId().id())) //
+				.toList();
+	}
+
+	private boolean handlePost(User user, ChannelAddress channelAddress, Request request, Response response)
+			throws OpenemsNamedException {
+		user.assertRoleIsAtLeast("HTTP POST", Role.OWNER);
+
+		// Parse JSON request body using HttpServletRequest.
+		var jHttpPost = parseJson(request);
+
+		if (!jHttpPost.has("value")) {
+			throw new OpenemsException("Value is missing");
+		}
+		var jValue = jHttpPost.get("value");
+
+		if (this.parent.isDebugModeEnabled()) {
+			this.parent.logInfo(this.log, "REST call by User [" + user.getName() + "]: POST " //
+					+ "Channel [" + channelAddress.toString() + "] " //
+					+ "value [" + jValue + "]");
+		}
+
+		// Dispatch the set channel value request.
+		this.parent.apiWorker.handleSetChannelValueRequest(this.parent.getComponentManager(), user,
+				new SetChannelValueRequest(channelAddress.getComponentId(), channelAddress.getChannelId(), jValue));
+
+		return sendOkResponse(response, new JsonObject());
+	}
+
+	private void handleJsonRpc(User user, Request request, Response response) throws OpenemsNamedException {
+		user.assertRoleIsAtLeast("HTTP POST JSON-RPC", Role.OWNER);
+
+		var requestId = new UUID(0L, 0L); // Dummy UUID
+		try {
+			if (!"POST".equalsIgnoreCase(request.getMethod())) {
+				throw new OpenemsException(
+						"Method [" + request.getMethod() + "] is not supported for JSON-RPC endpoint");
+			}
+			var json = parseJson(request);
+			if (this.parent.isDebugModeEnabled()) {
+				this.parent.logInfo(this.log,
+						"REST/JsonRpc call by User [" + user.getName() + "]: " + StringUtils.toShortString(json, 100));
+			}
+
+			if (!json.has("jsonrpc")) {
+				json.addProperty("jsonrpc", "2.0");
+			}
+			if (!json.has("id")) {
+				json.addProperty("id", UUID.randomUUID().toString());
+			}
+			if (json.has("params")) {
+				var params = getAsJsonObject(json, "params");
+				if (params.has("payload")) {
+					var payload = getAsJsonObject(params, "payload");
+					if (!payload.has("jsonrpc")) {
+						payload.addProperty("jsonrpc", "2.0");
+					}
+					if (!payload.has("id")) {
+						payload.addProperty("id", UUID.randomUUID().toString());
+					}
+					params.add("payload", payload);
+				}
+				json.add("params", params);
+			}
+
+			var message = JsonrpcMessage.from(json);
+			if (!(message instanceof JsonrpcRequest requestMessage)) {
+				throw new OpenemsException("Only JSON-RPC Request is supported here.");
+			}
+			requestId = requestMessage.getId();
+			var responseFuture = this.parent.getRpcRestHandler().handleRequest(user, requestMessage);
+			final JsonrpcResponseSuccess rpcResponse;
+			try {
+				rpcResponse = responseFuture.get();
+			} catch (InterruptedException | ExecutionException e) {
+				sendErrorResponse(response, requestMessage.getId(),
+						new OpenemsException("Unable to get Response: " + e.getMessage()));
+				return;
+			}
+			sendOkResponse(response, rpcResponse.toJsonObject());
+
+		} catch (Exception e) {
+			sendErrorResponse(response, requestId, new OpenemsException("Unable to get Response: " + e.getMessage()));
+		}
+	}
+}

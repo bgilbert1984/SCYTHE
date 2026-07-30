@@ -1,0 +1,71 @@
+#!/bin/bash
+# postinst script for openems-edge
+#
+# Copyright (C) 2014-2023 Stefan Feilmeier <stefan.feilmeier@fenecon.de>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+set -o errexit
+
+function start_service {
+	local service=$1
+
+	# Check if service is enabled
+	if ! ( /bin/systemctl --quiet is-enabled $service > /dev/null ); then
+		# Enable
+		echo "Enabling $service"
+		/bin/systemctl enable $service.service
+	fi
+
+	echo "Start $service"
+	/bin/systemctl start --no-block $service.service
+}
+
+function stop_service {
+	local service=$1
+
+	# Check if service exists
+	if ! ( /bin/systemctl list-unit-files | grep "$service.service" > /dev/null ); then
+		return
+	fi 
+
+	# Check if service is disabled
+	if ( /bin/systemctl --quiet is-enabled $service > /dev/null ); then 
+		# Disable
+		echo "Disabling $service"
+		/bin/systemctl disable $service.service
+	fi
+
+	echo "Stop $service"
+	/bin/systemctl stop --no-block "$service.service"
+}
+
+case "$1" in
+	configure|upgrade)
+		# Always restart openems
+		/bin/systemctl stop openems
+		
+		# Enable and start services
+		start_service openems
+		start_service nginx
+		;;
+		
+	abort-upgrade|abort-remove|abort-deconfigure)
+		;;
+
+	*)
+		echo "postinst called with unknown argument \`$1'" >&2
+		;;
+esac
+

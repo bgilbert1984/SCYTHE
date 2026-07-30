@@ -1,0 +1,152 @@
+= Core concepts & terminology 
+:imagesdir: ../assets/images
+:sectnums:
+:sectnumlevels: 4
+:toclevels: 4
+:experimental:
+:keywords: AsciiDoc
+:source-highlighter: highlight.js
+:icons: font
+
+This chapter describes some of the core concepts and commonly used terms in OpenEMS:
+
+== OSGi Bundle
+
+OpenEMS Edge is using the https://en.wikipedia.org/wiki/OSGi[OSGi icon:external-link[]] platform to provide a completely modular and dynamic service oriented system.
+
+Logical groups of source code are put into one OSGi Bundle. Every directory in the source code root directory starting with `io.openems.*`` is a bundle. 
+
+More bundle naming conventions are:
+
+* Bundle names ending with `*.common` are for common code that is shared by multiple components. Examples are:
+`io.openems.common`::
+  for common code between Edge and Backend, like helper utils, JSON-RPC definitions and Abstract Worker implementations
+`io.openems.backend.common`::
+  for common code within Backend.
+`io.openems.edge.common`::
+  for common code within Edge.
+`io.openems.edge.controller.api.common`::
+  for common code used by API Controllers
+`...`::
+
+* Bundle names ending with `*.api` are for xref:#_nature[Natures and APIs]. Examples are:
+`io.openems.edge.controller.api`::
+  for Controllers
+`io.openems.edge.scheduler.api`::
+  for Schedulers
+`...`::
+
+* Bundle names ending with `*.core` are for shared and helper OSGi services. Examples are:
+`io.openems.edge.core`:::
+for central singleton services:
+  *ComponentManager*::
+    handles access to OpenEMS Components and Channels
+  *Cycle*::
+    is responsible for the process xref:edge/architecture.adoc#_cycle[Cycle]
+  *Host*::
+    for accessing the host and operating system
+  *Meta*::
+    for some Meta information like the version of the running OpenEMS Edge
+  *Sum*::
+    for summing the values of the entire energy system, all meters, energy storage systems and so on.
+   
+`io.openems.edge.ess.core`:::
+  for the central *EssPower* service, that distributes power requirements to different energy storage systems
+
+== OpenEMS Component
+
+An OpenEMS Component is the fundamental building block in OpenEMS. Within the used OSGi Java framework, an OpenEMS component represents a service with requirements and capabilities.
+
+As an example, an OpenEMS Component can declare to have the capabilities of an Energy Storage System (ESS) and as such represents the digital twin of a real device. 
+A specific control algorithm can be implemented as a separate OpenEMS Component that declares a requirement for an ESS.
+Using this metadata, these building blocks are wired together at runtime and form a very flexible system.
+OSGi provides the capability to enable, modify or disable an OpenEMS Component at any time, without requiring a restart of the software.
+Re-wiring of the building blocks happens transparently in the background by the framework.
+
+Every OpenEMS Component is identified by a unique ID, the "Component-ID".
+In an ecosystem consisting of a couple of ESS, a power meter at the grid connection point, and a measured photovoltaic system, those Component-IDs can be represented as follows:
+*	`ess1` for the first ESS
+*	`ess2` for the second ESS
+*	`ess0` for a virtual ESS cluster Component that aggregates ess1 and ess2
+*	`meter0` for the power meter at the grid connection point
+*	`meter1` for the measured photovoltaic system 
+* ...
+
+To declare an OpenEMS component, the Java class has to `implement` the link:https://github.com/OpenEMS/openems/blob/develop/io.openems.edge.common/src/io/openems/edge/common/component/OpenemsComponent.java[OpenemsComponent interface icon:code[]]. 
+
+== Channel
+
+Each OpenEMS component has a defined set of data points. 
+These data points are called "Channels". 
+Each represents a single piece of information about a component. 
+By definition, each channel has a unique ID, the "Channel-ID", within its parent component. 
+Channels are defined by metadata like descriptive text, access-mode (`read-only`, `read-write`, `write-only`), data type (`string`, `integer`, `float`, etc.), and unit of measure (`Watt`, `Volt`, `Degree Celsius`, etc.). 
+It is up to the OpenEMS component to provide the input for its read-channels as well as triggering actions on write-channels.
+
+_Example:_ An OpenEMS Component that represents a device connected via the Modbus communication protocol continuously reads data, such as the current measured power and provides the data in its Channels.
+Other Components in the system can then use the channel data for their application, e.g. as input for a control algorithm, to analyse it, store it locally or publish it via an application programming interface (API).
+
+An energy system architecture as depicted in the Introduction is complex: connected to multiple hardware devices - batteries, converters, meters, and others - and an operating system and other software components.
+All of these elements are possible sources of errors.
+Because of this, measures are implemented in OpenEMS to improve fault tolerance.
+The developer needs to be aware, that every Channel value, while it will never change within a cycle, it could always be `undefined` or `null`, e.g. because there is no communication (yet) with the external hardware device or service.
+Therefore, the programming API for accessing a channel value requires an explicit declaration of what should be done in that case. 
+It provides the following methods to get the actual value:
+
+- `public T getOrError() throws InvalidValueException;`
+- `public T orElse(T alternativeValue);`
+
+Each Channel implements the link:https://github.com/OpenEMS/openems/blob/develop/io.openems.edge.common/src/io/openems/edge/common/channel/Channel.java[Channel interface icon:code[]].
+
+== Nature
+
+Certain categories of devices and services provide the same kind of information (i.e. Channels).
+To group these similar devices and services, OpenEMS defines "Natures" as sets of characteristics and attributes which need to be provided by each component that implements them.
+That is, a Nature extends a normal Java interface with channels.
+
+Examples of abstracting physical devices using Natures are:
+-	"ElectricityMeter" for electricity meters
+-	"SymmetricEss" for symmetric battery energy storage systems
+-	"Evcs" for electric vehicle charging stations.
+
+OpenEMS components can declare their service capabilities and requirements as Natures.
+In this way, a control algorithm can simply declare a requirement for a controllable energy storage system (“ManagedSymmetricEss”) and will at runtime be wired with a service that provides this capability.
+The control algorithm does not need to know anything about the ESS's specific communication interface, protocol, or manufacturer.
+
+Natures extend normal Java interfaces with 'Channels'.
+If a Component implements a Nature it also needs to provide the required Channels.
+For example the Energy Storage System (ESS) Simulator link:https://github.com/OpenEMS/openems/blob/develop/io.openems.edge.simulator/src/io/openems/edge/simulator/ess/symmetric/reacting/EssSymmetric.java[Simulator.EssSymmetric.Reacting icon:code[]] implements the link:https://github.com/OpenEMS/openems/blob/develop/io.openems.edge.ess.api/src/io/openems/edge/ess/api/SymmetricEss.java[Ess interface icon:code[]] and therefore needs to provide a `Soc` Channel that provides the current 'State of Charge' of the battery.
+
+Controllers are written against Nature implementations. Example: A Controller can be used with any ESS, because it can be sure that it provides all the data the Controller requires for its algorithm.
+
+== Channel Address
+
+By combining the unique *Component-ID* and *Channel-ID* each Channel in the system can be addressed by a distinct 'Channel Address' in the form `Component-ID/Channel-ID`.
+
+Example: the state of charge ("Soc") of the first energy storage system ("ess0") has the channel address `ess0/Soc`.
+
+== Scheduler
+
+The Scheduler handles the order, in which Controllers are executed.
+
+== Controller
+
+A OpenEMS Edge Controller holds the actual business logic or the actual algorithm that controls hardware. It implements the link:https://github.com/OpenEMS/openems/blob/develop/io.openems.edge.controller.api/src/io/openems/edge/controller/api/Controller.java[Controller interface icon:code[]]. Each Controller holds one specific, encapsulated task.
+
+The logic of each active Controller is executed regularly on every Cycle, i.e. once per second.
+
+On each execution cycle, e.g. once every second, the EMS can send a control command, which allows two different ways of controlling the hardware:
+
+- **Control by setpoint**
++
+In “control by setpoint” mode, the EMS calculates setpoint commands and sends them to the hardware for immediate execution.
++
+_Example:_ A power smoothing algorithm uses the current and previous output power values of a photovoltaics system. By applying its configured maximum defined ramp rate it deduces that the energy storage systems needs to be discharged with 150 kW to compensate a suddenly reduced output power. It therefore sends a setpoint for "discharge with 150 kW" to the ESS for immediate execution.
+
+- **Control by parameterization**
++
+In “control by parameterization” mode, the EMS sends the configuration parameters for control algorithms embedded into the hardware for internal execution.
++
+_Example:_ In a Virtual Inertia Ancillary Services application,     the EMS sends the configuration parameters for the control characteristics to the ESS. The ESS uses this parameter set for its internal, high-performance algorithm.
+
+The following Controllers are implemented in the OpenEMS standard codebase. The links point directly to the source code.

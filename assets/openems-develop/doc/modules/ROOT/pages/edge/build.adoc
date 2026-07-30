@@ -1,0 +1,42 @@
+= Build OpenEMS Edge
+:sectnums:
+:sectnumlevels: 4
+:toclevels: 4
+:experimental:
+:keywords: AsciiDoc
+:source-highlighter: highlight.js
+:icons: font
+:imagesdir: ../../assets/images
+
+This chapter explains, how OpenEMS Edge can be compiled to a JAR file that can be executed outside of an IDE.
+
+== Build using Eclipse IDE
+
+. Inside Eclipse IDE open the *io.openems.edge.application* project and open the link:https://github.com/OpenEMS/openems/blob/develop/io.openems.edge.application/EdgeApp.bndrun[EdgeApp.bndrun icon:code[]] file.
++
+.Eclipse IDE EdgeApp.bndrun
+image::eclipse-edgeapp-bndrun.png[Eclipse IDE EdgeApp.bndrun]
+
+. Press btn:[Export] to start the *Export Wizard Selection* assistant.
+
+. Select btn:[Executable JAR] and press btn:[Next >].
++
+.Eclipse Export Wizard Selection assistant
+image::eclipse-bnd-file-export.png[Eclipse Export Wizard Selection assistant]
+
+. Select a *Destination* for *Export to JAR*.
++
+.Eclipse Export Destination
+image::eclipse-bnd-file-export-destination.png[Eclipse Export Destination]
+
+. Press btn:[Finish]
+
+This creates a so called Fat-JAR-file including all bundles. It can be executed by running `java -jar openems.jar` in a console.
+
+== Build using Gradle from command line
+
+link:https://gradle.org/[Gradle] is a build tool that is used in the OpenEMS project to compile the JAR-files and to execute other tasks like building the documentation webpage using link:https://antora.org/[Antora] and the Javadocs. To build OpenEMS Edge:
+
+. Open a console and change to your repository directory.
+
+. Execute `gradlew buildEdge`

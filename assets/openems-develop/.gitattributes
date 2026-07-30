@@ -1,0 +1,79 @@
+# Text files with LF eol
+*.auth text eol=lf
+*.awk text eol=lf
+*.bnd text eol=lf
+*.bndrun text eol=lf
+*.c text eol=lf
+*.conf text eol=lf
+*.cpp text eol=lf
+*.css text eol=lf diff=css
+*.ddf text eol=lf
+*.ee text eol=lf
+*.gradle text eol=lf
+*.groovy text eol=lf
+*.h text eol=lf
+*.html text eol=lf diff=html
+*.java text eol=lf
+*.js text eol=lf diff=javascript
+*.json text eol=lf
+*.lib text eol=lf
+*.md text eol=lf
+*.MF text eol=lf
+*.mf text eol=lf
+*.perm text eol=lf
+*.php text eol=lf
+*.pl text eol=lf
+*.pom text eol=lf
+*.prefs text eol=lf
+*.properties text eol=lf
+*.py text eol=lf
+*.schema text eol=lf
+*.scss text eol=lf
+*.SF text eol=lf
+*.sh text eol=lf
+*.tcl text eol=lf
+*.ts text eol=lf
+*.txt text eol=lf
+*.xml text eol=lf
+*.xsd text eol=lf
+*.xsl text eol=lf
+*.xslt text eol=lf
+*.yml text eol=lf
+.classpath text eol=lf diff=xml
+.project text eol=lf diff=xml
+gradlew text eol=lf
+packageinfo text eol=lf
+Makefile text eol=lf
+README text eol=lf
+LICENSE text eol=lf
+
+# Windows
+.bat text eol=crlf
+
+# Binary. No EOL translation, no diff
+*.ico binary
+*.jpeg binary
+*.jpg binary
+*.png binary
+*.crt binary
+*.pdf binary
+*.dll binary
+*.jar binary
+*.jnilib binary
+*.so binary
+*.zip binary
+*.doc binary
+*.ppt binary
+*.xls binary
+*.odg binary
+*.odp binary
+*.ods binary
+*.odt binary
+*.otg binary
+*.otp binary
+*.ots binary
+*.ott binary
+*.svg binary
+*.key binary
+*.numbers binary
+*.pages binary

@@ -1,0 +1,75 @@
+package io.openems.common.utils;
+
+import java.util.OptionalDouble;
+
+public class DoubleUtils {
+
+	private static final double EPSILON = 1e-10;
+
+	/**
+	 * Checks if a value is close to zero within a small epsilon threshold.
+	 *
+	 * @param value the value to check
+	 * @return true if the absolute value is less than epsilon, false otherwise
+	 */
+	public static boolean isCloseToZero(double value) {
+		return Math.abs(value) < EPSILON;
+	}
+
+	/**
+	 * Normalize a value to a range - normalize values between [100, 1000] to range
+	 * [0, 1].
+	 *
+	 * @param value         the value to be normalized
+	 * @param minValue      the minimum possible value (e.g. "200")
+	 * @param maxValue      the maximum possible value (e.g. "1000")
+	 * @param minNormalized the minimum normalized value (e.g. "0")
+	 * @param maxNormalized the maximum normalized value (e.g. "1")
+	 * @param invert        invert the normalization, i.e. 1000 is mapped to 0 and
+	 *                      200 is mapped to 1
+	 * @return the normalized value
+	 */
+	public static double normalize(double value, double minValue, double maxValue, double minNormalized,
+			double maxNormalized, boolean invert) {
+		if (!Double.isFinite(minValue) || !Double.isFinite(maxValue) || minValue == maxValue) {
+			return invert ? maxNormalized : minNormalized;
+		}
+
+		double result;
+		if (value < minValue) {
+			result = minNormalized;
+		} else if (value > maxValue) {
+			result = maxNormalized;
+		} else {
+			result = minNormalized + (maxNormalized - minNormalized) * ((value - minValue) / (maxValue - minValue));
+		}
+		if (invert) {
+			return maxNormalized + minNormalized - result;
+		}
+		return result;
+	}
+
+	/**
+	 * Convert {@link OptionalDouble} to nullable {@link Double}.
+	 * 
+	 * @param valueOpt the input value
+	 * @return the output value; possibly null
+	 */
+	public static Double getOrNull(OptionalDouble valueOpt) {
+		if (valueOpt.isEmpty()) {
+			return null;
+		}
+		return valueOpt.getAsDouble();
+	}
+
+	@FunctionalInterface
+	public static interface DoubleToDoubleFunction {
+		/**
+		 * Applies this function to the given argument.
+		 *
+		 * @param value the function argument
+		 * @return the function result
+		 */
+		double apply(double value);
+	}
+}

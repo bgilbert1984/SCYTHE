@@ -1,0 +1,62 @@
+// @ts-strict-ignore
+import { ChangeDetectionStrategy, Component, effect, OnDestroy } from "@angular/core";
+import { Router } from "@angular/router";
+import { ModalController, ViewWillLeave } from "@ionic/angular";
+import { Edge, Service, Websocket } from "src/app/shared/shared";
+import { Pagination } from "../shared/service/pagination";
+import { RouteService } from "../shared/service/route.service";
+import { UserService } from "../shared/service/user.service";
+
+/** This component is needed as a routing parent and acts as a transit station without being displayed. */
+@Component({
+    selector: "edge",
+    template: `
+        <ion-content></ion-content>
+        <ion-router-outlet id="content"></ion-router-outlet>
+    `,
+    changeDetection: ChangeDetectionStrategy.Eager,
+    standalone: false,
+})
+export class EdgeComponent implements OnDestroy, ViewWillLeave {
+    protected latestIncident: { message: string | null; id: string } | null = null;
+    private edge: Edge | null = null;
+
+    constructor(
+        private routeService: RouteService,
+        private service: Service,
+        private websocket: Websocket,
+        private pagination: Pagination,
+        private popoverCtrl: ModalController,
+        private router: Router,
+        private userService: UserService,
+    ) {
+        effect(async () => {
+            const edge = this.service.currentEdge();
+            const edgeId = this.routeService.getRouteParam<string>("edgeId");
+            if (!edgeId || !edge || edge.id == this.edge?.id) {
+                return;
+            }
+            this.edge = edge;
+
+            pagination.getAndSubscribeEdge(edge.id);
+        });
+    }
+
+    async ionViewWillEnter() {
+        const edgeId = this.routeService.getRouteParam<string>("edgeId");
+        await this.service.updateCurrentEdge(edgeId);
+        const edge = this.service.currentEdge();
+        await this.pagination.subscribeEdge(edge, this.websocket);
+    }
+
+    public ionViewWillLeave() {
+        this.ngOnDestroy();
+    }
+
+    public ngOnDestroy(): void {
+        this.service.currentEdge.set(null);
+        if (!this.edge) {
+            return;
+        }
+    }
+}

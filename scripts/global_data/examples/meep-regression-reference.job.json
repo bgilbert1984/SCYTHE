@@ -1,0 +1,100 @@
+{
+  "solverSourceDirectory": "../../../assets/meep-master",
+  "inputs": [
+    {
+      "sourcePath": "../../../assets/meep-master/tests/array-slice-ll.cpp",
+      "logicalPath": "inputs/array-slice-ll.cpp"
+    }
+  ],
+  "assets": [
+    {
+      "sourcePath": "../../../assets/meep-master/tests/array-slice-ll-ref.h5",
+      "datasetPath": "fields/array-slice-ll-ref.h5",
+      "role": "AUTHORITATIVE_VALUES",
+      "mediaType": "application/x-hdf5"
+    }
+  ],
+  "manifest": {
+    "schemaVersion": "1.0",
+    "datasetId": "meep-array-slice-contract-fixture",
+    "title": "Meep array-slice regression reference",
+    "description": "Schema and packaging fixture around a bundled Meep regression HDF5 file. It is not a physical SCYTHE optical dataset and has no geospatial registration.",
+    "evidenceClass": "SYNTHETIC",
+    "authority": {
+      "solverName": "Meep",
+      "solverVersion": "1.35.0-beta",
+      "modelName": "FDTD regression reference",
+      "standardRevision": null,
+      "sourceRevision": "VCS_REVISION_UNAVAILABLE_IN_SOURCE_ARCHIVE",
+      "sourceTreeSha256": null,
+      "provenanceStatus": "ARCHIVE_DIGEST_ONLY",
+      "solverLicense": "GPL-2.0-or-later",
+      "datasetLicense": "UNSPECIFIED",
+      "runId": "bundled-meep-array-slice-reference",
+      "deterministic": true,
+      "executionEnvironment": "Not executed in this Codespace; existing Meep regression reference wrapped for contract testing only.",
+      "inputHashes": []
+    },
+    "spatialReference": {
+      "type": "LOCAL_CARTESIAN",
+      "axes": "Meep two-dimensional x-y cell; component data order documented by array-slice-ll.cpp",
+      "distanceUnits": "solver_length_unit",
+      "metersPerSolverUnit": null,
+      "originDescription": "Centered Meep simulation cell; no physical scale or Earth registration declared.",
+      "geodeticRegistration": null
+    },
+    "temporal": {
+      "generatedUtc": "2026-07-30T00:00:00Z",
+      "validFromUtc": null,
+      "validToUtc": null,
+      "statisticalTimePercentage": null,
+      "timeSemantics": "STATIC"
+    },
+    "physics": {
+      "domain": "OPTICAL",
+      "rf": null,
+      "optical": {
+        "wavelengthNanometers": null,
+        "frequencySolverUnits": 0.25,
+        "polarizationRepresentation": "FIELD_COMPONENTS",
+        "materialModel": "Synthetic dielectric waveguide regression geometry with epsilon=13",
+        "boundaryConditions": "PML thickness 1 solver unit; exact setup is the hashed input source."
+      }
+    },
+    "quantity": {
+      "name": "Meep regression field slices",
+      "definition": "HDF5 datasets hz.r and hz.i contain a 126-sample complex Hz slice; sy contains a 126 by 38 Poynting-component slice.",
+      "units": "Meep normalized field units",
+      "valueSemantics": "COMPLEX_AMPLITUDE",
+      "complexRepresentation": "REAL_IMAGINARY",
+      "uncertainty": {
+        "kind": "NOT_QUANTIFIED",
+        "description": "Bundled regression values have no physical uncertainty or convergence study attached.",
+        "assetPath": null
+      }
+    },
+    "grid": {
+      "representation": "HDF5",
+      "dimensions": [126, 38],
+      "resolution": [0.05, 0.05],
+      "noData": {
+        "policy": "NONE",
+        "value": null
+      },
+      "interpolation": "NONE",
+      "authoritativeAssetPath": "fields/array-slice-ll-ref.h5",
+      "lodPolicy": {
+        "authoritativeValuesImmutable": true,
+        "derivedTilesAllowed": false,
+        "aggregationMethod": null,
+        "description": "Regression fixture is consumed at native resolution only."
+      }
+    },
+    "assets": [],
+    "lineage": {
+      "parentDatasetIds": [],
+      "transformations": []
+    },
+    "visualizationIsAuthoritative": false
+  }
+}

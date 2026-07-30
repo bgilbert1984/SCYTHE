@@ -1,0 +1,86 @@
+<ion-content>
+  <ion-grid>
+    <ion-row>
+      <ion-col size="12">
+        <ion-card>
+          <ion-item lines="full" color="light">
+            <ion-icon slot="start" name="code-working-outline" color="primary"></ion-icon>
+            <ion-label>System-Log</ion-label>
+          </ion-item>
+
+          <ion-card-content>
+            <ion-grid class="ion-no-padding">
+              <ion-row>
+                <ion-col>
+                  <ion-item lines="none">
+                    <ion-checkbox [labelPlacement]="'start'" (ionChange)="toggleSubscribe($event)" slot="start"
+                      [(ngModel)]="isSubscribed">
+                      {{'EDGE.CONFIG.LOG.AUTOMATIC_UPDATING' | translate}}
+                    </ion-checkbox>
+                  </ion-item>
+                </ion-col>
+                @if (isCondensedOutput !== null && isAtLeastGuest) {
+                  <ion-col>
+                    <ion-item lines="none">
+                      <ion-toggle tabindex="0" mode="md" (ionChange)="toggleCondensedOutput($event)" slot="start"
+                        [(ngModel)]="isCondensedOutput">
+                      </ion-toggle>
+                      <ion-label class="ion-text-wrap">{{"EDGE.CONFIG.LOG.CONDENSED_OUTPUT" | translate}}</ion-label>
+                    </ion-item>
+                  </ion-col>
+                }
+                <ion-col>
+                  <ion-item lines="none">
+                    <ion-select interface="popover" [multiple]="filters.multiple" label="Level" fill="outline"
+                      class="custom-ion-popover" style="white-space: initial; --color: var(--ion-color-primary)"
+                      (ionDismiss)="searchOnChange($event)" style="white-space: initial;">
+                      @for (filter of filters.options; track filter) {
+                        <ion-select-option (keydown.enter)="searchOnChange($event)" button
+                          [value]="filter.option.value">{{filter.name}}
+                        </ion-select-option>
+                      }
+                    </ion-select>
+                  </ion-item>
+                </ion-col>
+              </ion-row>
+            </ion-grid>
+            <ion-grid class="ion-no-padding">
+              <ion-row class="ion-justify-content-center">
+                <ion-col>
+                  <ion-searchbar
+                    style="--background: var(--ion-color-searchbar-background); color:var(--ion-color-searchbar-text);"
+                    [(ngModel)]="query" (ionChange)="searchOnChange()">
+                  </ion-searchbar>
+                </ion-col>
+              </ion-row>
+            </ion-grid>
+          </ion-card-content>
+
+          <ion-card-content style="overflow-x: scroll">
+            @for (line of logLines; track line) {
+              <ion-grid class="ion-no-padding" style="user-select: text;">
+                <ion-row style="font-family: monospace; font-size: small" style.color="black">
+                  <ion-col size-sm="2" size="6">
+                    {{ line.time }}
+                  </ion-col>
+                  <ion-col size-sm="1" size="6">
+                    {{ line.level }}
+                  </ion-col>
+                  <ion-col size-sm="auto" size="12">
+                    {{ line.source }}
+                  </ion-col>
+                </ion-row>
+                <ion-row style="font-family: monospace" [style.color]="line.color">
+                  <ion-col size="12">
+                    <ion-text [innerHTML]="line.message"></ion-text>
+                  </ion-col>
+                </ion-row>
+              </ion-grid>
+            }
+          </ion-card-content>
+
+        </ion-card>
+      </ion-col>
+    </ion-row>
+  </ion-grid>
+</ion-content>

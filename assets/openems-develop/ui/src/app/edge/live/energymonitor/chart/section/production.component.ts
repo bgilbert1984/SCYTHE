@@ -1,0 +1,160 @@
+// @ts-strict-ignore
+import { Component, OnDestroy, OnInit, ChangeDetectionStrategy } from "@angular/core";
+import { ActivatedRoute, Router } from "@angular/router";
+import { TranslateService } from "@ngx-translate/core";
+import { Subscription } from "rxjs";
+import { NavigationService } from "src/app/shared/components/navigation/service/navigation.service";
+import { UnitvaluePipe } from "src/app/shared/pipe/unitvalue/unitvalue.pipe";
+import { environment } from "src/environments";
+import { Service, Utils } from "../../../../../shared/shared";
+import { DefaultTypes } from "../../../../../shared/type/defaulttypes";
+import { AbstractSection, EnergyFlow, Ratio, SvgEnergyFlow, SvgSquare, SvgSquarePosition, } from "./abstractsection.component";
+import { AnimationService } from "./animation.service";
+
+@Component({
+    selector: "[productionsection]",
+    templateUrl: "./production.component.html",
+    styleUrls: ["../animation.scss"],
+    changeDetection: ChangeDetectionStrategy.Eager,
+    standalone: false,
+})
+export class ProductionSectionComponent extends AbstractSection implements OnInit, OnDestroy {
+    protected productionAnimationClass: string = "production-hide";
+
+    private subShow?: Subscription;
+    private animationTrigger: boolean = false;
+
+    constructor(
+        translate: TranslateService,
+        service: Service,
+        navigationService: NavigationService,
+        router: Router,
+        route: ActivatedRoute,
+        private unitpipe: UnitvaluePipe,
+        private animationService: AnimationService,
+    ) {
+        super(
+            "GENERAL.PRODUCTION",
+            "up",
+            "var(--ion-color-primary)",
+            translate,
+            service,
+            navigationService,
+            router,
+            route,
+            "Common_Production",
+            ["common", "production"],
+        );
+    }
+
+    ngOnInit() {
+        this.adjustFillRefbyBrowser();
+        this.subShow = this.animationService.toggleAnimation$.subscribe((show) => {
+            this.productionAnimationClass = show ? "production-show" : "production-hide";
+        });
+    }
+
+    ngOnDestroy() {
+        this.subShow?.unsubscribe();
+    }
+
+    toggleAnimation() {
+        this.animationTrigger = true;
+    }
+
+    protected getStartAngle(): number {
+        return 316;
+    }
+
+    protected getEndAngle(): number {
+        return 404;
+    }
+
+    protected getRatioType(): Ratio {
+        return "Only Positive [0,1]";
+    }
+
+    protected _updateCurrentData(sum: DefaultTypes.Summary): void {
+        let arrowIndicate: number;
+        // only reacts to kW values (50 W => 0.1 kW rounded)
+        if (sum.production.activePower > 49) {
+            if (!this.animationTrigger) {
+                this.toggleAnimation();
+            }
+            arrowIndicate = Utils.divideSafely(sum.production.activePower, sum.system.totalPower);
+        } else {
+            arrowIndicate = 0;
+        }
+        super.updateSectionData(sum.production.activePower, sum.production.powerRatio, arrowIndicate);
+    }
+
+    protected getSquarePosition(square: SvgSquare, innerRadius: number): SvgSquarePosition {
+        const x = (square.length / 2) * -1;
+        const y = (innerRadius - 10) * -1;
+        return new SvgSquarePosition(x, y);
+    }
+
+    protected getImagePath(): string {
+        return environment.icons.COMMON.PRODUCTION;
+    }
+
+    protected getValueText(value: number): string {
+        if (value == null || Number.isNaN(value)) {
+            return "";
+        }
+
+        return this.unitpipe.transform(value, "kW");
+    }
+
+    protected initEnergyFlow(radius: number): EnergyFlow {
+        return new EnergyFlow(radius, { x1: "50%", y1: "100%", x2: "50%", y2: "0%" });
+    }
+
+    protected setElementHeight() {
+        this.square.valueText.y = this.square.valueText.y - this.square.valueText.y * 0.4;
+        this.square.image.y = this.square.image.y - this.square.image.y * 0.45;
+    }
+
+    protected getSvgEnergyFlow(ratio: number, radius: number): SvgEnergyFlow {
+        const v = Math.abs(ratio);
+        const r = radius;
+        const p = {
+            topLeft: { x: v * -1, y: r * -1 },
+            bottomLeft: { x: v * -1, y: v * -1 },
+            topRight: { x: v, y: r * -1 },
+            bottomRight: { x: v, y: v * -1 },
+            middleBottom: { x: 0, y: 0 },
+            middleTop: { x: 0, y: r * -1 + v },
+        };
+        if (ratio < 0) {
+            // towards top
+            p.topLeft.y = p.topLeft.y + v;
+            p.middleTop.y = p.middleTop.y - v;
+            p.topRight.y = p.topRight.y + v;
+        }
+        return p;
+    }
+
+    protected getSvgAnimationEnergyFlow(ratio: number, radius: number): SvgEnergyFlow {
+        const v = Math.abs(ratio);
+        const r = radius;
+        const animationWidth = r * -1 + v;
+        let p = {
+            topLeft: { x: v * -1, y: r * -1 },
+            bottomLeft: { x: v * -1, y: v * -1 },
+            topRight: { x: v, y: r * -1 },
+            bottomRight: { x: v, y: v * -1 },
+            middleBottom: { x: 0, y: 0 },
+            middleTop: { x: 0, y: r * -1 + v },
+        };
+        if (ratio > 0) {
+            // towards bottom
+            p.bottomRight.y = p.topRight.y + animationWidth * 0.2;
+            p.bottomLeft.y = p.topLeft.y + animationWidth * 0.2;
+            p.middleBottom.y = p.middleTop.y + animationWidth * 0.2;
+        } else {
+            p = null;
+        }
+        return p;
+    }
+}

@@ -1,0 +1,513 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://scythe.local/schemas/global-propagation-dataset-1.0.json",
+  "title": "SCYTHE Global Propagation Dataset Contract",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "datasetId",
+    "title",
+    "description",
+    "evidenceClass",
+    "authority",
+    "spatialReference",
+    "temporal",
+    "physics",
+    "quantity",
+    "grid",
+    "assets",
+    "lineage",
+    "visualizationIsAuthoritative"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "1.0"
+    },
+    "datasetId": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._-]{2,127}$"
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1
+    },
+    "description": {
+      "type": "string",
+      "minLength": 1
+    },
+    "evidenceClass": {
+      "enum": [
+        "MEASURED",
+        "SOLVER_OUTPUT",
+        "REDUCED_ORDER",
+        "SYNTHETIC",
+        "ILLUSTRATIVE"
+      ]
+    },
+    "authority": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "solverName",
+        "solverVersion",
+        "modelName",
+        "standardRevision",
+        "sourceRevision",
+        "sourceTreeSha256",
+        "provenanceStatus",
+        "solverLicense",
+        "datasetLicense",
+        "runId",
+        "deterministic",
+        "executionEnvironment",
+        "inputHashes"
+      ],
+      "properties": {
+        "solverName": { "type": "string", "minLength": 1 },
+        "solverVersion": { "type": "string", "minLength": 1 },
+        "modelName": { "type": "string", "minLength": 1 },
+        "standardRevision": {
+          "type": ["string", "null"],
+          "minLength": 1
+        },
+        "sourceRevision": { "type": "string", "minLength": 1 },
+        "sourceTreeSha256": {
+          "type": ["string", "null"],
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "provenanceStatus": {
+          "enum": ["COMPLETE", "ARCHIVE_DIGEST_ONLY", "INCOMPLETE"]
+        },
+        "solverLicense": { "type": "string", "minLength": 1 },
+        "datasetLicense": { "type": "string", "minLength": 1 },
+        "runId": { "type": "string", "minLength": 1 },
+        "deterministic": { "type": "boolean" },
+        "executionEnvironment": { "type": "string", "minLength": 1 },
+        "inputHashes": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/hashedArtifact" }
+        }
+      }
+    },
+    "spatialReference": {
+      "oneOf": [
+        { "$ref": "#/$defs/geodeticGrid" },
+        { "$ref": "#/$defs/localCartesian" },
+        { "$ref": "#/$defs/localEnu" }
+      ]
+    },
+    "temporal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "generatedUtc",
+        "validFromUtc",
+        "validToUtc",
+        "statisticalTimePercentage",
+        "timeSemantics"
+      ],
+      "properties": {
+        "generatedUtc": { "type": "string", "format": "date-time" },
+        "validFromUtc": { "type": ["string", "null"], "format": "date-time" },
+        "validToUtc": { "type": ["string", "null"], "format": "date-time" },
+        "statisticalTimePercentage": {
+          "type": ["number", "null"],
+          "exclusiveMinimum": 0,
+          "maximum": 100
+        },
+        "timeSemantics": {
+          "enum": [
+            "STATIC",
+            "INSTANTANEOUS",
+            "INTERVAL",
+            "STATISTICAL_PERCENTAGE",
+            "TIME_SERIES"
+          ]
+        }
+      }
+    },
+    "physics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["domain", "rf", "optical"],
+      "properties": {
+        "domain": { "enum": ["RF", "OPTICAL", "RF_AND_OPTICAL"] },
+        "rf": {
+          "oneOf": [
+            { "type": "null" },
+            { "$ref": "#/$defs/rfParameters" }
+          ]
+        },
+        "optical": {
+          "oneOf": [
+            { "type": "null" },
+            { "$ref": "#/$defs/opticalParameters" }
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "domain": { "const": "RF" } },
+            "required": ["domain"]
+          },
+          "then": {
+            "properties": {
+              "rf": { "$ref": "#/$defs/rfParameters" },
+              "optical": { "type": "null" }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "domain": { "const": "OPTICAL" } },
+            "required": ["domain"]
+          },
+          "then": {
+            "properties": {
+              "rf": { "type": "null" },
+              "optical": { "$ref": "#/$defs/opticalParameters" }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "domain": { "const": "RF_AND_OPTICAL" } },
+            "required": ["domain"]
+          },
+          "then": {
+            "properties": {
+              "rf": { "$ref": "#/$defs/rfParameters" },
+              "optical": { "$ref": "#/$defs/opticalParameters" }
+            }
+          }
+        }
+      ]
+    },
+    "quantity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "definition",
+        "units",
+        "valueSemantics",
+        "complexRepresentation",
+        "uncertainty"
+      ],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "definition": { "type": "string", "minLength": 1 },
+        "units": { "type": "string", "minLength": 1 },
+        "valueSemantics": {
+          "enum": [
+            "INSTANTANEOUS",
+            "MEAN",
+            "MEDIAN",
+            "PERCENTILE",
+            "COMPLEX_AMPLITUDE",
+            "PHASE",
+            "INTENSITY",
+            "POWER_DENSITY",
+            "FIELD_STRENGTH",
+            "PATH_LOSS",
+            "ATTENUATION"
+          ]
+        },
+        "complexRepresentation": {
+          "enum": ["NONE", "REAL_IMAGINARY", "MAGNITUDE_PHASE"]
+        },
+        "uncertainty": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "description", "assetPath"],
+          "properties": {
+            "kind": {
+              "enum": [
+                "NUMERICAL_CONVERGENCE",
+                "STATISTICAL",
+                "MEASUREMENT",
+                "NOT_QUANTIFIED",
+                "NONE"
+              ]
+            },
+            "description": { "type": "string", "minLength": 1 },
+            "assetPath": { "type": ["string", "null"] }
+          }
+        }
+      }
+    },
+    "grid": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "representation",
+        "dimensions",
+        "resolution",
+        "noData",
+        "interpolation",
+        "authoritativeAssetPath",
+        "lodPolicy"
+      ],
+      "properties": {
+        "representation": {
+          "enum": ["HDF5", "NETCDF", "GEOTIFF", "ZARR", "3D_TILES", "CUSTOM_BINARY"]
+        },
+        "dimensions": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 4,
+          "items": { "type": "integer", "minimum": 1 }
+        },
+        "resolution": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 4,
+          "items": { "type": "number", "exclusiveMinimum": 0 }
+        },
+        "noData": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["policy", "value"],
+          "properties": {
+            "policy": { "enum": ["NONE", "SENTINEL", "NAN", "MASK_ASSET"] },
+            "value": { "type": ["number", "string", "null"] }
+          }
+        },
+        "interpolation": {
+          "enum": ["NONE", "NEAREST", "BILINEAR", "TRILINEAR", "MODEL_DEFINED"]
+        },
+        "authoritativeAssetPath": { "type": "string", "minLength": 1 },
+        "lodPolicy": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "authoritativeValuesImmutable",
+            "derivedTilesAllowed",
+            "aggregationMethod",
+            "description"
+          ],
+          "properties": {
+            "authoritativeValuesImmutable": { "const": true },
+            "derivedTilesAllowed": { "type": "boolean" },
+            "aggregationMethod": { "type": ["string", "null"] },
+            "description": { "type": "string", "minLength": 1 }
+          }
+        }
+      }
+    },
+    "assets": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/datasetAsset" }
+    },
+    "lineage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["parentDatasetIds", "transformations"],
+      "properties": {
+        "parentDatasetIds": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "transformations": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "version", "parameters", "inputSha256", "outputSha256"],
+            "properties": {
+              "name": { "type": "string", "minLength": 1 },
+              "version": { "type": "string", "minLength": 1 },
+              "parameters": { "type": "object" },
+              "inputSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+              "outputSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+            }
+          }
+        }
+      }
+    },
+    "visualizationIsAuthoritative": {
+      "const": false
+    }
+  },
+  "$defs": {
+    "hashedArtifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+      }
+    },
+    "datasetAsset": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "role", "mediaType", "sha256", "sizeBytes"],
+      "properties": {
+        "path": {
+          "type": "string",
+          "pattern": "^(?!/)(?!.*\\.\\.)[^\\\\]+$"
+        },
+        "role": {
+          "enum": [
+            "AUTHORITATIVE_VALUES",
+            "UNCERTAINTY",
+            "MASK",
+            "COORDINATES",
+            "ANTENNA_PATTERN",
+            "MATERIALS",
+            "DERIVED_VISUALIZATION",
+            "OTHER"
+          ]
+        },
+        "mediaType": { "type": "string", "minLength": 1 },
+        "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "sizeBytes": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "geodeticGrid": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "horizontalCrs",
+        "verticalDatum",
+        "coordinateOrder",
+        "heightUnits",
+        "ecefCompatible",
+        "boundsDegrees",
+        "crossesAntimeridian"
+      ],
+      "properties": {
+        "type": { "const": "GEODETIC_GRID" },
+        "horizontalCrs": { "const": "EPSG:4326" },
+        "verticalDatum": {
+          "enum": ["WGS84_ELLIPSOID", "EGM96", "EGM2008", "LOCAL", "NONE"]
+        },
+        "coordinateOrder": { "const": "longitude,latitude,height" },
+        "heightUnits": { "const": "m" },
+        "ecefCompatible": { "type": "boolean" },
+        "boundsDegrees": {
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "prefixItems": [
+            { "type": "number", "minimum": -180, "maximum": 180 },
+            { "type": "number", "minimum": -90, "maximum": 90 },
+            { "type": "number", "minimum": -180, "maximum": 180 },
+            { "type": "number", "minimum": -90, "maximum": 90 }
+          ]
+        },
+        "crossesAntimeridian": { "type": "boolean" }
+      }
+    },
+    "localCartesian": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "axes",
+        "distanceUnits",
+        "metersPerSolverUnit",
+        "originDescription",
+        "geodeticRegistration"
+      ],
+      "properties": {
+        "type": { "const": "LOCAL_CARTESIAN" },
+        "axes": { "type": "string", "minLength": 1 },
+        "distanceUnits": { "enum": ["m", "solver_length_unit"] },
+        "metersPerSolverUnit": {
+          "type": ["number", "null"],
+          "exclusiveMinimum": 0
+        },
+        "originDescription": { "type": "string", "minLength": 1 },
+        "geodeticRegistration": { "type": "null" }
+      }
+    },
+    "localEnu": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "axes",
+        "distanceUnits",
+        "metersPerSolverUnit",
+        "originDescription",
+        "geodeticRegistration"
+      ],
+      "properties": {
+        "type": { "const": "LOCAL_ENU" },
+        "axes": { "const": "x-east,y-up,z-north" },
+        "distanceUnits": { "const": "m" },
+        "metersPerSolverUnit": { "type": "null" },
+        "originDescription": { "type": "string", "minLength": 1 },
+        "geodeticRegistration": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["longitudeDegrees", "latitudeDegrees", "heightMeters", "verticalDatum"],
+          "properties": {
+            "longitudeDegrees": { "type": "number", "minimum": -180, "maximum": 180 },
+            "latitudeDegrees": { "type": "number", "minimum": -90, "maximum": 90 },
+            "heightMeters": { "type": "number" },
+            "verticalDatum": {
+              "enum": ["WGS84_ELLIPSOID", "EGM96", "EGM2008", "LOCAL"]
+            }
+          }
+        }
+      }
+    },
+    "rfParameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "frequencyHz",
+        "bandwidthHz",
+        "polarization",
+        "transmitterHeightMeters",
+        "receiverHeightMeters",
+        "antennaPatternAssetPath",
+        "atmosphericModel",
+        "earthSpaceModel"
+      ],
+      "properties": {
+        "frequencyHz": { "type": "number", "exclusiveMinimum": 0 },
+        "bandwidthHz": { "type": "number", "minimum": 0 },
+        "polarization": { "type": "string", "minLength": 1 },
+        "transmitterHeightMeters": { "type": ["number", "null"] },
+        "receiverHeightMeters": { "type": ["number", "null"] },
+        "antennaPatternAssetPath": { "type": ["string", "null"] },
+        "atmosphericModel": { "type": ["string", "null"] },
+        "earthSpaceModel": { "type": ["string", "null"] }
+      }
+    },
+    "opticalParameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "wavelengthNanometers",
+        "frequencySolverUnits",
+        "polarizationRepresentation",
+        "materialModel",
+        "boundaryConditions"
+      ],
+      "properties": {
+        "wavelengthNanometers": {
+          "type": ["number", "null"],
+          "exclusiveMinimum": 0
+        },
+        "frequencySolverUnits": {
+          "type": ["number", "null"],
+          "exclusiveMinimum": 0
+        },
+        "polarizationRepresentation": {
+          "enum": ["STOKES_IQUV", "JONES_EXEY_COMPLEX", "FIELD_COMPONENTS", "NONE"]
+        },
+        "materialModel": { "type": "string", "minLength": 1 },
+        "boundaryConditions": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

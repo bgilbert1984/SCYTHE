@@ -1,0 +1,271 @@
+package io.openems.common.utils;
+
+import static io.openems.common.utils.DateUtils.roundDownToQuarter;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertTrue;
+
+import java.time.Clock;
+import java.time.DayOfWeek;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.LocalTime;
+import java.time.ZoneId;
+import java.time.ZonedDateTime;
+
+import org.junit.Test;
+
+import io.openems.common.exceptions.OpenemsException;
+import io.openems.common.test.TestUtils;
+
+public class DateUtilsTest {
+
+	@Test
+	public void testRoundDownToQuarter() throws Exception {
+		{
+			var expected = ZonedDateTime.of(2023, 1, 2, 3, 0, 0, 0, ZoneId.of("UTC"));
+			var source = ZonedDateTime.of(2023, 1, 2, 3, 4, 5, 6, ZoneId.of("UTC"));
+			assertEquals(expected, roundDownToQuarter(source));
+			assertEquals(expected.toInstant(), roundDownToQuarter(source.toInstant()));
+		}
+		{
+			var expected = ZonedDateTime.of(2023, 1, 2, 3, 15, 0, 0, ZoneId.of("UTC"));
+			var source = ZonedDateTime.of(2023, 1, 2, 3, 16, 17, 18, ZoneId.of("UTC"));
+			assertEquals(expected, roundDownToQuarter(source));
+			assertEquals(expected.toInstant(), roundDownToQuarter(source.toInstant()));
+		}
+	}
+
+	@Test
+	public void testParseDateWithDmyFormat() throws Exception {
+		var dateString = "11.11.2018";
+		var expectedDate = LocalDate.of(2018, 11, 11);
+		assertEquals(expectedDate, DateUtils.parseLocalDateOrError(dateString, DateUtils.DMY_FORMATTER));
+
+		dateString = "31.02.2018";
+		expectedDate = LocalDate.of(2018, 2, 28);
+		assertEquals(expectedDate, DateUtils.parseLocalDateOrError(dateString, DateUtils.DMY_FORMATTER));
+	}
+
+	@Test(expected = OpenemsException.class)
+	public void testParseDateWithDmyFormatMissingLeadingZeros() throws Exception {
+		DateUtils.parseLocalDateOrError("1.1.2018", DateUtils.DMY_FORMATTER);
+	}
+
+	@Test(expected = OpenemsException.class)
+	public void testParseDateWithDmyFormatInvalidDate() throws Exception {
+		DateUtils.parseLocalDateOrError("32.12.2018", DateUtils.DMY_FORMATTER);
+	}
+
+	@Test
+	public void testParseZonedDateTimeOrNull() {
+		assertNull(DateUtils.parseZonedDateTimeOrNull(null));
+		assertNull(DateUtils.parseZonedDateTimeOrNull(""));
+		assertNull(DateUtils.parseZonedDateTimeOrNull("    "));
+		assertNull(DateUtils.parseZonedDateTimeOrNull("abcde"));
+		assertNotNull(DateUtils.parseZonedDateTimeOrNull("2007-12-03T10:15:30+01:00[Europe/Paris]"));
+	}
+
+	@Test(expected = OpenemsException.class)
+	public void testParseZonedDateTimeOrErrorNull() throws Exception {
+		DateUtils.parseZonedDateTimeOrError(null);
+	}
+
+	@Test(expected = OpenemsException.class)
+	public void testParseZonedDateTimeOrErrorEmpty() throws Exception {
+		DateUtils.parseZonedDateTimeOrError("");
+	}
+
+	@Test(expected = OpenemsException.class)
+	public void testParseZonedDateTimeOrErrorBlank() throws Exception {
+		DateUtils.parseZonedDateTimeOrError("      ");
+	}
+
+	@Test(expected = OpenemsException.class)
+	public void testParseZonedDateTimeOrErrorLetters() throws Exception {
+		DateUtils.parseZonedDateTimeOrError("abc");
+	}
+
+	@Test
+	public void testParseZonedDateTimeOrErrorSuccess() throws OpenemsException {
+		final ZonedDateTime datetime = DateUtils.parseZonedDateTimeOrError("2007-12-03T10:15:30+01:00[Europe/Paris]");
+		assertEquals(2007, datetime.getYear());
+		assertEquals(12, datetime.getMonthValue());
+		assertEquals(3, datetime.getDayOfMonth());
+	}
+
+	@Test
+	public void testParseLocalDateOrNull() {
+		assertNull(DateUtils.parseLocalDateOrNull(null));
+		assertNull(DateUtils.parseLocalDateOrNull(""));
+		assertNull(DateUtils.parseLocalDateOrNull("    "));
+		assertNull(DateUtils.parseLocalDateOrNull("abcde"));
+		assertNotNull(DateUtils.parseLocalDateOrNull("2007-12-03"));
+	}
+
+	@Test(expected = OpenemsException.class)
+	public void testParseLocalDateOrErrorNull() throws Exception {
+		DateUtils.parseLocalDateOrError(null);
+	}
+
+	@Test(expected = OpenemsException.class)
+	public void testParseLocalDateOrErrorEmpty() throws Exception {
+		DateUtils.parseLocalDateOrError("");
+	}
+
+	@Test(expected = OpenemsException.class)
+	public void testParseLocalDateOrErrorBlank() throws Exception {
+		DateUtils.parseLocalDateOrError("      ");
+	}
+
+	@Test(expected = OpenemsException.class)
+	public void testParseLocalDateOrErrorLetters() throws Exception {
+		DateUtils.parseLocalDateOrError("abc");
+	}
+
+	@Test
+	public void testParseLocalDateOrErrorSuccess() throws OpenemsException {
+		final LocalDate date = DateUtils.parseLocalDateOrError("2007-12-03");
+		assertEquals(2007, date.getYear());
+		assertEquals(12, date.getMonthValue());
+		assertEquals(3, date.getDayOfMonth());
+	}
+
+	@Test
+	public void testParseLocalTimeOrNull() {
+		assertNull(DateUtils.parseLocalTimeOrNull(null));
+		assertNull(DateUtils.parseLocalTimeOrNull(""));
+		assertNull(DateUtils.parseLocalTimeOrNull("    "));
+		assertNull(DateUtils.parseLocalTimeOrNull("abcde"));
+		assertNotNull(DateUtils.parseLocalTimeOrNull("10:15"));
+	}
+
+	@Test(expected = OpenemsException.class)
+	public void testParseLocalTimeOrErrorNull() throws Exception {
+		DateUtils.parseLocalTimeOrError(null);
+	}
+
+	@Test(expected = OpenemsException.class)
+	public void testParseLocalTimeOrErrorEmpty() throws Exception {
+		DateUtils.parseLocalTimeOrError("");
+	}
+
+	@Test(expected = OpenemsException.class)
+	public void testParseLocalTimeOrErrorBlank() throws Exception {
+		DateUtils.parseLocalTimeOrError("      ");
+	}
+
+	@Test(expected = OpenemsException.class)
+	public void testParseLocalTimeOrErrorLetters() throws Exception {
+		DateUtils.parseLocalTimeOrError("abc");
+	}
+
+	@Test
+	public void testParseLocalTimeOrErrorSuccess() throws Exception {
+		var timeString = "10:15";
+		var expectedTime = LocalTime.of(10, 15);
+		assertEquals(expectedTime, DateUtils.parseLocalTimeOrError(timeString));
+
+		timeString = "23:13";
+		expectedTime = LocalTime.of(23, 13);
+		assertEquals(expectedTime, DateUtils.parseLocalTimeOrError(timeString));
+
+		timeString = "00:13";
+		expectedTime = LocalTime.of(0, 13);
+		assertEquals(expectedTime, DateUtils.parseLocalTimeOrError(timeString));
+	}
+
+	@Test(expected = OpenemsException.class)
+	public void testParseLocalTimeOrErrorSuccess24Hour() throws Exception {
+		DateUtils.parseLocalTimeOrError("24:00");
+	}
+
+	@Test
+	public void testParseLocalTimeOrErrorSuccess24HourWithTimeFormatter() throws Exception {
+		assertEquals(LocalTime.of(0, 0), DateUtils.parseLocalTimeOrError("24:00", DateUtils.TIME_FORMATTER));
+	}
+
+	@Test(expected = OpenemsException.class)
+	public void testParseLocalTimeOrErrorSuccessInvalidTime() throws Exception {
+		DateUtils.parseLocalTimeOrError("25:21");
+	}
+
+	@Test(expected = OpenemsException.class)
+	public void testParseLocalTimeOrErrorSuccessInvalidTime2() throws Exception {
+		DateUtils.parseLocalTimeOrError("24:13");
+	}
+
+	@Test(expected = OpenemsException.class)
+	public void testParseLocalTimeOrErrorSuccessMissingLeadingZero() throws Exception {
+		DateUtils.parseLocalTimeOrError("0:13");
+	}
+
+	@Test
+	public void testMin() {
+		final var now0 = ZonedDateTime.now(TestUtils.createDummyClock());
+		final var now1 = now0.plusDays(1);
+		assertEquals(now0, DateUtils.min(null, now1, null, now0));
+	}
+
+	@Test
+	public void testMax() {
+		final var now0 = Instant.now(TestUtils.createDummyClock());
+		final var now1 = now0.plus(Duration.ofDays(1));
+		assertEquals(now1, DateUtils.max(null, now1, null, now0));
+	}
+
+	@Test
+	public void testDurationUntilNextQuarter() {
+		// 10:07:30
+		var fixedTime = ZonedDateTime.of(2026, 1, 2, 10, 7, 30, 0, ZoneId.of("UTC"));
+		var clock = Clock.fixed(fixedTime.toInstant(), fixedTime.getZone());
+
+		var duration = DateUtils.durationUntilNextQuarter(clock);
+
+		var expected = Duration.ofMinutes(7).plusSeconds(30);
+		assertEquals(expected, duration);
+	}
+
+	@Test
+	public void testNthWeekdayOfMonth() {
+		var now = ZonedDateTime.now(TestUtils.createDummyClock());
+		assertEquals(DayOfWeek.WEDNESDAY, now.getDayOfWeek());
+		assertEquals("2020-01-01T00:00Z", now.toString());
+		assertEquals(1, DateUtils.nthWeekdayOfMonth(now));
+		now = now.plusWeeks(1);
+		assertEquals("2020-01-08T00:00Z", now.toString());
+		assertEquals(2, DateUtils.nthWeekdayOfMonth(now));
+		now = now.plusWeeks(1);
+		assertEquals("2020-01-15T00:00Z", now.toString());
+		assertEquals(3, DateUtils.nthWeekdayOfMonth(now));
+		now = now.plusWeeks(1);
+		assertEquals("2020-01-22T00:00Z", now.toString());
+		assertEquals(4, DateUtils.nthWeekdayOfMonth(now));
+		now = now.plusWeeks(1);
+		assertEquals("2020-01-29T00:00Z", now.toString());
+		assertEquals(5, DateUtils.nthWeekdayOfMonth(now));
+		now = now.plusWeeks(1);
+		assertEquals("2020-02-05T00:00Z", now.toString());
+		assertEquals(1, DateUtils.nthWeekdayOfMonth(now));
+	}
+
+	@Test
+	public void testTime() {
+		assertTrue(DateUtils.isAfterOrEquals(Instant.parse("2025-02-03T02:00:00Z"),
+				Instant.parse("2025-02-03T01:00:00Z")));
+		assertTrue(DateUtils.isAfterOrEquals(Instant.parse("2025-02-03T02:00:00Z"),
+				Instant.parse("2025-02-03T02:00:00Z")));
+		assertFalse(DateUtils.isAfterOrEquals(Instant.parse("2025-02-03T00:00:00Z"),
+				Instant.parse("2025-02-03T02:00:00Z")));
+
+		assertTrue(DateUtils.isBeforeOrEquals(Instant.parse("2025-02-03T00:00:00Z"),
+				Instant.parse("2025-02-03T01:00:00Z")));
+		assertTrue(DateUtils.isBeforeOrEquals(Instant.parse("2025-02-03T02:00:00Z"),
+				Instant.parse("2025-02-03T02:00:00Z")));
+		assertFalse(DateUtils.isBeforeOrEquals(Instant.parse("2025-02-03T03:00:00Z"),
+				Instant.parse("2025-02-03T02:00:00Z")));
+	}
+}

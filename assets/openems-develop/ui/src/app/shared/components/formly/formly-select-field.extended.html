@@ -1,0 +1,15 @@
+<ion-item (click)="onSelectItem()" [disabled]="formControl.disabled" [button]="!formControl.disabled">
+  <ion-label>
+    <span>{{to.label}}</span>
+    @if (to.required && to.hideRequiredMarker !== true) {
+      <span>*</span>
+    }
+    @if (to.description) {
+      <span><br /><small>{{ to.description }}</small></span>
+    }
+  </ion-label>
+  <ion-text>
+    {{ formControl.value }}
+  </ion-text>
+  <ion-icon name="caret-down-outline"></ion-icon>
+</ion-item>

@@ -97,3 +97,25 @@ declared data stops the build. If no dataset is declared, the runtime states
 The first fusion overlay is explicitly labeled **dataset space / unregistered**. Displaying an optical
 texture over the monocle does not establish camera calibration, depth registration, pose registration,
 or physical alignment with RF samples.
+
+## Global propagation boundary
+
+Planetary visualization does not turn Unity, Cesium, a shader, a voxel renderer, or a ray marcher into
+a propagation solver. Global and regional layers must validate against
+[`GlobalPropagationDataContract.schema.json`](./GlobalPropagationDataContract.schema.json) before
+consumer integration.
+
+Every global layer declares exactly one evidence class:
+
+- **MEASURED**
+- **SOLVER_OUTPUT**
+- **REDUCED_ORDER**
+- **SYNTHETIC**
+- **ILLUSTRATIVE**
+
+The contract records the solver/model authority, exact source identity, input and output hashes,
+coordinate reference and vertical datum, time semantics, RF/optical parameters, quantity definition,
+units, uncertainty, interpolation, no-data rules, and immutable-value LOD policy.
+
+Derived Cesium or Unity tiles remain presentation products. They preserve lineage to the authoritative
+asset and never replace it. `visualizationIsAuthoritative` is always false.

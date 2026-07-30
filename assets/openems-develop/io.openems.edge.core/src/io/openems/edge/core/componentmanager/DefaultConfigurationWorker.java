@@ -1,0 +1,272 @@
+package io.openems.edge.core.componentmanager;
+
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Dictionary;
+import java.util.List;
+import java.util.Optional;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.stream.Collectors;
+
+import org.osgi.service.cm.Configuration;
+import org.slf4j.Logger;
+
+import io.openems.common.exceptions.OpenemsError.OpenemsNamedException;
+import io.openems.common.exceptions.OpenemsException;
+import io.openems.common.jsonrpc.request.UpdateComponentConfigRequest.Property;
+import io.openems.common.jsonrpc.type.CreateComponentConfig;
+import io.openems.common.jsonrpc.type.DeleteComponentConfig;
+import io.openems.common.jsonrpc.type.UpdateComponentConfig;
+import io.openems.edge.common.component.OpenemsComponent;
+
+/**
+ * This Worker checks if certain OpenEMS-Components are configured and - if not
+ * - configures them. It is used to make sure a set of standard components are
+ * always activated by default on a deployed energy management system.
+ *
+ * <p>
+ * Example 1: Add JSON/REST-Api Controller by default:
+ *
+ * <pre>
+ * if (existingConfigs.stream().noneMatch(c -> //
+ * // Check if either "Controller.Api.Rest.ReadOnly" or
+ * // "Controller.Api.Rest.ReadWrite" exist
+ * "Controller.Api.Rest.ReadOnly".equals(c.factoryPid) || "Controller.Api.Rest.ReadWrite".equals(c.factoryPid))) {
+ * 	// if not -> create configuration for "Controller.Api.Rest.ReadOnly"
+ * 	this.createConfiguration(defaultConfigurationFailed, "Controller.Api.Rest.ReadOnly", Arrays.asList(//
+ * 			new Property("id", "ctrlApiRest0"), //
+ * 			new Property("alias", ""), //
+ * 			new Property("enabled", true), //
+ * 			new Property("port", 8084), //
+ * 			new Property("debugMode", false) //
+ * 	));
+ * }
+ * </pre>
+ *
+ * <p>
+ * Example 2: Add Modbus/TCP-Api Controller by default:
+ *
+ * <pre>
+ * if (existingConfigs.stream().noneMatch(c -> //
+ * // Check if either "Controller.Api.Rest.ReadOnly" or
+ * // "Controller.Api.Rest.ReadWrite" exist
+ * "Controller.Api.ModbusTcp.ReadOnly".equals(c.factoryPid)
+ * 		|| "Controller.Api.ModbusTcp.ReadWrite".equals(c.factoryPid))) {
+ * 	// if not -> create configuration for "Controller.Api.Rest.ReadOnly"
+ * 	this.createConfiguration(defaultConfigurationFailed, "Controller.Api.ModbusTcp.ReadOnly", Arrays.asList(//
+ * 			new Property("id", "ctrlApiModbusTcp0"), //
+ * 			new Property("alias", ""), //
+ * 			new Property("enabled", true), //
+ * 			new Property("port", 502), //
+ * 			new Property("component.ids", JsonUtils.buildJsonArray().add("_sum").build()), //
+ * 			new Property("maxConcurrentConnections", 5) //
+ * 	));
+ * }
+ * </pre>
+ */
+public class DefaultConfigurationWorker extends ComponentManagerWorker {
+
+	/**
+	 * Time to wait before doing the check. This allows the system to completely
+	 * boot and read configurations.
+	 */
+	private static final int INITIAL_WAIT_TIME = 5_000; // in ms
+
+	private final Logger log;
+
+	public DefaultConfigurationWorker(ComponentManagerImpl parent) {
+		super(parent);
+		this.log = OpenemsComponent.getComponentLogger(DefaultConfigurationWorker.class, parent);
+	}
+
+	/**
+	 * Creates all default configurations.
+	 *
+	 * @param existingConfigs already existing {@link Config}s
+	 * @return true on error, false if default configuration was successfully
+	 *         applied
+	 */
+	private boolean createDefaultConfigurations(List<Config> existingConfigs) {
+		final var defaultConfigurationFailed = new AtomicBoolean(false);
+
+		/*
+		 * Delete configuration for deprecated Controller.Api.Rest
+		 */
+		existingConfigs.stream().filter(c -> //
+		c.componentId.isPresent() && "Controller.Api.Rest".equals(c.factoryPid)).forEach(c -> {
+			this.deleteConfiguration(defaultConfigurationFailed, c.componentId.get());
+		});
+
+		/*
+		 * Create Timedata.Rrd4j
+		 */
+		if (existingConfigs.stream().noneMatch(c -> //
+		// Check if either "Timedata.Rrd4j" or
+		// "Timedata.InfluxDB" exist
+		"Timedata.Rrd4j".equals(c.factoryPid) || "Timedata.InfluxDB".equals(c.factoryPid))) {
+			// if not -> create configuration for "Timedata.Rrd4j"
+			this.createConfiguration(defaultConfigurationFailed, "Timedata.Rrd4j", Arrays.asList(//
+					new Property("id", "rrd4j0"), //
+					new Property("alias", ""), //
+					new Property("enabled", true), //
+					new Property("noOfCycles", 60) //
+			));
+		}
+
+		return defaultConfigurationFailed.get();
+	}
+
+	@Override
+	protected void forever() {
+		var existingConfigs = this.readConfigs();
+
+		boolean defaultConfigurationFailed;
+		try {
+			defaultConfigurationFailed = this.createDefaultConfigurations(existingConfigs);
+		} catch (Exception e) {
+			this.log.error("Unable to create default configuration: {}", e, e);
+			defaultConfigurationFailed = true;
+		}
+
+		// Set DefaultConfigurationFailed channel value
+		this.parent._setDefaultConfigurationFailed(defaultConfigurationFailed);
+
+		// Execute this worker only once
+		this.deactivate();
+	}
+
+	/**
+	 * Reads all currently active configurations.
+	 *
+	 * @return a list of currently active {@link Config}s
+	 */
+	private List<Config> readConfigs() {
+		List<Config> result = new ArrayList<>();
+		try {
+			var cm = this.parent.cm;
+			var configs = cm.listConfigurations(null); // NOTE: here we are not filtering for enabled=true
+			if (configs != null) {
+				for (Configuration config : configs) {
+					result.add(Config.from(config));
+				}
+			}
+		} catch (Exception e) {
+			this.log.error(e.getMessage(), e);
+		}
+		return result;
+	}
+
+	/**
+	 * Creates a Component configuration.
+	 *
+	 * @param defaultConfigurationFailed the result of the last configuration,
+	 *                                   updated on error
+	 * @param factoryPid                 the Factory-PID
+	 * @param properties                 the Component properties
+	 */
+	protected void createConfiguration(AtomicBoolean defaultConfigurationFailed, String factoryPid,
+			List<Property> properties) {
+		try {
+			this.log.atInfo() //
+					.setMessage("Creating Component configuration [{}]: {}") //
+					.addArgument(factoryPid) //
+					.addArgument(() -> properties.stream() //
+							.map(p -> p.getName() + ":" + p.getValue().toString()) //
+							.collect(Collectors.joining(", "))) //
+					.log();
+			this.parent.handleCreateComponentConfigRequest(null /* no user */,
+					new CreateComponentConfig.Request(factoryPid, properties));
+		} catch (OpenemsNamedException e) {
+			this.log.error("Unable to create Component configuration for Factory [{}]: {}", factoryPid, e.getMessage(),
+					e);
+			defaultConfigurationFailed.set(true);
+		}
+	}
+
+	/**
+	 * Updates a Component configuration.
+	 *
+	 * @param defaultConfigurationFailed the result of the last configuration,
+	 *                                   updated on error
+	 * @param componentId                the Component-ID
+	 * @param properties                 the Component properties
+	 */
+	protected void updateConfiguration(AtomicBoolean defaultConfigurationFailed, String componentId,
+			List<Property> properties) {
+		try {
+			this.log.atInfo() //
+					.setMessage("Updating Component configuration [{}]: {}") //
+					.addArgument(componentId) //
+					.addArgument(() -> properties.stream() //
+							.map(p -> p.getName() + ":" + p.getValue().toString()) //
+							.collect(Collectors.joining(", "))) //
+					.log();
+
+			this.parent.handleUpdateComponentConfigRequest(null /* no user */,
+					new UpdateComponentConfig.Request(componentId, properties));
+		} catch (OpenemsNamedException e) {
+			this.log.error("Unable to update Component configuration for Component [{}]: {}", componentId,
+					e.getMessage(), e);
+			defaultConfigurationFailed.set(true);
+		}
+	}
+
+	/**
+	 * Deletes a Component configuration.
+	 *
+	 * @param defaultConfigurationFailed the result of the last configuration,
+	 *                                   updated on error
+	 * @param componentId                the Component-ID
+	 */
+	protected void deleteConfiguration(AtomicBoolean defaultConfigurationFailed, String componentId) {
+		try {
+			this.log.info("Deleting Component [{}]", componentId);
+
+			this.parent.handleDeleteComponentConfigRequest(null /* no user */,
+					new DeleteComponentConfig.Request(componentId));
+		} catch (OpenemsNamedException e) {
+			this.log.error("Unable to delete Component [{}]: {}", componentId, e.getMessage(), e);
+			defaultConfigurationFailed.set(true);
+		}
+	}
+
+	/**
+	 * Holds a configuration.
+	 */
+	protected static class Config {
+		protected static Config from(Configuration config) throws OpenemsException {
+			var properties = config.getProperties();
+			if (properties == null) {
+				throw new OpenemsException(config.getPid() + ": Properties is 'null'");
+			}
+			var componentIdObj = properties.get("id");
+			String componentId;
+			if (componentIdObj != null) {
+				componentId = componentIdObj.toString();
+			} else {
+				componentId = null;
+			}
+			var pid = config.getPid();
+			return new Config(config.getFactoryPid(), componentId, pid, properties);
+		}
+
+		protected final String factoryPid;
+		protected final Optional<String> componentId;
+		protected final String pid;
+		protected final Dictionary<String, Object> properties;
+
+		private Config(String factoryPid, String componentId, String pid, Dictionary<String, Object> properties) {
+			this.factoryPid = factoryPid;
+			this.componentId = Optional.ofNullable(componentId);
+			this.pid = pid;
+			this.properties = properties;
+		}
+	}
+
+	@Override
+	protected int getCycleTime() {
+		// initial cycle time
+		return DefaultConfigurationWorker.INITIAL_WAIT_TIME;
+	}
+
+}

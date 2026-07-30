@@ -1,0 +1,12 @@
+@if (index !== null && components !== null) {
+  <!-- Shows a horizontal line on all but the last component of an array -->
+  @if (index !== (components.length - 1)) {
+    <div style="border-bottom: 1px solid lightgray; width: 110%; margin-top: 2%; margin-bottom: 2%; margin-left: -5%;">
+    </div>
+  }
+} @else {
+  <div style="border-bottom: 1px solid lightgray; width: 110%; margin-top: 2%; margin-bottom: 2%; margin-left: -5%;">
+  </div>
+}
+
+<!-- If called without passed @Input() index and components -->

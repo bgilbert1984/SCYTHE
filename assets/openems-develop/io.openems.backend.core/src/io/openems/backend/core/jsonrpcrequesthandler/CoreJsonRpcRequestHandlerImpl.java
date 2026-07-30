@@ -1,0 +1,295 @@
+package io.openems.backend.core.jsonrpcrequesthandler;
+
+import static java.util.stream.Collectors.toUnmodifiableMap;
+
+import java.util.HashMap;
+import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+
+import org.osgi.service.component.annotations.Activate;
+import org.osgi.service.component.annotations.Component;
+import org.osgi.service.component.annotations.Deactivate;
+import org.osgi.service.component.annotations.Modified;
+import org.osgi.service.component.annotations.Reference;
+import org.osgi.service.component.annotations.ReferenceCardinality;
+import org.osgi.service.component.annotations.ReferencePolicy;
+import org.osgi.service.component.annotations.ReferencePolicyOption;
+import org.osgi.service.metatype.annotations.Designate;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import com.google.gson.JsonElement;
+import com.google.gson.JsonPrimitive;
+
+import io.openems.backend.common.component.AbstractOpenemsBackendComponent;
+import io.openems.backend.common.debugcycle.DebugLoggable;
+import io.openems.backend.common.edge.EdgeManager;
+import io.openems.backend.common.jsonrpc.JsonRpcRequestHandler;
+import io.openems.backend.common.jsonrpc.request.GetEdgesChannelsValuesRequest;
+import io.openems.backend.common.jsonrpc.request.GetEdgesStatusRequest;
+import io.openems.backend.common.jsonrpc.response.GetEdgesChannelsValuesResponse;
+import io.openems.backend.common.jsonrpc.response.GetEdgesStatusResponse;
+import io.openems.backend.common.jsonrpc.response.GetEdgesStatusResponse.EdgeInfo;
+import io.openems.backend.common.metadata.AppCenterMetadata;
+import io.openems.backend.common.metadata.Metadata;
+import io.openems.backend.common.metadata.User;
+import io.openems.backend.common.timedata.TimedataManager;
+import io.openems.backend.metrics.prometheus.DebugExecutor;
+import io.openems.common.exceptions.OpenemsError;
+import io.openems.common.exceptions.OpenemsError.OpenemsNamedException;
+import io.openems.common.function.ThrowingSupplier;
+import io.openems.common.jsonrpc.base.GenericJsonrpcResponseSuccess;
+import io.openems.common.jsonrpc.base.JsonrpcRequest;
+import io.openems.common.jsonrpc.base.JsonrpcResponseSuccess;
+import io.openems.common.jsonrpc.request.ComponentJsonApiRequest;
+import io.openems.common.jsonrpc.request.EdgeRpcRequest;
+import io.openems.common.jsonrpc.request.SetGridConnScheduleRequest;
+import io.openems.common.session.Role;
+import io.openems.common.types.DebugMode;
+
+@Designate(ocd = Config.class, factory = false)
+@Component(//
+		name = "Core.JsonRpcRequestHandler", //
+		immediate = true //
+)
+public class CoreJsonRpcRequestHandlerImpl extends AbstractOpenemsBackendComponent
+		implements JsonRpcRequestHandler, DebugLoggable {
+
+	private static final String ID = "coreJsonRpcRequestHandler0";
+
+	private final Logger log = LoggerFactory.getLogger(JsonRpcRequestHandler.class);
+	private final EdgeRpcRequestHandler edgeRpcRequestHandler;
+
+	@Reference(cardinality = ReferenceCardinality.MANDATORY, policy = ReferencePolicy.DYNAMIC)
+	protected volatile EdgeManager edgeManager;
+
+	@Reference(cardinality = ReferenceCardinality.MANDATORY, policy = ReferencePolicy.DYNAMIC)
+	protected volatile Metadata metadata;
+
+	@Reference(cardinality = ReferenceCardinality.OPTIONAL, policy = ReferencePolicy.DYNAMIC, policyOption = ReferencePolicyOption.GREEDY)
+	protected volatile AppCenterMetadata.UiData appCenterMetadata;
+
+	@Reference(cardinality = ReferenceCardinality.MANDATORY, policy = ReferencePolicy.DYNAMIC)
+	protected volatile TimedataManager timedataManager;
+
+	protected Config config;
+
+	private DebugExecutor timeDataQueryDebugExecutor;
+	private final AtomicInteger rejectedExecutionCount = new AtomicInteger();
+
+	public CoreJsonRpcRequestHandlerImpl() {
+		super("Core.JsonRpcRequestHandler");
+		this.edgeRpcRequestHandler = new EdgeRpcRequestHandler(this);
+	}
+
+	@Activate
+	private void activate(Config config) {
+		this.updateConfig(config);
+
+		this.initExecutors(config);
+	}
+
+	@Modified
+	private void modified(Config config) {
+		this.updateConfig(config);
+
+		this.timeDataQueryDebugExecutor.shutdown();
+		this.initExecutors(config);
+	}
+
+	private void initExecutors(Config config) {
+		final var timeDataQueryExecutor = new ThreadPoolExecutor(config.queryThreadPoolSize(),
+				config.queryThreadPoolSize(), 0L, TimeUnit.MILLISECONDS,
+				new LinkedBlockingQueue<>(config.queryThreadPoolMaxQueueSize()), //
+				Thread.ofVirtual().name("CoreJsonRpcRequestHandler.Timedata.Request-", 0).factory(), //
+				(r, executor) -> {
+					// Custom RejectedExecutionHandler; avoid throwing a RejectedExecutionException
+					this.rejectedExecutionCount.incrementAndGet();
+				});
+		this.timeDataQueryDebugExecutor = new DebugExecutor(ID, timeDataQueryExecutor);
+	}
+
+	@Deactivate
+	private void deactivate() {
+		this.timeDataQueryDebugExecutor.shutdown();
+	}
+
+	private void updateConfig(Config config) {
+		this.config = config;
+	}
+
+	/**
+	 * Handles a JSON-RPC Request.
+	 *
+	 * @param context the Logger context, i.e. the name of the parent source
+	 * @param user    the {@link User}
+	 * @param request the JsonrpcRequest
+	 * @return the JSON-RPC Success Response Future
+	 * @throws OpenemsNamedException on error
+	 */
+	@Override
+	public CompletableFuture<? extends JsonrpcResponseSuccess> handleRequest(String context, User user,
+			JsonrpcRequest request) throws OpenemsNamedException {
+		return switch (request.getMethod()) {
+		case EdgeRpcRequest.METHOD //
+			-> this.edgeRpcRequestHandler.handleRequest(user, request.getId(), EdgeRpcRequest.from(request));
+		case GetEdgesStatusRequest.METHOD //
+			-> this.handleGetEdgesStatusRequest(user, request.getId(), GetEdgesStatusRequest.from(request));
+		case GetEdgesChannelsValuesRequest.METHOD //
+			-> this.handleGetEdgesChannelsValuesRequest(user, request.getId(),
+					GetEdgesChannelsValuesRequest.from(request));
+		case SetGridConnScheduleRequest.METHOD //
+			-> this.handleSetGridConnScheduleRequest(user, request.getId(), SetGridConnScheduleRequest.from(request));
+		default -> {
+			this.logWarn(context, "Unhandled Request: " + request);
+			throw OpenemsError.JSONRPC_UNHANDLED_METHOD.exception(request.getMethod());
+		}
+		};
+	}
+
+	/**
+	 * Handles a {@link GetEdgesStatusRequest}.
+	 *
+	 * @param user      the {@link User}
+	 * @param messageId the JSON-RPC Message-ID
+	 * @param request   the {@link GetEdgesStatusRequest}
+	 * @return the JSON-RPC Success Response Future
+	 * @throws OpenemsNamedException on error
+	 */
+	private CompletableFuture<GetEdgesStatusResponse> handleGetEdgesStatusRequest(User user, UUID messageId,
+			GetEdgesStatusRequest request) throws OpenemsNamedException {
+		Map<String, EdgeInfo> result = new HashMap<>();
+		for (var edgeId : request.edgeIds) {
+			// assure read permissions of this User for this Edge.
+			this.metadata.assertUserRole(user, edgeId, Role.GUEST, GetEdgesStatusRequest.METHOD);
+
+			var edgeOpt = this.metadata.getEdge(edgeId);
+			if (edgeOpt.isPresent()) {
+				var edge = edgeOpt.get();
+				var info = new EdgeInfo(edge.isOnline());
+				result.put(edge.getId(), info);
+			}
+		}
+		return CompletableFuture.completedFuture(new GetEdgesStatusResponse(messageId, result));
+	}
+
+	/**
+	 * Handles a {@link GetEdgesChannelsValuesRequest}.
+	 *
+	 * @param user      the {@link User}
+	 * @param messageId the JSON-RPC Message-ID
+	 * @param request   the {@link GetEdgesChannelsValuesRequest}
+	 * @return the JSON-RPC Success Response Future
+	 * @throws OpenemsNamedException on error
+	 */
+	private CompletableFuture<GetEdgesChannelsValuesResponse> handleGetEdgesChannelsValuesRequest(User user,
+			UUID messageId, GetEdgesChannelsValuesRequest request) throws OpenemsNamedException {
+		var response = new GetEdgesChannelsValuesResponse(messageId);
+		for (String edgeId : request.getEdgeIds()) {
+			// assure read permissions of this User for this Edge.
+			this.metadata.assertUserRole(user, edgeId, Role.GUEST, GetEdgesChannelsValuesRequest.METHOD);
+
+			var data = this.edgeManager.getChannelValues(edgeId, request.getChannels());
+			for (var entry : data.entrySet()) {
+				response.addValue(edgeId, entry.getKey(), entry.getValue());
+			}
+		}
+		return CompletableFuture.completedFuture(response);
+	}
+
+	/**
+	 * Handles a {@link SetGridConnScheduleRequest}.
+	 *
+	 * @param user                       the {@link User}
+	 * @param messageId                  the JSON-RPC Message-ID
+	 * @param setGridConnScheduleRequest the {@link SetGridConnScheduleRequest}
+	 * @return the JSON-RPC Success Response Future
+	 * @throws OpenemsNamedException on error
+	 */
+	private CompletableFuture<GenericJsonrpcResponseSuccess> handleSetGridConnScheduleRequest(User user, UUID messageId,
+			SetGridConnScheduleRequest setGridConnScheduleRequest) throws OpenemsNamedException {
+		var edgeId = setGridConnScheduleRequest.getEdgeId();
+
+		final var role = this.metadata.assertUserRole(user, edgeId, Role.ADMIN, SetGridConnScheduleRequest.METHOD);
+
+		// wrap original request inside ComponentJsonApiRequest
+		var componentId = "ctrlBalancingSchedule0"; // TODO find dynamic Component-ID of BalancingScheduleController
+		var request = new ComponentJsonApiRequest(componentId, setGridConnScheduleRequest);
+
+		var resultFuture = this.edgeManager.send(edgeId, user, role, request);
+
+		// Wrap reply in GenericJsonrpcResponseSuccess
+		var result = new CompletableFuture<GenericJsonrpcResponseSuccess>();
+		resultFuture.whenComplete((r, ex) -> {
+			if (ex != null) {
+				result.completeExceptionally(ex);
+			} else if (r != null) {
+				result.complete(new GenericJsonrpcResponseSuccess(messageId, r.toJsonObject()));
+			} else {
+				result.completeExceptionally(new OpenemsNamedException(OpenemsError.JSONRPC_UNHANDLED_METHOD,
+						SetGridConnScheduleRequest.METHOD));
+			}
+		});
+		return result;
+	}
+
+	/**
+	 * Log an info message including the Handler name.
+	 *
+	 * @param context the Logger context, i.e. the name of the parent source
+	 * @param message the Info-message
+	 */
+	protected void logInfo(String context, String message) {
+		this.log.info("[" + context + "] " + message);
+	}
+
+	/**
+	 * Log a warn message including the Handler name.
+	 *
+	 * @param context the Logger context, i.e. the name of the parent source
+	 * @param message the Warn-message
+	 */
+	protected void logWarn(String context, String message) {
+		this.log.warn("[" + context + "] " + message);
+	}
+
+	/**
+	 * Log an error message including the Handler name.
+	 *
+	 * @param context the Logger context, i.e. the name of the parent source
+	 * @param message the Error-message
+	 */
+	protected void logError(String context, String message) {
+		this.log.error("[" + context + "] " + message);
+	}
+
+	@Override
+	public String debugLog() {
+		return new StringBuilder("[").append(this.getName()).append("] [monitor] ") //
+				.append("Timedata-Executor: ") //
+				.append(this.timeDataQueryDebugExecutor.debugLog(DebugMode.DETAILED)) //
+				.append(", RejectedExecutions:") //
+				.append(this.rejectedExecutionCount.get()) //
+				.toString();
+	}
+
+	@Override
+	public Map<String, JsonElement> debugMetrics() {
+		return this.timeDataQueryDebugExecutor.debugMetrics().entrySet().stream() //
+				.collect(toUnmodifiableMap(//
+						// TODO implement getId()
+						e -> ID + "/" + e.getKey(), //
+						e -> new JsonPrimitive(e.getValue())));
+	}
+
+	protected <T, E extends Exception> CompletableFuture<T> submitQueryRequest(String id,
+			ThrowingSupplier<T, E> command) {
+		return this.timeDataQueryDebugExecutor.submit(id, command);
+	}
+
+}

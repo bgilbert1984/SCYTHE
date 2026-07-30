@@ -1,0 +1,16 @@
+Bundle-Name: OpenEMS Backend-to-Backend REST-Api
+Bundle-Vendor: FENECON GmbH
+Bundle-License: https://opensource.org/licenses/EPL-2.0
+Bundle-Version: 1.0.0.${tstamp}
+
+-buildpath: \
+	${buildpath},\
+	io.openems.backend.authentication.api,\
+	io.openems.backend.common,\
+	io.openems.common,\
+	io.openems.wrapper.Java-WebSocket,\
+	org.apache.felix.http.jetty12,\
+	org.apache.felix.http.servlet-api,\
+
+-testpath: \
+	${testpath}

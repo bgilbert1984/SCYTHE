@@ -1,0 +1,32 @@
+package io.openems.edge.ess.generic.symmetric.statemachine;
+
+import io.openems.common.exceptions.OpenemsError.OpenemsNamedException;
+import io.openems.edge.common.statemachine.StateHandler;
+import io.openems.edge.ess.generic.symmetric.statemachine.StateMachine.State;
+
+public class ErrorHandler extends StateHandler<State, Context> {
+
+	@Override
+	protected void onEntry(Context context) throws OpenemsNamedException {
+		context.batteryInverter.stop();
+		context.battery.stop();
+	}
+
+	@Override
+	public State runAndGetNextState(Context context) {
+
+		/*
+		 * Wait at least for stopping the battery and check for ess, battery,
+		 * battery-inverter faults
+		 * 
+		 * If ModbusCommunicationFault would be a FaultState, check it explicitly. The
+		 * battery could still have a communication fault while starting the battery.
+		 */
+		if (!context.hasEssFaults() && context.battery.isStopped()) {
+			return State.UNDEFINED;
+		}
+
+		return State.ERROR;
+	}
+
+}

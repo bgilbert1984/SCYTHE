@@ -1,0 +1,82 @@
+= Virtual Meters
+
+Calculated meters that combine or transform other meters through mathematical operations.
+
+== Overview
+
+This bundle provides virtual meter components that perform calculations based on other meters or energy storage systems. Virtual meters are useful for creating derived measurements and aggregations without hardware connections. Two types are supported:
+
+* **Virtual Subtract Meter**: Calculates `Minuend - Subtrahend1 - Subtrahend2 - ...`
+* **Virtual Add Meter**: Sums values from multiple meters
+
+Virtual meters enable flexible energy accounting scenarios without additional hardware.
+
+== Components
+
+This bundle implements the following OpenEMS Components:
+
+=== <<_virtual_subtract,Virtual Subtract Meter>>
+
+*Name*: Meter Virtual Subtract
+
+*Factory-PID*: `Meter.Virtual.Subtract`
+
+.Implemented Natures/Interfaces
+* VirtualSubtractMeter
+* ElectricityMeter
+* OpenemsComponent
+* ModbusSlave
+* SumOptions
+
+*Description*: Virtual meter that subtracts multiple meters or energy storage systems from a minuend. Useful for calculating derived energy values through arithmetic subtraction.
+
+*Use Cases*:
+
+* Calculate grid meter from consumption - production - battery: `Grid = Consumption - ESS - Production`
+* Calculate consumption from grid + production - battery: `Consumption = Grid + Production - ESS`
+
+.*Configuration*:
+
+* `id` (String): Component ID for unique identification (default: "meter0")
+* `alias` (String): Human-readable alias for the component
+* `enabled` (Boolean): Enable/disable this component (default: true)
+* `type` (Enum): Meter type - GRID, PRODUCTION, or CONSUMPTION (default: PRODUCTION)
+* `minuend_id` (String): Component ID of the minuend meter (if empty, 0 power is assumed)
+* `subtrahends_ids` (String[]): Component IDs of meters to subtract (required)
+* `addToSum` (Boolean): Should data be added to Sum? (default: false)
+
+[[_virtual_subtract]]
+
+=== <<_virtual_add,Virtual Add Meter>>
+
+*Name*: Meter Virtual Add
+
+*Factory-PID*: `Meter.Virtual.Add`
+
+.Implemented Natures/Interfaces
+* MeterVirtualAdd
+* ElectricityMeter
+* OpenemsComponent
+* ModbusSlave
+* SumOptions
+
+*Description*: Virtual meter that sums values from multiple meters. Useful for aggregating measurements from multiple systems into a single virtual meter for averaging and statistics.
+
+*Use Cases*:
+
+* Combine production from multiple PV inverters
+* Aggregate consumption across multiple buildings or zones
+* Create average values from distributed meter readings
+
+.*Configuration*:
+
+* `id` (String): Component ID for unique identification (default: "meter0")
+* `alias` (String): Human-readable alias for the component
+* `enabled` (Boolean): Enable/disable this component (default: true)
+* `type` (Enum): Meter type - GRID or CONSUMPTION (default: GRID)
+* `meterIds` (String[]): Component IDs of meters to sum (required)
+* `addToSum` (Boolean): Should data be added to Sum? (default: false)
+
+[[_virtual_add]]
+
+https://github.com/OpenEMS/openems/tree/develop/io.openems.edge.meter.virtual[Source Code icon:github[]]
