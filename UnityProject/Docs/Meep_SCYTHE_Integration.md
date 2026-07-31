@@ -157,10 +157,57 @@ They may not:
 
 `visualizationIsAuthoritative` is fixed to `false` by the schema.
 
-## Solver installation gate
+## Pinned solver environment
 
-Before running new Meep studies, create a separate, pinned solver environment with MPI, parallel
-HDF5, Meep's Python bindings, NumPy, and h5py. Record the environment lockfile or container digest in
-`authority.executionEnvironment`.
+The solver gate is now implemented under `solvers/meep/`:
+
+- PyMeep `1.34.0`, exact Conda build `mpi_mpich_py311hef964db_0`;
+- Python `3.11`;
+- MPICH `4.3.2`;
+- HDF5 `1.14.6`;
+- h5py `3.16.0`;
+- NumPy `2.4.6`;
+- exact transitive package URLs in `environment.explicit.txt`;
+- cryptographic package hashes captured from all 134 Conda records for each run.
+
+The installed environment is local and ignored by Git. It is reconstructed from the checked-in
+specification and lock rather than linked into a Unity player.
+
+## First accepted `SOLVER_OUTPUT`
+
+The first physical dataset is:
+
+```text
+datasets/meep-slab-650nm-convergence-v1/
+```
+
+It models a normally incident 650 nm, two-dimensional TE (`Ez`) plane wave crossing a 400 nm
+lossless dielectric slab with refractive index 1.5. One Meep length unit is explicitly one
+micrometre.
+
+Vacuum-reference and slab simulations ran at 20, 30, and 40 pixels per micrometre. Normalized
+transmission was:
+
+| Resolution (pixels/µm) | Normalized transmission | Change from previous |
+|---:|---:|---:|
+| 20 | 0.9825776555 | — |
+| 30 | 0.9729258473 | 0.9920% |
+| 40 | 0.9690960238 | 0.3952% |
+
+The declared finest-pair tolerance is 3%; the observed change is 0.3952%, so the numerical
+convergence gate passes. The accepted native HDF5 asset is immutable and has this run-specific
+SHA-256:
+
+```text
+600de612f97d1da193583db8d8f2c57313601b7d45af5efd8c1f2e13d6fbf373
+```
+
+Independent executions produced bit-identical `ez_0.r` and `ez_0.i` arrays. Their payload hashes are
+recorded separately because Meep/HDF5 object timestamps make the native container bytes differ
+between executions. The contract packager preserved the accepted asset checksum and the full
+dataset integrity validation passed. This supports `SOLVER_OUTPUT`; it does not support `MEASURED`.
+
+The dataset is local Cartesian and deliberately has no geodetic registration. Cesium integration
+must wait for a separate, explicit registration or geospatial solver dataset. It may not infer one.
 
 Do not link the Meep solver into the Unity player. Unity consumes validated outputs only.

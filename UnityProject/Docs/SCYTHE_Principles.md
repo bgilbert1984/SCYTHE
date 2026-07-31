@@ -119,3 +119,16 @@ units, uncertainty, interpolation, no-data rules, and immutable-value LOD policy
 
 Derived Cesium or Unity tiles remain presentation products. They preserve lineage to the authoritative
 asset and never replace it. `visualizationIsAuthoritative` is always false.
+
+## First authoritative-solver milestone
+
+SCYTHE's first accepted `SOLVER_OUTPUT` is the 650 nm Meep dielectric-slab study in
+`datasets/meep-slab-650nm-convergence-v1/`. It is physically scaled, convergence-gated, tied to an
+exact binary environment, and asset-hashed. Its complex-field array values are bit-reproducible in
+independent executions; its native HDF5 containers are run-specific because their metadata includes
+object timestamps.
+
+Its evidence class is `SOLVER_OUTPUT`, not `MEASURED`. Its coordinates are local Cartesian, not
+WGS84 or ECEF. A Cesium or Unity consumer may visualize or sample the declared optical field, but
+cannot promote the evidence class, invent geodetic registration, or treat derived tiles as the
+authoritative values.

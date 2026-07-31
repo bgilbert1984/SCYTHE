@@ -1,7 +1,0 @@
-= Solar-Log
-
-Implemented Natures:
-- SymmetricPvInverter
-- ElectricityMeter
-
-https://github.com/OpenEMS/openems/tree/develop/io.openems.edge.pvinverter.solarlog[Source Code icon:github[]]

@@ -1,5 +1,15 @@
 {
+  "scopedRegistries": [
+    {
+      "name": "Cesium",
+      "url": "https://unity.pkg.cesium.com",
+      "scopes": [
+        "com.cesium.unity"
+      ]
+    }
+  ],
   "dependencies": {
+    "com.cesium.unity": "1.24.0",
     "com.unity.modules.accessibility": "1.0.0",
     "com.unity.modules.ai": "1.0.0",
     "com.unity.modules.animation": "1.0.0",

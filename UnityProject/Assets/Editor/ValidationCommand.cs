@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using SCYTHE.Core;
+using SCYTHE.Global;
 using SCYTHE.Optics;
 using SCYTHE.RF;
 using UnityEngine;
@@ -28,14 +29,15 @@ namespace Scythe.Editor
             ValidateDeterminism();
             ValidateSpatialRfModel();
             ValidateOcclusionApproximation();
+            ValidateGlobalContractBoundary();
             ValidateWrappedPhaseGradient();
             ValidateOpticalMetadataContract();
             ValidateDeclaredOpticalDataset();
             Debug.Log(
-                "[SCYTHE VALIDATION] PASS: scenario v2, multi-emitter RF round trips, "
+                "[SCYTHE VALIDATION] PASS: scenario v3, multi-emitter RF round trips, "
                 + "deterministic channel and motion, spatial attenuation, one-way Doppler, "
-                + "explicit geometric occlusion loss, wrapped optical gradient, and optical "
-                + "dataset contract.");
+                + "explicit geometric occlusion loss, global evidence isolation, deterministic "
+                + "geospatial sampling, wrapped optical gradient, and optical dataset contract.");
         }
 
         private static void ValidateScenarioContract()
@@ -43,7 +45,18 @@ namespace Scythe.Editor
             ScenarioManifest manifest = ScenarioManifest.Load(
                 "Scenarios/rf_milestone_01.json");
             Require(manifest.transmitters.Count >= 3, "Multi-emitter scenario requires at least three emitters.");
-            Require(manifest.events.Count >= 1, "Scenario v2 requires at least one scripted event.");
+            Require(manifest.events.Count >= 1, "Scenario v3 requires at least one scripted event.");
+            Require(manifest.globalSettings.enabled, "Scenario v3 must enable its Cesium georeference.");
+            Require(
+                string.Equals(
+                    manifest.globalSettings.originEvidenceClass,
+                    "ILLUSTRATIVE",
+                    StringComparison.Ordinal),
+                "The unregistered local-lab origin must remain ILLUSTRATIVE.");
+            Require(
+                !manifest.globalSettings.globalDatasetRequired
+                    && manifest.globalSettings.datasets.Count == 0,
+                "The first global scenario must not invent a bundled propagation dataset.");
 
             ScenarioTransmitter moving = manifest.transmitters.Find(
                 transmitter => string.Equals(
@@ -56,6 +69,154 @@ namespace Scythe.Editor
             Vector3 second = RFTransmitter.EvaluatePosition(anchor, moving.motion, 2.5d);
             Require(first == second, "Scripted transmitter motion is not deterministic.");
             Require(first != anchor, "Scripted moving transmitter remained at its anchor.");
+        }
+
+        private static void ValidateGlobalContractBoundary()
+        {
+            EvidenceStyle measured = EvidenceStyleRouter.Get(EvidenceClass.Measured);
+            EvidenceStyle solver = EvidenceStyleRouter.Get(EvidenceClass.SolverOutput);
+            EvidenceStyle illustrative =
+                EvidenceStyleRouter.Get(EvidenceClass.Illustrative);
+            Require(measured.Pattern == "SOLID", "MEASURED style must be solid.");
+            Require(solver.Pattern == "HASHED", "SOLVER_OUTPUT style must be hashed.");
+            Require(
+                illustrative.Pattern == "DASHED",
+                "ILLUSTRATIVE style must be dashed.");
+
+            double[] grid =
+            {
+                0d, 10d,
+                20d, 30d,
+            };
+            bool sampled = GlobalScalarGridSampler.TrySampleBilinear(
+                grid,
+                2,
+                2,
+                westDegrees: -1d,
+                southDegrees: -1d,
+                eastDegrees: 1d,
+                northDegrees: 1d,
+                longitudeDegrees: 0d,
+                latitudeDegrees: 0d,
+                out double center);
+            Require(sampled && Math.Abs(center - 15d) < 1e-12d,
+                "Global bilinear sampling is incorrect.");
+            Require(
+                !GlobalScalarGridSampler.TrySampleBilinear(
+                    grid,
+                    2,
+                    2,
+                    -1d,
+                    -1d,
+                    1d,
+                    1d,
+                    2d,
+                    0d,
+                    out _),
+                "Global sampler accepted an out-of-bounds query.");
+
+            GeodeticPosition referenceOrigin =
+                Wgs84Reference.LocalEastUpNorthToLongitudeLatitudeHeight(
+                    0d,
+                    0d,
+                    0d,
+                    0d,
+                    0d,
+                    0d);
+            Require(
+                Math.Abs(referenceOrigin.LongitudeDegrees) < 1e-12d
+                    && Math.Abs(referenceOrigin.LatitudeDegrees) < 1e-12d
+                    && Math.Abs(referenceOrigin.HeightMeters) < 1e-7d,
+                "WGS84 reference transform does not preserve its origin.");
+
+            var manifest = new GlobalPropagationManifest
+            {
+                schemaVersion = "1.0",
+                datasetId = "validation-global-rf-grid",
+                title = "Validation-only global RF grid",
+                description = "In-memory contract test; no physical dataset.",
+                evidenceClass = "SYNTHETIC",
+                visualizationIsAuthoritative = false,
+                authority = new GlobalAuthorityMetadata
+                {
+                    solverName = "contract-test",
+                    solverVersion = "1.0",
+                    modelName = "in-memory fixture",
+                    sourceRevision = "validation-command",
+                    provenanceStatus = "COMPLETE",
+                    runId = "validation-global-grid",
+                    deterministic = true,
+                },
+                spatialReference = new GlobalSpatialReferenceMetadata
+                {
+                    type = "GEODETIC_GRID",
+                    horizontalCrs = "EPSG:4326",
+                    verticalDatum = "WGS84_ELLIPSOID",
+                    coordinateOrder = "longitude,latitude,height",
+                    heightUnits = "m",
+                    ecefCompatible = true,
+                    boundsDegrees = new[] { -1d, -1d, 1d, 1d },
+                    crossesAntimeridian = false,
+                },
+                physics = new GlobalPhysicsMetadata
+                {
+                    domain = "RF",
+                    rf = new GlobalRfMetadata
+                    {
+                        frequencyHz = 2.4e9d,
+                        bandwidthHz = 1e6d,
+                        polarization = "unspecified-test-only",
+                    },
+                },
+                quantity = new GlobalQuantityMetadata
+                {
+                    name = "path loss",
+                    definition = "Validation-only scalar.",
+                    units = "dB",
+                    valueSemantics = "PATH_LOSS",
+                    uncertainty = new GlobalUncertaintyMetadata
+                    {
+                        kind = "NOT_QUANTIFIED",
+                        description = "Validation fixture.",
+                        assetPath = null,
+                    },
+                },
+                grid = new GlobalGridMetadata
+                {
+                    representation = "CUSTOM_BINARY",
+                    dimensions = new[] { 2, 2 },
+                    resolution = new[] { 2d, 2d },
+                    interpolation = "BILINEAR",
+                    authoritativeAssetPath = "values.f64le",
+                },
+                assets = new[]
+                {
+                    new GlobalDatasetAsset
+                    {
+                        path = "values.f64le",
+                        role = "AUTHORITATIVE_VALUES",
+                        mediaType = "application/octet-stream",
+                        sha256 = new string('a', 64),
+                        sizeBytes = 32,
+                    },
+                },
+            };
+            manifest.ValidateForUnityConsumer();
+
+            manifest.visualizationIsAuthoritative = true;
+            bool rejectedAuthorityClaim = false;
+            try
+            {
+                manifest.ValidateForUnityConsumer();
+            }
+            catch (InvalidDataException)
+            {
+                rejectedAuthorityClaim = true;
+            }
+
+            Require(
+                rejectedAuthorityClaim,
+                "Unity accepted an authoritative visualization claim.");
         }
 
         private static void ValidateRfRoundTrips()

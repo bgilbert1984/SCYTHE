@@ -185,12 +185,19 @@ def package_job(job_path: Path, schema_path: Path) -> dict[str, Any]:
     if not isinstance(authority, dict):
         raise ContractError("Packaging job manifest requires authority metadata.")
 
-    source_directory = _resolve(
-        base,
-        job.get("solverSourceDirectory", ""),
-        "solverSourceDirectory",
-    )
-    authority["sourceTreeSha256"] = source_tree_sha256(source_directory)
+    source_directory_value = job.get("solverSourceDirectory")
+    if source_directory_value is not None:
+        source_directory = _resolve(
+            base,
+            source_directory_value,
+            "solverSourceDirectory",
+        )
+        authority["sourceTreeSha256"] = source_tree_sha256(source_directory)
+    elif "sourceTreeSha256" not in authority:
+        raise ContractError(
+            "Packaging jobs without solverSourceDirectory must declare "
+            "authority.sourceTreeSha256 (null is permitted by the contract)."
+        )
 
     packaged_inputs = []
     for item in _require_list(job, "inputs"):

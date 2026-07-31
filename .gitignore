@@ -39,3 +39,7 @@ UnityProject/Builds/
 *.alf
 *.ulf
 .unity-desktop/
+
+# Reproducible solver environments are rebuilt from checked-in specs/locks.
+.solver-envs/
+.conda-pkgs/

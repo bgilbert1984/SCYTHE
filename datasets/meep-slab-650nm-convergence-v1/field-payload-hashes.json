@@ -1,0 +1,23 @@
+{
+  "format": "SCYTHE_HDF5_DATASET_PAYLOAD_HASHES_1",
+  "sourceAsset": "meep-slab-650nm.h5",
+  "note": "Hashes cover uncompressed dataset value bytes in C order. They exclude HDF5 container metadata such as object timestamps.",
+  "datasets": {
+    "ez_0.i": {
+      "shape": [
+        122,
+        42
+      ],
+      "dtype": "float64",
+      "sha256": "3576ff276576513b0e63b6d616934e37cd09f2a723bee6c917a7e93dd42791e1"
+    },
+    "ez_0.r": {
+      "shape": [
+        122,
+        42
+      ],
+      "dtype": "float64",
+      "sha256": "d97bfd9e2475c05923cc784d45b06c931c07dfbe98812fd71cfadd9dbe4279d2"
+    }
+  }
+}

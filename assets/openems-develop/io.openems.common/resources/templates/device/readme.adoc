@@ -1,3 +1,0 @@
-= $projectName$
-
-https://github.com/OpenEMS/openems/tree/develop/$projectName$[Source Code icon:github[]]

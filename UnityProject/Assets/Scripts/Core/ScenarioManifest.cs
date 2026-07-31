@@ -184,11 +184,158 @@ namespace SCYTHE.Core
     }
 
     [Serializable]
+    public sealed class ScenarioGeodeticPosition
+    {
+        public double longitudeDegrees;
+        public double latitudeDegrees;
+        public double heightMeters;
+        public string verticalDatum = "WGS84_ELLIPSOID";
+
+        public void Validate(string context)
+        {
+            if (longitudeDegrees < -180d
+                || longitudeDegrees > 180d
+                || latitudeDegrees < -90d
+                || latitudeDegrees > 90d)
+            {
+                throw new InvalidDataException($"{context} geodetic coordinates are invalid.");
+            }
+
+            if (!string.Equals(
+                    verticalDatum,
+                    "WGS84_ELLIPSOID",
+                    StringComparison.Ordinal))
+            {
+                throw new InvalidDataException(
+                    $"{context} must use WGS84_ELLIPSOID until an explicit datum transform exists.");
+            }
+        }
+    }
+
+    [Serializable]
+    public sealed class ScenarioGlobalDatasetReference
+    {
+        public string manifestRelativePath;
+        public string manifestSha256;
+        public bool required;
+
+        public void Validate()
+        {
+            if (string.IsNullOrWhiteSpace(manifestRelativePath)
+                || Path.IsPathRooted(manifestRelativePath)
+                || manifestRelativePath.Contains("..")
+                || manifestRelativePath.Contains("\\"))
+            {
+                throw new InvalidDataException(
+                    "Global dataset manifests must use safe StreamingAssets-relative paths.");
+            }
+
+            if (string.IsNullOrWhiteSpace(manifestSha256)
+                || manifestSha256.Length != 64)
+            {
+                throw new InvalidDataException(
+                    "Every global dataset reference requires a pinned manifest SHA-256.");
+            }
+
+            foreach (char character in manifestSha256)
+            {
+                bool isHex = (character >= '0' && character <= '9')
+                    || (character >= 'a' && character <= 'f');
+                if (!isHex)
+                {
+                    throw new InvalidDataException(
+                        "Global manifest SHA-256 must be lowercase hexadecimal.");
+                }
+            }
+        }
+    }
+
+    [Serializable]
+    public sealed class ScenarioGlobalSettings
+    {
+        public bool enabled = true;
+        public ScenarioGeodeticPosition origin = new ScenarioGeodeticPosition();
+        public string originEvidenceClass = "ILLUSTRATIVE";
+        public string originDescription =
+            "Illustrative WGS84 anchor for the local laboratory; not solver registration.";
+        public string utcEpoch = "2026-07-31T00:00:00Z";
+        public bool enableOriginShifting;
+        public bool globalDatasetRequired;
+        public List<ScenarioGlobalDatasetReference> datasets =
+            new List<ScenarioGlobalDatasetReference>();
+
+        public void Validate()
+        {
+            if (!enabled)
+            {
+                if (globalDatasetRequired)
+                {
+                    throw new InvalidDataException(
+                        "A disabled global mode cannot require a global dataset.");
+                }
+
+                return;
+            }
+
+            (origin ?? throw new InvalidDataException("Global mode requires an origin."))
+                .Validate("Global origin");
+            if (string.IsNullOrWhiteSpace(originDescription))
+            {
+                throw new InvalidDataException("Global origin requires an evidence description.");
+            }
+
+            switch (originEvidenceClass?.Trim().ToUpperInvariant())
+            {
+                case "MEASURED":
+                case "SOLVER_OUTPUT":
+                case "REDUCED_ORDER":
+                case "SYNTHETIC":
+                case "ILLUSTRATIVE":
+                    break;
+                default:
+                    throw new InvalidDataException(
+                        $"Unsupported global-origin evidence class {originEvidenceClass}.");
+            }
+
+            if (!DateTimeOffset.TryParse(
+                    utcEpoch,
+                    null,
+                    System.Globalization.DateTimeStyles.AssumeUniversal
+                        | System.Globalization.DateTimeStyles.AdjustToUniversal,
+                    out _))
+            {
+                throw new InvalidDataException("Global mode requires a valid UTC epoch.");
+            }
+
+            if (datasets == null)
+            {
+                datasets = new List<ScenarioGlobalDatasetReference>();
+            }
+
+            foreach (ScenarioGlobalDatasetReference dataset in datasets)
+            {
+                dataset?.Validate();
+                if (dataset == null)
+                {
+                    throw new InvalidDataException(
+                        "Global dataset reference cannot be null.");
+                }
+            }
+
+            if (globalDatasetRequired && datasets.Count == 0)
+            {
+                throw new InvalidDataException(
+                    "Required global data must declare at least one dataset manifest.");
+            }
+        }
+    }
+
+    [Serializable]
     public sealed class ScenarioManifest
     {
-        public string schemaVersion = "2.0";
-        public string scenarioId = "rf-milestone-02";
-        public string displayName = "Multi-Emitter RF Environment";
+        public string schemaVersion = "3.0";
+        public string scenarioId = "global-monocle-milestone-01";
+        public string displayName = "Cesium-Anchored Multi-Emitter Environment";
         public string description =
             "Deterministic multi-emitter baseband links with explicit geometric occlusion approximation.";
         public int seed = 424242;
@@ -203,6 +350,7 @@ namespace SCYTHE.Core
         public List<ScenarioEvent> events = new List<ScenarioEvent>();
         public string opticalDatasetRelativeDirectory = "";
         public bool opticalDatasetRequired;
+        public ScenarioGlobalSettings globalSettings = new ScenarioGlobalSettings();
 
         public static ScenarioManifest Load(string relativePath)
         {
@@ -232,9 +380,10 @@ namespace SCYTHE.Core
                 throw new InvalidDataException("Scenario manifest requires scenarioId.");
             }
 
-            if (!string.Equals(schemaVersion, "2.0", StringComparison.Ordinal))
+            if (!string.Equals(schemaVersion, "3.0", StringComparison.Ordinal))
             {
-                throw new InvalidDataException($"Unsupported scenario schemaVersion {schemaVersion}; expected 2.0.");
+                throw new InvalidDataException(
+                    $"Unsupported scenario schemaVersion {schemaVersion}; expected 3.0.");
             }
 
             if (channelNoiseStdDev < 0f
@@ -293,6 +442,10 @@ namespace SCYTHE.Core
             {
                 throw new InvalidDataException("A required optical dataset must declare its relative directory.");
             }
+
+            (globalSettings
+                ?? throw new InvalidDataException("Scenario requires global settings."))
+                .Validate();
         }
 
         private static ScenarioManifest CreateFallback()

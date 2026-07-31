@@ -1,7 +1,0 @@
-{
-  "name": "openems-ui",
-  "integrations": {
-    "capacitor": {}
-  },
-  "type": "angular"
-}

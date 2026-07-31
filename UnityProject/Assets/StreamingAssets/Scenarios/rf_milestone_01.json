@@ -1,8 +1,8 @@
 {
-  "schemaVersion": "2.0",
-  "scenarioId": "rf-milestone-02",
-  "displayName": "SCYTHE Multi-Emitter Walk-Around",
-  "description": "Three deterministic transmitter links share one mobile probe. Friis free-space attenuation, seeded AWGN, one-way radial Doppler, and static-collider line-of-sight loss are explicitly reduced-order models. One emitter follows deterministic ping-pong motion and manifest events alter the environment.",
+  "schemaVersion": "3.0",
+  "scenarioId": "global-monocle-milestone-01",
+  "displayName": "SCYTHE Cesium-Anchored Walk-Around",
+  "description": "Three deterministic local transmitter links share one mobile probe inside an illustrative Cesium WGS84 anchor. The local RF models remain reduced-order; no global propagation dataset is bundled or inferred.",
   "seed": 424242,
   "fixedStepSeconds": 0.016666667,
   "channelNoiseStdDev": 0.00002,
@@ -103,5 +103,20 @@
     }
   ],
   "opticalDatasetRelativeDirectory": "",
-  "opticalDatasetRequired": false
+  "opticalDatasetRequired": false,
+  "globalSettings": {
+    "enabled": true,
+    "origin": {
+      "longitudeDegrees": 0.0,
+      "latitudeDegrees": 0.0,
+      "heightMeters": 0.0,
+      "verticalDatum": "WGS84_ELLIPSOID"
+    },
+    "originEvidenceClass": "ILLUSTRATIVE",
+    "originDescription": "Illustrative Null Island WGS84 anchor for exercising the geospatial coordinate path. It is not a solver registration or measured site.",
+    "utcEpoch": "2026-07-31T00:00:00Z",
+    "enableOriginShifting": false,
+    "globalDatasetRequired": false,
+    "datasets": []
+  }
 }

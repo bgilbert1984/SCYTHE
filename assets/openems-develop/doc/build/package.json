@@ -1,7 +1,0 @@
-{
-  "name": "openems-doc",
-  "version": "1.0.0",
-  "devDependencies": {
-    "antora": "^3.1.8"
-  }
-}

@@ -1,3 +1,0 @@
-= Thermometer
-
-A Thermometer measures temperature.

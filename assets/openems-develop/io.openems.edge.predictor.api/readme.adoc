@@ -1,3 +1,0 @@
-= Predictor
-
-A Predictor provides abstract access to prediction of production and consumption.

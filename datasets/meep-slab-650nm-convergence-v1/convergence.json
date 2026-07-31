@@ -1,0 +1,46 @@
+{
+  "format": "SCYTHE_NUMERICAL_CONVERGENCE_1",
+  "generatedUtc": "2026-07-30T04:57:47.748763Z",
+  "experiment": {
+    "wavelengthNanometers": 650.0,
+    "metersPerSolverUnit": 1e-06,
+    "slabThicknessMeters": 4e-07,
+    "slabRefractiveIndex": 1.5,
+    "polarization": "Ez (two-dimensional TE)",
+    "randomnessUsed": false
+  },
+  "metric": "normalized transmitted flux through dielectric slab",
+  "comparison": "absolute consecutive change divided by current value",
+  "toleranceRelative": 0.03,
+  "finestPairRelativeChange": 0.0039519546732399765,
+  "passed": true,
+  "records": [
+    {
+      "resolutionPixelsPerSolverUnit": 20,
+      "vacuumReferenceFluxMeepUnits": 0.6495563825614848,
+      "slabFluxMeepUnits": 0.6382395875100947,
+      "normalizedTransmission": 0.9825776555273569,
+      "vacuumRunTimeSolverUnits": 60.025000000000006,
+      "slabRunTimeSolverUnits": 60.025000000000006,
+      "relativeChangeFromPrevious": null
+    },
+    {
+      "resolutionPixelsPerSolverUnit": 30,
+      "vacuumReferenceFluxMeepUnits": 0.6240865411628639,
+      "slabFluxMeepUnits": 0.6071899268681651,
+      "normalizedTransmission": 0.972925847330059,
+      "vacuumRunTimeSolverUnits": 60.03333333333333,
+      "slabRunTimeSolverUnits": 60.03333333333333,
+      "relativeChangeFromPrevious": 0.009920394471772639
+    },
+    {
+      "resolutionPixelsPerSolverUnit": 40,
+      "vacuumReferenceFluxMeepUnits": 0.6376287030999057,
+      "slabFluxMeepUnits": 0.6179234408158059,
+      "normalizedTransmission": 0.9690960237701025,
+      "vacuumRunTimeSolverUnits": 60.025000000000006,
+      "slabRunTimeSolverUnits": 60.025000000000006,
+      "relativeChangeFromPrevious": 0.0039519546732399765
+    }
+  ]
+}

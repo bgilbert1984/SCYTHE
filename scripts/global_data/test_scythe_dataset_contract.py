@@ -106,6 +106,32 @@ class GlobalContractTests(unittest.TestCase):
         ):
             CONTRACT.validate_manifest(invalid, SCHEMA_PATH)
 
+    def test_exact_binary_lock_can_replace_solver_source_tree(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            temporary_root = Path(temporary)
+            job = json.loads(JOB_PATH.read_text(encoding="utf-8"))
+            job.pop("solverSourceDirectory")
+            job["manifest"]["authority"]["sourceTreeSha256"] = None
+            job["inputs"][0]["sourcePath"] = str(
+                (
+                    REPOSITORY_ROOT
+                    / "solvers"
+                    / "meep"
+                    / "environment.explicit.txt"
+                ).resolve()
+            )
+            job["assets"][0]["sourcePath"] = str(MEEP_REFERENCE.resolve())
+            job_path = temporary_root / "binary-lock.job.json"
+            job_path.write_text(json.dumps(job), encoding="utf-8")
+
+            manifest = CONTRACT.package_job(job_path, SCHEMA_PATH)
+
+            self.assertIsNone(manifest["authority"]["sourceTreeSha256"])
+            self.assertEqual(
+                manifest["authority"]["inputHashes"][0]["path"],
+                "inputs/array-slice-ll.cpp",
+            )
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

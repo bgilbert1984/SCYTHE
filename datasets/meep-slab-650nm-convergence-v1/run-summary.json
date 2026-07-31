@@ -1,0 +1,58 @@
+{
+  "passed": true,
+  "hdf5": "/workspaces/codespaces-blank/datasets/meep-slab-650nm-convergence-v1/meep-slab-650nm.h5",
+  "hdf5Sha256BeforePackaging": "600de612f97d1da193583db8d8f2c57313601b7d45af5efd8c1f2e13d6fbf373",
+  "hdf5DatasetPayloads": {
+    "ez_0.i": {
+      "shape": [
+        122,
+        42
+      ],
+      "dtype": "float64",
+      "sha256": "3576ff276576513b0e63b6d616934e37cd09f2a723bee6c917a7e93dd42791e1"
+    },
+    "ez_0.r": {
+      "shape": [
+        122,
+        42
+      ],
+      "dtype": "float64",
+      "sha256": "d97bfd9e2475c05923cc784d45b06c931c07dfbe98812fd71cfadd9dbe4279d2"
+    }
+  },
+  "packageJob": "/workspaces/codespaces-blank/datasets/meep-slab-650nm-convergence-v1/package.job.json",
+  "finestPairRelativeChange": 0.0039519546732399765,
+  "fieldShape": [
+    122,
+    42
+  ],
+  "records": [
+    {
+      "resolutionPixelsPerSolverUnit": 20,
+      "vacuumReferenceFluxMeepUnits": 0.6495563825614848,
+      "slabFluxMeepUnits": 0.6382395875100947,
+      "normalizedTransmission": 0.9825776555273569,
+      "vacuumRunTimeSolverUnits": 60.025000000000006,
+      "slabRunTimeSolverUnits": 60.025000000000006,
+      "relativeChangeFromPrevious": null
+    },
+    {
+      "resolutionPixelsPerSolverUnit": 30,
+      "vacuumReferenceFluxMeepUnits": 0.6240865411628639,
+      "slabFluxMeepUnits": 0.6071899268681651,
+      "normalizedTransmission": 0.972925847330059,
+      "vacuumRunTimeSolverUnits": 60.03333333333333,
+      "slabRunTimeSolverUnits": 60.03333333333333,
+      "relativeChangeFromPrevious": 0.009920394471772639
+    },
+    {
+      "resolutionPixelsPerSolverUnit": 40,
+      "vacuumReferenceFluxMeepUnits": 0.6376287030999057,
+      "slabFluxMeepUnits": 0.6179234408158059,
+      "normalizedTransmission": 0.9690960237701025,
+      "vacuumRunTimeSolverUnits": 60.025000000000006,
+      "slabRunTimeSolverUnits": 60.025000000000006,
+      "relativeChangeFromPrevious": 0.0039519546732399765
+    }
+  ]
+}

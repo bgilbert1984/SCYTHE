@@ -1,0 +1,135 @@
+{
+  "schemaVersion": "1.0",
+  "datasetId": "meep-slab-650nm-convergence-v1",
+  "title": "Meep 650 nm dielectric slab convergence study",
+  "description": "Complex Ez, phase, and relative intensity for a 650 nm TE plane wave crossing a 400 nm lossless dielectric slab (n=1.5).",
+  "evidenceClass": "SOLVER_OUTPUT",
+  "authority": {
+    "solverName": "Meep",
+    "solverVersion": "1.34.0",
+    "modelName": "Two-dimensional FDTD dielectric slab transmission",
+    "standardRevision": null,
+    "sourceRevision": "conda-forge:pymeep-1.34.0-mpi_mpich_py311hef964db_0",
+    "sourceTreeSha256": null,
+    "provenanceStatus": "COMPLETE",
+    "solverLicense": "GPL-2.0-or-later",
+    "datasetLicense": "CC-BY-4.0",
+    "runId": "scythe-meep-slab-650nm-r20-30-40-v1",
+    "deterministic": true,
+    "executionEnvironment": "Linux-6.8.0-1052-azure-x86_64-with-glibc2.39; Python 3.11.15; single MPI rank; exact Conda package URLs and package hashes are recorded as inputs",
+    "inputHashes": [
+      {
+        "path": "inputs/slab_convergence.py",
+        "sha256": "6fd11cd7b10dddca258319a018cf9a30ccae11b7344acfa44c59d1f040a28ce1"
+      },
+      {
+        "path": "inputs/environment.explicit.txt",
+        "sha256": "0722ff3c68e9b834ff353f9ec39e417bd9e808532d6012c8686fd4f7c8ab7215"
+      },
+      {
+        "path": "inputs/environment.yml",
+        "sha256": "84a51e997f21e58347edc6c53d65cc9689b1edff0d5e8d1d02e67126aa5e9620"
+      },
+      {
+        "path": "inputs/environment-packages.json",
+        "sha256": "ada618ef7a3a6ce65aea27dc6ea4ad62eec6e0b265a3d01520ebca0e5a92c6f0"
+      }
+    ]
+  },
+  "spatialReference": {
+    "type": "LOCAL_CARTESIAN",
+    "axes": "x-right,y-up; two-dimensional Meep cell",
+    "distanceUnits": "solver_length_unit",
+    "metersPerSolverUnit": 1e-06,
+    "originDescription": "Center of the dielectric slab and simulation cell; no geodetic registration.",
+    "geodeticRegistration": null
+  },
+  "temporal": {
+    "generatedUtc": "2026-07-30T04:57:47.748763Z",
+    "validFromUtc": null,
+    "validToUtc": null,
+    "statisticalTimePercentage": null,
+    "timeSemantics": "STATIC"
+  },
+  "physics": {
+    "domain": "OPTICAL",
+    "rf": null,
+    "optical": {
+      "wavelengthNanometers": 650.0,
+      "frequencySolverUnits": 1.5384615384615383,
+      "polarizationRepresentation": "FIELD_COMPONENTS",
+      "materialModel": "Lossless nondispersive slab, refractive index 1.5, thickness 0.4 solver units (400 nm).",
+      "boundaryConditions": "0.5 solver-unit x-directed PML; periodic y boundary; normally incident Ez line source."
+    }
+  },
+  "quantity": {
+    "name": "Complex Ez optical field",
+    "definition": "Native Meep output_dft frequency-domain Ez real and imaginary components at 650 nm. Phase and relative intensity are declared consumer derivations angle(Ez) and abs(Ez)^2, not authoritative datasets in this package.",
+    "units": "Meep normalized electric-field units",
+    "valueSemantics": "COMPLEX_AMPLITUDE",
+    "complexRepresentation": "REAL_IMAGINARY",
+    "uncertainty": {
+      "kind": "NUMERICAL_CONVERGENCE",
+      "description": "Normalized transmitted flux is compared at 20, 30, and 40 pixels per micrometre; the finest-pair relative change must not exceed 3%.",
+      "assetPath": "convergence.json"
+    }
+  },
+  "grid": {
+    "representation": "HDF5",
+    "dimensions": [
+      122,
+      42
+    ],
+    "resolution": [
+      0.02499999999999991,
+      0.025000000000000022
+    ],
+    "noData": {
+      "policy": "NONE",
+      "value": null
+    },
+    "interpolation": "BILINEAR",
+    "authoritativeAssetPath": "meep-slab-650nm.h5",
+    "lodPolicy": {
+      "authoritativeValuesImmutable": true,
+      "derivedTilesAllowed": true,
+      "aggregationMethod": "Any future visualization tile must be separately labeled and retain lineage to this HDF5 checksum.",
+      "description": "The native HDF5 values are immutable; LOD products may support visualization but cannot replace them."
+    }
+  },
+  "assets": [
+    {
+      "path": "meep-slab-650nm.h5",
+      "role": "AUTHORITATIVE_VALUES",
+      "mediaType": "application/x-hdf5",
+      "sha256": "600de612f97d1da193583db8d8f2c57313601b7d45af5efd8c1f2e13d6fbf373",
+      "sizeBytes": 84032
+    },
+    {
+      "path": "convergence.json",
+      "role": "UNCERTAINTY",
+      "mediaType": "application/json",
+      "sha256": "d2e46a1ef35898539df43cb770860ba99f18ea73cb62364826daf56375acee85",
+      "sizeBytes": 1699
+    },
+    {
+      "path": "grid-metadata.json",
+      "role": "COORDINATES",
+      "mediaType": "application/json",
+      "sha256": "c4651709bfdf8f2455b269c25f320daf7051ff8e7087aabbeb40a06df0e55ef3",
+      "sizeBytes": 150768
+    },
+    {
+      "path": "field-payload-hashes.json",
+      "role": "OTHER",
+      "mediaType": "application/json",
+      "sha256": "7fcf3f52f575828067618ba4265b4df1a81df689b40993e1227d0d292f776937",
+      "sizeBytes": 613
+    }
+  ],
+  "lineage": {
+    "parentDatasetIds": [],
+    "transformations": []
+  },
+  "visualizationIsAuthoritative": false
+}

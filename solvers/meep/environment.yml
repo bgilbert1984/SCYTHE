@@ -1,0 +1,11 @@
+name: scythe-meep-1.34.0
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - pymeep=1.34.0=mpi_mpich_py311hef964db_0
+  - mpich
+  - hdf5
+  - h5py
+  - numpy
+  - jsonschema

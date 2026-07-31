@@ -1,3 +1,0 @@
-= OpenEMS Edge Heat Api
-
-https://github.com/OpenEMS/openems/tree/develop/io.openems.edge.heat.Api[Source Code icon:github[]]

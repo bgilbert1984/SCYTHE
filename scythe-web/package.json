@@ -1,0 +1,8 @@
+{
+  "name": "@scythe/web-monocle",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test"
+  }
+}

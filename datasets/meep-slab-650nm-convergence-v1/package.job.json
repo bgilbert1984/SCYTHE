@@ -1,0 +1,135 @@
+{
+  "inputs": [
+    {
+      "sourcePath": "../../solvers/meep/studies/slab_convergence.py",
+      "logicalPath": "inputs/slab_convergence.py"
+    },
+    {
+      "sourcePath": "../../solvers/meep/environment.explicit.txt",
+      "logicalPath": "inputs/environment.explicit.txt"
+    },
+    {
+      "sourcePath": "../../solvers/meep/environment.yml",
+      "logicalPath": "inputs/environment.yml"
+    },
+    {
+      "sourcePath": "environment-packages.json",
+      "logicalPath": "inputs/environment-packages.json"
+    }
+  ],
+  "assets": [
+    {
+      "sourcePath": "meep-slab-650nm.h5",
+      "datasetPath": "meep-slab-650nm.h5",
+      "role": "AUTHORITATIVE_VALUES",
+      "mediaType": "application/x-hdf5"
+    },
+    {
+      "sourcePath": "convergence.json",
+      "datasetPath": "convergence.json",
+      "role": "UNCERTAINTY",
+      "mediaType": "application/json"
+    },
+    {
+      "sourcePath": "grid-metadata.json",
+      "datasetPath": "grid-metadata.json",
+      "role": "COORDINATES",
+      "mediaType": "application/json"
+    },
+    {
+      "sourcePath": "field-payload-hashes.json",
+      "datasetPath": "field-payload-hashes.json",
+      "role": "OTHER",
+      "mediaType": "application/json"
+    }
+  ],
+  "manifest": {
+    "schemaVersion": "1.0",
+    "datasetId": "meep-slab-650nm-convergence-v1",
+    "title": "Meep 650 nm dielectric slab convergence study",
+    "description": "Complex Ez, phase, and relative intensity for a 650 nm TE plane wave crossing a 400 nm lossless dielectric slab (n=1.5).",
+    "evidenceClass": "SOLVER_OUTPUT",
+    "authority": {
+      "solverName": "Meep",
+      "solverVersion": "1.34.0",
+      "modelName": "Two-dimensional FDTD dielectric slab transmission",
+      "standardRevision": null,
+      "sourceRevision": "conda-forge:pymeep-1.34.0-mpi_mpich_py311hef964db_0",
+      "sourceTreeSha256": null,
+      "provenanceStatus": "COMPLETE",
+      "solverLicense": "GPL-2.0-or-later",
+      "datasetLicense": "CC-BY-4.0",
+      "runId": "scythe-meep-slab-650nm-r20-30-40-v1",
+      "deterministic": true,
+      "executionEnvironment": "Linux-6.8.0-1052-azure-x86_64-with-glibc2.39; Python 3.11.15; single MPI rank; exact Conda package URLs and package hashes are recorded as inputs",
+      "inputHashes": []
+    },
+    "spatialReference": {
+      "type": "LOCAL_CARTESIAN",
+      "axes": "x-right,y-up; two-dimensional Meep cell",
+      "distanceUnits": "solver_length_unit",
+      "metersPerSolverUnit": 1e-06,
+      "originDescription": "Center of the dielectric slab and simulation cell; no geodetic registration.",
+      "geodeticRegistration": null
+    },
+    "temporal": {
+      "generatedUtc": "2026-07-30T04:57:47.748763Z",
+      "validFromUtc": null,
+      "validToUtc": null,
+      "statisticalTimePercentage": null,
+      "timeSemantics": "STATIC"
+    },
+    "physics": {
+      "domain": "OPTICAL",
+      "rf": null,
+      "optical": {
+        "wavelengthNanometers": 650.0,
+        "frequencySolverUnits": 1.5384615384615383,
+        "polarizationRepresentation": "FIELD_COMPONENTS",
+        "materialModel": "Lossless nondispersive slab, refractive index 1.5, thickness 0.4 solver units (400 nm).",
+        "boundaryConditions": "0.5 solver-unit x-directed PML; periodic y boundary; normally incident Ez line source."
+      }
+    },
+    "quantity": {
+      "name": "Complex Ez optical field",
+      "definition": "Native Meep output_dft frequency-domain Ez real and imaginary components at 650 nm. Phase and relative intensity are declared consumer derivations angle(Ez) and abs(Ez)^2, not authoritative datasets in this package.",
+      "units": "Meep normalized electric-field units",
+      "valueSemantics": "COMPLEX_AMPLITUDE",
+      "complexRepresentation": "REAL_IMAGINARY",
+      "uncertainty": {
+        "kind": "NUMERICAL_CONVERGENCE",
+        "description": "Normalized transmitted flux is compared at 20, 30, and 40 pixels per micrometre; the finest-pair relative change must not exceed 3%.",
+        "assetPath": "convergence.json"
+      }
+    },
+    "grid": {
+      "representation": "HDF5",
+      "dimensions": [
+        122,
+        42
+      ],
+      "resolution": [
+        0.02499999999999991,
+        0.025000000000000022
+      ],
+      "noData": {
+        "policy": "NONE",
+        "value": null
+      },
+      "interpolation": "BILINEAR",
+      "authoritativeAssetPath": "meep-slab-650nm.h5",
+      "lodPolicy": {
+        "authoritativeValuesImmutable": true,
+        "derivedTilesAllowed": true,
+        "aggregationMethod": "Any future visualization tile must be separately labeled and retain lineage to this HDF5 checksum.",
+        "description": "The native HDF5 values are immutable; LOD products may support visualization but cannot replace them."
+      }
+    },
+    "assets": [],
+    "lineage": {
+      "parentDatasetIds": [],
+      "transformations": []
+    },
+    "visualizationIsAuthoritative": false
+  }
+}

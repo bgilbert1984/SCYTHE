@@ -1,4 +1,5 @@
 using SCYTHE.Core;
+using SCYTHE.Global;
 using SCYTHE.Optics;
 using SCYTHE.RF;
 using UnityEngine;
@@ -12,6 +13,8 @@ namespace SCYTHE.Presentation
         [SerializeField] private RFFieldSampler fieldSampler;
         [SerializeField] private OpticalDatasetLoader opticalLoader;
         [SerializeField] private ScenarioDirector scenarioDirector;
+        [SerializeField] private CesiumGeospatialAdapter geospatialAdapter;
+        [SerializeField] private GlobalDatasetManager globalDatasetManager;
 
         private GUIStyle headingStyle;
         private GUIStyle labelStyle;
@@ -25,13 +28,17 @@ namespace SCYTHE.Presentation
             RFFieldVisualizer visualizer,
             RFFieldSampler sampler,
             OpticalDatasetLoader optics,
-            ScenarioDirector director)
+            ScenarioDirector director,
+            CesiumGeospatialAdapter geospatial,
+            GlobalDatasetManager globalDatasets)
         {
             simulation = controller;
             fieldVisualizer = visualizer;
             fieldSampler = sampler;
             opticalLoader = optics;
             scenarioDirector = director;
+            geospatialAdapter = geospatial;
+            globalDatasetManager = globalDatasets;
         }
 
         private void Update()
@@ -47,12 +54,96 @@ namespace SCYTHE.Presentation
             EnsureStyles();
             DrawOpticalFusionLayer();
             DrawLinkPanel();
+            DrawGlobalPanel();
             DrawFieldMap();
             DrawSpatialInstrument();
             DrawEmitterRoster();
             DrawOpticalPanel();
             DrawScenarioPanel();
             DrawWorldMarkers();
+        }
+
+        private void DrawGlobalPanel()
+        {
+            if (geospatialAdapter == null || globalDatasetManager == null)
+            {
+                return;
+            }
+
+            const float width = 360f;
+            Rect panel = new Rect(538f, 22f, width, 164f);
+            GUI.color = new Color(0.02f, 0.055f, 0.075f, 0.94f);
+            GUI.Box(panel, GUIContent.none);
+            GUI.color = Color.white;
+
+            EvidenceClass originEvidence;
+            try
+            {
+                originEvidence = EvidenceStyleRouter.Parse(
+                    geospatialAdapter.OriginEvidenceClass);
+            }
+            catch
+            {
+                originEvidence = EvidenceClass.Illustrative;
+            }
+
+            EvidenceStyle originStyle = EvidenceStyleRouter.Get(originEvidence);
+            GUI.Label(
+                new Rect(panel.x + 16f, panel.y + 10f, width - 32f, 28f),
+                geospatialAdapter.IsCesiumBacked
+                    ? "CESIUM // WGS84 MONOCLE"
+                    : "WGS84 REFERENCE // CESIUM UNAVAILABLE",
+                headingStyle);
+            Color previousContentColor = GUI.contentColor;
+            GUI.contentColor = originStyle.Color;
+            GUI.Label(
+                new Rect(panel.x + 16f, panel.y + 40f, width - 32f, 22f),
+                $"ORIGIN: {originStyle.Label} // {originStyle.Pattern}",
+                evidenceStyle);
+            GUI.contentColor = previousContentColor;
+
+            if (!globalDatasetManager.HasOperatorPosition)
+            {
+                GUI.Label(
+                    new Rect(panel.x + 16f, panel.y + 65f, width - 32f, 22f),
+                    "GEODETIC POSITION: INITIALIZING",
+                    labelStyle);
+            }
+            else
+            {
+                GeodeticPosition position = globalDatasetManager.OperatorPosition;
+                GUI.Label(
+                    new Rect(panel.x + 16f, panel.y + 65f, width - 32f, 22f),
+                    $"LON {position.LongitudeDegrees:+000.000000;-000.000000;000.000000}°  "
+                    + $"LAT {position.LatitudeDegrees:+00.000000;-00.000000;00.000000}°",
+                    labelStyle);
+                GUI.Label(
+                    new Rect(panel.x + 16f, panel.y + 88f, width - 32f, 22f),
+                    $"HEIGHT {position.HeightMeters:F2} m WGS84 ELLIPSOID",
+                    labelStyle);
+
+                RFTransmitter transmitter = simulation?.Transmitter;
+                if (transmitter != null)
+                {
+                    GlobalFieldSample sample = globalDatasetManager.SampleRFField(
+                        position.LatitudeDegrees,
+                        position.LongitudeDegrees,
+                        position.HeightMeters,
+                        globalDatasetManager.CurrentUtc(),
+                        transmitter.CarrierFrequencyHz);
+                    GUI.Label(
+                        new Rect(panel.x + 16f, panel.y + 111f, width - 32f, 22f),
+                        $"GLOBAL SAMPLE: {sample.Status}",
+                        sample.IsAvailable ? passStyle : labelStyle);
+                }
+            }
+
+            GUI.Label(
+                new Rect(panel.x + 16f, panel.y + 136f, width - 32f, 22f),
+                $"DATA: {globalDatasetManager.Status}",
+                globalDatasetManager.ValidatedDatasetCount > 0
+                    ? passStyle
+                    : failStyle);
         }
 
         private void DrawLinkPanel()
