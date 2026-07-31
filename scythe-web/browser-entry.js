@@ -1,6 +1,8 @@
 import { loadContract } from "./contractLoader.js";
 import { ScytheRfSampler } from "./rfSampler.js";
+import { ScytheOpticsSampler } from "./opticsSampler.js";
 import { MonocleOverlayLayer } from "./monocleOverlayLayer.js";
+import { resolveScytheWebConfig } from "./scytheWebConfig.js";
 
 async function waitForViewer(resolveViewer, timeoutMilliseconds = 15_000) {
   const started = Date.now();
@@ -20,6 +22,7 @@ async function waitForViewer(resolveViewer, timeoutMilliseconds = 15_000) {
  * not to the generic sampler.
  */
 export async function installScytheWeb(config) {
+  config = resolveScytheWebConfig(config);
   if (!config?.contractUrl) throw new Error("SCYTHE-Web contractUrl is required");
   if (typeof config.createTileIndex !== "function") {
     throw new Error("SCYTHE-Web createTileIndex(descriptor) is required");
@@ -53,7 +56,9 @@ if (typeof window !== "undefined") {
   window.SCYTHEWeb = Object.freeze({
     install: installScytheWeb,
     ScytheRfSampler,
+    ScytheOpticsSampler,
     MonocleOverlayLayer,
+    resolveConfig: resolveScytheWebConfig,
   });
 
   const config = window.SCYTHE_WEB_CONFIG;

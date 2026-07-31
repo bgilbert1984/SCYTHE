@@ -2,6 +2,7 @@ import {
   cesiumPolylineMaterial,
   evidenceStyle,
 } from "./evidenceStyles.js";
+import { getOperatorGeodetic } from "./geoFrames.js";
 
 const STYLE_ELEMENT_ID = "scythe-web-monocle-styles";
 
@@ -31,15 +32,7 @@ export function formatSampleForHud(sample) {
 }
 
 export function operatorGeodetic(viewer, Cesium) {
-  const position = viewer?.scene?.camera?.positionWC;
-  if (!position) throw new Error("Cesium camera positionWC is unavailable");
-  const cartographic = Cesium.Ellipsoid.WGS84.cartesianToCartographic(position);
-  if (!cartographic) throw new Error("Camera cannot be converted to WGS84");
-  return Object.freeze({
-    longitudeDegrees: Cesium.Math.toDegrees(cartographic.longitude),
-    latitudeDegrees: Cesium.Math.toDegrees(cartographic.latitude),
-    heightMeters: cartographic.height,
-  });
+  return getOperatorGeodetic(viewer, Cesium);
 }
 
 function injectStyles(documentRoot) {

@@ -1,18 +1,31 @@
 # SCYTHE-Web monocle boundary
 
-This directory contains the first browser-native SCYTHE instrument skeleton.
+This directory contains the browser-native SCYTHE instrument boundary.
 It is a read-only consumer of datasets that have already passed the Global
 Propagation Data Contract v1 Python gate.
 
-The two primary modules are:
+The modules are:
 
-- `rfSampler.js`: deterministic sampling of validated RF tiles.
-- `monocleOverlayLayer.js`: fixed-step Cesium camera sampling and an
-  evidence-labelled browser HUD.
+- `scytheWebConfig.js`: immutable client defaults and contract-version gate.
+- `contractLoader.js`: safety-critical browser validation and normalization.
+- `tileIndex.js`: deterministic geodetic lookup, including explicit
+  antimeridian support.
+- `tileLoader.js`: bounded caching, mandatory SHA-256 verification, and
+  explicit binary decoding.
+- `geoFrames.js`: WGS84/ECEF/local-ENU helpers backed by Cesium transforms.
+- `rfSampler.js`: deterministic RF sampling and coverage classification.
+- `opticsSampler.js`: deterministic optical quantity/depth-plane sampling.
+- `evidenceStyles.js`: evidence-preserving Cesium and HUD styles.
+- `monocleOverlayLayer.js`: fixed-step Cesium camera sampling, bearing
+  geometry, and an evidence-labelled browser HUD.
+- `scenarioManifestWeb.js`: validated dataset, transmitter, time-window, and
+  operator-view bindings.
+- `browser-entry.js`: opt-in integration with `cesium-hypergraph-globe.html`.
 
-The core intentionally has no propagation model and no random fallback. It
-also does not guess a binary tile layout. A dataset-specific adapter must
-provide:
+The core has no propagation model and no random fallback. It does not guess a
+binary tile layout. Use `GeodeticTileIndex` plus `VerifiedTileLoader` when the
+dataset has explicit per-tile bounds, hashes, and a supported decoder, or
+provide a dataset-specific adapter:
 
 ```js
 const tileIndex = {
@@ -23,7 +36,7 @@ const tileIndex = {
 };
 
 const tileLoader = {
-  // The adapter verifies its asset checksum before returning this payload.
+  // The adapter must verify its asset checksum before returning this payload.
   async getTilePayload(tileId) {
     return {
       shape: [width, height],
@@ -62,6 +75,9 @@ window.SCYTHE_WEB_CONFIG = {
 
 If no configuration is supplied, the module only exposes `window.SCYTHEWeb`;
 it does not create overlays or invent sample data.
+
+The existing globe loads `scythe-web/browser-entry.js` as an ES module at the
+end of `cesium-hypergraph-globe.html`. Activation remains deliberately opt-in.
 
 Run the dependency-free unit tests with:
 
