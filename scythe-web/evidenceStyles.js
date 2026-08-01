@@ -82,3 +82,29 @@ export function cesiumPolylineMaterial(Cesium, evidenceClass) {
     dashPattern,
   });
 }
+
+/** Evidence-distinct area fill for Cesium rectangles/polygons. */
+export function cesiumAreaMaterial(Cesium, evidenceClass, alphaScale = 1) {
+  const style = evidenceStyle(evidenceClass);
+  const color = Cesium.Color.fromCssColorString(style.color)
+    .withAlpha(Math.min(1, style.alpha * alphaScale));
+  const transparent = Cesium.Color.fromCssColorString(style.color).withAlpha(0.03);
+  if (style.line === "hashed" && Cesium.StripeMaterialProperty) {
+    return new Cesium.StripeMaterialProperty({
+      evenColor: color,
+      oddColor: transparent,
+      repeat: 12,
+      orientation: Cesium.StripeOrientation?.DIAGONAL ??
+        Cesium.StripeOrientation?.HORIZONTAL,
+    });
+  }
+  if (style.line === "dotted" && Cesium.GridMaterialProperty) {
+    return new Cesium.GridMaterialProperty({
+      color,
+      cellAlpha: 0.08,
+      lineCount: new Cesium.Cartesian2(12, 12),
+      lineThickness: new Cesium.Cartesian2(1, 1),
+    });
+  }
+  return color;
+}

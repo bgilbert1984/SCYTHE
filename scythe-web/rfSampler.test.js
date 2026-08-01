@@ -90,6 +90,13 @@ function descriptor(overrides = {}) {
         sha256: "a".repeat(64),
         sizeBytes: 16,
       },
+      {
+        path: "uncertainty.bin",
+        role: "UNCERTAINTY",
+        mediaType: "application/octet-stream",
+        sha256: "b".repeat(64),
+        sizeBytes: 16,
+      },
     ],
     lineage: { parentDatasetIds: [], transformations: [] },
     visualizationIsAuthoritative: false,
@@ -187,4 +194,20 @@ test("antimeridian grids require an adapter that declares support", () => {
     },
     tileLoader: { getTilePayload: async () => null },
   }));
+});
+
+test("coverage grids are deterministic sampler-driven cells", async () => {
+  const instance = sampler();
+  const request = {
+    westDegrees: 0, southDegrees: 0, eastDegrees: 1, northDegrees: 1,
+    longitudeCells: 2, latitudeCells: 2,
+    heightMeters: 10, utc: query.utc, frequencyHz: query.frequencyHz,
+    coverageThreshold: { value: 14, units: "dBuV/m", comparison: "GTE" },
+  };
+  const first = await instance.sampleGrid(request);
+  const second = await instance.sampleGrid(request);
+  assert.equal(first.length, 4);
+  assert.deepEqual(first, second);
+  assert.deepEqual(first[0].boundsDegrees, [0, 0, 0.5, 0.5]);
+  assert.equal(first.every((cell) => cell.sample.visualizationIsAuthoritative === false), true);
 });

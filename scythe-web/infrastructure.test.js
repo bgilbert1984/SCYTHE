@@ -3,7 +3,12 @@ import test from "node:test";
 import { webcrypto } from "node:crypto";
 
 import { GeodeticTileIndex } from "./tileIndex.js";
-import { VerifiedTileLoader, decodeFloat32Grid, sha256Hex } from "./tileLoader.js";
+import {
+  VerifiedTileLoader,
+  decodeFloat32Grid,
+  decodeScaledUint16Grid,
+  sha256Hex,
+} from "./tileLoader.js";
 import { ScenarioManifestWeb } from "./scenarioManifestWeb.js";
 
 test("tile index deterministically selects highest LOD and normalized coordinates", () => {
@@ -45,8 +50,30 @@ test("verified loader rejects corruption and decodes valid Float32 tiles", async
 
 test("scenario manifest rejects an unbound active transmitter", () => {
   assert.throws(() => new ScenarioManifestWeb({
-    datasets: [{ contractId: "rf-v1" }],
+    datasets: [{ id: "rf-v1", kind: "RF", contractUrl: "/rf-v1/manifest.json" }],
     activeTransmitterId: "missing",
     transmitters: [],
   }), /does not reference/);
+});
+
+test("Uint16 decoding requires and applies explicit physical scaling", () => {
+  const bytes = new Uint8Array([0, 0, 10, 0, 255, 255, 20, 0]).buffer;
+  const tile = {
+    id: "compact",
+    shape: [2, 2],
+    encoding: {
+      scalarType: "UINT16",
+      byteOrder: "LITTLE_ENDIAN",
+      scale: 0.5,
+      offset: -10,
+      noDataRaw: 65535,
+    },
+  };
+  const payload = decodeScaledUint16Grid(bytes, tile);
+  assert.deepEqual([...payload.values].slice(0, 2), [-10, -5]);
+  assert.deepEqual([...payload.validMask], [1, 1, 0, 1]);
+  assert.equal(Number.isNaN(payload.values[2]), true);
+  assert.throws(() => decodeScaledUint16Grid(bytes, {
+    ...tile, encoding: { scalarType: "UINT16", byteOrder: "LITTLE_ENDIAN" },
+  }), /scale and offset/);
 });

@@ -3,6 +3,11 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test"
+    "test": "node --test",
+    "test:browser": "node --test browserIntegration.browser.js",
+    "test:all": "npm test && npm run test:browser"
+  },
+  "devDependencies": {
+    "playwright": "^1.62.1"
   }
 }

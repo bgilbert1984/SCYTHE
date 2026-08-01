@@ -7,17 +7,19 @@ Propagation Data Contract v1 Python gate.
 The modules are:
 
 - `scytheWebConfig.js`: immutable client defaults and contract-version gate.
-- `contractLoader.js`: safety-critical browser validation and normalization.
+- `contractLoader.js`: full Contract v1 field validation, Python-equivalent
+  cross-reference checks, and frozen descriptor normalization.
 - `tileIndex.js`: deterministic geodetic lookup, including explicit
   antimeridian support.
 - `tileLoader.js`: bounded caching, mandatory SHA-256 verification, and
-  explicit binary decoding.
+  explicit Float32 or scaled Uint16 binary decoding.
 - `geoFrames.js`: WGS84/ECEF/local-ENU helpers backed by Cesium transforms.
 - `rfSampler.js`: deterministic RF sampling and coverage classification.
 - `opticsSampler.js`: deterministic optical quantity/depth-plane sampling.
 - `evidenceStyles.js`: evidence-preserving Cesium and HUD styles.
-- `monocleOverlayLayer.js`: fixed-step Cesium camera sampling, bearing
-  geometry, and an evidence-labelled browser HUD.
+- `monocleOverlayLayer.js`: fixed-step Cesium camera sampling, RF coverage
+  cells/point footprints, declared range geometry, physically dimensioned
+  uncertainty halos, optical cues, and an evidence-labelled browser HUD.
 - `scenarioManifestWeb.js`: validated dataset, transmitter, time-window, and
   operator-view bindings.
 - `browser-entry.js`: opt-in integration with `cesium-hypergraph-globe.html`.
@@ -48,6 +50,31 @@ const tileLoader = {
 };
 ```
 
+Complex optical quantities must expose either `realValues` plus
+`imaginaryValues`, or `magnitudeValues` plus `phaseValues`, exactly as declared
+by `quantity.complexRepresentation`. The sampler derives phase and relative
+intensity from those samples; it never interprets a complex field as a scalar.
+
+Compact Uint16 tiles require checksum-bound tile metadata and never infer
+physical scaling:
+
+```js
+const tile = {
+  id: "z0/x0/y0",
+  shape: [256, 256],
+  encoding: {
+    scalarType: "UINT16",
+    byteOrder: "LITTLE_ENDIAN",
+    scale: 0.01,
+    offset: -200,
+    noDataRaw: 65535
+  }
+};
+```
+
+This encoding belongs in a metadata asset covered by the dataset contract's
+SHA-256 and lineage. It is not an undeclared extension to Contract v1.
+
 To activate it alongside `cesium-hypergraph-globe.html`, define the opt-in
 configuration before `scythe-web/browser-entry.js` executes:
 
@@ -57,14 +84,22 @@ window.SCYTHE_WEB_CONFIG = {
   enabled: true,
   contractUrl: "/datasets/regional-rf-v1/manifest.json",
   scenario: {
+    datasets: [{
+      id: "regional-rf",
+      kind: "RF",
+      contractUrl: "/datasets/regional-rf-v1/manifest.json"
+    }],
     activeTransmitterId: "tx-01",
     coverageThreshold: { value: -100, units: "dBm", comparison: "GTE" },
+    coverageFootprintMeters: 50,
     transmitters: [{
       id: "tx-01",
       label: "TX 01",
       longitudeDegrees: -122.4,
       latitudeDegrees: 37.8,
-      heightMeters: 30
+      heightMeters: 30,
+      frequencyHz: 2400000000,
+      rangeMeters: 1000
     }]
   },
   createTileIndex: descriptor => createRegionalTileIndex(descriptor),
@@ -85,3 +120,15 @@ Run the dependency-free unit tests with:
 cd scythe-web
 npm test
 ```
+
+Run the real Chromium integration harness with:
+
+```bash
+npm install
+npx playwright install chromium
+npm run test:browser
+```
+
+On minimal Linux installations, Playwright's native browser libraries must be
+installed by the system administrator first. `npm run test:all` runs both the
+unit and browser suites.

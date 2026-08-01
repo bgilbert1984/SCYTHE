@@ -20,7 +20,8 @@ async function sampler() {
     tileLoader: {
       getTilePayload: async () => ({
         shape: [2, 2],
-        values: new Float32Array([0, 2, 4, 6]),
+        realValues: new Float32Array([0, 2, 4, 6]),
+        imaginaryValues: new Float32Array([2, 2, 2, 2]),
       }),
     },
   });
@@ -38,7 +39,9 @@ test("optical sampling preserves solver evidence and depth-plane identity", asyn
     depthPlaneIndex: 3,
   });
   assert.equal(result.available, true);
-  assert.equal(result.value, 3);
+  assert.deepEqual(result.value, { real: 3, imaginary: 2 });
+  assert.equal(result.relativeIntensity, 13);
+  assert.equal(result.phaseRadians, Math.atan2(2, 3));
   assert.equal(result.depthPlaneIndex, 3);
   assert.equal(result.evidenceClass, "SOLVER_OUTPUT");
   assert.equal(result.visualizationIsAuthoritative, false);

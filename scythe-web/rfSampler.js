@@ -339,4 +339,42 @@ export class ScytheRfSampler {
       query,
     });
   }
+
+  /** Sample a bounded geodetic grid exclusively through the scalar sampler. */
+  async sampleGrid({
+    westDegrees, southDegrees, eastDegrees, northDegrees,
+    longitudeCells, latitudeCells, ...query
+  }) {
+    for (const [name, value] of Object.entries({
+      westDegrees, southDegrees, eastDegrees, northDegrees,
+    })) finite(value, name);
+    if (!(eastDegrees > westDegrees) || !(northDegrees > southDegrees)) {
+      throw new RangeError("sampleGrid requires increasing west/south/east/north bounds");
+    }
+    if (!Number.isInteger(longitudeCells) || !Number.isInteger(latitudeCells) ||
+        longitudeCells < 1 || latitudeCells < 1 ||
+        longitudeCells * latitudeCells > 4096) {
+      throw new RangeError("sampleGrid cell counts must define 1-4096 cells");
+    }
+    const longitudeStep = (eastDegrees - westDegrees) / longitudeCells;
+    const latitudeStep = (northDegrees - southDegrees) / latitudeCells;
+    const cells = [];
+    for (let y = 0; y < latitudeCells; y += 1) {
+      for (let x = 0; x < longitudeCells; x += 1) {
+        const boundsDegrees = Object.freeze([
+          westDegrees + x * longitudeStep,
+          southDegrees + y * latitudeStep,
+          westDegrees + (x + 1) * longitudeStep,
+          southDegrees + (y + 1) * latitudeStep,
+        ]);
+        const sample = await this.sample({
+          ...query,
+          longitudeDegrees: (boundsDegrees[0] + boundsDegrees[2]) / 2,
+          latitudeDegrees: (boundsDegrees[1] + boundsDegrees[3]) / 2,
+        });
+        cells.push(Object.freeze({ x, y, boundsDegrees, sample }));
+      }
+    }
+    return Object.freeze(cells);
+  }
 }

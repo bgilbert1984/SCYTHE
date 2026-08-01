@@ -13,24 +13,24 @@ function coordinate(location, width, height) {
   throw new Error("Tile location must provide x/y or u/v");
 }
 
-function read(payload, index, noData) {
-  const value = payload.values[index];
+function read(values, payload, index, noData) {
+  const value = values[index];
   if (payload.validMask?.[index] === 0) return null;
   if (noData.policy === "NAN" && Number.isNaN(value)) return null;
   if (noData.policy === "SENTINEL" && value === noData.value) return null;
   return value;
 }
 
-function interpolate(payload, method, x, y, width, height, noData) {
+function interpolate(values, payload, method, x, y, width, height, noData) {
   if (method === "NONE") {
     if (Math.abs(x - Math.round(x)) > EPSILON ||
         Math.abs(y - Math.round(y)) > EPSILON) return undefined;
-    return read(payload, Math.round(y) * width + Math.round(x), noData);
+    return read(values, payload, Math.round(y) * width + Math.round(x), noData);
   }
   if (method === "NEAREST") {
     const xi = Math.max(0, Math.min(width - 1, Math.round(x)));
     const yi = Math.max(0, Math.min(height - 1, Math.round(y)));
-    return read(payload, yi * width + xi, noData);
+    return read(values, payload, yi * width + xi, noData);
   }
   const x0 = Math.max(0, Math.min(width - 1, Math.floor(x)));
   const y0 = Math.max(0, Math.min(height - 1, Math.floor(y)));
@@ -38,15 +38,15 @@ function interpolate(payload, method, x, y, width, height, noData) {
   const y1 = Math.min(height - 1, y0 + 1);
   const tx = x - x0;
   const ty = y - y0;
-  const values = [
-    read(payload, y0 * width + x0, noData),
-    read(payload, y0 * width + x1, noData),
-    read(payload, y1 * width + x0, noData),
-    read(payload, y1 * width + x1, noData),
+  const neighbors = [
+    read(values, payload, y0 * width + x0, noData),
+    read(values, payload, y0 * width + x1, noData),
+    read(values, payload, y1 * width + x0, noData),
+    read(values, payload, y1 * width + x1, noData),
   ];
-  if (values.some((value) => value == null)) return null;
-  return (values[0] * (1 - tx) + values[1] * tx) * (1 - ty) +
-    (values[2] * (1 - tx) + values[3] * tx) * ty;
+  if (neighbors.some((value) => value == null)) return null;
+  return (neighbors[0] * (1 - tx) + neighbors[1] * tx) * (1 - ty) +
+    (neighbors[2] * (1 - tx) + neighbors[3] * tx) * ty;
 }
 
 function unavailable(status, descriptor, query, reason) {
@@ -113,24 +113,51 @@ export class ScytheOpticsSampler {
     }
     const payload = await this.tileLoader.getTilePayload(location.tileId);
     const [width, height] = payload.shape ?? [];
-    if (!Number.isInteger(width) || !Number.isInteger(height) ||
-        !ArrayBuffer.isView(payload.values) || payload.values.length < width * height) {
+    if (!Number.isInteger(width) || !Number.isInteger(height))
       throw new Error("Optical tile payload does not match shape");
-    }
     const { x, y } = coordinate(location, width, height);
     if (x < 0 || x > width - 1 || y < 0 || y > height - 1) {
       return unavailable("OUTSIDE_DATASET", this.descriptor, query,
         "Tile coordinate outside payload");
     }
-    const value = interpolate(payload, this.descriptor.grid.interpolation,
-      x, y, width, height, this.descriptor.grid.noData);
-    if (value === undefined) {
+    const representation = this.descriptor.quantity.complexRepresentation;
+    const requiredArrays = representation === "REAL_IMAGINARY"
+      ? ["realValues", "imaginaryValues"]
+      : representation === "MAGNITUDE_PHASE"
+        ? ["magnitudeValues", "phaseValues"]
+        : ["values"];
+    for (const name of requiredArrays) {
+      if (!ArrayBuffer.isView(payload[name]) || payload[name].length < width * height) {
+        throw new Error(`Optical ${representation} tile requires ${name}`);
+      }
+    }
+    const sampled = requiredArrays.map((name) => interpolate(
+      payload[name], payload, this.descriptor.grid.interpolation,
+      x, y, width, height, this.descriptor.grid.noData));
+    if (sampled.some((value) => value === undefined)) {
       return unavailable("INTERPOLATION_FORBIDDEN", this.descriptor, query,
         "Contract interpolation NONE requires an exact coordinate");
     }
-    if (value === null) {
+    if (sampled.some((value) => value === null)) {
       return unavailable("NO_DATA", this.descriptor, query,
         "No-data encountered; browser does not synthesize a fallback");
+    }
+    let value = sampled[0];
+    let phaseRadians = null;
+    let relativeIntensity = null;
+    let components = null;
+    if (representation === "REAL_IMAGINARY") {
+      const [real, imaginary] = sampled;
+      components = Object.freeze({ real, imaginary });
+      phaseRadians = Math.atan2(imaginary, real);
+      relativeIntensity = real * real + imaginary * imaginary;
+      value = components;
+    } else if (representation === "MAGNITUDE_PHASE") {
+      const [magnitude, phase] = sampled;
+      components = Object.freeze({ magnitude, phase });
+      phaseRadians = phase;
+      relativeIntensity = magnitude * magnitude;
+      value = components;
     }
     return Object.freeze({
       status: "OK",
@@ -140,6 +167,9 @@ export class ScytheOpticsSampler {
       quantity: this.descriptor.quantity.name,
       valueSemantics: this.descriptor.quantity.valueSemantics,
       value,
+      components,
+      phaseRadians,
+      relativeIntensity,
       units: this.descriptor.quantity.units,
       depthPlaneIndex: location.depthPlaneIndex ?? query.depthPlaneIndex,
       evidenceClass: this.descriptor.evidenceClass,
