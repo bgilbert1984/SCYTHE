@@ -139,3 +139,43 @@ test("real browser loads a contract-backed optical scenario deterministically", 
     "scythe-web:tx:laser",
   ]);
 });
+
+test("real browser verifies and samples the regional Uint16 ITM fixture", async (context) => {
+  const { server, origin } = await startServer();
+  context.after(() => new Promise((done) => server.close(done)));
+  const browser = await chromium.launch({ headless: true });
+  context.after(() => browser.close());
+  const page = await browser.newPage();
+  await page.goto(`${origin}/scythe-web/browser-harness.html`);
+
+  const result = await page.evaluate(async () => {
+    const { loadContract } = await import("./contractLoader.js");
+    const { createRegionalTileIndex, createRegionalTileLoader } =
+      await import("./regionalRfDataset.js");
+    const { ScytheRfSampler } = await import("./rfSampler.js");
+    const contractUrl = `${location.origin}/datasets/ntia-itm-sf-bay-area-v1/manifest.json`;
+    const descriptor = await loadContract(contractUrl);
+    const binding = { id: "regional-rf", kind: "RF", contractUrl };
+    const sampler = new ScytheRfSampler({
+      descriptor,
+      tileIndex: await createRegionalTileIndex(descriptor, binding),
+      tileLoader: await createRegionalTileLoader(descriptor, binding),
+    });
+    return sampler.sample({
+      longitudeDegrees: -122.50,
+      latitudeDegrees: 37.84,
+      heightMeters: 1.5,
+      utc: "2026-08-02T00:00:00Z",
+      frequencyHz: 900_000_000,
+      coverageThreshold: { value: 145, units: "dB", comparison: "LTE" },
+    });
+  });
+
+  assert.equal(result.available, true);
+  assert.equal(result.datasetId, "ntia-itm-sf-bay-area-v1");
+  assert.equal(result.units, "dB");
+  assert.equal(result.evidenceClass, "SOLVER_OUTPUT");
+  assert.equal(result.visualizationIsAuthoritative, false);
+  assert.equal(Number.isFinite(result.value), true);
+  assert.equal(typeof result.coverage, "boolean");
+});

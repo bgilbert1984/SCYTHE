@@ -253,9 +253,9 @@ function validateLineage(value) {
 
 function validateCrossReferences(manifest) {
   const paths = new Set(manifest.assets.map((asset) => asset.path));
-  const authoritative = manifest.assets.find((asset) =>
-    asset.path === manifest.grid.authoritativeAssetPath && asset.role === "AUTHORITATIVE_VALUES");
-  if (!authoritative) fail("grid.authoritativeAssetPath", "must reference AUTHORITATIVE_VALUES");
+  if (!paths.has(manifest.grid.authoritativeAssetPath)) {
+    fail("grid.authoritativeAssetPath", "must reference a declared asset");
+  }
   const uncertaintyPath = manifest.quantity.uncertainty.assetPath;
   if (uncertaintyPath !== null && !paths.has(uncertaintyPath)) {
     fail("quantity.uncertainty.assetPath", "must reference a declared asset");

@@ -57,7 +57,7 @@ export class VerifiedTileLoader {
   async #load(tileId) {
     const tile = this.tiles.get(tileId);
     if (!tile) throw new Error(`Unknown tile: ${String(tileId)}`);
-    const response = await this.fetchImpl(tile.url, { cache: "force-cache" });
+    const response = await this.fetchImpl.call(globalThis, tile.url, { cache: "force-cache" });
     if (!response.ok) throw new Error(`Tile fetch failed (${response.status}): ${tile.id}`);
     const buffer = await response.arrayBuffer();
     if (Number.isInteger(tile.sizeBytes) && buffer.byteLength !== tile.sizeBytes) {

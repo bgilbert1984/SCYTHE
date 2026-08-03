@@ -75,6 +75,11 @@ const tile = {
 This encoding belongs in a metadata asset covered by the dataset contract's
 SHA-256 and lineage. It is not an undeclared extension to Contract v1.
 
+`regionalRfDataset.js` implements that boundary for the packaged NTIA ITM
+fixture. It verifies `tile-metadata.json`, matches each compact tile to its
+`DERIVED_VISUALIZATION` contract asset, and refuses scale/offset values that do
+not match the authority-to-visualization lineage hashes and parameters.
+
 To activate it alongside `cesium-hypergraph-globe.html`, define the opt-in
 configuration before `scythe-web/browser-entry.js` executes:
 
@@ -110,6 +115,18 @@ window.SCYTHE_WEB_CONFIG = {
 
 If no configuration is supplied, the module only exposes `window.SCYTHEWeb`;
 it does not create overlays or invent sample data.
+
+The end-to-end regional demo can be served from the repository root:
+
+```bash
+python -m http.server 8765 --bind 127.0.0.1
+```
+
+Open `http://127.0.0.1:8765/scythe-web/regional-rf-demo.html`. It shows the
+contract-backed TX and range ring, sampled coverage cells, evidence class,
+basic transmission loss, uncertainty status, and pinned solver provenance.
+Every overlay and the page banner state that the visualization is
+non-authoritative.
 
 The existing globe loads `scythe-web/browser-entry.js` as an ES module at the
 end of `cesium-hypergraph-globe.html`. Activation remains deliberately opt-in.

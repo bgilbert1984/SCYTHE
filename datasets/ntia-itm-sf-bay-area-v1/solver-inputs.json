@@ -1,0 +1,38 @@
+{
+  "datasetId": "ntia-itm-sf-bay-area-v1",
+  "transmitter": {
+    "id": "sf-itm-tx",
+    "longitudeDegrees": -122.4194,
+    "latitudeDegrees": 37.7749,
+    "heightMeters": 30.0
+  },
+  "modelInputs": {
+    "predictionMode": "AREA_TLS",
+    "hTxMeters": 30.0,
+    "hRxMeters": 1.5,
+    "txSitingCriteria": 1,
+    "rxSitingCriteria": 0,
+    "deltaHMeters": 90.0,
+    "climate": 5,
+    "surfaceRefractivityNUnits": 301.0,
+    "frequencyMHz": 900.0,
+    "polarization": 1,
+    "relativePermittivity": 15.0,
+    "conductivitySiemensPerMeter": 0.005,
+    "variabilityMode": 3,
+    "timePercentage": 50.0,
+    "locationPercentage": 50.0,
+    "situationPercentage": 50.0,
+    "minimumModelDistanceKm": 1.0
+  },
+  "boundsDegrees": [
+    -122.5994,
+    37.5949,
+    -122.2394,
+    37.9549
+  ],
+  "shape": [
+    33,
+    33
+  ]
+}

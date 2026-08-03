@@ -43,3 +43,4 @@ UnityProject/Builds/
 # Reproducible solver environments are rebuilt from checked-in specs/locks.
 .solver-envs/
 .conda-pkgs/
+solvers/itm/build/

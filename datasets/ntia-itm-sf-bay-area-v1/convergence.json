@@ -1,0 +1,35 @@
+{
+  "datasetId": "ntia-itm-sf-bay-area-v1",
+  "solverRegression": {
+    "source": "NTIA/itm area.csv row 1",
+    "expectedLossDbRoundedToTenths": 152.5,
+    "actualLossDb": 152.505191390576,
+    "absoluteErrorDb": 0.005191390575987498,
+    "toleranceDb": 0.1,
+    "passed": true
+  },
+  "nestedGridCheck": {
+    "description": "ITM was independently evaluated on nested 33x33 and 65x65 grids and compared at every valid shared coordinate.",
+    "coarseGridShape": [
+      33,
+      33
+    ],
+    "fineGridShape": [
+      65,
+      65
+    ],
+    "sharedValidCellCount": 1086,
+    "maximumAbsoluteLossDifferenceDb": 0.0,
+    "toleranceDb": 1e-09,
+    "passed": true
+  },
+  "compactEncoding": {
+    "scaleDb": 0.01,
+    "offsetDb": 0.0,
+    "maximumAbsoluteQuantizationErrorDb": 0.004990853262995643,
+    "requiredMaximumErrorDb": 0.005,
+    "passed": true
+  },
+  "validCellCount": 1086,
+  "noDataCellCount": 3
+}

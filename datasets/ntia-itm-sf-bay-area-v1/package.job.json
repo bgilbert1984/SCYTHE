@@ -1,0 +1,151 @@
+{
+  "inputs": [
+    {
+      "sourcePath": "solver-inputs.json",
+      "logicalPath": "solver-inputs.json"
+    }
+  ],
+  "assets": [
+    {
+      "sourcePath": "path-loss.float64le",
+      "datasetPath": "path-loss.float64le",
+      "role": "AUTHORITATIVE_VALUES",
+      "mediaType": "application/octet-stream"
+    },
+    {
+      "sourcePath": "path-loss.u16le",
+      "datasetPath": "path-loss.u16le",
+      "role": "DERIVED_VISUALIZATION",
+      "mediaType": "application/octet-stream"
+    },
+    {
+      "sourcePath": "tile-metadata.json",
+      "datasetPath": "tile-metadata.json",
+      "role": "OTHER",
+      "mediaType": "application/json"
+    },
+    {
+      "sourcePath": "convergence.json",
+      "datasetPath": "convergence.json",
+      "role": "OTHER",
+      "mediaType": "application/json"
+    },
+    {
+      "sourcePath": "solver-inputs.json",
+      "datasetPath": "solver-inputs.json",
+      "role": "OTHER",
+      "mediaType": "application/json"
+    }
+  ],
+  "manifest": {
+    "schemaVersion": "1.0",
+    "datasetId": "ntia-itm-sf-bay-area-v1",
+    "title": "NTIA ITM San Francisco Bay regional path-loss fixture",
+    "description": "Deterministic NTIA ITM area-mode basic transmission loss on a small WGS84 grid; visualization remains non-authoritative.",
+    "evidenceClass": "SOLVER_OUTPUT",
+    "authority": {
+      "solverName": "NTIA ITS Irregular Terrain Model",
+      "solverVersion": "v1.4-43-g183ad95",
+      "modelName": "Longley-Rice ITM Area Prediction Mode",
+      "standardRevision": "ITM 1.2.2 algorithm",
+      "sourceRevision": "183ad95bd813a8be11009df396e1c631356864b2",
+      "sourceTreeSha256": "d655560f08c4720f4cec8b626c5f26388e8ca4cc63cb7bf48e6430507f7c0466",
+      "provenanceStatus": "COMPLETE",
+      "solverLicense": "NTIA software disclaimer / US Government public domain",
+      "datasetLicense": "CC0-1.0",
+      "runId": "ntia-itm-sf-bay-area-v1-run-1",
+      "deterministic": true,
+      "executionEnvironment": "AlmaLinux 10 x86_64; GCC 14.3.1; IEEE-754",
+      "inputHashes": []
+    },
+    "spatialReference": {
+      "type": "GEODETIC_GRID",
+      "horizontalCrs": "EPSG:4326",
+      "verticalDatum": "WGS84_ELLIPSOID",
+      "coordinateOrder": "longitude,latitude,height",
+      "heightUnits": "m",
+      "ecefCompatible": true,
+      "boundsDegrees": [
+        -122.5994,
+        37.5949,
+        -122.2394,
+        37.9549
+      ],
+      "crossesAntimeridian": false
+    },
+    "temporal": {
+      "generatedUtc": "2026-08-02T00:00:00Z",
+      "validFromUtc": null,
+      "validToUtc": null,
+      "statisticalTimePercentage": 50.0,
+      "timeSemantics": "STATISTICAL_PERCENTAGE"
+    },
+    "physics": {
+      "domain": "RF",
+      "rf": {
+        "frequencyHz": 900000000.0,
+        "bandwidthHz": 0.0,
+        "polarization": "vertical",
+        "transmitterHeightMeters": 30.0,
+        "receiverHeightMeters": 1.5,
+        "antennaPatternAssetPath": null,
+        "atmosphericModel": "ITM climate 5; N0 301 N-units",
+        "earthSpaceModel": "ITM area mode; delta-h 90 m"
+      },
+      "optical": null
+    },
+    "quantity": {
+      "name": "basic transmission loss",
+      "definition": "NTIA ITM basic transmission loss A, excluding transmitter power and antenna gains",
+      "units": "dB",
+      "valueSemantics": "PATH_LOSS",
+      "complexRepresentation": "NONE",
+      "uncertainty": {
+        "kind": "NOT_QUANTIFIED",
+        "description": "ITM statistical variability is parameterized at 50 percent; no cell-wise uncertainty interval is asserted. Uint16 visualization quantization error is reported separately.",
+        "assetPath": null
+      }
+    },
+    "grid": {
+      "representation": "CUSTOM_BINARY",
+      "dimensions": [
+        33,
+        33
+      ],
+      "resolution": [
+        0.011249999999999982,
+        0.011249999999999982
+      ],
+      "noData": {
+        "policy": "NAN",
+        "value": null
+      },
+      "interpolation": "BILINEAR",
+      "authoritativeAssetPath": "path-loss.float64le",
+      "lodPolicy": {
+        "authoritativeValuesImmutable": true,
+        "derivedTilesAllowed": true,
+        "aggregationMethod": null,
+        "description": "The Float64 grid is immutable authority; Uint16 is a non-authoritative browser visualization transform."
+      }
+    },
+    "assets": [],
+    "lineage": {
+      "parentDatasetIds": [],
+      "transformations": [
+        {
+          "name": "linear-uint16-quantization",
+          "version": "1",
+          "parameters": {
+            "scale": 0.01,
+            "offset": 0.0,
+            "noDataRaw": 65535
+          },
+          "inputSha256": "970123865ac5f2bf5a1eb4d5e2ba2cd9e9bae077292443baa96a257e27ca25da",
+          "outputSha256": "741853a39d36c6aa0d631666e21ba953140d168618adb16fcb9e0f707c0ae50e"
+        }
+      ]
+    },
+    "visualizationIsAuthoritative": false
+  }
+}

@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>SCYTHE // NTIA ITM Regional RF Demo</title>
+  <script src="https://cesium.com/downloads/cesiumjs/releases/1.114/Build/Cesium/Cesium.js"></script>
+  <link rel="stylesheet" href="https://cesium.com/downloads/cesiumjs/releases/1.114/Build/Cesium/Widgets/widgets.css">
+  <style>
+    html, body, #globe-root, #cesium-container { width:100%; height:100%; margin:0; overflow:hidden; }
+    body { background:#000; color:#ccefff; font-family:ui-monospace,monospace; }
+    #globe-root { position:relative; }
+    .notice {
+      position:absolute; top:12px; left:50%; transform:translateX(-50%); z-index:50;
+      padding:7px 12px; border:1px dashed #00d4ff; background:rgba(0,12,28,.86);
+      color:#ccefff; font-size:11px; letter-spacing:.08em; pointer-events:none;
+    }
+  </style>
+</head>
+<body>
+  <main id="globe-root">
+    <div id="cesium-container"></div>
+    <div class="notice">SOLVER OUTPUT // DERIVED UINT16 VIEW // VISUALIZATION IS NOT AUTHORITATIVE</div>
+  </main>
+  <script type="module">
+    import { installScytheWeb } from "./browser-entry.js";
+    import { regionalRfDemoConfig } from "./regionalRfDataset.js";
+
+    const viewer = new Cesium.Viewer("cesium-container", {
+      animation: false,
+      baseLayerPicker: false,
+      fullscreenButton: false,
+      geocoder: false,
+      homeButton: false,
+      infoBox: false,
+      navigationHelpButton: false,
+      sceneModePicker: false,
+      selectionIndicator: false,
+      timeline: false,
+      terrainProvider: new Cesium.EllipsoidTerrainProvider(),
+    });
+    viewer.scene.globe.baseColor = Cesium.Color.fromCssColorString("#071422");
+    const client = await installScytheWeb({
+      ...regionalRfDemoConfig(),
+      Cesium,
+      resolveViewer: () => viewer,
+      container: document.getElementById("globe-root"),
+    });
+    window.scytheWebClient = client;
+  </script>
+</body>
+</html>

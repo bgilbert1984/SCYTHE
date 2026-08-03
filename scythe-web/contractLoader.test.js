@@ -18,6 +18,8 @@ test("browser boundary accepts the Python-validated Meep contract", async () => 
   assert.equal(validated.samplingPolicy.interpolation, "BILINEAR");
   assert.equal(validated.quantityDescriptor.units, "Meep normalized electric-field units");
   assert.equal(validated.epistemics.visualizationIsAuthoritative, false);
+  assert.equal(validated.integrity.assets[0].sha256, manifest.assets[0].sha256);
+  assert.deepEqual(validated.integrity.lineage, manifest.lineage);
   assert.equal(Object.isFrozen(validated), true);
   assert.equal(Object.isFrozen(validated.authority), true);
 });
@@ -35,6 +37,13 @@ test("browser boundary mirrors Python cross-reference checks", async () => {
   const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
   manifest.quantity.uncertainty.assetPath = "missing.json";
   assert.throws(() => validateContractBoundary(manifest), /must reference a declared asset/);
+});
+
+test("browser boundary matches Python semantics for an authoritative path role", async () => {
+  const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+  const asset = manifest.assets.find((item) => item.path === manifest.grid.authoritativeAssetPath);
+  asset.role = "OTHER";
+  assert.equal(validateContractBoundary(manifest).datasetId, manifest.datasetId);
 });
 
 test("browser boundary rejects schema-unknown properties", async () => {
