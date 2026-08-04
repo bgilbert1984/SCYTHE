@@ -1897,14 +1897,23 @@ class CesiumHypergraphGlobe {
    * init — set up Cesium + Three.js, start shared render loop
    * ----------------------------------------------------------------------- */
   init(cesiumContainerId, token) {
-    Cesium.Ion.defaultAccessToken = token;
+    const ionToken = String(token || '').trim();
+    Cesium.Ion.defaultAccessToken = ionToken;
 
-    const terrainObj = this._resolveTerrainProvider();
+    // Ion terrain cannot load without an application token. Use the WGS84
+    // ellipsoid locally so startup does not emit an avoidable authentication
+    // request; imagery is selected independently by the render scheduler.
+    const terrainObj = ionToken
+      ? this._resolveTerrainProvider()
+      : new Cesium.EllipsoidTerrainProvider();
     const viewerOptions = {
       useDefaultRenderLoop: false,
       timeline: false,
       animation: false,
       baseLayerPicker: false,
+      // URS owns imagery and installs either ion or its OSM fallback. Prevent
+      // Viewer from racing it with the built-in ion asset 2 base layer.
+      baseLayer: false,
       geocoder: false,
       sceneModePicker: false,
       navigationHelpButton: false,

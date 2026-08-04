@@ -1,0 +1,32 @@
+{
+  "format": "SCYTHE_GEODETIC_TILESET_V1",
+  "datasetId": "ntia-itm-sf-bay-area-v1",
+  "quantity": "basic transmission loss",
+  "units": "dB",
+  "visualizationIsAuthoritative": false,
+  "derivedFrom": "path-loss.float64le",
+  "tiles": [
+    {
+      "id": "regional-z0",
+      "path": "path-loss.u16le",
+      "sha256": "741853a39d36c6aa0d631666e21ba953140d168618adb16fcb9e0f707c0ae50e",
+      "sizeBytes": 2178,
+      "shape": [
+        33,
+        33
+      ],
+      "westDegrees": -122.5994,
+      "southDegrees": 37.5949,
+      "eastDegrees": -122.2394,
+      "northDegrees": 37.9549,
+      "lod": 0,
+      "encoding": {
+        "scalarType": "UINT16",
+        "byteOrder": "LITTLE_ENDIAN",
+        "scale": 0.01,
+        "offset": 0.0,
+        "noDataRaw": 65535
+      }
+    }
+  ]
+}

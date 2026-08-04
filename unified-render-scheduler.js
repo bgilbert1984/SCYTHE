@@ -402,6 +402,20 @@ class UnifiedRenderScheduler {
     this.imageryMode = mode;
     this._onImageryChange?.(mode, { requestedMode: mode });
 
+    if (mode === ImageryMode.ION) {
+      const ionToken = String(
+        (typeof Cesium !== 'undefined' && Cesium.Ion?.defaultAccessToken) ||
+        (typeof window !== 'undefined'
+          ? (window.CESIUM_ION_TOKEN || window.SCYTHE_CESIUM_ION_TOKEN || '')
+          : '')
+      ).trim();
+      if (!ionToken) {
+        console.warn('[URS] Cesium ion token missing — switching to OSM');
+        this.setImageryMode(ImageryMode.OSM, localUrl);
+        return;
+      }
+    }
+
     // VECTOR modes: MapLibre owns the basemap — strip Cesium imagery entirely
     if (mode === ImageryMode.VECTOR || mode === ImageryMode.VECTOR_DARK) {
       if (v) {
@@ -447,23 +461,24 @@ class UnifiedRenderScheduler {
         }
         provider._asyncPromise
           .then((p) => {
-            if (!p) return;
+            // Do not let a late ion response replace a mode selected while the
+            // endpoint request was in flight.
+            if (!p || this.imageryMode !== mode) return;
             try {
               // Replace the OSM baseline with Ion
               while (layers.length > 0) layers.remove(layers.get(0), false);
               this._imageryLayer = layers.addImageryProvider(p);
+              this._attachImageryFallback(p, layers, mode);
               console.log(`[URS] Imagery mode → ${mode} (ion async)`);
             } catch (err) {
               console.warn('[URS] Ion async addImageryProvider failed:', err.message);
-              // OSM was already stripped; re-add it as permanent fallback
-              try {
-                const osm2 = buildImageryProvider(ImageryMode.OSM);
-                if (osm2) { this._imageryLayer = layers.addImageryProvider(osm2); }
-              } catch (_) {}
+              this.setImageryMode(ImageryMode.OSM, localUrl);
             }
           })
           .catch((e) => {
-            console.warn('[URS] Ion async provider failed — staying on OSM:', e?.message || e);
+            if (this.imageryMode !== mode) return;
+            console.warn('[URS] Ion async provider failed — switching to OSM:', e?.message || e);
+            this.setImageryMode(ImageryMode.OSM, localUrl);
           });
         return;
       }
@@ -500,18 +515,42 @@ class UnifiedRenderScheduler {
     provider.errorEvent.addEventListener((error) => {
       errors += 1;
       console.warn('[URS] Imagery tile load error:', error);
-      if (errors < 3 || this.imageryMode !== mode) return;
+      if (this.imageryMode !== mode) return;
+
+      const errorText = [
+        error?.message,
+        error?.error?.message,
+        error?.statusCode,
+        error?.error?.statusCode,
+      ].filter((value) => value != null).join(' ');
+      const ionAuthFailed = mode === ImageryMode.ION &&
+        /(?:\b401\b|unauthori[sz]ed|invalid[_ ]token|access token)/i.test(errorText);
+
+      // Authentication failures will not recover through retries. Switch to
+      // the public OSM provider immediately and update the visible map mode.
+      if (ionAuthFailed) {
+        console.warn('[URS] Cesium ion authentication failed — switching to OSM');
+        this.setImageryMode(ImageryMode.OSM);
+        return;
+      }
+
+      if (errors < 3) return;
 
       try {
         while (layers.length > 0) layers.remove(layers.get(0), false);
-        const fallback = buildImageryProvider(ImageryMode.OFFLINE, this._offlineTileUrl);
+        const fallbackMode = mode === ImageryMode.ION
+          ? ImageryMode.OSM
+          : ImageryMode.OFFLINE;
+        const fallback = buildImageryProvider(fallbackMode, this._offlineTileUrl);
         if (fallback) this._imageryLayer = layers.addImageryProvider(fallback);
         if (this._viewer?.scene?.globe) {
           this._viewer.scene.globe.baseColor = Cesium.Color.fromCssColorString('#2f6f9f');
         }
-        console.warn('[URS] Falling back to offline diagnostic imagery');
+        this.imageryMode = fallbackMode;
+        this._onImageryChange?.(fallbackMode, { requestedMode: mode });
+        console.warn(`[URS] Falling back to ${fallbackMode} imagery`);
       } catch (e) {
-        console.warn('[URS] Offline imagery fallback failed:', e?.message || e);
+        console.warn('[URS] Imagery fallback failed:', e?.message || e);
       }
     });
   }
