@@ -1204,6 +1204,27 @@ def orchestrator_health():
     })
 
 
+@app.route('/api/graphops/directives/explain-coverage-cell', methods=['POST'])
+def graphops_explain_coverage_cell():
+    """Broker-safe Clarktech directive for the standalone regional globe.
+
+    This endpoint has no graph or sensor authority.  It validates and records a
+    typed SOLVER_OUTPUT sample, then returns the same deterministic explanation
+    used by the GraphOps MCP tool.  Remote callers must use a valid session.
+    """
+    if request.remote_addr not in {'127.0.0.1', '::1'}:
+        token = request.headers.get('Authorization', '').removeprefix('Bearer ').strip()
+        if not validate_jwt(token):
+            return jsonify({'error': 'Authentication required'}), 401
+    try:
+        from rf_solver_evidence import explain_coverage_cell, get_rf_solver_evidence_store
+        payload = request.get_json(silent=True) or {}
+        evidence = get_rf_solver_evidence_store().ingest(payload.get('sample') or payload)
+        return jsonify(explain_coverage_cell(evidence))
+    except (TypeError, ValueError, KeyError) as exc:
+        return jsonify({'error': str(exc)}), 400
+
+
 # ---------------------------------------------------------------------------
 # Shared Session Registry — used by gRPC TokenAuthInterceptor
 # ---------------------------------------------------------------------------

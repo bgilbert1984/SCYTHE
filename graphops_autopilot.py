@@ -258,14 +258,19 @@ class InvestigatorAgent:
     to the full agent investigation loop.
     """
 
-    def __init__(self, engine=None):
+    def __init__(self, engine=None, ollama_url=None, embedding_engine=None):
         self._engine = engine
+        self._ollama_url = ollama_url
+        self._embedding_engine = embedding_engine
         self._agent  = None  # lazy init — avoid import cost at startup
 
     def _get_agent(self):
         if self._agent is None:
             from graphops_copilot import GraphOpsAgent
-            self._agent = GraphOpsAgent(self._engine)
+            self._agent = GraphOpsAgent(
+                self._engine, ollama_url=self._ollama_url,
+                embedding_engine=self._embedding_engine,
+            )
         return self._agent
 
     def investigate(self, card: EventCard) -> Dict[str, Any]:
@@ -545,9 +550,10 @@ class GraphOpsAutopilot:
     _instance: Optional["GraphOpsAutopilot"] = None
 
     def __init__(self, engine=None, topo_detector=None, fanin_detector=None,
-                 attractor_detector=None, takml_client=None):
+                 attractor_detector=None, takml_client=None, ollama_url=None,
+                 embedding_engine=None):
         self._engine  = engine
-        investigator  = InvestigatorAgent(engine)
+        investigator  = InvestigatorAgent(engine, ollama_url, embedding_engine)
         self.sentinel = SentinelLoop(
             topo_detector      = topo_detector,
             fanin_detector     = fanin_detector,
@@ -660,6 +666,31 @@ class GraphOpsAutopilot:
             ],
         )
 
+    def handle_rf_solver_evidence(self, evidence: Dict[str, Any]) -> None:
+        """Route modeled RF evidence, capped below automatic-alert authority."""
+        if evidence.get("evidence_class") != "SOLVER_OUTPUT":
+            return
+        covered = bool(evidence.get("coverage"))
+        # Solver output may suggest analyst attention, never Tier 2/3 dispatch.
+        confidence = 0.72 if not covered else 0.64
+        self.sentinel._route(
+            source_type="rf_solver",
+            pattern="rf_solver_coverage_gap" if not covered else "rf_solver_coverage",
+            nodes=0,
+            window_ms=0,
+            confidence=min(confidence, TIER_ALERT - 0.01),
+            node_ids=[str(evidence.get("tile_id", "unknown"))],
+            temporal_sync=0.0,
+            ip_entropy=0.0,
+            metadata=dict(evidence),
+            evidence_refs=[str(evidence.get("evidence_id", ""))],
+            suggested_actions=[
+                "Explain this coverage cell",
+                "Review solver provenance and threshold assumptions",
+                "Collect calibrated field measurements to test the model",
+            ],
+        )
+
     def submit_feedback(self, card_id: str, verdict: str,
                         notes: str = "") -> dict:
         """Submit analyst feedback for a specific EventCard to TAK-ML.
@@ -731,6 +762,7 @@ class GraphOpsAutopilot:
 
 def register_autopilot_tools(engine, mcp_handler,
                               autopilot: Optional[GraphOpsAutopilot] = None,
+                              ollama_url=None, embedding_engine=None,
                               ) -> GraphOpsAutopilot:
     """Register GraphOps Autopilot MCP tools; creates/starts Autopilot if needed.
 
@@ -743,13 +775,20 @@ def register_autopilot_tools(engine, mcp_handler,
     from mcp_server import ToolDef
 
     if autopilot is None:
-        autopilot = GraphOpsAutopilot(engine)
+        autopilot = GraphOpsAutopilot(
+            engine, ollama_url=ollama_url, embedding_engine=embedding_engine,
+        )
         autopilot.start()
     try:
         from rf_bridge import get_rf_observation_store
         get_rf_observation_store().subscribe(autopilot.handle_rf_observation)
     except Exception as exc:
         logger.warning("[GraphOpsAutopilot] RF observation subscription unavailable: %s", exc)
+    try:
+        from rf_solver_evidence import get_rf_solver_evidence_store
+        get_rf_solver_evidence_store().subscribe(autopilot.handle_rf_solver_evidence)
+    except Exception as exc:
+        logger.warning("[GraphOpsAutopilot] RF solver subscription unavailable: %s", exc)
 
     def _status(params: dict) -> dict:
         return autopilot.status()

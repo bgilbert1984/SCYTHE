@@ -53,6 +53,7 @@ from __future__ import annotations
 import json
 import logging
 import math
+import os
 import re
 import time
 from collections import Counter, defaultdict
@@ -2623,7 +2624,7 @@ class GraphOpsAgent:
                  engine=None,
                  topology_detector=None,
                  fanin_detector=None,
-                 ollama_url: str = "http://localhost:11434",
+                 ollama_url: Optional[str] = None,
                  embedding_engine=None,
                  rf_observation_provider=None,
                  allow_sensor_mutation: bool = True):
@@ -2632,7 +2633,7 @@ class GraphOpsAgent:
         self.executor        = InvestigativeDSLExecutor(
             engine, topology_detector, fanin_detector, rf_observation_provider
         )
-        self._ollama         = ollama_url
+        self._ollama         = ollama_url or os.environ.get("OLLAMA_URL", "http://localhost:11434")
         self._models         = self._pick_models()
         self._model          = self._models[0]
         self._embedding_engine = embedding_engine  # optional EmbeddingEngine for RAG
@@ -3148,7 +3149,8 @@ class GraphOpsAgent:
             interpretation["geography"] = "N/A"
             interpretation["assessment"] = "UNKNOWN — no temporal evidence. Recommend: request burst capture and re-query."
             interpretation["direction"] = "Instrument: trigger burst capture / temporal resample for the target entity or path."
-            interpretation["confidence"] = min(float(interpretation.get("confidence", 0.3) or 0.3), 0.25)
+            confidence = interpretation.get("confidence", 0.3)
+            interpretation["confidence"] = min(float(0.0 if confidence is None else confidence), 0.25)
             return interpretation
 
         interpretation["temporal_evidence"] = (
@@ -3331,13 +3333,35 @@ class GraphOpsAgent:
         arbitration: Optional[Dict[str, Any]] = None,
         allow_grounding: bool = True,
     ) -> Dict[str, Any]:
-        final = self._enforce_temporal_authority(question, result_summary, interpretation)
+        final = self._enforce_evidence_authority(result_summary, interpretation)
+        final = self._enforce_temporal_authority(question, result_summary, final)
         if arbitration:
             final["model_arbitration"] = arbitration
         if allow_grounding:
             grounding = self._maybe_reflexive_grounding(question, result_summary, final)
             if grounding:
                 final["reflexive_grounding"] = grounding
+        return final
+
+    @staticmethod
+    def _enforce_evidence_authority(result_summary: Dict[str, Any], interpretation: Dict[str, Any]) -> Dict[str, Any]:
+        """Structurally prevent an LLM from assigning confidence to absent data."""
+        nodes = int(result_summary.get("node_count", 0) or 0)
+        edges = int(result_summary.get("edge_count", 0) or 0)
+        if nodes == 0 and edges == 0:
+            return {
+                "temporal_evidence": "TEMPORAL_EVIDENCE: ABSENT",
+                "situation": "UNKNOWN — query returned no graph data",
+                "change": "UNKNOWN",
+                "structure": "UNKNOWN",
+                "geography": "N/A",
+                "assessment": "UNKNOWN — no sensor data. Recommend: run nmap/nDPI capture then re-query.",
+                "direction": "Instrument: start capture session and ingest PCAP.",
+                "confidence": 0.0,
+            }
+        final = dict(interpretation)
+        if nodes < 3:
+            final["confidence"] = min(float(final.get("confidence", 0.0) or 0.0), 0.25)
         return final
 
     @staticmethod
@@ -3680,7 +3704,7 @@ class GraphOpsAgent:
 # ─── MCP tool registration ────────────────────────────────────────────────────
 
 def register_graphops_tools(engine, mcp_handler, embedding_engine=None,
-                            rf_observation_provider=None) -> None:
+                            rf_observation_provider=None, ollama_url=None) -> None:
     """Register GraphOps Copilot tools into an MCPHandler instance.
 
     Three tools:
@@ -3690,7 +3714,7 @@ def register_graphops_tools(engine, mcp_handler, embedding_engine=None,
     """
     from mcp_server import ToolDef
 
-    _agent = GraphOpsAgent(engine, embedding_engine=embedding_engine,
+    _agent = GraphOpsAgent(engine, embedding_engine=embedding_engine, ollama_url=ollama_url,
                            rf_observation_provider=rf_observation_provider,
                            allow_sensor_mutation=False)
 
@@ -3777,6 +3801,38 @@ def register_graphops_tools(engine, mcp_handler, embedding_engine=None,
         fn=_entity_parse,
     )
 
+    def _explain_coverage_cell(params: dict) -> dict:
+        from rf_solver_evidence import explain_coverage_cell, get_rf_solver_evidence_store
+        evidence_id = str(params.get("evidence_id", ""))
+        if evidence_id:
+            matches = get_rf_solver_evidence_store().query(evidence_id=evidence_id, limit=1)
+            if not matches:
+                return {"error": "solver evidence_id not found"}
+            evidence = matches[0]
+        else:
+            try:
+                evidence = get_rf_solver_evidence_store().ingest(params.get("sample") or {})
+            except (TypeError, ValueError) as exc:
+                return {"error": str(exc)}
+        return explain_coverage_cell(evidence)
+
+    mcp_handler._tools["graphops_explain_coverage_cell"] = ToolDef(
+        name="graphops_explain_coverage_cell",
+        description=(
+            "Execute the directive 'Explain this coverage cell' for contract-backed RF "
+            "solver output. Returns threshold logic, provenance, assumptions, a falsifier, "
+            "and an explicit non-measurement authority boundary."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "evidence_id": {"type": "string"},
+                "sample": {"type": "object", "description": "Typed SOLVER_OUTPUT cell sample"},
+            },
+        },
+        fn=_explain_coverage_cell,
+    )
+
     def _suggest(params: dict) -> dict:
         top_n      = int(params.get("top_n", 5))
         auto_exec  = bool(params.get("auto_execute", False))
@@ -3817,8 +3873,8 @@ def register_graphops_tools(engine, mcp_handler, embedding_engine=None,
     except Exception as _eve_err:
         logger.warning("[graphops_copilot] eve_sensor_mcp unavailable: %s", _eve_err)
 
-    logger.info("[graphops_copilot] registered 5 MCP tools: "
-                "investigate, dsl_exec, entity_parse, suggest, sensor_stream")
+    logger.info("[graphops_copilot] registered 6 MCP tools: "
+                "investigate, dsl_exec, entity_parse, explain_coverage_cell, suggest, sensor_stream")
 
 
 # ─── CLI self-test ────────────────────────────────────────────────────────────

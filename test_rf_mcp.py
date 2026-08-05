@@ -6,6 +6,7 @@ from graphops_copilot import InvestigativeDSLExecutor
 from mcp_server import MCPHandler
 from rf_bridge import get_rf_bridge, reset_rf_bridge_for_tests
 from rf_mcp import correlate_rf_graph, register_rf_tools
+from rf_solver_evidence import RFSolverEvidenceStore, explain_coverage_cell
 
 
 class _Engine:
@@ -92,6 +93,33 @@ class RFMCPTests(unittest.TestCase):
         suggestions = pilot.get_suggestion_queue()
         self.assertEqual(suggestions[0]["pattern"], "rf_peak")
         self.assertEqual(suggestions[0]["evidence_refs"], [self.observation["evidence_id"]])
+
+    def test_solver_evidence_is_distinct_and_cannot_auto_alert(self):
+        pilot = GraphOpsAutopilot(_Engine())
+        store = RFSolverEvidenceStore()
+        store.subscribe(pilot.handle_rf_solver_evidence)
+        evidence = store.ingest({
+            "dataset_id": "ntia-itm-sf-bay-area-v1", "tile_id": "regional-z0",
+            "longitude_degrees": -122.4, "latitude_degrees": 37.8,
+            "height_meters": 0, "frequency_hz": 900_000_000,
+            "quantity": "basic transmission loss", "value": 151.2, "units": "dB",
+            "coverage": False, "coverage_threshold": 145,
+            "transmitter_id": "sf-itm-tx",
+            "provenance": {"solverName": "NTIA ITM", "runId": "fixture-run"},
+        })
+        self.assertEqual(evidence["evidence_class"], "SOLVER_OUTPUT")
+        self.assertFalse(evidence["visualization_is_authoritative"])
+        suggestion = pilot.get_suggestion_queue()[0]
+        self.assertEqual(suggestion["pattern"], "rf_solver_coverage_gap")
+        self.assertLess(suggestion["score"], 0.80)
+        self.assertEqual(pilot.sentinel.alert_count, 0)
+        explanation = explain_coverage_cell(evidence)
+        self.assertEqual(explanation["finding_class"], "INFERRED")
+        self.assertIn("not a measurement", explanation["authority_boundary"])
+
+    def test_solver_store_rejects_authoritative_visualization(self):
+        with self.assertRaisesRegex(ValueError, "cannot be authoritative"):
+            RFSolverEvidenceStore().ingest({"visualization_is_authoritative": True})
 
 
 if __name__ == "__main__":

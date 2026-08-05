@@ -20660,7 +20660,10 @@ def main():
                             _embed_engine.stats()['total_vectors'], _embed_engine._model)
 
                 # Wire embedding engine into the GraphOps agent used by MCP tools
-                register_graphops_tools(eng, mcp_handler, embedding_engine=_embed_engine)
+                register_graphops_tools(
+                    eng, mcp_handler, embedding_engine=_embed_engine,
+                    ollama_url=_DEFAULT_OLLAMA_URL,
+                )
             except Exception as emb_err:
                 logger.warning('Could not init EmbeddingEngine: %s', emb_err)
         else:

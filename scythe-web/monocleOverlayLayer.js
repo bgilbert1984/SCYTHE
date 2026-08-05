@@ -155,6 +155,7 @@ export class MonocleOverlayLayer {
     this.removePostRender = null;
     this.entityIds = new Set();
     this.coverageGridEntityIds = new Set();
+    this.coverageClickHandler = null;
     this.destroyed = false;
   }
 
@@ -164,6 +165,7 @@ export class MonocleOverlayLayer {
     this.hud = createHud(this.documentRoot, this.container);
     this.#addTransmitterMarkers();
     this.#addRangeRings();
+    this.#installCoverageCellInteraction();
     this.removePostRender = this.viewer.scene.postRender.addEventListener(() => {
       void this.tick();
     });
@@ -231,6 +233,42 @@ export class MonocleOverlayLayer {
     } finally {
       this.inFlight = false;
     }
+  }
+
+  #installCoverageCellInteraction() {
+    if (!this.Cesium.ScreenSpaceEventHandler || this.coverageClickHandler) return;
+    this.coverageClickHandler = new this.Cesium.ScreenSpaceEventHandler(this.viewer.scene.canvas);
+    this.coverageClickHandler.setInputAction((movement) => {
+      const picked = this.viewer.scene.pick(movement.position);
+      const entity = picked?.id;
+      if (!entity?.id?.startsWith("scythe-web:coverage:")) return;
+      const at = this.viewer.clock.currentTime;
+      const read = (name) => entity.properties?.[name]?.getValue?.(at) ?? null;
+      const detail = {
+        evidence_class: read("evidenceClass"),
+        visualization_is_authoritative: read("visualizationIsAuthoritative"),
+        dataset_id: read("datasetId"),
+        tile_id: read("tileId"),
+        longitude_degrees: read("longitudeDegrees"),
+        latitude_degrees: read("latitudeDegrees"),
+        height_meters: read("heightMeters"),
+        frequency_hz: read("frequencyHz"),
+        quantity: read("quantity"),
+        value: read("value"),
+        units: read("units"),
+        coverage: read("coverage"),
+        coverage_threshold: read("coverageThreshold"),
+        transmitter_id: read("transmitterId"),
+        provenance: {
+          solverName: read("solverName"), solverVersion: read("solverVersion"),
+          sourceRevision: read("sourceRevision"), runId: read("runId"),
+        },
+      };
+      const EventClass = this.documentRoot?.defaultView?.CustomEvent ?? globalThis.CustomEvent;
+      this.container?.dispatchEvent(new EventClass("scythe-web:coverage-cell-selected", {
+        bubbles: true, detail,
+      }));
+    }, this.Cesium.ScreenSpaceEventType.LEFT_CLICK);
   }
 
   #renderHud(sample) {
@@ -382,6 +420,10 @@ export class MonocleOverlayLayer {
       if (!sample.available || sample.coverage == null) continue;
       const id = `scythe-web:coverage:${cell.x}:${cell.y}`;
       const style = evidenceStyle(sample.evidenceClass);
+      const centerLongitude = (cell.boundsDegrees[0] + cell.boundsDegrees[2]) / 2;
+      const centerLatitude = (cell.boundsDegrees[1] + cell.boundsDegrees[3]) / 2;
+      const threshold = this.scenario.coverageThreshold;
+      const transmitter = activeTransmitter(this.scenario);
       const fill = sample.coverage
         ? cesiumAreaMaterial(this.Cesium, sample.evidenceClass, 0.28)
         : this.Cesium.Color.fromCssColorString("#ff445e").withAlpha(0.12);
@@ -396,10 +438,22 @@ export class MonocleOverlayLayer {
         },
         properties: {
           datasetId: sample.datasetId,
+          tileId: sample.tileId,
           evidenceClass: sample.evidenceClass,
+          quantity: sample.quantity,
           value: sample.value,
           units: sample.units,
           coverage: sample.coverage,
+          coverageThreshold: threshold?.value ?? null,
+          longitudeDegrees: centerLongitude,
+          latitudeDegrees: centerLatitude,
+          heightMeters: grid.heightMeters ?? 0,
+          frequencyHz: sample.query?.frequencyHz ?? null,
+          transmitterId: transmitter?.id ?? "unknown",
+          solverName: sample.provenance?.solverName,
+          solverVersion: sample.provenance?.solverVersion,
+          sourceRevision: sample.provenance?.sourceRevision,
+          runId: sample.provenance?.runId,
           visualizationIsAuthoritative: false,
         },
       });
@@ -501,6 +555,8 @@ export class MonocleOverlayLayer {
     this.destroyed = true;
     if (typeof this.removePostRender === "function") this.removePostRender();
     this.removePostRender = null;
+    this.coverageClickHandler?.destroy();
+    this.coverageClickHandler = null;
     for (const id of this.entityIds) this.viewer.entities.removeById(id);
     this.entityIds.clear();
     this.hud?.remove();
