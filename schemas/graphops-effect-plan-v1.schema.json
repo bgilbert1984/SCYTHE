@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://scythe.local/schemas/graphops-effect-plan-v1.schema.json",
+  "title": "GraphOps EffectPlan v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["protocolVersion", "directiveId", "planId", "status", "evidencePosture", "effects", "queries", "jobs", "proposals", "claims", "supportingEvidence", "contradictingEvidence", "assumptions", "falsifiers", "mutations", "refusals"],
+  "properties": {
+    "protocolVersion": {"const": "1.0"},
+    "directiveId": {"type": "string"}, "planId": {"type": "string"},
+    "status": {"enum": ["completed", "partially-completed", "refused", "unavailable"]},
+    "summary": {"type": "string"},
+    "evidencePosture": {"enum": ["no-data", "sparse", "inference-heavy", "solver-backed", "measurement-backed", "mixed"]},
+    "effects": {"type": "array", "items": {"type": "object"}},
+    "queries": {"type": "array"}, "jobs": {"type": "array"},
+    "proposals": {"type": "array"}, "claims": {"type": "array"},
+    "supportingEvidence": {"type": "array"}, "contradictingEvidence": {"type": "array"},
+    "assumptions": {"type": "array"}, "falsifiers": {"type": "array"},
+    "mutations": {"type": "array"}, "refusals": {"type": "array"},
+    "undoToken": {"type": ["string", "null"]}, "expiresAt": {"type": "string"}
+  }
+}

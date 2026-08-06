@@ -23,6 +23,15 @@ The modules are:
 - `scenarioManifestWeb.js`: validated dataset, transmitter, time-window, and
   operator-view bindings.
 - `browser-entry.js`: opt-in integration with `cesium-hypergraph-globe.html`.
+- `directiveProtocol.js`: strict GraphOps Directive Request and EffectPlan v1
+  validation with allow-listed effect and style tokens.
+- `selectionModel.js`: typed, revisioned browser selections.
+- `effectRuntime.js`: transactional apply/revert behavior for declarative
+  browser effects.
+- `visualEffects.js`: Cesium implementations of allow-listed Clarktech visual
+  effects, including the reversible coverage-threshold lens.
+- `realityPrism.js`: authority, lineage, display-difference, threshold, and
+  falsifier presentation for a selected RF cell.
 
 The core has no propagation model and no random fallback. It does not guess a
 binary tile layout. Use `GeodeticTileIndex` plus `VerifiedTileLoader` when the
@@ -127,6 +136,14 @@ contract-backed TX and range ring, sampled coverage cells, evidence class,
 basic transmission loss, uncertainty status, and pinned solver provenance.
 Every overlay and the page banner state that the visualization is
 non-authoritative.
+
+Clicking a coverage cell now sends only a typed dataset/tile/location reference
+and the non-authoritative display value to GraphOps. The server verifies the
+manifest, tile metadata, and authoritative Float64 asset hashes, samples the
+authority independently, and returns a declarative EffectPlan. The Reality
+Prism exposes any display quantization difference. The threshold control applies
+a reversible classification lens to the browser view without changing source
+values or evidence authority.
 
 The existing globe loads `scythe-web/browser-entry.js` as an ES module at the
 end of `cesium-hypergraph-globe.html`. Activation remains deliberately opt-in.

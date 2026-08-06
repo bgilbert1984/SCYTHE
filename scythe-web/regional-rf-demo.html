@@ -21,17 +21,32 @@
       color:#ccefff; font:11px/1.45 ui-monospace,monospace; white-space:pre-wrap;
     }
     .directive[hidden] { display:none; }
+    .directive pre { white-space:pre-wrap; margin:8px 0; font:inherit; }
+    .directive__controls { display:flex; gap:6px; align-items:center; margin-top:8px; }
+    .directive button,.directive input { color:#ccefff; background:#071422; border:1px solid #00d4ff; font:inherit; padding:4px 6px; }
+    .directive input { width:64px; }
   </style>
 </head>
 <body>
   <main id="globe-root">
     <div id="cesium-container"></div>
     <div class="notice">SOLVER OUTPUT // DERIVED UINT16 VIEW // VISUALIZATION IS NOT AUTHORITATIVE</div>
-    <aside id="graphops-directive" class="directive" hidden></aside>
+    <aside id="graphops-directive" class="directive" hidden>
+      <div id="directive-status">GRAPHOPS DIRECTIVE</div>
+      <div id="reality-prism"></div>
+      <div class="directive__controls">
+        <label>THRESHOLD <input id="threshold-value" type="number" value="145" step="1"></label>
+        <button id="apply-threshold" type="button">APPLY LENS</button>
+        <button id="undo-effects" type="button">UNDO</button>
+      </div>
+    </aside>
   </main>
   <script type="module">
     import { installScytheWeb } from "./browser-entry.js";
     import { regionalRfDemoConfig } from "./regionalRfDataset.js";
+    import { SelectionModel } from "./selectionModel.js";
+    import { EffectRuntime } from "./effectRuntime.js";
+    import { registerVisualEffects } from "./visualEffects.js";
 
     const viewer = new Cesium.Viewer("cesium-container", {
       animation: false,
@@ -61,31 +76,62 @@
     window.scytheWebClient = client;
 
     const directive = document.getElementById("graphops-directive");
+    const status = document.getElementById("directive-status");
+    const selections = new SelectionModel();
+    const effects = registerVisualEffects(new EffectRuntime(), {
+      viewer, Cesium, prismRoot: document.getElementById("reality-prism"),
+    });
+    let activePlanId = null;
+
+    async function submitDirective(request) {
+      const response = await fetch(`/api/graphops/directives/${request.requestedMode}`, {
+        method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(request),
+      });
+      const plan = await response.json();
+      if (!response.ok) throw new Error(plan.error ?? `HTTP ${response.status}`);
+      if (activePlanId) await effects.revertPlan(activePlanId);
+      await effects.applyPlan(plan);
+      activePlanId = plan.planId;
+      status.textContent = `GRAPHOPS // ${plan.status.toUpperCase()} // ${plan.evidencePosture.toUpperCase()}`;
+      return plan;
+    }
+
     document.getElementById("globe-root").addEventListener(
       "scythe-web:coverage-cell-selected", async ({ detail: sample }) => {
         directive.hidden = false;
-        directive.textContent = "GRAPHOPS DIRECTIVE // EXPLAIN THIS COVERAGE CELL\nSubmitting contract-backed solver evidence…";
+        status.textContent = "GRAPHOPS // RESOLVING AUTHORITATIVE CELL…";
+        selections.replace({
+          kind: "rf-cell", datasetId: sample.dataset_id, tileId: sample.tile_id,
+          longitudeDegrees: sample.longitude_degrees, latitudeDegrees: sample.latitude_degrees,
+          displayValue: sample.value, displayUnits: sample.units,
+          ...(sample.display_asset_hash ? { displayAssetHash: sample.display_asset_hash } : {}),
+          coverageThreshold: { value: sample.coverage_threshold,
+            units: sample.coverage_threshold_units, comparison: sample.coverage_comparison },
+        });
         try {
-          const response = await fetch("/api/graphops/directives/explain-coverage-cell", {
-            method: "POST", credentials: "same-origin",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ sample }),
-          });
-          const result = await response.json();
-          if (!response.ok) throw new Error(result.error ?? `HTTP ${response.status}`);
-          if (result.error) throw new Error(result.error);
-          directive.textContent = [
-            "GRAPHOPS DIRECTIVE // EXPLAIN THIS COVERAGE CELL",
-            result.explanation,
-            `EVIDENCE // ${result.evidence_class} // ${result.finding_class}`,
-            `BOUNDARY // ${result.authority_boundary}`,
-            `FALSIFIER // ${result.falsifier}`,
-          ].join("\n\n");
+          await submitDirective(selections.directiveRequest({
+            directive: "explain.coverage-cell", utterance: "Explain why this cell is red", mode: "preview",
+          }));
         } catch (error) {
-          directive.textContent = `GRAPHOPS DIRECTIVE // UNAVAILABLE\n${error.message}\n\nThe selected cell remains SOLVER_OUTPUT, not a measurement.`;
+          status.textContent = `GRAPHOPS // UNAVAILABLE // ${error.message}`;
         }
       },
     );
+    document.getElementById("apply-threshold").addEventListener("click", async () => {
+      try {
+        await submitDirective(selections.directiveRequest({
+          directive: "reclassify.coverage-threshold", utterance: "Reclassify coverage at this threshold",
+          parameters: { threshold: Number(document.getElementById("threshold-value").value), units: "dB", comparison: "LTE" },
+          mode: "execute",
+        }));
+      } catch (error) { status.textContent = `GRAPHOPS // REFUSED // ${error.message}`; }
+    });
+    document.getElementById("undo-effects").addEventListener("click", async () => {
+      if (activePlanId) await effects.revertPlan(activePlanId);
+      activePlanId = null;
+      status.textContent = "GRAPHOPS // EFFECTS REVERTED";
+    });
   </script>
 </body>
 </html>

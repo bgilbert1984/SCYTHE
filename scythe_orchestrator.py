@@ -1225,6 +1225,39 @@ def graphops_explain_coverage_cell():
         return jsonify({'error': str(exc)}), 400
 
 
+def _graphops_directive_authorized():
+    if request.remote_addr in {'127.0.0.1', '::1'}:
+        return True
+    token = request.headers.get('Authorization', '').removeprefix('Bearer ').strip()
+    return bool(validate_jwt(token))
+
+
+@app.route('/api/graphops/directives/preview', methods=['POST'])
+def graphops_directive_preview():
+    """Compile a reference-based directive into a non-mutating EffectPlan."""
+    if not _graphops_directive_authorized():
+        return jsonify({'error': 'Authentication required'}), 401
+    try:
+        from graphops_director import GraphOpsDirector
+        return jsonify(GraphOpsDirector().compile(
+            request.get_json(silent=True) or {}, expected_mode='preview'))
+    except (TypeError, ValueError, KeyError, OSError, json.JSONDecodeError) as exc:
+        return jsonify({'error': str(exc)}), 400
+
+
+@app.route('/api/graphops/directives/execute', methods=['POST'])
+def graphops_directive_execute():
+    """Compile browser-view execution effects; operational mutations remain proposals."""
+    if not _graphops_directive_authorized():
+        return jsonify({'error': 'Authentication required'}), 401
+    try:
+        from graphops_director import GraphOpsDirector
+        return jsonify(GraphOpsDirector().compile(
+            request.get_json(silent=True) or {}, expected_mode='execute'))
+    except (TypeError, ValueError, KeyError, OSError, json.JSONDecodeError) as exc:
+        return jsonify({'error': str(exc)}), 400
+
+
 # ---------------------------------------------------------------------------
 # Shared Session Registry — used by gRPC TokenAuthInterceptor
 # ---------------------------------------------------------------------------

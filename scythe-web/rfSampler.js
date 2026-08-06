@@ -319,6 +319,7 @@ export class ScytheRfSampler {
       evidenceClass: descriptor.evidenceClass,
       visualizationIsAuthoritative: false,
       tileId: location.tileId,
+      displayAssetHash: this.tileLoader?.tiles?.get?.(location.tileId)?.sha256 ?? null,
       quantity: descriptor.quantity.name,
       value,
       units: descriptor.quantity.units,

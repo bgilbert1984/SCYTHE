@@ -3833,6 +3833,21 @@ def register_graphops_tools(engine, mcp_handler, embedding_engine=None,
         fn=_explain_coverage_cell,
     )
 
+    def _directive(params: dict) -> dict:
+        from graphops_director import GraphOpsDirector
+        return GraphOpsDirector().compile(params)
+
+    mcp_handler._tools["graphops_directive"] = ToolDef(
+        name="graphops_directive",
+        description=(
+            "Compile an allow-listed, reference-based Clarktech directive into a "
+            "proof-carrying EffectPlan. Browser effects are declarative and reversible; "
+            "operational mutations are never executed by this tool."
+        ),
+        input_schema={"type": "object", "additionalProperties": True},
+        fn=_directive,
+    )
+
     def _suggest(params: dict) -> dict:
         top_n      = int(params.get("top_n", 5))
         auto_exec  = bool(params.get("auto_execute", False))
@@ -3873,8 +3888,8 @@ def register_graphops_tools(engine, mcp_handler, embedding_engine=None,
     except Exception as _eve_err:
         logger.warning("[graphops_copilot] eve_sensor_mcp unavailable: %s", _eve_err)
 
-    logger.info("[graphops_copilot] registered 6 MCP tools: "
-                "investigate, dsl_exec, entity_parse, explain_coverage_cell, suggest, sensor_stream")
+    logger.info("[graphops_copilot] registered 7 MCP tools: "
+                "investigate, dsl_exec, entity_parse, explain_coverage_cell, directive, suggest, sensor_stream")
 
 
 # ─── CLI self-test ────────────────────────────────────────────────────────────
