@@ -20627,6 +20627,7 @@ def main():
                 eng,
                 use_orchestrator=True,
                 auth_validator=lambda: _rf_bridge_authorized(require_identity=True),
+                selection_engine=globals().get('hypergraph_store'),
             )
             logger.info('MCP server registered at /mcp (%d tools, %d resources)',
                         len(mcp_handler._tools), len(mcp_handler._resources))

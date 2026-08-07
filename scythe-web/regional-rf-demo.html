@@ -25,6 +25,8 @@
     .directive__controls { display:flex; gap:6px; align-items:center; margin-top:8px; }
     .directive button,.directive input { color:#ccefff; background:#071422; border:1px solid #00d4ff; font:inherit; padding:4px 6px; }
     .directive input { width:64px; }
+    .directive__analysis { margin-top:8px; padding-top:7px; border-top:1px dashed rgba(247,209,84,.45); color:#f7d154; }
+    .directive__analysis[hidden] { display:none; }
   </style>
 </head>
 <body>
@@ -34,10 +36,15 @@
     <aside id="graphops-directive" class="directive" hidden>
       <div id="directive-status">GRAPHOPS DIRECTIVE</div>
       <div id="reality-prism"></div>
+      <pre id="dsl-preview" class="directive__analysis" hidden></pre>
+      <pre id="correlation-status" class="directive__analysis" hidden></pre>
       <div class="directive__controls">
         <label>THRESHOLD <input id="threshold-value" type="number" value="145" step="1"></label>
         <button id="apply-threshold" type="button">APPLY LENS</button>
         <button id="undo-effects" type="button">UNDO</button>
+      </div>
+      <div class="directive__controls">
+        <button id="execute-correlation" type="button" disabled>EXECUTE RF ↔ GRAPH</button>
       </div>
     </aside>
   </main>
@@ -47,6 +54,7 @@
     import { SelectionModel } from "./selectionModel.js";
     import { EffectRuntime } from "./effectRuntime.js";
     import { registerVisualEffects } from "./visualEffects.js";
+    import { GraphOverlayLayer } from "./graphOverlayLayer.js";
 
     const viewer = new Cesium.Viewer("cesium-container", {
       animation: false,
@@ -80,6 +88,13 @@
     const selections = new SelectionModel();
     const effects = registerVisualEffects(new EffectRuntime(), {
       viewer, Cesium, prismRoot: document.getElementById("reality-prism"),
+      dslRoot: document.getElementById("dsl-preview"),
+      correlationRoot: document.getElementById("correlation-status"),
+    });
+    const graphOverlay = new GraphOverlayLayer({viewer, Cesium, container: document.getElementById("globe-root")});
+    graphOverlay.start().catch((error) => {
+      document.getElementById("correlation-status").hidden = false;
+      document.getElementById("correlation-status").textContent = `GRAPH // UNAVAILABLE // ${error.message}`;
     });
     let activePlanId = null;
 
@@ -118,6 +133,15 @@
         }
       },
     );
+    document.getElementById("globe-root").addEventListener("scythe-web:graph-selection", async ({detail}) => {
+      selections.upsert(detail);
+      document.getElementById("execute-correlation").disabled = !selections.items.some((item) => item.kind === "rf-cell");
+      if (document.getElementById("execute-correlation").disabled) return;
+      try {
+        await submitDirective(selections.directiveRequest({directive: "correlate.rf-cell-graph",
+          utterance: "Connect this RF cell to this graph node", mode: "preview"}));
+      } catch (error) { status.textContent = `GRAPHOPS // REFUSED // ${error.message}`; }
+    });
     document.getElementById("apply-threshold").addEventListener("click", async () => {
       try {
         await submitDirective(selections.directiveRequest({
@@ -131,6 +155,12 @@
       if (activePlanId) await effects.revertPlan(activePlanId);
       activePlanId = null;
       status.textContent = "GRAPHOPS // EFFECTS REVERTED";
+    });
+    document.getElementById("execute-correlation").addEventListener("click", async () => {
+      try {
+        await submitDirective(selections.directiveRequest({directive: "correlate.rf-cell-graph",
+          utterance: "Execute the bounded RF correlation plan", mode: "execute"}));
+      } catch (error) { status.textContent = `GRAPHOPS // REFUSED // ${error.message}`; }
     });
   </script>
 </body>

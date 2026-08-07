@@ -69,10 +69,13 @@ function injectStyles(documentRoot) {
       letter-spacing:.08em; white-space:nowrap;
     }
     .scythe-evidence-measured { color:#63ffd1; border-style:solid; }
+    .scythe-evidence-observed { color:#b7ffdc; border-style:solid; }
     .scythe-evidence-solver-output { color:#00d4ff; border-style:double; }
     .scythe-evidence-reduced-order { color:#f7d154; border-style:dotted; }
     .scythe-evidence-synthetic { color:rgba(187,131,255,.62); border-style:solid; }
     .scythe-evidence-illustrative { color:#ff8c42; border-style:dashed; }
+    .scythe-evidence-inferred { color:#f7d154; border-style:dashed; }
+    .scythe-evidence-counterfactual { color:#bb83ff; border-style:dotted; }
   `;
   documentRoot.head.appendChild(element);
 }

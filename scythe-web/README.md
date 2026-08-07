@@ -32,6 +32,8 @@ The modules are:
   effects, including the reversible coverage-threshold lens.
 - `realityPrism.js`: authority, lineage, display-difference, threshold, and
   falsifier presentation for a selected RF cell.
+- `graphOverlayLayer.js`: bounded, revision-pinned geospatial graph nodes and
+  inferred relationships with typed graph selection events.
 
 The core has no propagation model and no random fallback. It does not guess a
 binary tile layout. Use `GeodeticTileIndex` plus `VerifiedTileLoader` when the
@@ -144,6 +146,14 @@ authority independently, and returns a declarative EffectPlan. The Reality
 Prism exposes any display quantization difference. The threshold control applies
 a reversible classification lens to the browser view without changing source
 values or evidence authority.
+
+When a SCYTHE instance is active, the regional demo also loads its bounded
+graph through the orchestrator. Select an RF cell and then a graph node to
+preview the generated `FOCUS`, bounded `EXPAND`, and `RF_CORRELATE` plan.
+Execution searches for measured RF observations at the modeled frequency. A
+solver cell is never treated as event-time evidence: absent measured support is
+rendered as `TEMPORAL_EVIDENCE: ABSENT`, while any temporal match is rendered
+as a dashed `INFERRED` correlation fiber explicitly labelled “not causation.”
 
 The existing globe loads `scythe-web/browser-entry.js` as an ES module at the
 end of `cesium-hypergraph-globe.html`. Activation remains deliberately opt-in.

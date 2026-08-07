@@ -1238,9 +1238,16 @@ def graphops_directive_preview():
     if not _graphops_directive_authorized():
         return jsonify({'error': 'Authentication required'}), 401
     try:
+        payload = request.get_json(silent=True) or {}
+        if payload.get('directive') == 'correlate.rf-cell-graph':
+            port = _get_primary_instance_port()
+            if not port:
+                return jsonify({'error': 'No active SCYTHE graph instance'}), 503
+            result = _proxy_post(port, '/api/graphops/directives/preview', payload, timeout=15)
+            return (jsonify(result), 200) if result is not None else (jsonify({'error': 'Graph instance unavailable'}), 502)
         from graphops_director import GraphOpsDirector
         return jsonify(GraphOpsDirector().compile(
-            request.get_json(silent=True) or {}, expected_mode='preview'))
+            payload, expected_mode='preview'))
     except (TypeError, ValueError, KeyError, OSError, json.JSONDecodeError) as exc:
         return jsonify({'error': str(exc)}), 400
 
@@ -1251,9 +1258,16 @@ def graphops_directive_execute():
     if not _graphops_directive_authorized():
         return jsonify({'error': 'Authentication required'}), 401
     try:
+        payload = request.get_json(silent=True) or {}
+        if payload.get('directive') == 'correlate.rf-cell-graph':
+            port = _get_primary_instance_port()
+            if not port:
+                return jsonify({'error': 'No active SCYTHE graph instance'}), 503
+            result = _proxy_post(port, '/api/graphops/directives/execute', payload, timeout=30)
+            return (jsonify(result), 200) if result is not None else (jsonify({'error': 'Graph instance unavailable'}), 502)
         from graphops_director import GraphOpsDirector
         return jsonify(GraphOpsDirector().compile(
-            request.get_json(silent=True) or {}, expected_mode='execute'))
+            payload, expected_mode='execute'))
     except (TypeError, ValueError, KeyError, OSError, json.JSONDecodeError) as exc:
         return jsonify({'error': str(exc)}), 400
 
@@ -1903,9 +1917,9 @@ def debug_operators():
 # ---------------------------------------------------------------------------
 
 def _get_primary_instance_port() -> int | None:
-    """Return the port of the running instance with the most nodes."""
+    """Return the port of the healthy/starting instance with the most nodes."""
     with _registry_lock:
-        running = [v for v in _instances.values() if v.get('status') == 'running']
+        running = [v for v in _instances.values() if v.get('status') in {'running', 'ready'}]
     if not running:
         return None
     best = max(running, key=lambda i: i.get('info', {}).get('node_count', 0))
@@ -1917,7 +1931,8 @@ def _proxy_get(instance_port: int, path: str, timeout: int = 5):
     import urllib.request as _ureq
     url = f"http://127.0.0.1:{instance_port}{path}"
     try:
-        with _ureq.urlopen(url, timeout=timeout) as resp:
+        req = _ureq.Request(url, headers={'X-Internal-Token': _INTERNAL_TOKEN})
+        with _ureq.urlopen(req, timeout=timeout) as resp:
             return json.loads(resp.read().decode('utf-8'))
     except Exception as e:
         return None
@@ -1937,6 +1952,27 @@ def orchestrator_recon_entities():
     if data is None:
         return jsonify({'status': 'error', 'message': f'Instance on port {port} unreachable', 'entities': [], 'entity_count': 0}), 502
 
+    return jsonify(data)
+
+
+@app.route('/api/graphops/selection/graph', methods=['GET'])
+def orchestrator_graphops_selection_graph():
+    """Proxy the bounded, revision-pinned Clarktech graph selection snapshot."""
+    port = _get_primary_instance_port()
+    if not port:
+        return jsonify({'status': 'unavailable', 'message': 'No active SCYTHE instance',
+                        'nodes': [], 'edges': [], 'bounded': True}), 503
+    try:
+        node_limit = min(max(int(request.args.get('node_limit', 200)), 1), 500)
+        edge_limit = min(max(int(request.args.get('edge_limit', 300)), 1), 1000)
+    except (TypeError, ValueError):
+        return jsonify({'status': 'error', 'message': 'node_limit and edge_limit must be integers',
+                        'nodes': [], 'edges': [], 'bounded': True}), 400
+    query = f"?node_limit={node_limit}&edge_limit={edge_limit}"
+    data = _proxy_get(port, '/api/graphops/selection/graph' + query)
+    if data is None:
+        return jsonify({'status': 'unavailable', 'message': 'Graph instance unreachable',
+                        'nodes': [], 'edges': [], 'bounded': True}), 502
     return jsonify(data)
 
 
@@ -1967,7 +2003,9 @@ def _proxy_post(instance_port: int, path: str, body: dict, timeout: int = 5):
     import urllib.request as _ureq
     url = f"http://127.0.0.1:{instance_port}{path}"
     data = json.dumps(body).encode('utf-8')
-    req = _ureq.Request(url, data=data, headers={'Content-Type': 'application/json'}, method='POST')
+    req = _ureq.Request(url, data=data, headers={
+        'Content-Type': 'application/json', 'X-Internal-Token': _INTERNAL_TOKEN,
+    }, method='POST')
     try:
         with _ureq.urlopen(req, timeout=timeout) as resp:
             return json.loads(resp.read().decode('utf-8'))

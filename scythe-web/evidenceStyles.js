@@ -13,6 +13,13 @@ export const EVIDENCE_CLASSES = Object.freeze([
 ]);
 
 export const EVIDENCE_STYLES = Object.freeze({
+  OBSERVED: Object.freeze({
+    label: "OBSERVED",
+    line: "solid",
+    color: "#b7ffdc",
+    alpha: 0.96,
+    cssClass: "scythe-evidence-observed",
+  }),
   MEASURED: Object.freeze({
     label: "MEASURED",
     line: "solid",
@@ -47,6 +54,20 @@ export const EVIDENCE_STYLES = Object.freeze({
     color: "#ff8c42",
     alpha: 0.78,
     cssClass: "scythe-evidence-illustrative",
+  }),
+  INFERRED: Object.freeze({
+    label: "INFERRED",
+    line: "dashed",
+    color: "#f7d154",
+    alpha: 0.82,
+    cssClass: "scythe-evidence-inferred",
+  }),
+  COUNTERFACTUAL: Object.freeze({
+    label: "COUNTERFACTUAL",
+    line: "dotted",
+    color: "#bb83ff",
+    alpha: 0.62,
+    cssClass: "scythe-evidence-counterfactual",
   }),
 });
 

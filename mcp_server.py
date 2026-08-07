@@ -388,7 +388,9 @@ class MCPHandler:
 
 
 # -------------------- Register Flask routes --------------------
-def register_mcp_routes(app, engine, use_orchestrator: bool = False, auth_validator=None):
+def register_mcp_routes(app, engine, use_orchestrator: bool = False, auth_validator=None,
+                        selection_engine=None):
+    graph_selection_engine = selection_engine or engine
     try:
         handler = MCPHandler(engine, use_orchestrator=use_orchestrator)
     except Exception as exc:
@@ -459,6 +461,43 @@ def register_mcp_routes(app, engine, use_orchestrator: bool = False, auth_valida
             "resources": len(getattr(handler, '_resources', {})),
             "orchestrator": use_orchestrator,
         })
+
+    @app.route('/api/graphops/selection/graph', methods=['GET'])
+    def graphops_selection_graph():
+        if not _authorized():
+            return _unauthorized()
+        try:
+            from graphops_graph_resolver import GraphSelectionResolver
+            return jsonify(GraphSelectionResolver(graph_selection_engine).snapshot(
+                node_limit=request.args.get('node_limit', 200),
+                edge_limit=request.args.get('edge_limit', 300),
+            ))
+        except (TypeError, ValueError) as exc:
+            return jsonify({'status': 'error', 'message': str(exc), 'nodes': [], 'edges': []}), 400
+
+    def _directive_response(expected_mode):
+        if not _authorized():
+            return _unauthorized()
+        try:
+            from graphops_director import GraphOpsDirector
+            try:
+                from rf_bridge import get_rf_observation_store
+                provider = get_rf_observation_store()
+            except Exception:
+                provider = None
+            return jsonify(GraphOpsDirector(
+                engine=graph_selection_engine, rf_observation_provider=provider,
+            ).compile(request.get_json(silent=True) or {}, expected_mode=expected_mode))
+        except (TypeError, ValueError, KeyError, OSError, json.JSONDecodeError) as exc:
+            return jsonify({'error': str(exc)}), 400
+
+    @app.route('/api/graphops/directives/preview', methods=['POST'])
+    def graphops_directive_preview():
+        return _directive_response('preview')
+
+    @app.route('/api/graphops/directives/execute', methods=['POST'])
+    def graphops_directive_execute():
+        return _directive_response('execute')
 
     mode_desc = "orchestrator (graduated autonomy)" if use_orchestrator else "standalone"
     logger.info(

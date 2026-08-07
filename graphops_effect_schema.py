@@ -11,15 +11,16 @@ from typing import Any, Dict
 
 
 PROTOCOL_VERSION = "1.0"
-DIRECTIVES = {"explain.coverage-cell", "reclassify.coverage-threshold"}
+DIRECTIVES = {"explain.coverage-cell", "reclassify.coverage-threshold", "correlate.rf-cell-graph"}
 EFFECT_TYPES = {
     "view.highlight-targets", "view.set-coverage-threshold",
     "view.show-provenance-path", "view.show-reality-prism",
+    "view.show-dsl-preview", "view.show-correlation-fibers", "view.show-no-data",
 }
 STYLE_TOKENS = {
     "EVIDENCE_ISOLATION", "STATIC_SOLVER_OUTPUT", "CAUSAL_DISAGREEMENT",
     "CONTRADICTION", "UNCERTAINTY_BOUNDARY", "MISSING_DATA",
-    "AUTHORITY_GATE", "THRESHOLD_LENS",
+    "AUTHORITY_GATE", "THRESHOLD_LENS", "INFERRED_RELATIONSHIP",
 }
 _ID = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
 _DATASET = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
@@ -30,6 +31,7 @@ _REQUEST_KEYS = {
 _SELECTION_KEYS = {
     "kind", "datasetId", "tileId", "longitudeDegrees", "latitudeDegrees",
     "displayValue", "displayUnits", "displayAssetHash", "coverageThreshold",
+    "entityId", "graphRevision", "position", "observedAt",
 }
 
 
@@ -72,19 +74,23 @@ def validate_directive_request(payload: Any, *, expected_mode: str | None = None
     for index, selection in enumerate(selections):
         if not isinstance(selection, dict) or set(selection) - _SELECTION_KEYS:
             raise DirectiveProtocolError(f"selection[{index}] contains unknown fields")
-        if selection.get("kind") != "rf-cell":
-            raise DirectiveProtocolError("only rf-cell selections are supported in protocol v1")
-        if not _DATASET.fullmatch(str(selection.get("datasetId", ""))):
-            raise DirectiveProtocolError("selection datasetId is invalid")
-        if not isinstance(selection.get("tileId"), str) or not selection["tileId"]:
-            raise DirectiveProtocolError("selection tileId is required")
+        kind = selection.get("kind")
+        if kind not in {"rf-cell", "graph-node", "event"}:
+            raise DirectiveProtocolError("selection kind is not supported")
         item = dict(selection)
-        item["longitudeDegrees"] = _finite(selection.get("longitudeDegrees"), "longitudeDegrees")
-        item["latitudeDegrees"] = _finite(selection.get("latitudeDegrees"), "latitudeDegrees")
-        if not -180 <= item["longitudeDegrees"] <= 180 or not -90 <= item["latitudeDegrees"] <= 90:
-            raise DirectiveProtocolError("selection coordinates are out of range")
-        if "displayValue" in item:
-            item["displayValue"] = _finite(item["displayValue"], "displayValue")
+        if kind == "rf-cell":
+            if not _DATASET.fullmatch(str(selection.get("datasetId", ""))):
+                raise DirectiveProtocolError("selection datasetId is invalid")
+            if not isinstance(selection.get("tileId"), str) or not selection["tileId"]:
+                raise DirectiveProtocolError("selection tileId is required")
+            item["longitudeDegrees"] = _finite(selection.get("longitudeDegrees"), "longitudeDegrees")
+            item["latitudeDegrees"] = _finite(selection.get("latitudeDegrees"), "latitudeDegrees")
+            if not -180 <= item["longitudeDegrees"] <= 180 or not -90 <= item["latitudeDegrees"] <= 90:
+                raise DirectiveProtocolError("selection coordinates are out of range")
+            if "displayValue" in item:
+                item["displayValue"] = _finite(item["displayValue"], "displayValue")
+        elif not isinstance(selection.get("entityId"), str) or not selection["entityId"]:
+            raise DirectiveProtocolError("graph selection entityId is required")
         normalized_selections.append(item)
     normalized["selection"] = normalized_selections
     parameters = payload.get("parameters") or {}
@@ -98,6 +104,10 @@ def validate_directive_request(payload: Any, *, expected_mode: str | None = None
         if parameters.get("comparison") not in {"LTE", "GTE"} or not parameters.get("units"):
             raise DirectiveProtocolError("reclassification requires units and LTE/GTE comparison")
     normalized["parameters"] = parameters
+    if payload["directive"] == "correlate.rf-cell-graph":
+        kinds = {item["kind"] for item in normalized_selections}
+        if "rf-cell" not in kinds or not kinds.intersection({"graph-node", "event"}):
+            raise DirectiveProtocolError("RF/graph correlation requires an rf-cell and graph-node/event selection")
     return normalized
 
 

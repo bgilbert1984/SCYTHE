@@ -7,10 +7,17 @@ export class SelectionModel {
   }
 
   replace(item) {
-    if (!item || item.kind !== "rf-cell") throw new TypeError("A typed rf-cell selection is required");
+    if (!item || !["rf-cell", "graph-node", "event"].includes(item.kind)) throw new TypeError("A typed selection is required");
     this.items = [Object.freeze({ ...item })];
     this.revision += 1;
     return this.items[0];
+  }
+
+  upsert(item) {
+    if (!item || !["rf-cell", "graph-node", "event"].includes(item.kind)) throw new TypeError("A typed selection is required");
+    this.items = [...this.items.filter((candidate) => candidate.kind !== item.kind), Object.freeze({ ...item })];
+    this.revision += 1;
+    return item;
   }
 
   directiveRequest({ directive = "explain.coverage-cell", utterance = "", parameters = {}, mode = "preview" } = {}) {

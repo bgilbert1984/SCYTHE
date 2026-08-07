@@ -3,14 +3,19 @@
 from __future__ import annotations
 
 from typing import Any, Dict
+import json
 
 from graphops_effect_schema import new_effect_plan, validate_directive_request
 from graphops_evidence_resolver import RFCellEvidenceResolver
+from graphops_graph_resolver import GraphResolutionError, GraphSelectionResolver
 
 
 class GraphOpsDirector:
-    def __init__(self, resolver: RFCellEvidenceResolver | None = None):
+    def __init__(self, resolver: RFCellEvidenceResolver | None = None, *, engine=None,
+                 rf_observation_provider=None):
         self.resolver = resolver or RFCellEvidenceResolver()
+        self.engine = engine
+        self.rf_observation_provider = rf_observation_provider
 
     @staticmethod
     def _effect(effect_id: str, effect_type: str, parameters: Dict[str, Any],
@@ -25,8 +30,11 @@ class GraphOpsDirector:
 
     def compile(self, payload: Dict[str, Any], *, expected_mode: str | None = None) -> Dict[str, Any]:
         request = validate_directive_request(payload, expected_mode=expected_mode)
-        evidence = self.resolver.resolve(request["selection"][0])
+        rf_selection = next(item for item in request["selection"] if item["kind"] == "rf-cell")
+        evidence = self.resolver.resolve(rf_selection)
         evidence_ref = f"dataset:{evidence['datasetId']}:{evidence['tileId']}:{evidence['authorityAssetSha256']}"
+        if request["directive"] == "correlate.rf-cell-graph":
+            return self._compile_rf_graph_correlation(request, evidence, evidence_ref)
         threshold = request.get("parameters", {}).get("threshold")
         if threshold is None:
             threshold = (request["selection"][0].get("coverageThreshold") or {}).get("value")
@@ -74,4 +82,96 @@ class GraphOpsDirector:
                 "target": "browser-view", "kind": "reversible-effect-plan", "authorityImpact": "none",
             }],
             undoToken=None if request["requestedMode"] == "preview" else f"undo:{request['directiveId']}",
+        )
+
+    def _compile_rf_graph_correlation(self, request: Dict[str, Any], evidence: Dict[str, Any],
+                                      evidence_ref: str) -> Dict[str, Any]:
+        if self.engine is None:
+            raise GraphResolutionError("graph engine is unavailable")
+        graph_selection = next(item for item in request["selection"]
+                               if item["kind"] in {"graph-node", "event"})
+        graph = GraphSelectionResolver(self.engine).resolve(graph_selection)
+        node = graph["node"]
+        frequency_hz = float(evidence["provenance"].get("frequencyHz") or 0.0)
+        if frequency_hz <= 0:
+            # Contract authority carries the RF frequency outside the authority block.
+            manifest = json.loads((self.resolver.dataset_root / evidence["datasetId"] / "manifest.json").read_text())
+            frequency_hz = float(manifest["physics"]["rf"]["frequencyHz"])
+        frequency_label = f"{frequency_hz / 1e6:g}MHz"
+        entity_literal = json.dumps(node["id"])
+        dsl = [
+            f"FOCUS {entity_literal}", "EXPAND neighbors depth=1 limit=50",
+            f"RF_CORRELATE freq={frequency_label} window=2s",
+        ]
+        observations = []
+        matches = []
+        executed = request["requestedMode"] == "execute"
+        if executed and self.rf_observation_provider is not None:
+            observations = self.rf_observation_provider.query(
+                since=None, frequency_hz=frequency_hz, tolerance_hz=25_000.0, limit=200)
+            for observation in observations:
+                try:
+                    observed_at = float(observation["observed_at"])
+                except (KeyError, TypeError, ValueError):
+                    continue
+                for edge in graph["incidentEdges"]:
+                    try:
+                        delta = abs(float(edge["timestamp"]) - observed_at)
+                    except (TypeError, ValueError):
+                        continue
+                    if delta <= 2.0:
+                        matches.append({
+                            "evidenceId": observation.get("evidence_id"), "edgeId": edge["id"],
+                            "observedAt": observed_at, "edgeTimestamp": float(edge["timestamp"]),
+                            "deltaMilliseconds": round(delta * 1000.0, 3),
+                            "findingClass": "INFERRED",
+                        })
+            matches.sort(key=lambda item: item["deltaMilliseconds"])
+            matches = matches[:30]
+
+        effects = [self._effect(
+            f"{request['directiveId']}:dsl", "view.show-dsl-preview",
+            {"dsl": dsl, "executed": executed}, [evidence_ref, f"graph:{graph['graphRevision']}:{node['id']}"],
+            "INFERRED_RELATIONSHIP",
+        )]
+        can_render_fiber = bool(matches and node.get("position"))
+        if can_render_fiber:
+            effects.append(self._effect(
+                f"{request['directiveId']}:fibers", "view.show-correlation-fibers", {
+                    "from": [evidence["selection"]["latitudeDegrees"], evidence["selection"]["longitudeDegrees"], 0.0],
+                    "to": node["position"], "matches": matches,
+                    "label": "TEMPORAL CORRELATION // NOT CAUSATION",
+                    "findingClass": "INFERRED",
+                    "caveat": "Temporal proximity is not evidence of causality.",
+                }, [evidence_ref, f"graph:{graph['graphRevision']}:{node['id']}"], "INFERRED_RELATIONSHIP",
+            ))
+        else:
+            reason = ("Preview only; execute the bounded DSL to seek measured RF support." if not executed else
+                      "No measured RF observation temporally supports an incident edge for the selected node.")
+            effects.append(self._effect(
+                f"{request['directiveId']}:no-data", "view.show-no-data", {
+                    "reason": reason, "temporalAuthority": "ABSENT",
+                    "requiredObservation": f"Collect measured RF near {frequency_label} with synchronized timestamps.",
+                }, [evidence_ref, f"graph:{graph['graphRevision']}:{node['id']}"], "MISSING_DATA",
+            ))
+        status = "completed" if matches else "partially-completed"
+        summary = (f"Found {len(matches)} measured-RF/incident-edge temporal matches for {node['id']}. "
+                   "All matches are inferred correlations, not causal evidence." if matches else
+                   f"No measured RF temporal support connects the solver cell to {node['id']}; the solver cell itself has statistical, not event, time semantics.")
+        return new_effect_plan(
+            request, status=status, summary=summary,
+            evidencePosture="mixed" if matches else "no-data", effects=effects,
+            queries=[{"dsl": dsl, "executed": executed, "bounded": True,
+                      "rfObservationCount": len(observations), "matchCount": len(matches)}],
+            claims=[{"text": summary, "evidenceClass": "INFERRED" if matches else "UNKNOWN",
+                     "authority": "TEMPORAL_CORRELATION_ONLY",
+                     "nullExpectation": "NOT_ESTIMATED — insufficient background event-rate model"}],
+            supportingEvidence=[{"evidenceRef": evidence_ref, "evidenceClass": "SOLVER_OUTPUT"},
+                                {"evidenceRef": f"graph:{graph['graphRevision']}:{node['id']}",
+                                 "evidenceClass": node["evidenceClass"], "node": node}],
+            assumptions=["RF and graph clocks are synchronized within the two-second window.",
+                         "A measured RF observation at the solver frequency is relevant to the selected modeled cell."],
+            falsifiers=[f"Capture calibrated, synchronized RF at {frequency_label} and test recurrence against incident graph edges."],
+            refusals=[] if matches else [{"code": "TEMPORAL_EVIDENCE_ABSENT",
+                                          "message": "The solver cell cannot supply event-time evidence."}],
         )

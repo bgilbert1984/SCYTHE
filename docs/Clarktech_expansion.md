@@ -25,6 +25,24 @@ This completes the recommended “Reality Prism + threshold lens” foundation.
 The next planned work begins Phase 2: bounded graph selection, graph overlays,
 DSL preview, and read-only RF/graph correlation effects.
 
+Phase 2A was implemented on 2026-08-06:
+
+- Bounded, revision-pinned graph snapshots through the stable orchestrator URL.
+- Explicit selection of the populated visualization graph rather than an empty
+  parallel analysis engine.
+- Geospatial graph-node and inferred-edge rendering in SCYTHE-Web.
+- Typed RF-cell plus graph-node selection.
+- Deterministic `FOCUS`, bounded `EXPAND`, and `RF_CORRELATE` DSL preview.
+- Separate preview and execute controls.
+- Dashed correlation fibers labelled `INFERRED` and “not causation.”
+- Structural `TEMPORAL_EVIDENCE: ABSENT` output when measured RF support is
+  missing or the selected solver cell is temporally incomparable.
+- Stable primary-instance proxying fixed for instances whose healthy lifecycle
+  state is `ready` rather than `running`.
+
+Phase 2B remains: graph-edge/event selection, paired time pins, `GRAPH_DELTA`,
+provenance-impact traversal, and contradiction overlays.
+
 ## 1. Executive intent
 
 The Clarktech expansion turns the SCYTHE globe from a passive dashboard into a

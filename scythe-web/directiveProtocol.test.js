@@ -15,6 +15,13 @@ test("directive protocol rejects unknown fields and directives", () => {
   assert.throws(() => validateDirectiveRequest({...request, directive: "execute.javascript"}), /allow-listed/);
 });
 
+test("RF graph correlation requires both typed selections", () => {
+  const correlation = {...request, directive: "correlate.rf-cell-graph",
+    selection: [...request.selection, {kind: "graph-node", entityId: "burst-a", graphRevision: "graph-1"}]};
+  assert.equal(validateDirectiveRequest(correlation), correlation);
+  assert.throws(() => validateDirectiveRequest({...correlation, selection: request.selection}), /requires rf-cell and graph/);
+});
+
 test("effect plan rejects executable and authority-changing effects", () => {
   const base = {protocolVersion: "1.0", directiveId: "dir-1", planId: "plan-1", status: "completed",
     effects: [], queries: [], jobs: [], proposals: [], claims: [], supportingEvidence: [],
