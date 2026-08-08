@@ -79,6 +79,16 @@ the repository's declared Go 1.24 toolchain. The service uses explicit
 `suricata` mode, disables privileged-mode fallback, and binds both gRPC and HTTP
 metrics to loopback.
 
+The shipper also owns a resilient gRPC client stream. If the orchestrator's
+receiver generation exits or restarts, a failed send discards the poisoned
+stream, reconnects with capped exponential backoff (100 ms through 5 s), and
+retries the same normalized batch. Retries remain bounded by the existing
+in-memory event channel and are interruptible during service shutdown. Receiver
+replay safety derives from the event ID generated before batching; raw packets
+are never added to the retry path. Recovery is visible in
+`runtime/eve-streamer.log` as `remote send attempt ... reconnecting`, followed
+by `remote stream recovered ...`.
+
 ## Production sensor deployment
 
 Production cutover completed on 2026-08-07. WSL2 is using its default NAT

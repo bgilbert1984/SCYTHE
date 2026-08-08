@@ -22,7 +22,6 @@ import (
 	"github.com/gorilla/websocket"
 	Nerf "github.com/yourorg/eve-streamer/fb/Nerf"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
 
 	pb "github.com/yourorg/eve-streamer/pb"
@@ -55,9 +54,12 @@ var (
 // Global reference to current engine for metrics reporting
 var currentEngine CaptureEngine
 
-// when running in shipper/client mode we keep the open stream here so
-// batches can be sent continuously without dialing each time.
-var remoteStream pb.EventStreamer_StreamEventsClient
+// Shipper mode uses a reconnecting sender. Its context is cancelled during
+// shutdown so an unavailable receiver cannot prevent a clean service stop.
+var (
+	remoteSender      *resilientRemoteSender
+	remoteSendContext = context.Background()
+)
 
 type SuricataEvent struct {
 	EventType string                 `json:"event_type"`
@@ -148,12 +150,10 @@ func extractEdges(raw map[string]interface{}) []string {
 
 func sendBatch(batch *pb.EventBatch) {
 	log.Printf("Sending batch with %d events", len(batch.Events))
-	if remoteStream != nil {
-		if err := remoteStream.Send(batch); err != nil {
+	if remoteSender != nil {
+		if err := remoteSender.Send(remoteSendContext, batch); err != nil {
 			log.Printf("failed to send batch to remote: %v", err)
 		}
-	} else {
-		// local mode – nothing to do
 	}
 }
 
@@ -284,28 +284,13 @@ func authStreamInterceptor(ctx context.Context, desc *grpc.StreamDesc, cc *grpc.
 	return streamer(ctx, desc, cc, method, opts...)
 }
 
-func initRemote(addr string) error {
-	ctx := context.Background()
-	opts := []grpc.DialOption{
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithStreamInterceptor(authStreamInterceptor),
-	}
-	conn, err := grpc.DialContext(ctx, addr, opts...)
-	if err != nil {
-		return err
-	}
-	client := pb.NewEventStreamerClient(conn)
-	remoteStream, err = client.StreamEvents(ctx)
-	return err
-}
-
 func main() {
 	flag.Parse()
 
+	var cancelRemote context.CancelFunc
 	if *remoteAddr != "" {
-		if err := initRemote(*remoteAddr); err != nil {
-			log.Fatalf("failed to initialise remote stream: %v", err)
-		}
+		remoteSendContext, cancelRemote = context.WithCancel(context.Background())
+		remoteSender = newResilientRemoteSender(*remoteAddr)
 		log.Printf("acting as client, forwarding events to %s", *remoteAddr)
 	}
 
@@ -416,11 +401,12 @@ func main() {
 	// signal capture engine / batcher to stop
 	close(done)
 
-	if remoteStream != nil {
-		if ack, err := remoteStream.CloseAndRecv(); err != nil {
+	if remoteSender != nil {
+		if cancelRemote != nil {
+			cancelRemote()
+		}
+		if err := remoteSender.Close(); err != nil {
 			log.Printf("remote close error: %v", err)
-		} else {
-			log.Printf("final ack from remote: count=%d status=%s", ack.Count, ack.Status)
 		}
 	}
 

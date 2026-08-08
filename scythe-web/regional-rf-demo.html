@@ -16,26 +16,49 @@
       color:#ccefff; font-size:11px; letter-spacing:.08em; pointer-events:none;
     }
     .directive {
-      position:absolute; top:52px; right:12px; z-index:55; width:min(430px,calc(100vw - 24px));
-      padding:10px 12px; border:1px solid rgba(0,212,255,.55); background:rgba(0,12,28,.9);
-      color:#ccefff; font:11px/1.45 ui-monospace,monospace; white-space:pre-wrap;
+      position:absolute; top:52px; right:12px; z-index:56; width:min(390px,calc(100vw - 24px));
+      max-height:calc(100vh - 64px); overflow:auto; box-sizing:border-box; padding:7px 8px 8px;
+      border:1px solid rgba(0,212,255,.55); background:rgba(0,12,28,.92);
+      color:#ccefff; font:10px/1.35 ui-monospace,monospace; white-space:pre-wrap;
     }
     .directive[hidden] { display:none; }
-    .directive pre { white-space:pre-wrap; margin:8px 0; font:inherit; }
-    .directive__controls { display:flex; gap:6px; align-items:center; margin-top:8px; }
-    .directive button,.directive input { color:#ccefff; background:#071422; border:1px solid #00d4ff; font:inherit; padding:4px 6px; }
-    .directive input { width:64px; }
-    .directive input.wide { width:176px; }
-    .directive__controls--wrap { flex-wrap:wrap; }
-    .directive__analysis { margin-top:8px; padding-top:7px; border-top:1px dashed rgba(247,209,84,.45); color:#f7d154; }
+    .directive-dismiss-layer { position:absolute; inset:0; z-index:55; background:transparent; }
+    .directive-dismiss-layer[hidden] { display:none; }
+    .directive__header { display:flex; min-height:22px; align-items:center; justify-content:space-between;
+      gap:8px; padding-bottom:5px; border-bottom:1px dashed rgba(0,212,255,.3); }
+    .directive__title { color:#66ddff; letter-spacing:.08em; }
+    .directive__close { flex:0 0 22px; width:22px; height:22px; padding:0!important; color:#7f9bad!important;
+      border-color:#24506a!important; font-size:15px!important; line-height:18px!important; cursor:pointer; }
+    .directive__close:hover,.directive__close:focus-visible { color:#fff!important; border-color:#00d4ff!important;
+      outline:none; box-shadow:0 0 9px rgba(0,212,255,.35); }
+    .directive pre { white-space:pre-wrap; margin:5px 0; font:inherit; }
+    .directive__controls { display:flex; flex-wrap:wrap; gap:4px; align-items:center; margin-top:5px; }
+    .directive__controls label { display:flex; align-items:center; gap:3px; color:#9eb6c7; white-space:nowrap; }
+    .directive button,.directive input { color:#ccefff; background:#071422; border:1px solid #00d4ff;
+      font:9px/1.2 ui-monospace,monospace; padding:3px 5px; box-sizing:border-box; }
+    .directive button:disabled { color:#526674; border-color:#24404f; opacity:.7; }
+    .directive input { width:56px; min-height:22px; }
+    .directive input.wide { width:153px; }
+    .directive__controls--actions { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); }
+    .directive__controls--actions button { min-height:27px; white-space:normal; }
+    .directive__analysis { margin-top:5px; padding-top:5px; border-top:1px dashed rgba(247,209,84,.45); color:#f7d154; }
     .directive__analysis[hidden] { display:none; }
     .live-hypergraph {
       position:absolute; left:12px; bottom:12px; z-index:54; width:min(460px,calc(100vw - 24px));
+      min-width:min(320px,calc(100vw - 24px)); min-height:min(220px,calc(100vh - 24px));
+      max-width:calc(100vw - 24px); max-height:calc(100vh - 24px);
       height:300px; border:1px solid rgba(0,212,255,.45); background:rgba(0,8,20,.9);
       display:grid; grid-template-rows:auto auto 1fr auto; box-sizing:border-box;
     }
-    .live-hypergraph__status { padding:7px 9px; color:#ccefff; white-space:pre-wrap;
+    .live-hypergraph__status { padding:7px 30px 7px 9px; color:#ccefff; white-space:pre-wrap;
       font:10px/1.35 ui-monospace,monospace; border-bottom:1px dashed rgba(0,212,255,.3); }
+    .live-hypergraph__resize { position:absolute; z-index:6; top:-1px; right:-1px; width:25px; height:25px;
+      padding:0; border:1px solid rgba(0,212,255,.65); border-width:1px 1px 0 0;
+      color:#66ddff; background:linear-gradient(225deg,rgba(0,212,255,.24),rgba(3,9,20,.92) 62%);
+      font:13px/1 ui-monospace,monospace; cursor:nesw-resize; touch-action:none; }
+    .live-hypergraph__resize:hover,.live-hypergraph__resize:focus-visible,
+    .live-hypergraph__resize[data-dragging="true"] { color:#fff; outline:1px solid #00d4ff;
+      outline-offset:-3px; box-shadow:0 0 12px rgba(0,212,255,.45); }
     .live-hypergraph__modes { display:flex; gap:5px; padding:5px 8px;
       border-bottom:1px dashed rgba(0,212,255,.25); }
     .live-hypergraph__modes button { color:#7f9bad; background:#071422; border:1px solid #24506a;
@@ -67,7 +90,8 @@
     .world-stack__falsifier { color:#ff7890; margin-top:4px; }
     .world-stack__next { color:#63ffd1; margin-top:4px; }
     .world-stack__boundary { color:#ff7890; margin-top:7px; border-top:1px dashed #ff445e; padding-top:5px; }
-    .selection-tray { color:#9eb6c7; border:1px dashed rgba(0,212,255,.3); padding:5px; margin-top:7px; }
+    .selection-tray { color:#9eb6c7; border:1px dashed rgba(0,212,255,.3); padding:4px 5px; margin-top:5px;
+      overflow-wrap:anywhere; }
     @media (max-width:800px) { .live-hypergraph { height:220px; width:320px; } }
   </style>
   <script type="importmap">
@@ -79,6 +103,7 @@
     <div id="cesium-container"></div>
     <div class="notice">SOLVER OUTPUT // DERIVED UINT16 VIEW // VISUALIZATION IS NOT AUTHORITATIVE</div>
     <aside id="live-hypergraph" class="live-hypergraph" aria-label="Live network hypergraph">
+      <button class="live-hypergraph__resize" type="button" data-live-graph-resize aria-label="Resize live hypergraph">↗</button>
       <div class="live-hypergraph__status" data-live-graph-status>LIVE HYPERGRAPH // CONNECTING…</div>
       <div class="live-hypergraph__modes" role="group" aria-label="Hypergraph view mode">
         <button id="hypergraph-mode-3d" type="button" aria-pressed="true" disabled>3D CAUSAL CHAMBER</button>
@@ -93,8 +118,12 @@
       <div class="live-hypergraph__legend">TOPOLOGY // NOT GEOLOCATION · SHAPE + COLOR = EVIDENCE · CLICK NODE, EDGE, OR HYPEREDGE</div>
     </aside>
     <aside id="causal-world-stack" class="world-stack" aria-label="Causal hypothesis world stack" hidden></aside>
-    <aside id="graphops-directive" class="directive" hidden>
-      <div id="directive-status">GRAPHOPS DIRECTIVE</div>
+    <div id="directive-dismiss-layer" class="directive-dismiss-layer" aria-hidden="true" hidden></div>
+    <aside id="graphops-directive" class="directive" aria-label="GraphOps directive controls" hidden>
+      <div class="directive__header">
+        <div id="directive-status" class="directive__title">GRAPHOPS DIRECTIVE</div>
+        <button id="dismiss-directive" class="directive__close" type="button" aria-label="Dismiss GraphOps directive panel" title="Dismiss GraphOps panel (Escape)">×</button>
+      </div>
       <div id="reality-prism"></div>
       <pre id="dsl-preview" class="directive__analysis" hidden></pre>
       <pre id="correlation-status" class="directive__analysis" hidden></pre>
@@ -104,7 +133,7 @@
         <button id="apply-threshold" type="button">APPLY LENS</button>
         <button id="undo-effects" type="button">UNDO</button>
       </div>
-      <div class="directive__controls">
+      <div class="directive__controls directive__controls--actions">
         <button id="execute-correlation" type="button" disabled>EXECUTE RF ↔ GRAPH</button>
         <button id="trace-provenance" type="button" disabled>TRACE PROVENANCE</button>
         <button id="expose-contradictions" type="button" disabled>EXPOSE CONTRADICTIONS</button>
@@ -134,6 +163,7 @@
     import { LiveHypergraphView } from "./liveHypergraphView.js";
     import { LiveGraphController } from "./liveGraphController.js";
     import { LiveHypergraph3DView } from "./liveHypergraph3DView.js";
+    import { ResizablePanel } from "./resizablePanel.js";
     import { InvestigationStore } from "./investigationStore.js";
     import { WorldStack } from "./worldStack.js";
 
@@ -178,7 +208,17 @@
     window.scytheWebClient = client;
 
     const directive = document.getElementById("graphops-directive");
+    const directiveDismissLayer = document.getElementById("directive-dismiss-layer");
     const status = document.getElementById("directive-status");
+    const showDirective = () => { directive.hidden = false; directiveDismissLayer.hidden = false; };
+    const dismissDirective = () => { directive.hidden = true; directiveDismissLayer.hidden = true; };
+    document.getElementById("dismiss-directive").addEventListener("click", dismissDirective);
+    directiveDismissLayer.addEventListener("pointerdown", dismissDirective);
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && !directive.hidden) {
+        dismissDirective(); event.preventDefault();
+      }
+    });
     const selections = new SelectionModel();
     const investigation = new InvestigationStore({storage: window.sessionStorage});
     const worldStack = new WorldStack({root: document.getElementById("causal-world-stack"), store: investigation});
@@ -196,6 +236,9 @@
       document.getElementById("correlation-status").textContent = `GRAPH // UNAVAILABLE // ${error.message}`;
     });
     const liveRoot = document.getElementById("live-hypergraph");
+    const livePanelResize = new ResizablePanel({panel: liveRoot,
+      handle: liveRoot.querySelector("[data-live-graph-resize]")}).start();
+    window.scytheLivePanelResize = livePanelResize;
     const liveHypergraph = new LiveHypergraphView({root: liveRoot, controller: liveGraphController});
     liveHypergraph.start().catch((error) => {
       document.querySelector("[data-live-graph-status]").textContent = `LIVE HYPERGRAPH // UNAVAILABLE // ${error.message}`;
@@ -271,7 +314,7 @@
 
     document.getElementById("globe-root").addEventListener(
       "scythe-web:coverage-cell-selected", async ({ detail: sample }) => {
-        directive.hidden = false;
+        showDirective();
         status.textContent = "GRAPHOPS // RESOLVING AUTHORITATIVE CELL…";
         selections.replace({
           kind: "rf-cell", datasetId: sample.dataset_id, tileId: sample.tile_id,
@@ -292,7 +335,7 @@
       },
     );
     document.getElementById("globe-root").addEventListener("scythe-web:graph-selection", async ({detail}) => {
-      directive.hidden = false;
+      showDirective();
       selections.upsert(detail);
       updateInvestigation();
       const hasRf = selections.items.some((item) => item.kind === "rf-cell");

@@ -41,10 +41,17 @@ export class LiveHypergraphView {
     this.running = false; this.graphRevision = null;
     this.statusRoot = root.querySelector("[data-live-graph-status]");
     this.svg = root.querySelector("svg");
+    this.document = root.ownerDocument ?? globalThis.document;
+    this.window = this.document?.defaultView ?? globalThis;
+    this.latestGraph = null; this.resizeObserver = null;
   }
 
   async start() {
     this.running = true;
+    this.resizeObserver = this.window.ResizeObserver ? new this.window.ResizeObserver(() => {
+      if (this.latestGraph) this.render(this.latestGraph);
+    }) : null;
+    this.resizeObserver?.observe(this.svg);
     this.unsubscribe = this.controller.subscribe((update) => this.#update(update));
     await this.controller.start();
     return this;
@@ -56,6 +63,7 @@ export class LiveHypergraphView {
     this.#status(update.message);
     const graph = update.graph;
     if (!update.available || !graph) return;
+    this.latestGraph = graph;
     if (update.changed || graph.graphRevision !== this.graphRevision) {
       this.graphRevision = graph.graphRevision; this.render(graph);
       this.root.dispatchEvent(new CustomEvent("scythe-web:live-graph-revision", {bubbles: true,
@@ -112,6 +120,7 @@ export class LiveHypergraphView {
   #status(text) { if (this.statusRoot) this.statusRoot.textContent = text; }
   destroy() {
     this.running = false; this.unsubscribe?.(); this.unsubscribe = null;
+    this.resizeObserver?.disconnect(); this.resizeObserver = null;
     if (this.ownsController) this.controller.destroy();
   }
 }
