@@ -25,14 +25,34 @@
     .directive__controls { display:flex; gap:6px; align-items:center; margin-top:8px; }
     .directive button,.directive input { color:#ccefff; background:#071422; border:1px solid #00d4ff; font:inherit; padding:4px 6px; }
     .directive input { width:64px; }
+    .directive input.wide { width:176px; }
+    .directive__controls--wrap { flex-wrap:wrap; }
     .directive__analysis { margin-top:8px; padding-top:7px; border-top:1px dashed rgba(247,209,84,.45); color:#f7d154; }
     .directive__analysis[hidden] { display:none; }
+    .live-hypergraph {
+      position:absolute; left:12px; bottom:12px; z-index:54; width:min(460px,calc(100vw - 24px));
+      height:300px; border:1px solid rgba(0,212,255,.45); background:rgba(0,8,20,.9);
+      display:grid; grid-template-rows:auto 1fr auto; box-sizing:border-box;
+    }
+    .live-hypergraph__status { padding:7px 9px; color:#ccefff; white-space:pre-wrap;
+      font:10px/1.35 ui-monospace,monospace; border-bottom:1px dashed rgba(0,212,255,.3); }
+    .live-hypergraph svg { width:100%; height:100%; min-height:0; }
+    .live-hypergraph__node,.live-hypergraph__edge { cursor:pointer; }
+    .live-hypergraph__edge { pointer-events:stroke; }
+    .live-hypergraph__legend { padding:5px 9px; color:#7f9bad; font-size:9px;
+      border-top:1px dashed rgba(0,212,255,.25); }
+    @media (max-width:800px) { .live-hypergraph { height:220px; width:320px; } }
   </style>
 </head>
 <body>
   <main id="globe-root">
     <div id="cesium-container"></div>
     <div class="notice">SOLVER OUTPUT // DERIVED UINT16 VIEW // VISUALIZATION IS NOT AUTHORITATIVE</div>
+    <aside id="live-hypergraph" class="live-hypergraph" aria-label="Live network hypergraph">
+      <div class="live-hypergraph__status" data-live-graph-status>LIVE HYPERGRAPH // CONNECTING…</div>
+      <svg role="img" aria-label="Revision-pinned live hypergraph"></svg>
+      <div class="live-hypergraph__legend">NETWORK LAYOUT // NOT GEOLOCATION · OBSERVED SOLID · INFERRED DASHED · CLICK NODE OR EDGE</div>
+    </aside>
     <aside id="graphops-directive" class="directive" hidden>
       <div id="directive-status">GRAPHOPS DIRECTIVE</div>
       <div id="reality-prism"></div>
@@ -45,6 +65,20 @@
       </div>
       <div class="directive__controls">
         <button id="execute-correlation" type="button" disabled>EXECUTE RF ↔ GRAPH</button>
+        <button id="trace-provenance" type="button" disabled>TRACE PROVENANCE</button>
+        <button id="expose-contradictions" type="button" disabled>EXPOSE CONTRADICTIONS</button>
+      </div>
+      <div class="directive__controls directive__controls--wrap">
+        <label>FROM <input id="pin-from" class="wide" type="datetime-local" step="0.001"></label>
+        <label>TO <input id="pin-to" class="wide" type="datetime-local" step="0.001"></label>
+        <button id="execute-delta" type="button">GRAPH_DELTA</button>
+      </div>
+      <div class="directive__controls directive__controls--wrap">
+        <label>SENSOR <input id="rf-sensor" value="manual-1"></label>
+        <label>MHz <input id="rf-frequency" type="number" value="900" step="0.001"></label>
+        <label>PEAK <input id="rf-peak" type="number" value="-45" step="1"></label>
+        <label>NOISE <input id="rf-noise" type="number" value="-80" step="1"></label>
+        <button id="ingest-rf" type="button">INGEST MEASURED RF</button>
       </div>
     </aside>
   </main>
@@ -55,8 +89,9 @@
     import { EffectRuntime } from "./effectRuntime.js";
     import { registerVisualEffects } from "./visualEffects.js";
     import { GraphOverlayLayer } from "./graphOverlayLayer.js";
+    import { LiveHypergraphView } from "./liveHypergraphView.js";
 
-    const viewer = new Cesium.Viewer("cesium-container", {
+    const viewerOptions = {
       animation: false,
       baseLayerPicker: false,
       baseLayer: new Cesium.ImageryLayer(new Cesium.OpenStreetMapImageryProvider({
@@ -72,9 +107,22 @@
       sceneModePicker: false,
       selectionIndicator: false,
       timeline: false,
-      terrainProvider: new Cesium.EllipsoidTerrainProvider(),
-    });
+    };
+    const cesiumIonToken = String(window.CESIUM_ION_TOKEN || window.SCYTHE_CESIUM_ION_TOKEN || "").trim();
+    if (cesiumIonToken) {
+      Cesium.Ion.defaultAccessToken = cesiumIonToken;
+      if (Cesium.Terrain?.fromWorldTerrain) {
+        viewerOptions.terrain = Cesium.Terrain.fromWorldTerrain({requestVertexNormals: true, requestWaterMask: true});
+      } else if (Cesium.createWorldTerrain) {
+        viewerOptions.terrainProvider = Cesium.createWorldTerrain({requestVertexNormals: true, requestWaterMask: true});
+      }
+    } else {
+      viewerOptions.terrainProvider = new Cesium.EllipsoidTerrainProvider();
+    }
+    const viewer = new Cesium.Viewer("cesium-container", viewerOptions);
+    window.viewer = viewer;
     viewer.scene.globe.baseColor = Cesium.Color.fromCssColorString("#071422");
+    viewer.scene.globe.depthTestAgainstTerrain = false;
     const client = await installScytheWeb({
       ...regionalRfDemoConfig(),
       Cesium,
@@ -96,6 +144,17 @@
       document.getElementById("correlation-status").hidden = false;
       document.getElementById("correlation-status").textContent = `GRAPH // UNAVAILABLE // ${error.message}`;
     });
+    const liveHypergraph = new LiveHypergraphView({root: document.getElementById("live-hypergraph")});
+    liveHypergraph.start().catch((error) => {
+      document.querySelector("[data-live-graph-status]").textContent = `LIVE HYPERGRAPH // UNAVAILABLE // ${error.message}`;
+    });
+    window.scytheLiveHypergraph = liveHypergraph;
+    const localDateTime = (date) => {
+      const shifted = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+      return shifted.toISOString().slice(0, 23);
+    };
+    document.getElementById("pin-from").value = localDateTime(new Date(Date.now() - 60_000));
+    document.getElementById("pin-to").value = localDateTime(new Date());
     let activePlanId = null;
 
     async function submitDirective(request) {
@@ -134,13 +193,23 @@
       },
     );
     document.getElementById("globe-root").addEventListener("scythe-web:graph-selection", async ({detail}) => {
+      directive.hidden = false;
       selections.upsert(detail);
-      document.getElementById("execute-correlation").disabled = !selections.items.some((item) => item.kind === "rf-cell");
+      const hasRf = selections.items.some((item) => item.kind === "rf-cell");
+      document.getElementById("execute-correlation").disabled = !hasRf;
+      document.getElementById("trace-provenance").disabled = false;
+      document.getElementById("expose-contradictions").disabled = false;
       if (document.getElementById("execute-correlation").disabled) return;
       try {
         await submitDirective(selections.directiveRequest({directive: "correlate.rf-cell-graph",
           utterance: "Connect this RF cell to this graph node", mode: "preview"}));
       } catch (error) { status.textContent = `GRAPHOPS // REFUSED // ${error.message}`; }
+    });
+    document.getElementById("globe-root").addEventListener("scythe-web:graph-status", ({detail}) => {
+      if (detail.status === "empty" || detail.status === "unavailable") {
+        document.getElementById("correlation-status").hidden = false;
+        document.getElementById("correlation-status").textContent = `GRAPH // ${detail.status.toUpperCase()}\n${detail.message ?? detail.reason ?? "No graph data"}`;
+      }
     });
     document.getElementById("apply-threshold").addEventListener("click", async () => {
       try {
@@ -161,6 +230,49 @@
         await submitDirective(selections.directiveRequest({directive: "correlate.rf-cell-graph",
           utterance: "Execute the bounded RF correlation plan", mode: "execute"}));
       } catch (error) { status.textContent = `GRAPHOPS // REFUSED // ${error.message}`; }
+    });
+    document.getElementById("trace-provenance").addEventListener("click", async () => {
+      try {
+        await submitDirective(selections.directiveRequest({directive: "trace.provenance-impact",
+          utterance: "Trace bounded provenance impact from this graph entity",
+          parameters: {depth: 3, limit: 100}, mode: "execute"}));
+      } catch (error) { status.textContent = `GRAPHOPS // REFUSED // ${error.message}`; }
+    });
+    document.getElementById("expose-contradictions").addEventListener("click", async () => {
+      try {
+        await submitDirective(selections.directiveRequest({directive: "expose.contradictions",
+          utterance: "Expose contradictions without synthesizing consensus",
+          parameters: {limit: 100}, mode: "execute"}));
+      } catch (error) { status.textContent = `GRAPHOPS // REFUSED // ${error.message}`; }
+    });
+    document.getElementById("execute-delta").addEventListener("click", async () => {
+      const from = new Date(document.getElementById("pin-from").value).getTime() / 1000;
+      const to = new Date(document.getElementById("pin-to").value).getTime() / 1000;
+      if (!Number.isFinite(from) || !Number.isFinite(to)) {
+        status.textContent = "GRAPHOPS // REFUSED // Two valid time pins are required"; return;
+      }
+      selections.upsert({kind: "time-pin", timestamp: from, clockId: "UTC", uncertaintyMilliseconds: 0});
+      selections.upsert({kind: "time-pin", timestamp: to, clockId: "UTC", uncertaintyMilliseconds: 0});
+      try {
+        await submitDirective(selections.directiveRequest({directive: "compare.graph-delta",
+          utterance: "Compare the graph between these two UTC pins", parameters: {limit: 100}, mode: "execute"}));
+      } catch (error) { status.textContent = `GRAPHOPS // REFUSED // ${error.message}`; }
+    });
+    document.getElementById("ingest-rf").addEventListener("click", async () => {
+      const frequency = Number(document.getElementById("rf-frequency").value) * 1e6;
+      const payload = {sensor_id: document.getElementById("rf-sensor").value,
+        sequence: Date.now(), timestamp: Date.now() / 1000, center_frequency_hz: frequency,
+        peak_frequency_hz: frequency, sample_rate_hz: 2_400_000,
+        peak_dbfs: Number(document.getElementById("rf-peak").value),
+        noise_floor_dbfs: Number(document.getElementById("rf-noise").value)};
+      try {
+        const response = await fetch("/api/graphops/rf-observations", {method: "POST",
+          credentials: "same-origin", headers: {"Content-Type": "application/json"}, body: JSON.stringify(payload)});
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error ?? `HTTP ${response.status}`);
+        document.getElementById("correlation-status").hidden = false;
+        document.getElementById("correlation-status").textContent = `MEASURED RF // ${result.status.toUpperCase()}\nAUTHORITY // ${result.authority}\nEVIDENCE // ${result.observation?.evidence_id ?? "FILTERED"}\nRAW IQ // REJECTED BY CONTRACT`;
+      } catch (error) { status.textContent = `RF INGEST // REJECTED // ${error.message}`; }
     });
   </script>
 </body>

@@ -1,0 +1,115 @@
+// Hypergraph-optimized flow event schema.
+// Namespace matches the rfscythe project namespace.
+//
+// Two root types are provided:
+//   FlowEvent  – rich table for hypergraph ingest (entropy hints, IPv6, etc.)
+//   FlowCore   – fixed-size struct whose binary layout mirrors the kernel
+//                struct flow_core in bpf_capture.c (zero-copy forwarding).
+//
+// Regenerate Go/Python bindings with:
+//   flatc --go  -o fb fb/flow.fbs
+//   flatc --python -o fb fb/flow.fbs
+
+namespace rfscythe;
+
+// ── Enumerations ──────────────────────────────────────────────────────────────
+
+enum FlowEventType : ubyte {
+  FLOW_START  = 0,
+  FLOW_UPDATE = 1,
+  FLOW_END    = 2
+}
+
+enum TransportProto : ubyte {
+  ICMP  = 1,
+  TCP   = 6,
+  UDP   = 17,
+  OTHER = 255
+}
+
+// ── Structs (fixed-size, zero-copy friendly) ──────────────────────────────────
+
+// 128-bit IPv6 address split into two 64-bit halves (big-endian network order).
+struct IPv6Addr {
+  hi : ulong;
+  lo : ulong;
+}
+
+// FlowCore mirrors the kernel struct flow_core in bpf_capture.c.
+// Field ordering is chosen so that natural C alignment == FlatBuffers alignment:
+//   all ulongs first-group, then uints, then ushorts, then ubytes.
+// The 2-byte pad between event_type and packets is implicit in both C and
+// FlatBuffers (each ulong field is 8-byte aligned).
+// Binary layout (56 bytes, little-endian):
+//   [0]  flow_id    : ulong  (8)
+//   [8]  ts         : ulong  (8)
+//   [16] src_ip     : uint   (4)
+//   [20] dst_ip     : uint   (4)
+//   [24] src_port   : ushort (2)
+//   [26] dst_port   : ushort (2)
+//   [28] proto      : ubyte  (1)
+//   [29] event_type : ubyte  (1)
+//   [30] <pad 2>
+//   [32] packets    : ulong  (8)
+//   [40] bytes      : ulong  (8)
+//   [48] flow_hash  : ulong  (8)
+struct FlowCore {
+  flow_id    : ulong;
+  ts         : ulong;
+  src_ip     : uint;
+  dst_ip     : uint;
+  src_port   : ushort;
+  dst_port   : ushort;
+  proto      : ubyte;
+  event_type : ubyte;
+  packets    : ulong;
+  bytes      : ulong;
+  flow_hash  : ulong;
+}
+
+// ── FlowEvent table (rich, hypergraph-ingest path) ────────────────────────────
+
+table FlowEvent {
+  // ── Identity
+  flow_id      : ulong;
+
+  // ── Timestamp (nanoseconds since boot / epoch)
+  ts           : ulong;
+
+  // ── Network endpoints (IPv4; use src_ipv6/dst_ipv6 for IPv6 flows)
+  src_ipv4     : uint;
+  dst_ipv4     : uint;
+
+  // ── IPv6 endpoints (zero when not applicable)
+  src_ipv6     : IPv6Addr;
+  dst_ipv6     : IPv6Addr;
+
+  src_port     : ushort;
+  dst_port     : ushort;
+
+  proto        : TransportProto;
+
+  // ── Aggregated flow metrics
+  packets      : ulong;
+  bytes        : ulong;
+
+  // ── TCP metadata
+  tcp_flags    : ushort;
+
+  // ── Kernel provenance
+  ifindex      : uint;
+  cpu          : ushort;
+
+  // ── Event semantics
+  event_type   : FlowEventType;
+
+  // ── Kernel-computed anomaly hints (set by eBPF ML helpers when available)
+  entropy_hint  : ushort;   // scaled 0-65535
+  anomaly_score : ushort;   // scaled 0-65535
+
+  // ── Precomputed edge identity (SipHash of 5-tuple; O(1) hypergraph lookup)
+  flow_hash    : ulong;
+}
+
+root_type FlowEvent;
+

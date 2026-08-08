@@ -8,34 +8,48 @@ function finitePosition(position) {
 export class GraphOverlayLayer {
   constructor({ viewer, Cesium, apiBase = "", fetchImpl = globalThis.fetch,
                 container = globalThis.document?.getElementById("globe-root"),
-                nodeLimit = 200, edgeLimit = 300 }) {
+                nodeLimit = 200, edgeLimit = 300, refreshMilliseconds = 2500 }) {
     if (!viewer?.entities || !Cesium?.Cartesian3) throw new TypeError("Cesium viewer is required");
     this.viewer = viewer; this.Cesium = Cesium; this.apiBase = apiBase;
     this.fetchImpl = fetchImpl; this.container = container;
     this.nodeLimit = Math.min(Math.max(nodeLimit, 1), 500);
     this.edgeLimit = Math.min(Math.max(edgeLimit, 1), 1000);
     this.entityIds = new Set(); this.nodes = new Map(); this.graphRevision = null;
-    this.clickHandler = null;
+    this.clickHandler = null; this.refreshMilliseconds = Math.max(500, refreshMilliseconds);
+    this.refreshTimer = null; this.running = false;
   }
 
   async start() {
+    this.running = true;
     await this.refresh();
     if (this.Cesium.ScreenSpaceEventHandler) {
       this.clickHandler = new this.Cesium.ScreenSpaceEventHandler(this.viewer.scene.canvas);
       this.clickHandler.setInputAction((movement) => {
         const entity = this.viewer.scene.pick(movement.position)?.id;
-        if (!entity?.id?.startsWith("scythe-web:graph-node:")) return;
+        const isNode = entity?.id?.startsWith("scythe-web:graph-node:");
+        const isEdge = entity?.id?.startsWith("scythe-web:graph-edge:");
+        if (!isNode && !isEdge) return;
         const time = this.viewer.clock.currentTime;
         const read = (key) => entity.properties?.[key]?.getValue?.(time) ?? null;
         const EventClass = this.container?.ownerDocument?.defaultView?.CustomEvent ?? globalThis.CustomEvent;
         this.container?.dispatchEvent(new EventClass("scythe-web:graph-selection", {bubbles: true, detail: {
-          kind: "graph-node", entityId: read("graphEntityId"), graphRevision: read("graphRevision"),
+          kind: isEdge ? "graph-edge" : (read("graphKind") === "event" ||
+            String(read("graphKind") ?? "").toLowerCase().includes("burst") ? "event" : "graph-node"),
+          entityId: read("graphEntityId"), graphRevision: read("graphRevision"),
           position: [read("latitudeDegrees"), read("longitudeDegrees"), read("heightMeters")],
           observedAt: read("observedAt"),
         }}));
       }, this.Cesium.ScreenSpaceEventType.LEFT_CLICK);
     }
+    this.#scheduleRefresh();
     return this;
+  }
+
+  #scheduleRefresh() {
+    clearTimeout(this.refreshTimer);
+    if (this.running) this.refreshTimer = setTimeout(async () => {
+      try { await this.refresh(); } finally { this.#scheduleRefresh(); }
+    }, this.refreshMilliseconds);
   }
 
   async refresh() {
@@ -48,7 +62,10 @@ export class GraphOverlayLayer {
       return {status: "unavailable", nodes: [], edges: []};
     }
     const graph = await response.json();
+    if (graph.status === "empty") { this.#clearEntities(); this.graphRevision = graph.graphRevision; this.#emitStatus(graph); return graph; }
     if (graph.status !== "ok") { this.#emitStatus(graph); return graph; }
+    if (graph.graphRevision === this.graphRevision) { this.#emitStatus({status: "ok", graphRevision: graph.graphRevision,
+      nodeCount: graph.nodeCount, edgeCount: graph.edgeCount}); return graph; }
     this.#clearEntities(); this.graphRevision = graph.graphRevision;
     for (const node of graph.nodes.slice(0, this.nodeLimit)) {
       if (!node.id || !finitePosition(node.position)) continue;
@@ -65,7 +82,7 @@ export class GraphOverlayLayer {
           fillColor: this.Cesium.Color.fromCssColorString(style.color),
           pixelOffset: new this.Cesium.Cartesian2(0, 16),
           distanceDisplayCondition: new this.Cesium.DistanceDisplayCondition(0, 2_000_000)},
-        properties: {graphEntityId: node.id, graphRevision: graph.graphRevision,
+        properties: {graphEntityId: node.id, graphRevision: graph.graphRevision, graphKind: node.kind,
           latitudeDegrees: lat, longitudeDegrees: lon, heightMeters: height,
           observedAt: node.observedAt ?? null, evidenceClass},
       });
@@ -81,7 +98,12 @@ export class GraphOverlayLayer {
       this.viewer.entities.add({id, polyline: {positions: endpoints.map((p) =>
         this.Cesium.Cartesian3.fromDegrees(p.lon, p.lat, Math.max(p.height, 300))), width: 1.5,
         material: cesiumPolylineMaterial(this.Cesium, edgeClass)},
-        properties: {graphRevision: graph.graphRevision, evidenceClass: edgeClass,
+        properties: {graphEntityId: edge.id, graphRevision: graph.graphRevision,
+          graphKind: edge.kind, observedAt: edge.observedAt ?? edge.timestamp ?? null,
+          latitudeDegrees: (endpoints[0].lat + endpoints[1].lat) / 2,
+          longitudeDegrees: (endpoints[0].lon + endpoints[1].lon) / 2,
+          heightMeters: (endpoints[0].height + endpoints[1].height) / 2,
+          evidenceClass: edge.evidenceClass ?? edgeClass,
           scytheSemantics: "GRAPH RELATIONSHIP; NOT CAUSAL PROOF"}});
       this.entityIds.add(id);
     }
@@ -96,5 +118,6 @@ export class GraphOverlayLayer {
   }
 
   #clearEntities() { for (const id of this.entityIds) this.viewer.entities.removeById(id); this.entityIds.clear(); this.nodes.clear(); }
-  destroy() { this.clickHandler?.destroy(); this.clickHandler = null; this.#clearEntities(); }
+  destroy() { this.running = false; clearTimeout(this.refreshTimer); this.refreshTimer = null;
+    this.clickHandler?.destroy(); this.clickHandler = null; this.#clearEntities(); }
 }

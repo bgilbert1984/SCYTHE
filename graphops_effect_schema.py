@@ -11,16 +11,24 @@ from typing import Any, Dict
 
 
 PROTOCOL_VERSION = "1.0"
-DIRECTIVES = {"explain.coverage-cell", "reclassify.coverage-threshold", "correlate.rf-cell-graph"}
+DIRECTIVES = {
+    "explain.coverage-cell", "reclassify.coverage-threshold", "correlate.rf-cell-graph",
+    "compare.graph-delta", "trace.provenance-impact", "expose.contradictions",
+    "explain.lunar-location",
+}
 EFFECT_TYPES = {
     "view.highlight-targets", "view.set-coverage-threshold",
     "view.show-provenance-path", "view.show-reality-prism",
     "view.show-dsl-preview", "view.show-correlation-fibers", "view.show-no-data",
+    "view.pin-time", "view.show-graph-delta", "view.show-graph-provenance",
+    "view.show-contradictions",
+    "view.show-lunar-prism",
 }
 STYLE_TOKENS = {
     "EVIDENCE_ISOLATION", "STATIC_SOLVER_OUTPUT", "CAUSAL_DISAGREEMENT",
     "CONTRADICTION", "UNCERTAINTY_BOUNDARY", "MISSING_DATA",
     "AUTHORITY_GATE", "THRESHOLD_LENS", "INFERRED_RELATIONSHIP",
+    "LUNAR_REFERENCE",
 }
 _ID = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
 _DATASET = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
@@ -32,6 +40,8 @@ _SELECTION_KEYS = {
     "kind", "datasetId", "tileId", "longitudeDegrees", "latitudeDegrees",
     "displayValue", "displayUnits", "displayAssetHash", "coverageThreshold",
     "entityId", "graphRevision", "position", "observedAt",
+    "timestamp", "clockId", "uncertaintyMilliseconds",
+    "locationId", "celestialBody", "referenceFrame", "heightMeters", "spatialAuthority",
 }
 
 
@@ -75,7 +85,7 @@ def validate_directive_request(payload: Any, *, expected_mode: str | None = None
         if not isinstance(selection, dict) or set(selection) - _SELECTION_KEYS:
             raise DirectiveProtocolError(f"selection[{index}] contains unknown fields")
         kind = selection.get("kind")
-        if kind not in {"rf-cell", "graph-node", "event"}:
+        if kind not in {"rf-cell", "lunar-location", "graph-node", "graph-edge", "event", "time-pin"}:
             raise DirectiveProtocolError("selection kind is not supported")
         item = dict(selection)
         if kind == "rf-cell":
@@ -89,25 +99,65 @@ def validate_directive_request(payload: Any, *, expected_mode: str | None = None
                 raise DirectiveProtocolError("selection coordinates are out of range")
             if "displayValue" in item:
                 item["displayValue"] = _finite(item["displayValue"], "displayValue")
+        elif kind == "lunar-location":
+            if not _DATASET.fullmatch(str(selection.get("datasetId", ""))):
+                raise DirectiveProtocolError("selection datasetId is invalid")
+            if not isinstance(selection.get("locationId"), str) or not selection["locationId"]:
+                raise DirectiveProtocolError("lunar locationId is required")
+            if selection.get("celestialBody") != "MOON" or selection.get("referenceFrame") != "MOON_ME_DE421":
+                raise DirectiveProtocolError("lunar body and referenceFrame are required")
+            item["longitudeDegrees"] = _finite(selection.get("longitudeDegrees"), "longitudeDegrees")
+            item["latitudeDegrees"] = _finite(selection.get("latitudeDegrees"), "latitudeDegrees")
+            item["heightMeters"] = _finite(selection.get("heightMeters", 0), "heightMeters")
+            if not -180 <= item["longitudeDegrees"] <= 180 or not -90 <= item["latitudeDegrees"] <= 90:
+                raise DirectiveProtocolError("selection coordinates are out of range")
+            if selection.get("spatialAuthority") != "REFERENCE_ELLIPSOID_ONLY":
+                raise DirectiveProtocolError("M0 lunar selection must declare reference-ellipsoid authority")
+        elif kind == "time-pin":
+            item["timestamp"] = _finite(selection.get("timestamp"), "timestamp")
+            if not isinstance(selection.get("clockId"), str) or not selection["clockId"]:
+                raise DirectiveProtocolError("time-pin clockId is required")
+            if "uncertaintyMilliseconds" in item:
+                item["uncertaintyMilliseconds"] = _finite(
+                    item["uncertaintyMilliseconds"], "uncertaintyMilliseconds")
+                if item["uncertaintyMilliseconds"] < 0:
+                    raise DirectiveProtocolError("uncertaintyMilliseconds cannot be negative")
         elif not isinstance(selection.get("entityId"), str) or not selection["entityId"]:
             raise DirectiveProtocolError("graph selection entityId is required")
         normalized_selections.append(item)
     normalized["selection"] = normalized_selections
     parameters = payload.get("parameters") or {}
-    if not isinstance(parameters, dict) or set(parameters) - {"threshold", "units", "comparison"}:
+    if not isinstance(parameters, dict) or set(parameters) - {"threshold", "units", "comparison", "depth", "limit"}:
         raise DirectiveProtocolError("parameters contains unknown fields")
+    parameters = dict(parameters)
+    for key, maximum in (("depth", 5), ("limit", 200)):
+        if key not in parameters:
+            continue
+        number = _finite(parameters[key], key)
+        if not number.is_integer() or number < (0 if key == "depth" else 1) or number > maximum:
+            raise DirectiveProtocolError(f"{key} is outside its bounded integer range")
+        parameters[key] = int(number)
     if payload["directive"] == "reclassify.coverage-threshold":
         if "threshold" not in parameters:
             raise DirectiveProtocolError("threshold is required for reclassification")
-        parameters = dict(parameters)
         parameters["threshold"] = _finite(parameters["threshold"], "threshold")
         if parameters.get("comparison") not in {"LTE", "GTE"} or not parameters.get("units"):
             raise DirectiveProtocolError("reclassification requires units and LTE/GTE comparison")
     normalized["parameters"] = parameters
     if payload["directive"] == "correlate.rf-cell-graph":
         kinds = {item["kind"] for item in normalized_selections}
-        if "rf-cell" not in kinds or not kinds.intersection({"graph-node", "event"}):
-            raise DirectiveProtocolError("RF/graph correlation requires an rf-cell and graph-node/event selection")
+        if "rf-cell" not in kinds or not kinds.intersection({"graph-node", "graph-edge", "event"}):
+            raise DirectiveProtocolError("RF/graph correlation requires an rf-cell and graph entity selection")
+    if payload["directive"] == "compare.graph-delta":
+        pins = [item for item in normalized_selections if item["kind"] == "time-pin"]
+        if len(pins) != 2:
+            raise DirectiveProtocolError("GRAPH_DELTA requires exactly two time-pin selections")
+        if pins[0]["clockId"] != pins[1]["clockId"]:
+            raise DirectiveProtocolError("GRAPH_DELTA time pins must use the same clockId")
+    if payload["directive"] in {"trace.provenance-impact", "expose.contradictions"}:
+        kinds = {item["kind"] for item in normalized_selections}
+        if not kinds.intersection({"graph-node", "graph-edge", "event"}):
+            raise DirectiveProtocolError("graph analysis requires a graph entity selection")
     return normalized
 
 

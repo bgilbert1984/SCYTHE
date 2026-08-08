@@ -382,10 +382,14 @@ class HypergraphEngine:
         pos = src.get('position')
         freq = src.get('frequency')
         labels = src.get('labels') or {}
-        meta = src.get('metadata') or {}
+        # WriteBus intentionally publishes ``metadata`` and the legacy ``meta``
+        # alias as the same mapping.  Treat both names as first-class inputs;
+        # otherwise the alias is folded back into metadata below and creates a
+        # self-reference that cannot be serialized by graph snapshot routes.
+        meta = src.get('metadata') or src.get('meta') or {}
 
         # move everything else into metadata (avoid HGNode strict init errors)
-        known_keys = {'id', 'node_id', 'kind', 'type', 'position', 'frequency', 'labels', 'metadata', 'created_at', 'updated_at'}
+        known_keys = {'id', 'node_id', 'kind', 'type', 'position', 'frequency', 'labels', 'metadata', 'meta', 'created_at', 'updated_at'}
         for k, v in src.items():
             if k not in known_keys:
                 meta[k] = v
@@ -409,11 +413,11 @@ class HypergraphEngine:
         nodes = src.get('nodes') or []
         weight = src.get('weight', 1.0)
         labels = src.get('labels') or {}
-        meta = src.get('metadata') or {}
+        meta = src.get('metadata') or src.get('meta') or {}
         timestamp = src.get('timestamp') or time.time()
 
         # move extra keys to metadata
-        known_keys = {'id', 'kind', 'type', 'nodes', 'weight', 'labels', 'metadata', 'timestamp'}
+        known_keys = {'id', 'kind', 'type', 'nodes', 'weight', 'labels', 'metadata', 'meta', 'timestamp'}
         for k, v in src.items():
             if k not in known_keys:
                 meta[k] = v
@@ -1358,7 +1362,7 @@ class HypergraphEngine:
                         if 'labels' in src: patch['labels'] = nd['labels']
 
                         # Handle metadata + implicit extra fields
-                        known_keys = {'id', 'node_id', 'kind', 'type', 'position', 'frequency', 'labels', 'metadata', 'created_at', 'updated_at'}
+                        known_keys = {'id', 'node_id', 'kind', 'type', 'position', 'frequency', 'labels', 'metadata', 'meta', 'created_at', 'updated_at'}
                         has_implicit = any(k not in known_keys for k in src)
                         if 'metadata' in src or has_implicit:
                             patch['metadata'] = nd['metadata']
@@ -1386,7 +1390,7 @@ class HypergraphEngine:
                         if 'labels' in src: patch['labels'] = nd['labels']
 
                         # Handle metadata + implicit extra fields
-                        known_keys = {'id', 'node_id', 'kind', 'type', 'position', 'frequency', 'labels', 'metadata', 'created_at', 'updated_at'}
+                        known_keys = {'id', 'node_id', 'kind', 'type', 'position', 'frequency', 'labels', 'metadata', 'meta', 'created_at', 'updated_at'}
                         has_implicit = any(k not in known_keys for k in src)
                         if 'metadata' in src or has_implicit:
                             patch['metadata'] = nd['metadata']

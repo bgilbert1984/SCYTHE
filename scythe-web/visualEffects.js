@@ -5,6 +5,17 @@ function property(entity, name, time) {
 }
 
 export function registerVisualEffects(runtime, { viewer, Cesium, prismRoot, dslRoot = null, correlationRoot = null }) {
+  function panel(text) {
+    if (!correlationRoot) return null;
+    const previous = {hidden: correlationRoot.hidden, text: correlationRoot.textContent};
+    correlationRoot.hidden = false; correlationRoot.textContent = text;
+    return previous;
+  }
+  function restorePanel(previous) {
+    if (correlationRoot && previous) {
+      correlationRoot.hidden = previous.hidden; correlationRoot.textContent = previous.text;
+    }
+  }
   runtime.register("view.show-reality-prism", {
     apply(effect) {
       const previous = { hidden: prismRoot.hidden, html: prismRoot.innerHTML };
@@ -80,6 +91,87 @@ export function registerVisualEffects(runtime, { viewer, Cesium, prismRoot, dslR
       if (correlationRoot && receipt.previous) {
         correlationRoot.hidden = receipt.previous.hidden; correlationRoot.textContent = receipt.previous.text;
       }
+    },
+  });
+  runtime.register("view.pin-time", {
+    apply(effect) {
+      return panel(`TIME PIN // ${effect.parameters.label}\n${new Date(effect.parameters.timestamp * 1000).toISOString()}\nCLOCK // ${effect.parameters.clockId}\nUNCERTAINTY // ±${effect.parameters.uncertaintyMilliseconds} ms`);
+    },
+    revert(effect, receipt) { restorePanel(receipt); },
+  });
+  runtime.register("view.show-graph-delta", {
+    apply(effect) {
+      const changed = [];
+      const delta = effect.parameters.delta;
+      for (const node of delta.addedNodes ?? []) {
+        const entity = viewer.entities.getById?.(`scythe-web:graph-node:${encodeURIComponent(node.id)}`);
+        if (!entity?.point) continue;
+        changed.push({entity, kind: "node", color: entity.point.color, pixelSize: entity.point.pixelSize});
+        entity.point.color = Cesium.Color.fromCssColorString("#7dff7d"); entity.point.pixelSize = 14;
+      }
+      for (const edge of delta.addedEdges ?? []) {
+        const entity = viewer.entities.getById?.(`scythe-web:graph-edge:${encodeURIComponent(edge.id)}`);
+        if (!entity?.polyline) continue;
+        changed.push({entity, kind: "edge", material: entity.polyline.material, width: entity.polyline.width});
+        entity.polyline.material = Cesium.Color.fromCssColorString("#7dff7d"); entity.polyline.width = 4;
+      }
+      const previous = panel(`GRAPH_DELTA // ${effect.parameters.executed ? "EXECUTED" : "PREVIEW"}\nADDED NODES // ${delta.addedNodes?.length ?? 0}\nADDED EDGES // ${delta.addedEdges?.length ?? 0}\nREMOVALS // ${delta.removedNodes?.length ?? 0} NODES / ${delta.removedEdges?.length ?? 0} EDGES\nUNKNOWN TIME // ${delta.unknownTimeCount ?? 0}\nBOUNDARY // ${effect.parameters.caveat}`);
+      return {changed, previous};
+    },
+    revert(effect, receipt) {
+      for (const item of receipt.changed) {
+        if (item.kind === "node") { item.entity.point.color = item.color; item.entity.point.pixelSize = item.pixelSize; }
+        else { item.entity.polyline.material = item.material; item.entity.polyline.width = item.width; }
+      }
+      restorePanel(receipt.previous);
+    },
+  });
+  runtime.register("view.show-graph-provenance", {
+    apply(effect) {
+      const changed = [];
+      for (const node of effect.parameters.path.nodes ?? []) {
+        const entity = viewer.entities.getById?.(`scythe-web:graph-node:${encodeURIComponent(node.id)}`);
+        if (!entity?.point) continue;
+        changed.push({entity, kind: "node", color: entity.point.color, pixelSize: entity.point.pixelSize});
+        entity.point.color = Cesium.Color.fromCssColorString("#00d4ff"); entity.point.pixelSize = 12;
+      }
+      for (const edge of effect.parameters.path.edges ?? []) {
+        const entity = viewer.entities.getById?.(`scythe-web:graph-edge:${encodeURIComponent(edge.id)}`);
+        if (!entity?.polyline) continue;
+        changed.push({entity, kind: "edge", material: entity.polyline.material, width: entity.polyline.width});
+        entity.polyline.material = new Cesium.PolylineDashMaterialProperty({
+          color: Cesium.Color.fromCssColorString("#00d4ff"), dashLength: 12,
+        }); entity.polyline.width = 3;
+      }
+      const path = effect.parameters.path;
+      const previous = panel(`PROVENANCE IMPACT // ${effect.parameters.executed ? "EXECUTED" : "PREVIEW"}\nENTITIES // ${(path.nodes?.length ?? 0) + (path.edges?.length ?? 0)}\nDECLARED SOURCES // ${path.sources?.length ?? 0}\nBOUNDARY // ${effect.parameters.caveat}`);
+      return {changed, previous};
+    },
+    revert(effect, receipt) {
+      for (const item of receipt.changed) {
+        if (item.kind === "node") { item.entity.point.color = item.color; item.entity.point.pixelSize = item.pixelSize; }
+        else { item.entity.polyline.material = item.material; item.entity.polyline.width = item.width; }
+      }
+      restorePanel(receipt.previous);
+    },
+  });
+  runtime.register("view.show-contradictions", {
+    apply(effect) {
+      const changed = [];
+      for (const finding of effect.parameters.findings) {
+        const entity = viewer.entities.getById?.(`scythe-web:graph-edge:${encodeURIComponent(finding.id)}`);
+        if (!entity?.polyline) continue;
+        changed.push({entity, material: entity.polyline.material, width: entity.polyline.width});
+        entity.polyline.material = new Cesium.PolylineDashMaterialProperty({
+          color: Cesium.Color.fromCssColorString("#ff445e"), dashLength: 18, dashPattern: 0xaaaa,
+        }); entity.polyline.width = 5;
+      }
+      const previous = panel(`CONTRADICTIONS // ${effect.parameters.executed ? "EXPOSED" : "PREVIEW"}\nROOT // ${effect.parameters.root}\nRELATIONS // ${effect.parameters.findings.length}\nPOLICY // ${effect.parameters.caveat}`);
+      return {changed, previous};
+    },
+    revert(effect, receipt) {
+      for (const item of receipt.changed) { item.entity.polyline.material = item.material; item.entity.polyline.width = item.width; }
+      restorePanel(receipt.previous);
     },
   });
   const noOp = { apply: () => null, revert: () => undefined };

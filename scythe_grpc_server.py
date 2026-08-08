@@ -44,6 +44,8 @@ import requests
 
 import scythe_pb2
 import scythe_pb2_grpc
+from pb import event_pb2 as eve_event_pb2
+from pb import event_pb2_grpc as eve_event_pb2_grpc
 
 log = logging.getLogger('scythe.grpc')
 
@@ -110,7 +112,44 @@ def _cached_validate(token: str, orchestrator_url: str, internal_token: str) -> 
 _BYPASS_METHODS = frozenset([
     '/scythe.v1.AuthService/Login',
     '/scythe.v1.OperatorStream/Connect',
+    # Eve Streamer is accepted only on this loopback-bound server. Its payload
+    # is validated again at the GraphOps HTTP boundary before WriteBus commit.
+    '/pb.EventStreamer/StreamEvents',
 ])
+
+
+class EveEventStreamServicer(eve_event_pb2_grpc.EventStreamerServicer):
+    """Receive normalized Eve batches and forward them to GraphOps WriteBus."""
+
+    def __init__(self, orchestrator_url: str, internal_token: str) -> None:
+        self._orchestrator_url = orchestrator_url.rstrip('/')
+        self._headers = {'X-Internal-Token': internal_token, 'Content-Type': 'application/json'}
+
+    def StreamEvents(self, request_iterator, context):
+        total = 0
+        for batch in request_iterator:
+            events = [{
+                'event_id': event.event_id, 'type': event.type,
+                'entities': [{'key': item.key, 'value': item.value} for item in event.entities],
+                'edges': list(event.edges), 'timestamp': event.timestamp,
+            } for event in batch.events]
+            for offset in range(0, len(events), 500):
+                chunk = events[offset:offset + 500]
+                try:
+                    response = requests.post(
+                        f'{self._orchestrator_url}/api/graphops/eve/events',
+                        json={'events': chunk}, headers=self._headers, timeout=15,
+                    )
+                    response.raise_for_status()
+                    result = response.json()
+                    total += int(result.get('committed', 0))
+                    rejected = result.get('rejected') or []
+                    if rejected:
+                        log.warning('[EVE] batch partially rejected: %s', rejected[:3])
+                except Exception as exc:
+                    log.error('[EVE] GraphOps forward failed: %s', exc)
+                    context.abort(grpc.StatusCode.UNAVAILABLE, 'GraphOps Eve ingest unavailable')
+        return eve_event_pb2.EventAck(count=total, status='completed')
 
 
 class TokenAuthInterceptor(grpc.ServerInterceptor):
@@ -1896,6 +1935,9 @@ def serve(
     )
     scythe_pb2_grpc.add_ControlPathStreamServicer_to_server(
         ControlPathStreamServicer(orchestrator_url, internal_token), server,
+    )
+    eve_event_pb2_grpc.add_EventStreamerServicer_to_server(
+        EveEventStreamServicer(orchestrator_url, internal_token), server,
     )
 
     server.add_insecure_port(f'127.0.0.1:{grpc_port}')

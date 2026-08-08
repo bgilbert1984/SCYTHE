@@ -1,0 +1,34 @@
+syntax = "proto3";
+
+package pb;
+
+option go_package = "github.com/yourorg/eve-streamer/pb";
+
+message Entity {
+  string key = 1;
+  string value = 2;
+}
+
+message Event {
+  string event_id = 1;
+  string type = 2;
+  repeated Entity entities = 3;
+  repeated string edges = 4;
+  string timestamp = 5;
+}
+
+message EventBatch {
+  repeated Event events = 1;
+}
+
+message EventAck {
+  int32 count = 1;
+  string status = 2;
+}
+
+service EventStreamer {
+  // client-streaming RPC: producer sends a continuous stream of batches
+  // over a single connection and receives one acknowledgement when the
+  // stream is closed.
+  rpc StreamEvents(stream EventBatch) returns (EventAck);
+}

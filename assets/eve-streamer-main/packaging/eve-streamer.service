@@ -1,0 +1,16 @@
+[Unit]
+Description=Eve Streamer daemon (Suricata eve.json shipper)
+After=network.target
+
+[Service]
+Type=simple
+User=eve-streamer
+Group=eve-streamer
+WorkingDirectory=/opt/eve-streamer/eve-streamer
+ExecStart=/opt/eve-streamer/eve-streamer/bin/eve-streamer -eve /var/log/suricata/eve.json -batch-size 100 -batch-time 5s
+Restart=on-failure
+RestartSec=5s
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

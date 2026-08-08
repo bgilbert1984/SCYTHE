@@ -1,0 +1,20 @@
+namespace eve;
+
+table Entity {
+  key:string;
+  value:string;
+}
+
+table Event {
+  event_id:string;
+  type:string;
+  entities:[Entity];
+  edges:[string];
+  timestamp:string;
+}
+
+table EventBatch {
+  events:[Event];
+}
+
+root_type EventBatch;

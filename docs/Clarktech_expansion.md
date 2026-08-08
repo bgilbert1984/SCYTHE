@@ -1,6 +1,6 @@
 # SCYTHE Clarktech Expansion
 
-Status: implementation plan  
+Status: active implementation
 Scope: GraphOps executable effects, causal-world interaction, SCYTHE-Web, and
 authority-safe visual reasoning  
 Companion catalog: [GraphOps_Directives.md](GraphOps_Directives.md)
@@ -40,8 +40,47 @@ Phase 2A was implemented on 2026-08-06:
 - Stable primary-instance proxying fixed for instances whose healthy lifecycle
   state is `ready` rather than `running`.
 
-Phase 2B remains: graph-edge/event selection, paired time pins, `GRAPH_DELTA`,
-provenance-impact traversal, and contradiction overlays.
+Phase 2B was implemented on 2026-08-06:
+
+- Graph edges and event-like nodes are selectable typed references pinned to a
+  graph revision.
+- Paired same-clock time pins compile and execute bounded `GRAPH_DELTA` queries.
+- Delta results explicitly declare `CURRENT_GRAPH_TIMESTAMP_PROJECTION`; they
+  do not claim historical removals without retained immutable snapshots.
+- Bounded provenance-impact traversal exposes graph adjacency and declared
+  sources without treating adjacency as causality.
+- Explicit contradiction relations remain separate and render as red dashed
+  overlays; no synthetic consensus is produced.
+- The stable orchestrator accepts validated measured-RF spectral summaries,
+  derives `OBSERVED` evidence IDs, synchronizes them to the selected graph
+  instance, and structurally rejects raw IQ fields.
+- A missing graph instance now returns an explicit HTTP 200 empty snapshot so
+  the standalone RF instrument continues operating without console-breaking
+  503 responses.
+- The regional globe uses the same optional Cesium World Terrain negotiation
+  as Command Ops while retaining token-free OpenStreetMap imagery and an
+  ellipsoid fallback.
+
+Lunar M0 was implemented on 2026-08-06:
+
+- A token-free, Moon-native Cesium instrument runs on a 1,737,400 m lunar
+  ellipsoid without allowing WGS84 coordinates into the view.
+- Lunar selections carry the explicit `MOON_ME_DE421` body-fixed frame and
+  `REFERENCE_ELLIPSOID_ONLY` spatial authority.
+- Three locally packaged visual references are SHA-256 verified before the
+  instrument becomes ready.
+- The `explain.lunar-location` directive compiles a proof-carrying
+  `view.show-lunar-prism` effect through the stable GraphOps endpoint.
+- The Lunar Reality Prism refuses elevation, slope, lighting, Earth visibility,
+  and RF occultation claims because M0 has no registered LOLA terrain or pinned
+  SPICE kernel set.
+- LROC illumination and LOLA slope imagery remain labelled reference panels;
+  neither is sampled as a geospatial measurement surface.
+
+The next bounded frontiers are Lunar M1 registered LOLA terrain, a pinned SPICE
+kernel set, retained immutable graph snapshots, clock calibration evidence,
+contradiction adjudication receipts, and persistent RF observation storage
+across orchestrator restarts.
 
 ## 1. Executive intent
 
@@ -1126,3 +1165,36 @@ The final standard is simple:
 > fracture, trail, world, and action must be able to answer: “Why are you here,
 > what evidence supports you, what would falsify you, and what authority did you
 > change?”
+
+## 26. Implemented live sensor-to-hypergraph slice
+
+The Eve Streamer expansion establishes the first continuous external-event
+path into the Clarktech interaction surface. Normalized Suricata summaries now
+travel over a loopback protobuf stream, cross a strict GraphOps ingestion
+boundary, commit through WriteBus, and appear in the regional demo's separate
+2D network hypergraph. Nodes and edges participate in the existing typed,
+revision-pinned selection, delta, provenance, and contradiction interactions.
+
+This slice preserves the central formalities:
+
+- no raw packet or payload material enters the GraphOps endpoint;
+- controlled-feed events are synthetic, never observed;
+- production Suricata summaries are observed, never solver output;
+- absent network geolocation remains absent instead of becoming pseudo-geo;
+- the browser layout is a visual index, not an authority surface;
+- every graph mutation carries WriteBus provenance and bounded system trust.
+
+Operational details and the deliberate Suricata cutover are codified in
+[`Eve_Live_Hypergraph.md`](Eve_Live_Hypergraph.md).
+
+The production cutover completed on 2026-08-07. Because the WSL2 guest is
+NAT-isolated behind a virtual interface, the sensor runs against the Windows
+host's Npcap Wi-Fi device and publishes bounded, UTC-stamped, daily-rotated EVE
+metadata to the existing unprivileged WSL tailer. Production graph entities
+are `OBSERVED`; the original controlled feed and service definition remain
+available for deterministic rollback.
+
+The live selection boundary retains the 32 most recently served bounded graph
+snapshots. This prevents high-rate ingress from invalidating a click before its
+directive arrives while preserving exact revision semantics; the resolver
+rejects selections whose rendered snapshot is no longer retained.

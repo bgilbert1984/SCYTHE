@@ -1239,7 +1239,8 @@ def graphops_directive_preview():
         return jsonify({'error': 'Authentication required'}), 401
     try:
         payload = request.get_json(silent=True) or {}
-        if payload.get('directive') == 'correlate.rf-cell-graph':
+        if payload.get('directive') in {'correlate.rf-cell-graph', 'compare.graph-delta',
+                                         'trace.provenance-impact', 'expose.contradictions'}:
             port = _get_primary_instance_port()
             if not port:
                 return jsonify({'error': 'No active SCYTHE graph instance'}), 503
@@ -1259,10 +1260,13 @@ def graphops_directive_execute():
         return jsonify({'error': 'Authentication required'}), 401
     try:
         payload = request.get_json(silent=True) or {}
-        if payload.get('directive') == 'correlate.rf-cell-graph':
+        if payload.get('directive') in {'correlate.rf-cell-graph', 'compare.graph-delta',
+                                         'trace.provenance-impact', 'expose.contradictions'}:
             port = _get_primary_instance_port()
             if not port:
                 return jsonify({'error': 'No active SCYTHE graph instance'}), 503
+            if payload.get('directive') == 'correlate.rf-cell-graph':
+                _sync_rf_observations_to_child(port)
             result = _proxy_post(port, '/api/graphops/directives/execute', payload, timeout=30)
             return (jsonify(result), 200) if result is not None else (jsonify({'error': 'Graph instance unavailable'}), 502)
         from graphops_director import GraphOpsDirector
@@ -1960,8 +1964,9 @@ def orchestrator_graphops_selection_graph():
     """Proxy the bounded, revision-pinned Clarktech graph selection snapshot."""
     port = _get_primary_instance_port()
     if not port:
-        return jsonify({'status': 'unavailable', 'message': 'No active SCYTHE instance',
-                        'nodes': [], 'edges': [], 'bounded': True}), 503
+        return jsonify({'status': 'empty', 'message': 'No active SCYTHE graph instance',
+                        'graphRevision': 'graph-empty', 'nodes': [], 'edges': [],
+                        'nodeCount': 0, 'edgeCount': 0, 'bounded': True}), 200
     try:
         node_limit = min(max(int(request.args.get('node_limit', 200)), 1), 500)
         edge_limit = min(max(int(request.args.get('edge_limit', 300)), 1), 1000)
@@ -1974,6 +1979,87 @@ def orchestrator_graphops_selection_graph():
         return jsonify({'status': 'unavailable', 'message': 'Graph instance unreachable',
                         'nodes': [], 'edges': [], 'bounded': True}), 502
     return jsonify(data)
+
+
+def _rf_observation_frame(observation):
+    return {key: observation[key] for key in (
+        'sensor_id', 'sequence', 'observed_at', 'center_frequency_hz',
+        'peak_frequency_hz', 'sample_rate_hz', 'peak_dbfs', 'noise_floor_dbfs'
+    ) if key in observation} | {'timestamp': observation.get('observed_at')}
+
+
+def _sync_rf_observations_to_child(port):
+    """Best-effort bounded transfer from the stable broker store to a child."""
+    try:
+        from rf_bridge import get_rf_observation_store
+        for observation in reversed(get_rf_observation_store().query(limit=200)):
+            frame = _rf_observation_frame(observation)
+            frame.pop('observed_at', None)
+            _proxy_post(port, '/api/graphops/rf-observations', frame, timeout=3)
+    except Exception:
+        log.exception('GraphOps measured-RF synchronization failed')
+
+
+@app.route('/api/graphops/rf-observations', methods=['POST'])
+def orchestrator_graphops_rf_observation_ingest():
+    """Accept a validated spectral summary; raw IQ is structurally rejected."""
+    if not _graphops_directive_authorized():
+        return jsonify({'error': 'Authentication required'}), 401
+    try:
+        from graphops_rf_ingest import ingest_measured_rf, validate_measured_rf_frame
+        from rf_bridge import get_rf_observation_store
+        payload = request.get_json(silent=True)
+        frame = validate_measured_rf_frame(payload)
+        result = ingest_measured_rf(get_rf_observation_store(), frame)
+        port = _get_primary_instance_port()
+        result['forwardedToGraphInstance'] = bool(
+            port and _proxy_post(port, '/api/graphops/rf-observations', frame, timeout=5) is not None)
+        return jsonify(result), 201 if result['status'] == 'accepted' else 202
+    except (TypeError, ValueError, KeyError) as exc:
+        return jsonify({'status': 'rejected', 'error': str(exc), 'rawIqAccepted': False}), 400
+
+
+@app.route('/api/graphops/rf-observations/status', methods=['GET'])
+def orchestrator_graphops_rf_observation_status():
+    if not _graphops_directive_authorized():
+        return jsonify({'error': 'Authentication required'}), 401
+    from rf_bridge import get_rf_observation_store
+    return jsonify({'status': 'ok', **get_rf_observation_store().stats(),
+                    'authority': 'MEASURED_SPECTRAL_SUMMARY', 'rawIqAccepted': False,
+                    'graphInstanceActive': _get_primary_instance_port() is not None})
+
+
+@app.route('/api/graphops/eve/events', methods=['POST'])
+def orchestrator_graphops_eve_events():
+    """Forward bounded normalized Eve summaries to the active graph instance."""
+    if not _graphops_directive_authorized():
+        return jsonify({'error': 'Authentication required'}), 401
+    if request.content_length is not None and request.content_length > 2_000_000:
+        return jsonify({'status': 'rejected', 'error': 'Eve batch exceeds 2 MB',
+                        'rawPacketsAccepted': False}), 413
+    port = _get_primary_instance_port()
+    if not port:
+        return jsonify({'status': 'unavailable', 'error': 'No active SCYTHE graph instance',
+                        'rawPacketsAccepted': False}), 503
+    result = _proxy_post(port, '/api/graphops/eve/events', request.get_json(silent=True) or {}, timeout=15)
+    if result is None:
+        return jsonify({'status': 'unavailable', 'error': 'Graph instance rejected or did not answer'}), 502
+    return jsonify(result)
+
+
+@app.route('/api/graphops/eve/status', methods=['GET'])
+def orchestrator_graphops_eve_status():
+    if not _graphops_directive_authorized():
+        return jsonify({'error': 'Authentication required'}), 401
+    port = _get_primary_instance_port()
+    if not port:
+        return jsonify({'status': 'empty', 'received': 0, 'committed': 0,
+                        'graphInstanceActive': False, 'rawPacketsAccepted': False}), 200
+    result = _proxy_get(port, '/api/graphops/eve/status')
+    if result is None:
+        return jsonify({'status': 'unavailable', 'graphInstanceActive': True}), 502
+    result['graphInstanceActive'] = True
+    return jsonify(result)
 
 
 @app.route('/api/clusters/swarms', methods=['GET'])

@@ -1,0 +1,5 @@
+# Controlled SCYTHE Eve feed. eve-streamer tails from EOF; append JSONL events below.
+{"timestamp":"2026-08-07T03:14:00.000000Z","event_type":"test_flow","src_ip":"10.20.30.40","src_port":49152,"dest_ip":"8.8.8.8","dest_port":443,"proto":"TCP"}
+{"timestamp":"2026-08-07T03:21:10.609166Z","event_type":"test_flow","src_ip":"10.20.30.41","src_port":49152,"dest_ip":"8.8.4.4","dest_port":443,"proto":"TCP","controlled_event_id":"c3a1727e-b72d-4c62-a647-bf7c2b1e3738"}
+{"timestamp":"2026-08-07T03:21:51.356013Z","event_type":"test_flow","src_ip":"10.20.30.42","src_port":49152,"dest_ip":"1.1.1.1","dest_port":443,"proto":"TCP","controlled_event_id":"8f8b36e9-84d0-499b-80c3-0de1814a33bc"}
+{"timestamp":"2026-08-07T03:26:48.108453Z","event_type":"test_flow","src_ip":"10.20.30.43","src_port":49152,"dest_ip":"9.9.9.9","dest_port":443,"proto":"TCP","controlled_event_id":"fbcc1ac5-4102-4a9a-95e1-8d06ca2b133b"}

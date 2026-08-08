@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>SCYTHE // Lunar South Pole Operations M0</title>
+  <script src="https://cesium.com/downloads/cesiumjs/releases/1.114/Build/Cesium/Cesium.js"></script>
+  <link rel="stylesheet" href="https://cesium.com/downloads/cesiumjs/releases/1.114/Build/Cesium/Widgets/widgets.css">
+  <style>
+    :root { color-scheme:dark; --cyan:#79e7ef; --gold:#f7d154; --ink:rgba(3,7,13,.91); }
+    html,body,#lunar-root,#lunar-viewer { width:100%; height:100%; margin:0; overflow:hidden; }
+    body { background:#000; color:#d9f8fb; font:11px/1.45 ui-monospace,SFMono-Regular,Consolas,monospace; }
+    #lunar-root { position:relative; }
+    .banner { position:absolute; z-index:20; top:12px; left:50%; transform:translateX(-50%);
+      padding:8px 14px; border:1px solid var(--gold); background:var(--ink); color:var(--gold);
+      letter-spacing:.12em; white-space:nowrap; pointer-events:none; }
+    .panel { position:absolute; z-index:20; border:1px solid rgba(121,231,239,.48); background:var(--ink);
+      box-shadow:0 0 28px rgba(0,0,0,.38); }
+    .authority { top:58px; left:12px; width:min(330px,calc(100vw - 24px)); padding:11px; white-space:pre-wrap; }
+    .prism { top:58px; right:12px; width:min(440px,calc(100vw - 24px)); max-height:62vh; overflow:auto;
+      padding:11px; white-space:pre-wrap; }
+    .evidence { left:12px; right:12px; bottom:12px; height:170px; display:grid;
+      grid-template-columns:220px 220px 1fr; gap:8px; padding:8px; box-sizing:border-box; }
+    .evidence figure { margin:0; display:grid; grid-template-rows:1fr auto; min-width:0; }
+    .evidence img { width:100%; height:125px; object-fit:cover; border:1px solid rgba(247,209,84,.32); }
+    .evidence figcaption { color:#9cb6bf; font-size:9px; padding-top:4px; }
+    .telemetry { padding:8px 10px; white-space:pre-wrap; color:#9cb6bf; overflow:auto; }
+    a { color:var(--cyan); }
+    .ready { color:#7dff9a; } .absent { color:#ff9b69; }
+    @media(max-width:850px) {
+      .prism { top:auto; bottom:190px; max-height:34vh; }
+      .evidence { grid-template-columns:1fr 1fr; }
+      .telemetry { display:none; }
+    }
+  </style>
+</head>
+<body>
+  <main id="lunar-root">
+    <div id="lunar-viewer"></div>
+    <div class="banner">MOON // BODY-FIXED // TOKEN-FREE // TERRAIN AUTHORITY ABSENT M0</div>
+    <aside class="panel authority" id="lunar-authority">LUNAR WORLD // INITIALIZING…</aside>
+    <aside class="panel prism" id="lunar-prism">GRAPHOPS // SELECT A LUNAR LOCATION</aside>
+    <section class="panel evidence" aria-label="Pinned lunar reference evidence">
+      <figure><img id="lroc-reference" alt="LROC multi-temporal south pole illumination reference">
+        <figcaption>LROC // MULTI-TEMPORAL ILLUMINATION // REFERENCE PANEL ONLY</figcaption></figure>
+      <figure><img id="lola-reference" alt="LOLA south pole slope reference visualization">
+        <figcaption>LOLA // SLOPE VISUALIZATION // REFERENCE PANEL ONLY</figcaption></figure>
+      <div class="telemetry" id="lunar-telemetry">CAMERA // ACQUIRING BODY-FIXED POSITION…</div>
+    </section>
+  </main>
+  <script type="module">
+    import {loadLunarReferenceDataset} from "./lunarDataset.js";
+    import {createLunarViewer, LunarSurfaceLayer} from "./lunarWorld.js";
+    import {bodyFixedCartographic} from "./celestialBodies.js";
+    import {SelectionModel} from "./selectionModel.js";
+    import {validateEffectPlan} from "./directiveProtocol.js";
+    import {renderLunarPrism} from "./lunarPrism.js";
+
+    const manifestUrl = new URL("../datasets/lunar-south-pole-reference-m0/manifest.json", location.href).href;
+    const dataset = await loadLunarReferenceDataset(manifestUrl);
+    const texture = dataset.assets.get("cesium-moon-reference-texture");
+    const world = await createLunarViewer({Cesium, container:"lunar-viewer", textureUrl:texture.url});
+    window.viewer = world.viewer; window.scytheLunarWorld = world;
+    document.getElementById("lroc-reference").src = dataset.assets.get("lroc-multitemporal-illumination").url;
+    document.getElementById("lola-reference").src = dataset.assets.get("lola-slope-hyperwall").url;
+    const authority = document.getElementById("lunar-authority");
+    authority.innerHTML = `<span class="ready">LUNAR WORLD // READY</span>\nBODY // MOON\nFRAME // ${dataset.descriptor.spatialReference.bodyFixedFrame}\nELLIPSOID // 1,737,400 m REFERENCE RADIUS\nTEXTURE // ILLUSTRATIVE\n<span class="absent">TERRAIN // ABSENT M0</span>\nTOKEN // NOT REQUIRED\n\nCLICK THE SURFACE TO RESOLVE A MOON-FIXED LOCATION.`;
+    const layer = new LunarSurfaceLayer({viewer:world.viewer, Cesium, ellipsoid:world.ellipsoid,
+      container:document.getElementById("lunar-root"), descriptor:dataset.descriptor}).start();
+    window.scytheLunarLayer = layer;
+    const selections = new SelectionModel();
+    const prism = document.getElementById("lunar-prism");
+
+    document.getElementById("lunar-root").addEventListener("scythe-web:lunar-location-selected", async ({detail}) => {
+      selections.replace(detail);
+      prism.textContent = `GRAPHOPS // RESOLVING\n${detail.latitudeDegrees.toFixed(4)}° // ${detail.longitudeDegrees.toFixed(4)}°\nFRAME // ${detail.referenceFrame}`;
+      try {
+        const request = selections.directiveRequest({directive:"explain.lunar-location",
+          utterance:"Explain the authority available at this lunar location", mode:"preview"});
+        const response = await fetch("/api/graphops/directives/preview", {method:"POST", credentials:"same-origin",
+          headers:{"Content-Type":"application/json"}, body:JSON.stringify(request)});
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.error ?? `HTTP ${response.status}`);
+        const plan = validateEffectPlan(payload);
+        const effect = plan.effects.find((candidate) => candidate.type === "view.show-lunar-prism");
+        if (!effect) throw new Error("GraphOps returned no lunar prism effect");
+        renderLunarPrism(prism, effect.parameters);
+      } catch (error) {
+        prism.textContent = `GRAPHOPS // UNAVAILABLE\n${error.message}\n\nLOCAL BOUNDARY REMAINS ACTIVE\nTERRAIN AUTHORITY // ABSENT M0`;
+      }
+    });
+
+    const telemetry = document.getElementById("lunar-telemetry");
+    let lastTelemetry = 0;
+    world.viewer.scene.postRender.addEventListener(() => {
+      if (performance.now() - lastTelemetry < 250) return; lastTelemetry = performance.now();
+      try {
+        const camera = bodyFixedCartographic(Cesium, "MOON", world.viewer.camera.positionWC, world.ellipsoid);
+        telemetry.textContent = `CAMERA // MOON BODY-FIXED\nLAT // ${camera.latitudeDegrees.toFixed(4)}°\nLON // ${camera.longitudeDegrees.toFixed(4)}°\nHEIGHT // ${Math.round(camera.heightMeters).toLocaleString()} m\n\nDATASET // ${dataset.descriptor.datasetId}\nASSETS // ${dataset.assets.size} CHECKSUM VERIFIED\nSPICE // NOT INGESTED M0\nLOLA DEM // NOT INGESTED M0\n\nNO EARTH WGS84 COORDINATES ENTER THIS VIEW.`;
+      } catch {}
+    });
+  </script>
+</body>
+</html>

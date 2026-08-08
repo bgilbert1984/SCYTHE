@@ -4,11 +4,38 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
+from collections import OrderedDict
+from copy import deepcopy
+from threading import RLock
 from typing import Any, Dict, Iterable
 
 
 class GraphResolutionError(ValueError):
     pass
+
+
+_SNAPSHOT_CACHE: "OrderedDict[str, Dict[str, Any]]" = OrderedDict()
+_SNAPSHOT_CACHE_LOCK = RLock()
+_SNAPSHOT_CACHE_LIMIT = 32
+
+
+def _remember_snapshot(snapshot: Dict[str, Any]) -> None:
+    revision = snapshot["graphRevision"]
+    with _SNAPSHOT_CACHE_LOCK:
+        _SNAPSHOT_CACHE[revision] = deepcopy(snapshot)
+        _SNAPSHOT_CACHE.move_to_end(revision)
+        while len(_SNAPSHOT_CACHE) > _SNAPSHOT_CACHE_LIMIT:
+            _SNAPSHOT_CACHE.popitem(last=False)
+
+
+def _cached_snapshot(revision: str) -> Dict[str, Any] | None:
+    with _SNAPSHOT_CACHE_LOCK:
+        snapshot = _SNAPSHOT_CACHE.get(revision)
+        if snapshot is not None:
+            _SNAPSHOT_CACHE.move_to_end(revision)
+            return deepcopy(snapshot)
+    return None
 
 
 def _mapping(value: Any) -> Dict[str, Any]:
@@ -19,6 +46,17 @@ def _mapping(value: Any) -> Dict[str, Any]:
 
 def _node_id(node: Dict[str, Any], fallback: str = "") -> str:
     return str(node.get("id") or node.get("node_id") or node.get("entity_id") or fallback)
+
+
+def _edge_id(edge: Dict[str, Any]) -> str:
+    explicit = edge.get("id") or edge.get("edge_id") or edge.get("_fallback_id")
+    if explicit:
+        return str(explicit)
+    nodes = GraphSelectionResolver._edge_nodes(edge)
+    seed = json.dumps({"kind": edge.get("kind") or edge.get("type") or "edge",
+                       "nodes": nodes, "timestamp": edge.get("timestamp") or edge.get("observed_at")},
+                      sort_keys=True, separators=(",", ":"), default=str)
+    return "edge-" + hashlib.blake2s(seed.encode(), digest_size=8).hexdigest()
 
 
 def _position(node: Dict[str, Any]) -> list[float] | None:
@@ -41,32 +79,86 @@ def _position(node: Dict[str, Any]) -> list[float] | None:
     return None
 
 
+def _timestamp(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        number = float(value)
+        return number if math.isfinite(number) else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _evidence_class(value: Dict[str, Any]) -> str:
+    metadata = dict(value.get("metadata") or {})
+    declared = str(value.get("evidenceClass") or metadata.get("evidence_class") or
+                   metadata.get("obs_class") or "").upper()
+    if metadata.get("source") == "test_generator" or metadata.get("generated") is True:
+        return "SYNTHETIC"
+    if declared in {"OBSERVED", "MEASURED", "SYNTHETIC", "INFERRED", "CONTRADICTED"}:
+        return declared
+    return "INFERRED"
+
+
 class GraphSelectionResolver:
     def __init__(self, engine: Any):
         self.engine = engine
+        self._pinned_nodes: list[Dict[str, Any]] | None = None
+        self._pinned_edges: list[Dict[str, Any]] | None = None
+        self._pinned_revision: str | None = None
 
     def _nodes(self) -> list[Dict[str, Any]]:
+        if self._pinned_nodes is not None:
+            return deepcopy(self._pinned_nodes)
         nodes = getattr(self.engine, "nodes", {}) or {}
         if isinstance(nodes, dict):
-            return [{**_mapping(value), "_fallback_id": str(key)} for key, value in nodes.items()]
-        return [_mapping(value) for value in nodes]
+            result = [{**_mapping(value), "_fallback_id": str(key)} for key, value in nodes.items()]
+        else:
+            result = [_mapping(value) for value in nodes]
+        attached = getattr(self.engine, "hypergraph_engine", None)
+        attached_nodes = getattr(attached, "nodes", {}) if attached is not None else {}
+        for key, value in (attached_nodes.items() if isinstance(attached_nodes, dict) else []):
+            item = {**_mapping(value), "_fallback_id": str(key)}
+            metadata = item.get("metadata") or {}
+            if metadata.get("source") == "eve-streamer":
+                result.append(item)
+        deduplicated = {}
+        for item in result:
+            deduplicated[_node_id(item, item.get("_fallback_id", ""))] = item
+        return list(deduplicated.values())
 
     def _edges(self) -> list[Dict[str, Any]]:
+        if self._pinned_edges is not None:
+            return deepcopy(self._pinned_edges)
         edges = getattr(self.engine, "edges", None)
         if edges is None:
             edges = getattr(self.engine, "hyperedges", {}) or {}
         if isinstance(edges, dict):
-            return [{**_mapping(value), "_fallback_id": str(key)} for key, value in edges.items()]
-        return [_mapping(value) for value in edges]
+            result = [{**_mapping(value), "_fallback_id": str(key)} for key, value in edges.items()]
+        else:
+            result = [_mapping(value) for value in edges]
+        attached = getattr(self.engine, "hypergraph_engine", None)
+        attached_edges = getattr(attached, "edges", {}) if attached is not None else {}
+        for key, value in (attached_edges.items() if isinstance(attached_edges, dict) else []):
+            item = {**_mapping(value), "_fallback_id": str(key)}
+            metadata = item.get("metadata") or {}
+            if metadata.get("source") == "eve-streamer":
+                result.append(item)
+        deduplicated = {}
+        for item in result:
+            deduplicated[_edge_id(item)] = item
+        return list(deduplicated.values())
 
     def revision(self) -> str:
+        if self._pinned_revision is not None:
+            return self._pinned_revision
         nodes = sorted(({
             "id": _node_id(node, node.get("_fallback_id", "")),
             "kind": node.get("kind") or node.get("type"), "position": _position(node),
             "observedAt": node.get("observed_at") or node.get("timestamp") or node.get("created_at"),
         } for node in self._nodes()), key=lambda item: item["id"])
         edges = sorted(({
-            "id": str(edge.get("id") or edge.get("edge_id") or edge.get("_fallback_id", "")),
+            "id": _edge_id(edge),
             "kind": edge.get("kind") or edge.get("type"), "nodes": self._edge_nodes(edge),
             "timestamp": edge.get("timestamp"),
         } for edge in self._edges()), key=lambda item: item["id"])
@@ -78,18 +170,12 @@ class GraphSelectionResolver:
     def _normalize_node(node: Dict[str, Any]) -> Dict[str, Any]:
         node_id = _node_id(node, node.get("_fallback_id", ""))
         metadata = dict(node.get("metadata") or {})
-        declared = str(metadata.get("evidence_class") or "").upper()
-        if metadata.get("source") == "test_generator" or metadata.get("generated") is True:
-            evidence_class = "SYNTHETIC"
-        elif declared in {"OBSERVED", "MEASURED", "SYNTHETIC", "INFERRED"}:
-            evidence_class = declared
-        else:
-            evidence_class = "INFERRED"
         return {
             "id": node_id, "kind": str(node.get("kind") or node.get("type") or "entity"),
             "position": _position(node), "labels": dict(node.get("labels") or {}),
-            "metadata": metadata, "evidenceClass": evidence_class,
-            "observedAt": node.get("observed_at") or node.get("timestamp") or node.get("created_at"),
+            "metadata": metadata, "evidenceClass": _evidence_class(node),
+            "observedAt": _timestamp(node.get("observed_at") or metadata.get("observed_at") or
+                                     node.get("timestamp") or node.get("updated_at") or node.get("created_at")),
         }
 
     @staticmethod
@@ -101,6 +187,25 @@ class GraphSelectionResolver:
         target = edge.get("target", edge.get("dst"))
         return [str(value) for value in (source, target) if value is not None]
 
+    @classmethod
+    def _normalize_edge(cls, edge: Dict[str, Any]) -> Dict[str, Any]:
+        metadata = dict(edge.get("metadata") or {})
+        contradictions = edge.get("contradictions", edge.get("contradicts", metadata.get("contradictions", [])))
+        if isinstance(contradictions, str):
+            contradictions = [contradictions]
+        if not isinstance(contradictions, (list, tuple)):
+            contradictions = []
+        return {
+            "id": _edge_id(edge),
+            "kind": str(edge.get("kind") or edge.get("type") or "edge"),
+            "nodes": cls._edge_nodes(edge),
+            "observedAt": _timestamp(edge.get("observed_at") or edge.get("timestamp") or edge.get("created_at")),
+            "timestamp": _timestamp(edge.get("timestamp") or edge.get("observed_at") or edge.get("created_at")),
+            "metadata": metadata,
+            "evidenceClass": _evidence_class(edge),
+            "contradictions": [str(item) for item in contradictions[:20]],
+        }
+
     def snapshot(self, *, node_limit: int = 200, edge_limit: int = 300) -> Dict[str, Any]:
         node_limit = min(max(int(node_limit), 1), 500)
         edge_limit = min(max(int(edge_limit), 1), 1000)
@@ -110,25 +215,42 @@ class GraphSelectionResolver:
         for edge in self._edges():
             members = self._edge_nodes(edge)
             if members and all(member in allowed for member in members):
-                edges.append({
-                    "id": str(edge.get("id") or edge.get("edge_id") or edge.get("_fallback_id", "")),
-                    "kind": str(edge.get("kind") or edge.get("type") or "edge"),
-                    "nodes": members, "timestamp": edge.get("timestamp"),
-                })
+                edges.append(self._normalize_edge(edge))
             if len(edges) >= edge_limit:
                 break
-        return {
+        snapshot = {
             "status": "ok", "graphRevision": self.revision(), "nodes": nodes,
             "edges": edges, "bounded": True, "nodeLimit": node_limit,
             "edgeLimit": edge_limit, "nodeCount": len(nodes), "edgeCount": len(edges),
         }
+        _remember_snapshot(snapshot)
+        return snapshot
 
     def resolve(self, selection: Dict[str, Any]) -> Dict[str, Any]:
         requested_revision = selection.get("graphRevision")
         revision = self.revision()
         if requested_revision and requested_revision != revision:
-            raise GraphResolutionError("graph selection is stale; graph revision changed")
+            snapshot = _cached_snapshot(str(requested_revision))
+            if snapshot is None:
+                raise GraphResolutionError("graph selection is stale; retained snapshot is unavailable")
+            self._pinned_nodes = snapshot["nodes"]
+            self._pinned_edges = snapshot["edges"]
+            self._pinned_revision = snapshot["graphRevision"]
+            revision = self._pinned_revision
         entity_id = str(selection.get("entityId", ""))
+        selection_kind = selection.get("kind", "graph-node")
+        if selection_kind == "graph-edge":
+            edge = next((self._normalize_edge(candidate) for candidate in self._edges()
+                         if self._normalize_edge(candidate)["id"] == entity_id), None)
+            if edge is None:
+                raise GraphResolutionError("selected graph edge was not found")
+            nodes_by_id = {item["id"]: item for item in map(self._normalize_node, self._nodes())}
+            members = [nodes_by_id[node_id] for node_id in edge["nodes"] if node_id in nodes_by_id]
+            positions = [member["position"] for member in members if member.get("position")]
+            edge["position"] = ([sum(item[index] for item in positions) / len(positions) for index in range(3)]
+                                if positions else None)
+            return {"graphRevision": revision, "selectionKind": selection_kind, "edge": edge,
+                    "memberNodes": members[:20], "incidentEdges": [edge], "bounded": True}
         node = next((self._normalize_node(candidate) for candidate in self._nodes()
                      if _node_id(candidate, candidate.get("_fallback_id", "")) == entity_id), None)
         if node is None:
@@ -136,11 +258,74 @@ class GraphSelectionResolver:
         incident = []
         for edge in self._edges():
             if entity_id in self._edge_nodes(edge):
-                incident.append({
-                    "id": str(edge.get("id") or edge.get("edge_id") or edge.get("_fallback_id", "")),
-                    "kind": str(edge.get("kind") or edge.get("type") or "edge"),
-                    "nodes": self._edge_nodes(edge), "timestamp": edge.get("timestamp"),
-                })
+                incident.append(self._normalize_edge(edge))
             if len(incident) >= 50:
                 break
-        return {"graphRevision": revision, "node": node, "incidentEdges": incident, "bounded": True}
+        return {"graphRevision": revision, "selectionKind": selection_kind,
+                "node": node, "incidentEdges": incident, "bounded": True}
+
+    def delta(self, start: float, end: float, *, limit: int = 100) -> Dict[str, Any]:
+        start = float(start); end = float(end)
+        if not math.isfinite(start) or not math.isfinite(end) or start == end:
+            raise GraphResolutionError("time pins must be finite and distinct")
+        if start > end:
+            start, end = end, start
+        limit = min(max(int(limit), 1), 200)
+        nodes = [self._normalize_node(item) for item in self._nodes()]
+        edges = [self._normalize_edge(item) for item in self._edges()]
+        added_nodes = [item for item in nodes if item["observedAt"] is not None and start < item["observedAt"] <= end][:limit]
+        added_edges = [item for item in edges if item["observedAt"] is not None and start < item["observedAt"] <= end][:limit]
+        unknown = sum(item["observedAt"] is None for item in [*nodes, *edges])
+        return {"graphRevision": self.revision(), "from": start, "to": end,
+                "addedNodes": added_nodes, "addedEdges": added_edges,
+                "removedNodes": [], "removedEdges": [], "unknownTimeCount": unknown,
+                "bounded": True, "limit": limit,
+                "temporalSemantics": "CURRENT_GRAPH_TIMESTAMP_PROJECTION; NOT A HISTORICAL SNAPSHOT DIFF"}
+
+    def provenance(self, selection: Dict[str, Any], *, depth: int = 3, limit: int = 100) -> Dict[str, Any]:
+        resolved = self.resolve(selection)
+        depth = min(max(int(depth), 0), 5); limit = min(max(int(limit), 1), 200)
+        start_ids = ([resolved["node"]["id"]] if resolved.get("node") else list(resolved["edge"]["nodes"]))
+        nodes = {item["id"]: item for item in map(self._normalize_node, self._nodes())}
+        edges = [self._normalize_edge(item) for item in self._edges()]
+        visited = set(start_ids); frontier = list(start_ids); path_edges = []
+        for _ in range(depth):
+            next_frontier = []
+            for edge in edges:
+                if not visited.intersection(edge["nodes"]):
+                    continue
+                if edge["id"] not in {item["id"] for item in path_edges}:
+                    path_edges.append(edge)
+                for node_id in edge["nodes"]:
+                    if node_id not in visited:
+                        visited.add(node_id); next_frontier.append(node_id)
+                if len(visited) + len(path_edges) >= limit:
+                    break
+            frontier = next_frontier
+            if not frontier or len(visited) + len(path_edges) >= limit:
+                break
+        path_nodes = [nodes[node_id] for node_id in visited if node_id in nodes]
+        sources = []
+        for entity in [*path_nodes, *path_edges]:
+            metadata = entity.get("metadata") or {}
+            source = metadata.get("source") or metadata.get("provenance") or metadata.get("dataset")
+            if source is not None:
+                sources.append({"entityId": entity["id"], "source": source})
+        return {"graphRevision": self.revision(), "root": selection.get("entityId"),
+                "nodes": path_nodes[:limit], "edges": path_edges[:limit], "sources": sources[:limit],
+                "bounded": True, "depth": depth, "limit": limit}
+
+    def contradictions(self, selection: Dict[str, Any], *, limit: int = 100) -> Dict[str, Any]:
+        provenance = self.provenance(selection, depth=2, limit=limit)
+        entity_ids = {item["id"] for item in [*provenance["nodes"], *provenance["edges"]]}
+        findings = []
+        for edge in map(self._normalize_edge, self._edges()):
+            kind_is_contradiction = "contradict" in edge["kind"].lower() or "conflict" in edge["kind"].lower()
+            explicit = edge.get("contradictions") or []
+            if entity_ids.intersection(edge["nodes"]) and (kind_is_contradiction or explicit):
+                findings.append({**edge, "findingClass": "CONTRADICTION",
+                                 "reason": "explicit contradiction relation" if explicit else "contradiction edge kind"})
+            if len(findings) >= min(max(int(limit), 1), 200):
+                break
+        return {"graphRevision": self.revision(), "root": selection.get("entityId"),
+                "contradictions": findings, "bounded": True, "limit": limit}

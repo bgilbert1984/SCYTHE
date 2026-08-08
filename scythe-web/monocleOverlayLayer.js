@@ -394,6 +394,7 @@ export class MonocleOverlayLayer {
         material: color,
         outline: true,
         outlineColor: this.Cesium.Color.fromCssColorString(style.color),
+        height: 0,
       },
       properties: {
         datasetId: sample.datasetId,
@@ -487,6 +488,7 @@ export class MonocleOverlayLayer {
         material: this.Cesium.Color.fromCssColorString("#f7d154").withAlpha(0.14),
         outline: true,
         outlineColor: this.Cesium.Color.fromCssColorString("#f7d154").withAlpha(0.8),
+        height: 0,
       },
       properties: {
         uncertaintyKind: uncertainty.kind,

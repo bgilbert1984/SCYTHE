@@ -83,6 +83,34 @@ expensive observation that would distinguish them.
 - Compare this hour with the same hour yesterday.** Normalize for sensor
   availability and configuration changes before reporting behavioral drift.
 
+## Operate on the Moon
+
+- **Explain this lunar location.** Resolve the picked point in the declared
+  Moon-fixed frame, display available evidence and authority, and refuse any
+  terrain or ephemeris claim whose registered source has not been ingested.
+- **Reveal the frame behind this lunar overlay.** State the celestial body,
+  reference ellipsoid, body-fixed frame, longitude convention, latitude type,
+  epoch dependencies, and kernel or product lineage.
+- **Separate lunar reference imagery from sampleable terrain.** Keep
+  illustrative textures and published image panels visible while preventing
+  their pixels from becoming elevation, slope, illumination, or visibility
+  measurements.
+- **Traverse this lunar location's provenance.** Follow the selection through
+  its dataset manifest, checksum-bound artifacts, registered DEM tile, frame
+  transform, solver run, and display transform; stop at every absent link.
+- **Show what Earth can see from here at this time.** Require a pinned SPICE
+  kernel set and registered terrain before evaluating line of sight; otherwise
+  return the missing authorities as a refusal.
+- **Find terrain that could occult this link.** Compute the path only inside a
+  versioned lunar world with registered elevation and state every sampling and
+  interpolation assumption.
+- **Compare illumination and communications windows.** Keep source epochs,
+  coordinate frames, terrain occlusion, and uncertainty explicit instead of
+  treating a reference illumination image as a live forecast.
+- **Design the smallest lunar observation that resolves this ambiguity.** Name
+  the required instrument, location, time window, accuracy, and authority
+  needed to discriminate among the surviving worlds.
+
 ## Correlate RF and graph behavior
 
 - **Find graph entities activated during this RF transition.** Run a

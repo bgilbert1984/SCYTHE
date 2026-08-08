@@ -25,7 +25,8 @@ The modules are:
 - `browser-entry.js`: opt-in integration with `cesium-hypergraph-globe.html`.
 - `directiveProtocol.js`: strict GraphOps Directive Request and EffectPlan v1
   validation with allow-listed effect and style tokens.
-- `selectionModel.js`: typed, revisioned browser selections.
+- `selectionModel.js`: typed, revisioned RF-cell, graph-node, graph-edge,
+  event, and paired time-pin selections.
 - `effectRuntime.js`: transactional apply/revert behavior for declarative
   browser effects.
 - `visualEffects.js`: Cesium implementations of allow-listed Clarktech visual
@@ -33,7 +34,16 @@ The modules are:
 - `realityPrism.js`: authority, lineage, display-difference, threshold, and
   falsifier presentation for a selected RF cell.
 - `graphOverlayLayer.js`: bounded, revision-pinned geospatial graph nodes and
-  inferred relationships with typed graph selection events.
+  inferred relationships with typed node, event, and edge selection events.
+- `liveHypergraphView.js`: bounded 2D topology for live non-geospatial network
+  events, with evidence styling, revision-aware refresh, and typed selection.
+- `celestialBodies.js`: explicit Earth/Moon ellipsoids and body-fixed
+  coordinate conversion that prevents accidental WGS84 reuse.
+- `lunarDataset.js`: exact Lunar Reference v1 manifest validation and browser
+  SHA-256 verification of every packaged asset.
+- `lunarWorld.js`: token-free Moon-native Cesium globe, polar reference grid,
+  and typed Moon-fixed surface selection.
+- `lunarPrism.js`: sparse-evidence Lunar Reality Prism rendering.
 
 The core has no propagation model and no random fallback. It does not guess a
 binary tile layout. Use `GeodeticTileIndex` plus `VerifiedTileLoader` when the
@@ -155,8 +165,42 @@ solver cell is never treated as event-time evidence: absent measured support is
 rendered as `TEMPORAL_EVIDENCE: ABSENT`, while any temporal match is rendered
 as a dashed `INFERRED` correlation fiber explicitly labelled “not causation.”
 
+Phase 2B adds three read-only graph operations. Select a node, event, or edge
+to trace bounded declared provenance or expose explicit contradiction
+relations. Choose two UTC pins to execute `GRAPH_DELTA`; the result is labelled
+as a current-graph timestamp projection because removals cannot be proven
+without retained historical snapshots. The demo can also ingest a measured RF
+spectral summary through `/api/graphops/rf-observations`. This endpoint accepts
+frequency, signal/noise, sensor, and timestamp metadata only. Raw IQ and
+unknown fields are rejected, and accepted observations are classified
+`OBSERVED` rather than solver output.
+
+The regional demo also contains a live network hypergraph fed through the Eve
+Streamer protobuf service. It polls the stable orchestrator every two seconds,
+renders network topology in a separate 2D panel, and never converts IP
+addresses into guessed globe positions. `test_*` and `synthetic_*` event types
+remain `SYNTHETIC`; ordinary Suricata summaries are `OBSERVED`. See
+[`../docs/Eve_Live_Hypergraph.md`](../docs/Eve_Live_Hypergraph.md) for the
+transport, service configuration, production cutover, and verification steps.
+
 The existing globe loads `scythe-web/browser-entry.js` as an ES module at the
 end of `cesium-hypergraph-globe.html`. Activation remains deliberately opt-in.
+
+## Lunar South Pole M0
+
+With the orchestrator running, open
+`http://127.0.0.1:5001/scythe-web/lunar-ops-demo.html`. The standalone lunar
+instrument needs no Cesium ion token. It uses a Moon-radius ellipsoid, declares
+the `MOON_ME_DE421` body-fixed frame, checksum-verifies its local reference
+assets, and sends typed `lunar-location` selections to GraphOps.
+
+Clicking the surface executes `explain.lunar-location` in preview mode and
+renders `view.show-lunar-prism`. M0 intentionally has no registered terrain:
+elevation, slope, illumination, Earth visibility, and RF occultation remain
+unasserted. The two NASA panels and the Cesium reference texture are
+visualization references, not sampleable scientific surfaces. See
+[`../docs/Lunar_Clarktech_M0.md`](../docs/Lunar_Clarktech_M0.md) for the
+authority contract, provenance, validation, and M1 handoff.
 
 Run the dependency-free unit tests with:
 

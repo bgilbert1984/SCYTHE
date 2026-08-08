@@ -1,0 +1,83 @@
+{
+  "schemaVersion": "SCYTHE_LUNAR_REFERENCE_V1",
+  "datasetId": "lunar-south-pole-reference-m0",
+  "title": "Lunar South Pole Reference Evidence — M0",
+  "description": "Checksum-pinned reference visualizations for the first token-free SCYTHE lunar world. These images are not registered elevation tiles and are never sampled as terrain authority.",
+  "celestialBody": "MOON",
+  "evidenceClass": "DERIVED_VISUALIZATION",
+  "spatialReference": {
+    "bodyFixedFrame": "MOON_ME_DE421",
+    "longitudeConvention": "EAST_POSITIVE_180",
+    "latitudeType": "PLANETOCENTRIC",
+    "referenceRadiusMeters": 1737400,
+    "verticalDatum": "LUNAR_REFERENCE_RADIUS",
+    "renderRegistration": "REFERENCE_PANEL_ONLY"
+  },
+  "viewer": {
+    "ellipsoid": "CESIUM_ELLIPSOID_MOON",
+    "terrainAuthority": "ABSENT_M0",
+    "textureRole": "ILLUSTRATIVE_BASE_TEXTURE",
+    "defaultView": {"longitudeDegrees": 0, "latitudeDegrees": -89, "heightMeters": 850000}
+  },
+  "assets": [
+    {
+      "id": "lroc-multitemporal-illumination",
+      "path": "lunar-south-pole-illumination.png",
+      "mediaType": "image/png",
+      "role": "REFERENCE_VISUALIZATION",
+      "sha256": "b41ba69dd4981c7d077781c4fc189d22d32aed97f31a5220a4cf37b58079b036",
+      "sourceUrl": "https://assets.science.nasa.gov/dynamicimage/assets/science/psd/solar/2023/09/l/lunar_south_pole_lroc.png?crop=faces%2Cfocalpoint&fit=clip&h=1214&w=1214",
+      "productPage": "https://science.nasa.gov/resource/illumination-map-of-the-moons-south-pole/",
+      "credit": "NASA/GSFC/Arizona State University",
+      "instrument": "LROC",
+      "mission": "LRO"
+    },
+    {
+      "id": "lola-slope-hyperwall",
+      "path": "lola-slope-map.jpg",
+      "mediaType": "image/jpeg",
+      "role": "REFERENCE_VISUALIZATION",
+      "sha256": "6d8b8c59bfd162ee1adb661c9ef13af4985e7a780c93a3b042f5931bb1ccfc25",
+      "sourceUrl": "https://svs.gsfc.nasa.gov/vis/a000000/a004200/a004226/slope_map_3x1_print.jpg",
+      "productPage": "https://svs.gsfc.nasa.gov/4226",
+      "credit": "NASA/GSFC/MIT/SVS",
+      "instrument": "LOLA",
+      "mission": "LRO"
+    },
+    {
+      "id": "cesium-moon-reference-texture",
+      "path": "moon-reference-texture.jpg",
+      "mediaType": "image/jpeg",
+      "role": "ILLUSTRATIVE_BASE_TEXTURE",
+      "sha256": "380fa69424e1cd2268816e346dc56393bd1c809b8e0cb078e705ec469a5847db",
+      "sourceUrl": "https://cesium.com/downloads/cesiumjs/releases/1.114/Build/Cesium/Assets/Textures/moonSmall.jpg",
+      "productPage": "https://cesium.com/learn/cesiumjs/ref-doc/Moon.html",
+      "credit": "CesiumJS reference texture",
+      "instrument": null,
+      "mission": null
+    }
+  ],
+  "authoritativeSources": [
+    {
+      "id": "pgda-lola-south-pole",
+      "role": "PLANNED_MACHINE_REGISTERED_TERRAIN",
+      "url": "https://pgda.gsfc.nasa.gov/products/90",
+      "frame": "MOON_ME_DE421",
+      "status": "NOT_INGESTED_M0"
+    },
+    {
+      "id": "naif-spice",
+      "role": "PLANNED_EPHEMERIS_AND_FRAME_AUTHORITY",
+      "url": "https://naif.jpl.nasa.gov/naif/toolkit.html",
+      "frame": "DECLARED_BY_KERNEL_SET",
+      "status": "NOT_INGESTED_M0"
+    }
+  ],
+  "limitations": [
+    "No packaged asset in M0 is a registered digital elevation model.",
+    "The base texture is illustrative and cannot support scientific claims.",
+    "The LROC and LOLA images are reference panels, not geospatial sample surfaces.",
+    "Earth visibility, illumination, link delay, and terrain occultation require pinned SPICE and LOLA products in a later phase."
+  ],
+  "retrievedAt": "2026-08-07T00:00:00Z"
+}

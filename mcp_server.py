@@ -475,6 +475,46 @@ def register_mcp_routes(app, engine, use_orchestrator: bool = False, auth_valida
         except (TypeError, ValueError) as exc:
             return jsonify({'status': 'error', 'message': str(exc), 'nodes': [], 'edges': []}), 400
 
+    @app.route('/api/graphops/rf-observations', methods=['POST'])
+    def graphops_rf_observation_ingest():
+        if not _authorized():
+            return _unauthorized()
+        try:
+            from graphops_rf_ingest import ingest_measured_rf
+            from rf_bridge import get_rf_observation_store
+            result = ingest_measured_rf(get_rf_observation_store(), request.get_json(silent=True))
+            return jsonify(result), 201 if result['status'] == 'accepted' else 202
+        except (TypeError, ValueError, KeyError) as exc:
+            return jsonify({'status': 'rejected', 'error': str(exc), 'rawIqAccepted': False}), 400
+
+    @app.route('/api/graphops/rf-observations/status', methods=['GET'])
+    def graphops_rf_observation_status():
+        if not _authorized():
+            return _unauthorized()
+        from rf_bridge import get_rf_observation_store
+        return jsonify({'status': 'ok', **get_rf_observation_store().stats(),
+                        'authority': 'MEASURED_SPECTRAL_SUMMARY', 'rawIqAccepted': False})
+
+    @app.route('/api/graphops/eve/events', methods=['POST'])
+    def graphops_eve_events():
+        if not _authorized():
+            return _unauthorized()
+        try:
+            from eve_graph_ingest import commit_eve_events, validate_eve_batch
+            import writebus
+            events = validate_eve_batch(request.get_json(silent=True))
+            return jsonify(commit_eve_events(events, writebus.bus()))
+        except (TypeError, ValueError, KeyError) as exc:
+            return jsonify({'status': 'rejected', 'error': str(exc),
+                            'rawPacketsAccepted': False}), 400
+
+    @app.route('/api/graphops/eve/status', methods=['GET'])
+    def graphops_eve_status():
+        if not _authorized():
+            return _unauthorized()
+        from eve_graph_ingest import STATS
+        return jsonify({'status': 'ok', **STATS.snapshot()})
+
     def _directive_response(expected_mode):
         if not _authorized():
             return _unauthorized()

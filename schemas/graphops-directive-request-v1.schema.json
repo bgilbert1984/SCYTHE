@@ -8,7 +8,7 @@
   "properties": {
     "protocolVersion": {"const": "1.0"},
     "directiveId": {"type": "string", "pattern": "^[A-Za-z0-9._:-]{1,128}$"},
-    "directive": {"enum": ["explain.coverage-cell", "reclassify.coverage-threshold", "correlate.rf-cell-graph"]},
+    "directive": {"enum": ["explain.coverage-cell", "reclassify.coverage-threshold", "correlate.rf-cell-graph", "compare.graph-delta", "trace.provenance-impact", "expose.contradictions", "explain.lunar-location"]},
     "utterance": {"type": "string", "maxLength": 2000},
     "selection": {
       "type": "array", "minItems": 1, "maxItems": 16,
@@ -16,7 +16,7 @@
         "type": "object", "additionalProperties": false,
         "required": ["kind"],
         "properties": {
-          "kind": {"enum": ["rf-cell", "graph-node", "event"]},
+          "kind": {"enum": ["rf-cell", "lunar-location", "graph-node", "graph-edge", "event", "time-pin"]},
           "datasetId": {"type": "string", "pattern": "^[A-Za-z0-9._-]{1,128}$"},
           "tileId": {"type": "string", "pattern": "^[A-Za-z0-9._:/-]{1,256}$"},
           "longitudeDegrees": {"type": "number", "minimum": -180, "maximum": 180},
@@ -28,6 +28,14 @@
           "graphRevision": {"type": "string", "minLength": 1, "maxLength": 128},
           "position": {"type": "array", "minItems": 2, "maxItems": 3, "items": {"type": "number"}},
           "observedAt": {"type": ["number", "string", "null"]},
+          "timestamp": {"type": "number"},
+          "clockId": {"type": "string", "minLength": 1, "maxLength": 128},
+          "uncertaintyMilliseconds": {"type": "number", "minimum": 0},
+          "locationId": {"type": "string", "minLength": 1, "maxLength": 256},
+          "celestialBody": {"const": "MOON"},
+          "referenceFrame": {"const": "MOON_ME_DE421"},
+          "heightMeters": {"type": "number"},
+          "spatialAuthority": {"const": "REFERENCE_ELLIPSOID_ONLY"},
           "coverageThreshold": {
             "type": "object", "additionalProperties": false,
             "required": ["value", "units", "comparison"],
@@ -43,7 +51,9 @@
       "type": "object", "additionalProperties": false,
       "properties": {
         "threshold": {"type": "number"}, "units": {"type": "string"},
-        "comparison": {"enum": ["LTE", "GTE"]}
+        "comparison": {"enum": ["LTE", "GTE"]},
+        "depth": {"type": "integer", "minimum": 0, "maximum": 5},
+        "limit": {"type": "integer", "minimum": 1, "maximum": 200}
       }
     },
     "viewContext": {"type": "object"},

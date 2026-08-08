@@ -56,6 +56,12 @@ def correlation_request(*, mode="preview"):
     return payload
 
 
+def graph_request(directive, *, mode="execute", selection=None, parameters=None):
+    return {"protocolVersion": "1.0", "directiveId": "dir-graph", "directive": directive,
+            "utterance": "fixture", "selection": selection or [], "parameters": parameters or {},
+            "requestedMode": mode, "idempotencyKey": f"fixture:{directive}:{mode}"}
+
+
 class GraphOpsDirectorTests(unittest.TestCase):
     def test_resolver_reads_verified_float64_authority_not_display_claim(self):
         evidence = RFCellEvidenceResolver().resolve(request()["selection"][0])
@@ -105,6 +111,17 @@ class GraphOpsDirectorTests(unittest.TestCase):
         with self.assertRaisesRegex(GraphResolutionError, "stale"):
             resolver.resolve(stale)
 
+    def test_recent_rendered_snapshot_remains_selectable_while_live_graph_advances(self):
+        engine = _GraphEngine()
+        snapshot = GraphSelectionResolver(engine).snapshot(node_limit=10, edge_limit=10)
+        engine.nodes["later"] = {"id": "later", "kind": "network_burst", "timestamp": 101.0}
+        resolved = GraphSelectionResolver(engine).resolve({
+            "kind": "graph-node", "entityId": "burst-a",
+            "graphRevision": snapshot["graphRevision"],
+        })
+        self.assertEqual(resolved["graphRevision"], snapshot["graphRevision"])
+        self.assertEqual(resolved["node"]["id"], "burst-a")
+
     def test_generated_graph_nodes_remain_synthetic(self):
         engine = _GraphEngine()
         engine.nodes["burst-a"]["metadata"] = {"source": "test_generator"}
@@ -126,6 +143,41 @@ class GraphOpsDirectorTests(unittest.TestCase):
         fiber = next(effect for effect in plan["effects"] if effect["type"] == "view.show-correlation-fibers")
         self.assertEqual(fiber["parameters"]["findingClass"], "INFERRED")
         self.assertIn("not evidence of causality", fiber["parameters"]["caveat"])
+
+    def test_graph_edge_selection_is_revision_pinned(self):
+        resolver = GraphSelectionResolver(_GraphEngine())
+        resolved = resolver.resolve({"kind": "graph-edge", "entityId": "edge-a",
+                                     "graphRevision": resolver.revision()})
+        self.assertEqual(resolved["edge"]["id"], "edge-a")
+        self.assertEqual(resolved["selectionKind"], "graph-edge")
+
+    def test_graph_delta_declares_timestamp_projection_boundary(self):
+        payload = graph_request("compare.graph-delta", selection=[
+            {"kind": "time-pin", "timestamp": 99, "clockId": "UTC"},
+            {"kind": "time-pin", "timestamp": 101, "clockId": "UTC"},
+        ], parameters={"limit": 100})
+        plan = GraphOpsDirector(engine=_GraphEngine()).compile(payload, expected_mode="execute")
+        self.assertIn("GRAPH_DELTA", "\n".join(plan["queries"][0]["dsl"]))
+        delta = next(effect for effect in plan["effects"] if effect["type"] == "view.show-graph-delta")
+        self.assertIn("NOT A HISTORICAL SNAPSHOT DIFF", delta["parameters"]["delta"]["temporalSemantics"])
+
+    def test_provenance_and_contradictions_are_bounded_read_only_plans(self):
+        engine = _GraphEngine()
+        engine.edges["edge-a"]["metadata"] = {"source": "pcap:fixture"}
+        engine.edges["edge-c"] = {"id": "edge-c", "kind": "contradicts",
+                                   "nodes": ["burst-a", "claim-b"], "timestamp": 100.5}
+        revision = GraphSelectionResolver(engine).revision()
+        selection = [{"kind": "graph-node", "entityId": "burst-a", "graphRevision": revision}]
+        provenance = GraphOpsDirector(engine=engine).compile(graph_request(
+            "trace.provenance-impact", selection=selection, parameters={"depth": 2, "limit": 50}),
+            expected_mode="execute")
+        self.assertEqual(provenance["mutations"], [])
+        self.assertEqual(provenance["supportingEvidence"][0]["path"]["sources"][0]["source"], "pcap:fixture")
+        contradictions = GraphOpsDirector(engine=engine).compile(graph_request(
+            "expose.contradictions", selection=selection, parameters={"limit": 50}),
+            expected_mode="execute")
+        self.assertEqual(len(contradictions["contradictingEvidence"]), 1)
+        self.assertEqual(contradictions["contradictingEvidence"][0]["findingClass"], "CONTRADICTION")
 
 
 if __name__ == "__main__":
