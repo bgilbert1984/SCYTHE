@@ -1271,3 +1271,36 @@ revisions. A time pin outside retained history is clamped to the nearest
 available immutable state and visibly labelled `CLAMPED`; SCYTHE does not claim
 that such a diff exactly represents the requested instant. Durable historical
 replay remains future work.
+
+## 29. Implemented adaptive GraphOps-to-view routing
+
+The GraphOps directive panel and resizable live-hypergraph window now share an
+ephemeral `InvestigationContext`. Typed selections produce a deterministic
+capability set: actions become available only when their RF, graph, and time
+requirements are present, while the panel names missing context instead of
+silently accepting an underspecified directive. The persisted
+`InvestigationStore` remains the bounded record of selection and plan summaries;
+the context layer adds no authority and performs no graph mutation.
+
+Validated EffectPlans can generate a browser-local `ViewIntent` only for an
+allow-listed effect-to-view mapping. The initial mappings are:
+
+- `view.show-graph-provenance` → **Provenance Lattice**;
+- `view.show-graph-delta` → **Temporal Wake**;
+- `view.show-contradictions` → **Contradiction Field**.
+
+The router revalidates the complete EffectPlan before deriving the intent,
+rejects unknown fields, arbitrary view names, and cross-effect routing, and
+caps focus identifiers. It does not accept server-provided JavaScript, DOM
+selectors, style declarations, or executable commands. Result payloads remain
+the bounded parameters of the already validated reversible visual effect.
+
+Each result creates or refreshes a closable contextual tab in the resizable
+window. Provenance displays the selected root, bounded traversal, and declared
+sources; Temporal Wake displays immutable-snapshot additions, removals, and
+changes; Contradiction Field preserves explicit competing relations and an
+unambiguous no-findings state. Every tab repeats the evidence posture and
+authority boundary. Selecting an entity inside a result emits the same typed,
+revision-pinned graph-selection event as the 2D and 3D topology renderers, so
+the result can adapt the GraphOps menu without creating a second selection or
+execution protocol.

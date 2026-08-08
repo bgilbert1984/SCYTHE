@@ -16,13 +16,13 @@
       color:#ccefff; font-size:11px; letter-spacing:.08em; pointer-events:none;
     }
     .directive {
-      position:absolute; top:52px; right:12px; z-index:56; width:min(390px,calc(100vw - 24px));
+      position:absolute; top:52px; right:12px; z-index:58; width:min(390px,calc(100vw - 24px));
       max-height:calc(100vh - 64px); overflow:auto; box-sizing:border-box; padding:7px 8px 8px;
       border:1px solid rgba(0,212,255,.55); background:rgba(0,12,28,.92);
       color:#ccefff; font:10px/1.35 ui-monospace,monospace; white-space:pre-wrap;
     }
     .directive[hidden] { display:none; }
-    .directive-dismiss-layer { position:absolute; inset:0; z-index:55; background:transparent; }
+    .directive-dismiss-layer { position:absolute; inset:0; z-index:56; background:transparent; }
     .directive-dismiss-layer[hidden] { display:none; }
     .directive__header { display:flex; min-height:22px; align-items:center; justify-content:space-between;
       gap:8px; padding-bottom:5px; border-bottom:1px dashed rgba(0,212,255,.3); }
@@ -37,6 +37,7 @@
     .directive button,.directive input { color:#ccefff; background:#071422; border:1px solid #00d4ff;
       font:9px/1.2 ui-monospace,monospace; padding:3px 5px; box-sizing:border-box; }
     .directive button:disabled { color:#526674; border-color:#24404f; opacity:.7; }
+    .directive button[hidden] { display:none; }
     .directive input { width:56px; min-height:22px; }
     .directive input.wide { width:153px; }
     .directive__controls--actions { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); }
@@ -44,7 +45,7 @@
     .directive__analysis { margin-top:5px; padding-top:5px; border-top:1px dashed rgba(247,209,84,.45); color:#f7d154; }
     .directive__analysis[hidden] { display:none; }
     .live-hypergraph {
-      position:absolute; left:12px; bottom:12px; z-index:54; width:min(460px,calc(100vw - 24px));
+      position:absolute; left:12px; bottom:12px; z-index:57; width:min(460px,calc(100vw - 24px));
       min-width:min(320px,calc(100vw - 24px)); min-height:min(220px,calc(100vh - 24px));
       max-width:calc(100vw - 24px); max-height:calc(100vh - 24px);
       height:300px; border:1px solid rgba(0,212,255,.45); background:rgba(0,8,20,.9);
@@ -59,12 +60,15 @@
     .live-hypergraph__resize:hover,.live-hypergraph__resize:focus-visible,
     .live-hypergraph__resize[data-dragging="true"] { color:#fff; outline:1px solid #00d4ff;
       outline-offset:-3px; box-shadow:0 0 12px rgba(0,212,255,.45); }
-    .live-hypergraph__modes { display:flex; gap:5px; padding:5px 8px;
+    .live-hypergraph__modes { display:flex; flex-wrap:wrap; gap:4px; padding:5px 8px;
       border-bottom:1px dashed rgba(0,212,255,.25); }
     .live-hypergraph__modes button { color:#7f9bad; background:#071422; border:1px solid #24506a;
       font:9px ui-monospace,monospace; padding:3px 8px; cursor:pointer; }
     .live-hypergraph__modes button[aria-pressed="true"] { color:#ccefff; border-color:#00d4ff;
       box-shadow:inset 0 0 8px rgba(0,212,255,.18); }
+    .live-hypergraph__context-tab { display:inline-flex; }
+    .live-hypergraph__context-tab-main { border-right:0!important; }
+    .live-hypergraph__context-tab-close { width:18px; padding:2px!important; color:#ff7890!important; }
     .live-hypergraph__viewport { position:relative; min-height:0; overflow:hidden; }
     .live-hypergraph__viewport[hidden] { display:none; }
     .live-hypergraph svg,.live-hypergraph__three { width:100%; height:100%; min-height:0; display:block; }
@@ -78,6 +82,33 @@
       font:9px/1.35 ui-monospace,monospace; white-space:pre-wrap; pointer-events:none; }
     .live-hypergraph__three-stats { position:absolute; top:6px; left:7px; color:#66ddff;
       font:8px ui-monospace,monospace; opacity:.78; pointer-events:none; }
+    .live-hypergraph__result { overflow:auto; padding:7px 8px; box-sizing:border-box;
+      color:#b8cad6; font:9px/1.35 ui-monospace,monospace; }
+    .graph-result__authority { color:#66ddff; padding-bottom:5px; border-bottom:1px dashed rgba(0,212,255,.3); }
+    .graph-result__boundary { margin-top:7px; padding-top:5px; color:#ff7890; border-top:1px dashed rgba(255,68,94,.5); }
+    .graph-result__lattice { display:grid; grid-template-columns:minmax(90px,.7fr) minmax(130px,1.2fr) minmax(130px,1fr);
+      gap:6px; margin-top:7px; min-width:380px; }
+    .graph-result__column { min-width:0; padding:5px; border:1px solid rgba(0,212,255,.22); }
+    .graph-result__column-title { color:#7f9bad; margin-bottom:4px; }
+    .graph-result__root { color:#f7d154; padding:5px; margin-top:6px; border:1px solid rgba(247,209,84,.35); overflow-wrap:anywhere; }
+    .graph-result__entity { display:block; width:100%; margin-top:3px; padding:3px 4px; overflow:hidden;
+      color:#b7ffdc; background:#071422; border:1px solid rgba(99,255,209,.3); text-align:left;
+      text-overflow:ellipsis; white-space:nowrap; font:8px ui-monospace,monospace; cursor:pointer; }
+    .graph-result__entity:hover,.graph-result__entity:focus-visible { border-color:#63ffd1; color:#fff; outline:none; }
+    .graph-result__source { margin-top:3px; color:#9eb6c7; overflow-wrap:anywhere; }
+    .graph-result__empty { padding:12px 6px; color:#7f9bad; text-align:center; }
+    .graph-result__time-window { margin-top:7px; padding:5px; color:#f7d154; text-align:center; border:1px solid rgba(247,209,84,.3); }
+    .graph-result__metrics { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:4px; margin-top:6px; }
+    .graph-result__metric { display:flex; flex-direction:column; padding:5px; border:1px solid #29404d; }
+    .graph-result__metric strong { font-size:15px; }.graph-result__metric span { color:#7f9bad; }
+    .graph-result__metric--added strong { color:#7dff7d; }.graph-result__metric--removed strong { color:#ff7890; }
+    .graph-result__metric--changed strong { color:#f7d154; }
+    .graph-result__changes { margin-top:6px; }.graph-result__change { display:grid; grid-template-columns:95px 1fr; gap:4px; align-items:center; }
+    .graph-result__change-kind { color:#7f9bad; }.graph-result__contradictions { display:grid; gap:5px; margin-top:6px; }
+    .graph-result__contradiction { padding:6px; border:1px solid rgba(255,68,94,.52);
+      background:linear-gradient(90deg,rgba(255,68,94,.09),transparent); }
+    .graph-result__fracture { color:#ff7890; letter-spacing:.08em; }.graph-result__reason { color:#f7d154; margin-top:4px; }
+    .graph-result__members { color:#9eb6c7; margin-top:3px; overflow-wrap:anywhere; }
     .world-stack { position:absolute; left:12px; top:52px; z-index:53; width:min(500px,calc(100vw - 24px));
       max-height:calc(100vh - 380px); overflow:auto; box-sizing:border-box; padding:9px;
       border:1px solid rgba(247,209,84,.55); background:rgba(5,10,22,.93); font:10px/1.4 ui-monospace,monospace; }
@@ -92,6 +123,8 @@
     .world-stack__boundary { color:#ff7890; margin-top:7px; border-top:1px dashed #ff445e; padding-top:5px; }
     .selection-tray { color:#9eb6c7; border:1px dashed rgba(0,212,255,.3); padding:4px 5px; margin-top:5px;
       overflow-wrap:anywhere; }
+    .directive__context { margin-top:5px; padding:4px 5px; border-left:2px solid rgba(99,255,209,.55); background:rgba(7,20,34,.62); }
+    .directive__context-signature { color:#63ffd1; }.directive__context-missing { color:#7f9bad; margin-top:2px; }
     @media (max-width:800px) { .live-hypergraph { height:220px; width:320px; } }
   </style>
   <script type="importmap">
@@ -105,9 +138,9 @@
     <aside id="live-hypergraph" class="live-hypergraph" aria-label="Live network hypergraph">
       <button class="live-hypergraph__resize" type="button" data-live-graph-resize aria-label="Resize live hypergraph">↗</button>
       <div class="live-hypergraph__status" data-live-graph-status>LIVE HYPERGRAPH // CONNECTING…</div>
-      <div class="live-hypergraph__modes" role="group" aria-label="Hypergraph view mode">
-        <button id="hypergraph-mode-3d" type="button" aria-pressed="true" disabled>3D CAUSAL CHAMBER</button>
-        <button id="hypergraph-mode-2d" type="button" aria-pressed="false">2D ACCESSIBLE</button>
+      <div class="live-hypergraph__modes" role="tablist" aria-label="Hypergraph views">
+        <button id="hypergraph-mode-3d" type="button" role="tab" aria-pressed="true" aria-selected="true" disabled>3D CAUSAL CHAMBER</button>
+        <button id="hypergraph-mode-2d" type="button" role="tab" aria-pressed="false" aria-selected="false">2D ACCESSIBLE</button>
       </div>
       <div id="live-hypergraph-3d-viewport" class="live-hypergraph__viewport">
         <div class="live-hypergraph__three" data-live-graph-3d></div>
@@ -128,6 +161,10 @@
       <pre id="dsl-preview" class="directive__analysis" hidden></pre>
       <pre id="correlation-status" class="directive__analysis" hidden></pre>
       <div id="selection-tray" class="selection-tray">INVESTIGATION // NO SELECTION</div>
+      <div class="directive__context">
+        <div id="context-signature" class="directive__context-signature">CONTEXT // EMPTY</div>
+        <div id="context-missing" class="directive__context-missing">SELECT AN RF CELL OR GRAPH ENTITY</div>
+      </div>
       <div class="directive__controls">
         <label>THRESHOLD <input id="threshold-value" type="number" value="145" step="1"></label>
         <button id="apply-threshold" type="button">APPLY LENS</button>
@@ -165,6 +202,9 @@
     import { LiveHypergraph3DView } from "./liveHypergraph3DView.js";
     import { ResizablePanel } from "./resizablePanel.js";
     import { InvestigationStore } from "./investigationStore.js";
+    import { InvestigationContext } from "./investigationContext.js";
+    import { viewIntentFromPlan } from "./viewIntent.js";
+    import { GraphResultTabs } from "./graphResultTabs.js";
     import { WorldStack } from "./worldStack.js";
 
     const viewerOptions = {
@@ -221,6 +261,8 @@
     });
     const selections = new SelectionModel();
     const investigation = new InvestigationStore({storage: window.sessionStorage});
+    const investigationContext = new InvestigationContext({selectionModel: selections, store: investigation});
+    window.scytheInvestigationContext = investigationContext;
     const worldStack = new WorldStack({root: document.getElementById("causal-world-stack"), store: investigation});
     const effects = registerVisualEffects(new EffectRuntime(), {
       viewer, Cesium, prismRoot: document.getElementById("reality-prism"),
@@ -249,13 +291,20 @@
     const mode2D = document.getElementById("hypergraph-mode-2d");
     const viewport3D = document.getElementById("live-hypergraph-3d-viewport");
     const viewport2D = document.getElementById("live-hypergraph-2d-viewport");
+    let resultTabs = null;
     function setHypergraphMode(mode) {
       const show3D = mode === "3d" && liveHypergraph3D;
-      viewport3D.hidden = !show3D; viewport2D.hidden = Boolean(show3D);
+      const show2D = mode === "2d" || (mode === "3d" && !liveHypergraph3D);
+      viewport3D.hidden = !show3D; viewport2D.hidden = !show2D;
       mode3D.setAttribute("aria-pressed", String(Boolean(show3D)));
-      mode2D.setAttribute("aria-pressed", String(!show3D));
+      mode3D.setAttribute("aria-selected", String(Boolean(show3D)));
+      mode2D.setAttribute("aria-pressed", String(Boolean(show2D)));
+      mode2D.setAttribute("aria-selected", String(Boolean(show2D)));
       liveHypergraph3D?.setVisible(Boolean(show3D));
+      resultTabs?.setVisible(mode);
     }
+    resultTabs = new GraphResultTabs({root: liveRoot, onSelect: setHypergraphMode});
+    window.scytheGraphResultTabs = resultTabs;
     mode3D.addEventListener("click", () => setHypergraphMode("3d"));
     mode2D.addEventListener("click", () => setHypergraphMode("2d"));
     try {
@@ -278,7 +327,7 @@
 
     function updateInvestigation() {
       const graphSelection = selections.items.find((item) => ["graph-node", "graph-edge", "event"].includes(item.kind));
-      investigation.captureSelections(selections.items, graphSelection?.graphRevision ?? liveGraphController.graphRevision);
+      investigationContext.refresh(graphSelection?.graphRevision ?? liveGraphController.graphRevision);
       const labels = selections.items.map((item) => item.kind === "rf-cell"
         ? `RF:${item.tileId}` : item.kind === "time-pin"
           ? `TIME:${new Date(item.timestamp * 1000).toISOString()}` : `${item.kind.toUpperCase()}:${item.entityId}`);
@@ -287,6 +336,21 @@
       document.getElementById("compare-worlds").disabled = !(kinds.has("rf-cell") &&
         (["graph-node", "graph-edge", "event"].some((kind) => kinds.has(kind))));
     }
+
+    investigationContext.subscribe((context) => {
+      const labels = context.selections.map((item) => item.kind.toUpperCase());
+      document.getElementById("context-signature").textContent = `CONTEXT // ${labels.join(" + ") || "EMPTY"}`;
+      const buttonIds = {"trace.provenance-impact": "trace-provenance", "expose.contradictions": "expose-contradictions",
+        "correlate.rf-cell-graph": "execute-correlation", "compare.causal-worlds": "compare-worlds"};
+      const missing = [];
+      for (const action of context.actions) {
+        const button = document.getElementById(buttonIds[action.id]);
+        if (button) { button.hidden = !action.enabled; button.disabled = !action.enabled; }
+        if (!action.enabled) missing.push(`${action.label}: ${action.missing.join(" + ")}`);
+      }
+      document.getElementById("context-missing").textContent = missing.length
+        ? `AVAILABLE WITH // ${missing.join(" // ")}` : "ALL BOUNDED DIRECTIVES AVAILABLE";
+    });
 
     function captureTimePins() {
       const from = new Date(document.getElementById("pin-from").value).getTime() / 1000;
@@ -307,7 +371,9 @@
       if (activePlanId) await effects.revertPlan(activePlanId);
       await effects.applyPlan(plan);
       activePlanId = plan.planId;
-      investigation.recordPlan(plan);
+      const viewIntent = viewIntentFromPlan(plan);
+      if (viewIntent) resultTabs.applyIntent(viewIntent);
+      investigationContext.recordPlan(plan, viewIntent);
       status.textContent = `GRAPHOPS // ${plan.status.toUpperCase()} // ${plan.evidencePosture.toUpperCase()}`;
       return plan;
     }
@@ -324,6 +390,7 @@
           coverageThreshold: { value: sample.coverage_threshold,
             units: sample.coverage_threshold_units, comparison: sample.coverage_comparison },
         });
+        captureTimePins();
         updateInvestigation();
         try {
           await submitDirective(selections.directiveRequest({
