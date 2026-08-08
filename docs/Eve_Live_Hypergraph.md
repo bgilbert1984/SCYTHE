@@ -191,6 +191,8 @@ Suricata.
   2D network view remain independent.
 - Missing geolocation: the network node stays in the topology panel and is not
   projected onto Cesium.
+- Missing WebGL or Three.js: the shared live snapshot remains visible and
+  selectable through the SVG fallback.
 - Replayed event ID: WriteBus idempotency prevents a second authoritative write.
 
 ## Verification record
@@ -215,3 +217,6 @@ Verification includes:
 - live regional-demo browser acceptance.
 - live node selection and executed provenance traversal against the exact
   retained render revision, with no HTTP, console, or page errors.
+- live Three.js rendering of the bounded 200-node/300-edge production snapshot,
+  2D/3D mode switching, and executed provenance traversal from a selectable 3D
+  graph edge.

@@ -1172,7 +1172,7 @@ The Eve Streamer expansion establishes the first continuous external-event
 path into the Clarktech interaction surface. Normalized Suricata summaries now
 travel over a loopback protobuf stream, cross a strict GraphOps ingestion
 boundary, commit through WriteBus, and appear in the regional demo's separate
-2D network hypergraph. Nodes and edges participate in the existing typed,
+live network hypergraph. Nodes and edges participate in the existing typed,
 revision-pinned selection, delta, provenance, and contradiction interactions.
 
 This slice preserves the central formalities:
@@ -1198,3 +1198,37 @@ The live selection boundary retains the 32 most recently served bounded graph
 snapshots. This prevents high-rate ingress from invalidating a click before its
 directive arrives while preserving exact revision semantics; the resolver
 rejects selections whose rendered snapshot is no longer retained.
+
+## 27. Implemented live Three.js causal chamber
+
+The regional demo now offers two views of the same bounded, revision-pinned
+network graph: an accessible SVG topology and a Three.js causal chamber. A
+single `LiveGraphController` polls the graph and Eve status endpoints, so the
+renderers cannot drift onto different revisions or independently widen the
+query. Three.js is pinned locally at `0.158.0`; failure to import or initialize
+WebGL leaves the SVG view operational.
+
+The chamber is topology space, never geography. It ignores graph positions for
+layout, preserves retained-node coordinates between live revisions, and gives
+new nodes deterministic seeds near already rendered neighbors. It therefore
+avoids both IP-derived pseudo-geolocation and random two-second rearrangement.
+Its visual vocabulary is evidence-bearing:
+
+- color comes from the shared `evidenceStyles.js` registry;
+- shape provides a second, non-color evidence cue;
+- non-solid evidence relations use dashed or dotted line material;
+- hyperedges remain first-class selectable hubs with member spokes;
+- fresh nodes bloom once on arrival, while retained evidence remains still;
+- reduced-motion preference removes the arrival animation.
+
+Nodes, dyadic edges, and hyperedges dispatch the existing typed
+`scythe-web:graph-selection` event with entity ID, observed time, and the exact
+render revision. They therefore enter the same resolver, retained-snapshot,
+provenance, contradiction, delta, and RF-correlation boundaries as selections
+from the SVG panel. The 3D presentation creates no new analytic or mutation
+authority.
+
+Lifecycle controls suspend rendering when the chamber or document is hidden,
+respond to container resize, and dispose controls, geometry, material, renderer,
+and WebGL context on teardown. Tooltips use text content rather than interpreting
+graph metadata as HTML.

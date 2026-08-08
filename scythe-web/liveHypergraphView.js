@@ -1,4 +1,5 @@
 import { evidenceStyle } from "./evidenceStyles.js";
+import { LiveGraphController } from "./liveGraphController.js";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 
@@ -28,47 +29,38 @@ function layout(nodes, width, height) {
 
 export class LiveHypergraphView {
   constructor({root, apiBase = "", fetchImpl = globalThis.fetch, refreshMilliseconds = 2000,
-               nodeLimit = 200, edgeLimit = 300}) {
+               nodeLimit = 200, edgeLimit = 300, controller = null}) {
     if (!root) throw new TypeError("live hypergraph root is required");
     this.root = root; this.apiBase = apiBase; this.fetchImpl = fetchImpl;
     this.refreshMilliseconds = Math.max(500, Number(refreshMilliseconds) || 2000);
     this.nodeLimit = Math.min(Math.max(nodeLimit, 1), 500);
     this.edgeLimit = Math.min(Math.max(edgeLimit, 1), 1000);
-    this.timer = null; this.running = false; this.graphRevision = null;
+    this.controller = controller ?? new LiveGraphController({apiBase, fetchImpl, refreshMilliseconds,
+      nodeLimit: this.nodeLimit, edgeLimit: this.edgeLimit});
+    this.ownsController = !controller; this.unsubscribe = null;
+    this.running = false; this.graphRevision = null;
     this.statusRoot = root.querySelector("[data-live-graph-status]");
     this.svg = root.querySelector("svg");
   }
 
   async start() {
-    this.running = true; await this.refresh(); this.#schedule(); return this;
+    this.running = true;
+    this.unsubscribe = this.controller.subscribe((update) => this.#update(update));
+    await this.controller.start();
+    return this;
   }
 
-  #schedule() {
-    clearTimeout(this.timer);
-    if (this.running) this.timer = setTimeout(async () => {
-      try { await this.refresh(); } finally { this.#schedule(); }
-    }, this.refreshMilliseconds);
-  }
+  async refresh() { return this.controller.refresh(); }
 
-  async refresh() {
-    const graphUrl = `${this.apiBase}/api/graphops/selection/graph?node_limit=${this.nodeLimit}&edge_limit=${this.edgeLimit}`;
-    const statusUrl = `${this.apiBase}/api/graphops/eve/status`;
-    const [graphResponse, eveResponse] = await Promise.all([
-      this.fetchImpl.call(globalThis, graphUrl, {credentials: "same-origin", cache: "no-store"}),
-      this.fetchImpl.call(globalThis, statusUrl, {credentials: "same-origin", cache: "no-store"}),
-    ]);
-    const graph = await graphResponse.json();
-    const eve = eveResponse.ok ? await eveResponse.json() : {status: "unavailable", committed: 0};
-    if (!graphResponse.ok || !["ok", "empty"].includes(graph.status)) {
-      this.#status(`LIVE HYPERGRAPH // UNAVAILABLE // HTTP ${graphResponse.status}`); return graph;
-    }
-    this.#status(`LIVE HYPERGRAPH // ${graph.status.toUpperCase()} // ${graph.nodeCount ?? graph.nodes.length} NODES // ${graph.edgeCount ?? graph.edges.length} EDGES\nEVE // ${eve.status?.toUpperCase() ?? "UNKNOWN"} // ${eve.committed ?? 0} COMMITTED // RAW PACKETS NOT EXPOSED`);
-    if (graph.graphRevision !== this.graphRevision) {
+  #update(update) {
+    this.#status(update.message);
+    const graph = update.graph;
+    if (!update.available || !graph) return;
+    if (update.changed || graph.graphRevision !== this.graphRevision) {
       this.graphRevision = graph.graphRevision; this.render(graph);
       this.root.dispatchEvent(new CustomEvent("scythe-web:live-graph-revision", {bubbles: true,
         detail: {graphRevision: graph.graphRevision, nodeCount: graph.nodes.length, edgeCount: graph.edges.length}}));
     }
-    return graph;
   }
 
   render(graph) {
@@ -118,5 +110,8 @@ export class LiveHypergraphView {
   }
 
   #status(text) { if (this.statusRoot) this.statusRoot.textContent = text; }
-  destroy() { this.running = false; clearTimeout(this.timer); this.timer = null; }
+  destroy() {
+    this.running = false; this.unsubscribe?.(); this.unsubscribe = null;
+    if (this.ownsController) this.controller.destroy();
+  }
 }

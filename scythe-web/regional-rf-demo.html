@@ -32,17 +32,34 @@
     .live-hypergraph {
       position:absolute; left:12px; bottom:12px; z-index:54; width:min(460px,calc(100vw - 24px));
       height:300px; border:1px solid rgba(0,212,255,.45); background:rgba(0,8,20,.9);
-      display:grid; grid-template-rows:auto 1fr auto; box-sizing:border-box;
+      display:grid; grid-template-rows:auto auto 1fr auto; box-sizing:border-box;
     }
     .live-hypergraph__status { padding:7px 9px; color:#ccefff; white-space:pre-wrap;
       font:10px/1.35 ui-monospace,monospace; border-bottom:1px dashed rgba(0,212,255,.3); }
-    .live-hypergraph svg { width:100%; height:100%; min-height:0; }
+    .live-hypergraph__modes { display:flex; gap:5px; padding:5px 8px;
+      border-bottom:1px dashed rgba(0,212,255,.25); }
+    .live-hypergraph__modes button { color:#7f9bad; background:#071422; border:1px solid #24506a;
+      font:9px ui-monospace,monospace; padding:3px 8px; cursor:pointer; }
+    .live-hypergraph__modes button[aria-pressed="true"] { color:#ccefff; border-color:#00d4ff;
+      box-shadow:inset 0 0 8px rgba(0,212,255,.18); }
+    .live-hypergraph__viewport { position:relative; min-height:0; overflow:hidden; }
+    .live-hypergraph__viewport[hidden] { display:none; }
+    .live-hypergraph svg,.live-hypergraph__three { width:100%; height:100%; min-height:0; display:block; }
+    .live-hypergraph__three { position:relative; }
     .live-hypergraph__node,.live-hypergraph__edge { cursor:pointer; }
     .live-hypergraph__edge { pointer-events:stroke; }
     .live-hypergraph__legend { padding:5px 9px; color:#7f9bad; font-size:9px;
       border-top:1px dashed rgba(0,212,255,.25); }
+    .live-hypergraph__tooltip { position:absolute; z-index:3; max-width:300px; padding:5px 8px;
+      color:#e9f8ff; background:rgba(3,9,20,.94); border:1px solid #00d4ff; border-radius:3px;
+      font:9px/1.35 ui-monospace,monospace; white-space:pre-wrap; pointer-events:none; }
+    .live-hypergraph__three-stats { position:absolute; top:6px; left:7px; color:#66ddff;
+      font:8px ui-monospace,monospace; opacity:.78; pointer-events:none; }
     @media (max-width:800px) { .live-hypergraph { height:220px; width:320px; } }
   </style>
+  <script type="importmap">
+  {"imports":{"three":"./node_modules/three/build/three.module.js","three/addons/":"./node_modules/three/examples/jsm/"}}
+  </script>
 </head>
 <body>
   <main id="globe-root">
@@ -50,8 +67,17 @@
     <div class="notice">SOLVER OUTPUT // DERIVED UINT16 VIEW // VISUALIZATION IS NOT AUTHORITATIVE</div>
     <aside id="live-hypergraph" class="live-hypergraph" aria-label="Live network hypergraph">
       <div class="live-hypergraph__status" data-live-graph-status>LIVE HYPERGRAPH // CONNECTING…</div>
-      <svg role="img" aria-label="Revision-pinned live hypergraph"></svg>
-      <div class="live-hypergraph__legend">NETWORK LAYOUT // NOT GEOLOCATION · OBSERVED SOLID · INFERRED DASHED · CLICK NODE OR EDGE</div>
+      <div class="live-hypergraph__modes" role="group" aria-label="Hypergraph view mode">
+        <button id="hypergraph-mode-3d" type="button" aria-pressed="true" disabled>3D CAUSAL CHAMBER</button>
+        <button id="hypergraph-mode-2d" type="button" aria-pressed="false">2D ACCESSIBLE</button>
+      </div>
+      <div id="live-hypergraph-3d-viewport" class="live-hypergraph__viewport">
+        <div class="live-hypergraph__three" data-live-graph-3d></div>
+      </div>
+      <div id="live-hypergraph-2d-viewport" class="live-hypergraph__viewport" hidden>
+        <svg role="img" aria-label="Revision-pinned live hypergraph"></svg>
+      </div>
+      <div class="live-hypergraph__legend">TOPOLOGY // NOT GEOLOCATION · SHAPE + COLOR = EVIDENCE · CLICK NODE, EDGE, OR HYPEREDGE</div>
     </aside>
     <aside id="graphops-directive" class="directive" hidden>
       <div id="directive-status">GRAPHOPS DIRECTIVE</div>
@@ -90,6 +116,8 @@
     import { registerVisualEffects } from "./visualEffects.js";
     import { GraphOverlayLayer } from "./graphOverlayLayer.js";
     import { LiveHypergraphView } from "./liveHypergraphView.js";
+    import { LiveGraphController } from "./liveGraphController.js";
+    import { LiveHypergraph3DView } from "./liveHypergraph3DView.js";
 
     const viewerOptions = {
       animation: false,
@@ -144,11 +172,37 @@
       document.getElementById("correlation-status").hidden = false;
       document.getElementById("correlation-status").textContent = `GRAPH // UNAVAILABLE // ${error.message}`;
     });
-    const liveHypergraph = new LiveHypergraphView({root: document.getElementById("live-hypergraph")});
+    const liveRoot = document.getElementById("live-hypergraph");
+    const liveGraphController = new LiveGraphController();
+    const liveHypergraph = new LiveHypergraphView({root: liveRoot, controller: liveGraphController});
     liveHypergraph.start().catch((error) => {
       document.querySelector("[data-live-graph-status]").textContent = `LIVE HYPERGRAPH // UNAVAILABLE // ${error.message}`;
     });
     window.scytheLiveHypergraph = liveHypergraph;
+    let liveHypergraph3D = null;
+    const mode3D = document.getElementById("hypergraph-mode-3d");
+    const mode2D = document.getElementById("hypergraph-mode-2d");
+    const viewport3D = document.getElementById("live-hypergraph-3d-viewport");
+    const viewport2D = document.getElementById("live-hypergraph-2d-viewport");
+    function setHypergraphMode(mode) {
+      const show3D = mode === "3d" && liveHypergraph3D;
+      viewport3D.hidden = !show3D; viewport2D.hidden = Boolean(show3D);
+      mode3D.setAttribute("aria-pressed", String(Boolean(show3D)));
+      mode2D.setAttribute("aria-pressed", String(!show3D));
+      liveHypergraph3D?.setVisible(Boolean(show3D));
+    }
+    mode3D.addEventListener("click", () => setHypergraphMode("3d"));
+    mode2D.addEventListener("click", () => setHypergraphMode("2d"));
+    try {
+      const [THREE, controlsModule] = await Promise.all([import("three"), import("three/addons/controls/OrbitControls.js")]);
+      liveHypergraph3D = new LiveHypergraph3DView({root: liveRoot, controller: liveGraphController,
+        THREE, OrbitControls: controlsModule.OrbitControls});
+      await liveHypergraph3D.start(); mode3D.disabled = false; setHypergraphMode("3d");
+      window.scytheLiveHypergraph3D = liveHypergraph3D;
+    } catch (error) {
+      mode3D.disabled = true; setHypergraphMode("2d");
+      document.querySelector("[data-live-graph-status]").textContent += `\n3D // UNAVAILABLE // SVG FALLBACK // ${error.message}`;
+    }
     const localDateTime = (date) => {
       const shifted = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
       return shifted.toISOString().slice(0, 23);

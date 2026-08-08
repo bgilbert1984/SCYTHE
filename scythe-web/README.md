@@ -177,11 +177,19 @@ unknown fields are rejected, and accepted observations are classified
 
 The regional demo also contains a live network hypergraph fed through the Eve
 Streamer protobuf service. It polls the stable orchestrator every two seconds,
-renders network topology in a separate 2D panel, and never converts IP
+renders the same bounded snapshot as an accessible SVG topology or a live
+Three.js causal chamber, and never converts IP
 addresses into guessed globe positions. `test_*` and `synthetic_*` event types
 remain `SYNTHETIC`; ordinary Suricata summaries are `OBSERVED`. See
 [`../docs/Eve_Live_Hypergraph.md`](../docs/Eve_Live_Hypergraph.md) for the
 transport, service configuration, production cutover, and verification steps.
+
+The two renderers share one `LiveGraphController`. The 3D view preserves node
+positions across revisions, creates deterministic positions for arrivals,
+supports node, edge, and hyperedge selection, and uses shared evidence colors
+plus evidence-distinct geometry. Its layout is explicitly topology space, not
+geolocation. Three.js is an exact local dependency; an import or WebGL failure
+leaves the SVG view available.
 
 The existing globe loads `scythe-web/browser-entry.js` as an ES module at the
 end of `cesium-hypergraph-globe.html`. Activation remains deliberately opt-in.
