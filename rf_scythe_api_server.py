@@ -58,6 +58,13 @@ from recon_enrichment import (
     enrich_hypergraph_rf_node,
 )
 from recon_network_stitching import apply_recon_network_stitch_batch
+from network_tool_policy import (
+    NetworkToolPolicyError,
+    parse_nmap_report_identity,
+    validate_ndpi_request,
+    validate_nmap_options,
+    validate_nmap_target,
+)
 
 # ────────────────────────────────────────────────────────────────────
 # NETWORK INGRESS AGGREGATOR
@@ -925,35 +932,35 @@ class NmapScanner:
         """Run an nmap scan"""
         if not self.check_nmap_available():
             return {
-                'status': 'simulated',
+                'status': 'unavailable',
                 'message': 'nmap not installed. Install with: sudo dnf install nmap',
-                'simulated': True,
-                'results': self._generate_simulated_results(target)
             }
 
         self.scanning = True
         try:
-            # Build command - restrict to safe options; add -6 for IPv6 targets
-            safe_options = options.replace(';', '').replace('|', '').replace('&', '')
-            try:
-                _ipv6_flag = ['-6'] if ipaddress.ip_address(target).version == 6 else []
-            except ValueError:
-                _ipv6_flag = []
-            cmd = ['nmap'] + _ipv6_flag + safe_options.split() + [target]
+            safe_target = validate_nmap_target(target)
+            safe_options = validate_nmap_options(options)
+            target_network = ipaddress.ip_network(safe_target, strict=False)
+            ipv6_flag = ['-6'] if target_network.version == 6 else []
+            cmd = ['nmap'] + ipv6_flag + safe_options + [safe_target]
 
             logger.info(f"Running nmap: {' '.join(cmd)}")
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
 
             self.scan_results = {
-                'status': 'success',
-                'target': target,
-                'options': safe_options,
+                'status': 'success' if result.returncode == 0 else 'error',
+                'target': safe_target,
+                'options': ' '.join(safe_options),
                 'output': result.stdout,
+                'message': result.stderr.strip() if result.returncode else '',
+                'returncode': result.returncode,
                 'timestamp': time.time(),
-                'hosts': self._parse_nmap_output(result.stdout)
+                'hosts': self._parse_nmap_output(result.stdout) if result.returncode == 0 else [],
             }
             self.last_scan_time = time.time()
 
+        except NetworkToolPolicyError as exc:
+            self.scan_results = {'status': 'refused', 'message': str(exc)}
         except subprocess.TimeoutExpired:
             self.scan_results = {
                 'status': 'error',
@@ -978,16 +985,14 @@ class NmapScanner:
             if 'Nmap scan report for' in line:
                 if current_host:
                     hosts.append(current_host)
-                parts = line.split()
-                ip = parts[-1].strip('()')
-                hostname = parts[-2] if len(parts) > 4 else ip
+                ip, hostname = parse_nmap_report_identity(line)
                 current_host = {
                     'ip': ip,
                     'hostname': hostname,
                     'ports': [],
                     'status': 'up'
                 }
-            elif current_host and '/tcp' in line or '/udp' in line:
+            elif current_host and ('/tcp' in line or '/udp' in line):
                 parts = line.split()
                 if len(parts) >= 3:
                     current_host['ports'].append({
@@ -1000,32 +1005,6 @@ class NmapScanner:
             hosts.append(current_host)
 
         return hosts
-
-    def _generate_simulated_results(self, target: str) -> List[Dict[str, Any]]:
-        """Generate simulated scan results when nmap is not available"""
-        # Parse target for simulation
-        if '/' in target:
-            base_ip = target.split('/')[0]
-        else:
-            base_ip = target
-
-        base_parts = base_ip.split('.')[:3]
-
-        hosts = []
-        for i in range(random.randint(3, 10)):
-            host_ip = f"{'.'.join(base_parts)}.{random.randint(1, 254)}"
-            hosts.append({
-                'ip': host_ip,
-                'hostname': f"host-{host_ip.replace('.', '-')}",
-                'status': 'up',
-                'ports': [
-                    {'port': '22/tcp', 'state': 'open', 'service': 'ssh'},
-                    {'port': '80/tcp', 'state': 'open', 'service': 'http'},
-                ] if random.random() > 0.5 else []
-            })
-
-        return hosts
-
 
 # ============================================================================
 # NDPI INTEGRATION
@@ -1050,27 +1029,32 @@ class NDPIAnalyzer:
         """Analyze network traffic on an interface"""
         if not self.check_ndpi_available():
             return {
-                'status': 'simulated',
+                'status': 'unavailable',
                 'message': 'ndpiReader not installed. Install nDPI for real analysis.',
-                'results': self._generate_simulated_results()
             }
 
         self.analyzing = True
         try:
+            interface, duration = validate_ndpi_request(interface, duration)
             cmd = ['ndpiReader', '-i', interface, '-s', str(duration)]
 
             logger.info(f"Running nDPI: {' '.join(cmd)}")
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=duration + 30)
 
             self.analysis_results = {
-                'status': 'success',
+                'status': 'success' if result.returncode == 0 else 'error',
                 'interface': interface,
                 'duration': duration,
                 'output': result.stdout,
-                'protocols': self._parse_ndpi_output(result.stdout),
-                'timestamp': time.time()
+                'message': result.stderr.strip() if result.returncode else '',
+                'returncode': result.returncode,
+                'protocols': self._parse_ndpi_output(result.stdout) if result.returncode == 0 else {
+                    'protocols': [], 'categories': [], 'statistics': {}, 'risks': []},
+                'timestamp': time.time(),
             }
 
+        except NetworkToolPolicyError as exc:
+            self.analysis_results = {'status': 'refused', 'message': str(exc)}
         except subprocess.TimeoutExpired:
             self.analysis_results = {
                 'status': 'error',
@@ -1178,32 +1162,6 @@ class NDPIAnalyzer:
                     result['statistics']['throughput_rate'] = f"{match.group(2)} {match.group(3)}/sec"
 
         return result
-
-    def _generate_simulated_results(self) -> Dict[str, Any]:
-        """Generate simulated NDPI results"""
-        protocols = [
-            {'protocol': 'TLS', 'count': random.randint(100, 500), 'bytes': random.randint(50000, 200000), 'category': 'Encrypted'},
-            {'protocol': 'HTTP', 'count': random.randint(50, 200), 'bytes': random.randint(20000, 100000), 'category': 'Web'},
-            {'protocol': 'DNS', 'count': random.randint(200, 800), 'bytes': random.randint(10000, 50000), 'category': 'Network'},
-            {'protocol': 'QUIC', 'count': random.randint(20, 100), 'bytes': random.randint(10000, 80000), 'category': 'Encrypted'},
-            {'protocol': 'SSH', 'count': random.randint(5, 30), 'bytes': random.randint(5000, 30000), 'category': 'Remote Access'},
-            {'protocol': 'NTP', 'count': random.randint(10, 50), 'bytes': random.randint(1000, 5000), 'category': 'Network'},
-            {'protocol': 'Unknown', 'count': random.randint(10, 100), 'bytes': random.randint(5000, 50000), 'category': 'Unknown'},
-        ]
-
-        return {
-            'protocols': protocols,
-            'total_flows': sum(p['count'] for p in protocols),
-            'total_bytes': sum(p['bytes'] for p in protocols),
-            'duration': 10,
-            'categories': {
-                'Encrypted': sum(p['count'] for p in protocols if p['category'] == 'Encrypted'),
-                'Web': sum(p['count'] for p in protocols if p['category'] == 'Web'),
-                'Network': sum(p['count'] for p in protocols if p['category'] == 'Network'),
-                'Unknown': sum(p['count'] for p in protocols if p['category'] == 'Unknown'),
-            }
-        }
-
 
 # ============================================================================
 # AIS VESSEL TRACKING
@@ -9079,6 +9037,8 @@ if FLASK_AVAILABLE:
     @app.route('/api/nmap/scan', methods=['POST', 'GET'])
     def nmap_scan():
         """Run an nmap scan"""
+        if not _rf_bridge_authorized(require_identity=True):
+            return jsonify({'status': 'error', 'message': 'Authentication required'}), 401
         try:
             if request.method == 'POST':
                 data = request.get_json() or {}
@@ -9089,7 +9049,8 @@ if FLASK_AVAILABLE:
                 options = request.args.get('options', '-sn')
 
             results = nmap_scanner.scan(target, options)
-            return jsonify(results)
+            status_code = {'unavailable': 503, 'refused': 400, 'error': 502}.get(results.get('status'), 200)
+            return jsonify(results), status_code
         except Exception as e:
             logger.error(f"Error running nmap scan: {e}")
             return jsonify({'status': 'error', 'message': str(e)}), 500
@@ -9097,6 +9058,8 @@ if FLASK_AVAILABLE:
     @app.route('/api/nmap/status', methods=['GET'])
     def nmap_status():
         """Get nmap scanner status"""
+        if not _rf_bridge_authorized(require_identity=True):
+            return jsonify({'status': 'error', 'message': 'Authentication required'}), 401
         return jsonify({
             'available': nmap_scanner.check_nmap_available(),
             'scanning': nmap_scanner.scanning,
@@ -9107,6 +9070,8 @@ if FLASK_AVAILABLE:
     @app.route('/api/nmap/results', methods=['GET'])
     def nmap_results():
         """Get cached nmap results"""
+        if not _rf_bridge_authorized(require_identity=True):
+            return jsonify({'status': 'error', 'message': 'Authentication required'}), 401
         return jsonify(nmap_scanner.scan_results or {'status': 'no_results'})
 
     # ========================================================================
@@ -9116,6 +9081,8 @@ if FLASK_AVAILABLE:
     @app.route('/api/network-hypergraph/scan', methods=['POST', 'GET'])
     def network_hypergraph_scan():
         """Scan network with nmap and create hypergraph visualization"""
+        if not _rf_bridge_authorized(require_identity=True):
+            return jsonify({'status': 'error', 'message': 'Authentication required'}), 401
         try:
             if request.method == 'POST':
                 data = request.get_json() or {}
@@ -9127,16 +9094,17 @@ if FLASK_AVAILABLE:
                 options = request.args.get('options', '-sV -sn')
                 reset = request.args.get('reset', 'true').lower() == 'true'
 
-            # Reset hypergraph if requested
-            if reset:
-                hypergraph_store.reset()
-
             # Run nmap scan
             logger.info(f"Running network hypergraph scan on {target}")
             scan_results = nmap_scanner.scan(target, options)
 
-            if scan_results.get('status') == 'error':
-                return jsonify(scan_results), 500
+            if scan_results.get('status') != 'success':
+                code = 503 if scan_results.get('status') == 'unavailable' else 400
+                return jsonify(scan_results), code
+
+            # Only discard the prior visualization after a real scan succeeds.
+            if reset:
+                hypergraph_store.reset()
 
             # Convert scan results to hypergraph nodes
             hosts = scan_results.get('hosts', scan_results.get('results', []))
@@ -9174,12 +9142,15 @@ if FLASK_AVAILABLE:
     @app.route('/api/network-hypergraph/localhost', methods=['GET'])
     def network_hypergraph_localhost():
         """Quick scan of localhost services and create hypergraph"""
+        if not _rf_bridge_authorized(require_identity=True):
+            return jsonify({'status': 'error', 'message': 'Authentication required'}), 401
         try:
-            # Reset and scan localhost
-            hypergraph_store.reset()
-
             # Scan localhost for open ports
             scan_results = nmap_scanner.scan('127.0.0.1', '-sV -p 1-1024')
+            if scan_results.get('status') != 'success':
+                code = 503 if scan_results.get('status') == 'unavailable' else 400
+                return jsonify(scan_results), code
+            hypergraph_store.reset()
 
             hosts = scan_results.get('hosts', scan_results.get('results', []))
             for host in hosts:
@@ -9207,12 +9178,16 @@ if FLASK_AVAILABLE:
     @app.route('/api/network-hypergraph/quick-scan', methods=['GET'])
     def network_hypergraph_quick_scan():
         """Quick network discovery scan (ping sweep only)"""
+        if not _rf_bridge_authorized(require_identity=True):
+            return jsonify({'status': 'error', 'message': 'Authentication required'}), 401
         try:
             target = request.args.get('target', '192.168.1.0/24')
 
-            # Reset and do ping sweep only (fast)
-            hypergraph_store.reset()
             scan_results = nmap_scanner.scan(target, '-sn -T4')
+            if scan_results.get('status') != 'success':
+                code = 503 if scan_results.get('status') == 'unavailable' else 400
+                return jsonify(scan_results), code
+            hypergraph_store.reset()
 
             hosts = scan_results.get('hosts', scan_results.get('results', []))
             for host in hosts:
@@ -10084,17 +10059,20 @@ if FLASK_AVAILABLE:
     @app.route('/api/ndpi/analyze', methods=['POST', 'GET'])
     def ndpi_analyze():
         """Run NDPI analysis"""
+        if not _rf_bridge_authorized(require_identity=True):
+            return jsonify({'status': 'error', 'message': 'Authentication required'}), 401
         try:
             if request.method == 'POST':
                 data = request.get_json() or {}
                 network_interface = data.get('interface', 'eth0')
-                duration = int(data.get('duration', 10))
+                duration = data.get('duration', 10)
             else:
                 network_interface = request.args.get('interface', 'eth0')
-                duration = int(request.args.get('duration', 10))
+                duration = request.args.get('duration', 10)
 
             results = ndpi_analyzer.analyze_interface(network_interface, duration)
-            return jsonify(results)
+            status_code = {'unavailable': 503, 'refused': 400, 'error': 502}.get(results.get('status'), 200)
+            return jsonify(results), status_code
         except Exception as e:
             logger.error(f"Error running NDPI analysis: {e}")
             return jsonify({'status': 'error', 'message': str(e)}), 500
@@ -10102,6 +10080,8 @@ if FLASK_AVAILABLE:
     @app.route('/api/ndpi/status', methods=['GET'])
     def ndpi_status():
         """Get NDPI analyzer status"""
+        if not _rf_bridge_authorized(require_identity=True):
+            return jsonify({'status': 'error', 'message': 'Authentication required'}), 401
         return jsonify({
             'available': ndpi_analyzer.check_ndpi_available(),
             'analyzing': ndpi_analyzer.analyzing,
@@ -10111,6 +10091,8 @@ if FLASK_AVAILABLE:
     @app.route('/api/ndpi/results', methods=['GET'])
     def ndpi_results():
         """Get cached NDPI results"""
+        if not _rf_bridge_authorized(require_identity=True):
+            return jsonify({'status': 'error', 'message': 'Authentication required'}), 401
         return jsonify(ndpi_analyzer.analysis_results or {'status': 'no_results'})
 
     # ========================================================================

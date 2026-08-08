@@ -38,7 +38,11 @@ from writebus import bus, init_writebus, WriteContext, GraphOp
 
 logger = logging.getLogger("SensorRegistry")
 
-# LPI Frontend import (unchanged)
+# Optional LPI frontend.  The historical RF_QUANTUM_SCYTHE tree is not part of
+# this repository, so absence is a capability state rather than a startup
+# failure.  A real IQ-window request is rejected explicitly below instead of
+# silently falling through to the generic activity path.
+LPI_IMPORT_ERROR: Optional[str] = None
 try:
     from RF_QUANTUM_SCYTHE.SignalIntelligence.lpi_frontend import (
         LPIFrontend,
@@ -47,13 +51,17 @@ try:
         process_iq_with_lpi
     )
     LPI_AVAILABLE = True
-except ImportError:
+except ImportError as package_error:
     try:
         from lpi_frontend import LPIFrontend, SignalObservation, create_lpi_graph_entities, process_iq_with_lpi
         LPI_AVAILABLE = True
-    except ImportError:
-        logger.warning("LPI Frontend not available for sensor_registry")
+    except ImportError as local_error:
         LPI_AVAILABLE = False
+        LPI_IMPORT_ERROR = (
+            f"RF_QUANTUM_SCYTHE backend: {package_error}; "
+            f"local backend: {local_error}"
+        )
+        logger.info("Optional LPI frontend disabled; IQ-window processing unavailable")
 
 
 Json = Dict[str, Any]
@@ -378,7 +386,21 @@ class SensorRegistry:
         stub_op = GraphOp(event_type="NODE_UPDATE", entity_id=s_node, entity_data={"id": s_node, "kind": "sensor_stub", "labels": {"sensor_id": str(sensor_id)}})
 
         # ---- LPI IQ window path ----
-        if kind == "iq_window" and LPI_AVAILABLE:
+        if kind == "iq_window" and not LPI_AVAILABLE:
+            logger.warning(
+                "Rejected IQ window for sensor %s: optional LPI frontend unavailable",
+                sensor_id,
+            )
+            return {
+                "ok": False,
+                "error": "LPI frontend unavailable",
+                "error_code": "lpi_frontend_unavailable",
+                "sensor_id": str(sensor_id),
+                "lpi_available": False,
+                "detail": LPI_IMPORT_ERROR,
+            }
+
+        if kind == "iq_window":
             return self._emit_iq_window_lpi(
                 sensor_id=str(sensor_id),
                 sensor_node=s_node,

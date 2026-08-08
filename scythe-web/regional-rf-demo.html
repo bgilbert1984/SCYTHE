@@ -55,6 +55,19 @@
       font:9px/1.35 ui-monospace,monospace; white-space:pre-wrap; pointer-events:none; }
     .live-hypergraph__three-stats { position:absolute; top:6px; left:7px; color:#66ddff;
       font:8px ui-monospace,monospace; opacity:.78; pointer-events:none; }
+    .world-stack { position:absolute; left:12px; top:52px; z-index:53; width:min(500px,calc(100vw - 24px));
+      max-height:calc(100vh - 380px); overflow:auto; box-sizing:border-box; padding:9px;
+      border:1px solid rgba(247,209,84,.55); background:rgba(5,10,22,.93); font:10px/1.4 ui-monospace,monospace; }
+    .world-stack[hidden] { display:none; }
+    .world-stack__title { color:#f7d154; margin-bottom:5px; }
+    .world-stack__observed { color:#63ffd1; padding:5px; border:1px solid rgba(99,255,209,.35); }
+    .world-stack__world { margin-top:5px; padding:5px; border:1px dashed rgba(247,209,84,.4); }
+    .world-stack__world summary { color:#f7d154; cursor:pointer; }
+    .world-stack__datum { color:#9eb6c7; margin-top:4px; }
+    .world-stack__falsifier { color:#ff7890; margin-top:4px; }
+    .world-stack__next { color:#63ffd1; margin-top:4px; }
+    .world-stack__boundary { color:#ff7890; margin-top:7px; border-top:1px dashed #ff445e; padding-top:5px; }
+    .selection-tray { color:#9eb6c7; border:1px dashed rgba(0,212,255,.3); padding:5px; margin-top:7px; }
     @media (max-width:800px) { .live-hypergraph { height:220px; width:320px; } }
   </style>
   <script type="importmap">
@@ -79,11 +92,13 @@
       </div>
       <div class="live-hypergraph__legend">TOPOLOGY // NOT GEOLOCATION · SHAPE + COLOR = EVIDENCE · CLICK NODE, EDGE, OR HYPEREDGE</div>
     </aside>
+    <aside id="causal-world-stack" class="world-stack" aria-label="Causal hypothesis world stack" hidden></aside>
     <aside id="graphops-directive" class="directive" hidden>
       <div id="directive-status">GRAPHOPS DIRECTIVE</div>
       <div id="reality-prism"></div>
       <pre id="dsl-preview" class="directive__analysis" hidden></pre>
       <pre id="correlation-status" class="directive__analysis" hidden></pre>
+      <div id="selection-tray" class="selection-tray">INVESTIGATION // NO SELECTION</div>
       <div class="directive__controls">
         <label>THRESHOLD <input id="threshold-value" type="number" value="145" step="1"></label>
         <button id="apply-threshold" type="button">APPLY LENS</button>
@@ -93,6 +108,7 @@
         <button id="execute-correlation" type="button" disabled>EXECUTE RF ↔ GRAPH</button>
         <button id="trace-provenance" type="button" disabled>TRACE PROVENANCE</button>
         <button id="expose-contradictions" type="button" disabled>EXPOSE CONTRADICTIONS</button>
+        <button id="compare-worlds" type="button" disabled>COMPARE CAUSAL WORLDS</button>
       </div>
       <div class="directive__controls directive__controls--wrap">
         <label>FROM <input id="pin-from" class="wide" type="datetime-local" step="0.001"></label>
@@ -118,6 +134,8 @@
     import { LiveHypergraphView } from "./liveHypergraphView.js";
     import { LiveGraphController } from "./liveGraphController.js";
     import { LiveHypergraph3DView } from "./liveHypergraph3DView.js";
+    import { InvestigationStore } from "./investigationStore.js";
+    import { WorldStack } from "./worldStack.js";
 
     const viewerOptions = {
       animation: false,
@@ -162,18 +180,22 @@
     const directive = document.getElementById("graphops-directive");
     const status = document.getElementById("directive-status");
     const selections = new SelectionModel();
+    const investigation = new InvestigationStore({storage: window.sessionStorage});
+    const worldStack = new WorldStack({root: document.getElementById("causal-world-stack"), store: investigation});
     const effects = registerVisualEffects(new EffectRuntime(), {
       viewer, Cesium, prismRoot: document.getElementById("reality-prism"),
       dslRoot: document.getElementById("dsl-preview"),
       correlationRoot: document.getElementById("correlation-status"),
+      worldStack,
     });
-    const graphOverlay = new GraphOverlayLayer({viewer, Cesium, container: document.getElementById("globe-root")});
+    const liveGraphController = new LiveGraphController();
+    const graphOverlay = new GraphOverlayLayer({viewer, Cesium, container: document.getElementById("globe-root"),
+      controller: liveGraphController});
     graphOverlay.start().catch((error) => {
       document.getElementById("correlation-status").hidden = false;
       document.getElementById("correlation-status").textContent = `GRAPH // UNAVAILABLE // ${error.message}`;
     });
     const liveRoot = document.getElementById("live-hypergraph");
-    const liveGraphController = new LiveGraphController();
     const liveHypergraph = new LiveHypergraphView({root: liveRoot, controller: liveGraphController});
     liveHypergraph.start().catch((error) => {
       document.querySelector("[data-live-graph-status]").textContent = `LIVE HYPERGRAPH // UNAVAILABLE // ${error.message}`;
@@ -211,6 +233,27 @@
     document.getElementById("pin-to").value = localDateTime(new Date());
     let activePlanId = null;
 
+    function updateInvestigation() {
+      const graphSelection = selections.items.find((item) => ["graph-node", "graph-edge", "event"].includes(item.kind));
+      investigation.captureSelections(selections.items, graphSelection?.graphRevision ?? liveGraphController.graphRevision);
+      const labels = selections.items.map((item) => item.kind === "rf-cell"
+        ? `RF:${item.tileId}` : item.kind === "time-pin"
+          ? `TIME:${new Date(item.timestamp * 1000).toISOString()}` : `${item.kind.toUpperCase()}:${item.entityId}`);
+      document.getElementById("selection-tray").textContent = `INVESTIGATION // ${labels.join(" // ") || "NO SELECTION"}`;
+      const kinds = new Set(selections.items.map((item) => item.kind));
+      document.getElementById("compare-worlds").disabled = !(kinds.has("rf-cell") &&
+        (["graph-node", "graph-edge", "event"].some((kind) => kinds.has(kind))));
+    }
+
+    function captureTimePins() {
+      const from = new Date(document.getElementById("pin-from").value).getTime() / 1000;
+      const to = new Date(document.getElementById("pin-to").value).getTime() / 1000;
+      if (!Number.isFinite(from) || !Number.isFinite(to) || from === to) return false;
+      selections.upsert({kind: "time-pin", timestamp: from, clockId: "UTC", uncertaintyMilliseconds: 0});
+      selections.upsert({kind: "time-pin", timestamp: to, clockId: "UTC", uncertaintyMilliseconds: 0});
+      updateInvestigation(); return true;
+    }
+
     async function submitDirective(request) {
       const response = await fetch(`/api/graphops/directives/${request.requestedMode}`, {
         method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" },
@@ -221,6 +264,7 @@
       if (activePlanId) await effects.revertPlan(activePlanId);
       await effects.applyPlan(plan);
       activePlanId = plan.planId;
+      investigation.recordPlan(plan);
       status.textContent = `GRAPHOPS // ${plan.status.toUpperCase()} // ${plan.evidencePosture.toUpperCase()}`;
       return plan;
     }
@@ -237,6 +281,7 @@
           coverageThreshold: { value: sample.coverage_threshold,
             units: sample.coverage_threshold_units, comparison: sample.coverage_comparison },
         });
+        updateInvestigation();
         try {
           await submitDirective(selections.directiveRequest({
             directive: "explain.coverage-cell", utterance: "Explain why this cell is red", mode: "preview",
@@ -249,6 +294,7 @@
     document.getElementById("globe-root").addEventListener("scythe-web:graph-selection", async ({detail}) => {
       directive.hidden = false;
       selections.upsert(detail);
+      updateInvestigation();
       const hasRf = selections.items.some((item) => item.kind === "rf-cell");
       document.getElementById("execute-correlation").disabled = !hasRf;
       document.getElementById("trace-provenance").disabled = false;
@@ -300,17 +346,21 @@
       } catch (error) { status.textContent = `GRAPHOPS // REFUSED // ${error.message}`; }
     });
     document.getElementById("execute-delta").addEventListener("click", async () => {
-      const from = new Date(document.getElementById("pin-from").value).getTime() / 1000;
-      const to = new Date(document.getElementById("pin-to").value).getTime() / 1000;
-      if (!Number.isFinite(from) || !Number.isFinite(to)) {
+      if (!captureTimePins()) {
         status.textContent = "GRAPHOPS // REFUSED // Two valid time pins are required"; return;
       }
-      selections.upsert({kind: "time-pin", timestamp: from, clockId: "UTC", uncertaintyMilliseconds: 0});
-      selections.upsert({kind: "time-pin", timestamp: to, clockId: "UTC", uncertaintyMilliseconds: 0});
       try {
         await submitDirective(selections.directiveRequest({directive: "compare.graph-delta",
           utterance: "Compare the graph between these two UTC pins", parameters: {limit: 100}, mode: "execute"}));
       } catch (error) { status.textContent = `GRAPHOPS // REFUSED // ${error.message}`; }
+    });
+    document.getElementById("compare-worlds").addEventListener("click", async () => {
+      try {
+        if (!captureTimePins()) throw new Error("Two distinct valid time pins are required");
+        await submitDirective(selections.directiveRequest({directive: "compare.causal-worlds",
+          utterance: "Determine what must be true for this RF coverage gap and network burst to share a cause",
+          parameters: {limit: 100}, mode: "execute"}));
+      } catch (error) { status.textContent = `CAUSAL WORLDS // REFUSED // ${error.message}`; }
     });
     document.getElementById("ingest-rf").addEventListener("click", async () => {
       const frequency = Number(document.getElementById("rf-frequency").value) * 1e6;

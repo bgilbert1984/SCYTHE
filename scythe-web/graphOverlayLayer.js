@@ -8,10 +8,12 @@ function finitePosition(position) {
 export class GraphOverlayLayer {
   constructor({ viewer, Cesium, apiBase = "", fetchImpl = globalThis.fetch,
                 container = globalThis.document?.getElementById("globe-root"),
-                nodeLimit = 200, edgeLimit = 300, refreshMilliseconds = 2500 }) {
+                nodeLimit = 200, edgeLimit = 300, refreshMilliseconds = 2500,
+                controller = null }) {
     if (!viewer?.entities || !Cesium?.Cartesian3) throw new TypeError("Cesium viewer is required");
     this.viewer = viewer; this.Cesium = Cesium; this.apiBase = apiBase;
     this.fetchImpl = fetchImpl; this.container = container;
+    this.controller = controller; this.unsubscribe = null;
     this.nodeLimit = Math.min(Math.max(nodeLimit, 1), 500);
     this.edgeLimit = Math.min(Math.max(edgeLimit, 1), 1000);
     this.entityIds = new Set(); this.nodes = new Map(); this.graphRevision = null;
@@ -21,7 +23,16 @@ export class GraphOverlayLayer {
 
   async start() {
     this.running = true;
-    await this.refresh();
+    if (this.controller) {
+      this.unsubscribe = this.controller.subscribe((update) => {
+        if (!this.running) return;
+        if (update.kind === "snapshot" && update.graph) this.renderSnapshot(update.graph);
+        else if (!update.available) this.#emitStatus({status: "unavailable", reason: update.message});
+      });
+      await this.controller.start();
+    } else {
+      await this.refresh();
+    }
     if (this.Cesium.ScreenSpaceEventHandler) {
       this.clickHandler = new this.Cesium.ScreenSpaceEventHandler(this.viewer.scene.canvas);
       this.clickHandler.setInputAction((movement) => {
@@ -41,7 +52,7 @@ export class GraphOverlayLayer {
         }}));
       }, this.Cesium.ScreenSpaceEventType.LEFT_CLICK);
     }
-    this.#scheduleRefresh();
+    if (!this.controller) this.#scheduleRefresh();
     return this;
   }
 
@@ -62,6 +73,10 @@ export class GraphOverlayLayer {
       return {status: "unavailable", nodes: [], edges: []};
     }
     const graph = await response.json();
+    return this.renderSnapshot(graph);
+  }
+
+  renderSnapshot(graph) {
     if (graph.status === "empty") { this.#clearEntities(); this.graphRevision = graph.graphRevision; this.#emitStatus(graph); return graph; }
     if (graph.status !== "ok") { this.#emitStatus(graph); return graph; }
     if (graph.graphRevision === this.graphRevision) { this.#emitStatus({status: "ok", graphRevision: graph.graphRevision,
@@ -119,5 +134,6 @@ export class GraphOverlayLayer {
 
   #clearEntities() { for (const id of this.entityIds) this.viewer.entities.removeById(id); this.entityIds.clear(); this.nodes.clear(); }
   destroy() { this.running = false; clearTimeout(this.refreshTimer); this.refreshTimer = null;
+    this.unsubscribe?.(); this.unsubscribe = null;
     this.clickHandler?.destroy(); this.clickHandler = null; this.#clearEntities(); }
 }

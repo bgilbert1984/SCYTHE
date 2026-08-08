@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import math
 import threading
 import time
@@ -9,6 +10,9 @@ from dataclasses import dataclass, field
 from typing import Any, Deque, Dict, List, Optional, Set, Tuple
 
 from mac_cluster_engine import MacClusterEngine
+
+
+logger = logging.getLogger(__name__)
 
 
 _VENDOR_BY_OUI = {

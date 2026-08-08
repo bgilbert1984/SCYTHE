@@ -6,6 +6,7 @@ export const EFFECT_TYPES = Object.freeze(new Set([
   "view.show-dsl-preview", "view.show-correlation-fibers", "view.show-no-data",
   "view.pin-time", "view.show-graph-delta", "view.show-graph-provenance",
   "view.show-contradictions",
+  "view.show-causal-worlds",
   "view.show-lunar-prism",
 ]));
 
@@ -39,6 +40,7 @@ export function validateDirectiveRequest(input) {
   if (!/^[A-Za-z0-9._:-]{1,128}$/.test(request.directiveId ?? "")) throw new Error("invalid directiveId");
   if (!["explain.coverage-cell", "reclassify.coverage-threshold", "correlate.rf-cell-graph",
     "compare.graph-delta", "trace.provenance-impact", "expose.contradictions",
+    "compare.causal-worlds",
     "explain.lunar-location"].includes(request.directive)) {
     throw new Error("directive is not allow-listed");
   }
@@ -74,6 +76,16 @@ export function validateDirectiveRequest(input) {
     const kinds = new Set(request.selection.map((item) => item.kind));
     if (!kinds.has("rf-cell") || !(kinds.has("graph-node") || kinds.has("graph-edge") || kinds.has("event"))) {
       throw new Error("RF/graph correlation requires rf-cell and graph selections");
+    }
+  }
+  if (request.directive === "compare.causal-worlds") {
+    const kinds = new Set(request.selection.map((item) => item.kind));
+    const pins = request.selection.filter((item) => item.kind === "time-pin");
+    if (!kinds.has("rf-cell") || !(kinds.has("graph-node") || kinds.has("graph-edge") || kinds.has("event"))) {
+      throw new Error("causal-world comparison requires rf-cell and graph selections");
+    }
+    if (pins.length !== 2 || pins[0].clockId !== pins[1].clockId) {
+      throw new Error("causal-world comparison requires two time pins on the same clock");
     }
   }
   if (request.parameters != null) {
@@ -124,6 +136,7 @@ export function validateEffect(effectInput) {
     "view.show-graph-delta": ["delta", "executed", "caveat"],
     "view.show-graph-provenance": ["path", "executed", "caveat"],
     "view.show-contradictions": ["findings", "root", "executed", "caveat"],
+    "view.show-causal-worlds": ["investigationId", "observedWorld", "worlds", "executed", "boundary"],
     "view.show-lunar-prism": ["datasetId", "locationId", "celestialBody", "referenceFrame",
       "longitudeDegrees", "latitudeDegrees", "heightMeters", "spatialAuthority", "terrainAuthority",
       "elevationMeters", "evidenceClass", "artifacts", "limitations"],

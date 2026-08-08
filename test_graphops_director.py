@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 import struct
 import unittest
+from unittest.mock import patch
 
 import jsonschema
 
@@ -144,6 +145,23 @@ class GraphOpsDirectorTests(unittest.TestCase):
         self.assertEqual(fiber["parameters"]["findingClass"], "INFERRED")
         self.assertIn("not evidence of causality", fiber["parameters"]["caveat"])
 
+    def test_causal_world_comparison_withholds_verdict_and_carries_falsifiers(self):
+        payload = correlation_request(mode="execute")
+        payload["directive"] = "compare.causal-worlds"
+        payload["idempotencyKey"] = "fixture:compare.causal-worlds:execute"
+        payload["selection"].extend([
+            {"kind": "time-pin", "timestamp": 99, "clockId": "UTC", "uncertaintyMilliseconds": 2},
+            {"kind": "time-pin", "timestamp": 101, "clockId": "UTC", "uncertaintyMilliseconds": 2},
+        ])
+        plan = GraphOpsDirector(engine=_GraphEngine(), rf_observation_provider=_Observations()).compile(
+            payload, expected_mode="execute")
+        effect = next(item for item in plan["effects"] if item["type"] == "view.show-causal-worlds")
+        self.assertEqual(4, len(effect["parameters"]["worlds"]))
+        self.assertEqual("CAUSAL_VERDICT_WITHHELD", plan["claims"][0]["authority"])
+        self.assertEqual("COUNTERFACTUAL", effect["parameters"]["worlds"][0]["evidenceClass"])
+        self.assertTrue(all(world["falsifier"] for world in effect["parameters"]["worlds"]))
+        self.assertGreaterEqual(plan["queries"][0]["matchCount"], 1)
+
     def test_graph_edge_selection_is_revision_pinned(self):
         resolver = GraphSelectionResolver(_GraphEngine())
         resolved = resolver.resolve({"kind": "graph-edge", "entityId": "edge-a",
@@ -151,15 +169,28 @@ class GraphOpsDirectorTests(unittest.TestCase):
         self.assertEqual(resolved["edge"]["id"], "edge-a")
         self.assertEqual(resolved["selectionKind"], "graph-edge")
 
-    def test_graph_delta_declares_timestamp_projection_boundary(self):
+    def test_graph_delta_uses_retained_immutable_snapshots(self):
+        engine = _GraphEngine()
+        engine.nodes["history-seed"] = {"id": "history-seed", "kind": "host", "timestamp": 98.0}
+        with patch("graphops_graph_resolver.time.time", return_value=99.0):
+            GraphSelectionResolver(engine).snapshot()
+        engine.nodes["later"] = {"id": "later", "kind": "event", "timestamp": 100.5}
+        engine.edges["later-edge"] = {"id": "later-edge", "kind": "flow",
+                                      "nodes": ["burst-a", "later"], "timestamp": 100.5}
+        with patch("graphops_graph_resolver.time.time", return_value=101.0):
+            GraphSelectionResolver(engine).snapshot()
         payload = graph_request("compare.graph-delta", selection=[
             {"kind": "time-pin", "timestamp": 99, "clockId": "UTC"},
             {"kind": "time-pin", "timestamp": 101, "clockId": "UTC"},
         ], parameters={"limit": 100})
-        plan = GraphOpsDirector(engine=_GraphEngine()).compile(payload, expected_mode="execute")
+        with patch("graphops_graph_resolver.time.time", return_value=101.0):
+            plan = GraphOpsDirector(engine=engine).compile(payload, expected_mode="execute")
         self.assertIn("GRAPH_DELTA", "\n".join(plan["queries"][0]["dsl"]))
         delta = next(effect for effect in plan["effects"] if effect["type"] == "view.show-graph-delta")
-        self.assertIn("NOT A HISTORICAL SNAPSHOT DIFF", delta["parameters"]["delta"]["temporalSemantics"])
+        self.assertEqual("RETAINED_IMMUTABLE_SNAPSHOT_DIFF",
+                         delta["parameters"]["delta"]["temporalSemantics"])
+        self.assertEqual(["later"], [item["id"] for item in delta["parameters"]["delta"]["addedNodes"]])
+        self.assertFalse(delta["parameters"]["delta"]["windowCoverage"]["clamped"])
 
     def test_provenance_and_contradictions_are_bounded_read_only_plans(self):
         engine = _GraphEngine()

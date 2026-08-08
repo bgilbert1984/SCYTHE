@@ -45,6 +45,8 @@ class GraphOpsDirector:
         evidence_ref = f"dataset:{evidence['datasetId']}:{evidence['tileId']}:{evidence['authorityAssetSha256']}"
         if request["directive"] == "correlate.rf-cell-graph":
             return self._compile_rf_graph_correlation(request, evidence, evidence_ref)
+        if request["directive"] == "compare.causal-worlds":
+            return self._compile_causal_worlds(request, evidence, evidence_ref)
         threshold = request.get("parameters", {}).get("threshold")
         if threshold is None:
             threshold = (request["selection"][0].get("coverageThreshold") or {}).get("value")
@@ -262,22 +264,164 @@ class GraphOpsDirector:
             }, [graph_ref], "UNCERTAINTY_BOUNDARY", "time-pin"))
         effects.append(self._effect(f"{request['directiveId']}:delta", "view.show-graph-delta", {
             "delta": delta, "executed": executed,
-            "caveat": "Current-graph timestamp projection; removals require retained historical snapshots.",
+            "caveat": ("Immutable retained-snapshot diff; clamped pins identify incomplete temporal coverage."
+                       if executed else "Preview only; no retained snapshots compared."),
         }, [graph_ref], "CAUSAL_DISAGREEMENT", "time-pin"))
-        changes = len(delta["addedNodes"]) + len(delta["addedEdges"])
-        summary = (f"GRAPH_DELTA found {changes} timestamped additions between the pins. "
-                   f"{delta['unknownTimeCount']} entities have unknown time." if executed else
+        changes = sum(len(delta.get(key, [])) for key in (
+            "addedNodes", "addedEdges", "removedNodes", "removedEdges", "changedNodes", "changedEdges"))
+        summary = (f"GRAPH_DELTA found {changes} structural changes between two retained immutable states. "
+                   f"Temporal coverage is {'clamped' if delta['windowCoverage']['clamped'] else 'exact'}." if executed else
                    "GRAPH_DELTA preview compiled; no graph query executed.")
         return new_effect_plan(request, status="completed", summary=summary,
             evidencePosture="mixed" if changes else "sparse", effects=effects,
             queries=[{"dsl": dsl, "executed": executed, "bounded": True,
                       "resultCount": changes, "temporalSemantics": delta["temporalSemantics"]}],
             claims=[{"text": summary, "evidenceClass": "INFERRED",
-                     "authority": "GRAPH_ENTITY_TIMESTAMPS_ONLY"}],
+                     "authority": "RETAINED_IMMUTABLE_GRAPH_STATES"}],
             supportingEvidence=[{"evidenceRef": graph_ref, "evidenceClass": "INFERRED", "delta": delta}],
             assumptions=["Selected clock identity and timestamp normalization are valid."],
-            falsifiers=["Compare against retained immutable graph snapshots for the same pins."],
+            falsifiers=["Acquire graph snapshots exactly at both requested pins and repeat the diff."],
             mutations=[] if not executed else [{"target": "browser-view", "kind": "reversible-effect-plan", "authorityImpact": "none"}])
+
+    def _compile_causal_worlds(self, request: Dict[str, Any], evidence: Dict[str, Any],
+                               evidence_ref: str) -> Dict[str, Any]:
+        selection = self._graph_selection(request)
+        graph = self._graph_resolver().resolve(selection)
+        entity = graph.get("node") or graph.get("edge")
+        pins = sorted((item for item in request["selection"] if item["kind"] == "time-pin"),
+                      key=lambda item: float(item["timestamp"]))
+        start, end = (float(pins[0]["timestamp"]), float(pins[1]["timestamp"]))
+        limit = int(request.get("parameters", {}).get("limit", 100))
+        executed = request["requestedMode"] == "execute"
+        dsl = [
+            f"FOCUS {json.dumps(entity['id'])}",
+            f"PIN from={start:.6f} to={end:.6f} clock={json.dumps(pins[0]['clockId'])}",
+            "RF_CORRELATE window=2s",
+            f"GRAPH_DELTA limit={limit}",
+            f"CONTRADICTIONS depth=2 limit={limit}",
+            "COMPARE_WORLDS shared-cause independent-events clock-artifact adversarial-coordination",
+        ]
+        delta = self._graph_resolver().delta(start, end, limit=limit) if executed else {
+            "from": start, "to": end, "addedNodes": [], "addedEdges": [], "removedNodes": [],
+            "removedEdges": [], "changedNodes": [], "changedEdges": [],
+            "temporalSemantics": "PREVIEW; NOT EXECUTED", "windowCoverage": {"clamped": True},
+        }
+        contradictions = self._graph_resolver().contradictions(selection, limit=limit) if executed else {
+            "contradictions": [], "bounded": True,
+        }
+
+        frequency_hz = float(evidence["provenance"].get("frequencyHz") or 0.0)
+        if frequency_hz <= 0:
+            manifest = json.loads((self.resolver.dataset_root / evidence["datasetId"] / "manifest.json").read_text())
+            frequency_hz = float(manifest["physics"]["rf"]["frequencyHz"])
+        observations = []
+        matches = []
+        if executed and self.rf_observation_provider is not None:
+            observations = self.rf_observation_provider.query(
+                since=start, frequency_hz=frequency_hz, tolerance_hz=25_000.0, limit=200)
+            event_times = []
+            for candidate in [entity, *graph.get("incidentEdges", [])]:
+                value = candidate.get("observedAt", candidate.get("timestamp"))
+                try:
+                    timestamp = float(value)
+                    if start <= timestamp <= end:
+                        event_times.append((candidate["id"], timestamp))
+                except (TypeError, ValueError):
+                    continue
+            for observation in observations:
+                try:
+                    observed_at = float(observation["observed_at"])
+                except (KeyError, TypeError, ValueError):
+                    continue
+                if not start <= observed_at <= end:
+                    continue
+                for event_id, event_at in event_times:
+                    delta_seconds = abs(event_at - observed_at)
+                    if delta_seconds <= 2.0:
+                        matches.append({"evidenceId": observation.get("evidence_id"),
+                                        "graphEntityId": event_id, "observedAt": observed_at,
+                                        "graphObservedAt": event_at,
+                                        "deltaMilliseconds": round(delta_seconds * 1000.0, 3),
+                                        "findingClass": "INFERRED"})
+        matches = sorted(matches, key=lambda item: item["deltaMilliseconds"])[:30]
+        findings = contradictions["contradictions"]
+        clamped = bool(delta.get("windowCoverage", {}).get("clamped", True))
+        shared_status = ("NOT_EVALUATED" if not executed else
+                         "VIABLE_UNPROVEN" if matches else "UNSUPPORTED_BY_CURRENT_TEMPORAL_EVIDENCE")
+        clock_status = ("NOT_EVALUATED" if not executed else
+                        "VIABLE_UNPROVEN" if clamped or any(float(pin.get("uncertaintyMilliseconds", 0)) > 0 for pin in pins)
+                        else "REQUIRES_CLOCK_EVIDENCE")
+        worlds = [
+            {"worldId": "W1_SHARED_CAUSE", "label": "SHARED RF / NETWORK CAUSE",
+             "evidenceClass": "COUNTERFACTUAL", "support": shared_status,
+             "assumptions": ["The RF and graph clocks are aligned within two seconds.",
+                             "The measured RF frequency is relevant to the modeled coverage cell.",
+                             "One mechanism can produce both the RF condition and selected graph event."],
+             "supportingEvidence": matches,
+             "contradictingEvidence": findings,
+             "predictedObservation": "The RF feature recurs within the calibrated window of comparable graph bursts.",
+             "falsifier": "Synchronized repeated captures show the graph burst without the RF feature.",
+             "nextObservation": "Collect calibrated RF and graph timestamps during the next comparable burst."},
+            {"worldId": "W2_INDEPENDENT", "label": "INDEPENDENT COINCIDENT EVENTS",
+             "evidenceClass": "COUNTERFACTUAL", "support": "VIABLE_UNPROVEN" if executed else "NOT_EVALUATED",
+             "assumptions": ["The RF condition and graph event arise from unrelated processes."],
+             "supportingEvidence": [], "contradictingEvidence": matches,
+             "predictedObservation": "RF features and graph bursts vary independently over repeated windows.",
+             "falsifier": "A repeatable synchronized dependency survives background-rate correction.",
+             "nextObservation": "Measure both event rates across control windows with no selected burst."},
+            {"worldId": "W3_CLOCK_ARTIFACT", "label": "SENSOR OR CLOCK ARTIFACT",
+             "evidenceClass": "COUNTERFACTUAL", "support": clock_status,
+             "assumptions": ["Clock offset, jitter, loss, or sensor state can explain apparent alignment."],
+             "supportingEvidence": ([delta.get("windowCoverage", {})] if clamped else []),
+             "contradictingEvidence": [],
+             "predictedObservation": "Alignment changes after clock calibration or sequence-gap correction.",
+             "falsifier": "Independent calibrated clocks preserve the same temporal relationship.",
+             "nextObservation": "Record clock offset, uncertainty, sensor health, and sequence continuity."},
+            {"worldId": "W4_ADVERSARIAL", "label": "ADVERSARIAL COORDINATION",
+             "evidenceClass": "COUNTERFACTUAL", "support": "UNSUPPORTED" if executed else "NOT_EVALUATED",
+             "assumptions": ["An actor intentionally coordinates emissions and network behavior."],
+             "supportingEvidence": [], "contradictingEvidence": [],
+             "predictedObservation": "The coupled pattern recurs with actor-linked infrastructure or waveform identity.",
+             "falsifier": "Independent sources and null-rate analysis explain the recurrence.",
+             "nextObservation": "Capture waveform identity and network attribution without promoting correlation to intent."},
+        ]
+        investigation_id = f"investigation:{request['directiveId']}"
+        graph_ref = f"graph:{graph['graphRevision']}:{entity['id']}"
+        effects = [
+            self._effect(f"{request['directiveId']}:dsl", "view.show-dsl-preview",
+                         {"dsl": dsl, "executed": executed}, [evidence_ref, graph_ref],
+                         "INFERRED_RELATIONSHIP", selection["kind"]),
+            self._effect(f"{request['directiveId']}:worlds", "view.show-causal-worlds", {
+                "investigationId": investigation_id,
+                "observedWorld": {"worldId": "W0_OBSERVED", "graphRevision": graph["graphRevision"],
+                                  "rfEvidenceRef": evidence_ref, "graphEvidenceRef": graph_ref,
+                                  "timeWindow": {"from": start, "to": end, "clockId": pins[0]["clockId"]},
+                                  "temporalCoverage": delta.get("windowCoverage")},
+                "worlds": worlds, "executed": executed,
+                "boundary": "Hypothesis worlds organize tests; they are not observations, measurements, or causal verdicts.",
+            }, [evidence_ref, graph_ref], "CAUSAL_DISAGREEMENT", selection["kind"]),
+        ]
+        summary = (f"Compared four causal worlds using {len(matches)} temporal RF/graph matches, "
+                   f"{len(findings)} explicit contradictions, and retained graph state. No causal verdict was issued."
+                   if executed else "Compiled four causal worlds for preview; no evidence query executed.")
+        return new_effect_plan(
+            request, status="completed", summary=summary,
+            evidencePosture="mixed" if matches or findings else "sparse", effects=effects,
+            queries=[{"dsl": dsl, "executed": executed, "bounded": True,
+                      "matchCount": len(matches), "contradictionCount": len(findings),
+                      "temporalSemantics": delta["temporalSemantics"]}],
+            claims=[{"text": "No shared cause is established; candidate worlds remain hypothetical.",
+                     "evidenceClass": "INFERRED", "authority": "CAUSAL_VERDICT_WITHHELD"}],
+            supportingEvidence=[{"evidenceRef": evidence_ref, "evidenceClass": "SOLVER_OUTPUT"},
+                                {"evidenceRef": graph_ref, "evidenceClass": entity["evidenceClass"]},
+                                *matches],
+            contradictingEvidence=findings,
+            assumptions=[assumption for world in worlds for assumption in world["assumptions"]],
+            falsifiers=[world["falsifier"] for world in worlds],
+            mutations=[] if not executed else [{"target": "browser-investigation", "kind": "reversible-world-stack",
+                                                "authorityImpact": "none"}],
+            undoToken=None if not executed else f"undo:{request['directiveId']}",
+        )
 
     def _compile_provenance(self, request: Dict[str, Any]) -> Dict[str, Any]:
         selection = self._graph_selection(request)

@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import time
 from collections import OrderedDict
 from copy import deepcopy
 from threading import RLock
@@ -23,7 +24,10 @@ _SNAPSHOT_CACHE_LIMIT = 32
 def _remember_snapshot(snapshot: Dict[str, Any]) -> None:
     revision = snapshot["graphRevision"]
     with _SNAPSHOT_CACHE_LOCK:
-        _SNAPSHOT_CACHE[revision] = deepcopy(snapshot)
+        # A revision is content-addressed. Preserve the first capture time so a
+        # later poll of identical state cannot rewrite temporal history.
+        if revision not in _SNAPSHOT_CACHE:
+            _SNAPSHOT_CACHE[revision] = deepcopy(snapshot)
         _SNAPSHOT_CACHE.move_to_end(revision)
         while len(_SNAPSHOT_CACHE) > _SNAPSHOT_CACHE_LIMIT:
             _SNAPSHOT_CACHE.popitem(last=False)
@@ -36,6 +40,12 @@ def _cached_snapshot(revision: str) -> Dict[str, Any] | None:
             _SNAPSHOT_CACHE.move_to_end(revision)
             return deepcopy(snapshot)
     return None
+
+
+def _retained_snapshots() -> list[Dict[str, Any]]:
+    with _SNAPSHOT_CACHE_LOCK:
+        return sorted((deepcopy(item) for item in _SNAPSHOT_CACHE.values()),
+                      key=lambda item: float(item.get("capturedAt", 0.0)))
 
 
 def _mapping(value: Any) -> Dict[str, Any]:
@@ -152,16 +162,13 @@ class GraphSelectionResolver:
     def revision(self) -> str:
         if self._pinned_revision is not None:
             return self._pinned_revision
-        nodes = sorted(({
-            "id": _node_id(node, node.get("_fallback_id", "")),
-            "kind": node.get("kind") or node.get("type"), "position": _position(node),
-            "observedAt": node.get("observed_at") or node.get("timestamp") or node.get("created_at"),
-        } for node in self._nodes()), key=lambda item: item["id"])
-        edges = sorted(({
-            "id": _edge_id(edge),
-            "kind": edge.get("kind") or edge.get("type"), "nodes": self._edge_nodes(edge),
-            "timestamp": edge.get("timestamp"),
-        } for edge in self._edges()), key=lambda item: item["id"])
+        # Revisions cover the complete normalized selection state, including
+        # evidence and provenance metadata. A metadata/evidence transition must
+        # never reuse a revision whose retained snapshot says something else.
+        nodes = sorted((self._normalize_node(node) for node in self._nodes()),
+                       key=lambda item: item["id"])
+        edges = sorted((self._normalize_edge(edge) for edge in self._edges()),
+                       key=lambda item: item["id"])
         payload = json.dumps({"nodes": nodes, "edges": edges}, separators=(",", ":"),
                              sort_keys=True, default=str)
         return "graph-" + hashlib.blake2s(payload.encode(), digest_size=8).hexdigest()
@@ -209,22 +216,29 @@ class GraphSelectionResolver:
     def snapshot(self, *, node_limit: int = 200, edge_limit: int = 300) -> Dict[str, Any]:
         node_limit = min(max(int(node_limit), 1), 500)
         edge_limit = min(max(int(edge_limit), 1), 1000)
-        nodes = [self._normalize_node(node) for node in self._nodes()[:node_limit]]
-        allowed = {node["id"] for node in nodes}
-        edges = []
+        canonical_nodes = [self._normalize_node(node) for node in self._nodes()[:500]]
+        canonical_allowed = {node["id"] for node in canonical_nodes}
+        canonical_edges = []
         for edge in self._edges():
             members = self._edge_nodes(edge)
-            if members and all(member in allowed for member in members):
-                edges.append(self._normalize_edge(edge))
-            if len(edges) >= edge_limit:
+            if members and all(member in canonical_allowed for member in members):
+                canonical_edges.append(self._normalize_edge(edge))
+            if len(canonical_edges) >= 1000:
                 break
-        snapshot = {
-            "status": "ok", "graphRevision": self.revision(), "nodes": nodes,
-            "edges": edges, "bounded": True, "nodeLimit": node_limit,
-            "edgeLimit": edge_limit, "nodeCount": len(nodes), "edgeCount": len(edges),
+        canonical = {
+            "status": "ok", "graphRevision": self.revision(), "nodes": canonical_nodes,
+            "edges": canonical_edges, "bounded": True, "nodeLimit": 500,
+            "edgeLimit": 1000, "nodeCount": len(canonical_nodes), "edgeCount": len(canonical_edges),
+            "capturedAt": time.time(), "snapshotAuthority": "RETAINED_IMMUTABLE_GRAPH_STATE",
         }
-        _remember_snapshot(snapshot)
-        return snapshot
+        _remember_snapshot(canonical)
+        retained = _cached_snapshot(canonical["graphRevision"]) or canonical
+        nodes = retained["nodes"][:node_limit]
+        allowed = {node["id"] for node in nodes}
+        edges = [edge for edge in retained["edges"]
+                 if edge["nodes"] and all(member in allowed for member in edge["nodes"])][:edge_limit]
+        return {**retained, "nodes": nodes, "edges": edges, "nodeLimit": node_limit,
+                "edgeLimit": edge_limit, "nodeCount": len(nodes), "edgeCount": len(edges)}
 
     def resolve(self, selection: Dict[str, Any]) -> Dict[str, Any]:
         requested_revision = selection.get("graphRevision")
@@ -271,16 +285,53 @@ class GraphSelectionResolver:
         if start > end:
             start, end = end, start
         limit = min(max(int(limit), 1), 200)
-        nodes = [self._normalize_node(item) for item in self._nodes()]
-        edges = [self._normalize_edge(item) for item in self._edges()]
-        added_nodes = [item for item in nodes if item["observedAt"] is not None and start < item["observedAt"] <= end][:limit]
-        added_edges = [item for item in edges if item["observedAt"] is not None and start < item["observedAt"] <= end][:limit]
-        unknown = sum(item["observedAt"] is None for item in [*nodes, *edges])
-        return {"graphRevision": self.revision(), "from": start, "to": end,
-                "addedNodes": added_nodes, "addedEdges": added_edges,
-                "removedNodes": [], "removedEdges": [], "unknownTimeCount": unknown,
-                "bounded": True, "limit": limit,
-                "temporalSemantics": "CURRENT_GRAPH_TIMESTAMP_PROJECTION; NOT A HISTORICAL SNAPSHOT DIFF"}
+        self.snapshot(node_limit=500, edge_limit=1000)
+        retained = _retained_snapshots()
+        if not retained:
+            raise GraphResolutionError("no retained immutable graph snapshots are available")
+
+        def snapshot_at(pin: float) -> tuple[Dict[str, Any], bool]:
+            prior = [item for item in retained if float(item.get("capturedAt", 0.0)) <= pin]
+            if prior:
+                selected = prior[-1]
+                return selected, abs(float(selected["capturedAt"]) - pin) < 1e-6
+            return retained[0], False
+
+        before, start_exact = snapshot_at(start)
+        after, end_exact = snapshot_at(end)
+        before_nodes = {item["id"]: item for item in before["nodes"]}
+        after_nodes = {item["id"]: item for item in after["nodes"]}
+        before_edges = {item["id"]: item for item in before["edges"]}
+        after_edges = {item["id"]: item for item in after["edges"]}
+
+        def added(left, right):
+            return [right[key] for key in sorted(right.keys() - left.keys())][:limit]
+
+        def removed(left, right):
+            return [left[key] for key in sorted(left.keys() - right.keys())][:limit]
+
+        def changed(left, right):
+            return [{"before": left[key], "after": right[key]} for key in sorted(left.keys() & right.keys())
+                    if left[key] != right[key]][:limit]
+
+        unknown = sum(item.get("observedAt") is None for item in [*after_nodes.values(), *after_edges.values()])
+        return {
+            "graphRevision": after["graphRevision"],
+            "fromGraphRevision": before["graphRevision"], "toGraphRevision": after["graphRevision"],
+            "from": start, "to": end,
+            "addedNodes": added(before_nodes, after_nodes), "addedEdges": added(before_edges, after_edges),
+            "removedNodes": removed(before_nodes, after_nodes), "removedEdges": removed(before_edges, after_edges),
+            "changedNodes": changed(before_nodes, after_nodes), "changedEdges": changed(before_edges, after_edges),
+            "unknownTimeCount": unknown, "bounded": True, "limit": limit,
+            "retainedSnapshotCount": len(retained),
+            "windowCoverage": {
+                "requestedFrom": start, "requestedTo": end,
+                "snapshotFrom": before["capturedAt"], "snapshotTo": after["capturedAt"],
+                "fromExact": start_exact, "toExact": end_exact,
+                "clamped": not (start_exact and end_exact),
+            },
+            "temporalSemantics": "RETAINED_IMMUTABLE_SNAPSHOT_DIFF",
+        }
 
     def provenance(self, selection: Dict[str, Any], *, depth: int = 3, limit: int = 100) -> Dict[str, Any]:
         resolved = self.resolve(selection)

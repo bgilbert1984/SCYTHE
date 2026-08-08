@@ -77,10 +77,26 @@ Lunar M0 was implemented on 2026-08-06:
 - LROC illumination and LOLA slope imagery remain labelled reference panels;
   neither is sampled as a geospatial measurement surface.
 
-The next bounded frontiers are Lunar M1 registered LOLA terrain, a pinned SPICE
-kernel set, retained immutable graph snapshots, clock calibration evidence,
-contradiction adjudication receipts, and persistent RF observation storage
-across orchestrator restarts.
+Phase 3A was implemented on 2026-08-08:
+
+- The Cesium graph overlay and both topology renderers consume one shared
+  `LiveGraphController` snapshot and therefore one exact graph revision.
+- The existing 32-revision cache now records immutable capture times and powers
+  structural `GRAPH_DELTA` results containing additions, removals, and changed
+  entities rather than a current-graph timestamp projection.
+- Temporal results disclose exact or clamped snapshot coverage for both pins.
+- The deterministic `compare.causal-worlds` directive constructs four explicit
+  hypothesis worlds for an RF cell plus graph event: shared cause, independent
+  events, clock/sensor artifact, and adversarial coordination.
+- Every hypothesis remains `COUNTERFACTUAL`, carries assumptions, a predicted
+  observation, a falsifier, and a next observation, while the plan declares
+  `CAUSAL_VERDICT_WITHHELD`.
+- SCYTHE-Web now has a bounded, session-persistent investigation ledger and a
+  reversible causal world-stack effect in the regional RF demo.
+
+The next bounded frontiers are durable snapshot retention across restarts,
+clock calibration evidence, contradiction adjudication receipts, persistent
+RF observation storage, and Lunar M1 registered LOLA/SPICE authority.
 
 ## 1. Executive intent
 
@@ -1232,3 +1248,26 @@ Lifecycle controls suspend rendering when the chamber or document is hidden,
 respond to container resize, and dispose controls, geometry, material, renderer,
 and WebGL context on teardown. Tooltips use text content rather than interpreting
 graph metadata as HTML.
+
+## 28. Implemented Phase 3A temporal causal workbench
+
+The regional RF demo now performs the signature interaction as a deterministic,
+bounded GraphOps operation. The operator selects one RF cell and one graph node,
+edge, or event, chooses two UTC pins, and executes `compare.causal-worlds`.
+The director resolves the RF cell against Float64 solver authority, resolves the
+graph selection against its retained revision, compares retained immutable graph
+states, searches bounded measured-RF temporal matches, and preserves explicit
+contradiction relations.
+
+The resulting four worlds are investigative hypotheses, not parallel claims.
+They cannot enter the observed graph, change evidence class, or initiate a
+sensor action. Each world declares what it assumes, what it predicts, what
+would falsify it, and which observation should be collected next. The browser
+renders all text with DOM `textContent`, records only bounded plan summaries in
+session storage, and reverses the active world stack through the EffectRuntime.
+
+Snapshot retention remains process-local and bounded to 32 distinct graph
+revisions. A time pin outside retained history is clamped to the nearest
+available immutable state and visibly labelled `CLAMPED`; SCYTHE does not claim
+that such a diff exactly represents the requested instant. Durable historical
+replay remains future work.

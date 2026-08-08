@@ -1240,7 +1240,8 @@ def graphops_directive_preview():
     try:
         payload = request.get_json(silent=True) or {}
         if payload.get('directive') in {'correlate.rf-cell-graph', 'compare.graph-delta',
-                                         'trace.provenance-impact', 'expose.contradictions'}:
+                                         'trace.provenance-impact', 'expose.contradictions',
+                                         'compare.causal-worlds'}:
             port = _get_primary_instance_port()
             if not port:
                 return jsonify({'error': 'No active SCYTHE graph instance'}), 503
@@ -1261,11 +1262,12 @@ def graphops_directive_execute():
     try:
         payload = request.get_json(silent=True) or {}
         if payload.get('directive') in {'correlate.rf-cell-graph', 'compare.graph-delta',
-                                         'trace.provenance-impact', 'expose.contradictions'}:
+                                         'trace.provenance-impact', 'expose.contradictions',
+                                         'compare.causal-worlds'}:
             port = _get_primary_instance_port()
             if not port:
                 return jsonify({'error': 'No active SCYTHE graph instance'}), 503
-            if payload.get('directive') == 'correlate.rf-cell-graph':
+            if payload.get('directive') in {'correlate.rf-cell-graph', 'compare.causal-worlds'}:
                 _sync_rf_observations_to_child(port)
             result = _proxy_post(port, '/api/graphops/directives/execute', payload, timeout=30)
             return (jsonify(result), 200) if result is not None else (jsonify({'error': 'Graph instance unavailable'}), 502)

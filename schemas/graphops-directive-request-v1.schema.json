@@ -8,7 +8,7 @@
   "properties": {
     "protocolVersion": {"const": "1.0"},
     "directiveId": {"type": "string", "pattern": "^[A-Za-z0-9._:-]{1,128}$"},
-    "directive": {"enum": ["explain.coverage-cell", "reclassify.coverage-threshold", "correlate.rf-cell-graph", "compare.graph-delta", "trace.provenance-impact", "expose.contradictions", "explain.lunar-location"]},
+    "directive": {"enum": ["explain.coverage-cell", "reclassify.coverage-threshold", "correlate.rf-cell-graph", "compare.graph-delta", "trace.provenance-impact", "expose.contradictions", "compare.causal-worlds", "explain.lunar-location"]},
     "utterance": {"type": "string", "maxLength": 2000},
     "selection": {
       "type": "array", "minItems": 1, "maxItems": 16,

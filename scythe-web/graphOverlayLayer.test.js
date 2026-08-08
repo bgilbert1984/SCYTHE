@@ -43,3 +43,22 @@ test("bounded graph overlay renders geospatial nodes and inferred edges", async 
   layer.destroy();
   assert.equal(viewer.entities.values.length, 0);
 });
+
+test("graph overlay consumes the shared controller without a second graph poll", async () => {
+  const {viewer, Cesium, container} = fixture();
+  const graph = {status: "ok", graphRevision: "shared-1", nodes: [
+    {id: "a", kind: "event", position: [37.8, -122.4, 0], evidenceClass: "OBSERVED"},
+  ], edges: []};
+  let listener; let starts = 0; let fetches = 0;
+  const controller = {
+    subscribe(callback) { listener = callback; return () => { listener = null; }; },
+    async start() { starts += 1; listener({kind: "snapshot", graph, available: true, changed: true}); },
+  };
+  const layer = new GraphOverlayLayer({viewer, Cesium, container, controller,
+    fetchImpl: async () => { fetches += 1; throw new Error("must not poll"); }});
+  await layer.start();
+  assert.equal(starts, 1); assert.equal(fetches, 0);
+  assert.equal(layer.graphRevision, "shared-1");
+  assert.equal(viewer.entities.values.length, 1);
+  layer.destroy(); assert.equal(listener, null);
+});

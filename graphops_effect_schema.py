@@ -14,7 +14,7 @@ PROTOCOL_VERSION = "1.0"
 DIRECTIVES = {
     "explain.coverage-cell", "reclassify.coverage-threshold", "correlate.rf-cell-graph",
     "compare.graph-delta", "trace.provenance-impact", "expose.contradictions",
-    "explain.lunar-location",
+    "compare.causal-worlds", "explain.lunar-location",
 }
 EFFECT_TYPES = {
     "view.highlight-targets", "view.set-coverage-threshold",
@@ -22,6 +22,7 @@ EFFECT_TYPES = {
     "view.show-dsl-preview", "view.show-correlation-fibers", "view.show-no-data",
     "view.pin-time", "view.show-graph-delta", "view.show-graph-provenance",
     "view.show-contradictions",
+    "view.show-causal-worlds",
     "view.show-lunar-prism",
 }
 STYLE_TOKENS = {
@@ -148,6 +149,13 @@ def validate_directive_request(payload: Any, *, expected_mode: str | None = None
         kinds = {item["kind"] for item in normalized_selections}
         if "rf-cell" not in kinds or not kinds.intersection({"graph-node", "graph-edge", "event"}):
             raise DirectiveProtocolError("RF/graph correlation requires an rf-cell and graph entity selection")
+    if payload["directive"] == "compare.causal-worlds":
+        kinds = {item["kind"] for item in normalized_selections}
+        if "rf-cell" not in kinds or not kinds.intersection({"graph-node", "graph-edge", "event"}):
+            raise DirectiveProtocolError("causal-world comparison requires an rf-cell and graph entity selection")
+        pins = [item for item in normalized_selections if item["kind"] == "time-pin"]
+        if len(pins) != 2 or pins[0]["clockId"] != pins[1]["clockId"]:
+            raise DirectiveProtocolError("causal-world comparison requires two time pins on the same clock")
     if payload["directive"] == "compare.graph-delta":
         pins = [item for item in normalized_selections if item["kind"] == "time-pin"]
         if len(pins) != 2:

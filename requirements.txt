@@ -81,6 +81,7 @@ axios            # Note: This is a JS dependency, not Python
 questdb>=1.1.0    # Time series database client
 psycopg2-binary>=2.9.5  # PostgreSQL adapter
 duckdb>=1.0.0     # Embedded analytics store
+faiss-cpu==1.15.0 # CPU vector index used by GraphOps semantic memory
 
 # Signal Processing & Tracking
 filterpy>=1.4.5   # Kalman filtering and tracking

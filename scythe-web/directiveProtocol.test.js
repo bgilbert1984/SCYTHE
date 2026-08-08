@@ -33,6 +33,19 @@ test("GRAPH_DELTA requires exactly two same-clock time pins", () => {
     {...delta.selection[1], clockId: "sensor-clock"}]}), /same clock/);
 });
 
+test("causal-world comparison requires RF, graph, and same-clock time pins", () => {
+  const causal = {...request, directive: "compare.causal-worlds", selection: [
+    ...request.selection, {kind: "event", entityId: "burst-a", graphRevision: "graph-1"},
+    {kind: "time-pin", timestamp: 100, clockId: "UTC"},
+    {kind: "time-pin", timestamp: 200, clockId: "UTC"},
+  ]};
+  assert.equal(validateDirectiveRequest(causal), causal);
+  assert.throws(() => validateDirectiveRequest({...causal,
+    selection: causal.selection.filter((item) => item.kind !== "rf-cell")}), /requires rf-cell and graph/);
+  assert.throws(() => validateDirectiveRequest({...causal,
+    selection: causal.selection.filter((item) => item.kind !== "time-pin")}), /requires two time pins/);
+});
+
 test("graph edge selections support provenance and contradiction directives", () => {
   const selection = [{kind: "graph-edge", entityId: "edge-a", graphRevision: "graph-1"}];
   for (const directive of ["trace.provenance-impact", "expose.contradictions"]) {
@@ -59,6 +72,21 @@ test("effect plan rejects executable and authority-changing effects", () => {
   assert.equal(validateEffectPlan(base), base);
   assert.throws(() => validateEffectPlan({...base, effects: [{effectId: "x", type: "view.run-javascript",
     parameters: {}, styleToken: "THRESHOLD_LENS", authorityImpact: "none", reversible: true}]}), /allow-listed/);
+});
+
+test("effect plan accepts bounded counterfactual causal worlds", () => {
+  const effect = {effectId: "worlds-1", type: "view.show-causal-worlds", phase: "preview",
+    targets: [{kind: "event", id: "graph:1:event"}], styleToken: "CAUSAL_DISAGREEMENT",
+    evidenceRefs: ["graph:1:event"], authorityImpact: "none", reversible: true,
+    ttlMilliseconds: 300000, parameters: {investigationId: "investigation:1",
+      observedWorld: {worldId: "W0_OBSERVED"},
+      worlds: [{worldId: "W1", evidenceClass: "COUNTERFACTUAL", falsifier: "measure"}],
+      executed: true, boundary: "No causal verdict."}};
+  const plan = {protocolVersion: "1.0", directiveId: "dir-worlds", planId: "plan-worlds",
+    status: "completed", evidencePosture: "mixed", effects: [effect], queries: [], jobs: [],
+    proposals: [], claims: [], supportingEvidence: [], contradictingEvidence: [], assumptions: [],
+    falsifiers: [], mutations: [], refusals: []};
+  assert.equal(validateEffectPlan(plan), plan);
 });
 
 test("effect runtime applies and reverses a plan transactionally", async () => {

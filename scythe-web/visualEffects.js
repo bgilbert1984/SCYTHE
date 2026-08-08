@@ -4,7 +4,8 @@ function property(entity, name, time) {
   return entity.properties?.[name]?.getValue?.(time) ?? null;
 }
 
-export function registerVisualEffects(runtime, { viewer, Cesium, prismRoot, dslRoot = null, correlationRoot = null }) {
+export function registerVisualEffects(runtime, { viewer, Cesium, prismRoot, dslRoot = null,
+                                                  correlationRoot = null, worldStack = null }) {
   function panel(text) {
     if (!correlationRoot) return null;
     const previous = {hidden: correlationRoot.hidden, text: correlationRoot.textContent};
@@ -115,7 +116,8 @@ export function registerVisualEffects(runtime, { viewer, Cesium, prismRoot, dslR
         changed.push({entity, kind: "edge", material: entity.polyline.material, width: entity.polyline.width});
         entity.polyline.material = Cesium.Color.fromCssColorString("#7dff7d"); entity.polyline.width = 4;
       }
-      const previous = panel(`GRAPH_DELTA // ${effect.parameters.executed ? "EXECUTED" : "PREVIEW"}\nADDED NODES // ${delta.addedNodes?.length ?? 0}\nADDED EDGES // ${delta.addedEdges?.length ?? 0}\nREMOVALS // ${delta.removedNodes?.length ?? 0} NODES / ${delta.removedEdges?.length ?? 0} EDGES\nUNKNOWN TIME // ${delta.unknownTimeCount ?? 0}\nBOUNDARY // ${effect.parameters.caveat}`);
+      const coverage = delta.windowCoverage;
+      const previous = panel(`GRAPH_DELTA // ${effect.parameters.executed ? "EXECUTED" : "PREVIEW"}\nFROM // ${delta.fromGraphRevision ?? "PENDING"}\nTO // ${delta.toGraphRevision ?? "PENDING"}\nADDED // ${delta.addedNodes?.length ?? 0} NODES / ${delta.addedEdges?.length ?? 0} EDGES\nREMOVED // ${delta.removedNodes?.length ?? 0} NODES / ${delta.removedEdges?.length ?? 0} EDGES\nCHANGED // ${delta.changedNodes?.length ?? 0} NODES / ${delta.changedEdges?.length ?? 0} EDGES\nWINDOW // ${coverage ? (coverage.clamped ? "CLAMPED" : "EXACT") : "PREVIEW"}\nBOUNDARY // ${effect.parameters.caveat}`);
       return {changed, previous};
     },
     revert(effect, receipt) {
@@ -173,6 +175,10 @@ export function registerVisualEffects(runtime, { viewer, Cesium, prismRoot, dslR
       for (const item of receipt.changed) { item.entity.polyline.material = item.material; item.entity.polyline.width = item.width; }
       restorePanel(receipt.previous);
     },
+  });
+  runtime.register("view.show-causal-worlds", {
+    apply(effect) { return worldStack?.apply(effect.parameters) ?? null; },
+    revert(effect, receipt) { worldStack?.revert(receipt); },
   });
   const noOp = { apply: () => null, revert: () => undefined };
   runtime.register("view.show-provenance-path", noOp);

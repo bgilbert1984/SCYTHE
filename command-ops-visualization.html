@@ -7678,9 +7678,7 @@
                             <div style="margin-bottom: 10px;">
                                 <label style="display: block; margin-bottom: 5px; font-size: 12px;">Scan Type:</label>
                                 <select id="nmap-scan-type" style="width: 100%; padding: 5px; background: #2c2c2c; border: 1px solid #555; color: white; border-radius: 3px;">
-                                    <option value="SYN">SYN Scan (Fast)</option>
                                     <option value="TCP_CONNECT">TCP Connect</option>
-                                    <option value="UDP">UDP Scan</option>
                                     <option value="PING">Ping Sweep</option>
                                     <option value="SERVICE_DETECTION">Service Detection</option>
                                 </select>
@@ -7689,7 +7687,7 @@
                             <div style="margin-bottom: 10px;">
                                 <div style="display: flex; gap: 5px; font-size: 11px;">
                                     <label><input type="checkbox" id="nmap-service-detection" checked> Service Detection</label>
-                                    <label><input type="checkbox" id="nmap-os-detection"> OS Detection</label>
+                                    <label title="Privileged OS fingerprinting is outside the SCYTHE execution policy"><input type="checkbox" id="nmap-os-detection" disabled> OS Detection</label>
                                     <label><input type="checkbox" id="nmap-hypergraph-rf-correlation" checked> RF Correlation</label>
                                 </div>
                             </div>
@@ -27161,7 +27159,7 @@ API TIMING (avg ms):
             
             // Get scan parameters from UI
             const targetNetwork = document.getElementById('nmap-target-network')?.value || '192.168.1.0/24';
-            const scanType = document.getElementById('nmap-scan-type')?.value || 'SYN';
+            const scanType = document.getElementById('nmap-scan-type')?.value || 'TCP_CONNECT';
             const serviceDetection = document.getElementById('nmap-service-detection')?.checked || false;
             const osDetection = document.getElementById('nmap-os-detection')?.checked || false;
             const rfCorrelation = document.getElementById('nmap-hypergraph-rf-correlation')?.checked || false;
@@ -27206,11 +27204,16 @@ API TIMING (avg ms):
                     console.warn('Could not geolocate target:', geoError);
                 }
                 
-                const result = await hypergraphVisualizer.performNmapScan(targetNetwork, scanOptions);
+                const result = await performEnhancedNmapScan(targetNetwork, {
+                    scanType: scanType === 'PING' ? 'ping' : 'tcp-connect',
+                    serviceVersion: serviceDetection || scanType === 'SERVICE_DETECTION',
+                    timing: '3', hypergraph: true, rfCorrelation: rfCorrelation
+                });
                 
                 // Extract host counts from various possible response structures
                 const hostsDiscovered = result.hypergraphData?.metadata?.totalHosts 
                     || result.hypergraphData?.nodes?.length 
+                    || result.scan_info?.hosts_discovered
                     || result.hostsDiscovered 
                     || 0;
                 const rfCorrelatedHosts = result.hypergraphData?.metadata?.rfCorrelatedHosts || 0;
@@ -27752,14 +27755,13 @@ API TIMING (avg ms):
             // Build nmap options string for backend
             let nmapArgs = [];
             
-            // Scan type
-            if (options.scanType === 'tcp-syn') nmapArgs.push('-sS');
-            else if (options.scanType === 'tcp-connect') nmapArgs.push('-sT');
-            else if (options.scanType === 'udp') nmapArgs.push('-sU');
-            else if (options.scanType === 'stealth') nmapArgs.push('-sN -sF -sX');
+            // Scan type: the browser emits only the unprivileged policy subset.
+            const scanMode = String(options.scanType || '').toLowerCase().replaceAll('_', '-');
+            if (scanMode === 'ping') nmapArgs.push('-sn');
+            else if (scanMode) nmapArgs.push('-sT');
             
             // Timing
-            if (options.timing) nmapArgs.push(`-T${options.timing}`);
+            if (options.timing) nmapArgs.push(`-T${String(options.timing).replace(/^T/i, '')}`);
             
             // Port specification
             if (options.ports === 'top') nmapArgs.push('--top-ports 1000');
@@ -27806,24 +27808,15 @@ API TIMING (avg ms):
                         })
                     });
 
-                    if (res.ok) {
-                        scanResults = await res.json();
-                        
-                        // Handle simulated response from backend (if nmap missing on server)
-                        if (scanResults.status === 'simulated') {
-                            addConsoleMessage('Backend used simulation (nmap binary not found on server)', 'warning');
-                        } else {
-                            usedBackend = true;
-                            addConsoleMessage('Backend scan completed successfully', 'success');
-                        }
-                    } else {
-                        throw new Error(`Server error: ${res.status}`);
-                    }
+                    const responsePayload = await res.json().catch(() => ({}));
+                    if (!res.ok) throw new Error(responsePayload.message || `Server error: ${res.status}`);
+                    scanResults = responsePayload;
+                    usedBackend = true;
+                    addConsoleMessage('Backend scan completed successfully', 'success');
                 } catch (netErr) {
-                    console.warn('[Nmap] Backend scan failed, falling back to client simulation', netErr);
-                    // Fallback to client-side simulation
-                    scanResults = await simulateEnhancedNmapScan(target, options);
-                    addConsoleMessage('Using client-side simulation (Backend unavailable)', 'warning');
+                    console.warn('[Nmap] Backend scan unavailable or refused', netErr);
+                    addConsoleMessage(`Nmap unavailable or refused: ${netErr.message}`, 'alert');
+                    throw netErr;
                 }
                 
                 // Update hypergraph with results
@@ -28073,34 +28066,25 @@ API TIMING (avg ms):
             const startTime = performance.now();
             
             try {
-                // Try real backend first, fall back to simulation
-                let analysis;
-                try {
-                    const response = await fetch('/api/ndpi/analyze', {
+                const response = await fetch('/api/ndpi/analyze', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
-                            target: target,
-                            options: {
-                                detailed: options.detailed || true,
-                                hypergraph: options.hypergraph || false,
-                                timeout: options.timeout || 30000,
-                                maxPackets: options.maxPackets || 10000
-                            }
+                            interface: options.interface || 'eth0',
+                            duration: Math.max(1, Math.min(60, Number(options.duration) || 10))
                         })
                     });
-                    
-                    if (response.ok) {
-                        analysis = await response.json();
-                        addConsoleMessage('nDPI analysis completed via backend API', 'info');
-                    } else {
-                        throw new Error(`API returned ${response.status}`);
-                    }
-                } catch (apiError) {
-                    console.warn('[nDPI] Backend API unavailable, using simulation:', apiError);
-                    analysis = await simulateNdpiAnalysis(target, options);
-                    addConsoleMessage('nDPI analysis using simulated data (API unavailable)', 'warning');
-                }
+                const payload = await response.json().catch(() => ({}));
+                if (!response.ok) throw new Error(payload.message || `API returned ${response.status}`);
+                const parsed = payload.protocols || {};
+                const rows = Array.isArray(parsed.protocols) ? parsed.protocols : [];
+                const totalPackets = rows.reduce((sum, row) => sum + Number(row.packets || 0), 0);
+                const analysis = {...payload, totalPackets,
+                    totalBytes: rows.reduce((sum, row) => sum + Number(row.bytes || 0), 0),
+                    protocols: rows.map((row) => ({...row, name: row.protocol,
+                        percentage: totalPackets ? (Number(row.packets || 0) * 100 / totalPackets).toFixed(2) : '0.00'})),
+                    categories: parsed.categories || [], statistics: parsed.statistics || {}};
+                addConsoleMessage('nDPI analysis completed via backend API', 'info');
                 
                 const elapsedMs = performance.now() - startTime;
                 analysis.elapsedMs = elapsedMs;
