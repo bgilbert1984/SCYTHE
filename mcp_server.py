@@ -475,6 +475,18 @@ def register_mcp_routes(app, engine, use_orchestrator: bool = False, auth_valida
         except (TypeError, ValueError) as exc:
             return jsonify({'status': 'error', 'message': str(exc), 'nodes': [], 'edges': []}), 400
 
+    @app.route('/api/graphops/selection/resolve', methods=['POST'])
+    def graphops_selection_resolve():
+        """Resolve a typed selection against its retained immutable revision."""
+        if not _authorized():
+            return _unauthorized()
+        try:
+            from graphops_graph_resolver import GraphSelectionResolver
+            payload = request.get_json(silent=True) or {}
+            return jsonify(GraphSelectionResolver(graph_selection_engine).resolve(payload))
+        except (TypeError, ValueError) as exc:
+            return jsonify({'status': 'refused', 'error': str(exc)}), 400
+
     @app.route('/api/graphops/rf-observations', methods=['POST'])
     def graphops_rf_observation_ingest():
         if not _authorized():

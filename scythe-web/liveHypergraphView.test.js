@@ -33,6 +33,8 @@ test("live hypergraph polls bounded graph and Eve status without inventing geogr
     assert.match(status.textContent, /4 COMMITTED/);
     assert.ok(svg.children.length >= 3);
     assert.equal(events[0].detail.graphRevision, "graph-live-1");
+    svg.children.find((child) => child.dataset.entityId === "host:a").listeners.click();
+    assert.equal(events.at(-1).detail.entityType, "network_host");
     assert.equal(graph.nodes.some((node) => "position" in node), false);
     view.destroy();
   } finally { globalThis.document = previousDocument; globalThis.CustomEvent = previousEvent; }

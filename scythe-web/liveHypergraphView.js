@@ -1,5 +1,6 @@
 import { evidenceStyle } from "./evidenceStyles.js";
 import { LiveGraphController } from "./liveGraphController.js";
+import { graphEntityTooltip } from "./graphEntityTooltip.js";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 
@@ -44,6 +45,11 @@ export class LiveHypergraphView {
     this.document = root.ownerDocument ?? globalThis.document;
     this.window = this.document?.defaultView ?? globalThis;
     this.latestGraph = null; this.resizeObserver = null;
+    this.tooltip = this.document?.createElement?.("div") ?? null;
+    if (this.tooltip) {
+      this.tooltip.className = "live-hypergraph__tooltip"; this.tooltip.hidden = true;
+      this.root.appendChild?.(this.tooltip);
+    }
   }
 
   async start() {
@@ -106,15 +112,28 @@ export class LiveHypergraphView {
       circle.setAttribute("fill", style.color); circle.setAttribute("fill-opacity", String(style.alpha));
       circle.setAttribute("stroke", "#071422"); circle.setAttribute("stroke-width", "2");
       const title = document.createElementNS(SVG_NS, "title");
-      title.textContent = `${node.id}\n${node.kind}\n${node.evidenceClass}`; group.append(circle, title);
+      const tooltipText = graphEntityTooltip(node);
+      title.textContent = tooltipText; group.append(circle, title);
+      group.addEventListener("pointerenter", (event) => this.#showTooltip(event, tooltipText));
+      group.addEventListener("pointermove", (event) => this.#showTooltip(event, tooltipText));
+      group.addEventListener("pointerleave", () => { if (this.tooltip) this.tooltip.hidden = true; });
       group.addEventListener("click", () => this.#select({kind: graphKind(node), entityId: node.id,
-        graphRevision: graph.graphRevision, ...(node.position ? {position: node.position} : {}), observedAt: node.observedAt ?? null}));
+        entityType: node.kind, graphRevision: graph.graphRevision,
+        ...(node.position ? {position: node.position} : {}), observedAt: node.observedAt ?? null}));
       this.svg.appendChild(group);
     }
   }
 
   #select(detail) {
     this.root.dispatchEvent(new CustomEvent("scythe-web:graph-selection", {bubbles: true, detail}));
+  }
+
+  #showTooltip(event, tooltipText) {
+    if (!this.tooltip) return;
+    const bounds = this.root.getBoundingClientRect?.() ?? {left: 0, top: 0};
+    this.tooltip.textContent = tooltipText; this.tooltip.hidden = false;
+    this.tooltip.style.left = `${Number(event?.clientX || 0) - bounds.left + 12}px`;
+    this.tooltip.style.top = `${Number(event?.clientY || 0) - bounds.top + 12}px`;
   }
 
   #status(text) { if (this.statusRoot) this.statusRoot.textContent = text; }

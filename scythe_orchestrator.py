@@ -397,6 +397,40 @@ def _generate_instance_id():
     return f"scythe-{uuid.uuid4().hex[:8]}"
 
 
+def _bootstrap_instance_when_ready(base_url: str, name: str, *, timeout: float = 60.0,
+                                   retry_interval: float = 0.5, session=requests,
+                                   monotonic=time.monotonic, sleep=time.sleep) -> bool:
+    """Create one named child after the HTTP listener is ready, iff none exists.
+
+    This is deliberately idempotent: every retry checks the registry before it
+    attempts creation. A timed-out POST therefore cannot create a second child
+    on the following iteration. The public API remains the single instance
+    creation path, preserving normal registry and process lifecycle behavior.
+    """
+    base_url = base_url.rstrip('/')
+    deadline = monotonic() + max(float(timeout), 0.1)
+    last_error = None
+    while monotonic() < deadline:
+        try:
+            response = session.get(f'{base_url}/api/scythe/instances', timeout=2.0)
+            response.raise_for_status()
+            registry = response.json()
+            if int(registry.get('count', 0)) > 0:
+                log.info('[bootstrap] Instance registry already populated; no child created')
+                return True
+            created = session.post(f'{base_url}/api/scythe/instances/new',
+                                   json={'name': name}, timeout=15.0)
+            created.raise_for_status()
+            payload = created.json()
+            log.info('[bootstrap] Created instance %s (%s)', payload.get('instance_id'), name)
+            return True
+        except (requests.RequestException, ValueError, TypeError, KeyError) as exc:
+            last_error = exc
+            sleep(max(float(retry_interval), 0.01))
+    log.error('[bootstrap] Could not ensure an active instance within %.1fs: %s', timeout, last_error)
+    return False
+
+
 def _health_check(instance):
     """Poll /api/instance/info on a live instance. Returns dict or None."""
     import urllib.request
@@ -1983,6 +2017,128 @@ def orchestrator_graphops_selection_graph():
     return jsonify(data)
 
 
+_HOST_TRACE_CACHE = {}
+_HOST_TRACE_CACHE_LOCK = threading.RLock()
+_HOST_TRACE_CACHE_TTL_SECONDS = 30
+
+
+def _host_trace_target(snapshot, payload):
+    """Resolve an IP only from a revision-pinned network_host selection."""
+    import ipaddress
+    if not isinstance(payload, dict):
+        raise ValueError('JSON object required')
+    unknown = set(payload) - {'entityId', 'graphRevision', 'maxHops'}
+    if unknown:
+        raise ValueError(f'unknown host trace fields: {", ".join(sorted(unknown))}')
+    entity_id = str(payload.get('entityId') or '')
+    revision = str(payload.get('graphRevision') or '')
+    if not entity_id or not revision:
+        raise ValueError('entityId and graphRevision are required')
+    if revision != str(snapshot.get('graphRevision') or ''):
+        raise ValueError('graph selection is stale; select the host again')
+    node = next((item for item in snapshot.get('nodes', [])
+                 if item.get('id') == entity_id), None)
+    if not node or str(node.get('kind') or '').lower() != 'network_host':
+        raise ValueError('selected entity is not a current network_host')
+    value = (node.get('labels') or {}).get('ip')
+    if not value and entity_id.startswith('host:'):
+        value = entity_id[5:]
+    try:
+        address = ipaddress.ip_address(str(value or '').strip())
+    except ValueError as exc:
+        raise ValueError('selected host has no valid IP address') from exc
+    if address.is_multicast or address.is_unspecified:
+        raise ValueError('multicast and unspecified hosts cannot be traced')
+    try:
+        max_hops = min(max(int(payload.get('maxHops', 20)), 5), 30)
+    except (TypeError, ValueError) as exc:
+        raise ValueError('maxHops must be an integer from 5 through 30') from exc
+    return address.compressed, max_hops
+
+
+@app.route('/api/graphops/host-trace', methods=['POST'])
+def orchestrator_graphops_host_trace():
+    """Run bounded RTT/traceroute measurements for a selected graph host."""
+    if not _graphops_directive_authorized():
+        return jsonify({'error': 'Authentication required'}), 401
+    port = _get_primary_instance_port()
+    if not port:
+        return jsonify({'status': 'unavailable', 'error': 'No active SCYTHE graph instance'}), 503
+    payload = request.get_json(silent=True) or {}
+    if not isinstance(payload, dict):
+        return jsonify({'status': 'refused', 'error': 'JSON object required'}), 400
+    unknown = set(payload) - {'entityId', 'graphRevision', 'maxHops'}
+    if unknown or not payload.get('entityId') or not payload.get('graphRevision'):
+        return jsonify({'status': 'refused',
+                        'error': ('entityId and graphRevision are required' if not unknown else
+                                  f'unknown host trace fields: {", ".join(sorted(unknown))}')}), 400
+    resolved = _proxy_post(port, '/api/graphops/selection/resolve', {
+        'kind': 'graph-node', 'entityId': payload['entityId'],
+        'graphRevision': payload['graphRevision'],
+    }, timeout=8)
+    if resolved is None:
+        return jsonify({'status': 'refused',
+                        'error': 'graph selection is stale or unavailable; select the host again'}), 409
+    snapshot = {'graphRevision': resolved.get('graphRevision'),
+                'nodes': [resolved.get('node') or {}]}
+    try:
+        target, max_hops = _host_trace_target(snapshot, payload)
+    except ValueError as exc:
+        return jsonify({'status': 'refused', 'error': str(exc)}), 400
+
+    cache_key = (target, max_hops)
+    with _HOST_TRACE_CACHE_LOCK:
+        cached = _HOST_TRACE_CACHE.get(cache_key)
+        if cached and time.time() - cached['capturedAt'] <= _HOST_TRACE_CACHE_TTL_SECONDS:
+            return jsonify({**cached['result'], 'cached': True})
+
+    # Both commands are independent observations. Run them concurrently so a
+    # slow hop timeout does not delay an otherwise successful RTT measurement.
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=2, thread_name_prefix='graphops-host-trace') as pool:
+        probe_future = pool.submit(_proxy_post, port, '/api/timing/probe',
+                                   {'target': target, 'count': 5}, 70)
+        trace_future = pool.submit(_proxy_post, port, '/api/timing/traceroute',
+                                   {'target': target, 'max_hops': max_hops}, 70)
+        probe = probe_future.result()
+        traceroute = trace_future.result()
+
+    hops = list((traceroute or {}).get('hops') or [])[:max_hops]
+    route_class = ('SYNTHETIC' if (traceroute or {}).get('simulated') or
+                   (traceroute or {}).get('status') == 'simulated' else
+                   ('MEASURED' if hops else 'UNAVAILABLE'))
+    geo_path = [{key: hop.get(key) for key in
+                 ('hop', 'ip', 'rtt_ms', 'lat', 'lon', 'geo', 'anomaly', 'physics_anomaly')
+                 if hop.get(key) is not None} for hop in hops]
+    result = {
+        'status': 'completed' if probe or traceroute else 'unavailable',
+        'target': target,
+        'selection': {'entityId': payload['entityId'], 'graphRevision': payload['graphRevision']},
+        'probe': probe,
+        'traceroute': {**(traceroute or {}), 'hops': hops},
+        'geoPath': geo_path,
+        'evidenceClasses': {
+            'target': 'OBSERVED',
+            'rtt': 'MEASURED' if probe and probe.get('status') == 'ok' else 'UNAVAILABLE',
+            'route': route_class,
+            'geography': 'INFERRED' if any(hop.get('geo') for hop in hops) else 'UNAVAILABLE',
+        },
+        'boundary': ('RTT AND ROUTE HOPS ARE ACTIVE MEASUREMENTS; HOP GEOIP IS AN ESTIMATE; '
+                     'ROUTING DISTANCE IS NOT PHYSICAL DEVICE LOCATION'),
+        'cached': False,
+        'capturedAt': time.time(),
+        'bounded': True,
+        'maxHops': max_hops,
+        'rawPacketsExposed': False,
+    }
+    with _HOST_TRACE_CACHE_LOCK:
+        _HOST_TRACE_CACHE[cache_key] = {'capturedAt': result['capturedAt'], 'result': result}
+        if len(_HOST_TRACE_CACHE) > 64:
+            oldest = min(_HOST_TRACE_CACHE, key=lambda key: _HOST_TRACE_CACHE[key]['capturedAt'])
+            _HOST_TRACE_CACHE.pop(oldest, None)
+    return jsonify(result), 200 if result['status'] == 'completed' else 502
+
+
 def _rf_observation_frame(observation):
     return {key: observation[key] for key in (
         'sensor_id', 'sequence', 'observed_at', 'center_frequency_hz',
@@ -2223,6 +2379,8 @@ Examples:
                         help='gRPC server port (default: 50051)')
     parser.add_argument('--no-grpc', action='store_true',
                         help='Do not launch the gRPC server subprocess')
+    parser.add_argument('--bootstrap-instance-name', default=os.environ.get('SCYTHE_BOOTSTRAP_INSTANCE_NAME', ''),
+                        help='Create one named child after startup when the instance registry is empty')
     args = parser.parse_args()
 
     # Propagate stream URLs into module-level globals so spawn_instance() picks them up
@@ -2289,6 +2447,12 @@ Examples:
     if not _API_SERVER.exists():
         log.warning(f"API server not found at {_API_SERVER}")
         log.warning("Spawning new instances will fail until rf_scythe_api_server.py is available.")
+
+    if args.bootstrap_instance_name.strip():
+        bootstrap_url = f'http://127.0.0.1:{args.port}'
+        threading.Thread(target=_bootstrap_instance_when_ready,
+                         args=(bootstrap_url, args.bootstrap_instance_name.strip()),
+                         name='scythe-instance-bootstrap', daemon=True).start()
 
     # Register mDNS service so Android app can auto-discover this orchestrator
     _zc = register_mdns(args.port)

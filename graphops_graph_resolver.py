@@ -233,7 +233,10 @@ class GraphSelectionResolver:
         }
         _remember_snapshot(canonical)
         retained = _cached_snapshot(canonical["graphRevision"]) or canonical
-        nodes = retained["nodes"][:node_limit]
+        # Enrichment is a read-time display sidecar. It is deliberately absent
+        # from the content-addressed revision and retained evidence snapshot.
+        from ip_enrichment import enrich_graph_node
+        nodes = [enrich_graph_node(node) for node in retained["nodes"][:node_limit]]
         allowed = {node["id"] for node in nodes}
         edges = [edge for edge in retained["edges"]
                  if edge["nodes"] and all(member in allowed for member in edge["nodes"])][:edge_limit]
@@ -263,8 +266,10 @@ class GraphSelectionResolver:
             positions = [member["position"] for member in members if member.get("position")]
             edge["position"] = ([sum(item[index] for item in positions) / len(positions) for index in range(3)]
                                 if positions else None)
+            from ip_enrichment import enrich_graph_node
             return {"graphRevision": revision, "selectionKind": selection_kind, "edge": edge,
-                    "memberNodes": members[:20], "incidentEdges": [edge], "bounded": True}
+                    "memberNodes": [enrich_graph_node(item) for item in members[:20]],
+                    "incidentEdges": [edge], "bounded": True}
         node = next((self._normalize_node(candidate) for candidate in self._nodes()
                      if _node_id(candidate, candidate.get("_fallback_id", "")) == entity_id), None)
         if node is None:
@@ -275,8 +280,9 @@ class GraphSelectionResolver:
                 incident.append(self._normalize_edge(edge))
             if len(incident) >= 50:
                 break
+        from ip_enrichment import enrich_graph_node
         return {"graphRevision": revision, "selectionKind": selection_kind,
-                "node": node, "incidentEdges": incident, "bounded": True}
+                "node": enrich_graph_node(node), "incidentEdges": incident, "bounded": True}
 
     def delta(self, start: float, end: float, *, limit: int = 100) -> Dict[str, Any]:
         start = float(start); end = float(end)

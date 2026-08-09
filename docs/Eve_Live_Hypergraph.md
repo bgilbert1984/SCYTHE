@@ -62,6 +62,16 @@ It starts after `scythe-orchestrator.service`, exposes its otherwise-unused
 receiver only on `127.0.0.1:50052`, and ships normalized batches to SCYTHE on
 `127.0.0.1:50051`.
 
+The orchestrator user service supplies
+`--bootstrap-instance-name "Clarktech Live GraphOps"`. After each WSL/workstation
+start, the orchestrator waits for its own HTTP listener, checks the instance
+registry, and creates one named child only when the registry is empty. The
+check is idempotent across connection and POST retries, so it neither creates a
+second child when one is already registered nor bypasses the normal instance
+creation lifecycle. This child is the WriteBus destination required by the Eve
+ingress endpoint; active services without an active child correctly report
+`graphInstanceActive: false` and cannot populate the live graph.
+
 Inspect it with:
 
 ```bash

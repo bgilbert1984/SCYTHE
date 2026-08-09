@@ -1,4 +1,5 @@
 import { evidenceStyle } from "./evidenceStyles.js";
+import { graphEntityTooltip } from "./graphEntityTooltip.js";
 
 function hash(value) {
   let result = 2166136261;
@@ -162,8 +163,9 @@ export class LiveHypergraph3DView {
     }
     const point = this.positions.get(node.id); mesh.position.set(point.x, point.y, point.z);
     mesh.userData = {...mesh.userData, selection: {kind: graphKind(node), entityId: node.id,
-      graphRevision: revision, ...(node.position ? {position: node.position} : {}), observedAt: node.observedAt ?? null},
-      label: `${node.kind ?? "node"}\n${node.id}\n${evidence.name}`, evidenceClass: evidence.name};
+      entityType: node.kind, graphRevision: revision,
+      ...(node.position ? {position: node.position} : {}), observedAt: node.observedAt ?? null},
+      label: graphEntityTooltip(node), evidenceClass: evidence.name};
   }
 
   #addEdge(edge, revision) {

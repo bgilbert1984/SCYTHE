@@ -159,7 +159,7 @@
       </div>
       <div id="reality-prism"></div>
       <pre id="dsl-preview" class="directive__analysis" hidden></pre>
-      <pre id="correlation-status" class="directive__analysis" hidden></pre>
+      <pre id="correlation-status" class="directive__analysis" aria-live="polite" hidden></pre>
       <div id="selection-tray" class="selection-tray">INVESTIGATION // NO SELECTION</div>
       <div class="directive__context">
         <div id="context-signature" class="directive__context-signature">CONTEXT // EMPTY</div>
@@ -206,6 +206,7 @@
     import { viewIntentFromPlan } from "./viewIntent.js";
     import { GraphResultTabs } from "./graphResultTabs.js";
     import { WorldStack } from "./worldStack.js";
+    import { formatHostTracePrompt, geoPathPoints, runHostTrace } from "./hostTraceWorkflow.js";
 
     const viewerOptions = {
       animation: false,
@@ -324,6 +325,55 @@
     document.getElementById("pin-from").value = localDateTime(new Date(Date.now() - 60_000));
     document.getElementById("pin-to").value = localDateTime(new Date());
     let activePlanId = null;
+    let hostTraceSequence = 0;
+    let hostTraceEntityIds = [];
+
+    function renderHostGeoPath(result) {
+      for (const id of hostTraceEntityIds) viewer.entities.removeById(id);
+      hostTraceEntityIds = [];
+      const points = geoPathPoints(result);
+      for (const point of points) {
+        const id = `scythe-web:host-trace:hop:${point.hop}`;
+        viewer.entities.add({id, name: `Traceroute hop ${point.hop} // INFERRED GEOIP`,
+          position: Cesium.Cartesian3.fromDegrees(point.longitude, point.latitude, 65_000),
+          point: {pixelSize: 7, color: Cesium.Color.YELLOW, outlineColor: Cesium.Color.BLACK, outlineWidth: 1},
+          label: {text: `${point.hop} · ${point.ip}`, font: "10px ui-monospace",
+            fillColor: Cesium.Color.CYAN, showBackground: true,
+            backgroundColor: Cesium.Color.fromCssColorString("rgba(3,9,20,.82)"),
+            pixelOffset: new Cesium.Cartesian2(0, -13)},
+          description: `GEOIP ESTIMATE // ${point.city} // NOT DEVICE LOCATION`});
+        hostTraceEntityIds.push(id);
+      }
+      if (points.length >= 2) {
+        const id = "scythe-web:host-trace:path";
+        const path = viewer.entities.add({id, name: `Measured route to ${result.target} // inferred geography`,
+          polyline: {positions: points.map((point) => Cesium.Cartesian3.fromDegrees(
+            point.longitude, point.latitude, 90_000)), width: 3,
+            material: new Cesium.PolylineGlowMaterialProperty({glowPower: .2, color: Cesium.Color.CYAN}),
+            clampToGround: false}});
+        hostTraceEntityIds.push(id);
+        Promise.resolve(viewer.flyTo(path)).catch(() => undefined);
+      }
+    }
+
+    async function performHostTrace(selection) {
+      const sequence = ++hostTraceSequence;
+      const output = document.getElementById("correlation-status");
+      output.hidden = false;
+      output.textContent = `GRAPHOPS PROMPT // HOST ROUTE TRACE\nTARGET // ${selection.entityId}\nSTATUS // EXECUTING BOUNDED RTT + TRACEROUTE…`;
+      status.textContent = "GRAPHOPS // HOST TRACE // EXECUTING";
+      try {
+        const result = await runHostTrace(selection);
+        if (sequence !== hostTraceSequence) return;
+        output.textContent = formatHostTracePrompt(result);
+        renderHostGeoPath(result);
+        status.textContent = `GRAPHOPS // HOST TRACE // ${result.status.toUpperCase()}`;
+      } catch (error) {
+        if (sequence !== hostTraceSequence) return;
+        output.textContent = `GRAPHOPS PROMPT // HOST ROUTE TRACE\nTARGET // ${selection.entityId}\nSTATUS // REFUSED OR UNAVAILABLE\nREASON // ${error.message}`;
+        status.textContent = `GRAPHOPS // HOST TRACE // UNAVAILABLE`;
+      }
+    }
 
     function updateInvestigation() {
       const graphSelection = selections.items.find((item) => ["graph-node", "graph-edge", "event"].includes(item.kind));
@@ -403,12 +453,16 @@
     );
     document.getElementById("globe-root").addEventListener("scythe-web:graph-selection", async ({detail}) => {
       showDirective();
-      selections.upsert(detail);
+      const {entityType, ...typedSelection} = detail;
+      selections.upsert(typedSelection);
       updateInvestigation();
       const hasRf = selections.items.some((item) => item.kind === "rf-cell");
       document.getElementById("execute-correlation").disabled = !hasRf;
       document.getElementById("trace-provenance").disabled = false;
       document.getElementById("expose-contradictions").disabled = false;
+      if (entityType === "network_host" || String(typedSelection.entityId).startsWith("host:")) {
+        void performHostTrace(typedSelection);
+      }
       if (document.getElementById("execute-correlation").disabled) return;
       try {
         await submitDirective(selections.directiveRequest({directive: "correlate.rf-cell-graph",
