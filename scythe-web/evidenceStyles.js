@@ -79,6 +79,18 @@ export function evidenceStyle(evidenceClass) {
   return style;
 }
 
+export const HOST_LIVENESS_STYLES = Object.freeze({
+  active: Object.freeze({label: "ACTIVE · ICMP MEASURED", color: "#38f28f", alpha: 1}),
+  inactive: Object.freeze({label: "INACTIVE · ICMP NO REPLY", color: "#ff4f64", alpha: 1}),
+});
+
+/** Host liveness may override node color, but never its evidence-class shape. */
+export function graphNodeStyle(node) {
+  const fallback = evidenceStyle(node?.evidenceClass ?? "INFERRED");
+  if (String(node?.kind ?? "").toLowerCase() !== "network_host") return fallback;
+  return HOST_LIVENESS_STYLES[node?.liveness?.state] ?? fallback;
+}
+
 /**
  * Build a Cesium Entity polyline material without making Cesium a dependency
  * of the sampler or tests.

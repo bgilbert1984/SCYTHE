@@ -27,6 +27,14 @@ export function graphEntityTooltip(entity = {}) {
   const lines = [];
   if (ip) {
     lines.push(`${scope || "NETWORK"} HOST`, ip);
+    const liveness = entity.liveness ?? {};
+    if (["active", "inactive"].includes(liveness.state)) {
+      const rtt = Number(liveness.rttMs);
+      lines.push("", `LIVENESS // ${liveness.state.toUpperCase()} · ICMP MEASURED`,
+        `${liveness.tool || "PING"}${Number.isFinite(rtt) ? ` · ${compact(rtt)} ms` : " · NO REPLY"}`);
+    } else {
+      lines.push("", "LIVENESS // UNKNOWN · NOT YET MEASURED");
+    }
     const network = enrichment.network;
     if (network?.asn) {
       lines.push("", "NETWORK // INFERRED · LOCAL DB",

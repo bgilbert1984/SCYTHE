@@ -37,6 +37,8 @@ The modules are:
   inferred relationships with typed node, event, and edge selection events.
 - `liveHypergraphView.js`: bounded 2D topology for live non-geospatial network
   events, with evidence styling, revision-aware refresh, and typed selection.
+- `graphExplorerView.js`: separately queried bounded graph index with truthful
+  available/matched/returned counts, filters, paging, and depth-limited focus.
 - `celestialBodies.js`: explicit Earth/Moon ellipsoids and body-fixed
   coordinate conversion that prevents accidental WGS84 reuse.
 - `lunarDataset.js`: exact Lunar Reference v1 manifest validation and browser
@@ -190,6 +192,13 @@ supports node, edge, and hyperedge selection, and uses shared evidence colors
 plus evidence-distinct geometry. Its layout is explicitly topology space, not
 geolocation. Three.js is an exact local dependency; an import or WebGL failure
 leaves the SVG view available.
+
+The adjacent Graph Explorer tab searches the current graph without raising the
+live chamber's 200-node/300-edge limits. It supports text, protocol, explicit
+entity-time bounds, paging, and selected-entity neighborhoods through
+`/api/graphops/explorer`. Server scans and response pages are independently
+bounded, their counts are displayed separately, and adjacency is not presented
+as causality.
 
 The existing globe loads `scythe-web/browser-entry.js` as an ES module at the
 end of `cesium-hypergraph-globe.html`. Activation remains deliberately opt-in.

@@ -1304,3 +1304,26 @@ authority boundary. Selecting an entity inside a result emits the same typed,
 revision-pinned graph-selection event as the 2D and 3D topology renderers, so
 the result can adapt the GraphOps menu without creating a second selection or
 execution protocol.
+
+## 30. Implemented bounded Graph Explorer
+
+The resizable live-hypergraph instrument now includes a **Graph Explorer** tab
+for deliberate inspection beyond the chamber's fixed 200-node/300-edge render.
+The explorer does not widen live polling. It executes a separate bounded index
+query through the stable orchestrator and reports four different quantities
+without conflation: entities available in the source graph, entities examined
+within the declared scan bound, entities matching the operator's filters, and
+entities returned on the current page.
+
+Operators can search IDs, kinds, IPs, ports, ASN/organization enrichment, and
+place estimates; constrain edges by protocol; apply explicit entity-observation
+time bounds; page through results; and expand a selected node or edge to depth
+zero, one, or two. The backend scans at most 2,000 nodes and 10,000 edges and
+returns at most 200 nodes and 300 edges per request. It declares when even that
+scan was truncated.
+
+Explorer results are a graph index, not a causal result. Time filtering uses
+each entity's declared `observedAt` value and excludes unknown-time entities
+when a time bound is active. Focus expansion means adjacency only. Selecting a
+result emits the same typed graph-selection event used by the 2D view, causal
+chamber, contextual result tabs, host trace, and GraphOps directive panel.

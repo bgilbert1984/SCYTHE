@@ -30,3 +30,16 @@ test("host trace sends only the graph selection reference", async () => {
   await runHostTrace({entityId: "host:8.8.8.8", graphRevision: "graph-1", ip: "127.0.0.1"}, {fetchImpl});
   assert.deepEqual(JSON.parse(request.init.body), {entityId: "host:8.8.8.8", graphRevision: "graph-1", maxHops: 20});
 });
+
+test("synthetic fallback is rendered as non-evidence", () => {
+  const prompt = formatHostTracePrompt({...result,
+    probe: {status: "unavailable", reason: "INSUFFICIENT_PRIVILEGE"},
+    traceroute: {status: "simulated", simulated: true,
+      hops: [{hop: 1, ip: "10.0.0.1", rtt_ms: 8.5}]},
+    geoPath: [], evidenceClasses: {rtt: "UNAVAILABLE", route: "SYNTHETIC", geography: "UNAVAILABLE"},
+    boundary: "SYNTHETIC ROUTE DATA IS ILLUSTRATIVE ONLY"});
+  assert.match(prompt, /PROBE RTT \/\/ UNAVAILABLE \/\/ UNAVAILABLE \/\/ INSUFFICIENT_PRIVILEGE/);
+  assert.match(prompt, /SYNTHETIC HOPS \/\/ NOT MEASUREMENTS/);
+  assert.match(prompt, /Discard synthetic hops as evidence/);
+  assert.doesNotMatch(prompt, /ROUTE HOPS ARE ACTIVE MEASUREMENTS/);
+});

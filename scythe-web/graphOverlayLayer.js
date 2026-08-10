@@ -1,4 +1,4 @@
-import { cesiumPolylineMaterial, evidenceStyle } from "./evidenceStyles.js";
+import { cesiumPolylineMaterial, evidenceStyle, graphNodeStyle } from "./evidenceStyles.js";
 
 function finitePosition(position) {
   return Array.isArray(position) && position.length >= 2 &&
@@ -16,7 +16,7 @@ export class GraphOverlayLayer {
     this.controller = controller; this.unsubscribe = null;
     this.nodeLimit = Math.min(Math.max(nodeLimit, 1), 500);
     this.edgeLimit = Math.min(Math.max(edgeLimit, 1), 1000);
-    this.entityIds = new Set(); this.nodes = new Map(); this.graphRevision = null;
+    this.entityIds = new Set(); this.nodes = new Map(); this.graphRevision = null; this.renderKey = null;
     this.clickHandler = null; this.refreshMilliseconds = Math.max(500, refreshMilliseconds);
     this.refreshTimer = null; this.running = false;
   }
@@ -79,15 +79,16 @@ export class GraphOverlayLayer {
   renderSnapshot(graph) {
     if (graph.status === "empty") { this.#clearEntities(); this.graphRevision = graph.graphRevision; this.#emitStatus(graph); return graph; }
     if (graph.status !== "ok") { this.#emitStatus(graph); return graph; }
-    if (graph.graphRevision === this.graphRevision) { this.#emitStatus({status: "ok", graphRevision: graph.graphRevision,
+    const renderKey = `${graph.graphRevision}:${graph.livenessRevision ?? 0}`;
+    if (renderKey === this.renderKey) { this.#emitStatus({status: "ok", graphRevision: graph.graphRevision,
       nodeCount: graph.nodeCount, edgeCount: graph.edgeCount}); return graph; }
-    this.#clearEntities(); this.graphRevision = graph.graphRevision;
+    this.#clearEntities(); this.graphRevision = graph.graphRevision; this.renderKey = renderKey;
     for (const node of graph.nodes.slice(0, this.nodeLimit)) {
       if (!node.id || !finitePosition(node.position)) continue;
       const [lat, lon, height = 0] = node.position.map(Number);
       const evidenceClass = ["OBSERVED", "MEASURED", "SYNTHETIC", "INFERRED"].includes(node.evidenceClass)
         ? node.evidenceClass : "INFERRED";
-      const style = evidenceStyle(evidenceClass);
+      const style = graphNodeStyle({...node, evidenceClass});
       const entityId = `scythe-web:graph-node:${encodeURIComponent(node.id)}`;
       this.viewer.entities.add({id: entityId,
         position: this.Cesium.Cartesian3.fromDegrees(lon, lat, Math.max(height, 500)),

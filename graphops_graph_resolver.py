@@ -208,6 +208,7 @@ class GraphSelectionResolver:
             "nodes": cls._edge_nodes(edge),
             "observedAt": _timestamp(edge.get("observed_at") or edge.get("timestamp") or edge.get("created_at")),
             "timestamp": _timestamp(edge.get("timestamp") or edge.get("observed_at") or edge.get("created_at")),
+            "labels": dict(edge.get("labels") or {}),
             "metadata": metadata,
             "evidenceClass": _evidence_class(edge),
             "contradictions": [str(item) for item in contradictions[:20]],
@@ -283,6 +284,126 @@ class GraphSelectionResolver:
         from ip_enrichment import enrich_graph_node
         return {"graphRevision": revision, "selectionKind": selection_kind,
                 "node": enrich_graph_node(node), "incidentEdges": incident, "bounded": True}
+
+    def explore(self, *, query: str = "", protocol: str = "", start: Any = None,
+                end: Any = None, focus_id: str = "", depth: int = 1,
+                node_limit: int = 100, edge_limit: int = 150,
+                node_offset: int = 0, edge_offset: int = 0) -> Dict[str, Any]:
+        """Search a bounded current-graph scan without widening the live view."""
+        query = str(query or "").strip().lower()
+        protocol = str(protocol or "").strip().lower()
+        focus_id = str(focus_id or "").strip()
+        if len(query) > 128:
+            raise GraphResolutionError("query exceeds 128 characters")
+        if protocol and (len(protocol) > 32 or not all(char.isalnum() or char in "_-" for char in protocol)):
+            raise GraphResolutionError("protocol is invalid")
+        depth = min(max(int(depth), 0), 2)
+        node_limit = min(max(int(node_limit), 1), 200)
+        edge_limit = min(max(int(edge_limit), 1), 300)
+        node_offset = min(max(int(node_offset), 0), 10_000)
+        edge_offset = min(max(int(edge_offset), 0), 50_000)
+
+        def pin(value: Any, name: str) -> float | None:
+            if value in (None, ""):
+                return None
+            parsed = _timestamp(value)
+            if parsed is None:
+                raise GraphResolutionError(f"{name} must be a finite epoch timestamp")
+            return parsed
+
+        start_time = pin(start, "start"); end_time = pin(end, "end")
+        if start_time is not None and end_time is not None and start_time > end_time:
+            start_time, end_time = end_time, start_time
+
+        raw_nodes = self._nodes(); raw_edges = self._edges()
+        node_scan_limit = 2_000; edge_scan_limit = 10_000
+        from ip_enrichment import enrich_graph_node
+        nodes = [enrich_graph_node(self._normalize_node(item)) for item in raw_nodes[:node_scan_limit]]
+        node_ids = {item["id"] for item in nodes}
+        edges = [self._normalize_edge(item) for item in raw_edges[:edge_scan_limit]]
+        edges = [item for item in edges if item["nodes"] and all(member in node_ids for member in item["nodes"])]
+
+        def in_window(entity: Dict[str, Any]) -> bool:
+            if start_time is None and end_time is None:
+                return True
+            observed = entity.get("observedAt")
+            return observed is not None and (start_time is None or observed >= start_time) and (end_time is None or observed <= end_time)
+
+        def searchable(entity: Dict[str, Any]) -> str:
+            enrichment = entity.get("enrichment") or {}
+            network = enrichment.get("network") or {}; geo = enrichment.get("geo") or {}
+            values = [entity.get("id"), entity.get("kind"), entity.get("evidenceClass"),
+                      *(entity.get("labels") or {}).values(), network.get("asn"),
+                      network.get("organization"), network.get("prefix"), geo.get("city"),
+                      geo.get("region"), geo.get("country"), geo.get("countryCode")]
+            return " ".join(str(value).lower() for value in values if value not in (None, ""))
+
+        window_nodes = [item for item in nodes if in_window(item)]
+        window_edges = [item for item in edges if in_window(item)]
+        protocol_edges = [item for item in window_edges if not protocol or
+                          str((item.get("labels") or {}).get("proto") or "").lower() == protocol]
+        protocol_node_ids = ({member for edge in protocol_edges for member in edge["nodes"]}
+                             if protocol else {item["id"] for item in window_nodes})
+        matching_node_ids = {item["id"] for item in window_nodes
+                             if item["id"] in protocol_node_ids and (not query or query in searchable(item))}
+        matching_edge_ids = {item["id"] for item in protocol_edges if not query or query in searchable(item)}
+        if query:
+            directly_matching_nodes = set(matching_node_ids)
+            directly_matching_edges = set(matching_edge_ids)
+            matching_node_ids.update(member for edge in protocol_edges if edge["id"] in directly_matching_edges
+                                     for member in edge["nodes"])
+            matching_edge_ids.update(edge["id"] for edge in protocol_edges
+                                     if any(member in directly_matching_nodes for member in edge["nodes"]))
+
+        focus_found = False
+        if focus_id:
+            focus_nodes: set[str] = set(); focus_edges: set[str] = set()
+            edge_focus = next((item for item in protocol_edges if item["id"] == focus_id), None)
+            if focus_id in node_ids:
+                focus_nodes.add(focus_id); frontier = {focus_id}; focus_found = True
+            elif edge_focus:
+                focus_edges.add(focus_id); focus_nodes.update(edge_focus["nodes"])
+                frontier = set(edge_focus["nodes"]); focus_found = True
+            else:
+                frontier = set()
+            for _ in range(depth):
+                next_frontier = set()
+                for edge in protocol_edges:
+                    if any(member in frontier for member in edge["nodes"]):
+                        focus_edges.add(edge["id"]); next_frontier.update(edge["nodes"])
+                next_frontier -= focus_nodes; focus_nodes.update(next_frontier); frontier = next_frontier
+            matching_node_ids &= focus_nodes
+            matching_edge_ids &= focus_edges
+
+        def newest(entity: Dict[str, Any]):
+            observed = entity.get("observedAt")
+            return (-(observed if observed is not None else -1), entity["id"])
+
+        matched_nodes = sorted((item for item in window_nodes if item["id"] in matching_node_ids), key=newest)
+        matched_edges = sorted((item for item in protocol_edges if item["id"] in matching_edge_ids), key=newest)
+        returned_nodes = matched_nodes[node_offset:node_offset + node_limit]
+        returned_edges = matched_edges[edge_offset:edge_offset + edge_limit]
+        unknown_time_excluded = (sum(item.get("observedAt") is None for item in [*nodes, *edges])
+                                 if start_time is not None or end_time is not None else 0)
+        return {
+            "status": "ok", "graphRevision": self.revision(), "bounded": True,
+            "nodes": returned_nodes, "edges": returned_edges,
+            "query": {"text": query, "protocol": protocol, "start": start_time, "end": end_time,
+                      "focusId": focus_id, "depth": depth},
+            "counts": {"availableNodes": len(raw_nodes), "availableEdges": len(raw_edges),
+                       "scannedNodes": len(nodes), "scannedEdges": len(edges),
+                       "matchedNodes": len(matched_nodes), "matchedEdges": len(matched_edges),
+                       "returnedNodes": len(returned_nodes), "returnedEdges": len(returned_edges),
+                       "nodeOffset": node_offset, "edgeOffset": edge_offset,
+                       "unknownTimeExcluded": unknown_time_excluded},
+            "limits": {"nodeScan": node_scan_limit, "edgeScan": edge_scan_limit,
+                       "nodeReturn": node_limit, "edgeReturn": edge_limit},
+            "scanTruncated": len(raw_nodes) > node_scan_limit or len(raw_edges) > edge_scan_limit,
+            "focus": {"requested": bool(focus_id), "found": focus_found,
+                      "id": focus_id or None, "depth": depth},
+            "temporalSemantics": "ENTITY_OBSERVED_AT_FILTER",
+            "boundary": "SEARCH AND NEIGHBORHOOD RESULTS ARE A BOUNDED GRAPH INDEX; ADJACENCY IS NOT CAUSALITY",
+        }
 
     def delta(self, start: float, end: float, *, limit: int = 100) -> Dict[str, Any]:
         start = float(start); end = float(end)

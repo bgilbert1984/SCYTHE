@@ -32,3 +32,10 @@ test("non-host graph entities retain a compact fallback", () => {
   assert.equal(graphEntityTooltip({id: "edge:a", kind: "network_flow", evidenceClass: "OBSERVED"}),
     "network_flow\nedge:a\nOBSERVED");
 });
+
+test("host tooltip labels measured ping liveness independently of GeoIP", () => {
+  const value = graphEntityTooltip({id: "host:8.8.8.8", kind: "network_host",
+    evidenceClass: "OBSERVED", liveness: {state: "active", rttMs: 11, tool: "windows-ping-via-wsl"}});
+  assert.match(value, /LIVENESS \/\/ ACTIVE · ICMP MEASURED/);
+  assert.match(value, /windows-ping-via-wsl · 11 ms/);
+});

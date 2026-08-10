@@ -1,4 +1,4 @@
-import { evidenceStyle } from "./evidenceStyles.js";
+import { evidenceStyle, graphNodeStyle } from "./evidenceStyles.js";
 import { graphEntityTooltip } from "./graphEntityTooltip.js";
 
 function hash(value) {
@@ -148,18 +148,19 @@ export class LiveHypergraph3DView {
 
   #upsertNode(node, revision) {
     const T = this.THREE; const evidence = safeEvidence(node.evidenceClass);
+    const visual = graphNodeStyle(node);
     let mesh = this.nodeMeshes.get(node.id);
     if (!mesh) {
       const radius = node.kind === "network_host" ? 4.6 : graphKind(node) === "event" ? 3.7 : 3.2;
-      const material = new T.MeshStandardMaterial({color: evidence.style.color,
-        emissive: new T.Color(evidence.style.color).multiplyScalar(0.28), metalness: 0.25,
-        roughness: 0.52, transparent: evidence.style.alpha < 1, opacity: evidence.style.alpha});
+      const material = new T.MeshStandardMaterial({color: visual.color,
+        emissive: new T.Color(visual.color).multiplyScalar(0.28), metalness: 0.25,
+        roughness: 0.52, transparent: visual.alpha < 1, opacity: visual.alpha});
       mesh = new T.Mesh(this.#nodeGeometry(evidence.name, radius), material);
       mesh.userData.arrivedAt = this.window.performance?.now?.() ?? Date.now();
       this.nodeMeshes.set(node.id, mesh); this.nodeGroup.add(mesh);
     } else {
-      mesh.material.color.set(evidence.style.color); mesh.material.opacity = evidence.style.alpha;
-      mesh.material.transparent = evidence.style.alpha < 1;
+      mesh.material.color.set(visual.color); mesh.material.emissive.set(visual.color).multiplyScalar(0.28);
+      mesh.material.opacity = visual.alpha; mesh.material.transparent = visual.alpha < 1;
     }
     const point = this.positions.get(node.id); mesh.position.set(point.x, point.y, point.z);
     mesh.userData = {...mesh.userData, selection: {kind: graphKind(node), entityId: node.id,

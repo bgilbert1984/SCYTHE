@@ -28,7 +28,9 @@ import hmac
 import json
 import logging
 import os
+import re
 import secrets
+import shutil
 import signal
 import socket
 import subprocess
@@ -2017,9 +2019,101 @@ def orchestrator_graphops_selection_graph():
     return jsonify(data)
 
 
+@app.route('/api/graphops/explorer', methods=['GET'])
+def orchestrator_graphops_explorer():
+    """Proxy the bounded current-graph explorer without widening live polling."""
+    if not _graphops_directive_authorized():
+        return jsonify({'error': 'Authentication required'}), 401
+    allowed = {'q', 'protocol', 'start', 'end', 'focus_id', 'depth', 'node_limit',
+               'edge_limit', 'node_offset', 'edge_offset'}
+    unknown = set(request.args) - allowed
+    if unknown:
+        return jsonify({'status': 'refused',
+                        'error': f'unknown explorer fields: {", ".join(sorted(unknown))}'}), 400
+    port = _get_primary_instance_port()
+    if not port:
+        return jsonify({'status': 'unavailable', 'error': 'No active SCYTHE graph instance',
+                        'nodes': [], 'edges': [], 'bounded': True}), 503
+    from urllib.parse import urlencode
+    query = urlencode([(key, value) for key in sorted(request.args) for value in request.args.getlist(key)])
+    data = _proxy_get(port, '/api/graphops/explorer' + (f'?{query}' if query else ''), timeout=12)
+    if data is None:
+        return jsonify({'status': 'unavailable', 'error': 'Graph explorer unavailable',
+                        'nodes': [], 'edges': [], 'bounded': True}), 502
+    return jsonify(data)
+
+
 _HOST_TRACE_CACHE = {}
 _HOST_TRACE_CACHE_LOCK = threading.RLock()
 _HOST_TRACE_CACHE_TTL_SECONDS = 30
+
+_HOST_LIVENESS_CACHE = {}
+_HOST_LIVENESS_CACHE_LOCK = threading.RLock()
+_HOST_LIVENESS_CACHE_TTL_SECONDS = 5
+
+
+def _ping_rtt_ms(output):
+    """Extract an RTT from iputils or Windows ping without promoting absence."""
+    match = re.search(r'time\s*([=<])\s*([\d.]+)\s*ms', str(output or ''), re.IGNORECASE)
+    if not match:
+        return None
+    value = float(match.group(2))
+    return value / 2 if match.group(1) == '<' else value
+
+
+def _measure_host_liveness(target):
+    """Return one bounded ICMP observation, using the WSL host only as fallback."""
+    import ipaddress
+    address = ipaddress.ip_address(target)
+    linux_ping = shutil.which('ping6' if address.version == 6 else 'ping')
+    permission_failure = False
+    if linux_ping:
+        try:
+            result = subprocess.run(
+                [linux_ping, '-c', '1', '-W', '1', address.compressed],
+                capture_output=True, text=True, timeout=3,
+            )
+            output = (result.stdout or '') + (result.stderr or '')
+            if result.returncode == 0:
+                return {'state': 'active', 'alive': True, 'rttMs': _ping_rtt_ms(output),
+                        'tool': 'iputils-ping', 'evidenceClass': 'MEASURED'}
+            normalized = output.lower()
+            permission_failure = any(marker in normalized for marker in (
+                'operation not permitted', 'permission denied', 'cap_net_raw', 'socket: permission'))
+            if not permission_failure:
+                return {'state': 'inactive', 'alive': False, 'rttMs': None,
+                        'reason': 'NO_ICMP_REPLY', 'tool': 'iputils-ping',
+                        'evidenceClass': 'MEASURED'}
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+
+    # WSL interop provides a real ICMP implementation without granting the
+    # long-running Python service raw-socket capabilities.
+    windows_ping = Path('/mnt/c/WINDOWS/System32/ping.exe')
+    is_wsl = bool(os.environ.get('WSL_INTEROP'))
+    if not is_wsl:
+        try:
+            is_wsl = 'microsoft' in Path('/proc/sys/kernel/osrelease').read_text().lower()
+        except OSError:
+            is_wsl = False
+    if is_wsl and windows_ping.is_file():
+        try:
+            command = [str(windows_ping), '-n', '1', '-w', '1000']
+            if address.version == 6:
+                command.append('-6')
+            result = subprocess.run(command + [address.compressed], capture_output=True,
+                                    text=True, timeout=4)
+            output = (result.stdout or '') + (result.stderr or '')
+            return {'state': 'active' if result.returncode == 0 else 'inactive',
+                    'alive': result.returncode == 0,
+                    'rttMs': _ping_rtt_ms(output) if result.returncode == 0 else None,
+                    **({'reason': 'NO_ICMP_REPLY'} if result.returncode != 0 else {}),
+                    'tool': 'windows-ping-via-wsl', 'evidenceClass': 'MEASURED'}
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+    return {'state': 'unknown', 'alive': None, 'rttMs': None,
+            'reason': 'ICMP_PROBE_UNAVAILABLE' if permission_failure else 'PING_UNAVAILABLE',
+            'tool': None, 'evidenceClass': 'UNAVAILABLE'}
 
 
 def _host_trace_target(snapshot, payload):
@@ -2054,6 +2148,57 @@ def _host_trace_target(snapshot, payload):
     except (TypeError, ValueError) as exc:
         raise ValueError('maxHops must be an integer from 5 through 30') from exc
     return address.compressed, max_hops
+
+
+@app.route('/api/graphops/host-liveness', methods=['POST'])
+def orchestrator_graphops_host_liveness():
+    """Measure one revision-pinned host for bounded round-robin visualization."""
+    if not _graphops_directive_authorized():
+        return jsonify({'error': 'Authentication required'}), 401
+    payload = request.get_json(silent=True) or {}
+    if not isinstance(payload, dict):
+        return jsonify({'status': 'refused', 'error': 'JSON object required'}), 400
+    unknown = set(payload) - {'entityId', 'graphRevision'}
+    if unknown or not payload.get('entityId') or not payload.get('graphRevision'):
+        message = ('entityId and graphRevision are required' if not unknown else
+                   f'unknown host liveness fields: {", ".join(sorted(unknown))}')
+        return jsonify({'status': 'refused', 'error': message}), 400
+    port = _get_primary_instance_port()
+    if not port:
+        return jsonify({'status': 'unavailable', 'state': 'unknown',
+                        'error': 'No active SCYTHE graph instance'}), 503
+    resolved = _proxy_post(port, '/api/graphops/selection/resolve', {
+        'kind': 'graph-node', 'entityId': payload['entityId'],
+        'graphRevision': payload['graphRevision'],
+    }, timeout=8)
+    if resolved is None:
+        return jsonify({'status': 'refused', 'state': 'unknown',
+                        'error': 'graph selection is stale or unavailable'}), 409
+    try:
+        target, _ = _host_trace_target(
+            {'graphRevision': resolved.get('graphRevision'), 'nodes': [resolved.get('node') or {}]},
+            {**payload, 'maxHops': 5},
+        )
+    except ValueError as exc:
+        return jsonify({'status': 'refused', 'state': 'unknown', 'error': str(exc)}), 400
+
+    now = time.time()
+    with _HOST_LIVENESS_CACHE_LOCK:
+        cached = _HOST_LIVENESS_CACHE.get(target)
+        if cached and now - cached['observedAt'] <= _HOST_LIVENESS_CACHE_TTL_SECONDS:
+            return jsonify({**cached, 'entityId': payload['entityId'], 'cached': True})
+    observation = {
+        'status': 'completed', 'entityId': payload['entityId'], 'target': target,
+        **_measure_host_liveness(target), 'observedAt': now, 'cached': False,
+        'bounded': True, 'rawPacketsExposed': False,
+    }
+    with _HOST_LIVENESS_CACHE_LOCK:
+        _HOST_LIVENESS_CACHE[target] = observation
+        if len(_HOST_LIVENESS_CACHE) > 512:
+            oldest = min(_HOST_LIVENESS_CACHE,
+                         key=lambda key: _HOST_LIVENESS_CACHE[key]['observedAt'])
+            _HOST_LIVENESS_CACHE.pop(oldest, None)
+    return jsonify(observation)
 
 
 @app.route('/api/graphops/host-trace', methods=['POST'])
@@ -2104,14 +2249,36 @@ def orchestrator_graphops_host_trace():
         traceroute = trace_future.result()
 
     hops = list((traceroute or {}).get('hops') or [])[:max_hops]
-    route_class = ('SYNTHETIC' if (traceroute or {}).get('simulated') or
-                   (traceroute or {}).get('status') == 'simulated' else
-                   ('MEASURED' if hops else 'UNAVAILABLE'))
+    route_is_synthetic = bool((traceroute or {}).get('simulated') or
+                              (traceroute or {}).get('status') == 'simulated')
+    route_is_measured = bool(hops and (traceroute or {}).get('status') == 'ok' and
+                             not route_is_synthetic)
+    probe_is_measured = bool(probe and probe.get('status') == 'ok' and
+                             (probe.get('rtt_avg_ms') is not None or probe.get('rtt_ms') is not None))
+    route_class = ('SYNTHETIC' if route_is_synthetic else
+                   ('MEASURED' if route_is_measured else 'UNAVAILABLE'))
     geo_path = [{key: hop.get(key) for key in
                  ('hop', 'ip', 'rtt_ms', 'lat', 'lon', 'geo', 'anomaly', 'physics_anomaly')
-                 if hop.get(key) is not None} for hop in hops]
+                 if hop.get(key) is not None} for hop in hops] if route_is_measured else []
+    if route_is_synthetic:
+        boundary = ('SYNTHETIC ROUTE DATA IS ILLUSTRATIVE ONLY AND IS NOT A NETWORK MEASUREMENT; '
+                    'NO REACHABILITY, LATENCY, OR LOCATION CLAIM MAY BE DERIVED FROM IT')
+    elif route_is_measured and probe_is_measured:
+        boundary = ('RTT AND ROUTE HOPS ARE ACTIVE MEASUREMENTS; HOP GEOIP IS AN ESTIMATE; '
+                    'ROUTING DISTANCE IS NOT PHYSICAL DEVICE LOCATION')
+    elif route_is_measured:
+        boundary = ('ROUTE HOPS ARE ACTIVE MEASUREMENTS; THE ICMP RTT PROBE IS UNAVAILABLE; '
+                    'HOP GEOIP IS AN ESTIMATE; ROUTING DISTANCE IS NOT PHYSICAL DEVICE LOCATION')
+    elif probe_is_measured:
+        boundary = ('RTT IS AN ACTIVE MEASUREMENT; NO ROUTE WAS MEASURED; '
+                    'REACHABILITY DOES NOT ESTABLISH PHYSICAL DEVICE LOCATION')
+    else:
+        boundary = ('NO ACTIVE NETWORK MEASUREMENT WAS PRODUCED; MISSING RTT OR ROUTE DATA IS NOT '
+                    'EVIDENCE OF UNREACHABILITY OR LOCATION')
+    overall_status = ('completed' if probe_is_measured and route_is_measured else
+                      ('partial' if probe_is_measured or route_is_measured else 'unavailable'))
     result = {
-        'status': 'completed' if probe or traceroute else 'unavailable',
+        'status': overall_status,
         'target': target,
         'selection': {'entityId': payload['entityId'], 'graphRevision': payload['graphRevision']},
         'probe': probe,
@@ -2119,12 +2286,16 @@ def orchestrator_graphops_host_trace():
         'geoPath': geo_path,
         'evidenceClasses': {
             'target': 'OBSERVED',
-            'rtt': 'MEASURED' if probe and probe.get('status') == 'ok' else 'UNAVAILABLE',
+            'rtt': 'MEASURED' if probe_is_measured else 'UNAVAILABLE',
             'route': route_class,
-            'geography': 'INFERRED' if any(hop.get('geo') for hop in hops) else 'UNAVAILABLE',
+            'geography': 'INFERRED' if any(hop.get('geo') for hop in geo_path) else 'UNAVAILABLE',
         },
-        'boundary': ('RTT AND ROUTE HOPS ARE ACTIVE MEASUREMENTS; HOP GEOIP IS AN ESTIMATE; '
-                     'ROUTING DISTANCE IS NOT PHYSICAL DEVICE LOCATION'),
+        'measurementSummary': {
+            'rttMeasured': probe_is_measured,
+            'routeMeasured': route_is_measured,
+            'syntheticRoute': route_is_synthetic,
+        },
+        'boundary': boundary,
         'cached': False,
         'capturedAt': time.time(),
         'bounded': True,
@@ -2136,7 +2307,10 @@ def orchestrator_graphops_host_trace():
         if len(_HOST_TRACE_CACHE) > 64:
             oldest = min(_HOST_TRACE_CACHE, key=lambda key: _HOST_TRACE_CACHE[key]['capturedAt'])
             _HOST_TRACE_CACHE.pop(oldest, None)
-    return jsonify(result), 200 if result['status'] == 'completed' else 502
+    # A bounded attempt that produces no measurement is still a valid GraphOps
+    # result. Return it for explicit rendering instead of hiding its reason in a
+    # generic upstream error.
+    return jsonify(result), 200
 
 
 def _rf_observation_frame(observation):

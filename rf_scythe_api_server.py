@@ -15,6 +15,8 @@ import sys
 import json
 import time
 import random
+import re
+import shutil
 import subprocess
 import ipaddress
 import threading
@@ -65,6 +67,31 @@ from network_tool_policy import (
     validate_nmap_options,
     validate_nmap_target,
 )
+
+
+def _parse_tracepath_output(output):
+    """Parse numeric tracepath output into one bounded observation per hop."""
+    by_hop = {}
+    for line in str(output or '').splitlines():
+        match = re.match(r'^\s*(\d+)\??:\s+(\S+)\s+([\d.]+)ms\b', line)
+        if not match:
+            continue
+        hop_number, address, rtt = int(match.group(1)), match.group(2), float(match.group(3))
+        if address.upper() == 'LOCALHOST':
+            continue
+        candidate = {'hop': hop_number, 'ip': address, 'rtt_ms': rtt}
+        previous = by_hop.get(hop_number)
+        if previous is None or rtt < previous['rtt_ms']:
+            by_hop[hop_number] = candidate
+    return [by_hop[number] for number in sorted(by_hop)]
+
+
+def _ping_permission_failure(output):
+    normalized = str(output or '').lower()
+    return any(marker in normalized for marker in (
+        'operation not permitted', 'permission denied', 'cap_net_raw',
+        'socket: permission', 'icmp open socket',
+    ))
 
 # ────────────────────────────────────────────────────────────────────
 # NETWORK INGRESS AGGREGATOR
@@ -9395,11 +9422,21 @@ if FLASK_AVAILABLE:
                     packets_recv = int(m2.group(1))
 
             if rtt_avg is None and not rtt_samples:
+                if _ping_permission_failure(output):
+                    return jsonify({
+                        'status': 'unavailable',
+                        'target': target,
+                        'reason': 'INSUFFICIENT_PRIVILEGE',
+                        'message': 'ICMP RTT probe unavailable: ping lacks raw-socket permission',
+                        'tool_used': 'ping6' if _is_v6 else 'ping',
+                        'measurement_produced': False,
+                    })
                 return jsonify({
                     'status': 'unreachable',
                     'target': target,
                     'message': 'Host did not respond to ping',
-                    'raw_output': output[:500]
+                    'reason': 'NO_REPLY',
+                    'measurement_produced': False,
                 })
 
             # Use parsed samples if available; fall back to summary line values
@@ -9452,6 +9489,8 @@ if FLASK_AVAILABLE:
                 'asn_type':             dist_est.get('asn_type', 'unknown'),
                 'packets_sent':         count,
                 'packets_received':     packets_recv,
+                'measurement_produced': True,
+                'evidence_class':       'MEASURED',
                 'note':                 'distance_estimate_km uses min-RTT × 50 km/ms (fiber+routing factor)',
                 'timestamp':            time.time()
             })
@@ -9500,6 +9539,7 @@ if FLASK_AVAILABLE:
 
         hops = []
         used_tool = None
+        attempts = []
 
         # Try nmap traceroute first
         if nmap_scanner.check_nmap_available():
@@ -9526,46 +9566,64 @@ if FLASK_AVAILABLE:
                             break
                 if hops:
                     used_tool = 'nmap'
-            except Exception:
-                pass
+                else:
+                    detail = (res.stderr or res.stdout or '').lower()
+                    reason = ('INSUFFICIENT_PRIVILEGE' if 'root' in detail or 'privilege' in detail
+                              else 'NO_HOPS_RETURNED')
+                    attempts.append({'tool': 'nmap', 'reason': reason})
+            except Exception as exc:
+                attempts.append({'tool': 'nmap', 'reason': type(exc).__name__.upper()})
 
         # Fall back to traceroute binary
         if not hops:
             try:
                 tr_bin = None
-                for binary in ['traceroute', 'tracepath']:
-                    check = subprocess.run(['which', binary], capture_output=True)
-                    if check.returncode == 0:
-                        tr_bin = binary
+                for binary in ('tracepath', 'traceroute'):
+                    resolved_binary = shutil.which(binary)
+                    if resolved_binary:
+                        tr_bin = resolved_binary
                         break
 
                 if tr_bin:
-                    cmd = [tr_bin, '-n', '-m', str(max_hops), '-w', '2', target]
+                    tool_name = os.path.basename(tr_bin)
+                    # tracepath does not support traceroute's `-w` option. It is
+                    # intentionally preferred because it can operate without a
+                    # raw-socket capability in an unprivileged service.
+                    cmd = ([tr_bin, '-n', '-m', str(max_hops), target]
+                           if tool_name == 'tracepath' else
+                           [tr_bin, '-n', '-m', str(max_hops), '-w', '2', target])
                     res = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
-                    for line in res.stdout.splitlines():
-                        parsed = _parse_traceroute_line(line)
-                        if parsed:
+                    parsed_hops = (_parse_tracepath_output(res.stdout)
+                                   if tool_name == 'tracepath' else
+                                   [parsed for line in res.stdout.splitlines()
+                                    if (parsed := _parse_traceroute_line(line))])
+                    for parsed in parsed_hops:
+                        if isinstance(parsed, dict):
+                            hop_n, ip, rtt_ms = parsed['hop'], parsed['ip'], parsed['rtt_ms']
+                        else:
                             hop_n, ip, rtt_ms = parsed
-                            hops.append({'hop': hop_n, 'ip': ip, 'rtt_ms': rtt_ms,
-                                         'estimated_km': round(rtt_ms * _RTT_EFFECTIVE_KM_PER_MS, 1)})
+                        hops.append({'hop': hop_n, 'ip': ip, 'rtt_ms': rtt_ms,
+                                     'estimated_km': round(rtt_ms * _RTT_EFFECTIVE_KM_PER_MS, 1)})
                     if hops:
-                        used_tool = tr_bin
-            except Exception:
-                pass
+                        used_tool = tool_name
+                    else:
+                        attempts.append({'tool': tool_name, 'reason': 'NO_HOPS_RETURNED'})
+                else:
+                    attempts.append({'tool': 'tracepath/traceroute', 'reason': 'NOT_INSTALLED'})
+            except Exception as exc:
+                attempts.append({'tool': os.path.basename(tr_bin) if tr_bin else 'tracepath/traceroute',
+                                 'reason': type(exc).__name__.upper()})
 
         if not hops:
             return jsonify({
-                'status': 'simulated',
+                'status': 'unavailable',
                 'target': target,
-                'message': 'traceroute/nmap not available — returning simulated hops',
-                'hops': [
-                    {'hop': i, 'ip': f'10.0.0.{i}', 'rtt_ms': round(5 + i * 8 + random.uniform(-2, 2), 1),
-                     'estimated_km': round((5 + i * 8) * _RTT_EFFECTIVE_KM_PER_MS, 1),
-                     'delta_rtt_ms': round(8 + random.uniform(-1, 1), 1),
-                     'delta_km': round(8 * 50, 1), 'anomaly': None}
-                    for i in range(1, 9)
-                ],
-                'simulated': True
+                'reason': 'NO_MEASURED_ROUTE',
+                'message': 'No route measurement was produced; synthetic hops are never substituted',
+                'hops': [],
+                'attempts': attempts,
+                'simulated': False,
+                'measurement_produced': False,
             })
 
         # Annotate hops with anomaly flags, delta distances, and MIMO hop class
@@ -9767,6 +9825,9 @@ if FLASK_AVAILABLE:
             'distance_estimate_km': best_total_km,
             'path_summary':         path_summary,
             'tool_used':            used_tool,
+            'measurement_produced': True,
+            'evidence_class':       'MEASURED',
+            'simulated':            False,
             'timestamp':            time.time()
         })
 

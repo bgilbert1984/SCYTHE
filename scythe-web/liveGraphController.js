@@ -7,6 +7,7 @@ export class LiveGraphController {
     this.edgeLimit = Math.min(Math.max(Number(edgeLimit) || 300, 1), 1000);
     this.listeners = new Set(); this.timer = null; this.running = false;
     this.graphRevision = null; this.snapshot = null; this.status = null;
+    this.liveness = new Map(); this.livenessCursor = 0; this.livenessRevision = 0;
   }
 
   subscribe(listener) {
@@ -47,12 +48,57 @@ export class LiveGraphController {
       }
       const changed = graph.graphRevision !== this.graphRevision;
       this.graphRevision = graph.graphRevision;
-      if (changed || !this.snapshot) this.snapshot = graph;
-      return this.#publish({kind: "snapshot", graph: this.snapshot, eve, changed, available: true,
-        message: `LIVE HYPERGRAPH // ${graph.status.toUpperCase()} // ${graph.nodeCount ?? graph.nodes?.length ?? 0} NODES // ${graph.edgeCount ?? graph.edges?.length ?? 0} EDGES\nEVE // ${eve.status?.toUpperCase() ?? "UNKNOWN"} // ${eve.committed ?? 0} COMMITTED // RAW PACKETS NOT EXPOSED`});
+      const livenessChanged = await this.#probeNextHost(graph);
+      const currentIds = new Set((graph.nodes ?? []).map((node) => node.id));
+      for (const id of this.liveness.keys()) if (!currentIds.has(id)) this.liveness.delete(id);
+      this.snapshot = {...graph, livenessRevision: this.livenessRevision,
+        nodes: (graph.nodes ?? []).map((node) => ({...node,
+          ...(this.liveness.has(node.id) ? {liveness: this.liveness.get(node.id)} : {})}))};
+      const counts = {active: 0, inactive: 0};
+      for (const node of this.snapshot.nodes) if (node.liveness?.state in counts) counts[node.liveness.state] += 1;
+      const hostCount = this.snapshot.nodes.filter((node) => this.#isHost(node)).length;
+      const unknown = Math.max(0, hostCount - counts.active - counts.inactive);
+      return this.#publish({kind: "snapshot", graph: this.snapshot, eve,
+        changed: changed || livenessChanged, graphChanged: changed, livenessChanged, available: true,
+        message: `LIVE HYPERGRAPH // ${graph.status.toUpperCase()} // ${graph.nodeCount ?? graph.nodes?.length ?? 0} NODES // ${graph.edgeCount ?? graph.edges?.length ?? 0} EDGES\nHOST PING // ${counts.active} ACTIVE // ${counts.inactive} INACTIVE // ${unknown} UNKNOWN // ROUND ROBIN\nEVE // ${eve.status?.toUpperCase() ?? "UNKNOWN"} // ${eve.committed ?? 0} COMMITTED // RAW PACKETS NOT EXPOSED`});
     } catch (error) {
       return this.#publish({kind: "status", graph: this.snapshot, eve: null, available: false,
         error, message: `LIVE HYPERGRAPH // UNAVAILABLE // ${error.message}`});
+    }
+  }
+
+  #isHost(node) {
+    return String(node?.kind ?? "").toLowerCase() === "network_host" || String(node?.id ?? "").startsWith("host:");
+  }
+
+  async #probeNextHost(graph) {
+    const hosts = (graph.nodes ?? []).filter((node) => this.#isHost(node));
+    if (!hosts.length || !graph.graphRevision) return false;
+    const node = hosts[this.livenessCursor % hosts.length];
+    this.livenessCursor = (this.livenessCursor + 1) % hosts.length;
+    try {
+      const response = await this.fetchImpl.call(globalThis, `${this.apiBase}/api/graphops/host-liveness`, {
+        method: "POST", credentials: "same-origin", cache: "no-store",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({entityId: node.id, graphRevision: graph.graphRevision}),
+      });
+      if (!response.ok) return false;
+      const observation = await response.json();
+      if (!["active", "inactive", "unknown"].includes(observation.state)) return false;
+      const previous = this.liveness.get(node.id) ?? {state: "unknown", consecutiveFailures: 0};
+      const failures = observation.state === "inactive" ? previous.consecutiveFailures + 1 : 0;
+      // A single lost echo is not enough to paint a host red. Active is
+      // immediate; inactive requires two consecutive round-robin observations.
+      const state = observation.state === "inactive" && failures < 2 ? previous.state : observation.state;
+      const next = {state, consecutiveFailures: failures, rttMs: observation.rttMs ?? null,
+        tool: observation.tool ?? null, observedAt: observation.observedAt ?? null,
+        evidenceClass: observation.evidenceClass ?? "UNAVAILABLE"};
+      const changed = JSON.stringify(previous) !== JSON.stringify(next);
+      this.liveness.set(node.id, next);
+      if (changed) this.livenessRevision += 1;
+      return changed;
+    } catch {
+      return false;
     }
   }
 
@@ -67,6 +113,6 @@ export class LiveGraphController {
 
   destroy() {
     this.running = false; clearTimeout(this.timer); this.timer = null;
-    this.listeners.clear();
+    this.listeners.clear(); this.liveness.clear();
   }
 }

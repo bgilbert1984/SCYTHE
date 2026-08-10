@@ -1,4 +1,4 @@
-import { evidenceStyle } from "./evidenceStyles.js";
+import { evidenceStyle, graphNodeStyle } from "./evidenceStyles.js";
 import { LiveGraphController } from "./liveGraphController.js";
 import { graphEntityTooltip } from "./graphEntityTooltip.js";
 
@@ -104,7 +104,7 @@ export class LiveHypergraphView {
     }
     for (const node of nodes) {
       const point = positions.get(node.id); if (!point) continue;
-      const style = evidenceStyle(node.evidenceClass ?? "INFERRED");
+      const style = graphNodeStyle(node);
       const group = document.createElementNS(SVG_NS, "g"); group.classList.add("live-hypergraph__node");
       group.setAttribute("transform", `translate(${point.x} ${point.y})`); group.dataset.entityId = node.id;
       const circle = document.createElementNS(SVG_NS, "circle");

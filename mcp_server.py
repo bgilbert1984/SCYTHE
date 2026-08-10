@@ -487,6 +487,24 @@ def register_mcp_routes(app, engine, use_orchestrator: bool = False, auth_valida
         except (TypeError, ValueError) as exc:
             return jsonify({'status': 'refused', 'error': str(exc)}), 400
 
+    @app.route('/api/graphops/explorer', methods=['GET'])
+    def graphops_explorer():
+        if not _authorized():
+            return _unauthorized()
+        try:
+            from graphops_graph_resolver import GraphSelectionResolver
+            return jsonify(GraphSelectionResolver(graph_selection_engine).explore(
+                query=request.args.get('q', ''), protocol=request.args.get('protocol', ''),
+                start=request.args.get('start'), end=request.args.get('end'),
+                focus_id=request.args.get('focus_id', ''), depth=request.args.get('depth', 1),
+                node_limit=request.args.get('node_limit', 100),
+                edge_limit=request.args.get('edge_limit', 150),
+                node_offset=request.args.get('node_offset', 0),
+                edge_offset=request.args.get('edge_offset', 0),
+            ))
+        except (TypeError, ValueError) as exc:
+            return jsonify({'status': 'refused', 'error': str(exc), 'nodes': [], 'edges': []}), 400
+
     @app.route('/api/graphops/rf-observations', methods=['POST'])
     def graphops_rf_observation_ingest():
         if not _authorized():
