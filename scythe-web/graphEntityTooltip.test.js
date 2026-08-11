@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { graphEntityTooltip } from "./graphEntityTooltip.js";
+import { graphEntityPromptContext, graphEntityTooltip } from "./graphEntityTooltip.js";
 
 test("public host tooltip separates observation from local enrichment claims", () => {
   const value = graphEntityTooltip({
@@ -38,4 +38,14 @@ test("host tooltip labels measured ping liveness independently of GeoIP", () => 
     evidenceClass: "OBSERVED", liveness: {state: "active", rttMs: 11, tool: "windows-ping-via-wsl"}});
   assert.match(value, /LIVENESS \/\/ ACTIVE · ICMP MEASURED/);
   assert.match(value, /windows-ping-via-wsl · 11 ms/);
+});
+
+test("prompt context carries tooltip claims without promoting display enrichment", () => {
+  const value = graphEntityPromptContext({id: "host:8.8.8.8", kind: "network_host",
+    evidenceClass: "OBSERVED", enrichment: {ip: "8.8.8.8", scope: "PUBLIC",
+      network: {asn: 15169, organization: "Google LLC"}}});
+  assert.match(value, /SELECTED GRAPH ENTITY \/\/ TOOLTIP CONTEXT/);
+  assert.match(value, /AS15169 · Google LLC/);
+  assert.match(value, /CONTEXT AUTHORITY \/\/ MIXED/);
+  assert.match(value, /SERVER-RESOLVED GRAPH EVIDENCE GOVERNS ANSWERS/);
 });

@@ -66,3 +66,15 @@ export function graphEntityTooltip(entity = {}) {
   return [text(entity.kind) || "GRAPH ENTITY", text(entity.id), text(entity.evidenceClass) || "INFERRED"]
     .filter(Boolean).join("\n");
 }
+
+/** Render tooltip facts as prompt context without upgrading enrichment to evidence. */
+export function graphEntityPromptContext(entity = {}) {
+  const tooltip = graphEntityTooltip(entity);
+  if (!tooltip) return "";
+  return [
+    "SELECTED GRAPH ENTITY // TOOLTIP CONTEXT",
+    tooltip,
+    "CONTEXT AUTHORITY // MIXED; EACH CLAIM RETAINS ITS LABEL",
+    "BOUNDARY // DISPLAY ENRICHMENT GUIDES QUESTIONS; SERVER-RESOLVED GRAPH EVIDENCE GOVERNS ANSWERS",
+  ].join("\n");
+}

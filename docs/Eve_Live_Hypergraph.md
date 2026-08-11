@@ -164,6 +164,12 @@ It invokes the checksum-pinned launcher at
 the current Npcap GUID for the named `Wi-Fi` adapter, validates the deployed
 configuration, and refuses to start a modified executable.
 
+The launcher tolerates Windows boot ordering: after configuration validation
+it waits up to 120 seconds for the named adapter to report `Up`, verifies that
+Suricata remains running two seconds after launch, and records the outcome in
+`runtime/suricata-startup.log`. This prevents a hidden Startup-folder process
+from silently exiting while Wi-Fi is still initializing.
+
 ## Rotation and retention
 
 Suricata performs native daily EVE rotation. Eve Streamer accepts the literal
@@ -175,6 +181,17 @@ regression tests.
 Native rotation prevents an unbounded active file, but removal of old daily
 files remains a deployment policy. No automatic deletion is enabled in this
 phase; retention must be chosen explicitly before a cleanup task is installed.
+
+At service start, production mode replays at most the newest 256 newline-
+delimited Eve records before continuing at EOF. This bounded bootstrap restores
+recent topology when the graph instance is fresh but the Windows sensor is
+quiet after a workstation restart. Replayed records retain their original
+observation timestamps and `OBSERVED` evidence class, and carry
+`ingest_mode=BOOTSTRAP_REPLAY`; UI status reports them separately from the
+committed total. Eve event IDs are deterministic content hashes, so restarting
+only Eve Streamer cannot turn the same record into a second observation; those
+attempts increment `DEDUPLICATED`, not `COMMITTED`, and leave graph revision
+unchanged.
 
 The former controlled feed remains available at:
 

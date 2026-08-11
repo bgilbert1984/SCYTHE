@@ -2,8 +2,10 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -84,6 +86,58 @@ func TestSuricataEngineFollowsNewestRotatedFile(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("tailer did not follow the newest rotated Eve file")
+	}
+}
+
+func TestSuricataEngineReplaysBoundedRecentRecordsThenTails(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "eve.json")
+	var contents []byte
+	for i := 1; i <= 3; i++ {
+		record, _ := json.Marshal(map[string]interface{}{
+			"timestamp": "2026-08-08T02:50:00Z", "event_type": "flow",
+			"src_ip": "10.0.0.1", "dest_ip": "8.8.8.8",
+			"src_port": 49000 + i, "dest_port": 443, "proto": "TCP",
+		})
+		contents = append(contents, append(record, '\n')...)
+	}
+	if err := os.WriteFile(path, contents, 0600); err != nil {
+		t.Fatal(err)
+	}
+	engine := NewSuricataEngine(EngineConfig{EveFile: path, ReplayLast: 2})
+	events := make(chan *pb.Event, 4)
+	binary := make(chan []byte, 1)
+	done := make(chan struct{})
+	errCh := make(chan error, 1)
+	go func() { errCh <- engine.Run(events, binary, done) }()
+	t.Cleanup(func() { close(done); <-errCh })
+
+	for expectedPort := 49002; expectedPort <= 49003; expectedPort++ {
+		select {
+		case event := <-events:
+			if event.Entities[2].Value != fmt.Sprint(expectedPort) {
+				t.Fatalf("unexpected replay port %q", event.Entities[2].Value)
+			}
+			last := event.Entities[len(event.Entities)-1]
+			if last.Key != "scythe_ingest_mode" || last.Value != "bootstrap_replay" {
+				t.Fatalf("missing replay marker: %+v", last)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("bounded replay did not arrive")
+		}
+	}
+	select {
+	case extra := <-events:
+		t.Fatalf("replay exceeded bound: %+v", extra)
+	case <-time.After(150 * time.Millisecond):
+	}
+}
+
+func TestNormalizeEventIDIsStableAcrossReplay(t *testing.T) {
+	raw := map[string]interface{}{"timestamp": "2026-08-08T02:50:00Z", "event_type": "flow",
+		"src_ip": "10.0.0.1", "dest_ip": "8.8.8.8"}
+	first, second := normalizeEvent(raw), normalizeEvent(raw)
+	if first.EventId != second.EventId || !strings.HasPrefix(first.EventId, "eve-") {
+		t.Fatalf("event IDs are not stable: %q %q", first.EventId, second.EventId)
 	}
 }
 

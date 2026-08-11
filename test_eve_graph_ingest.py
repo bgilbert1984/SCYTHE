@@ -19,11 +19,19 @@ def event(event_type="flow"):
 class _Result:
     ok = True
     errors = []
+    debug = {}
 
 
 class _Bus:
     def __init__(self): self.calls = []
     def commit(self, **kwargs): self.calls.append(kwargs); return _Result()
+
+
+class _DuplicateBus(_Bus):
+    def commit(self, **kwargs):
+        self.calls.append(kwargs)
+        return type("DuplicateResult", (), {"ok": True, "errors": [],
+                    "debug": {"idempotent_replay": True}})()
 
 
 class _Store:
@@ -50,10 +58,30 @@ class EveGraphIngestTests(unittest.TestCase):
         self.assertTrue(bus.calls[0]["audit"])
         self.assertEqual(bus.calls[0]["graph_ops"][-1].entity_data["metadata"]["evidence_class"], "OBSERVED")
 
+    def test_idempotency_is_scoped_to_the_graph_session(self):
+        bus = _Bus(); normalized = validate_eve_batch({"events": [event()]})
+        commit_eve_events(normalized, bus, idempotency_scope="session-42")
+        self.assertEqual(bus.calls[0]["idempotency_key"], "eve:session-42:eve-1")
+
+    def test_idempotent_replay_is_counted_without_claiming_a_second_commit(self):
+        result = commit_eve_events(validate_eve_batch({"events": [event()]}), _DuplicateBus())
+        self.assertEqual(result["committed"], 0)
+        self.assertEqual(result["deduplicated"], 1)
+        self.assertEqual(result["received"], 1)
+
     def test_controlled_feed_remains_synthetic(self):
         bus = _Bus(); normalized = validate_eve_batch({"events": [event("test_flow")]})
         result = commit_eve_events(normalized, bus)
         self.assertEqual(result["evidenceClasses"], ["SYNTHETIC"])
+
+    def test_bootstrap_replay_is_observed_history_with_explicit_ingest_mode(self):
+        bus = _Bus(); replay = event()
+        replay["entities"].append({"key": "scythe_ingest_mode", "value": "bootstrap_replay"})
+        result = commit_eve_events(validate_eve_batch({"events": [replay]}), bus)
+        self.assertEqual(result["replayed"], 1)
+        edge = bus.calls[0]["graph_ops"][-1].entity_data
+        self.assertEqual(edge["metadata"]["ingest_mode"], "BOOTSTRAP_REPLAY")
+        self.assertEqual(edge["metadata"]["evidence_class"], "OBSERVED")
 
     def test_selection_projection_includes_attached_eve_graph(self):
         engine = HypergraphEngine()

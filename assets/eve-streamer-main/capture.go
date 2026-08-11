@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
@@ -61,11 +62,12 @@ func (b *BaseEngine) countEvent() {
 
 type SuricataEngine struct {
 	BaseEngine
-	FilePath string
+	FilePath   string
+	ReplayLast int
 }
 
 func NewSuricataEngine(cfg EngineConfig) CaptureEngine {
-	return &SuricataEngine{FilePath: cfg.EveFile}
+	return &SuricataEngine{FilePath: cfg.EveFile, ReplayLast: cfg.ReplayLast}
 }
 
 func init() {
@@ -90,6 +92,64 @@ func (e *SuricataEngine) Validate() error {
 		return err
 	}
 	return nil
+}
+
+const maxReplayScanBytes int64 = 16 * 1024 * 1024
+
+// seekForRecentLines positions file at the start of at most count complete or
+// pending newline-delimited records. The byte scan is bounded independently of
+// the Eve file size.
+func seekForRecentLines(file *os.File, count int) (int, error) {
+	info, err := file.Stat()
+	if err != nil {
+		return 0, err
+	}
+	if count <= 0 || info.Size() == 0 {
+		_, err = file.Seek(0, io.SeekEnd)
+		return 0, err
+	}
+	scanStart := info.Size() - maxReplayScanBytes
+	if scanStart < 0 {
+		scanStart = 0
+	}
+	data := make([]byte, info.Size()-scanStart)
+	read, readErr := file.ReadAt(data, scanStart)
+	if readErr != nil && readErr != io.EOF {
+		return 0, readErr
+	}
+	data = data[:read]
+	offset := scanStart
+	index := len(data) - 1
+	if index >= 0 && data[index] == '\n' {
+		index--
+	}
+	boundaries := 0
+	for ; index >= 0; index-- {
+		if data[index] == '\n' {
+			boundaries++
+			if boundaries == count {
+				offset = scanStart + int64(index) + 1
+				break
+			}
+		}
+	}
+	if boundaries < count && scanStart > 0 {
+		// The bounded scan began inside a record. Never emit that fragment.
+		if firstNewline := bytes.IndexByte(data, '\n'); firstNewline >= 0 {
+			offset = scanStart + int64(firstNewline) + 1
+		} else {
+			offset = info.Size()
+		}
+	}
+	if _, err := file.Seek(offset, io.SeekStart); err != nil {
+		return 0, err
+	}
+	segment := data[int(offset-scanStart):]
+	records := bytes.Count(segment, []byte{'\n'})
+	if len(segment) > 0 && segment[len(segment)-1] != '\n' {
+		records++
+	}
+	return records, nil
 }
 
 func evePathIsPattern(path string) bool {
@@ -141,8 +201,12 @@ func (e *SuricataEngine) Run(eventCh chan<- *pb.Event, binaryCh chan<- []byte, d
 	}
 	defer file.Close()
 
-	if _, err := file.Seek(0, io.SeekEnd); err != nil {
+	replayRemaining, err := seekForRecentLines(file, e.ReplayLast)
+	if err != nil {
 		return fmt.Errorf("failed to seek eve.json: %w", err)
+	}
+	if replayRemaining > 0 {
+		log.Printf("Bootstrapping %d recent eve.json records before live tail", replayRemaining)
 	}
 	reader := bufio.NewReaderSize(file, 64*1024)
 	var pending []byte
@@ -193,6 +257,10 @@ func (e *SuricataEngine) Run(eventCh chan<- *pb.Event, binaryCh chan<- []byte, d
 		if len(pending) == 0 {
 			continue
 		}
+		isReplay := replayRemaining > 0
+		if isReplay {
+			replayRemaining--
+		}
 
 		e.countPacket(len(pending))
 
@@ -205,6 +273,12 @@ func (e *SuricataEngine) Run(eventCh chan<- *pb.Event, binaryCh chan<- []byte, d
 		pending = pending[:0]
 
 		event := normalizeEvent(raw)
+		if isReplay {
+			event.Entities = append(event.Entities, &pb.Entity{Key: "scythe_ingest_mode", Value: "bootstrap_replay"})
+			if replayRemaining == 0 {
+				log.Printf("Recent eve.json bootstrap complete; continuing live tail")
+			}
+		}
 		select {
 		case eventCh <- event:
 		case <-done:

@@ -2633,7 +2633,14 @@ class GraphOpsAgent:
         self.executor        = InvestigativeDSLExecutor(
             engine, topology_detector, fanin_detector, rf_observation_provider
         )
-        self._ollama         = ollama_url or os.environ.get("OLLAMA_URL", "http://localhost:11434")
+        self._configured_ollama = (ollama_url or os.environ.get(
+            "OLLAMA_URL", "http://localhost:11434")).rstrip("/")
+        configured_fallbacks = [item.strip().rstrip("/") for item in
+                                os.environ.get("OLLAMA_FALLBACK_URLS", "").split(",") if item.strip()]
+        local_fallbacks = ["http://127.0.0.1:11434", "http://localhost:11434"]
+        self._ollama_candidates = list(dict.fromkeys(
+            [self._configured_ollama, *configured_fallbacks, *local_fallbacks]))
+        self._ollama         = self._configured_ollama
         self._models         = self._pick_models()
         self._model          = self._models[0]
         self._embedding_engine = embedding_engine  # optional EmbeddingEngine for RAG
@@ -2641,22 +2648,46 @@ class GraphOpsAgent:
 
     def _pick_models(self) -> List[str]:
         """Select the best available Ollama chat models in preference order."""
-        try:
-            import urllib.request
-            with urllib.request.urlopen(f"{self._ollama}/api/tags", timeout=3) as resp:
-                data = json.loads(resp.read())
-            available = {m["name"] for m in data.get("models", [])}
-            picked = [
-                m for m in self.PREFERRED_MODELS
-                if m in available and m not in self._EMBEDDING_ONLY_MODELS
-            ]
+        for endpoint in self._ollama_candidates:
+            picked = self._models_at(endpoint, timeout=3)
             if picked:
-                logger.info("GraphOpsAgent using models: %s", ", ".join(picked[:MAX_ARBITRATION_MODELS]))
-                return picked[:MAX_ARBITRATION_MODELS]
-        except Exception:
-            pass
+                self._ollama = endpoint
+                logger.info("GraphOpsAgent using models: %s via %s",
+                            ", ".join(picked), self._ollama_route())
+                return picked
         logger.warning("GraphOpsAgent: Ollama unreachable, using gemma3:1b fallback")
         return ["gemma3:1b"]
+
+    def _models_at(self, endpoint: str, *, timeout: int = 3) -> List[str]:
+        try:
+            import urllib.request
+            with urllib.request.urlopen(f"{endpoint}/api/tags", timeout=timeout) as resp:
+                data = json.loads(resp.read())
+            available = {m["name"] for m in data.get("models", [])}
+            return [m for m in self.PREFERRED_MODELS
+                    if m in available and m not in self._EMBEDDING_ONLY_MODELS][
+                        :MAX_ARBITRATION_MODELS]
+        except Exception:
+            return []
+
+    def _ollama_route(self) -> str:
+        is_local = self._ollama.startswith(("http://127.0.0.1:", "http://localhost:"))
+        if self._ollama == self._configured_ollama:
+            return "CONFIGURED_LOCAL" if is_local else "CONFIGURED_REMOTE"
+        return "LOCAL_FALLBACK" if is_local else "CONFIGURED_FALLBACK"
+
+    def probe_ollama(self, *, timeout: int = 3) -> Dict[str, Any]:
+        """Resolve the first responsive chat endpoint, preferring the current route."""
+        candidates = list(dict.fromkeys([self._ollama, *self._ollama_candidates]))
+        for endpoint in candidates:
+            picked = self._models_at(endpoint, timeout=timeout)
+            if picked:
+                self._ollama = endpoint
+                self._models = picked
+                self._model = picked[0]
+                return {"available": True, "route": self._ollama_route(),
+                        "model": self._model}
+        return {"available": False, "route": "UNAVAILABLE", "model": None}
 
     def _pick_model(self) -> str:
         """Backward-compatible primary model accessor."""
@@ -3717,6 +3748,7 @@ def register_graphops_tools(engine, mcp_handler, embedding_engine=None,
     _agent = GraphOpsAgent(engine, embedding_engine=embedding_engine, ollama_url=ollama_url,
                            rf_observation_provider=rf_observation_provider,
                            allow_sensor_mutation=False)
+    mcp_handler._graphops_agent = _agent
 
     def _investigate(params: dict) -> dict:
         question = params.get("question", "")

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/binary"
 	"encoding/json"
 	"flag"
@@ -49,6 +50,7 @@ var (
 	ifaceName     = flag.String("iface", "eth0", "Network interface for AF_PACKET/eBPF modes")
 	httpPort      = flag.String("http-port", ":8081", "HTTP metrics port")
 	allowFallback = flag.Bool("fallback", true, "Allow falling back to a compatible capture engine if the requested one is unavailable")
+	replayLast    = flag.Int("replay-last", 0, "Replay at most this many recent Eve records before live tailing")
 )
 
 // Global reference to current engine for metrics reporting
@@ -97,7 +99,9 @@ func (s *StreamServer) StreamEvents(stream pb.EventStreamer_StreamEventsServer) 
 }
 
 func normalizeEvent(raw map[string]interface{}) *pb.Event {
-	eventID := uuid.New().String()
+	canonical, _ := json.Marshal(raw)
+	digest := sha256.Sum256(canonical)
+	eventID := fmt.Sprintf("eve-%x", digest[:16])
 	eventType := ""
 	timestamp := ""
 
@@ -311,6 +315,7 @@ func main() {
 		Mode:          *mode,
 		Iface:         *ifaceName,
 		EveFile:       *eveFile,
+		ReplayLast:    max(0, *replayLast),
 		BlockSize:     afPacketBlockSize,
 		BlockCount:    afPacketBlockCount,
 		FrameSize:     afPacketFrameSize,

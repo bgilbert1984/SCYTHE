@@ -13,10 +13,13 @@ const result = {status: "completed", target: "8.8.8.8", maxHops: 20, cached: fal
   boundary: "RTT IS MEASURED; GEOGRAPHY IS ESTIMATED", bounded: true, rawPacketsExposed: false};
 
 test("host trace prompt distinguishes measurement from inferred geography", () => {
-  const prompt = formatHostTracePrompt(result);
+  const prompt = formatHostTracePrompt(result, {entityContext:
+    "SELECTED GRAPH ENTITY // TOOLTIP CONTEXT\nAS15169 · Google LLC\nNETWORK // INFERRED"});
   assert.match(prompt, /RTT \/\/ 12.50 ms \/\/ MEASURED/);
   assert.match(prompt, /GEO-PATH \/\/ 1 ESTIMATED WAYPOINTS \/\/ INFERRED/);
   assert.match(prompt, /PROMPT \/\/ Explain route anomalies/);
+  assert.match(prompt, /AS15169 · Google LLC/);
+  assert.ok(prompt.indexOf("SELECTED GRAPH ENTITY") < prompt.indexOf("PROBE RTT"));
 });
 
 test("geo path exposes only finite, explicitly inferred waypoints", () => {

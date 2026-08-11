@@ -13,7 +13,7 @@ export function geoPathPoints(result) {
   }).slice(0, 30);
 }
 
-export function formatHostTracePrompt(result) {
+export function formatHostTracePrompt(result, {entityContext = ""} = {}) {
   const probe = result?.probe ?? {}; const route = result?.traceroute ?? {};
   const hops = (route.hops ?? []).slice(0, Number(result?.maxHops) || 30);
   const rtt = finite(probe.rtt_avg_ms ?? probe.rtt_ms);
@@ -27,11 +27,13 @@ export function formatHostTracePrompt(result) {
     `TARGET // ${text(result?.target)}`,
     `GRAPH REVISION // ${text(result?.selection?.graphRevision)}`,
     `CACHE // ${result?.cached ? "REUSED ≤30 S" : "FRESH EXECUTION"}`,
-    "",
+  ];
+  if (String(entityContext).trim()) lines.push("", String(entityContext).trim());
+  lines.push("",
     `PROBE RTT // ${rtt == null ? "UNAVAILABLE" : `${rtt.toFixed(2)} ms`} // ${text(result?.evidenceClasses?.rtt, "UNAVAILABLE")}${probeReason ? ` // ${probeReason}` : ""}`,
     `ROUTE // ${hops.length} HOPS // ${routeClass}${routeRtt != null && routeIsMeasured ? ` // ${routeRtt.toFixed(2)} ms TO LAST RESPONDING HOP` : ""}${routeReason ? ` // ${routeReason}` : ""}`,
     `GEO-PATH // ${geoPathPoints(result).length} ESTIMATED WAYPOINTS // ${text(result?.evidenceClasses?.geography, "UNAVAILABLE")}`,
-  ];
+  );
   if (hops.length) {
     lines.push("", routeIsMeasured ? "MEASURED HOP TRACE" :
       (routeIsSynthetic ? "SYNTHETIC HOPS // NOT MEASUREMENTS" : "UNCLASSIFIED HOP DATA"));

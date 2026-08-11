@@ -1028,6 +1028,8 @@ def spawn_instance():
             stderr=log_file,
             cwd=str(_SCRIPT_DIR),
             start_new_session=True,  # Detach from orchestrator's process group
+            env={**os.environ, **({'OLLAMA_URL': _parsed_args.ollama_url}
+                                  if _parsed_args is not None else {})},
         )
     except Exception as e:
         log.error(f"Failed to spawn instance: {e}")
@@ -1312,6 +1314,24 @@ def graphops_directive_execute():
             payload, expected_mode='execute'))
     except (TypeError, ValueError, KeyError, OSError, json.JSONDecodeError) as exc:
         return jsonify({'error': str(exc)}), 400
+
+
+@app.route('/api/graphops/conversation', methods=['POST'])
+def graphops_conversation():
+    """Proxy bounded, read-only selected-graph questions to the child Copilot."""
+    if not _graphops_directive_authorized():
+        return jsonify({'error': 'Authentication required'}), 401
+    port = _get_primary_instance_port()
+    if not port:
+        return jsonify({'status': 'unavailable',
+                        'error': 'No active SCYTHE graph instance'}), 503
+    payload = request.get_json(silent=True) or {}
+    result, upstream_status = _proxy_post_with_status(
+        port, '/api/graphops/conversation', payload, timeout=240)
+    if result is None:
+        return jsonify({'status': 'unavailable',
+                        'error': 'GraphOps Copilot or Ollama is unavailable'}), 503
+    return jsonify(result), upstream_status
 
 
 # ---------------------------------------------------------------------------
@@ -2429,6 +2449,26 @@ def _proxy_post(instance_port: int, path: str, body: dict, timeout: int = 5):
             return json.loads(resp.read().decode('utf-8'))
     except Exception:
         return None
+
+
+def _proxy_post_with_status(instance_port: int, path: str, body: dict, timeout: int = 5):
+    """Forward JSON while preserving a child's bounded refusal status and body."""
+    import urllib.error as _uerr
+    import urllib.request as _ureq
+    url = f"http://127.0.0.1:{instance_port}{path}"
+    req = _ureq.Request(url, data=json.dumps(body).encode('utf-8'), headers={
+        'Content-Type': 'application/json', 'X-Internal-Token': _INTERNAL_TOKEN,
+    }, method='POST')
+    try:
+        with _ureq.urlopen(req, timeout=timeout) as resp:
+            return json.loads(resp.read().decode('utf-8')), int(resp.status)
+    except _uerr.HTTPError as exc:
+        try:
+            return json.loads(exc.read().decode('utf-8')), int(exc.code)
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            return {'status': 'unavailable', 'error': f'Graph child returned HTTP {exc.code}'}, int(exc.code)
+    except Exception:
+        return None, 502
 
 
 @app.route('/api/tak-ml/kserve/infer', methods=['POST'])

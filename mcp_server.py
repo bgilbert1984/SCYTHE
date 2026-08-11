@@ -391,6 +391,7 @@ class MCPHandler:
 def register_mcp_routes(app, engine, use_orchestrator: bool = False, auth_validator=None,
                         selection_engine=None):
     graph_selection_engine = selection_engine or engine
+    conversation_lock = threading.Lock()
     try:
         handler = MCPHandler(engine, use_orchestrator=use_orchestrator)
     except Exception as exc:
@@ -487,6 +488,93 @@ def register_mcp_routes(app, engine, use_orchestrator: bool = False, auth_valida
         except (TypeError, ValueError) as exc:
             return jsonify({'status': 'refused', 'error': str(exc)}), 400
 
+    @app.route('/api/graphops/conversation', methods=['POST'])
+    def graphops_conversation():
+        """Run a bounded, read-only Copilot investigation around a pinned selection."""
+        if not _authorized():
+            return _unauthorized()
+        try:
+            payload = request.get_json(silent=True) or {}
+            if not isinstance(payload, dict):
+                raise ValueError('JSON object required')
+            unknown = set(payload) - {'mode', 'question', 'selection', 'maxSteps'}
+            if unknown:
+                raise ValueError(f'unknown conversation fields: {", ".join(sorted(unknown))}')
+            if payload.get('mode', 'ask') != 'ask':
+                raise ValueError('conversation mode must be ask; directives use the allow-listed directive API')
+            question = str(payload.get('question') or '').strip()
+            if not question or len(question) > 2000:
+                raise ValueError('question must contain 1 through 2000 characters')
+            selection = payload.get('selection')
+            if not isinstance(selection, dict):
+                raise ValueError('selection is required')
+            selection_unknown = set(selection) - {'kind', 'entityId', 'graphRevision'}
+            if selection_unknown:
+                raise ValueError(f'unknown selection fields: {", ".join(sorted(selection_unknown))}')
+            if selection.get('kind') not in {'graph-node', 'graph-edge', 'event'}:
+                raise ValueError('selection kind must be graph-node, graph-edge, or event')
+            if not selection.get('entityId') or not selection.get('graphRevision'):
+                raise ValueError('selection entityId and graphRevision are required')
+            max_steps = min(max(int(payload.get('maxSteps', 3)), 1), 4)
+
+            from graphops_graph_resolver import GraphSelectionResolver
+            resolved = GraphSelectionResolver(graph_selection_engine).resolve(selection)
+            entity = resolved.get('node') or resolved.get('edge') or {}
+            evidence_context = {
+                'graphRevision': resolved.get('graphRevision'),
+                'selectionKind': resolved.get('selectionKind'),
+                'entity': entity,
+                'incidentEdges': (resolved.get('incidentEdges') or [])[:12],
+                'memberNodes': (resolved.get('memberNodes') or [])[:12],
+                'authority': 'RETAINED_IMMUTABLE_GRAPH_STATE_WITH_READ_TIME_ENRICHMENT',
+            }
+            grounded_question = (
+                f"OPERATOR QUESTION:\n{question}\n\n"
+                "REVISION-PINNED SELECTED ENTITY (JSON):\n" +
+                json.dumps(evidence_context, sort_keys=True, default=str) +
+                "\n\nTreat OBSERVED/MEASURED facts as evidence. Treat enrichment and geography as "
+                "INFERRED estimates. Do not claim adjacency proves causality. Identify a falsifier."
+            )
+            tool = getattr(handler, '_tools', {}).get('graphops_investigate')
+            if tool is None:
+                return jsonify({'status': 'unavailable',
+                                'error': 'GraphOps Copilot is not registered'}), 503
+            ollama_route = 'TEST'
+            if not app.config.get('TESTING'):
+                # The agent has a deterministic no-model fallback for automation, but this
+                # endpoint explicitly promises an Ollama conversation. Fail quickly instead
+                # of holding the browser open on an unreachable remote workstation.
+                agent = getattr(handler, '_graphops_agent', None)
+                probe = agent.probe_ollama(timeout=3) if agent is not None else {
+                    'available': False, 'route': 'UNAVAILABLE'}
+                if not probe.get('available'):
+                    logger.warning('[mcp] GraphOps conversation Ollama endpoint pool unavailable')
+                    return jsonify({'status': 'unavailable',
+                                    'error': 'Ollama is unreachable; start it and retry'}), 503
+                ollama_route = probe.get('route', 'UNAVAILABLE')
+            effective_steps = (min(max_steps, 1) if ollama_route in {
+                'LOCAL_FALLBACK', 'CONFIGURED_LOCAL'} else max_steps)
+            # GraphOpsAgent owns mutable executor state; serialize conversations.
+            with conversation_lock:
+                result = tool.fn({'question': grounded_question, 'max_steps': effective_steps})
+            if isinstance(result, dict) and result.get('error'):
+                return jsonify({'status': 'unavailable', 'error': result['error']}), 503
+            return jsonify({
+                'status': 'completed', 'mode': 'ask', 'question': question,
+                'selection': {**selection, 'graphRevision': resolved.get('graphRevision')},
+                'result': result, 'bounded': True, 'modelAuthority': 'INTERPRETIVE_ONLY',
+                'ollamaRoute': ollama_route,
+                'maxSteps': effective_steps,
+                'directiveExecution': False,
+                'boundary': ('OLLAMA INTERPRETS BOUNDED GRAPH EVIDENCE; IT DOES NOT EXECUTE '
+                             'DIRECTIVES OR ESTABLISH CAUSALITY'),
+            })
+        except (TypeError, ValueError, KeyError) as exc:
+            return jsonify({'status': 'refused', 'error': str(exc)}), 400
+        except (OSError, RuntimeError) as exc:
+            logger.warning('[mcp] GraphOps conversation unavailable: %s', exc)
+            return jsonify({'status': 'unavailable', 'error': str(exc)}), 503
+
     @app.route('/api/graphops/explorer', methods=['GET'])
     def graphops_explorer():
         if not _authorized():
@@ -533,7 +621,10 @@ def register_mcp_routes(app, engine, use_orchestrator: bool = False, auth_valida
             from eve_graph_ingest import commit_eve_events, validate_eve_batch
             import writebus
             events = validate_eve_batch(request.get_json(silent=True))
-            return jsonify(commit_eve_events(events, writebus.bus()))
+            graph_session = str(getattr(graph_selection_engine, 'session_id', '') or
+                                app.config.get('SCYTHE_INSTANCE_ID') or 'default')
+            return jsonify(commit_eve_events(events, writebus.bus(),
+                                             idempotency_scope=graph_session))
         except (TypeError, ValueError, KeyError) as exc:
             return jsonify({'status': 'rejected', 'error': str(exc),
                             'rawPacketsAccepted': False}), 400

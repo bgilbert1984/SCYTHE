@@ -117,6 +117,42 @@ _BYPASS_METHODS = frozenset([
     '/pb.EventStreamer/StreamEvents',
 ])
 
+_EVE_RETRYABLE_HTTP = frozenset({502, 503, 504})
+
+
+class EveForwardRejected(RuntimeError):
+    """A permanent GraphOps validation or authorization rejection."""
+
+
+def _forward_eve_chunk_with_retry(url, headers, chunk, context, *, post=requests.post,
+                                  sleep=time.sleep):
+    """Keep one normalized batch pending until the graph boundary accepts it."""
+    delay = 0.1
+    attempt = 0
+    while context.is_active():
+        attempt += 1
+        try:
+            response = post(url, json={'events': chunk}, headers=headers, timeout=15)
+            if response.status_code < 400:
+                if attempt > 1:
+                    log.info('[EVE] GraphOps forward recovered after %d attempts', attempt)
+                return response.json()
+            if response.status_code not in _EVE_RETRYABLE_HTTP:
+                raise EveForwardRejected(
+                    f'GraphOps rejected Eve batch with HTTP {response.status_code}: '
+                    f'{response.text[:300]}')
+            failure = f'HTTP {response.status_code}'
+        except EveForwardRejected:
+            raise
+        except requests.RequestException as exc:
+            failure = str(exc)
+        if attempt == 1 or attempt % 10 == 0:
+            log.warning('[EVE] GraphOps unavailable; retaining batch (attempt %d): %s',
+                        attempt, failure)
+        sleep(delay)
+        delay = min(delay * 2, 2.0)
+    raise RuntimeError('gRPC stream cancelled while Eve batch was pending')
+
 
 class EveEventStreamServicer(eve_event_pb2_grpc.EventStreamerServicer):
     """Receive normalized Eve batches and forward them to GraphOps WriteBus."""
@@ -136,16 +172,17 @@ class EveEventStreamServicer(eve_event_pb2_grpc.EventStreamerServicer):
             for offset in range(0, len(events), 500):
                 chunk = events[offset:offset + 500]
                 try:
-                    response = requests.post(
+                    result = _forward_eve_chunk_with_retry(
                         f'{self._orchestrator_url}/api/graphops/eve/events',
-                        json={'events': chunk}, headers=self._headers, timeout=15,
+                        self._headers, chunk, context,
                     )
-                    response.raise_for_status()
-                    result = response.json()
                     total += int(result.get('committed', 0))
                     rejected = result.get('rejected') or []
                     if rejected:
                         log.warning('[EVE] batch partially rejected: %s', rejected[:3])
+                except EveForwardRejected as exc:
+                    log.error('[EVE] GraphOps permanently rejected batch: %s', exc)
+                    context.abort(grpc.StatusCode.INVALID_ARGUMENT, str(exc))
                 except Exception as exc:
                     log.error('[EVE] GraphOps forward failed: %s', exc)
                     context.abort(grpc.StatusCode.UNAVAILABLE, 'GraphOps Eve ingest unavailable')

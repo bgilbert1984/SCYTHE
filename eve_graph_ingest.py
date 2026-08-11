@@ -122,6 +122,8 @@ def graph_ops_for_event(event: Dict[str, Any]):
     metadata = {"source": "eve-streamer", "evidence_class": evidence_class,
                 "observed_at": event["observed_at"], "provenance_write": provenance,
                 "geospatialAuthority": "ABSENT"}
+    if fields.get("scythe_ingest_mode") == "bootstrap_replay":
+        metadata["ingest_mode"] = "BOOTSTRAP_REPLAY"
     node_ops = []
     for role, address in (("source", src), ("destination", dst)):
         entity_id = f"host:{address}"
@@ -141,19 +143,24 @@ def graph_ops_for_event(event: Dict[str, Any]):
 class EveIngestStats:
     def __init__(self):
         self._lock = threading.Lock()
-        self.received = 0; self.committed = 0; self.rejected = 0
+        self.received = 0; self.committed = 0; self.replayed = 0
+        self.deduplicated = 0; self.rejected = 0
         self.last_received_at = None; self.last_event_at = None; self.last_error = None
 
-    def record(self, *, received=0, committed=0, rejected=0, event_at=None, error=None):
+    def record(self, *, received=0, committed=0, replayed=0, deduplicated=0,
+               rejected=0, event_at=None, error=None):
         with self._lock:
-            self.received += received; self.committed += committed; self.rejected += rejected
+            self.received += received; self.committed += committed
+            self.replayed += replayed; self.deduplicated += deduplicated
+            self.rejected += rejected
             self.last_received_at = time.time()
             if event_at is not None: self.last_event_at = event_at
             self.last_error = error
 
     def snapshot(self):
         with self._lock:
-            return {"received": self.received, "committed": self.committed, "rejected": self.rejected,
+            return {"received": self.received, "committed": self.committed, "replayed": self.replayed,
+                    "deduplicated": self.deduplicated, "rejected": self.rejected,
                     "lastReceivedAt": self.last_received_at, "lastEventAt": self.last_event_at,
                     "lastError": self.last_error, "rawPacketsAccepted": False,
                     "authority": "EVE_NORMALIZED_EVENT_SUMMARIES"}
@@ -162,13 +169,15 @@ class EveIngestStats:
 STATS = EveIngestStats()
 
 
-def commit_eve_events(events: Iterable[Dict[str, Any]], bus: Any) -> Dict[str, Any]:
+def commit_eve_events(events: Iterable[Dict[str, Any]], bus: Any,
+                      *, idempotency_scope: str = "default") -> Dict[str, Any]:
     from writebus import WriteContext
 
-    accepted = 0; rejected = []
+    accepted = 0; replayed = 0; deduplicated = 0; rejected = []
     evidence_classes = set()
     for event in events:
         try:
+            is_replay = _entity_map(event).get("scythe_ingest_mode") == "bootstrap_replay"
             ops, flow_id, evidence_class = graph_ops_for_event(event)
             ctx = WriteContext(room_name="Global", operator_id="SYSTEM:EVE_STREAMER",
                                request_id=event["event_id"], source="eve-streamer",
@@ -178,15 +187,21 @@ def commit_eve_events(events: Iterable[Dict[str, Any]], bus: Any) -> Dict[str, A
                                              "timestamp": event["timestamp"], "flow_id": flow_id,
                                              "evidence_class": evidence_class},
                                 graph_ops=ops, ctx=ctx, persist=False, audit=True,
-                                idempotency_key=f"eve:{event['event_id']}")
+                                idempotency_key=f"eve:{idempotency_scope}:{event['event_id']}")
             if not result.ok:
                 raise EveIngestError("WriteBus commit failed: " + "; ".join(result.errors))
-            accepted += 1; evidence_classes.add(evidence_class)
-            STATS.record(received=1, committed=1, event_at=event["observed_at"])
+            is_duplicate = bool((getattr(result, "debug", None) or {}).get("idempotent_replay"))
+            accepted += int(not is_duplicate); replayed += int(is_replay)
+            deduplicated += int(is_duplicate); evidence_classes.add(evidence_class)
+            STATS.record(received=1, committed=int(not is_duplicate), replayed=int(is_replay),
+                         deduplicated=int(is_duplicate),
+                         event_at=event["observed_at"])
         except Exception as exc:
             rejected.append({"eventId": event.get("event_id"), "error": str(exc)})
             STATS.record(received=1, rejected=1, error=str(exc))
-    return {"status": "ok" if not rejected else "partial", "received": accepted + len(rejected),
-            "committed": accepted, "rejected": rejected[:20], "bounded": True,
+    return {"status": "ok" if not rejected else "partial",
+            "received": accepted + deduplicated + len(rejected),
+            "committed": accepted, "replayed": replayed, "deduplicated": deduplicated,
+            "rejected": rejected[:20], "bounded": True,
             "evidenceClasses": sorted(evidence_classes), "rawPacketsAccepted": False,
             "authority": "EVE_NORMALIZED_EVENT_SUMMARIES"}

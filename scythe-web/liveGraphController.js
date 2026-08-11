@@ -60,7 +60,7 @@ export class LiveGraphController {
       const unknown = Math.max(0, hostCount - counts.active - counts.inactive);
       return this.#publish({kind: "snapshot", graph: this.snapshot, eve,
         changed: changed || livenessChanged, graphChanged: changed, livenessChanged, available: true,
-        message: `LIVE HYPERGRAPH // ${graph.status.toUpperCase()} // ${graph.nodeCount ?? graph.nodes?.length ?? 0} NODES // ${graph.edgeCount ?? graph.edges?.length ?? 0} EDGES\nHOST PING // ${counts.active} ACTIVE // ${counts.inactive} INACTIVE // ${unknown} UNKNOWN // ROUND ROBIN\nEVE // ${eve.status?.toUpperCase() ?? "UNKNOWN"} // ${eve.committed ?? 0} COMMITTED // RAW PACKETS NOT EXPOSED`});
+        message: `LIVE HYPERGRAPH // ${graph.status.toUpperCase()} // ${graph.nodeCount ?? graph.nodes?.length ?? 0} NODES // ${graph.edgeCount ?? graph.edges?.length ?? 0} EDGES\nHOST PING // ${counts.active} ACTIVE // ${counts.inactive} INACTIVE // ${unknown} UNKNOWN // ROUND ROBIN\nEVE // ${eve.status?.toUpperCase() ?? "UNKNOWN"} // ${eve.committed ?? 0} COMMITTED // ${eve.replayed ?? 0} BOOTSTRAP REPLAYED // ${eve.deduplicated ?? 0} DEDUPLICATED // RAW PACKETS NOT EXPOSED`});
     } catch (error) {
       return this.#publish({kind: "status", graph: this.snapshot, eve: null, available: false,
         error, message: `LIVE HYPERGRAPH // UNAVAILABLE // ${error.message}`});

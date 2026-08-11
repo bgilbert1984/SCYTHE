@@ -34,12 +34,16 @@
     .directive pre { white-space:pre-wrap; margin:5px 0; font:inherit; }
     .directive__controls { display:flex; flex-wrap:wrap; gap:4px; align-items:center; margin-top:5px; }
     .directive__controls label { display:flex; align-items:center; gap:3px; color:#9eb6c7; white-space:nowrap; }
-    .directive button,.directive input { color:#ccefff; background:#071422; border:1px solid #00d4ff;
+    .directive button,.directive input,.directive textarea { color:#ccefff; background:#071422; border:1px solid #00d4ff;
       font:9px/1.2 ui-monospace,monospace; padding:3px 5px; box-sizing:border-box; }
     .directive button:disabled { color:#526674; border-color:#24404f; opacity:.7; }
     .directive button[hidden] { display:none; }
     .directive input { width:56px; min-height:22px; }
     .directive input.wide { width:153px; }
+    .directive__conversation { display:grid; gap:4px; margin-top:6px; padding-top:6px;
+      border-top:1px dashed rgba(99,255,209,.4); }
+    .directive__conversation textarea { width:100%; min-height:48px; max-height:130px; resize:vertical; }
+    .directive__conversation-boundary { color:#7f9bad; font-size:8px; }
     .directive__controls--actions { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); }
     .directive__controls--actions button { min-height:27px; white-space:normal; }
     .directive__analysis { margin-top:5px; padding-top:5px; border-top:1px dashed rgba(247,209,84,.45); color:#f7d154; }
@@ -215,6 +219,14 @@
         <div id="context-signature" class="directive__context-signature">CONTEXT // EMPTY</div>
         <div id="context-missing" class="directive__context-missing">SELECT AN RF CELL OR GRAPH ENTITY</div>
       </div>
+      <form id="graphops-conversation" class="directive__conversation">
+        <label for="graphops-question">ASK THE SELECTED GRAPH</label>
+        <textarea id="graphops-question" maxlength="2000" placeholder="What must be true for this host and the RF coverage gap to share a cause?"></textarea>
+        <div class="directive__controls">
+          <button id="ask-graphops" type="submit" disabled>ASK OLLAMA</button>
+        </div>
+        <div class="directive__conversation-boundary">OLLAMA // INTERPRETIVE ONLY · DIRECTIVES // ALLOW-LISTED CONTROLS BELOW</div>
+      </form>
       <div class="directive__controls">
         <label>THRESHOLD <input id="threshold-value" type="number" value="145" step="1"></label>
         <button id="apply-threshold" type="button">APPLY LENS</button>
@@ -257,6 +269,8 @@
     import { GraphResultTabs } from "./graphResultTabs.js";
     import { WorldStack } from "./worldStack.js";
     import { formatHostTracePrompt, geoPathPoints, runHostTrace } from "./hostTraceWorkflow.js";
+    import { graphEntityPromptContext } from "./graphEntityTooltip.js";
+    import { askGraphOps, formatGraphOpsConversation } from "./graphOpsConversation.js";
     import { GraphExplorerView } from "./graphExplorerView.js";
 
     const viewerOptions = {
@@ -388,6 +402,17 @@
     let hostTraceSequence = 0;
     let hostTraceEntityIds = [];
 
+    function selectedGraphEntity(selection) {
+      const graph = liveHypergraph.latestGraph ?? liveGraphController.latestGraph ?? {};
+      const collection = selection?.kind === "graph-edge" ? graph.edges : graph.nodes;
+      return (collection ?? []).find((item) => item.id === selection?.entityId) ?? null;
+    }
+
+    function selectedEntityContext(selection) {
+      const entity = selectedGraphEntity(selection);
+      return entity ? graphEntityPromptContext(entity) : "";
+    }
+
     function renderHostGeoPath(result) {
       for (const id of hostTraceEntityIds) viewer.entities.removeById(id);
       hostTraceEntityIds = [];
@@ -425,7 +450,7 @@
       try {
         const result = await runHostTrace(selection);
         if (sequence !== hostTraceSequence) return;
-        output.textContent = formatHostTracePrompt(result);
+        output.textContent = formatHostTracePrompt(result, {entityContext: selectedEntityContext(selection)});
         renderHostGeoPath(result);
         status.textContent = `GRAPHOPS // HOST TRACE // ${result.status.toUpperCase()}`;
       } catch (error) {
@@ -445,7 +470,26 @@
       const kinds = new Set(selections.items.map((item) => item.kind));
       document.getElementById("compare-worlds").disabled = !(kinds.has("rf-cell") &&
         (["graph-node", "graph-edge", "event"].some((kind) => kinds.has(kind))));
+      document.getElementById("ask-graphops").disabled = !graphSelection;
     }
+
+    document.getElementById("graphops-conversation").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const graphSelection = selections.items.find((item) => ["graph-node", "graph-edge", "event"].includes(item.kind));
+      const question = document.getElementById("graphops-question").value.trim();
+      const output = document.getElementById("correlation-status");
+      output.hidden = false;
+      status.textContent = "GRAPHOPS // OLLAMA // INVESTIGATING";
+      output.textContent = `GRAPHOPS CONVERSATION // EXECUTING\nQUESTION // ${question || "EMPTY"}`;
+      try {
+        const result = await askGraphOps(question, graphSelection);
+        output.textContent = formatGraphOpsConversation(result, {entityContext: selectedEntityContext(graphSelection)});
+        status.textContent = "GRAPHOPS // OLLAMA // COMPLETED";
+      } catch (error) {
+        output.textContent = `GRAPHOPS CONVERSATION // REFUSED OR UNAVAILABLE\nREASON // ${error.message}`;
+        status.textContent = "GRAPHOPS // OLLAMA // UNAVAILABLE";
+      }
+    });
 
     investigationContext.subscribe((context) => {
       const labels = context.selections.map((item) => item.kind.toUpperCase());

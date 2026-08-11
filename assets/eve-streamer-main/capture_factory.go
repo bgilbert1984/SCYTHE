@@ -58,6 +58,7 @@ type EngineConfig struct {
 	Mode          string
 	Iface         string
 	EveFile       string // Added for Suricata mode
+	ReplayLast    int    // Bounded recent records replayed before tailing
 	BlockSize     int    // For TPACKET_V3
 	BlockCount    int    // For TPACKET_V3
 	FrameSize     int    // For TPACKET_V3
@@ -223,6 +224,7 @@ func (f *CaptureEngineFactory) fallback(cfg EngineConfig, cause error) (CaptureE
 			Mode:          mode,
 			Iface:         cfg.Iface,
 			EveFile:       cfg.EveFile,
+			ReplayLast:    cfg.ReplayLast,
 			BlockSize:     cfg.BlockSize,
 			BlockCount:    cfg.BlockCount,
 			FrameSize:     cfg.FrameSize,
