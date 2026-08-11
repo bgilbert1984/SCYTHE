@@ -26,6 +26,7 @@ test("conversation rendering includes tooltip context and epistemic boundary", (
   assert.match(output, /NETWORK \/\/ INFERRED/);
   assert.match(output, /OLLAMA ROUTE \/\/ LOCAL_FALLBACK/);
   assert.match(output, /REASONING BUDGET \/\/ 1 BOUNDED STEP/);
+  assert.match(output, /SELECTION PIN \/\/ ORIGINAL REVISION RETAINED/);
   assert.match(output, /ASSESSMENT \/\/ Evidence is sparse/);
   assert.match(output, /DOES NOT EXECUTE DIRECTIVES/);
 });

@@ -517,8 +517,26 @@ def register_mcp_routes(app, engine, use_orchestrator: bool = False, auth_valida
                 raise ValueError('selection entityId and graphRevision are required')
             max_steps = min(max(int(payload.get('maxSteps', 3)), 1), 4)
 
-            from graphops_graph_resolver import GraphSelectionResolver
-            resolved = GraphSelectionResolver(graph_selection_engine).resolve(selection)
+            from graphops_graph_resolver import GraphResolutionError, GraphSelectionResolver
+            resolver = GraphSelectionResolver(graph_selection_engine)
+            selection_rebased = False
+            requested_revision = str(selection.get('graphRevision'))
+            try:
+                resolved = resolver.resolve(selection)
+            except GraphResolutionError as exc:
+                if 'retained snapshot is unavailable' not in str(exc):
+                    raise
+                # Conversation is read-only: when a rapidly changing live graph has
+                # evicted the selected revision, preserve identity but explicitly re-pin
+                # only if that same entity still exists in current bounded state.
+                current = resolver.snapshot(node_limit=500, edge_limit=1000)
+                entity_id = str(selection.get('entityId'))
+                collection = current.get('edges', []) if selection.get('kind') == 'graph-edge' else current.get('nodes', [])
+                if not any(str(item.get('id')) == entity_id for item in collection):
+                    raise
+                resolved = resolver.resolve({**selection,
+                                             'graphRevision': current['graphRevision']})
+                selection_rebased = True
             entity = resolved.get('node') or resolved.get('edge') or {}
             evidence_context = {
                 'graphRevision': resolved.get('graphRevision'),
@@ -562,6 +580,8 @@ def register_mcp_routes(app, engine, use_orchestrator: bool = False, auth_valida
             return jsonify({
                 'status': 'completed', 'mode': 'ask', 'question': question,
                 'selection': {**selection, 'graphRevision': resolved.get('graphRevision')},
+                'requestedGraphRevision': requested_revision,
+                'selectionRebased': selection_rebased,
                 'result': result, 'bounded': True, 'modelAuthority': 'INTERPRETIVE_ONLY',
                 'ollamaRoute': ollama_route,
                 'maxSteps': effective_steps,

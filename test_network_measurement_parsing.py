@@ -1,6 +1,7 @@
 import unittest
 
-from rf_scythe_api_server import _parse_tracepath_output, _ping_permission_failure
+from rf_scythe_api_server import (_parse_ping_measurement, _parse_tracepath_output,
+                                  _ping_permission_failure)
 
 
 class NetworkMeasurementParsingTests(unittest.TestCase):
@@ -21,6 +22,18 @@ class NetworkMeasurementParsingTests(unittest.TestCase):
         self.assertTrue(_ping_permission_failure(
             'ping: socktype: SOCK_RAW\nping: missing cap_net_raw+p capability or setuid?'))
         self.assertFalse(_ping_permission_failure('5 packets transmitted, 0 received'))
+
+    def test_ping_parser_supports_linux_and_windows_measurements(self):
+        linux = _parse_ping_measurement(
+            '64 bytes time=11.4 ms\n3 received\nrtt min/avg/max/mdev = 10.1/11.4/12.7/1.3 ms')
+        self.assertEqual(linux, {'samples': [11.4], 'received': 3, 'min': 10.1,
+                                 'avg': 11.4, 'max': 12.7, 'mdev': 1.3})
+        windows = _parse_ping_measurement(
+            'Reply from 8.8.8.8: time=69ms\nReply from 8.8.8.8: time<1ms\n'
+            'Packets: Sent = 2, Received = 2, Lost = 0\n'
+            'Minimum = 0ms, Maximum = 69ms, Average = 34ms')
+        self.assertEqual(windows, {'samples': [69.0, 0.5], 'received': 2,
+                                   'min': 0.0, 'avg': 34.0, 'max': 69.0, 'mdev': None})
 
 
 if __name__ == '__main__':

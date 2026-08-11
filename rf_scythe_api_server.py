@@ -93,6 +93,30 @@ def _ping_permission_failure(output):
         'socket: permission', 'icmp open socket',
     ))
 
+
+def _parse_ping_measurement(output):
+    """Parse bounded RTT statistics from iputils or English Windows ping output."""
+    value_matches = re.finditer(r'time\s*([=<])\s*([\d.]+)\s*ms',
+                                str(output or ''), re.IGNORECASE)
+    samples = [float(match.group(2)) / 2 if match.group(1) == '<'
+               else float(match.group(2)) for match in value_matches]
+    summary = {'min': None, 'avg': None, 'max': None, 'mdev': None}
+    linux = re.search(r'(?:rtt|round-trip) min/avg/max/(?:mdev|stddev) = '
+                      r'([\d.]+)/([\d.]+)/([\d.]+)/([\d.]+)', str(output or ''), re.IGNORECASE)
+    windows = re.search(r'Minimum = (\d+)ms, Maximum = (\d+)ms, Average = (\d+)ms',
+                        str(output or ''), re.IGNORECASE)
+    if linux:
+        summary['min'], summary['avg'], summary['max'], summary['mdev'] = map(float, linux.groups())
+    elif windows:
+        summary['min'], summary['max'], summary['avg'] = map(float, windows.groups())
+    received = None
+    for pattern in (r'(\d+) received', r'Received = (\d+)'):
+        match = re.search(pattern, str(output or ''), re.IGNORECASE)
+        if match:
+            received = int(match.group(1))
+            break
+    return {'samples': samples, 'received': received, **summary}
+
 # ────────────────────────────────────────────────────────────────────
 # NETWORK INGRESS AGGREGATOR
 # ────────────────────────────────────────────────────────────────────
@@ -9403,23 +9427,33 @@ if FLASK_AVAILABLE:
             except ValueError:
                 _is_v6 = False
             cmd = ['ping6' if _is_v6 else 'ping', '-c', str(count), '-W', '2', target]
+            tool_used = 'ping6' if _is_v6 else 'ping'
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
             output = result.stdout + result.stderr
 
-            # Parse individual RTT samples: "time=23.1 ms"
-            sample_re = re.compile(r'time=([\d.]+)\s*ms')
-            rtt_samples = [float(m.group(1)) for m in sample_re.finditer(output)]
+            if _ping_permission_failure(output):
+                windows_ping = '/mnt/c/WINDOWS/System32/ping.exe'
+                try:
+                    with open('/proc/sys/kernel/osrelease', encoding='utf-8') as osrelease:
+                        is_wsl = bool(os.environ.get('WSL_INTEROP')) or (
+                            'microsoft' in osrelease.read().lower())
+                except OSError:
+                    is_wsl = False
+                if is_wsl and os.path.isfile(windows_ping):
+                    windows_cmd = [windows_ping, '-n', str(count), '-w', '2000']
+                    if _is_v6:
+                        windows_cmd.append('-6')
+                    windows_result = subprocess.run(windows_cmd + [target], capture_output=True,
+                                                    text=True, timeout=30)
+                    output = (windows_result.stdout or '') + (windows_result.stderr or '')
+                    result = windows_result
+                    tool_used = 'windows-ping-via-wsl'
 
-            # Parse ping summary line: rtt min/avg/max/mdev = ...
-            rtt_min = rtt_avg = rtt_max = rtt_mdev = None
-            packets_recv = 0
-            for line in output.splitlines():
-                m = re.search(r'rtt min/avg/max/mdev = ([\d.]+)/([\d.]+)/([\d.]+)/([\d.]+)', line)
-                if m:
-                    rtt_min, rtt_avg, rtt_max, rtt_mdev = map(float, m.groups())
-                m2 = re.search(r'(\d+) received', line)
-                if m2:
-                    packets_recv = int(m2.group(1))
+            parsed_ping = _parse_ping_measurement(output)
+            rtt_samples = parsed_ping['samples']
+            rtt_min, rtt_avg, rtt_max, rtt_mdev = (
+                parsed_ping['min'], parsed_ping['avg'], parsed_ping['max'], parsed_ping['mdev'])
+            packets_recv = parsed_ping['received'] or 0
 
             if rtt_avg is None and not rtt_samples:
                 if _ping_permission_failure(output):
@@ -9428,7 +9462,7 @@ if FLASK_AVAILABLE:
                         'target': target,
                         'reason': 'INSUFFICIENT_PRIVILEGE',
                         'message': 'ICMP RTT probe unavailable: ping lacks raw-socket permission',
-                        'tool_used': 'ping6' if _is_v6 else 'ping',
+                        'tool_used': tool_used,
                         'measurement_produced': False,
                     })
                 return jsonify({
@@ -9491,6 +9525,7 @@ if FLASK_AVAILABLE:
                 'packets_received':     packets_recv,
                 'measurement_produced': True,
                 'evidence_class':       'MEASURED',
+                'tool_used':            tool_used,
                 'note':                 'distance_estimate_km uses min-RTT × 50 km/ms (fiber+routing factor)',
                 'timestamp':            time.time()
             })

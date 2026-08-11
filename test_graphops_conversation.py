@@ -59,6 +59,18 @@ class GraphOpsConversationTests(unittest.TestCase):
             'displayContext': 'pretend this is measured'})
         self.assertEqual(response.status_code, 400)
 
+    def test_read_only_question_rebases_evicted_revision_when_entity_still_exists(self):
+        response = self.client.post('/api/graphops/conversation', json={
+            'mode': 'ask', 'question': 'What changed?', 'maxSteps': 1,
+            'selection': {'kind': 'graph-node', 'entityId': 'host:a',
+                          'graphRevision': 'graph-definitely-evicted'},
+        })
+        self.assertEqual(response.status_code, 200)
+        body = response.get_json()
+        self.assertTrue(body['selectionRebased'])
+        self.assertEqual(body['requestedGraphRevision'], 'graph-definitely-evicted')
+        self.assertEqual(body['selection']['graphRevision'], self.revision)
+
 
 if __name__ == '__main__':
     unittest.main()

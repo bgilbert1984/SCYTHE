@@ -29,6 +29,7 @@ export function formatGraphOpsConversation(payload, {entityContext = ""} = {}) {
     `QUESTION // ${text(payload?.question)}`,
     `SELECTION // ${text(payload?.selection?.kind)}:${text(payload?.selection?.entityId)}`,
     `GRAPH REVISION // ${text(payload?.selection?.graphRevision)}`,
+    `SELECTION PIN // ${payload?.selectionRebased ? `REBASED FROM ${text(payload?.requestedGraphRevision)}` : "ORIGINAL REVISION RETAINED"}`,
     `MODEL // ${text(result.model)}`,
     `OLLAMA ROUTE // ${text(payload?.ollamaRoute)}`,
     `REASONING BUDGET // ${text(payload?.maxSteps)} BOUNDED STEP${Number(payload?.maxSteps) === 1 ? "" : "S"}`,

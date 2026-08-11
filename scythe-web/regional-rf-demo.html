@@ -413,6 +413,13 @@
       return entity ? graphEntityPromptContext(entity) : "";
     }
 
+    function currentGraphSelection(selection) {
+      if (!selection) return selection;
+      const entity = selectedGraphEntity(selection);
+      const currentRevision = liveHypergraph.latestGraph?.graphRevision;
+      return entity && currentRevision ? {...selection, graphRevision: currentRevision} : selection;
+    }
+
     function renderHostGeoPath(result) {
       for (const id of hostTraceEntityIds) viewer.entities.removeById(id);
       hostTraceEntityIds = [];
@@ -482,8 +489,9 @@
       status.textContent = "GRAPHOPS // OLLAMA // INVESTIGATING";
       output.textContent = `GRAPHOPS CONVERSATION // EXECUTING\nQUESTION // ${question || "EMPTY"}`;
       try {
-        const result = await askGraphOps(question, graphSelection);
-        output.textContent = formatGraphOpsConversation(result, {entityContext: selectedEntityContext(graphSelection)});
+        const currentSelection = currentGraphSelection(graphSelection);
+        const result = await askGraphOps(question, currentSelection);
+        output.textContent = formatGraphOpsConversation(result, {entityContext: selectedEntityContext(currentSelection)});
         status.textContent = "GRAPHOPS // OLLAMA // COMPLETED";
       } catch (error) {
         output.textContent = `GRAPHOPS CONVERSATION // REFUSED OR UNAVAILABLE\nREASON // ${error.message}`;
