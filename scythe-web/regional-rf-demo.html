@@ -92,6 +92,12 @@
       font:9px/1.35 ui-monospace,monospace; white-space:pre-wrap; pointer-events:none; }
     .live-hypergraph__three-stats { position:absolute; top:6px; left:7px; color:#66ddff;
       font:8px ui-monospace,monospace; opacity:.78; pointer-events:none; }
+    .location-map { background:radial-gradient(circle at 50% 50%,rgba(0,212,255,.05),transparent 65%); }
+    .location-map__status { position:absolute; z-index:2; left:7px; bottom:5px; max-width:calc(100% - 14px);
+      padding:3px 5px; color:#f7d154; background:rgba(3,9,20,.86); border:1px solid rgba(247,209,84,.35);
+      font:8px/1.35 ui-monospace,monospace; white-space:pre-wrap; pointer-events:none; }
+    .location-map__marker { cursor:pointer; }
+    .location-map__marker:hover,.location-map__marker:focus { outline:none; filter:drop-shadow(0 0 4px #f7d154); }
     .live-hypergraph__result { overflow:auto; padding:7px 8px; box-sizing:border-box;
       color:#b8cad6; font:9px/1.35 ui-monospace,monospace; }
     .graph-result__authority { color:#66ddff; padding-bottom:5px; border-bottom:1px dashed rgba(0,212,255,.3); }
@@ -179,6 +185,7 @@
       <div class="live-hypergraph__modes" role="tablist" aria-label="Hypergraph views">
         <button id="hypergraph-mode-3d" type="button" role="tab" aria-pressed="true" aria-selected="true" disabled>3D CAUSAL CHAMBER</button>
         <button id="hypergraph-mode-2d" type="button" role="tab" aria-pressed="false" aria-selected="false">2D ACCESSIBLE</button>
+        <button id="hypergraph-mode-location" type="button" role="tab" aria-pressed="false" aria-selected="false">LOCATION ESTIMATES</button>
         <button id="hypergraph-mode-explorer" type="button" role="tab" aria-pressed="false" aria-selected="false">GRAPH EXPLORER</button>
       </div>
       <div id="live-hypergraph-3d-viewport" class="live-hypergraph__viewport">
@@ -187,6 +194,11 @@
       <div id="live-hypergraph-2d-viewport" class="live-hypergraph__viewport" hidden>
         <svg role="img" aria-label="Revision-pinned live hypergraph"></svg>
       </div>
+      <section id="live-hypergraph-location-viewport" class="live-hypergraph__viewport location-map"
+        aria-label="Inferred GeoIP location estimates" hidden>
+        <svg data-graph-location-map role="img" aria-label="Coordinate projection of inferred host GeoIP estimates"></svg>
+        <pre class="location-map__status" data-graph-location-status>LOCATION ESTIMATES // WAITING FOR GRAPH</pre>
+      </section>
       <section id="live-hypergraph-explorer-viewport" class="live-hypergraph__viewport graph-explorer"
         data-graph-explorer aria-label="Bounded live graph explorer" hidden>
         <form class="graph-explorer__form" data-graph-explorer-form>
@@ -281,6 +293,7 @@
     import { askGraphOps, formatGraphOpsConversation } from "./graphOpsConversation.js";
     import { GraphExplorerView } from "./graphExplorerView.js";
     import { downloadOfflineHypergraphBundle } from "./offlineHypergraphBundle.js";
+    import { HypergraphLocationView } from "./hypergraphLocationView.js";
 
     const viewerOptions = {
       animation: false,
@@ -383,23 +396,30 @@
     let liveHypergraph3D = null;
     const mode3D = document.getElementById("hypergraph-mode-3d");
     const mode2D = document.getElementById("hypergraph-mode-2d");
+    const modeLocation = document.getElementById("hypergraph-mode-location");
     const modeExplorer = document.getElementById("hypergraph-mode-explorer");
     const viewport3D = document.getElementById("live-hypergraph-3d-viewport");
     const viewport2D = document.getElementById("live-hypergraph-2d-viewport");
+    const viewportLocation = document.getElementById("live-hypergraph-location-viewport");
     let graphExplorer = null;
+    const locationView = new HypergraphLocationView({root: viewportLocation, controller: liveGraphController}).start();
     let resultTabs = null;
     function setHypergraphMode(mode) {
       const show3D = mode === "3d" && liveHypergraph3D;
       const show2D = mode === "2d" || (mode === "3d" && !liveHypergraph3D);
       const showExplorer = mode === "explorer";
-      viewport3D.hidden = !show3D; viewport2D.hidden = !show2D;
+      const showLocation = mode === "location";
+      viewport3D.hidden = !show3D; viewport2D.hidden = !show2D; viewportLocation.hidden = !showLocation;
       mode3D.setAttribute("aria-pressed", String(Boolean(show3D)));
       mode3D.setAttribute("aria-selected", String(Boolean(show3D)));
       mode2D.setAttribute("aria-pressed", String(Boolean(show2D)));
       mode2D.setAttribute("aria-selected", String(Boolean(show2D)));
+      modeLocation.setAttribute("aria-pressed", String(showLocation));
+      modeLocation.setAttribute("aria-selected", String(showLocation));
       modeExplorer.setAttribute("aria-pressed", String(showExplorer));
       modeExplorer.setAttribute("aria-selected", String(showExplorer));
       liveHypergraph3D?.setVisible(Boolean(show3D));
+      locationView.setVisible(showLocation);
       graphExplorer?.setVisible(showExplorer);
       resultTabs?.setVisible(mode);
     }
@@ -409,6 +429,7 @@
     window.scytheGraphExplorer = graphExplorer;
     mode3D.addEventListener("click", () => setHypergraphMode("3d"));
     mode2D.addEventListener("click", () => setHypergraphMode("2d"));
+    modeLocation.addEventListener("click", () => setHypergraphMode("location"));
     modeExplorer.addEventListener("click", () => setHypergraphMode("explorer"));
     try {
       const [THREE, controlsModule] = await Promise.all([import("three"), import("three/addons/controls/OrbitControls.js")]);

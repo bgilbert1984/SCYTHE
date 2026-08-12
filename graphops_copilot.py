@@ -2635,6 +2635,10 @@ class GraphOpsAgent:
         )
         self._configured_ollama = (ollama_url or os.environ.get(
             "OLLAMA_URL", "http://localhost:11434")).rstrip("/")
+        configured_models = [item.strip() for item in
+                             os.environ.get("OLLAMA_MODELS", "").split(",") if item.strip()]
+        self._preferred_models = list(dict.fromkeys(configured_models or self.PREFERRED_MODELS))
+        self._ollama_api_key = self._load_ollama_api_key()
         configured_fallbacks = [item.strip().rstrip("/") for item in
                                 os.environ.get("OLLAMA_FALLBACK_URLS", "").split(",") if item.strip()]
         local_fallbacks = ["http://127.0.0.1:11434", "http://localhost:11434"]
@@ -2661,20 +2665,73 @@ class GraphOpsAgent:
     def _models_at(self, endpoint: str, *, timeout: int = 3) -> List[str]:
         try:
             import urllib.request
-            with urllib.request.urlopen(f"{endpoint}/api/tags", timeout=timeout) as resp:
+            request = urllib.request.Request(
+                f"{endpoint}/api/tags", headers=self._ollama_headers(endpoint))
+            with urllib.request.urlopen(request, timeout=timeout) as resp:
                 data = json.loads(resp.read())
             available = {m["name"] for m in data.get("models", [])}
-            return [m for m in self.PREFERRED_MODELS
+            return [m for m in self._preferred_models
                     if m in available and m not in self._EMBEDDING_ONLY_MODELS][
                         :MAX_ARBITRATION_MODELS]
         except Exception:
             return []
 
     def _ollama_route(self) -> str:
+        if self._is_ollama_cloud(self._ollama):
+            return "OLLAMA_CLOUD_DIRECT"
         is_local = self._ollama.startswith(("http://127.0.0.1:", "http://localhost:"))
         if self._ollama == self._configured_ollama:
             return "CONFIGURED_LOCAL" if is_local else "CONFIGURED_REMOTE"
         return "LOCAL_FALLBACK" if is_local else "CONFIGURED_FALLBACK"
+
+    @staticmethod
+    def _is_ollama_cloud(endpoint: str) -> bool:
+        """Recognize the one host to which an Ollama Cloud credential may be sent."""
+        try:
+            from urllib.parse import urlparse
+            parsed = urlparse(endpoint)
+            return parsed.scheme == "https" and parsed.hostname == "ollama.com"
+        except (TypeError, ValueError):
+            return False
+
+    @staticmethod
+    def _load_ollama_api_key() -> Optional[str]:
+        """Load a cloud credential without placing it in argv or application logs."""
+        direct = os.environ.get("OLLAMA_API_KEY", "").strip()
+        if direct:
+            return direct
+        path = os.environ.get("OLLAMA_API_KEY_FILE", "").strip()
+        if not path:
+            return None
+        try:
+            with open(path, "r", encoding="utf-8") as handle:
+                contents = handle.read(16_385)
+            if len(contents) > 16_384:
+                raise ValueError("credential file exceeds 16 KiB")
+            for line in contents.splitlines():
+                candidate = line.strip()
+                if not candidate or candidate.startswith("#"):
+                    continue
+                if "=" in candidate:
+                    name, value = candidate.split("=", 1)
+                    if name.strip() not in {"OLLAMA_API_KEY", "API"}:
+                        continue
+                    candidate = value.strip()
+                if ((candidate.startswith('"') and candidate.endswith('"')) or
+                        (candidate.startswith("'") and candidate.endswith("'"))):
+                    candidate = candidate[1:-1]
+                if candidate:
+                    return candidate
+        except (OSError, ValueError) as exc:
+            logger.warning("GraphOpsAgent: Ollama credential file unavailable: %s", type(exc).__name__)
+        return None
+
+    def _ollama_headers(self, endpoint: str, *, json_content: bool = False) -> Dict[str, str]:
+        headers = {"Content-Type": "application/json"} if json_content else {}
+        # Never forward the cloud credential to LAN, localhost, or fallback endpoints.
+        if self._ollama_api_key and self._is_ollama_cloud(endpoint):
+            headers["Authorization"] = f"Bearer {self._ollama_api_key}"
+        return headers
 
     def probe_ollama(self, *, timeout: int = 3) -> Dict[str, Any]:
         """Resolve the first responsive chat endpoint, preferring the current route."""
@@ -2991,7 +3048,7 @@ class GraphOpsAgent:
             req = urllib.request.Request(
                 f"{self._ollama}/api/chat",
                 data=payload,
-                headers={"Content-Type": "application/json"},
+                headers=self._ollama_headers(self._ollama, json_content=True),
             )
             with urllib.request.urlopen(req, timeout=150) as resp:
                 data = json.loads(resp.read())

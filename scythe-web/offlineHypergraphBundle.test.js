@@ -17,10 +17,16 @@ test("offline bundle is self-contained, revision-pinned, hashed, and script-safe
   assert.match(html, /graph-test-1/);
   assert.match(html, /scythe\.offline-live-hypergraph\.v1/);
   assert.match(html, /NON_GEOGRAPHIC_DETERMINISTIC_LAYOUT/);
+  assert.match(html, /INFERRED_GEOIP_ESTIMATE/);
   assert.match(html, /RAW PACKETS NOT EXPOSED/);
   assert.match(html, /SHA-256 \/\/ VERIFYING/);
-  assert.match(html, /<canvas aria-label="Offline non-geographic hypergraph topology">/);
+  assert.match(html, /<canvas id="topology-canvas" aria-label="Offline non-geographic hypergraph topology">/);
   assert.match(html, /2D ACCESSIBLE/);
+  assert.match(html, /LOCATION ESTIMATES/);
+  assert.match(html, /NOT PHYSICAL DEVICE LOCATION/);
+  assert.match(html, /id="cfg-hop" type="number" min="1" max="4" value="1"/);
+  assert.match(html, /id="cfg-max" type="number" min="1" max="100" value="24"/);
+  assert.match(html, /Graph-distance depth for persistent labels/);
   assert.doesNotMatch(html, /https?:\/\//);
   assert.doesNotMatch(html, /<script>not executable<\/script>/);
   assert.match(html, /\\u003c\/script>/);
