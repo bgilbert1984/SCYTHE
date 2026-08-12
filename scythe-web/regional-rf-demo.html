@@ -55,7 +55,7 @@
       height:300px; border:1px solid rgba(0,212,255,.45); background:rgba(0,8,20,.9);
       display:grid; grid-template-rows:auto auto 1fr auto; box-sizing:border-box;
     }
-    .live-hypergraph__status { padding:7px 30px 7px 9px; color:#ccefff; white-space:pre-wrap;
+    .live-hypergraph__status { padding:7px 118px 7px 9px; color:#ccefff; white-space:pre-wrap;
       font:10px/1.35 ui-monospace,monospace; border-bottom:1px dashed rgba(0,212,255,.3); }
     .live-hypergraph__resize { position:absolute; z-index:6; top:-1px; right:-1px; width:25px; height:25px;
       padding:0; border:1px solid rgba(0,212,255,.65); border-width:1px 1px 0 0;
@@ -64,6 +64,12 @@
     .live-hypergraph__resize:hover,.live-hypergraph__resize:focus-visible,
     .live-hypergraph__resize[data-dragging="true"] { color:#fff; outline:1px solid #00d4ff;
       outline-offset:-3px; box-shadow:0 0 12px rgba(0,212,255,.45); }
+    .live-hypergraph__bundle { position:absolute; z-index:6; top:4px; right:33px; padding:3px 7px;
+      color:#63ffd1; background:#071422; border:1px solid #26765f; font:9px ui-monospace,monospace;
+      cursor:pointer; }
+    .live-hypergraph__bundle:hover,.live-hypergraph__bundle:focus-visible { color:#fff; border-color:#63ffd1;
+      outline:none; box-shadow:0 0 10px rgba(99,255,209,.3); }
+    .live-hypergraph__bundle:disabled { color:#526674; border-color:#24404f; cursor:wait; }
     .live-hypergraph__modes { display:flex; flex-wrap:wrap; gap:4px; padding:5px 8px;
       border-bottom:1px dashed rgba(0,212,255,.25); }
     .live-hypergraph__modes button { color:#7f9bad; background:#071422; border:1px solid #24506a;
@@ -167,6 +173,8 @@
     <div class="notice">SOLVER OUTPUT // DERIVED UINT16 VIEW // VISUALIZATION IS NOT AUTHORITATIVE</div>
     <aside id="live-hypergraph" class="live-hypergraph" aria-label="Live network hypergraph">
       <button class="live-hypergraph__resize" type="button" data-live-graph-resize aria-label="Resize live hypergraph">↗</button>
+      <button id="live-hypergraph-bundle" class="live-hypergraph__bundle" type="button"
+        title="Download a self-contained offline snapshot of the current live hypergraph">📦 BUNDLE</button>
       <div class="live-hypergraph__status" data-live-graph-status>LIVE HYPERGRAPH // CONNECTING…</div>
       <div class="live-hypergraph__modes" role="tablist" aria-label="Hypergraph views">
         <button id="hypergraph-mode-3d" type="button" role="tab" aria-pressed="true" aria-selected="true" disabled>3D CAUSAL CHAMBER</button>
@@ -272,6 +280,7 @@
     import { graphEntityPromptContext } from "./graphEntityTooltip.js";
     import { askGraphOps, formatGraphOpsConversation } from "./graphOpsConversation.js";
     import { GraphExplorerView } from "./graphExplorerView.js";
+    import { downloadOfflineHypergraphBundle } from "./offlineHypergraphBundle.js";
 
     const viewerOptions = {
       animation: false,
@@ -352,6 +361,25 @@
       document.querySelector("[data-live-graph-status]").textContent = `LIVE HYPERGRAPH // UNAVAILABLE // ${error.message}`;
     });
     window.scytheLiveHypergraph = liveHypergraph;
+    document.getElementById("live-hypergraph-bundle").addEventListener("click", async (event) => {
+      const button = event.currentTarget;
+      const graph = liveHypergraph.latestGraph;
+      if (!graph?.nodes?.length) {
+        button.textContent = "EMPTY";
+        setTimeout(() => { button.textContent = "📦 BUNDLE"; }, 1800);
+        return;
+      }
+      button.disabled = true; button.textContent = "BUILDING…";
+      try {
+        const artifact = await downloadOfflineHypergraphBundle(graph);
+        button.textContent = `SAVED ${artifact.bytes > 999999 ? `${(artifact.bytes / 1048576).toFixed(1)}M` : `${Math.ceil(artifact.bytes / 1024)}K`}`;
+      } catch (error) {
+        console.error("[Offline Hypergraph Bundle]", error);
+        button.textContent = "FAILED"; button.title = `Bundle failed: ${error.message}`;
+      } finally {
+        setTimeout(() => { button.disabled = false; button.textContent = "📦 BUNDLE"; }, 2200);
+      }
+    });
     let liveHypergraph3D = null;
     const mode3D = document.getElementById("hypergraph-mode-3d");
     const mode2D = document.getElementById("hypergraph-mode-2d");
