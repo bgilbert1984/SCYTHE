@@ -1334,6 +1334,69 @@ def graphops_conversation():
     return jsonify(result), upstream_status
 
 
+@app.route('/api/graphops/conversation/cloud-full-fidelity', methods=['POST'])
+def graphops_cloud_full_fidelity():
+    """Explicitly disclose one server-owned evidence capsule to Ollama Cloud."""
+    if not _graphops_directive_authorized():
+        return jsonify({'error': 'Authentication required'}), 401
+    payload = request.get_json(silent=True) or {}
+    if not isinstance(payload, dict):
+        return jsonify({'status': 'refused', 'error': 'JSON object required'}), 400
+    unknown = set(payload) - {'mode', 'question', 'selection', 'evidenceId', 'acknowledgeExactDisclosure'}
+    if unknown:
+        return jsonify({'status': 'refused',
+                        'error': f'unknown cloud conversation fields: {", ".join(sorted(unknown))}'}), 400
+    if payload.get('mode') != 'cloud-full-fidelity':
+        return jsonify({'status': 'refused', 'error': 'cloud conversation mode must be cloud-full-fidelity'}), 400
+    question = str(payload.get('question') or '').strip()
+    if not question or len(question) > 2000:
+        return jsonify({'status': 'refused',
+                        'error': 'question must contain 1 through 2000 characters'}), 400
+    selection = payload.get('selection')
+    if not isinstance(selection, dict):
+        return jsonify({'status': 'refused', 'error': 'selection is required'}), 400
+    selection_unknown = set(selection) - {'kind', 'entityId', 'graphRevision'}
+    if selection_unknown or selection.get('kind') != 'graph-node':
+        return jsonify({'status': 'refused',
+                        'error': 'full-fidelity Cloud analysis requires a pinned graph-node selection'}), 400
+    if payload.get('acknowledgeExactDisclosure') is not True:
+        return jsonify({'status': 'refused',
+                        'error': 'explicit acknowledgement of exact Cloud disclosure is required'}), 400
+    evidence_id = str(payload.get('evidenceId') or '').strip()
+    now = time.time()
+    with _HOST_TRACE_EVIDENCE_LOCK:
+        retained = _HOST_TRACE_EVIDENCE.get(evidence_id)
+        if retained and now - retained['capturedAt'] > _HOST_TRACE_EVIDENCE_TTL_SECONDS:
+            _HOST_TRACE_EVIDENCE.pop(evidence_id, None)
+            retained = None
+    if not retained:
+        return jsonify({'status': 'refused',
+                        'error': 'host trace evidence is unavailable or expired; trace the selected host again'}), 409
+    trace = retained['result']
+    expected = trace.get('selection') or {}
+    if (str(selection.get('entityId')) != str(expected.get('entityId')) or
+            str(selection.get('graphRevision')) != str(expected.get('graphRevision'))):
+        return jsonify({'status': 'refused',
+                        'error': 'host trace evidence does not belong to the selected graph revision'}), 409
+    try:
+        from graphops_full_fidelity import (ask_ollama_cloud, build_full_fidelity_capsule,
+                                            disclosure_receipt)
+        capsule = build_full_fidelity_capsule(question, selection, retained['resolved'], trace)
+        cloud_result = ask_ollama_cloud(capsule)
+        receipt = disclosure_receipt(capsule, cloud_result['model'])
+        return jsonify({
+            'status': 'completed', 'mode': 'cloud-full-fidelity', 'question': question,
+            'selection': selection, 'evidenceId': evidence_id,
+            'result': cloud_result, 'disclosureReceipt': receipt,
+            'bounded': True, 'modelAuthority': 'INTERPRETIVE_ONLY',
+            'ollamaRoute': 'OLLAMA_CLOUD_FULL_FIDELITY', 'directiveExecution': False,
+            'boundary': capsule['boundary'],
+        })
+    except (OSError, RuntimeError, TypeError, ValueError) as exc:
+        log.warning('GraphOps full-fidelity Cloud analysis unavailable: %s', type(exc).__name__)
+        return jsonify({'status': 'unavailable', 'error': str(exc)}), 503
+
+
 # ---------------------------------------------------------------------------
 # Shared Session Registry — used by gRPC TokenAuthInterceptor
 # ---------------------------------------------------------------------------
@@ -2073,6 +2136,12 @@ _HOST_TRACE_CACHE = {}
 _HOST_TRACE_CACHE_LOCK = threading.RLock()
 _HOST_TRACE_CACHE_TTL_SECONDS = 30
 
+# Conversation evidence outlives the short measurement-reuse cache so an
+# operator can inspect a trace before explicitly disclosing it to Cloud.
+_HOST_TRACE_EVIDENCE = {}
+_HOST_TRACE_EVIDENCE_LOCK = threading.RLock()
+_HOST_TRACE_EVIDENCE_TTL_SECONDS = 30 * 60
+
 _HOST_LIVENESS_CACHE = {}
 _HOST_LIVENESS_CACHE_LOCK = threading.RLock()
 _HOST_LIVENESS_CACHE_TTL_SECONDS = 5
@@ -2305,6 +2374,7 @@ def orchestrator_graphops_host_trace():
                       ('partial' if probe_is_measured or route_is_measured else 'unavailable'))
     result = {
         'status': overall_status,
+        'evidenceId': f'trace-{uuid.uuid4().hex}',
         'target': target,
         'selection': {'entityId': payload['entityId'], 'graphRevision': payload['graphRevision']},
         'probe': probe,
@@ -2333,6 +2403,18 @@ def orchestrator_graphops_host_trace():
         if len(_HOST_TRACE_CACHE) > 64:
             oldest = min(_HOST_TRACE_CACHE, key=lambda key: _HOST_TRACE_CACHE[key]['capturedAt'])
             _HOST_TRACE_CACHE.pop(oldest, None)
+    with _HOST_TRACE_EVIDENCE_LOCK:
+        _HOST_TRACE_EVIDENCE[result['evidenceId']] = {
+            'capturedAt': result['capturedAt'], 'result': result, 'resolved': resolved,
+        }
+        expired = [key for key, value in _HOST_TRACE_EVIDENCE.items()
+                   if time.time() - value['capturedAt'] > _HOST_TRACE_EVIDENCE_TTL_SECONDS]
+        for key in expired:
+            _HOST_TRACE_EVIDENCE.pop(key, None)
+        while len(_HOST_TRACE_EVIDENCE) > 128:
+            oldest = min(_HOST_TRACE_EVIDENCE,
+                         key=lambda key: _HOST_TRACE_EVIDENCE[key]['capturedAt'])
+            _HOST_TRACE_EVIDENCE.pop(oldest, None)
     # A bounded attempt that produces no measurement is still a valid GraphOps
     # result. Return it for explicit rendering instead of hiding its reason in a
     # generic upstream error.

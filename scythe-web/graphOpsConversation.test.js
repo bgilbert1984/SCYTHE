@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import {askGraphOps, formatGraphOpsConversation} from "./graphOpsConversation.js";
+import {askGraphOps, askGraphOpsCloudFullFidelity, formatCloudFullFidelityConversation,
+  formatGraphOpsConversation} from "./graphOpsConversation.js";
 
 const payload = {status: "completed", bounded: true, modelAuthority: "INTERPRETIVE_ONLY",
   ollamaRoute: "LOCAL_FALLBACK", maxSteps: 1,
@@ -36,4 +37,34 @@ test("conversation rejects responses that claim execution authority", async () =
   const fetchImpl = async () => new Response(JSON.stringify({...payload,
     modelAuthority: "EXECUTIVE"}), {status: 200});
   await assert.rejects(() => askGraphOps("Why?", payload.selection, {fetchImpl}), /bounded contract/);
+});
+
+test("full-fidelity Cloud sends only an evidence reference after explicit acknowledgement", async () => {
+  let request;
+  const cloudPayload = {...payload, mode: "cloud-full-fidelity",
+    ollamaRoute: "OLLAMA_CLOUD_FULL_FIDELITY", directiveExecution: false,
+    evidenceId: "trace-1", result: {model: "gpt-oss:20b", report: {
+      situation: "Measured route", anomalies: "One RTT spike",
+      measuredVsInferred: "RTT measured; GeoIP inferred", assessment: "Bounded",
+      falsifier: "Repeat trace", direction: "Measure again", confidence: .7}},
+    disclosureReceipt: {route: "OLLAMA_CLOUD_FULL_FIDELITY", capsuleId: "ffc-1",
+      capsuleSha256: "a".repeat(64), destination: "OLLAMA_CLOUD", model: "gpt-oss:20b",
+      disclosed: {exactIpAddresses: 4, exactLocations: 2, incidentEdges: 3, memberNodes: 0},
+      excluded: ["CREDENTIALS"]}};
+  const fetchImpl = async (url, init) => { request = {url, init};
+    return new Response(JSON.stringify(cloudPayload), {status: 200}); };
+  await assert.rejects(() => askGraphOpsCloudFullFidelity("Explain", payload.selection, "trace-1",
+    {fetchImpl}), /not acknowledged/);
+  await askGraphOpsCloudFullFidelity("Explain", {...payload.selection, enrichment: {unsafe: true}},
+    "trace-1", {fetchImpl, acknowledgeExactDisclosure: true});
+  assert.equal(request.url, "/api/graphops/conversation/cloud-full-fidelity");
+  assert.deepEqual(JSON.parse(request.init.body), {mode: "cloud-full-fidelity", question: "Explain",
+    evidenceId: "trace-1", acknowledgeExactDisclosure: true, selection: payload.selection});
+  assert.doesNotMatch(request.init.body, /unsafe/);
+
+  const output = formatCloudFullFidelityConversation(cloudPayload);
+  assert.match(output, /FULL-FIDELITY DISCLOSURE RECEIPT/);
+  assert.match(output, /4 EXACT IPs/);
+  assert.match(output, /SHA-256 \/\/ a{64}/);
+  assert.match(output, /MEASURED VS INFERRED/);
 });

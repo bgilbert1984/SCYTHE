@@ -246,10 +246,11 @@
         <textarea id="graphops-question" maxlength="2000" placeholder="What must be true for this host and the RF coverage gap to share a cause?"></textarea>
         <div class="directive__controls">
           <button id="ask-graphops" type="submit" disabled>ASK OLLAMA</button>
+          <button id="ask-cloud-full-fidelity" type="button" disabled>ASK CLOUD // FULL FIDELITY</button>
           <button id="cancel-graphops" type="button" hidden>STOP WAITING</button>
         </div>
         <div id="graphops-conversation-state" class="directive__conversation-state" aria-live="polite">OLLAMA // READY</div>
-        <div class="directive__conversation-boundary">OLLAMA // INTERPRETIVE ONLY · DIRECTIVES // ALLOW-LISTED CONTROLS BELOW</div>
+        <div class="directive__conversation-boundary">LOCAL // PRIVATE · CLOUD FULL FIDELITY // EXPLICIT EXACT DISCLOSURE · ALL MODELS // INTERPRETIVE ONLY</div>
       </form>
       <div class="directive__controls">
         <label>THRESHOLD <input id="threshold-value" type="number" value="145" step="1"></label>
@@ -294,7 +295,8 @@
     import { WorldStack } from "./worldStack.js";
     import { formatHostTracePrompt, geoPathPoints, runHostTrace } from "./hostTraceWorkflow.js";
     import { graphEntityPromptContext } from "./graphEntityTooltip.js";
-    import { askGraphOps, formatGraphOpsConversation } from "./graphOpsConversation.js";
+    import { askGraphOps, askGraphOpsCloudFullFidelity, formatCloudFullFidelityConversation,
+      formatGraphOpsConversation } from "./graphOpsConversation.js";
     import { GraphExplorerView } from "./graphExplorerView.js";
     import { downloadOfflineHypergraphBundle } from "./offlineHypergraphBundle.js";
     import { HypergraphLocationView } from "./hypergraphLocationView.js";
@@ -454,6 +456,7 @@
     let activePlanId = null;
     let hostTraceSequence = 0;
     let hostTraceEntityIds = [];
+    let latestHostTraceEvidence = null;
 
     function selectedGraphEntity(selection) {
       const graph = liveHypergraph.latestGraph ?? liveGraphController.latestGraph ?? {};
@@ -503,6 +506,8 @@
 
     async function performHostTrace(selection) {
       const sequence = ++hostTraceSequence;
+      latestHostTraceEvidence = null;
+      updateInvestigation();
       const output = document.getElementById("correlation-status");
       output.hidden = false;
       output.textContent = `GRAPHOPS PROMPT // HOST ROUTE TRACE\nTARGET // ${selection.entityId}\nSTATUS // EXECUTING BOUNDED RTT + TRACEROUTE…`;
@@ -510,9 +515,11 @@
       try {
         const result = await runHostTrace(selection);
         if (sequence !== hostTraceSequence) return;
+        latestHostTraceEvidence = result?.evidenceId ? result : null;
         output.textContent = formatHostTracePrompt(result, {entityContext: selectedEntityContext(selection)});
         renderHostGeoPath(result);
         status.textContent = `GRAPHOPS // HOST TRACE // ${result.status.toUpperCase()}`;
+        updateInvestigation();
       } catch (error) {
         if (sequence !== hostTraceSequence) return;
         output.textContent = `GRAPHOPS PROMPT // HOST ROUTE TRACE\nTARGET // ${selection.entityId}\nSTATUS // REFUSED OR UNAVAILABLE\nREASON // ${error.message}`;
@@ -531,6 +538,9 @@
       document.getElementById("compare-worlds").disabled = !(kinds.has("rf-cell") &&
         (["graph-node", "graph-edge", "event"].some((kind) => kinds.has(kind))));
       document.getElementById("ask-graphops").disabled = !graphSelection;
+      const cloudTraceMatches = Boolean(graphSelection && latestHostTraceEvidence?.evidenceId &&
+        latestHostTraceEvidence?.selection?.entityId === graphSelection.entityId);
+      document.getElementById("ask-cloud-full-fidelity").disabled = !cloudTraceMatches;
     }
 
     let graphOpsConversationController = null;
@@ -584,6 +594,73 @@
         askButton.disabled = !selections.items.some((item) =>
           ["graph-node", "graph-edge", "event"].includes(item.kind));
         cancelButton.hidden = true;
+      }
+    });
+
+    document.getElementById("ask-cloud-full-fidelity").addEventListener("click", async () => {
+      if (graphOpsConversationController) return;
+      const graphSelection = selections.items.find((item) => item.kind === "graph-node" &&
+        item.entityId === latestHostTraceEvidence?.selection?.entityId);
+      const question = document.getElementById("graphops-question").value.trim();
+      if (!graphSelection || !latestHostTraceEvidence?.evidenceId) return;
+      const hops = latestHostTraceEvidence?.traceroute?.hops ?? [];
+      const exactIps = new Set([latestHostTraceEvidence.target, ...hops.map((hop) => hop.ip)].filter(Boolean)).size;
+      const exactLocations = hops.filter((hop) => hop.geo ||
+        (hop.lat != null && hop.lon != null)).length;
+      const acknowledged = window.confirm(
+        `FULL-FIDELITY CLOUD DISCLOSURE\n\n` +
+        `Destination: Ollama Cloud\n` +
+        `Scope: selected host + measured trace + incident graph evidence\n` +
+        `Exact IP addresses: ${exactIps}\nExact locations: ${exactLocations}\n` +
+        `Exact timestamps: included\n` +
+        `Credentials, raw packet payloads, and execution authority: excluded\n\n` +
+        `Transmit this bounded evidence capsule?`);
+      if (!acknowledged) return;
+      const output = document.getElementById("correlation-status");
+      const cloudButton = document.getElementById("ask-cloud-full-fidelity");
+      const localButton = document.getElementById("ask-graphops");
+      const cancelButton = document.getElementById("cancel-graphops");
+      const conversationState = document.getElementById("graphops-conversation-state");
+      const startedAt = Date.now();
+      graphOpsConversationController = new AbortController();
+      cloudButton.disabled = true; localButton.disabled = true;
+      cloudButton.textContent = "CLOUD ANALYZING… 0s"; cancelButton.hidden = false;
+      conversationState.dataset.state = "working";
+      conversationState.textContent = "OLLAMA CLOUD // FULL-FIDELITY CAPSULE // 0s";
+      const progressTimer = setInterval(() => {
+        const elapsed = Math.floor((Date.now() - startedAt) / 1000);
+        cloudButton.textContent = `CLOUD ANALYZING… ${elapsed}s`;
+        conversationState.textContent = `OLLAMA CLOUD // FULL-FIDELITY CAPSULE // ${elapsed}s // STOP WAITING AVAILABLE`;
+      }, 1000);
+      const timeoutTimer = setTimeout(() => graphOpsConversationController?.abort(
+        new DOMException("Cloud conversation exceeded 235 seconds", "TimeoutError")), 235_000);
+      output.hidden = false;
+      status.textContent = "GRAPHOPS // OLLAMA CLOUD // FULL FIDELITY // INVESTIGATING";
+      output.textContent = `GRAPHOPS CLOUD CONVERSATION // TRANSMITTING EXACT BOUNDED EVIDENCE\nQUESTION // ${question || "EMPTY"}`;
+      try {
+        const traceSelection = {...graphSelection,
+          graphRevision: latestHostTraceEvidence.selection.graphRevision};
+        const result = await askGraphOpsCloudFullFidelity(question, traceSelection,
+          latestHostTraceEvidence.evidenceId, {signal: graphOpsConversationController.signal,
+            acknowledgeExactDisclosure: true});
+        output.textContent = formatCloudFullFidelityConversation(result,
+          {entityContext: selectedEntityContext(graphSelection)});
+        status.textContent = "GRAPHOPS // OLLAMA CLOUD // FULL FIDELITY // COMPLETED";
+        conversationState.dataset.state = "completed";
+        conversationState.textContent = `OLLAMA CLOUD // COMPLETED // ${Math.floor((Date.now() - startedAt) / 1000)}s // RECEIPT VERIFIED`;
+      } catch (error) {
+        const stopped = error.name === "AbortError";
+        const reason = stopped ? "Operator stopped waiting; Cloud inference may finish independently" : error.message;
+        output.textContent = `GRAPHOPS CLOUD CONVERSATION // ${stopped ? "WAIT STOPPED" : "REFUSED OR UNAVAILABLE"}\nREASON // ${reason}`;
+        status.textContent = `GRAPHOPS // OLLAMA CLOUD // ${stopped ? "WAIT STOPPED" : "UNAVAILABLE"}`;
+        conversationState.dataset.state = "error";
+        conversationState.textContent = `OLLAMA CLOUD // ${stopped ? "WAIT STOPPED" : "UNAVAILABLE"} // ${reason}`;
+      } finally {
+        clearInterval(progressTimer); clearTimeout(timeoutTimer);
+        graphOpsConversationController = null;
+        cloudButton.textContent = "ASK CLOUD // FULL FIDELITY";
+        cancelButton.hidden = true;
+        updateInvestigation();
       }
     });
 
