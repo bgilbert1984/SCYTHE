@@ -10,14 +10,15 @@ const payload = {status: "completed", bounded: true, modelAuthority: "INTERPRETI
     report: {situation: "One host changed", assessment: "Evidence is sparse", direction: "Measure again"}}};
 
 test("conversation sends only a pinned selection reference and read-only mode", async () => {
-  let request;
+  let request; const controller = new AbortController();
   const fetchImpl = async (url, init) => { request = {url, init};
     return new Response(JSON.stringify(payload), {status: 200}); };
   await askGraphOps("What changed?", {kind: "graph-node", entityId: "host:a",
-    graphRevision: "graph-1", enrichment: {unsafe: true}}, {fetchImpl});
+    graphRevision: "graph-1", enrichment: {unsafe: true}}, {fetchImpl, signal: controller.signal});
   assert.equal(request.url, "/api/graphops/conversation");
   assert.deepEqual(JSON.parse(request.init.body), {mode: "ask", question: "What changed?", maxSteps: 3,
     selection: {kind: "graph-node", entityId: "host:a", graphRevision: "graph-1"}});
+  assert.equal(request.init.signal, controller.signal);
 });
 
 test("conversation rendering includes tooltip context and epistemic boundary", () => {

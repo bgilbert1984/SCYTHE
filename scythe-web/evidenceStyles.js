@@ -84,6 +84,25 @@ export const HOST_LIVENESS_STYLES = Object.freeze({
   inactive: Object.freeze({label: "INACTIVE · ICMP NO REPLY", color: "#ff4f64", alpha: 1}),
 });
 
+export const DISPLAY_PURPOSE_STYLES = Object.freeze({
+  SELECTED_CONTEXT: Object.freeze({label: "SELECTED CONTEXT", color: "#ffffff", alpha: 1}),
+  MOST_ACTIVE: Object.freeze({label: "MOST ACTIVE", color: "#00d4ff", alpha: 1}),
+  EXPLICIT_SIGNAL: Object.freeze({label: "EXPLICIT SIGNAL", color: "#ff8c42", alpha: 1}),
+  NEW_ARRIVAL: Object.freeze({label: "NEW ARRIVAL", color: "#bb83ff", alpha: 1}),
+  NETWORK_DIVERSITY: Object.freeze({label: "NETWORK DIVERSITY", color: "#f7d154", alpha: .96}),
+  STABLE_CONTEXT: Object.freeze({label: "STABLE CONTEXT", color: "#7890a8", alpha: .9}),
+});
+
+export function graphPurposeStyle(node) {
+  const purpose = node?.display?.selectionPurpose;
+  return DISPLAY_PURPOSE_STYLES[purpose] ?? evidenceStyle(node?.evidenceClass ?? "INFERRED");
+}
+
+export function hostLivenessStyle(node) {
+  if (String(node?.kind ?? "").toLowerCase() !== "network_host") return null;
+  return HOST_LIVENESS_STYLES[node?.liveness?.state] ?? null;
+}
+
 /** Host liveness may override node color, but never its evidence-class shape. */
 export function graphNodeStyle(node) {
   const fallback = evidenceStyle(node?.evidenceClass ?? "INFERRED");

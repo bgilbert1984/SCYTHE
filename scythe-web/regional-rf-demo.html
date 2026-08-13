@@ -44,6 +44,8 @@
       border-top:1px dashed rgba(99,255,209,.4); }
     .directive__conversation textarea { width:100%; min-height:48px; max-height:130px; resize:vertical; }
     .directive__conversation-boundary { color:#7f9bad; font-size:8px; }
+    .directive__conversation-state { min-height:13px; color:#63ffd1; font-size:8px; letter-spacing:.04em; }
+    .directive__conversation-state[data-state="error"] { color:#ff7890; }
     .directive__controls--actions { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); }
     .directive__controls--actions button { min-height:27px; white-space:normal; }
     .directive__analysis { margin-top:5px; padding-top:5px; border-top:1px dashed rgba(247,209,84,.45); color:#f7d154; }
@@ -222,7 +224,7 @@
         </div>
         <div class="graph-result__boundary">BOUNDARY // SEARCH AND NEIGHBORHOOD RESULTS ARE A BOUNDED GRAPH INDEX; ADJACENCY IS NOT CAUSALITY</div>
       </section>
-      <div class="live-hypergraph__legend">TOPOLOGY // NOT GEOLOCATION · HOST COLOR: <span style="color:#38f28f">GREEN ACTIVE</span> / <span style="color:#ff4f64">RED INACTIVE</span> / NEUTRAL UNKNOWN · SHAPE = EVIDENCE · CLICK NODE, EDGE, OR HYPEREDGE</div>
+      <div class="live-hypergraph__legend">PURPOSE // <span style="color:#fff">● SELECTED</span> · <span style="color:#00d4ff">● ACTIVE TRAFFIC</span> · <span style="color:#ff8c42">● SIGNAL</span> · <span style="color:#bb83ff">● NEW</span> · <span style="color:#f7d154">● DIVERSITY</span> · <span style="color:#7890a8">● CONTEXT</span><br>STATUS BADGE ABOVE HOST // <span style="color:#38f28f">● ACTIVE</span> · <span style="color:#ff4f64">● INACTIVE</span> · ABSENT UNKNOWN<br>TOPOLOGY // NOT GEOLOCATION · SHAPE = EVIDENCE · CLICK NODE, EDGE, OR HYPEREDGE</div>
     </aside>
     <aside id="causal-world-stack" class="world-stack" aria-label="Causal hypothesis world stack" hidden></aside>
     <div id="directive-dismiss-layer" class="directive-dismiss-layer" aria-hidden="true" hidden></div>
@@ -244,7 +246,9 @@
         <textarea id="graphops-question" maxlength="2000" placeholder="What must be true for this host and the RF coverage gap to share a cause?"></textarea>
         <div class="directive__controls">
           <button id="ask-graphops" type="submit" disabled>ASK OLLAMA</button>
+          <button id="cancel-graphops" type="button" hidden>STOP WAITING</button>
         </div>
+        <div id="graphops-conversation-state" class="directive__conversation-state" aria-live="polite">OLLAMA // READY</div>
         <div class="directive__conversation-boundary">OLLAMA // INTERPRETIVE ONLY · DIRECTIVES // ALLOW-LISTED CONTROLS BELOW</div>
       </form>
       <div class="directive__controls">
@@ -529,22 +533,57 @@
       document.getElementById("ask-graphops").disabled = !graphSelection;
     }
 
+    let graphOpsConversationController = null;
+    document.getElementById("cancel-graphops").addEventListener("click", () => {
+      graphOpsConversationController?.abort(new DOMException("Operator stopped waiting", "AbortError"));
+    });
     document.getElementById("graphops-conversation").addEventListener("submit", async (event) => {
       event.preventDefault();
+      if (graphOpsConversationController) return;
       const graphSelection = selections.items.find((item) => ["graph-node", "graph-edge", "event"].includes(item.kind));
       const question = document.getElementById("graphops-question").value.trim();
       const output = document.getElementById("correlation-status");
+      const askButton = document.getElementById("ask-graphops");
+      const cancelButton = document.getElementById("cancel-graphops");
+      const conversationState = document.getElementById("graphops-conversation-state");
+      const startedAt = Date.now();
+      graphOpsConversationController = new AbortController();
+      askButton.disabled = true; askButton.textContent = "ASKING… 0s";
+      cancelButton.hidden = false;
+      conversationState.dataset.state = "working";
+      conversationState.textContent = "OLLAMA // WAITING FOR BOUNDED INVESTIGATION // 0s";
+      const progressTimer = setInterval(() => {
+        const elapsed = Math.floor((Date.now() - startedAt) / 1000);
+        askButton.textContent = `ASKING… ${elapsed}s`;
+        conversationState.textContent = `OLLAMA // WAITING FOR BOUNDED INVESTIGATION // ${elapsed}s // STOP WAITING AVAILABLE`;
+      }, 1000);
+      const timeoutTimer = setTimeout(() => graphOpsConversationController?.abort(
+        new DOMException("GraphOps conversation exceeded 235 seconds", "TimeoutError")), 235_000);
       output.hidden = false;
       status.textContent = "GRAPHOPS // OLLAMA // INVESTIGATING";
       output.textContent = `GRAPHOPS CONVERSATION // EXECUTING\nQUESTION // ${question || "EMPTY"}`;
       try {
         const currentSelection = currentGraphSelection(graphSelection);
-        const result = await askGraphOps(question, currentSelection);
+        const result = await askGraphOps(question, currentSelection, {signal: graphOpsConversationController.signal});
         output.textContent = formatGraphOpsConversation(result, {entityContext: selectedEntityContext(currentSelection)});
         status.textContent = "GRAPHOPS // OLLAMA // COMPLETED";
+        conversationState.dataset.state = "completed";
+        conversationState.textContent = `OLLAMA // COMPLETED // ${Math.floor((Date.now() - startedAt) / 1000)}s`;
       } catch (error) {
-        output.textContent = `GRAPHOPS CONVERSATION // REFUSED OR UNAVAILABLE\nREASON // ${error.message}`;
-        status.textContent = "GRAPHOPS // OLLAMA // UNAVAILABLE";
+        const stopped = error.name === "AbortError";
+        const reason = stopped
+          ? "Operator stopped waiting; server-side inference may finish independently" : error.message;
+        output.textContent = `GRAPHOPS CONVERSATION // ${stopped ? "WAIT STOPPED" : "REFUSED OR UNAVAILABLE"}\nREASON // ${reason}`;
+        status.textContent = `GRAPHOPS // OLLAMA // ${stopped ? "WAIT STOPPED" : "UNAVAILABLE"}`;
+        conversationState.dataset.state = "error";
+        conversationState.textContent = `OLLAMA // ${stopped ? "WAIT STOPPED" : "UNAVAILABLE"} // ${reason}`;
+      } finally {
+        clearInterval(progressTimer); clearTimeout(timeoutTimer);
+        graphOpsConversationController = null;
+        askButton.textContent = "ASK OLLAMA";
+        askButton.disabled = !selections.items.some((item) =>
+          ["graph-node", "graph-edge", "event"].includes(item.kind));
+        cancelButton.hidden = true;
       }
     });
 
@@ -616,6 +655,7 @@
       showDirective();
       const {entityType, ...typedSelection} = detail;
       selections.upsert(typedSelection);
+      liveGraphController.setFocus(typedSelection.entityId);
       graphExplorer.setSelection(typedSelection);
       updateInvestigation();
       const hasRf = selections.items.some((item) => item.kind === "rf-cell");

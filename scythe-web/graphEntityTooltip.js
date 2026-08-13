@@ -25,8 +25,11 @@ export function graphEntityTooltip(entity = {}) {
   const ip = text(enrichment.ip || labels.ip || (text(entity.id).startsWith("host:") ? text(entity.id).slice(5) : ""));
   const scope = text(enrichment.scope);
   const lines = [];
+  const purpose = text(entity.display?.selectionPurpose).replaceAll("_", " ");
+  const activityScore = compact(entity.display?.activityScore);
   if (ip) {
     lines.push(`${scope || "NETWORK"} HOST`, ip);
+    if (purpose) lines.push("", `DISPLAY PURPOSE // ${purpose}${activityScore ? ` · ACTIVITY ${activityScore}` : ""}`);
     const liveness = entity.liveness ?? {};
     if (["active", "inactive"].includes(liveness.state)) {
       const rtt = Number(liveness.rttMs);
@@ -63,7 +66,8 @@ export function graphEntityTooltip(entity = {}) {
       "GEOIP IS AN ESTIMATE · TOPOLOGY IS NOT GEOLOCATION");
     return lines.join("\n");
   }
-  return [text(entity.kind) || "GRAPH ENTITY", text(entity.id), text(entity.evidenceClass) || "INFERRED"]
+  return [text(entity.kind) || "GRAPH ENTITY", text(entity.id),
+    purpose ? `DISPLAY PURPOSE // ${purpose}` : "", text(entity.evidenceClass) || "INFERRED"]
     .filter(Boolean).join("\n");
 }
 

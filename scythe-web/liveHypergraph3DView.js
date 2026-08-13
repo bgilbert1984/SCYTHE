@@ -1,4 +1,4 @@
-import { evidenceStyle, graphNodeStyle } from "./evidenceStyles.js";
+import { evidenceStyle, graphPurposeStyle, hostLivenessStyle } from "./evidenceStyles.js";
 import { graphEntityTooltip } from "./graphEntityTooltip.js";
 
 function hash(value) {
@@ -148,7 +148,7 @@ export class LiveHypergraph3DView {
 
   #upsertNode(node, revision) {
     const T = this.THREE; const evidence = safeEvidence(node.evidenceClass);
-    const visual = graphNodeStyle(node);
+    const visual = graphPurposeStyle(node);
     let mesh = this.nodeMeshes.get(node.id);
     if (!mesh) {
       const radius = node.kind === "network_host" ? 4.6 : graphKind(node) === "event" ? 3.7 : 3.2;
@@ -162,6 +162,15 @@ export class LiveHypergraph3DView {
       mesh.material.color.set(visual.color); mesh.material.emissive.set(visual.color).multiplyScalar(0.28);
       mesh.material.opacity = visual.alpha; mesh.material.transparent = visual.alpha < 1;
     }
+    let badge = mesh.getObjectByName?.("scythe-liveness-badge");
+    const liveness = hostLivenessStyle(node);
+    if (liveness && !badge) {
+      badge = new T.Mesh(new T.SphereGeometry(1.35, 10, 8),
+        new T.MeshBasicMaterial({color: liveness.color}));
+      badge.name = "scythe-liveness-badge"; badge.position.set(0, 8, 0); mesh.add(badge);
+    } else if (liveness && badge) {
+      badge.material.color.set(liveness.color); badge.visible = true;
+    } else if (badge) badge.visible = false;
     const point = this.positions.get(node.id); mesh.position.set(point.x, point.y, point.z);
     mesh.userData = {...mesh.userData, selection: {kind: graphKind(node), entityId: node.id,
       entityType: node.kind, graphRevision: revision,

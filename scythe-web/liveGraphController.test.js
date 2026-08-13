@@ -61,3 +61,34 @@ test("controller retains the last bounded snapshot when the endpoint is unavaila
   assert.equal(updates.at(-1).available, false); assert.equal(updates.at(-1).graph.status, "unavailable");
   assert.equal(controller.snapshot.graphRevision, "stable"); controller.destroy();
 });
+
+test("status separates complete detected counts from the bounded display", async () => {
+  const fetchImpl = async (url) => {
+    if (url.includes("eve/status")) return new Response(JSON.stringify({status: "ok", committed: 12}));
+    return new Response(JSON.stringify({status: "ok", graphRevision: "many",
+      detectedNodeCount: 847, detectedEdgeCount: 4219,
+      displayedNodeCount: 200, displayedEdgeCount: 300,
+      ranking: {lens: "ADAPTIVE_RELEVANCE", suppressedNodes: 647, suppressedEdges: 3919},
+      nodeCount: 200, edgeCount: 300, nodes: [], edges: []}));
+  };
+  const controller = new LiveGraphController({fetchImpl, refreshMilliseconds: 60_000});
+  const updates = []; controller.subscribe((update) => updates.push(update)); await controller.start();
+  assert.match(updates.at(-1).message, /DETECTED \/\/ 847 NODES \/\/ 4219 EDGES/);
+  assert.match(updates.at(-1).message,
+    /DISPLAYED \/\/ 200 \/ 847 NODES \/\/ 300 \/ 4219 EDGES \/\/ BOUNDED 200N·300E/);
+  assert.match(updates.at(-1).message,
+    /LENS \/\/ ADAPTIVE_RELEVANCE \/\/ SUPPRESSED 647N·3919E/);
+  controller.destroy();
+});
+
+test("controller sends a bounded focus id for adaptive selection", async () => {
+  const urls = [];
+  const fetchImpl = async (url) => { urls.push(url);
+    if (url.includes("eve/status")) return new Response("{}");
+    return new Response(JSON.stringify({status: "ok", graphRevision: "focused", nodes: [], edges: []})); };
+  const controller = new LiveGraphController({fetchImpl, refreshMilliseconds: 60_000});
+  await controller.start(); controller.running = false;
+  controller.setFocus("host:203.0.113.7"); await controller.refresh();
+  assert.ok(urls.some((url) => url.includes("focus_id=host%3A203.0.113.7")));
+  controller.destroy();
+});

@@ -472,6 +472,7 @@ def register_mcp_routes(app, engine, use_orchestrator: bool = False, auth_valida
             return jsonify(GraphSelectionResolver(graph_selection_engine).snapshot(
                 node_limit=request.args.get('node_limit', 200),
                 edge_limit=request.args.get('edge_limit', 300),
+                focus_id=request.args.get('focus_id', ''),
             ))
         except (TypeError, ValueError) as exc:
             return jsonify({'status': 'error', 'message': str(exc), 'nodes': [], 'edges': []}), 400

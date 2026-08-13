@@ -8,6 +8,7 @@ export class LiveGraphController {
     this.listeners = new Set(); this.timer = null; this.running = false;
     this.graphRevision = null; this.snapshot = null; this.status = null;
     this.liveness = new Map(); this.livenessCursor = 0; this.livenessRevision = 0;
+    this.focusId = "";
   }
 
   subscribe(listener) {
@@ -33,7 +34,9 @@ export class LiveGraphController {
   }
 
   async refresh() {
-    const graphUrl = `${this.apiBase}/api/graphops/selection/graph?node_limit=${this.nodeLimit}&edge_limit=${this.edgeLimit}`;
+    const graphQuery = new URLSearchParams({node_limit: String(this.nodeLimit), edge_limit: String(this.edgeLimit)});
+    if (this.focusId) graphQuery.set("focus_id", this.focusId);
+    const graphUrl = `${this.apiBase}/api/graphops/selection/graph?${graphQuery}`;
     const statusUrl = `${this.apiBase}/api/graphops/eve/status`;
     try {
       const [graphResponse, eveResponse] = await Promise.all([
@@ -58,9 +61,17 @@ export class LiveGraphController {
       for (const node of this.snapshot.nodes) if (node.liveness?.state in counts) counts[node.liveness.state] += 1;
       const hostCount = this.snapshot.nodes.filter((node) => this.#isHost(node)).length;
       const unknown = Math.max(0, hostCount - counts.active - counts.inactive);
+      const detectedNodes = graph.detectedNodeCount ?? graph.nodeCount ?? graph.nodes?.length ?? 0;
+      const detectedEdges = graph.detectedEdgeCount ?? graph.edgeCount ?? graph.edges?.length ?? 0;
+      const displayedNodes = graph.displayedNodeCount ?? graph.nodes?.length ?? 0;
+      const displayedEdges = graph.displayedEdgeCount ?? graph.edges?.length ?? 0;
+      const ranking = graph.ranking ?? {};
+      const lens = ranking.lens ?? "SOURCE ORDER";
+      const suppressedNodes = ranking.suppressedNodes ?? Math.max(0, detectedNodes - displayedNodes);
+      const suppressedEdges = ranking.suppressedEdges ?? Math.max(0, detectedEdges - displayedEdges);
       return this.#publish({kind: "snapshot", graph: this.snapshot, eve,
         changed: changed || livenessChanged, graphChanged: changed, livenessChanged, available: true,
-        message: `LIVE HYPERGRAPH // ${graph.status.toUpperCase()} // ${graph.nodeCount ?? graph.nodes?.length ?? 0} NODES // ${graph.edgeCount ?? graph.edges?.length ?? 0} EDGES\nHOST PING // ${counts.active} ACTIVE // ${counts.inactive} INACTIVE // ${unknown} UNKNOWN // ROUND ROBIN\nEVE // ${eve.status?.toUpperCase() ?? "UNKNOWN"} // ${eve.committed ?? 0} COMMITTED // ${eve.replayed ?? 0} BOOTSTRAP REPLAYED // ${eve.deduplicated ?? 0} DEDUPLICATED // RAW PACKETS NOT EXPOSED`});
+        message: `LIVE HYPERGRAPH // ${graph.status.toUpperCase()}\nDETECTED // ${detectedNodes} NODES // ${detectedEdges} EDGES\nDISPLAYED // ${displayedNodes} / ${detectedNodes} NODES // ${displayedEdges} / ${detectedEdges} EDGES // BOUNDED ${this.nodeLimit}N·${this.edgeLimit}E\nLENS // ${lens} // SUPPRESSED ${suppressedNodes}N·${suppressedEdges}E${ranking.focusId ? ` // PINNED ${ranking.focusId}` : ""}\nHOST PING // ${counts.active} ACTIVE // ${counts.inactive} INACTIVE // ${unknown} UNKNOWN // ROUND ROBIN\nEVE // ${eve.status?.toUpperCase() ?? "UNKNOWN"} // ${eve.committed ?? 0} COMMITTED // ${eve.replayed ?? 0} BOOTSTRAP REPLAYED // ${eve.deduplicated ?? 0} DEDUPLICATED // RAW PACKETS NOT EXPOSED`});
     } catch (error) {
       return this.#publish({kind: "status", graph: this.snapshot, eve: null, available: false,
         error, message: `LIVE HYPERGRAPH // UNAVAILABLE // ${error.message}`});
@@ -109,6 +120,14 @@ export class LiveGraphController {
       catch (error) { globalThis.console?.error?.("[SCYTHE] Live graph listener failed", error); }
     }
     return update.graph;
+  }
+
+  setFocus(entityId) {
+    const next = String(entityId ?? "").slice(0, 256);
+    if (next === this.focusId) return false;
+    this.focusId = next;
+    if (this.running) void this.refresh();
+    return true;
   }
 
   destroy() {

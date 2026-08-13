@@ -3,12 +3,14 @@ function text(value, fallback = "—") {
   return result || fallback;
 }
 
-export async function askGraphOps(question, selection, {fetchImpl = globalThis.fetch, apiBase = ""} = {}) {
+export async function askGraphOps(question, selection, {
+  fetchImpl = globalThis.fetch, apiBase = "", signal,
+} = {}) {
   const utterance = String(question ?? "").trim();
   if (!utterance) throw new Error("Enter a GraphOps question");
   if (!selection?.entityId || !selection?.graphRevision) throw new Error("Select a graph node or edge first");
   const response = await fetchImpl.call(globalThis, `${apiBase}/api/graphops/conversation`, {
-    method: "POST", credentials: "same-origin", headers: {"Content-Type": "application/json"},
+    method: "POST", credentials: "same-origin", headers: {"Content-Type": "application/json"}, signal,
     body: JSON.stringify({mode: "ask", question: utterance, maxSteps: 3, selection: {
       kind: selection.kind, entityId: selection.entityId, graphRevision: selection.graphRevision,
     }}),

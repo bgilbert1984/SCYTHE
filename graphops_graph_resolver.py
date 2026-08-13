@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 import json
 import math
 import time
-from collections import OrderedDict
+from collections import Counter, defaultdict, OrderedDict
 from copy import deepcopy
 from threading import RLock
 from typing import Any, Dict, Iterable
@@ -19,6 +20,156 @@ class GraphResolutionError(ValueError):
 _SNAPSHOT_CACHE: "OrderedDict[str, Dict[str, Any]]" = OrderedDict()
 _SNAPSHOT_CACHE_LOCK = RLock()
 _SNAPSHOT_CACHE_LIMIT = 32
+
+_ADAPTIVE_PURPOSES = (
+    "SELECTED_CONTEXT", "MOST_ACTIVE", "EXPLICIT_SIGNAL",
+    "NEW_ARRIVAL", "NETWORK_DIVERSITY", "STABLE_CONTEXT",
+)
+_PURPOSE_SCHEDULE = (
+    "MOST_ACTIVE", "MOST_ACTIVE", "NETWORK_DIVERSITY", "NEW_ARRIVAL",
+    "MOST_ACTIVE", "STABLE_CONTEXT", "EXPLICIT_SIGNAL", "MOST_ACTIVE",
+    "NETWORK_DIVERSITY", "NEW_ARRIVAL", "MOST_ACTIVE", "EXPLICIT_SIGNAL",
+    "MOST_ACTIVE", "NETWORK_DIVERSITY", "NEW_ARRIVAL", "MOST_ACTIVE",
+    "STABLE_CONTEXT", "EXPLICIT_SIGNAL",
+)
+
+
+def _display_signal(node: Dict[str, Any]) -> float:
+    metadata = node.get("metadata") or {}
+    score = 1.0 if node.get("evidenceClass") == "CONTRADICTED" else 0.0
+    for key in ("anomaly_score", "threat_score", "risk_score", "severity"):
+        try:
+            score = max(score, float(metadata.get(key) or 0.0))
+        except (TypeError, ValueError):
+            continue
+    return score
+
+
+def _network_bucket(node: Dict[str, Any]) -> str:
+    labels = node.get("labels") or {}
+    value = str(labels.get("ip") or "").strip()
+    try:
+        address = ipaddress.ip_address(value)
+        prefix = 24 if address.version == 4 else 48
+        return str(ipaddress.ip_network(f"{address}/{prefix}", strict=False))
+    except ValueError:
+        return f"kind:{node.get('kind', 'entity')}"
+
+
+def _adaptive_rank_nodes(nodes: list[Dict[str, Any]], edges: list[Dict[str, Any]],
+                         limit: int, focus_id: str = "") -> tuple[list[Dict[str, Any]], Dict[str, int]]:
+    """Weighted-fair display ranking; presentation metadata never changes evidence authority."""
+    by_id = {node["id"]: node for node in nodes}
+    peers = {node_id: set() for node_id in by_id}
+    protocols = {node_id: set() for node_id in by_id}
+    activity = {node_id: 0.0 for node_id in by_id}
+    newest = max((_timestamp(edge.get("observedAt")) or -1 for edge in edges), default=-1)
+    for edge in edges:
+        members = [member for member in edge.get("nodes", []) if member in by_id]
+        observed = _timestamp(edge.get("observedAt"))
+        weight = math.exp(-max(0.0, newest - observed) / 120.0) if observed is not None and newest >= 0 else 0.2
+        protocol = str((edge.get("labels") or {}).get("proto") or "unknown").lower()
+        for member in members:
+            activity[member] += weight
+            protocols[member].add(protocol)
+            peers[member].update(other for other in members if other != member)
+    activity_score = {node_id: math.log1p(activity[node_id]) +
+                      0.35 * math.log1p(len(peers[node_id])) +
+                      0.2 * math.log1p(len(protocols[node_id])) for node_id in by_id}
+    stable_key = lambda node: (hashlib.blake2s(node["id"].encode(), digest_size=8).hexdigest(), node["id"])
+    candidates: Dict[str, list[Dict[str, Any]]] = {
+        "MOST_ACTIVE": sorted(nodes, key=lambda node: (-activity_score[node["id"]], node["id"])),
+        "EXPLICIT_SIGNAL": sorted((node for node in nodes if _display_signal(node) > 0),
+                                  key=lambda node: (-_display_signal(node), node["id"])),
+        "NEW_ARRIVAL": sorted((node for node in nodes if newest >= 0 and
+                               (_timestamp(node.get("observedAt")) or -1) >= newest - 60),
+                              key=lambda node: (-(_timestamp(node.get("observedAt")) or -1), node["id"])),
+        "STABLE_CONTEXT": sorted(nodes, key=stable_key),
+    }
+    buckets: Dict[str, list[Dict[str, Any]]] = defaultdict(list)
+    for node in nodes:
+        buckets[_network_bucket(node)].append(node)
+    for values in buckets.values():
+        values.sort(key=lambda node: (-activity_score[node["id"]], node["id"]))
+    diverse = []
+    while any(buckets.values()):
+        for bucket in sorted(buckets):
+            if buckets[bucket]:
+                diverse.append(buckets[bucket].pop(0))
+    candidates["NETWORK_DIVERSITY"] = diverse
+    focus_nodes = set()
+    if focus_id in by_id:
+        focus_nodes.add(focus_id)
+    else:
+        focus_edge = next((edge for edge in edges if edge.get("id") == focus_id), None)
+        focus_nodes.update(member for member in (focus_edge or {}).get("nodes", []) if member in by_id)
+    selected: list[Dict[str, Any]] = []
+    selected_ids = set()
+    purpose_counts = Counter()
+
+    def take(node: Dict[str, Any], purpose: str) -> None:
+        if node["id"] in selected_ids or len(selected) >= limit:
+            return
+        ranked = deepcopy(node)
+        ranked["display"] = {"selectionPurpose": purpose,
+                             "activityScore": round(activity_score[node["id"]], 4),
+                             "adaptiveRank": len(selected) + 1}
+        selected.append(ranked); selected_ids.add(node["id"]); purpose_counts[purpose] += 1
+
+    for node_id in sorted(focus_nodes):
+        take(by_id[node_id], "SELECTED_CONTEXT")
+    cursors = Counter()
+    while len(selected) < min(limit, len(nodes)):
+        progressed = False
+        for purpose in _PURPOSE_SCHEDULE:
+            pool = candidates[purpose]
+            while cursors[purpose] < len(pool) and pool[cursors[purpose]]["id"] in selected_ids:
+                cursors[purpose] += 1
+            if cursors[purpose] < len(pool):
+                take(pool[cursors[purpose]], purpose); cursors[purpose] += 1; progressed = True
+            if len(selected) >= min(limit, len(nodes)):
+                break
+        if not progressed:
+            break
+    for node in candidates["MOST_ACTIVE"]:
+        take(node, "MOST_ACTIVE")
+    return selected, {purpose: purpose_counts.get(purpose, 0) for purpose in _ADAPTIVE_PURPOSES}
+
+
+def _adaptive_rank_edges(edges: list[Dict[str, Any]], allowed: set[str], limit: int,
+                         focus_id: str = "") -> list[Dict[str, Any]]:
+    candidates = [edge for edge in edges if edge.get("nodes") and
+                  all(member in allowed for member in edge["nodes"])]
+    def score(edge: Dict[str, Any]) -> tuple:
+        metadata = edge.get("metadata") or {}; labels = edge.get("labels") or {}
+        signal = 1 if edge.get("evidenceClass") == "CONTRADICTED" or edge.get("contradictions") else 0
+        try: reinforcement = float(metadata.get("reinforcement_count") or 1)
+        except (TypeError, ValueError): reinforcement = 1
+        try: volume = float(labels.get("bytes") or 0) + float(labels.get("packets") or 0)
+        except (TypeError, ValueError): volume = 0
+        return (-int(edge.get("id") == focus_id), -signal,
+                -(_timestamp(edge.get("observedAt")) or -1), -reinforcement, -volume, edge["id"])
+    candidates.sort(key=score)
+    selected = []; selected_ids = set(); pair_counts = Counter(); hub_counts = Counter()
+    def take(edge: Dict[str, Any], purpose: str) -> None:
+        if edge["id"] in selected_ids or len(selected) >= limit:
+            return
+        ranked = deepcopy(edge); ranked["display"] = {"selectionPurpose": purpose,
+                                                       "adaptiveRank": len(selected) + 1}
+        selected.append(ranked); selected_ids.add(edge["id"])
+        pair_counts[tuple(sorted(edge["nodes"]))] += 1
+        hub_counts.update(edge["nodes"])
+    for edge in candidates:
+        members = edge["nodes"]; pair = tuple(sorted(members))
+        forced = edge["id"] == focus_id or focus_id in members or edge.get("evidenceClass") == "CONTRADICTED"
+        if forced or (pair_counts[pair] < 4 and all(hub_counts[node] < 30 for node in members)):
+            take(edge, "SELECTED_CONTEXT" if forced else "RECENT_DIVERSE_FLOW")
+    for edge in candidates:
+        if all(hub_counts[node] < 100 for node in edge["nodes"]):
+            take(edge, "RECENT_FLOW")
+    for edge in candidates:
+        take(edge, "CAPACITY_FILL")
+    return selected
 
 
 def _remember_snapshot(snapshot: Dict[str, Any]) -> None:
@@ -214,22 +365,31 @@ class GraphSelectionResolver:
             "contradictions": [str(item) for item in contradictions[:20]],
         }
 
-    def snapshot(self, *, node_limit: int = 200, edge_limit: int = 300) -> Dict[str, Any]:
+    def snapshot(self, *, node_limit: int = 200, edge_limit: int = 300,
+                 focus_id: str = "") -> Dict[str, Any]:
         node_limit = min(max(int(node_limit), 1), 500)
         edge_limit = min(max(int(edge_limit), 1), 1000)
-        canonical_nodes = [self._normalize_node(node) for node in self._nodes()[:500]]
+        # Detection counts describe the complete deduplicated engine surface;
+        # display counts below describe only the bounded payload returned to a client.
+        all_nodes = self._nodes()
+        all_edges = self._edges()
+        detected_node_count = len(all_nodes)
+        detected_edge_count = len(all_edges)
+        normalized_nodes = [self._normalize_node(node) for node in all_nodes]
+        normalized_edges = [self._normalize_edge(edge) for edge in all_edges]
+        ranked_nodes, _ = _adaptive_rank_nodes(normalized_nodes, normalized_edges, 500)
+        canonical_nodes = [{key: value for key, value in node.items() if key != "display"}
+                           for node in ranked_nodes]
         canonical_allowed = {node["id"] for node in canonical_nodes}
-        canonical_edges = []
-        for edge in self._edges():
-            members = self._edge_nodes(edge)
-            if members and all(member in canonical_allowed for member in members):
-                canonical_edges.append(self._normalize_edge(edge))
-            if len(canonical_edges) >= 1000:
-                break
+        canonical_edges = [{key: value for key, value in edge.items() if key != "display"}
+                           for edge in _adaptive_rank_edges(
+                               normalized_edges, canonical_allowed, 1000)]
         canonical = {
             "status": "ok", "graphRevision": self.revision(), "nodes": canonical_nodes,
             "edges": canonical_edges, "bounded": True, "nodeLimit": 500,
             "edgeLimit": 1000, "nodeCount": len(canonical_nodes), "edgeCount": len(canonical_edges),
+            "detectedNodeCount": detected_node_count, "detectedEdgeCount": detected_edge_count,
+            "displayedNodeCount": len(canonical_nodes), "displayedEdgeCount": len(canonical_edges),
             "capturedAt": time.time(), "snapshotAuthority": "RETAINED_IMMUTABLE_GRAPH_STATE",
         }
         _remember_snapshot(canonical)
@@ -237,12 +397,22 @@ class GraphSelectionResolver:
         # Enrichment is a read-time display sidecar. It is deliberately absent
         # from the content-addressed revision and retained evidence snapshot.
         from ip_enrichment import enrich_graph_node
-        nodes = [enrich_graph_node(node) for node in retained["nodes"][:node_limit]]
+        ranked_nodes, purpose_counts = _adaptive_rank_nodes(
+            retained["nodes"], retained["edges"], node_limit, str(focus_id or ""))
+        nodes = [enrich_graph_node(node) for node in ranked_nodes]
         allowed = {node["id"] for node in nodes}
-        edges = [edge for edge in retained["edges"]
-                 if edge["nodes"] and all(member in allowed for member in edge["nodes"])][:edge_limit]
+        edges = _adaptive_rank_edges(retained["edges"], allowed, edge_limit, str(focus_id or ""))
         return {**retained, "nodes": nodes, "edges": edges, "nodeLimit": node_limit,
-                "edgeLimit": edge_limit, "nodeCount": len(nodes), "edgeCount": len(edges)}
+                "edgeLimit": edge_limit, "nodeCount": len(nodes), "edgeCount": len(edges),
+                "detectedNodeCount": detected_node_count,
+                "detectedEdgeCount": detected_edge_count,
+                "displayedNodeCount": len(nodes), "displayedEdgeCount": len(edges),
+                "ranking": {"lens": "ADAPTIVE_RELEVANCE", "activityDecaySeconds": 120,
+                            "focusId": str(focus_id or "") or None,
+                            "purposeCounts": purpose_counts,
+                            "suppressedNodes": max(0, detected_node_count - len(nodes)),
+                            "suppressedEdges": max(0, detected_edge_count - len(edges)),
+                            "ordinaryPairCap": 4, "ordinaryHubSoftCap": 30}}
 
     def resolve(self, selection: Dict[str, Any]) -> Dict[str, Any]:
         requested_revision = selection.get("graphRevision")

@@ -108,9 +108,51 @@ class GraphOpsDirectorTests(unittest.TestCase):
         snapshot = resolver.snapshot(node_limit=1, edge_limit=1)
         self.assertTrue(snapshot["bounded"])
         self.assertEqual(snapshot["nodeCount"], 1)
+        self.assertEqual(snapshot["displayedNodeCount"], 1)
+        self.assertEqual(snapshot["detectedNodeCount"], 1)
+        self.assertEqual(snapshot["detectedEdgeCount"], 1)
         stale = {"kind": "graph-node", "entityId": "burst-a", "graphRevision": "stale"}
         with self.assertRaisesRegex(GraphResolutionError, "stale"):
             resolver.resolve(stale)
+
+    def test_graph_snapshot_separates_detected_counts_from_display_limits(self):
+        engine = _GraphEngine()
+        engine.nodes.update({f"node-{index}": {"id": f"node-{index}"}
+                             for index in range(8)})
+        engine.edges.update({f"edge-{index}": {"id": f"edge-{index}",
+                                                "nodes": ["burst-a", f"node-{index}"]}
+                             for index in range(8)})
+        snapshot = GraphSelectionResolver(engine).snapshot(node_limit=3, edge_limit=2)
+        self.assertEqual(snapshot["detectedNodeCount"], 9)
+        self.assertEqual(snapshot["detectedEdgeCount"], 9)
+        self.assertEqual(snapshot["displayedNodeCount"], 3)
+        self.assertLessEqual(snapshot["displayedEdgeCount"], 2)
+        self.assertEqual(snapshot["nodeCount"], snapshot["displayedNodeCount"])
+        self.assertEqual(snapshot["edgeCount"], snapshot["displayedEdgeCount"])
+        self.assertEqual(snapshot["ranking"]["lens"], "ADAPTIVE_RELEVANCE")
+        self.assertTrue(all(node["display"]["selectionPurpose"] for node in snapshot["nodes"]))
+
+    def test_adaptive_ranking_pins_focus_and_preserves_purpose_mix(self):
+        engine = _GraphEngine()
+        engine.nodes = {f"host:{index}": {"id": f"host:{index}", "kind": "network_host",
+                                                   "labels": {"ip": f"10.0.{index // 255}.{index % 255}"},
+                                                   "observed_at": 100 + index}
+                        for index in range(60)}
+        engine.edges = {f"flow:{index}": {"id": f"flow:{index}", "kind": "network_flow",
+                                                   "nodes": ["host:0", f"host:{index}"],
+                                                   "observed_at": 100 + index,
+                                                   "labels": {"proto": "tcp"}}
+                        for index in range(1, 60)}
+        snapshot = GraphSelectionResolver(engine).snapshot(
+            node_limit=20, edge_limit=30, focus_id="host:59")
+        self.assertEqual(snapshot["nodes"][0]["id"], "host:59")
+        self.assertEqual(snapshot["nodes"][0]["display"]["selectionPurpose"],
+                         "SELECTED_CONTEXT")
+        purposes = snapshot["ranking"]["purposeCounts"]
+        self.assertGreater(purposes["MOST_ACTIVE"], 0)
+        self.assertGreater(purposes["NEW_ARRIVAL"], 0)
+        self.assertGreater(purposes["NETWORK_DIVERSITY"], 0)
+        self.assertGreater(purposes["STABLE_CONTEXT"], 0)
 
     def test_recent_rendered_snapshot_remains_selectable_while_live_graph_advances(self):
         engine = _GraphEngine()

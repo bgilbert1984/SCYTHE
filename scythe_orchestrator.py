@@ -2024,14 +2024,20 @@ def orchestrator_graphops_selection_graph():
     if not port:
         return jsonify({'status': 'empty', 'message': 'No active SCYTHE graph instance',
                         'graphRevision': 'graph-empty', 'nodes': [], 'edges': [],
-                        'nodeCount': 0, 'edgeCount': 0, 'bounded': True}), 200
+                        'nodeCount': 0, 'edgeCount': 0,
+                        'detectedNodeCount': 0, 'detectedEdgeCount': 0,
+                        'displayedNodeCount': 0, 'displayedEdgeCount': 0,
+                        'bounded': True}), 200
     try:
         node_limit = min(max(int(request.args.get('node_limit', 200)), 1), 500)
         edge_limit = min(max(int(request.args.get('edge_limit', 300)), 1), 1000)
     except (TypeError, ValueError):
         return jsonify({'status': 'error', 'message': 'node_limit and edge_limit must be integers',
                         'nodes': [], 'edges': [], 'bounded': True}), 400
-    query = f"?node_limit={node_limit}&edge_limit={edge_limit}"
+    from urllib.parse import urlencode
+    focus_id = str(request.args.get('focus_id', ''))[:256]
+    query = "?" + urlencode({'node_limit': node_limit, 'edge_limit': edge_limit,
+                              **({'focus_id': focus_id} if focus_id else {})})
     data = _proxy_get(port, '/api/graphops/selection/graph' + query)
     if data is None:
         return jsonify({'status': 'unavailable', 'message': 'Graph instance unreachable',

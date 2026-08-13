@@ -1,4 +1,4 @@
-import { evidenceStyle, graphNodeStyle } from "./evidenceStyles.js";
+import { evidenceStyle, graphPurposeStyle, hostLivenessStyle } from "./evidenceStyles.js";
 import { LiveGraphController } from "./liveGraphController.js";
 import { graphEntityTooltip } from "./graphEntityTooltip.js";
 
@@ -104,13 +104,21 @@ export class LiveHypergraphView {
     }
     for (const node of nodes) {
       const point = positions.get(node.id); if (!point) continue;
-      const style = graphNodeStyle(node);
+      const style = graphPurposeStyle(node);
       const group = document.createElementNS(SVG_NS, "g"); group.classList.add("live-hypergraph__node");
       group.setAttribute("transform", `translate(${point.x} ${point.y})`); group.dataset.entityId = node.id;
       const circle = document.createElementNS(SVG_NS, "circle");
       circle.setAttribute("r", node.kind === "network_host" ? "7" : "6");
       circle.setAttribute("fill", style.color); circle.setAttribute("fill-opacity", String(style.alpha));
       circle.setAttribute("stroke", "#071422"); circle.setAttribute("stroke-width", "2");
+      const liveness = hostLivenessStyle(node);
+      if (liveness) {
+        const badge = document.createElementNS(SVG_NS, "circle");
+        badge.setAttribute("cy", "-12"); badge.setAttribute("r", "3.5");
+        badge.setAttribute("fill", liveness.color); badge.setAttribute("stroke", "#fff");
+        badge.setAttribute("stroke-width", "1"); badge.classList.add("live-hypergraph__liveness-badge");
+        group.appendChild(badge);
+      }
       const title = document.createElementNS(SVG_NS, "title");
       const tooltipText = graphEntityTooltip(node);
       title.textContent = tooltipText; group.append(circle, title);
