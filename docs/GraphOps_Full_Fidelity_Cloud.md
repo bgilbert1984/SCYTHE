@@ -63,7 +63,7 @@ Host-trace evidence is retained in orchestrator memory for 30 minutes and is bou
 
 ## Receipt
 
-Every successful response reports the capsule ID, capsule SHA-256, destination, model, exact-IP/location counts, graph scope, exclusions, route, and authority boundary. The capsule itself and Cloud credential are not returned to the browser.
+Every successful response reports the capsule ID, capsule SHA-256, destination, model, exact-IP/location counts, graph scope, infrastructure/control-plane counts, unresolved evidence tensions, observed changes, withheld tests, exclusions, route, and authority boundary. The capsule itself and Cloud credential are not returned to the browser.
 
 ## Configuration
 
@@ -73,3 +73,25 @@ Environment=OLLAMA_CLOUD_MODEL=gpt-oss:20b
 ```
 
 The API credential is sent only to the fixed HTTPS origin `https://ollama.com`. Do not place the credential in browser JavaScript, request bodies, command-line arguments, or logs.
+# Infrastructure evidence and compatibility
+
+Full-Fidelity capsules may include a bounded `graphops.infrastructure.v1` snapshot. Observed traffic, inferred ASN/GeoIP, modeled AS-path candidates, and display-only geometry retain separate authority labels. Disclosure receipts count each infrastructure class.
+
+Capsules also carry `evidenceCompatibility`. Full fidelity means exact disclosed evidence, not universally sufficient evidence. When a question requires unavailable temporal freshness, sensor-negative-evidence conditions, quantization provenance, interpolation provenance, or infrastructure evidence, deterministic validation refuses the unsupported conclusion and identifies the observations required before re-querying. See [GraphOps_InfraFlow.md](GraphOps_InfraFlow.md).
+
+PeeringDB declarations and RIS Live messages are disclosed as separate evidence layers. PeeringDB remains self-reported; RIS remains a timestamped collector-vantage control-plane observation. Neither is promoted into the measured traceroute or used to assert a physical/data-plane route. Questions naming BGP/RIS, PeeringDB/IX/facilities, or CAIDA relationships require their corresponding evidence class; unavailable layers produce an explicit question-evidence refusal.
+
+Persisted, time-windowed `infrastructureContradictions` may also be disclosed. They are deterministic unresolved source disagreements and tensions, not model-generated verdicts. The Cloud system contract requires the model to preserve alternatives, falsifiers, window and source revisions, and withheld tests. It explicitly forbids translating origin disagreement into hijacking or a collector withdrawal into global unreachability.
+
+## Selection-focused capsule projection
+
+The live infrastructure snapshot can be substantially larger than a Cloud model's context window. Full-Fidelity Cloud therefore does not serialize the entire unrelated environment. Before disclosure, the server deterministically projects exact records around the selected host's network domain and its observed domain flows:
+
+- at most 16 relevant domains and 32 observed flows;
+- at most 16 PeeringDB networks, 32 IX memberships, 32 facility presences, and their 32 referenced facilities/exchanges;
+- at most 32 selection-relevant RIS observations;
+- at most 32 relevant contradiction findings and control-plane changes.
+
+Included records retain their exact values and evidence classes. `capsuleProjection` reports source, included, and omitted counts and binds the projection to the sanitized complete source snapshot with SHA-256. Omitted records are neither summarized nor used for inference. The disclosure receipt displays included versus omitted/hash-bound record totals.
+
+Provider HTTP errors are classified without returning provider bodies or capsule data. In particular, context exhaustion is reported as `request exceeded the model context window` instead of an opaque HTTP 400.

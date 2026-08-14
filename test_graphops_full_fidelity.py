@@ -4,7 +4,7 @@ import unittest
 from unittest.mock import patch
 
 from graphops_full_fidelity import (build_full_fidelity_capsule, disclosure_receipt,
-                                    validate_cloud_report)
+                                    evaluate_evidence_compatibility, validate_cloud_report)
 from scythe_orchestrator import (_HOST_TRACE_EVIDENCE, app)
 
 
@@ -84,6 +84,99 @@ class FullFidelityCapsuleTests(unittest.TestCase):
         self.assertIn('NON_ACTIONABLE_DIRECTION_REPLACED', report['validationConstraints'])
         self.assertIn('DERIVED_PHYSICS_WARNING_CONFIDENCE_CEILING_0.50',
                       report['validationConstraints'])
+
+    def test_question_evidence_compatibility_refuses_missing_temporal_and_sample_claims(self):
+        trace, resolved = evidence_fixture()
+        question = ('Identify conclusions using stale evidence; expose every inference made from absence; '
+                    'test whether quantization or interpolation explains this anomaly')
+        capsule = build_full_fidelity_capsule(question, {
+            'kind': 'graph-node', 'entityId': 'host:20.189.172.33',
+            'graphRevision': 'graph-exact'}, resolved, trace)
+        self.assertFalse(capsule['evidenceCompatibility']['compatible'])
+        classes = {item['class'] for item in capsule['evidenceCompatibility']['missing']}
+        self.assertEqual(classes, {'TEMPORAL_FRESHNESS', 'SENSOR_NEGATIVE_EVIDENCE',
+                                   'QUANTIZATION_PROVENANCE', 'INTERPOLATION_PROVENANCE'})
+        report = validate_cloud_report({
+            'situation': 'A claim', 'anomalies': 'An anomaly', 'measuredVsInferred': 'Mixed',
+            'assessment': 'Certain', 'falsifier': 'Repeat', 'direction': 'Measure', 'confidence': .9,
+        }, capsule)
+        self.assertIn('QUESTION-EVIDENCE MISMATCH', report['situation'])
+        self.assertIn('INSUFFICIENT COMPATIBLE EVIDENCE', report['assessment'])
+        self.assertEqual(report['confidence'], .1)
+
+    def test_infrastructure_evidence_is_disclosed_with_explicit_classes(self):
+        trace, resolved = evidence_fixture()
+        infrastructure = {'schemaVersion': 'graphops.infrastructure.v1', 'domains': [{'id': 'asn:8075'}],
+                          'observedFlows': [{'id': 'flow:1', 'evidenceClass': 'OBSERVED'}],
+                          'modeledPathCandidates': [{'id': 'path:1', 'evidenceClass': 'MODELED_CANDIDATE'}]}
+        capsule = build_full_fidelity_capsule('Explain infrastructure', {
+            'kind': 'graph-node', 'entityId': 'host:20.189.172.33',
+            'graphRevision': 'graph-exact'}, resolved, trace, infrastructure)
+        self.assertTrue(capsule['evidenceCompatibility']['compatible'])
+        receipt = disclosure_receipt(capsule, 'gpt-oss:20b')
+        self.assertEqual(receipt['disclosed']['infrastructureDomains'], 1)
+        self.assertEqual(receipt['disclosed']['observedInfrastructureFlows'], 1)
+
+    def test_cloud_infrastructure_is_selection_focused_exact_and_hash_bound(self):
+        trace, resolved = evidence_fixture()
+        paths = [{'id': f'ris-{index}', 'prefix': f'20.{index}.0.0/16', 'originAsn': 8075,
+                  'collectorId': 'rrc20', 'evidenceClass': 'CONTROL_PLANE_OBSERVATION'}
+                 for index in range(40)]
+        infrastructure = {'schemaVersion': 'graphops.infrastructure.v1', 'graphRevision': 'graph-exact',
+            'domains': [
+                {'id': 'asn:8075', 'asn': 8075, 'observedHostIds': ['host:20.189.172.33'],
+                 'prefixes': ['20.0.0.0/8']},
+                {'id': 'asn:54113', 'asn': 54113, 'observedHostIds': ['host:151.101.1.91'],
+                 'prefixes': ['151.101.0.0/16']}],
+            'observedFlows': [{'id': 'flow-1', 'sourceDomain': 'asn:8075', 'targetDomain': 'asn:54113'}],
+            'peeringdbEvidence': {'datasetRevision': 'pdb-1', 'networks': [
+                {'asn': 8075}, {'asn': 54113}]},
+            'controlPlaneEvidence': {'snapshotRevision': 'ris-1', 'controlPlanePaths': paths},
+            'infrastructureContradictions': {'schemaVersion': 'graphops.infrastructure-contradictions.v1',
+                                              'findings': [], 'changes': [], 'withheld': []}}
+        capsule = build_full_fidelity_capsule('Explain infrastructure', {
+            'kind': 'graph-node', 'entityId': 'host:20.189.172.33',
+            'graphRevision': 'graph-exact'}, resolved, trace, infrastructure)
+        frame = capsule['infrastructureEvidence']; projection = frame['capsuleProjection']
+        self.assertEqual(projection['mode'], 'SELECTION_FOCUSED_EXACT_RECORDS')
+        self.assertEqual(len(frame['controlPlaneEvidence']['controlPlanePaths']), 32)
+        self.assertEqual(projection['omittedCounts']['controlPlanePaths'], 8)
+        self.assertEqual(len(projection['sourceSnapshotSha256']), 64)
+        self.assertEqual(frame['controlPlaneEvidence']['controlPlanePaths'][-1]['id'], 'ris-39')
+        receipt = disclosure_receipt(capsule, 'gpt-oss:20b')
+        self.assertEqual(receipt['capsuleProjection']['omittedCounts']['controlPlanePaths'], 8)
+
+    def test_control_plane_and_declared_questions_require_their_exact_layers(self):
+        trace, resolved = evidence_fixture()
+        infrastructure = {'schemaVersion': 'graphops.infrastructure.v1', 'domains': [], 'observedFlows': [],
+                          'peeringdbEvidence': {'networks': [{'asn': 8075}]},
+                          'controlPlaneEvidence': {'controlPlanePaths': [{
+                              'prefix': '20.0.0.0/8', 'collectorId': 'rrc20',
+                              'evidenceClass': 'CONTROL_PLANE_OBSERVATION'}]}}
+        capsule = build_full_fidelity_capsule('Compare BGP RIS evidence with PeeringDB facility presence', {
+            'kind': 'graph-node', 'entityId': 'host:20.189.172.33',
+            'graphRevision': 'graph-exact'}, resolved, trace, infrastructure)
+        self.assertTrue(capsule['evidenceCompatibility']['compatible'])
+        self.assertIn('CONTROL_PLANE', capsule['evidenceCompatibility']['available'])
+        self.assertIn('PEERINGDB_DECLARED', capsule['evidenceCompatibility']['available'])
+
+    def test_contradiction_evidence_is_disclosed_without_promoting_a_verdict(self):
+        trace, resolved = evidence_fixture()
+        infrastructure = {'schemaVersion': 'graphops.infrastructure.v1', 'domains': [],
+                          'observedFlows': [], 'infrastructureContradictions': {
+                              'schemaVersion': 'graphops.infrastructure-contradictions.v1',
+                              'findings': [{'kind': 'ORIGIN_DISAGREEMENT', 'status': 'UNRESOLVED',
+                                            'boundary': 'NOT A HIJACK DETERMINATION'}],
+                              'changes': [{'kind': 'ORIGIN_CHANGE_OBSERVED'}],
+                              'withheld': [{'kind': 'ABSENCE_INFERENCE_WITHHELD'}]}}
+        capsule = build_full_fidelity_capsule('Explain this source disagreement', {
+            'kind': 'graph-node', 'entityId': 'host:20.189.172.33',
+            'graphRevision': 'graph-exact'}, resolved, trace, infrastructure)
+        self.assertTrue(capsule['evidenceCompatibility']['compatible'])
+        receipt = disclosure_receipt(capsule, 'gpt-oss:20b')['disclosed']
+        self.assertEqual(receipt['infrastructureContradictions'], 1)
+        self.assertEqual(receipt['controlPlaneChanges'], 1)
+        self.assertEqual(receipt['withheldInfrastructureTests'], 1)
 
     @patch('graphops_full_fidelity.ask_ollama_cloud')
     @patch('scythe_orchestrator._graphops_directive_authorized', return_value=True)

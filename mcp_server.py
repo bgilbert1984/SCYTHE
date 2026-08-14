@@ -477,6 +477,104 @@ def register_mcp_routes(app, engine, use_orchestrator: bool = False, auth_valida
         except (TypeError, ValueError) as exc:
             return jsonify({'status': 'error', 'message': str(exc), 'nodes': [], 'edges': []}), 400
 
+    @app.route('/api/graphops/infrastructure/snapshot', methods=['GET'])
+    def graphops_infrastructure_snapshot():
+        """Project bounded live graph evidence into explicit infrastructure classes."""
+        if not _authorized():
+            return _unauthorized()
+        try:
+            from graphops_graph_resolver import GraphSelectionResolver
+            from graphops_infrastructure import (attach_external_infrastructure_evidence,
+                                                 build_infrastructure_snapshot)
+            from graphops_peeringdb import get_peeringdb_client
+            from graphops_ris_live import get_ris_live_collector
+            focus_id = request.args.get('focus_id', '')
+            graph = GraphSelectionResolver(graph_selection_engine).snapshot(
+                node_limit=request.args.get('node_limit', 500),
+                edge_limit=request.args.get('edge_limit', 1000), focus_id=focus_id)
+            base = build_infrastructure_snapshot(graph, focus_id)
+            asns = [item.get('asn') for item in base.get('domains', []) if item.get('asn')]
+            prefixes = [prefix for item in base.get('domains', []) for prefix in item.get('prefixes', [])]
+            peeringdb = get_peeringdb_client().snapshot(asns)
+            collector = get_ris_live_collector(); collector.update_scope(prefixes, asns)
+            since = float(request.args['since']) if request.args.get('since') else None
+            until = float(request.args['until']) if request.args.get('until') else None
+            if since is not None and until is not None and (until <= since or until - since > 604800):
+                raise ValueError('infrastructure time window must be increasing and at most 7 days')
+            fused = attach_external_infrastructure_evidence(
+                base, peeringdb, collector.snapshot(since=since, until=until))
+            from graphops_infrastructure_contradictions import evaluate_infrastructure_contradictions
+            fused['infrastructureContradictions'] = evaluate_infrastructure_contradictions(
+                fused, since=since, until=until, limit=request.args.get('contradiction_limit', 100))
+            return jsonify(fused)
+        except (TypeError, ValueError) as exc:
+            return jsonify({'status': 'error', 'message': str(exc), 'domains': [],
+                            'observedFlows': [], 'modeledPathCandidates': [], 'bounded': True}), 400
+
+    @app.route('/api/graphops/infrastructure/peeringdb/v1/snapshot', methods=['GET'])
+    def graphops_peeringdb_snapshot():
+        if not _authorized():
+            return _unauthorized()
+        try:
+            from graphops_graph_resolver import GraphSelectionResolver
+            from graphops_infrastructure import build_infrastructure_snapshot
+            from graphops_peeringdb import get_peeringdb_client
+            graph = GraphSelectionResolver(graph_selection_engine).snapshot(node_limit=500, edge_limit=1000)
+            base = build_infrastructure_snapshot(graph)
+            asns = [item.get('asn') for item in base.get('domains', []) if item.get('asn')]
+            return jsonify(get_peeringdb_client().snapshot(asns, force=request.args.get('refresh') == '1'))
+        except (TypeError, ValueError) as exc:
+            return jsonify({'status': 'error', 'message': str(exc), 'networks': [], 'bounded': True}), 400
+
+    @app.route('/api/graphops/infrastructure/control-plane/v1/snapshot', methods=['GET'])
+    def graphops_control_plane_snapshot():
+        if not _authorized():
+            return _unauthorized()
+        try:
+            from graphops_graph_resolver import GraphSelectionResolver
+            from graphops_infrastructure import build_infrastructure_snapshot
+            from graphops_ris_live import get_ris_live_collector
+            graph = GraphSelectionResolver(graph_selection_engine).snapshot(node_limit=500, edge_limit=1000)
+            base = build_infrastructure_snapshot(graph)
+            asns = [item.get('asn') for item in base.get('domains', []) if item.get('asn')]
+            prefixes = [prefix for item in base.get('domains', []) for prefix in item.get('prefixes', [])]
+            collector = get_ris_live_collector(); collector.update_scope(prefixes, asns)
+            since = float(request.args['since']) if request.args.get('since') else None
+            until = float(request.args['until']) if request.args.get('until') else None
+            return jsonify(collector.snapshot(since=since, until=until,
+                                               limit=request.args.get('limit', 128)))
+        except (TypeError, ValueError) as exc:
+            return jsonify({'status': 'error', 'message': str(exc), 'controlPlanePaths': [],
+                            'bounded': True}), 400
+
+    @app.route('/api/graphops/infrastructure/contradictions/v1', methods=['GET'])
+    def graphops_infrastructure_contradictions():
+        if not _authorized():
+            return _unauthorized()
+        try:
+            from graphops_graph_resolver import GraphSelectionResolver
+            from graphops_infrastructure import (attach_external_infrastructure_evidence,
+                                                 build_infrastructure_snapshot)
+            from graphops_infrastructure_contradictions import evaluate_infrastructure_contradictions
+            from graphops_peeringdb import get_peeringdb_client
+            from graphops_ris_live import get_ris_live_collector
+            graph = GraphSelectionResolver(graph_selection_engine).snapshot(node_limit=500, edge_limit=1000)
+            base = build_infrastructure_snapshot(graph)
+            asns = [item.get('asn') for item in base.get('domains', []) if item.get('asn')]
+            prefixes = [prefix for item in base.get('domains', []) for prefix in item.get('prefixes', [])]
+            since = float(request.args['since']) if request.args.get('since') else None
+            until = float(request.args['until']) if request.args.get('until') else None
+            if since is not None and until is not None and (until <= since or until - since > 604800):
+                raise ValueError('contradiction time window must be increasing and at most 7 days')
+            collector = get_ris_live_collector(); collector.update_scope(prefixes, asns)
+            fused = attach_external_infrastructure_evidence(
+                base, get_peeringdb_client().snapshot(asns), collector.snapshot(since=since, until=until, limit=256))
+            return jsonify(evaluate_infrastructure_contradictions(
+                fused, since=since, until=until, limit=request.args.get('limit', 100)))
+        except (TypeError, ValueError) as exc:
+            return jsonify({'status': 'error', 'message': str(exc), 'findings': [],
+                            'changes': [], 'bounded': True}), 400
+
     @app.route('/api/graphops/selection/resolve', methods=['POST'])
     def graphops_selection_resolve():
         """Resolve a typed selection against its retained immutable revision."""

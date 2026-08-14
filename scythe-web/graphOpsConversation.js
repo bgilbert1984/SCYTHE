@@ -86,6 +86,9 @@ export function formatCloudFullFidelityConversation(payload, {entityContext = ""
   const report = result.report ?? {};
   const receipt = payload?.disclosureReceipt ?? {};
   const disclosed = receipt.disclosed ?? {};
+  const projection = receipt.capsuleProjection ?? {};
+  const includedRecords = Object.values(projection.includedCounts ?? {}).reduce((sum, value) => sum + (Number(value) || 0), 0);
+  const omittedRecords = Object.values(projection.omittedCounts ?? {}).reduce((sum, value) => sum + (Number(value) || 0), 0);
   const lines = [
     "GRAPHOPS CONVERSATION // COMPLETED // OLLAMA CLOUD // FULL FIDELITY",
     `QUESTION // ${text(payload?.question)}`,
@@ -110,6 +113,11 @@ export function formatCloudFullFidelityConversation(payload, {entityContext = ""
   `SHA-256 // ${text(receipt.capsuleSha256)}`,
   `DESTINATION // ${text(receipt.destination)} // ${text(receipt.model)}`,
   `DISCLOSED // ${text(disclosed.exactIpAddresses, "0")} EXACT IPs · ${text(disclosed.exactLocations, "0")} EXACT LOCATIONS · EXACT TIMESTAMPS`,
+  `INFRASTRUCTURE // ${text(disclosed.infrastructureDomains, "0")} DOMAINS · ${text(disclosed.observedInfrastructureFlows, "0")} OBSERVED FLOWS · ${text(disclosed.modeledPathCandidates, "0")} MODELED PATH CANDIDATES`,
+  `DECLARED // ${text(disclosed.peeringdbNetworks, "0")} PEERINGDB NETWORKS · ${text(disclosed.declaredIxMemberships, "0")} IX MEMBERSHIPS`,
+  `CONTROL PLANE // ${text(disclosed.controlPlaneObservations, "0")} RIS COLLECTOR-VANTAGE OBSERVATIONS · NON-AUTHORITATIVE FOR DATA PLANE`,
+  `EVIDENCE TENSIONS // ${text(disclosed.infrastructureContradictions, "0")} UNRESOLVED FINDINGS · ${text(disclosed.controlPlaneChanges, "0")} OBSERVED CHANGES · ${text(disclosed.withheldInfrastructureTests, "0")} TESTS WITHHELD`,
+  `CAPSULE PROJECTION // ${text(projection.mode)} // ${includedRecords} EXACT RECORDS INCLUDED · ${omittedRecords} ENVIRONMENT RECORDS OMITTED AND HASH-BOUND`,
   `GRAPH SCOPE // 1 SELECTED ENTITY · ${text(disclosed.incidentEdges, "0")} INCIDENT EDGES · ${text(disclosed.memberNodes, "0")} MEMBER NODES`,
   `EXCLUDED // ${(receipt.excluded ?? []).join(" · ") || "UNAVAILABLE"}`,
   `BOUNDARY // ${text(payload?.boundary)}`);

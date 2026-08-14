@@ -5,6 +5,35 @@ function finitePosition(position) {
     Number.isFinite(Number(position[0])) && Number.isFinite(Number(position[1]));
 }
 
+function readProperty(entity, key, time) {
+  const value = entity?.properties?.[key];
+  return value?.getValue?.(time) ?? value ?? null;
+}
+
+export function summarizeGraphCluster(entities, time, limit = 24) {
+  const rows = (Array.isArray(entities) ? entities : []).map((entity) => ({
+    id: String(readProperty(entity, "graphEntityId", time) ?? "").slice(0, 256),
+    kind: String(readProperty(entity, "graphKind", time) ?? "entity").slice(0, 64),
+    evidence: String(readProperty(entity, "evidenceClass", time) ?? "UNAVAILABLE").slice(0, 32),
+    organization: String(readProperty(entity, "organization", time) ?? "").slice(0, 160),
+    place: String(readProperty(entity, "placeLabel", time) ?? "").slice(0, 160),
+  })).filter((row) => row.id);
+  const hosts = rows.filter((row) => /host/i.test(row.kind) || row.id.startsWith("host:"));
+  const listed = (hosts.length ? hosts : rows).slice(0, Math.max(1, limit));
+  const remainder = (hosts.length ? hosts.length : rows.length) - listed.length;
+  return {
+    entityCount: rows.length, hostCount: hosts.length,
+    markerCount: hosts.length || rows.length,
+    text: [
+      `SCREEN CLUSTER // ${rows.length} ENTITIES // ${hosts.length} HOSTS`,
+      ...listed.map((row) => `${row.id}${row.organization ? ` // ${row.organization}` : ""}` +
+        `${row.place ? ` // ${row.place}` : ""} // ${row.evidence}`),
+      ...(remainder > 0 ? [`+ ${remainder} MORE`] : []),
+      "BOUNDARY // SCREEN-SPACE PROXIMITY; GEOIP REMAINS INFERRED",
+    ].join("\n"),
+  };
+}
+
 export class GraphOverlayLayer {
   constructor({ viewer, Cesium, apiBase = "", fetchImpl = globalThis.fetch,
                 container = globalThis.document?.getElementById("globe-root"),
@@ -17,12 +46,36 @@ export class GraphOverlayLayer {
     this.nodeLimit = Math.min(Math.max(nodeLimit, 1), 500);
     this.edgeLimit = Math.min(Math.max(edgeLimit, 1), 1000);
     this.entityIds = new Set(); this.nodes = new Map(); this.graphRevision = null; this.renderKey = null;
-    this.clickHandler = null; this.refreshMilliseconds = Math.max(500, refreshMilliseconds);
+    this.clickHandler = null; this.clusterSource = null; this.collection = viewer.entities;
+    this.removeClusterListener = null; this.tooltip = null;
+    this.refreshMilliseconds = Math.max(500, refreshMilliseconds);
     this.refreshTimer = null; this.running = false;
   }
 
   async start() {
     this.running = true;
+    if (this.Cesium.CustomDataSource && this.viewer.dataSources?.add) {
+      this.clusterSource = new this.Cesium.CustomDataSource("SCYTHE Graph Hosts // CLUSTERED DISPLAY");
+      await this.viewer.dataSources.add(this.clusterSource); this.collection = this.clusterSource.entities;
+      const clustering = this.clusterSource.clustering;
+      clustering.enabled = true; clustering.pixelRange = 45; clustering.minimumClusterSize = 2;
+      clustering.clusterBillboards = true; clustering.clusterLabels = true; clustering.clusterPoints = true;
+      this.removeClusterListener = clustering.clusterEvent.addEventListener((entities, cluster) => {
+        const summary = summarizeGraphCluster(entities, this.viewer.clock?.currentTime);
+        cluster.billboard.show = false;
+        cluster.point.show = true; cluster.point.pixelSize = Math.min(46, 25 + Math.sqrt(summary.entityCount) * 2);
+        cluster.point.color = this.Cesium.Color.fromCssColorString("#0b6079").withAlpha(.92);
+        cluster.point.outlineColor = this.Cesium.Color.fromCssColorString("#66ddff"); cluster.point.outlineWidth = 2;
+        cluster.label.show = true; cluster.label.text = String(summary.markerCount);
+        cluster.label.font = "bold 13px ui-monospace,monospace";
+        cluster.label.fillColor = this.Cesium.Color.WHITE; cluster.label.outlineColor = this.Cesium.Color.BLACK;
+        cluster.label.outlineWidth = 2; cluster.label.style = this.Cesium.LabelStyle?.FILL_AND_OUTLINE;
+        cluster.label.horizontalOrigin = this.Cesium.HorizontalOrigin?.CENTER;
+        cluster.label.verticalOrigin = this.Cesium.VerticalOrigin?.CENTER;
+        cluster.label.pixelOffset = new this.Cesium.Cartesian2(0, 0);
+      });
+    }
+    this.#createTooltip();
     if (this.controller) {
       this.unsubscribe = this.controller.subscribe((update) => {
         if (!this.running) return;
@@ -37,6 +90,7 @@ export class GraphOverlayLayer {
       this.clickHandler = new this.Cesium.ScreenSpaceEventHandler(this.viewer.scene.canvas);
       this.clickHandler.setInputAction((movement) => {
         const entity = this.viewer.scene.pick(movement.position)?.id;
+        if (Array.isArray(entity)) return;
         const isNode = entity?.id?.startsWith("scythe-web:graph-node:");
         const isEdge = entity?.id?.startsWith("scythe-web:graph-edge:");
         if (!isNode && !isEdge) return;
@@ -51,6 +105,16 @@ export class GraphOverlayLayer {
           observedAt: read("observedAt"),
         }}));
       }, this.Cesium.ScreenSpaceEventType.LEFT_CLICK);
+      if (this.Cesium.ScreenSpaceEventType.MOUSE_MOVE) this.clickHandler.setInputAction((movement) => {
+        const picked = this.viewer.scene.pick(movement.endPosition)?.id;
+        if (!Array.isArray(picked) || picked.length < 2) return this.#hideTooltip();
+        const graphEntities = picked.filter((entity) => entity?.id?.startsWith("scythe-web:graph-node:"));
+        if (graphEntities.length < 2) return this.#hideTooltip();
+        const summary = summarizeGraphCluster(graphEntities, this.viewer.clock?.currentTime);
+        this.tooltip.textContent = summary.text; this.tooltip.hidden = false;
+        this.tooltip.style.left = `${Number(movement.endPosition?.x ?? 0) + 13}px`;
+        this.tooltip.style.top = `${Number(movement.endPosition?.y ?? 0) + 13}px`;
+      }, this.Cesium.ScreenSpaceEventType.MOUSE_MOVE);
     }
     if (!this.controller) this.#scheduleRefresh();
     return this;
@@ -89,8 +153,10 @@ export class GraphOverlayLayer {
       const evidenceClass = ["OBSERVED", "MEASURED", "SYNTHETIC", "INFERRED"].includes(node.evidenceClass)
         ? node.evidenceClass : "INFERRED";
       const style = graphNodeStyle({...node, evidenceClass});
+      const network = node.enrichment?.network ?? {}; const geo = node.enrichment?.geo ?? {};
+      const placeLabel = [geo.city, geo.region, geo.country].filter(Boolean).join(", ");
       const entityId = `scythe-web:graph-node:${encodeURIComponent(node.id)}`;
-      this.viewer.entities.add({id: entityId,
+      this.collection.add({id: entityId,
         position: this.Cesium.Cartesian3.fromDegrees(lon, lat, Math.max(height, 500)),
         point: {pixelSize: 9, color: this.Cesium.Color.fromCssColorString(style.color).withAlpha(style.alpha),
           outlineColor: this.Cesium.Color.BLACK, outlineWidth: 1},
@@ -100,7 +166,8 @@ export class GraphOverlayLayer {
           distanceDisplayCondition: new this.Cesium.DistanceDisplayCondition(0, 2_000_000)},
         properties: {graphEntityId: node.id, graphRevision: graph.graphRevision, graphKind: node.kind,
           latitudeDegrees: lat, longitudeDegrees: lon, heightMeters: height,
-          observedAt: node.observedAt ?? null, evidenceClass},
+          observedAt: node.observedAt ?? null, evidenceClass,
+          organization: network.organization ?? "", placeLabel},
       });
       this.entityIds.add(entityId); this.nodes.set(node.id, {lat, lon, height, evidenceClass});
     }
@@ -111,7 +178,7 @@ export class GraphOverlayLayer {
       const id = `scythe-web:graph-edge:${encodeURIComponent(edge.id)}`;
       const edgeClass = endpoints.every((value) => value.evidenceClass === "SYNTHETIC")
         ? "SYNTHETIC" : "INFERRED";
-      this.viewer.entities.add({id, polyline: {positions: endpoints.map((p) =>
+      this.collection.add({id, polyline: {positions: endpoints.map((p) =>
         this.Cesium.Cartesian3.fromDegrees(p.lon, p.lat, Math.max(p.height, 300))), width: 1.5,
         material: cesiumPolylineMaterial(this.Cesium, edgeClass)},
         properties: {graphEntityId: edge.id, graphRevision: graph.graphRevision,
@@ -133,8 +200,19 @@ export class GraphOverlayLayer {
     this.container?.dispatchEvent(new EventClass("scythe-web:graph-status", {bubbles: true, detail}));
   }
 
-  #clearEntities() { for (const id of this.entityIds) this.viewer.entities.removeById(id); this.entityIds.clear(); this.nodes.clear(); }
+  #createTooltip() {
+    const document = this.container?.ownerDocument;
+    if (!document?.createElement || this.tooltip) return;
+    this.tooltip = document.createElement("div"); this.tooltip.className = "graph-globe-cluster-tooltip";
+    this.tooltip.hidden = true; this.tooltip.setAttribute("role", "tooltip"); this.container.append(this.tooltip);
+  }
+  #hideTooltip() { if (this.tooltip) this.tooltip.hidden = true; }
+
+  #clearEntities() { for (const id of this.entityIds) this.collection.removeById(id); this.entityIds.clear(); this.nodes.clear(); this.#hideTooltip(); }
   destroy() { this.running = false; clearTimeout(this.refreshTimer); this.refreshTimer = null;
     this.unsubscribe?.(); this.unsubscribe = null;
-    this.clickHandler?.destroy(); this.clickHandler = null; this.#clearEntities(); }
+    this.clickHandler?.destroy(); this.clickHandler = null; this.#clearEntities();
+    this.removeClusterListener?.(); this.removeClusterListener = null;
+    if (this.clusterSource) this.viewer.dataSources.remove(this.clusterSource, true);
+    this.clusterSource = null; this.tooltip?.remove(); this.tooltip = null; }
 }

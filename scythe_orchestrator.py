@@ -1381,7 +1381,16 @@ def graphops_cloud_full_fidelity():
     try:
         from graphops_full_fidelity import (ask_ollama_cloud, build_full_fidelity_capsule,
                                             disclosure_receipt)
-        capsule = build_full_fidelity_capsule(question, selection, retained['resolved'], trace)
+        infrastructure = None
+        port = _get_primary_instance_port()
+        if port:
+            from urllib.parse import urlencode
+            infrastructure = _proxy_get(port, '/api/graphops/infrastructure/snapshot?' + urlencode({
+                'node_limit': 500, 'edge_limit': 1000,
+                'focus_id': str(selection.get('entityId') or '')[:256],
+            }), timeout=90)
+        capsule = build_full_fidelity_capsule(
+            question, selection, retained['resolved'], trace, infrastructure)
         cloud_result = ask_ollama_cloud(capsule)
         receipt = disclosure_receipt(capsule, cloud_result['model'])
         return jsonify({
@@ -2105,6 +2114,85 @@ def orchestrator_graphops_selection_graph():
     if data is None:
         return jsonify({'status': 'unavailable', 'message': 'Graph instance unreachable',
                         'nodes': [], 'edges': [], 'bounded': True}), 502
+    return jsonify(data)
+
+
+@app.route('/api/graphops/infrastructure/snapshot', methods=['GET'])
+def orchestrator_graphops_infrastructure_snapshot():
+    """Proxy the evidence-partitioned infrastructure projection."""
+    port = _get_primary_instance_port()
+    if not port:
+        return jsonify({'status': 'empty', 'schemaVersion': 'graphops.infrastructure.v1',
+                        'graphRevision': 'graph-empty', 'domains': [], 'observedFlows': [],
+                        'modeledPathCandidates': [], 'bounded': True}), 200
+    try:
+        node_limit = min(max(int(request.args.get('node_limit', 500)), 1), 500)
+        edge_limit = min(max(int(request.args.get('edge_limit', 1000)), 1), 1000)
+    except (TypeError, ValueError):
+        return jsonify({'status': 'error', 'message': 'node_limit and edge_limit must be integers',
+                        'domains': [], 'observedFlows': [], 'bounded': True}), 400
+    from urllib.parse import urlencode
+    focus_id = str(request.args.get('focus_id', ''))[:256]
+    query = '?' + urlencode({'node_limit': node_limit, 'edge_limit': edge_limit,
+                              **({'focus_id': focus_id} if focus_id else {}),
+                              **({key: request.args[key] for key in ('since', 'until', 'contradiction_limit')
+                                  if request.args.get(key)})})
+    data = _proxy_get(port, '/api/graphops/infrastructure/snapshot' + query, timeout=90)
+    if data is None:
+        return jsonify({'status': 'unavailable', 'message': 'Graph instance unreachable',
+                        'domains': [], 'observedFlows': [], 'bounded': True}), 502
+    return jsonify(data)
+
+
+@app.route('/api/graphops/infrastructure/peeringdb/v1/snapshot', methods=['GET'])
+def orchestrator_graphops_peeringdb_snapshot():
+    """Proxy the ASN-bounded, versioned PeeringDB evidence cache."""
+    port = _get_primary_instance_port()
+    if not port:
+        return jsonify({'status': 'empty', 'schemaVersion': 'graphops.peeringdb.v1',
+                        'networks': [], 'ixMemberships': [], 'facilities': [], 'bounded': True}), 200
+    refresh = '1' if request.args.get('refresh') == '1' else '0'
+    data = _proxy_get(port, '/api/graphops/infrastructure/peeringdb/v1/snapshot?refresh=' + refresh,
+                      timeout=90)
+    if data is None:
+        return jsonify({'status': 'unavailable', 'networks': [], 'bounded': True}), 502
+    return jsonify(data)
+
+
+@app.route('/api/graphops/infrastructure/control-plane/v1/snapshot', methods=['GET'])
+def orchestrator_graphops_control_plane_snapshot():
+    """Proxy bounded RIS Live observations without exposing a firehose."""
+    port = _get_primary_instance_port()
+    if not port:
+        return jsonify({'status': 'empty', 'schemaVersion': 'graphops.ris-live.v1',
+                        'controlPlanePaths': [], 'bounded': True}), 200
+    allowed = {'since', 'until', 'limit'}
+    if set(request.args) - allowed:
+        return jsonify({'status': 'error', 'message': 'unknown control-plane query parameter'}), 400
+    from urllib.parse import urlencode
+    query = '?' + urlencode({key: request.args[key] for key in allowed if request.args.get(key)})
+    data = _proxy_get(port, '/api/graphops/infrastructure/control-plane/v1/snapshot' + query,
+                      timeout=15)
+    if data is None:
+        return jsonify({'status': 'unavailable', 'controlPlanePaths': [], 'bounded': True}), 502
+    return jsonify(data)
+
+
+@app.route('/api/graphops/infrastructure/contradictions/v1', methods=['GET'])
+def orchestrator_graphops_infrastructure_contradictions():
+    """Proxy bounded, unresolved cross-layer infrastructure findings."""
+    port = _get_primary_instance_port()
+    if not port:
+        return jsonify({'status': 'empty', 'schemaVersion': 'graphops.infrastructure-contradictions.v1',
+                        'findings': [], 'changes': [], 'bounded': True}), 200
+    allowed = {'since', 'until', 'limit'}
+    if set(request.args) - allowed:
+        return jsonify({'status': 'error', 'message': 'unknown contradiction query parameter'}), 400
+    from urllib.parse import urlencode
+    query = '?' + urlencode({key: request.args[key] for key in allowed if request.args.get(key)})
+    data = _proxy_get(port, '/api/graphops/infrastructure/contradictions/v1' + query, timeout=90)
+    if data is None:
+        return jsonify({'status': 'unavailable', 'findings': [], 'changes': [], 'bounded': True}), 502
     return jsonify(data)
 
 

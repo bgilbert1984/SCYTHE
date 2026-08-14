@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { GraphOverlayLayer } from "./graphOverlayLayer.js";
+import { GraphOverlayLayer, summarizeGraphCluster } from "./graphOverlayLayer.js";
 
 function fixture() {
   const values = [];
@@ -61,4 +61,19 @@ test("graph overlay consumes the shared controller without a second graph poll",
   assert.equal(layer.graphRevision, "shared-1");
   assert.equal(viewer.entities.values.length, 1);
   layer.destroy(); assert.equal(listener, null);
+});
+
+test("screen clusters count hosts and retain a bounded evidence-labelled hover list", () => {
+  const entities = [
+    {properties: {graphEntityId: "host:192.0.2.1", graphKind: "network_host", evidenceClass: "OBSERVED",
+                  organization: "Example Network", placeLabel: "Seattle, Washington"}},
+    {properties: {graphEntityId: "host:192.0.2.2", graphKind: "network_host", evidenceClass: "INFERRED"}},
+    {properties: {graphEntityId: "event:burst-1", graphKind: "event", evidenceClass: "OBSERVED"}},
+  ];
+  const summary = summarizeGraphCluster(entities);
+  assert.equal(summary.entityCount, 3); assert.equal(summary.hostCount, 2); assert.equal(summary.markerCount, 2);
+  assert.match(summary.text, /SCREEN CLUSTER \/\/ 3 ENTITIES \/\/ 2 HOSTS/);
+  assert.match(summary.text, /host:192\.0\.2\.1 \/\/ Example Network \/\/ Seattle, Washington \/\/ OBSERVED/);
+  assert.doesNotMatch(summary.text, /event:burst-1/);
+  assert.match(summary.text, /SCREEN-SPACE PROXIMITY; GEOIP REMAINS INFERRED/);
 });

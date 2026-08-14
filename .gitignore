@@ -18,6 +18,7 @@ data/
 logs/
 tmp/
 temp/
+runtime/
 instances/
 metrics_logs/
 

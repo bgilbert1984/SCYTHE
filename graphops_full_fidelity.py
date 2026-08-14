@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 import json
 import os
 import re
@@ -108,8 +109,164 @@ def _trace_frame(trace: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def evaluate_evidence_compatibility(question: str, infrastructure: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Declare whether this capsule contains the evidence classes a question requires."""
+    lower = question.lower()
+    requirements = []
+    checks = (
+        (("stale", "freshness", "claim time", "analysis window"), "TEMPORAL_FRESHNESS",
+         "claim timestamps, source freshness, and an explicit analysis window"),
+        (("absence", "missing evidence", "inference made from absence"), "SENSOR_NEGATIVE_EVIDENCE",
+         "sensor capability, active status, coverage, position, and temporal alignment"),
+        (("quantization", "quantized"), "QUANTIZATION_PROVENANCE",
+         "encoding scale/offset and neighboring authoritative raw samples"),
+        (("interpolation", "interpolated"), "INTERPOLATION_PROVENANCE",
+         "interpolation algorithm and neighboring authoritative raw samples"),
+        (("infrastructure", "cable"), "INFRASTRUCTURE",
+         "observed flows plus inference/model provenance"),
+        (("bgp", "ris", "control-plane", "control plane", "as path"), "CONTROL_PLANE",
+         "prefix-relevant RIS messages with collector vantage and timestamps"),
+        (("peeringdb", "exchange point", " ix ", "facility", "peering policy"), "PEERINGDB_DECLARED",
+         "ASN-scoped, versioned PeeringDB declarations"),
+        (("caida", "as relationship"), "CAIDA_RELATIONSHIPS",
+         "versioned CAIDA relationship research inference"),
+        (("contradiction", "source disagreement", "evidence tension", "origin change"),
+         "INFRASTRUCTURE_CONTRADICTIONS",
+         "revision-pinned contradiction findings, alternatives, falsifiers, and withheld tests"),
+    )
+    for keywords, name, needed in checks:
+        if any(keyword in lower for keyword in keywords):
+            requirements.append({"class": name, "needed": needed})
+    available = {"HOST_TRACE", "PINNED_GRAPH_ENTITY"}
+    if infrastructure and infrastructure.get("schemaVersion") == "graphops.infrastructure.v1":
+        available.add("INFRASTRUCTURE")
+        if (infrastructure.get("peeringdbEvidence") or {}).get("networks"):
+            available.add("PEERINGDB_DECLARED")
+        if (infrastructure.get("controlPlaneEvidence") or {}).get("controlPlanePaths"):
+            available.add("CONTROL_PLANE")
+        if (infrastructure.get("infrastructureContradictions") or {}).get("schemaVersion") == \
+                "graphops.infrastructure-contradictions.v1":
+            available.add("INFRASTRUCTURE_CONTRADICTIONS")
+    # A host trace has capture time, but it does not establish source freshness or an analysis window.
+    missing = [item for item in requirements if item["class"] not in available]
+    return {"compatible": not missing, "required": requirements, "available": sorted(available),
+            "missing": missing,
+            "boundary": "FULL FIDELITY PRESERVES VALUES; IT DOES NOT CREATE ABSENT EVIDENCE"}
+
+
+def _origin_asns(value: Any) -> set[int]:
+    values = value if isinstance(value, list) else [value]; result = set()
+    for item in values:
+        if isinstance(item, list): result.update(_origin_asns(item))
+        else:
+            try: result.add(int(item))
+            except (TypeError, ValueError): pass
+    return result
+
+
+def _prefix_overlaps(value: Any, prefixes: list[str]) -> bool:
+    try: observed = ipaddress.ip_network(str(value), strict=False)
+    except ValueError: return False
+    for prefix in prefixes:
+        try: scoped = ipaddress.ip_network(str(prefix), strict=False)
+        except ValueError: continue
+        if observed.version == scoped.version and observed.overlaps(scoped): return True
+    return False
+
+
+def _focused_infrastructure_frame(infrastructure: Optional[Dict[str, Any]],
+                                  selection: Dict[str, Any]) -> Dict[str, Any]:
+    """Retain exact selection-relevant records with an auditable omission receipt."""
+    source = infrastructure or {"status": "unavailable", "domains": [], "observedFlows": []}
+    entity_id = str(selection.get("entityId") or "")
+    all_domains = list(source.get("domains") or [])
+    focus_domains = [row for row in all_domains if entity_id in (row.get("observedHostIds") or [])]
+    focus_ids = {row.get("id") for row in focus_domains if row.get("id")}
+    all_flows = list(source.get("observedFlows") or [])
+    incident_flows = [row for row in all_flows if not focus_ids or
+                      focus_ids.intersection({row.get("sourceDomain"), row.get("targetDomain")})][:32]
+    relevant_ids = set(focus_ids)
+    for row in incident_flows:
+        relevant_ids.update(filter(None, (row.get("sourceDomain"), row.get("targetDomain"))))
+    domains = ([row for row in all_domains if row.get("id") in relevant_ids] if relevant_ids
+               else all_domains[:16])[:16]
+    relevant_asns = {int(row["asn"]) for row in domains if row.get("asn") is not None}
+    focus_prefixes = [prefix for row in (focus_domains or domains) for prefix in row.get("prefixes") or []]
+
+    pdb_source = source.get("peeringdbEvidence") or {}
+    networks = [row for row in pdb_source.get("networks") or []
+                if not relevant_asns or int(row.get("asn") or 0) in relevant_asns][:16]
+    ix_memberships = [row for row in pdb_source.get("ixMemberships") or []
+                      if not relevant_asns or int(row.get("asn") or 0) in relevant_asns][:32]
+    facility_presences = [row for row in pdb_source.get("facilityPresences") or []
+                          if not relevant_asns or int(row.get("asn") or 0) in relevant_asns][:32]
+    ix_ids = {row.get("ix_id") for row in ix_memberships}; facility_ids = {
+        row.get("fac_id") for row in facility_presences}
+    exchanges = [row for row in pdb_source.get("exchanges") or [] if row.get("id") in ix_ids][:32]
+    facilities = [row for row in pdb_source.get("facilities") or [] if row.get("id") in facility_ids][:32]
+    pdb = {key: pdb_source.get(key) for key in ("status", "schemaVersion", "datasetRevision",
+           "retrievedAt", "retrievedEpoch", "recordUpdatedThrough", "provenance", "boundary", "scope")
+           if pdb_source.get(key) is not None}
+    pdb.update({"networks": networks, "ixMemberships": ix_memberships,
+                "facilityPresences": facility_presences, "exchanges": exchanges,
+                "facilities": facilities})
+
+    ris_source = source.get("controlPlaneEvidence") or {}
+    all_paths = list(ris_source.get("controlPlanePaths") or [])
+    relevant_paths = [row for row in all_paths if
+                      _origin_asns(row.get("originAsn")).intersection(relevant_asns) or
+                      _prefix_overlaps(row.get("prefix"), focus_prefixes)]
+    paths = (relevant_paths or all_paths)[-32:]
+    ris = {key: ris_source.get(key) for key in ("status", "schemaVersion", "snapshotRevision",
+           "capturedAt", "observationWindow", "scope", "collectors", "provenance", "boundary")
+           if ris_source.get(key) is not None}
+    ris["controlPlanePaths"] = paths
+
+    contradiction_source = source.get("infrastructureContradictions") or {}
+    contradictions = {key: contradiction_source.get(key) for key in ("status", "schemaVersion",
+        "revision", "capturedAt", "window", "sourceRevisions", "boundary")
+        if contradiction_source.get(key) is not None}
+    contradictions["findings"] = [row for row in contradiction_source.get("findings") or []
+        if not relevant_ids or row.get("subject") in relevant_ids][:32]
+    path_prefixes = {row.get("prefix") for row in paths}
+    contradictions["changes"] = [row for row in contradiction_source.get("changes") or []
+        if not path_prefixes or row.get("prefix") in path_prefixes][:32]
+    contradictions["withheld"] = list(contradiction_source.get("withheld") or [])[:16]
+
+    canonical_source = json.dumps(_safe_mapping(source), sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    source_counts = {"domains": len(all_domains), "observedFlows": len(all_flows),
+        "peeringdbNetworks": len(pdb_source.get("networks") or []),
+        "ixMemberships": len(pdb_source.get("ixMemberships") or []),
+        "facilityPresences": len(pdb_source.get("facilityPresences") or []),
+        "facilities": len(pdb_source.get("facilities") or []),
+        "exchanges": len(pdb_source.get("exchanges") or []), "controlPlanePaths": len(all_paths),
+        "contradictionFindings": len(contradiction_source.get("findings") or []),
+        "controlPlaneChanges": len(contradiction_source.get("changes") or [])}
+    included_counts = {"domains": len(domains), "observedFlows": len(incident_flows),
+        "peeringdbNetworks": len(networks), "ixMemberships": len(ix_memberships),
+        "facilityPresences": len(facility_presences), "facilities": len(facilities),
+        "exchanges": len(exchanges), "controlPlanePaths": len(paths),
+        "contradictionFindings": len(contradictions["findings"]),
+        "controlPlaneChanges": len(contradictions["changes"])}
+    return _safe_mapping({key: source.get(key) for key in ("status", "schemaVersion", "graphRevision",
+        "capturedAt", "focus", "authority", "sourceFreshness", "referenceCatalog", "boundary", "bounded")
+        if source.get(key) is not None} | {"domains": domains, "observedFlows": incident_flows,
+        "modeledPathCandidates": list(source.get("modeledPathCandidates") or [])[:16],
+        "declaredSharedIxCandidates": list(source.get("declaredSharedIxCandidates") or [])[:16],
+        "peeringdbEvidence": pdb, "controlPlaneEvidence": ris,
+        "infrastructureContradictions": contradictions, "capsuleProjection": {
+            "mode": "SELECTION_FOCUSED_EXACT_RECORDS", "selectedEntity": entity_id,
+            "sourceSnapshotSha256": hashlib.sha256(canonical_source.encode()).hexdigest(),
+            "sourceCounts": source_counts, "includedCounts": included_counts,
+            "omittedCounts": {key: max(source_counts[key] - included_counts[key], 0)
+                              for key in source_counts},
+            "boundary": "INCLUDED RECORDS RETAIN EXACT VALUES; OMITTED ENVIRONMENT RECORDS ARE COUNTED AND HASH-BOUND, NOT SUMMARIZED OR DISCLOSED",
+        }})
+
+
 def build_full_fidelity_capsule(question: str, selection: Dict[str, Any],
-                                resolved: Dict[str, Any], trace: Dict[str, Any]) -> Dict[str, Any]:
+                                resolved: Dict[str, Any], trace: Dict[str, Any],
+                                infrastructure: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Build a deterministic-content, exact-value capsule from server-owned evidence."""
     entity = resolved.get("node") or resolved.get("edge") or {}
     capsule = {
@@ -128,6 +285,7 @@ def build_full_fidelity_capsule(question: str, selection: Dict[str, Any],
         "memberNodes": [_entity_frame(item) for item in
                         list(resolved.get("memberNodes") or [])[:24]],
         "hostTrace": _trace_frame(trace),
+        "infrastructureEvidence": _focused_infrastructure_frame(infrastructure, selection),
         "authority": {
             "graph": "REVISION_PINNED_SERVER_RESOLVED",
             "target": "OBSERVED",
@@ -143,6 +301,7 @@ def build_full_fidelity_capsule(question: str, selection: Dict[str, Any],
             "INFERRED; GRAPH ADJACENCY AND MODEL OUTPUT DO NOT ESTABLISH CAUSALITY"
         ),
     }
+    capsule["evidenceCompatibility"] = evaluate_evidence_compatibility(question, infrastructure)
     canonical = json.dumps(capsule, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     capsule["sha256"] = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
     return capsule
@@ -156,6 +315,8 @@ def disclosure_receipt(capsule: Dict[str, Any], model: str) -> Dict[str, Any]:
         addresses.add(str(target))
     locations = sum(1 for item in hops if item.get("geo") or
                     (item.get("lat") is not None and item.get("lon") is not None))
+    infrastructure = capsule.get("infrastructureEvidence") or {}
+    projection = infrastructure.get("capsuleProjection") or {}
     return {
         "capsuleId": capsule["capsuleId"],
         "capsuleSha256": capsule["sha256"],
@@ -170,7 +331,18 @@ def disclosure_receipt(capsule: Dict[str, Any], model: str) -> Dict[str, Any]:
             "selectedEntities": 1,
             "incidentEdges": len(capsule.get("incidentEdges") or []),
             "memberNodes": len(capsule.get("memberNodes") or []),
+            "infrastructureDomains": len(infrastructure.get("domains") or []),
+            "observedInfrastructureFlows": len(infrastructure.get("observedFlows") or []),
+            "modeledPathCandidates": len(infrastructure.get("modeledPathCandidates") or []),
+            "peeringdbNetworks": len((infrastructure.get("peeringdbEvidence") or {}).get("networks") or []),
+            "declaredIxMemberships": len((infrastructure.get("peeringdbEvidence") or {}).get("ixMemberships") or []),
+            "controlPlaneObservations": len((infrastructure.get("controlPlaneEvidence") or {}).get("controlPlanePaths") or []),
+            "infrastructureContradictions": len((infrastructure.get("infrastructureContradictions") or {}).get("findings") or []),
+            "controlPlaneChanges": len((infrastructure.get("infrastructureContradictions") or {}).get("changes") or []),
+            "withheldInfrastructureTests": len((infrastructure.get("infrastructureContradictions") or {}).get("withheld") or []),
         },
+        "capsuleProjection": {key: projection.get(key) for key in
+                              ("mode", "sourceSnapshotSha256", "sourceCounts", "includedCounts", "omittedCounts", "boundary")},
         "excluded": capsule["exclusions"],
         "modelAuthority": "INTERPRETIVE_ONLY",
         "directiveExecution": False,
@@ -192,6 +364,26 @@ Physics anomalies are DERIVED_INFERENCE consistency warnings combining GeoIP wit
 ICMP RTT; they never prove physical distance, a long-haul leg, relay, or VPN. A city sequence
 from interface GeoIP must never be narrated as a physical itinerary without independent
 corroboration. Use "could be consistent with" for hypotheses and name alternatives.
+
+InfrastructureEvidence has strict partitions. observedFlows are observed graph traffic between
+endpoints whose ASN ownership and locations remain INFERRED. modeledPathCandidates are reference-
+model candidates, never observed BGP paths. Cesium arcs are DISPLAY_ONLY and never routes. Consult
+evidenceCompatibility before answering: when compatible is false, identify the missing evidence
+and refuse conclusions that require it. Full fidelity preserves disclosed values; it does not make
+the capsule complete for every question.
+
+PeeringDB evidence is self-reported declared infrastructure. Shared IX or facility presence does
+not establish adjacency, traffic, or routing. RIS Live paths are CONTROL_PLANE_OBSERVATION at the
+named collector vantage and are NON_AUTHORITATIVE for data-plane inference. Never merge either
+source into the traceroute hop graph. CAIDA relationship evidence is absent unless explicitly
+present with a dataset version and provenance. infrastructureContradictions contains deterministic
+UNRESOLVED source disagreements or evidence tensions, not security verdicts. Preserve its alternatives,
+falsifier, boundary, time window, source revisions, and withheld tests. Never translate an origin
+disagreement into a route hijack claim or a collector withdrawal into global unreachability.
+capsuleProjection declares the exact records retained for this selected investigation, the counts
+omitted from the wider environment, and a SHA-256 binding to the complete source snapshot. Never
+infer anything from an omitted record. "Full fidelity" means included values are exact; it does not
+mean the entire unrelated environment was disclosed.
 
 Return one JSON object with exactly these string fields plus numeric confidence:
 {"situation":"...","anomalies":"...","measuredVsInferred":"...","assessment":"...",
@@ -230,6 +422,22 @@ def validate_cloud_report(report: Dict[str, Any], capsule: Dict[str, Any]) -> Di
     geography = (capsule.get("hostTrace") or {}).get("evidenceClasses", {}).get("geography")
     confidence = min(max(float(report.get("confidence")), 0.0), 1.0)
     constraints = []
+    compatibility = capsule.get("evidenceCompatibility") or {}
+    missing = compatibility.get("missing") or []
+    if missing:
+        names = ", ".join(str(item.get("class") or "UNKNOWN") for item in missing)
+        details = "; ".join(str(item.get("needed") or "unspecified evidence") for item in missing)
+        normalized["situation"] = f"QUESTION-EVIDENCE MISMATCH — required evidence is absent: {names}."
+        normalized["anomalies"] = "No anomaly conclusion is supported for the missing evidence classes."
+        normalized["measuredVsInferred"] = (
+            "The capsule retains its host-trace and graph evidence, but those classes do not answer "
+            f"the requested test. Missing: {details}."
+        )
+        normalized["assessment"] = "INSUFFICIENT COMPATIBLE EVIDENCE — the requested conclusion is refused."
+        normalized["falsifier"] = f"Collect the missing evidence before re-querying: {details}."
+        normalized["direction"] = f"Instrument and capture: {details}."
+        confidence = min(confidence, 0.10)
+        constraints.append(f"QUESTION_EVIDENCE_INCOMPATIBLE:{names}")
     if not _CONCRETE_OBSERVATION.search(normalized["direction"]):
         normalized["direction"] = (
             "Run repeated fixed-flow traceroutes or MTR, compare minimum per-hop RTTs, route "
@@ -295,7 +503,20 @@ def ask_ollama_cloud(capsule: Dict[str, Any], *, model: Optional[str] = None,
         with request.urlopen(cloud_request, timeout=timeout) as response:
             envelope = json.loads(response.read())
     except error.HTTPError as exc:
-        raise RuntimeError(f"Ollama Cloud returned HTTP {exc.code}") from exc
+        try:
+            provider_error = str(json.loads(exc.read(4096)).get("error") or "")
+        except (json.JSONDecodeError, AttributeError, UnicodeDecodeError):
+            provider_error = ""
+        if "prompt is too long" in provider_error.lower():
+            reason = "request exceeded the model context window"
+        elif exc.code in {401, 403}:
+            reason = "credential was rejected"
+        elif "model" in provider_error.lower() and ("not found" in provider_error.lower() or
+                                                      "unknown" in provider_error.lower()):
+            reason = "configured model is unavailable"
+        else:
+            reason = "request was rejected"
+        raise RuntimeError(f"Ollama Cloud {reason} (HTTP {exc.code})") from exc
     except (error.URLError, TimeoutError, json.JSONDecodeError) as exc:
         raise RuntimeError("Ollama Cloud request failed") from exc
     content = str((envelope.get("message") or {}).get("content") or "").strip()

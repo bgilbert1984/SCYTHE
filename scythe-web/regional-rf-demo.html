@@ -105,12 +105,43 @@
       font:9px/1.35 ui-monospace,monospace; white-space:pre-wrap; pointer-events:none; }
     .live-hypergraph__three-stats { position:absolute; top:6px; left:7px; color:#66ddff;
       font:8px ui-monospace,monospace; opacity:.78; pointer-events:none; }
+    .graph-globe-cluster-tooltip { position:absolute; z-index:7; max-width:min(420px,calc(100% - 24px));
+      max-height:min(52vh,360px); overflow:auto; padding:7px 9px; color:#e9f8ff;
+      background:rgba(3,9,20,.96); border:1px solid #66ddff; border-radius:3px;
+      box-shadow:0 5px 22px rgba(0,0,0,.55); font:9px/1.45 ui-monospace,monospace;
+      white-space:pre-wrap; overflow-wrap:anywhere; pointer-events:none; }
     .location-map { background:radial-gradient(circle at 50% 50%,rgba(0,212,255,.05),transparent 65%); }
     .location-map__status { position:absolute; z-index:2; left:7px; bottom:5px; max-width:calc(100% - 14px);
       padding:3px 5px; color:#f7d154; background:rgba(3,9,20,.86); border:1px solid rgba(247,209,84,.35);
       font:8px/1.35 ui-monospace,monospace; white-space:pre-wrap; pointer-events:none; }
     .location-map__marker { cursor:pointer; }
     .location-map__marker:hover,.location-map__marker:focus { outline:none; filter:drop-shadow(0 0 4px #f7d154); }
+    .infra-lens { overflow:auto; padding:7px; box-sizing:border-box; color:#b8cad6;
+      font:9px/1.4 ui-monospace,monospace; }
+    .infra-lens__status { margin:0 0 7px; padding:5px; color:#63ffd1; white-space:pre-wrap;
+      border:1px solid rgba(99,255,209,.3); background:rgba(3,9,20,.75); }
+    .infra-lens__grid { display:grid; grid-template-columns:1fr 1fr; gap:7px; min-width:390px; }
+    .infra-lens__toggles { display:flex; gap:5px; margin:0 0 7px; }
+    .infra-lens__toggle { padding:3px 7px; color:#7890a8; background:#071422; border:1px solid #24506a;
+      font:8px ui-monospace,monospace; cursor:pointer; }
+    .infra-lens__toggle[aria-pressed="true"] { color:#fff; border-color:#f7d154; }
+    .infra-lens__column { min-width:0; padding:5px; border:1px solid rgba(0,212,255,.22); }
+    .infra-lens__title { margin:0 0 5px; color:#66ddff; font:9px ui-monospace,monospace; }
+    .infra-lens__card { display:block; width:100%; margin:0 0 4px; padding:5px; color:#ccefff;
+      background:#071422; border:1px solid #24506a; text-align:left; white-space:pre-wrap;
+      overflow-wrap:anywhere; font:8px/1.4 ui-monospace,monospace; cursor:pointer; }
+    .infra-lens__card--flow { color:#b7ffdc; border-color:rgba(99,255,209,.34); }
+    .infra-lens__card--declared { color:#ffc66d; border-color:rgba(255,166,65,.4); }
+    .infra-lens__card--control { color:#ff8cff; border-color:rgba(255,80,255,.38); }
+    .infra-lens__card--contradiction { color:#ff8c9f; border-color:rgba(255,68,94,.62);
+      box-shadow:inset 2px 0 rgba(255,68,94,.65); }
+    .infra-lens__card--change { color:#f7d154; border-color:rgba(247,209,84,.42); }
+    .infra-lens__card--withheld { color:#91a5b8; border-style:dashed; }
+    .infra-lens__card:hover:not(:disabled),.infra-lens__card:focus-visible { border-color:#00d4ff; outline:none; }
+    .infra-lens__card:disabled { opacity:.62; cursor:default; }
+    .infra-lens__empty { padding:7px; color:#7f9bad; }
+    .infra-lens__boundary { margin-top:7px; padding-top:5px; color:#ffb25e;
+      border-top:1px dashed rgba(255,178,94,.45); }
     .live-hypergraph__result { overflow:auto; padding:7px 8px; box-sizing:border-box;
       color:#b8cad6; font:9px/1.35 ui-monospace,monospace; }
     .graph-result__authority { color:#66ddff; padding-bottom:5px; border-bottom:1px dashed rgba(0,212,255,.3); }
@@ -199,6 +230,7 @@
         <button id="hypergraph-mode-3d" type="button" role="tab" aria-pressed="true" aria-selected="true" disabled>3D CAUSAL CHAMBER</button>
         <button id="hypergraph-mode-2d" type="button" role="tab" aria-pressed="false" aria-selected="false">2D ACCESSIBLE</button>
         <button id="hypergraph-mode-location" type="button" role="tab" aria-pressed="false" aria-selected="false">LOCATION ESTIMATES</button>
+        <button id="hypergraph-mode-infrastructure" type="button" role="tab" aria-pressed="false" aria-selected="false">INFRASTRUCTURE LENS</button>
         <button id="hypergraph-mode-explorer" type="button" role="tab" aria-pressed="false" aria-selected="false">GRAPH EXPLORER</button>
       </div>
       <div id="live-hypergraph-3d-viewport" class="live-hypergraph__viewport">
@@ -212,6 +244,8 @@
         <svg data-graph-location-map role="img" aria-label="Coordinate projection of inferred host GeoIP estimates"></svg>
         <pre class="location-map__status" data-graph-location-status>LOCATION ESTIMATES // WAITING FOR GRAPH</pre>
       </section>
+      <section id="live-hypergraph-infrastructure-viewport" class="live-hypergraph__viewport infra-lens"
+        aria-label="Evidence-partitioned infrastructure lens" hidden></section>
       <section id="live-hypergraph-explorer-viewport" class="live-hypergraph__viewport graph-explorer"
         data-graph-explorer aria-label="Bounded live graph explorer" hidden>
         <form class="graph-explorer__form" data-graph-explorer-form>
@@ -314,6 +348,9 @@
     import { GraphOpsInvestigationTabs, investigationKey } from "./graphOpsInvestigationTabs.js";
     import { downloadOfflineHypergraphBundle } from "./offlineHypergraphBundle.js";
     import { HypergraphLocationView } from "./hypergraphLocationView.js";
+    import { InfrastructureController } from "./infrastructureController.js";
+    import { InfrastructureLensView } from "./infrastructureLensView.js";
+    import { InfrastructureGlobeLayer } from "./infrastructureGlobeLayer.js";
 
     const viewerOptions = {
       animation: false,
@@ -420,29 +457,47 @@
     const mode3D = document.getElementById("hypergraph-mode-3d");
     const mode2D = document.getElementById("hypergraph-mode-2d");
     const modeLocation = document.getElementById("hypergraph-mode-location");
+    const modeInfrastructure = document.getElementById("hypergraph-mode-infrastructure");
     const modeExplorer = document.getElementById("hypergraph-mode-explorer");
     const viewport3D = document.getElementById("live-hypergraph-3d-viewport");
     const viewport2D = document.getElementById("live-hypergraph-2d-viewport");
     const viewportLocation = document.getElementById("live-hypergraph-location-viewport");
+    const viewportInfrastructure = document.getElementById("live-hypergraph-infrastructure-viewport");
     let graphExplorer = null;
     const locationView = new HypergraphLocationView({root: viewportLocation, controller: liveGraphController}).start();
+    const infrastructureController = new InfrastructureController();
+    const infrastructureView = new InfrastructureLensView({root: viewportInfrastructure,
+      controller: infrastructureController}).start();
+    const infrastructureGlobe = new InfrastructureGlobeLayer({viewer, Cesium,
+      controller: infrastructureController});
+    await infrastructureGlobe.start();
+    infrastructureController.start().catch(() => undefined);
+    window.scytheInfrastructureController = infrastructureController;
+    window.scytheInfrastructureGlobe = infrastructureGlobe;
+    liveRoot.addEventListener("scythe-web:infra-overlay", ({detail}) => infrastructureGlobe.setOverlayVisibility(detail));
     let resultTabs = null;
     function setHypergraphMode(mode) {
       const show3D = mode === "3d" && liveHypergraph3D;
       const show2D = mode === "2d" || (mode === "3d" && !liveHypergraph3D);
       const showExplorer = mode === "explorer";
       const showLocation = mode === "location";
+      const showInfrastructure = mode === "infrastructure";
       viewport3D.hidden = !show3D; viewport2D.hidden = !show2D; viewportLocation.hidden = !showLocation;
+      viewportInfrastructure.hidden = !showInfrastructure;
       mode3D.setAttribute("aria-pressed", String(Boolean(show3D)));
       mode3D.setAttribute("aria-selected", String(Boolean(show3D)));
       mode2D.setAttribute("aria-pressed", String(Boolean(show2D)));
       mode2D.setAttribute("aria-selected", String(Boolean(show2D)));
       modeLocation.setAttribute("aria-pressed", String(showLocation));
       modeLocation.setAttribute("aria-selected", String(showLocation));
+      modeInfrastructure.setAttribute("aria-pressed", String(showInfrastructure));
+      modeInfrastructure.setAttribute("aria-selected", String(showInfrastructure));
       modeExplorer.setAttribute("aria-pressed", String(showExplorer));
       modeExplorer.setAttribute("aria-selected", String(showExplorer));
       liveHypergraph3D?.setVisible(Boolean(show3D));
       locationView.setVisible(showLocation);
+      infrastructureView.setVisible(showInfrastructure);
+      infrastructureGlobe.setVisible(showInfrastructure);
       graphExplorer?.setVisible(showExplorer);
       resultTabs?.setVisible(mode);
     }
@@ -453,6 +508,7 @@
     mode3D.addEventListener("click", () => setHypergraphMode("3d"));
     mode2D.addEventListener("click", () => setHypergraphMode("2d"));
     modeLocation.addEventListener("click", () => setHypergraphMode("location"));
+    modeInfrastructure.addEventListener("click", () => setHypergraphMode("infrastructure"));
     modeExplorer.addEventListener("click", () => setHypergraphMode("explorer"));
     try {
       const [THREE, controlsModule] = await Promise.all([import("three"), import("three/addons/controls/OrbitControls.js")]);
@@ -748,6 +804,7 @@
       const from = new Date(document.getElementById("pin-from").value).getTime() / 1000;
       const to = new Date(document.getElementById("pin-to").value).getTime() / 1000;
       if (!Number.isFinite(from) || !Number.isFinite(to) || from === to) return false;
+      if (!infrastructureController.setWindow(Math.min(from, to), Math.max(from, to))) return false;
       selections.upsert({kind: "time-pin", timestamp: from, clockId: "UTC", uncertaintyMilliseconds: 0});
       selections.upsert({kind: "time-pin", timestamp: to, clockId: "UTC", uncertaintyMilliseconds: 0});
       updateInvestigation(); return true;
@@ -800,6 +857,7 @@
       investigationTabs.open(typedSelection, {label: typedSelection.entityId});
       selections.upsert(typedSelection);
       liveGraphController.setFocus(typedSelection.entityId);
+      infrastructureController.setFocus(typedSelection.entityId);
       graphExplorer.setSelection(typedSelection);
       updateInvestigation();
       const hasRf = selections.items.some((item) => item.kind === "rf-cell");
