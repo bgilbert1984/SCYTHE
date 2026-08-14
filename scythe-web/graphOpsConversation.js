@@ -3,10 +3,17 @@ function text(value, fallback = "—") {
   return result || fallback;
 }
 
+export function operatorQuestionOnly(value) {
+  const question = String(value ?? "").trim();
+  if (!/GRAPHOPS\s+(?:PROMPT|\/\/\s+HOST TRACE)/i.test(question)) return question;
+  const prompts = [...question.matchAll(/^PROMPT\s*\/\/\s*(.+)$/gim)];
+  return String(prompts.at(-1)?.[1] ?? "").trim() || question;
+}
+
 export async function askGraphOps(question, selection, {
   fetchImpl = globalThis.fetch, apiBase = "", signal,
 } = {}) {
-  const utterance = String(question ?? "").trim();
+  const utterance = operatorQuestionOnly(question);
   if (!utterance) throw new Error("Enter a GraphOps question");
   if (!selection?.entityId || !selection?.graphRevision) throw new Error("Select a graph node or edge first");
   const response = await fetchImpl.call(globalThis, `${apiBase}/api/graphops/conversation`, {
@@ -26,7 +33,7 @@ export async function askGraphOps(question, selection, {
 export async function askGraphOpsCloudFullFidelity(question, selection, evidenceId, {
   fetchImpl = globalThis.fetch, apiBase = "", signal, acknowledgeExactDisclosure = false,
 } = {}) {
-  const utterance = String(question ?? "").trim();
+  const utterance = operatorQuestionOnly(question);
   if (!utterance) throw new Error("Enter a GraphOps question");
   if (!selection?.entityId || !selection?.graphRevision) throw new Error("Select a traced graph host first");
   if (!String(evidenceId ?? "").trim()) throw new Error("Trace the selected host before asking Cloud");
@@ -97,6 +104,7 @@ export function formatCloudFullFidelityConversation(payload, {entityContext = ""
   }
   lines.push("", `CONFIDENCE // ${Number.isFinite(Number(report.confidence))
     ? Number(report.confidence).toFixed(3) : "UNAVAILABLE"}`,
+  `VALIDATION // ${(report.validationConstraints ?? []).join(" · ") || "PASSED"}`,
   "", "FULL-FIDELITY DISCLOSURE RECEIPT",
   `CAPSULE // ${text(receipt.capsuleId)}`,
   `SHA-256 // ${text(receipt.capsuleSha256)}`,

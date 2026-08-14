@@ -132,6 +132,43 @@ func TestSuricataEngineReplaysBoundedRecentRecordsThenTails(t *testing.T) {
 	}
 }
 
+func TestSuricataEngineReplaysPreviousNonemptyFileBeforeTailingEmptyRotation(t *testing.T) {
+	dir := t.TempDir()
+	previous := filepath.Join(dir, "eve-2026-08-13.json")
+	record, _ := json.Marshal(map[string]interface{}{
+		"timestamp": "2026-08-13T23:59:59Z", "event_type": "flow",
+		"src_ip": "10.0.0.1", "dest_ip": "8.8.8.8", "src_port": 49001,
+	})
+	if err := os.WriteFile(previous, append(record, '\n'), 0600); err != nil {
+		t.Fatal(err)
+	}
+	current := filepath.Join(dir, "eve-2026-08-14.json")
+	if err := os.WriteFile(current, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().Add(time.Second)
+	if err := os.Chtimes(current, now, now); err != nil {
+		t.Fatal(err)
+	}
+
+	engine := NewSuricataEngine(EngineConfig{EveFile: filepath.Join(dir, "eve-*.json"), ReplayLast: 1})
+	events := make(chan *pb.Event, 2)
+	binary := make(chan []byte, 1)
+	done := make(chan struct{})
+	errCh := make(chan error, 1)
+	go func() { errCh <- engine.Run(events, binary, done) }()
+	t.Cleanup(func() { close(done); <-errCh })
+	select {
+	case event := <-events:
+		last := event.Entities[len(event.Entities)-1]
+		if last.Key != "scythe_ingest_mode" || last.Value != "bootstrap_replay" {
+			t.Fatalf("prior nonempty record was not replayed: %+v", event)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("empty newest rotation suppressed prior-file bootstrap")
+	}
+}
+
 func TestNormalizeEventIDIsStableAcrossReplay(t *testing.T) {
 	raw := map[string]interface{}{"timestamp": "2026-08-08T02:50:00Z", "event_type": "flow",
 		"src_ip": "10.0.0.1", "dest_ip": "8.8.8.8"}

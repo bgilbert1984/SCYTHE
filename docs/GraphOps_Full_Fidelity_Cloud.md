@@ -40,6 +40,23 @@ Exact geography remains `INFERRED`; exact coordinates do not convert GeoIP into 
 
 The Cloud model is interpretive only. It cannot run probes, mutate the graph, execute directives, or promote an inference into an observation.
 
+## Deterministic epistemic validation
+
+Cloud prose is validated after generation. This layer does not rely on prompt compliance alone:
+
+- Interface GeoIP cannot be promoted into a physical route itinerary.
+- Differential RTT between independent ICMP hop responses is not segment propagation time.
+- Single-trace timing cannot establish congestion, load balancing, or a route change.
+- Uncorroborated GeoIP caps confidence at `0.60`; a derived physics warning caps it at `0.50`.
+- Unsupported physical-route claims and timing-cause attributions are replaced and capped at `0.25` or `0.35`.
+- A non-actionable direction such as `analysis` is replaced by a concrete repeated-measurement instruction.
+
+Traceroute timing and physics flags are labelled `DERIVED_INFERENCE`. Physics flags are mapped back to the original TTL-bearing hop after processing the compact geolocated subset; missing GeoIP hops therefore cannot shift an anomaly onto another router.
+
+## Investigation workspace
+
+Each selected hypergraph entity opens or reactivates a bounded GraphOps tab. Its question, trace evidence, output, and status remain associated with that entity while other investigations proceed. Twelve tabs are retained per page session. The dialog closes only through its explicit close control or Escape—not by clicking elsewhere—and has an independently persisted keyboard/pointer resize handle.
+
 ## Retention and binding
 
 Host-trace evidence is retained in orchestrator memory for 30 minutes and is bound to its exact entity ID and graph revision. A stale, missing, expired, or mismatched evidence reference is refused. Restarting the orchestrator clears retained capsules and requires a new trace.

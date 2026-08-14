@@ -3,7 +3,8 @@ import time
 import unittest
 from unittest.mock import patch
 
-from graphops_full_fidelity import (build_full_fidelity_capsule, disclosure_receipt)
+from graphops_full_fidelity import (build_full_fidelity_capsule, disclosure_receipt,
+                                    validate_cloud_report)
 from scythe_orchestrator import (_HOST_TRACE_EVIDENCE, app)
 
 
@@ -61,6 +62,28 @@ class FullFidelityCapsuleTests(unittest.TestCase):
         self.assertEqual(receipt['disclosed']['exactIpAddresses'], 3)
         self.assertEqual(receipt['disclosed']['exactLocations'], 1)
         self.assertFalse(receipt['directiveExecution'])
+
+    def test_cloud_guardrails_remove_geoip_itineraries_and_single_trace_causes(self):
+        trace, resolved = evidence_fixture()
+        trace['traceroute']['hops'][1]['physics_anomaly'] = {
+            'type': 'relay_chain', 'evidence_class': 'DERIVED_INFERENCE'}
+        capsule = build_full_fidelity_capsule(
+            'Explain', {'kind': 'graph-node', 'entityId': 'host:20.189.172.33',
+                        'graphRevision': 'graph-exact'}, resolved, trace)
+        report = validate_cloud_report({
+            'situation': 'The path likely traverses Seattle and Virginia before it returns.',
+            'anomalies': 'One non-monotonic response',
+            'measuredVsInferred': 'RTT measured and GeoIP inferred',
+            'assessment': 'The RTT spike suggests transient congestion and a routing change.',
+            'falsifier': 'Repeat the trace', 'direction': 'analysis', 'confidence': .88,
+        }, capsule)
+        self.assertIn('UNSUPPORTED PHYSICAL-ROUTE CLAIM REMOVED', report['situation'])
+        self.assertIn('UNCORROBORATED TIMING-CAUSE CLAIM REMOVED', report['assessment'])
+        self.assertIn('Run repeated fixed-flow traceroutes', report['direction'])
+        self.assertEqual(report['confidence'], .25)
+        self.assertIn('NON_ACTIONABLE_DIRECTION_REPLACED', report['validationConstraints'])
+        self.assertIn('DERIVED_PHYSICS_WARNING_CONFIDENCE_CEILING_0.50',
+                      report['validationConstraints'])
 
     @patch('graphops_full_fidelity.ask_ollama_cloud')
     @patch('scythe_orchestrator._graphops_directive_authorized', return_value=True)

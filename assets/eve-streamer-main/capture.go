@@ -190,10 +190,47 @@ func resolveEvePath(path string) (string, error) {
 	return files[len(files)-1].path, nil
 }
 
+func resolveReplayEvePath(path string) (string, error) {
+	active, err := resolveEvePath(path)
+	if err != nil || !evePathIsPattern(path) {
+		return active, err
+	}
+	matches, globErr := filepath.Glob(path)
+	if globErr != nil {
+		return "", globErr
+	}
+	type candidate struct {
+		path string
+		info os.FileInfo
+	}
+	files := make([]candidate, 0, len(matches))
+	for _, match := range matches {
+		info, statErr := os.Stat(match)
+		if statErr == nil && info.Mode().IsRegular() && info.Size() > 0 {
+			files = append(files, candidate{path: match, info: info})
+		}
+	}
+	if len(files) == 0 {
+		return active, nil
+	}
+	sort.Slice(files, func(i, j int) bool {
+		if files[i].info.ModTime().Equal(files[j].info.ModTime()) {
+			return files[i].path < files[j].path
+		}
+		return files[i].info.ModTime().Before(files[j].info.ModTime())
+	})
+	return files[len(files)-1].path, nil
+}
+
 func (e *SuricataEngine) Run(eventCh chan<- *pb.Event, binaryCh chan<- []byte, done <-chan struct{}) error {
 	activePath, err := resolveEvePath(e.FilePath)
 	if err != nil {
 		return err
+	}
+	if e.ReplayLast > 0 {
+		if replayPath, replayErr := resolveReplayEvePath(e.FilePath); replayErr == nil {
+			activePath = replayPath
+		}
 	}
 	file, err := os.Open(activePath)
 	if err != nil {

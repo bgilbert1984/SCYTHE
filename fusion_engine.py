@@ -423,6 +423,11 @@ class RTTAnalyzer:
                     anomaly = ANOMALY_RTT_SPIKE
 
             hop["anomaly"] = anomaly
+            if anomaly is not None:
+                hop["anomaly_evidence_class"] = "DERIVED_INFERENCE"
+                hop["anomaly_interpretation"] = (
+                    "SINGLE_TRACE_TIMING_OR_ADDRESS_CLASSIFICATION; NOT A ROOT-CAUSE CLAIM"
+                )
             if anomaly is None and rtt > 0:
                 prev_clean_rtt = rtt
 

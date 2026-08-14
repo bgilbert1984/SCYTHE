@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {askGraphOps, askGraphOpsCloudFullFidelity, formatCloudFullFidelityConversation,
-  formatGraphOpsConversation} from "./graphOpsConversation.js";
+  formatGraphOpsConversation, operatorQuestionOnly} from "./graphOpsConversation.js";
 
 const payload = {status: "completed", bounded: true, modelAuthority: "INTERPRETIVE_ONLY",
   ollamaRoute: "LOCAL_FALLBACK", maxSteps: 1,
@@ -20,6 +20,13 @@ test("conversation sends only a pinned selection reference and read-only mode", 
   assert.deepEqual(JSON.parse(request.init.body), {mode: "ask", question: "What changed?", maxSteps: 3,
     selection: {kind: "graph-node", entityId: "host:a", graphRevision: "graph-1"}});
   assert.equal(request.init.signal, controller.signal);
+});
+
+test("rendered host-trace transcripts collapse to the operator prompt", () => {
+  assert.equal(operatorQuestionOnly("GRAPHOPS // HOST TRACE // COMPLETED\nTARGET // 1.1.1.1\n" +
+    "PROMPT // Explain route anomalies and identify a falsifier."),
+  "Explain route anomalies and identify a falsifier.");
+  assert.equal(operatorQuestionOnly("What changed?"), "What changed?");
 });
 
 test("conversation rendering includes tooltip context and epistemic boundary", () => {
@@ -46,7 +53,8 @@ test("full-fidelity Cloud sends only an evidence reference after explicit acknow
     evidenceId: "trace-1", result: {model: "gpt-oss:20b", report: {
       situation: "Measured route", anomalies: "One RTT spike",
       measuredVsInferred: "RTT measured; GeoIP inferred", assessment: "Bounded",
-      falsifier: "Repeat trace", direction: "Measure again", confidence: .7}},
+      falsifier: "Repeat trace", direction: "Measure again", confidence: .6,
+      validationConstraints: ["GEOIP_UNCORROBORATED_CONFIDENCE_CEILING_0.60"]}},
     disclosureReceipt: {route: "OLLAMA_CLOUD_FULL_FIDELITY", capsuleId: "ffc-1",
       capsuleSha256: "a".repeat(64), destination: "OLLAMA_CLOUD", model: "gpt-oss:20b",
       disclosed: {exactIpAddresses: 4, exactLocations: 2, incidentEdges: 3, memberNodes: 0},
@@ -67,4 +75,5 @@ test("full-fidelity Cloud sends only an evidence reference after explicit acknow
   assert.match(output, /4 EXACT IPs/);
   assert.match(output, /SHA-256 \/\/ a{64}/);
   assert.match(output, /MEASURED VS INFERRED/);
+  assert.match(output, /VALIDATION \/\/ GEOIP_UNCORROBORATED/);
 });

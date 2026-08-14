@@ -15,12 +15,17 @@ export function clampPanelSize({width, height}, {viewportWidth, viewportHeight,
 }
 
 export class ResizablePanel {
-  constructor({panel, handle, storageKey = "scythe.live-hypergraph.size", storage = null}) {
+  constructor({panel, handle, storageKey = "scythe.live-hypergraph.size", storage = null,
+    label = "live hypergraph", widthDirection = 1, heightDirection = -1,
+    minWidth = DEFAULT_MIN_WIDTH, minHeight = DEFAULT_MIN_HEIGHT} = {}) {
     if (!panel || !handle) throw new TypeError("resizable panel and handle are required");
     this.panel = panel; this.handle = handle; this.storageKey = storageKey;
     this.document = panel.ownerDocument ?? globalThis.document;
     this.window = this.document?.defaultView ?? globalThis;
     this.storage = storage ?? this.window.localStorage;
+    this.label = label; this.widthDirection = Math.sign(widthDirection) || 1;
+    this.heightDirection = Math.sign(heightDirection) || -1;
+    this.minWidth = minWidth; this.minHeight = minHeight;
     this.drag = null; this.started = false;
   }
 
@@ -46,7 +51,8 @@ export class ResizablePanel {
 
   #viewport() {
     return {viewportWidth: this.window.innerWidth || this.document.documentElement?.clientWidth || 1024,
-      viewportHeight: this.window.innerHeight || this.document.documentElement?.clientHeight || 768};
+      viewportHeight: this.window.innerHeight || this.document.documentElement?.clientHeight || 768,
+      minWidth: this.minWidth, minHeight: this.minHeight};
   }
 
   #size() {
@@ -76,9 +82,8 @@ export class ResizablePanel {
 
   #move(event) {
     if (!this.drag || event.pointerId !== this.drag.pointerId) return;
-    // The panel is anchored at bottom-left: rightward grows width and upward grows height.
-    this.#apply({width: this.drag.width + event.clientX - this.drag.startX,
-      height: this.drag.height + this.drag.startY - event.clientY});
+    this.#apply({width: this.drag.width + this.widthDirection * (event.clientX - this.drag.startX),
+      height: this.drag.height + this.heightDirection * (event.clientY - this.drag.startY)});
     event.preventDefault?.();
   }
 
@@ -90,17 +95,20 @@ export class ResizablePanel {
   }
 
   #key(event) {
-    const directions = {ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, 1], ArrowDown: [0, -1]};
+    const directions = {ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1]};
     const direction = directions[event.key];
     if (!direction) return;
     const step = event.shiftKey ? 50 : 10; const size = this.#size();
-    this.#apply({width: size.width + direction[0] * step, height: size.height + direction[1] * step}, true);
+    this.#apply({width: size.width + this.widthDirection * direction[0] * step,
+      height: size.height + this.heightDirection * direction[1] * step}, true);
     event.preventDefault?.();
   }
 
   #announce(size = this.#size()) {
-    const label = `Resize live hypergraph. Current size ${Math.round(size.width)} by ${Math.round(size.height)} pixels. ` +
-      "Drag right and up to enlarge; use arrow keys; double-click to reset.";
+    const horizontal = this.widthDirection > 0 ? "right" : "left";
+    const vertical = this.heightDirection > 0 ? "down" : "up";
+    const label = `Resize ${this.label}. Current size ${Math.round(size.width)} by ${Math.round(size.height)} pixels. ` +
+      `Drag ${horizontal} and ${vertical} to enlarge; use arrow keys; double-click to reset.`;
     this.handle.setAttribute("aria-label", label); this.handle.title = label;
   }
 

@@ -9827,20 +9827,37 @@ if FLASK_AVAILABLE:
         _gi = _get_geo_infer_engine()
         physics_anomalies = []
         if _gi is not None:
+            # Retain the original traceroute index.  The physics helper operates
+            # on a compact geolocated subset, so applying its subset index to the
+            # full hop list can otherwise label the wrong router whenever an
+            # intervening hop has no GeoIP estimate.
             _geo_hops = [
-                {'lat': h['geo']['lat'], 'lon': h['geo']['lon'], 'rtt_ms': h.get('rtt_ms', 0)}
-                for h in hops
+                {'lat': h['geo']['lat'], 'lon': h['geo']['lon'], 'rtt_ms': h.get('rtt_ms', 0),
+                 '_trace_index': i, '_ttl': h.get('hop')}
+                for i, h in enumerate(hops)
                 if h.get('geo') and h['geo'].get('lat') is not None and h.get('rtt_ms')
             ]
             if len(_geo_hops) >= 2:
-                physics_anomalies = _gi.check_path_anomalies(_geo_hops)
-                # Tag hops with physics anomaly flag
-                _anom_idx = {a['hop'] for a in physics_anomalies}
-                for i, h in enumerate(hops):
-                    if i in _anom_idx:
-                        h['physics_anomaly'] = next(
-                            a for a in physics_anomalies if a['hop'] == i
-                        )
+                _subset_anomalies = _gi.check_path_anomalies(_geo_hops)
+                physics_anomalies = []
+                for anomaly in _subset_anomalies:
+                    _subset_to = int(anomaly['hop'])
+                    _subset_from = int(anomaly['from'])
+                    if not (0 <= _subset_from < len(_geo_hops) and 0 <= _subset_to < len(_geo_hops)):
+                        continue
+                    mapped = {
+                        **anomaly,
+                        'hop': _geo_hops[_subset_to]['_trace_index'],
+                        'from': _geo_hops[_subset_from]['_trace_index'],
+                        'ttl': _geo_hops[_subset_to]['_ttl'],
+                        'from_ttl': _geo_hops[_subset_from]['_ttl'],
+                        'type': anomaly.get('anomaly'),
+                        'evidence_class': 'DERIVED_INFERENCE',
+                        'interpretation': ('GEOIP/DIFFERENTIAL_ICMP_RTT_CONSISTENCY_CHECK; '
+                                           'NOT SEGMENT DISTANCE OR ROUTE LOCATION'),
+                    }
+                    physics_anomalies.append(mapped)
+                    hops[mapped['hop']]['physics_anomaly'] = mapped
 
         # Best distance: last clean hop's rtt × 50 km/ms
         last_clean = clean_hops[-1] if clean_hops else (hops[-1] if hops else {})
