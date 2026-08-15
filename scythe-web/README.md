@@ -200,6 +200,17 @@ entity-time bounds, paging, and selected-entity neighborhoods through
 bounded, their counts are displayed separately, and adjacency is not presented
 as causality.
 
+The contextual operations workbench adds `AUTOPILOT`, `SEMANTIC`, `SPECTRUM`,
+and `EVENTS` tabs without exposing an arbitrary MCP console. The orchestrator's
+`/api/graphops/workbench` boundary maps each tab to a fixed set of read-only MCP
+tools, bounds returned fields and collections, and retains the selected graph
+revision separately from the live observation time. Entity results can focus
+the shared graph/globe selection, while `OPEN IN GRAPHOPS` copies the evidence
+and its boundary into the entity's investigation tab. Mutating capabilities
+such as RF tuning, capture control, event ingestion, semantic corpus admission,
+and TAK-ML feedback are displayed only as guarded proposals; this endpoint
+cannot execute them.
+
 The existing globe loads `scythe-web/browser-entry.js` as an ES module at the
 end of `cesium-hypergraph-globe.html`. Activation remains deliberately opt-in.
 

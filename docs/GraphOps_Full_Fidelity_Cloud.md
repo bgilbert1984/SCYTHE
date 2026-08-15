@@ -49,6 +49,9 @@ Cloud prose is validated after generation. This layer does not rely on prompt co
 - Single-trace timing cannot establish congestion, load balancing, or a route change.
 - Uncorroborated GeoIP caps confidence at `0.60`; a derived physics warning caps it at `0.50`.
 - Unsupported physical-route claims and timing-cause attributions are replaced and capped at `0.25` or `0.35`.
+- RTT magnitude cannot be promoted into local/nearby/short-haul/long-haul distance claims.
+- A traceroute's last responding TTL cannot be promoted into a claim that the packet path ended there.
+- Failure to observe a VPN, relay, tunnel, distant leg, or route cannot be promoted into evidence of absence.
 - A non-actionable direction such as `analysis` is replaced by a concrete repeated-measurement instruction.
 
 Traceroute timing and physics flags are labelled `DERIVED_INFERENCE`. Physics flags are mapped back to the original TTL-bearing hop after processing the compact geolocated subset; missing GeoIP hops therefore cannot shift an anomaly onto another router.
@@ -93,5 +96,7 @@ The live infrastructure snapshot can be substantially larger than a Cloud model'
 - at most 32 relevant contradiction findings and control-plane changes.
 
 Included records retain their exact values and evidence classes. `capsuleProjection` reports source, included, and omitted counts and binds the projection to the sanitized complete source snapshot with SHA-256. Omitted records are neither summarized nor used for inference. The disclosure receipt displays included versus omitted/hash-bound record totals.
+
+There is deliberately no global fallback when the selected host has no prefix- or origin-relevant RIS observation. The focused capsule reports zero control-plane observations and omits unrelated collector records. Evidence compatibility is evaluated after projection, so a question requiring BGP/RIS evidence is refused when no relevant record was actually disclosed.
 
 Provider HTTP errors are classified without returning provider bodies or capsule data. In particular, context exhaustion is reported as `request exceeded the model context window` instead of an opaque HTTP 400.

@@ -179,3 +179,41 @@ test("real browser verifies and samples the regional Uint16 ITM fixture", async 
   assert.equal(Number.isFinite(result.value), true);
   assert.equal(typeof result.coverage, "boolean");
 });
+
+test("real browser renders bounded contextual MCP evidence and routes it to GraphOps", async (context) => {
+  const {server, origin} = await startServer();
+  context.after(() => new Promise((done) => server.close(done)));
+  const browser = await chromium.launch({headless: true});
+  context.after(() => browser.close());
+  const page = await browser.newPage();
+  await page.goto(`${origin}/scythe-web/browser-harness.html`);
+  const result = await page.evaluate(async () => {
+    const {ContextualWorkbench} = await import("./contextualWorkbench.js");
+    const host = document.getElementById("globe-root"); const roots = {};
+    for (const panel of ["autopilot", "semantic", "spectrum", "events"]) {
+      roots[panel] = document.createElement("section"); host.append(roots[panel]);
+    }
+    let request = null; let investigation = null;
+    host.addEventListener("scythe-web:workbench-investigate", (event) => { investigation = event.detail; });
+    const workbench = new ContextualWorkbench({roots, refreshMilliseconds: 60000, fetchImpl: async (_url, options) => {
+      request = JSON.parse(options.body);
+      return {ok: true, json: async () => ({status: "ok", panel: request.panel,
+        selection: request.selection, generatedAt: 1, bounded: true, readOnly: true,
+        records: [{tool: "query_hot_entities", status: "ok", authority: "OBSERVATIONAL_MCP",
+          result: {entities: [{id: "host:203.0.113.8", degree: 9}]}}],
+        proposals: [{tool: "ingest_live_event", boundary: "ORCHESTRATOR APPROVAL REQUIRED"}],
+        boundary: "LIVE OBSERVATIONAL MCP RESULTS; REVISION RETAINED"})};
+    }});
+    workbench.setSelection({kind: "graph-node", entityId: "host:203.0.113.8", graphRevision: "graph-a"});
+    await workbench.refresh("events");
+    roots.events.querySelectorAll("button")[1].click();
+    const output = {request, text: roots.events.textContent, investigation};
+    workbench.destroy(); return output;
+  });
+  assert.deepEqual(result.request, {panel: "events", selection: {kind: "graph-node",
+    entityId: "host:203.0.113.8", graphRevision: "graph-a"}});
+  assert.match(result.text, /query_hot_entities/);
+  assert.match(result.text, /GUARDED CAPABILITIES/);
+  assert.equal(result.investigation.selection.graphRevision, "graph-a");
+  assert.match(result.investigation.output, /OBSERVATIONAL_MCP/);
+});

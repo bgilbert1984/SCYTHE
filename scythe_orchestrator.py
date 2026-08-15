@@ -2220,6 +2220,160 @@ def orchestrator_graphops_explorer():
     return jsonify(data)
 
 
+_GRAPHOPS_WORKBENCH_PANELS = frozenset({'autopilot', 'semantic', 'spectrum', 'events'})
+
+
+def _bounded_workbench_value(value, *, depth=0):
+    """Keep observational MCP results suitable for an operator-facing panel."""
+    if depth >= 6:
+        return '[DEPTH BOUNDED]'
+    if isinstance(value, dict):
+        items = list(value.items())[:64]
+        bounded = {str(key)[:128]: _bounded_workbench_value(item, depth=depth + 1)
+                   for key, item in items}
+        if len(value) > len(items):
+            bounded['_fields_omitted'] = len(value) - len(items)
+        return bounded
+    if isinstance(value, (list, tuple)):
+        bounded = [_bounded_workbench_value(item, depth=depth + 1) for item in value[:50]]
+        if len(value) > len(bounded):
+            bounded.append({'_items_omitted': len(value) - len(bounded)})
+        return bounded
+    if isinstance(value, str):
+        return value[:4096]
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    return str(value)[:4096]
+
+
+def _workbench_mcp_result(response):
+    """Normalize direct-registry and ToolDef MCP result envelopes."""
+    if not isinstance(response, dict):
+        raise RuntimeError('MCP response is unavailable')
+    if response.get('error'):
+        error = response['error']
+        raise RuntimeError(str(error.get('message') if isinstance(error, dict) else error))
+    result = response.get('result')
+    if isinstance(result, dict) and isinstance(result.get('content'), list):
+        texts = [item.get('text', '') for item in result['content']
+                 if isinstance(item, dict) and item.get('type') == 'text']
+        if texts:
+            try:
+                result = json.loads('\n'.join(texts))
+            except json.JSONDecodeError:
+                result = {'text': '\n'.join(texts)}
+    return _bounded_workbench_value(result)
+
+
+def _workbench_mcp_call(port, name, arguments):
+    response = _proxy_post(port, '/mcp', {
+        'jsonrpc': '2.0', 'id': f'workbench-{name}', 'method': 'tools/call',
+        'params': {'name': name, 'arguments': arguments},
+    }, timeout=12)
+    return _workbench_mcp_result(response)
+
+
+@app.route('/api/graphops/workbench', methods=['POST'])
+def orchestrator_graphops_workbench():
+    """Return one bounded, read-only contextual projection of MCP capabilities.
+
+    This is deliberately not a general MCP proxy. The browser chooses a panel;
+    the server owns the exact allow-listed tools and arguments. Mutating tools
+    are described as proposals but cannot be called through this endpoint.
+    """
+    if not _graphops_directive_authorized():
+        return jsonify({'status': 'refused', 'error': 'Authentication required'}), 401
+    payload = request.get_json(silent=True) or {}
+    unknown = set(payload) - {'panel', 'selection'}
+    if unknown:
+        return jsonify({'status': 'refused',
+                        'error': f'unknown workbench fields: {", ".join(sorted(unknown))}'}), 400
+    panel = str(payload.get('panel', '')).lower()
+    if panel not in _GRAPHOPS_WORKBENCH_PANELS:
+        return jsonify({'status': 'refused', 'error': 'unsupported workbench panel'}), 400
+    selection = payload.get('selection') or {}
+    if not isinstance(selection, dict):
+        return jsonify({'status': 'refused', 'error': 'selection must be an object'}), 400
+    selection_unknown = set(selection) - {'kind', 'entityId', 'graphRevision', 'observedAt'}
+    if selection_unknown:
+        return jsonify({'status': 'refused', 'error': 'unknown selection fields'}), 400
+    entity_id = str(selection.get('entityId', ''))[:256]
+    revision = str(selection.get('graphRevision', ''))[:128]
+    port = _get_primary_instance_port()
+    if not port:
+        return jsonify({'status': 'unavailable', 'panel': panel,
+                        'error': 'No active SCYTHE graph instance', 'records': [],
+                        'bounded': True, 'readOnly': True}), 503
+
+    now = time.time()
+    calls = {
+        'autopilot': [
+            ('graphops_autopilot_status', {}),
+            ('graphops_suggestion_queue', {}),
+            ('graphops_observation_log', {}),
+        ],
+        'semantic': [
+            ('get_semantic_clusters', {'n_clusters': 5}),
+        ],
+        'spectrum': [
+            ('rf_bridge_status', {}),
+            ('rf_spectrum_snapshot', {'include_bins': False}),
+            ('rf_observations_query', {'since': now - 300, 'limit': 25}),
+        ],
+        'events': [
+            ('get_engine_metrics', {}),
+            ('query_hot_entities', {'limit': 12}),
+            ('query_recent_edges', {'since': now - 60, 'min_weight': 0}),
+            *([('get_entity_neighbors', {'entity_id': entity_id, 'limit': 20})]
+              if entity_id else []),
+        ],
+    }[panel]
+    records = []
+    for tool, arguments in calls:
+        try:
+            records.append({'tool': tool, 'status': 'ok', 'authority': 'OBSERVATIONAL_MCP',
+                            'result': _workbench_mcp_call(port, tool, arguments)})
+        except Exception as exc:
+            records.append({'tool': tool, 'status': 'unavailable',
+                            'authority': 'OBSERVATIONAL_MCP', 'error': str(exc)[:512]})
+    if panel == 'semantic' and entity_id:
+        clusters = next((record.get('result') for record in records
+                         if record['tool'] == 'get_semantic_clusters' and record['status'] == 'ok'), {})
+        if isinstance(clusters, dict) and int(clusters.get('total_vectors') or 0) > 0:
+            try:
+                records.append({'tool': 'search_similar_entities', 'status': 'ok',
+                                'authority': 'OBSERVATIONAL_MCP',
+                                'result': _workbench_mcp_call(port, 'search_similar_entities',
+                                                              {'query': entity_id, 'k': 8})})
+            except Exception as exc:
+                records.append({'tool': 'search_similar_entities', 'status': 'unavailable',
+                                'authority': 'OBSERVATIONAL_MCP', 'error': str(exc)[:512]})
+
+    proposals = {
+        'autopilot': [{'tool': 'graphops_submit_feedback', 'boundary': 'ANALYST REVIEW REQUIRED'}],
+        'semantic': [{'tool': 'embed_entity', 'boundary': 'EXPLICIT CORPUS ADMISSION REQUIRED'}],
+        'spectrum': [
+            {'tool': 'rf_tune', 'boundary': 'ORCHESTRATOR APPROVAL REQUIRED'},
+            {'tool': 'rf_capture_control', 'boundary': 'ORCHESTRATOR APPROVAL REQUIRED'},
+        ],
+        'events': [
+            {'tool': 'ingest_live_event', 'boundary': 'ORCHESTRATOR APPROVAL REQUIRED'},
+            {'tool': 'run_tak_ml', 'boundary': 'ORCHESTRATOR APPROVAL REQUIRED'},
+        ],
+    }[panel]
+    return jsonify({
+        'status': 'ok' if any(record['status'] == 'ok' for record in records) else 'unavailable',
+        'schemaVersion': 'graphops.contextual-workbench.v1', 'panel': panel,
+        'selection': {'kind': str(selection.get('kind', ''))[:32], 'entityId': entity_id,
+                      'graphRevision': revision,
+                      **({'observedAt': selection.get('observedAt')} if selection.get('observedAt') else {})},
+        'generatedAt': now, 'records': records, 'proposals': proposals,
+        'bounded': True, 'readOnly': True,
+        'boundary': ('LIVE OBSERVATIONAL MCP RESULTS; THE SELECTION REVISION IS RETAINED, '
+                     'BUT RESULTS ARE NOT HISTORICAL SNAPSHOT CLAIMS; MUTATIONS REQUIRE PROPOSAL REVIEW'),
+    })
+
+
 _HOST_TRACE_CACHE = {}
 _HOST_TRACE_CACHE_LOCK = threading.RLock()
 _HOST_TRACE_CACHE_TTL_SECONDS = 30

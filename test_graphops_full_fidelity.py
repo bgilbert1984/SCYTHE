@@ -148,10 +148,13 @@ class FullFidelityCapsuleTests(unittest.TestCase):
 
     def test_control_plane_and_declared_questions_require_their_exact_layers(self):
         trace, resolved = evidence_fixture()
-        infrastructure = {'schemaVersion': 'graphops.infrastructure.v1', 'domains': [], 'observedFlows': [],
+        infrastructure = {'schemaVersion': 'graphops.infrastructure.v1', 'domains': [
+                          {'id': 'asn:8075', 'asn': 8075, 'prefixes': ['20.0.0.0/8'],
+                           'observedHostIds': ['host:20.189.172.33']}], 'observedFlows': [],
                           'peeringdbEvidence': {'networks': [{'asn': 8075}]},
                           'controlPlaneEvidence': {'controlPlanePaths': [{
                               'prefix': '20.0.0.0/8', 'collectorId': 'rrc20',
+                              'originAsn': 8075,
                               'evidenceClass': 'CONTROL_PLANE_OBSERVATION'}]}}
         capsule = build_full_fidelity_capsule('Compare BGP RIS evidence with PeeringDB facility presence', {
             'kind': 'graph-node', 'entityId': 'host:20.189.172.33',
@@ -173,10 +176,33 @@ class FullFidelityCapsuleTests(unittest.TestCase):
             'kind': 'graph-node', 'entityId': 'host:20.189.172.33',
             'graphRevision': 'graph-exact'}, resolved, trace, infrastructure)
         self.assertTrue(capsule['evidenceCompatibility']['compatible'])
-        receipt = disclosure_receipt(capsule, 'gpt-oss:20b')['disclosed']
+        full_receipt = disclosure_receipt(capsule, 'gpt-oss:20b')
+        receipt = full_receipt['disclosed']
         self.assertEqual(receipt['infrastructureContradictions'], 1)
-        self.assertEqual(receipt['controlPlaneChanges'], 1)
+        self.assertEqual(receipt['controlPlaneChanges'], 0)
+        self.assertEqual(full_receipt['capsuleProjection']['omittedCounts']['controlPlaneChanges'], 1)
         self.assertEqual(receipt['withheldInfrastructureTests'], 1)
+
+    def test_validator_removes_rtt_distance_path_end_and_topology_absence_promotions(self):
+        trace, resolved = evidence_fixture()
+        capsule = build_full_fidelity_capsule('Explain route anomalies', {
+            'kind': 'graph-node', 'entityId': 'host:20.189.172.33',
+            'graphRevision': 'graph-exact'}, resolved, trace)
+        report = validate_cloud_report({
+            'situation': 'The route reaches an Amazon edge node.',
+            'anomalies': 'The last responding hop was not the target.',
+            'measuredVsInferred': 'RTTs under 40 ms indicate a short-haul path.',
+            'assessment': 'There is no evidence of a VPN or long-haul relay.',
+            'falsifier': 'A trace would falsify the claim that the path ends at the Comcast edge.',
+            'direction': 'Run repeated traceroutes.', 'confidence': .8,
+        }, capsule)
+        self.assertIn('TRACEROUTE-TERMINATION CLAIM REMOVED', report['situation'])
+        self.assertIn('RTT-TO-DISTANCE PROMOTION REMOVED', report['measuredVsInferred'])
+        self.assertIn('TOPOLOGY-ABSENCE CLAIM WITHHELD', report['assessment'])
+        self.assertIn('TRACEROUTE-TERMINATION CLAIM REMOVED', report['falsifier'])
+        self.assertEqual(report['confidence'], .2)
+        self.assertTrue(any(item.startswith('RTT_DISTANCE_PROMOTION_REMOVED')
+                            for item in report['validationConstraints']))
 
     @patch('graphops_full_fidelity.ask_ollama_cloud')
     @patch('scythe_orchestrator._graphops_directive_authorized', return_value=True)

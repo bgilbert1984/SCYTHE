@@ -216,7 +216,9 @@ def _focused_infrastructure_frame(infrastructure: Optional[Dict[str, Any]],
     relevant_paths = [row for row in all_paths if
                       _origin_asns(row.get("originAsn")).intersection(relevant_asns) or
                       _prefix_overlaps(row.get("prefix"), focus_prefixes)]
-    paths = (relevant_paths or all_paths)[-32:]
+    # Never fill a focused capsule with unrelated control-plane observations.
+    # Absence of a relevant row remains absence, not permission to sample globally.
+    paths = relevant_paths[-32:]
     ris = {key: ris_source.get(key) for key in ("status", "schemaVersion", "snapshotRevision",
            "capturedAt", "observationWindow", "scope", "collectors", "provenance", "boundary")
            if ris_source.get(key) is not None}
@@ -229,8 +231,8 @@ def _focused_infrastructure_frame(infrastructure: Optional[Dict[str, Any]],
     contradictions["findings"] = [row for row in contradiction_source.get("findings") or []
         if not relevant_ids or row.get("subject") in relevant_ids][:32]
     path_prefixes = {row.get("prefix") for row in paths}
-    contradictions["changes"] = [row for row in contradiction_source.get("changes") or []
-        if not path_prefixes or row.get("prefix") in path_prefixes][:32]
+    contradictions["changes"] = ([row for row in contradiction_source.get("changes") or []
+        if row.get("prefix") in path_prefixes][:32] if path_prefixes else [])
     contradictions["withheld"] = list(contradiction_source.get("withheld") or [])[:16]
 
     canonical_source = json.dumps(_safe_mapping(source), sort_keys=True, separators=(",", ":"), ensure_ascii=False)
@@ -301,7 +303,8 @@ def build_full_fidelity_capsule(question: str, selection: Dict[str, Any],
             "INFERRED; GRAPH ADJACENCY AND MODEL OUTPUT DO NOT ESTABLISH CAUSALITY"
         ),
     }
-    capsule["evidenceCompatibility"] = evaluate_evidence_compatibility(question, infrastructure)
+    capsule["evidenceCompatibility"] = evaluate_evidence_compatibility(
+        question, capsule["infrastructureEvidence"])
     canonical = json.dumps(capsule, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     capsule["sha256"] = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
     return capsule
@@ -363,7 +366,10 @@ and does not establish a route change, load balancing, congestion, or misidentif
 Physics anomalies are DERIVED_INFERENCE consistency warnings combining GeoIP with differential
 ICMP RTT; they never prove physical distance, a long-haul leg, relay, or VPN. A city sequence
 from interface GeoIP must never be narrated as a physical itinerary without independent
-corroboration. Use "could be consistent with" for hypotheses and name alternatives.
+corroboration. RTT magnitude alone cannot classify a path as local, nearby, short-haul, or
+long-haul. A traceroute's last responding hop is not evidence that the packet path ended there.
+Do not infer the absence of a VPN, relay, distant leg, or route merely because it was not observed.
+Use "could be consistent with" for hypotheses and name alternatives.
 
 InfrastructureEvidence has strict partitions. observedFlows are observed graph traffic between
 endpoints whose ASN ownership and locations remain INFERRED. modeledPathCandidates are reference-
@@ -409,6 +415,25 @@ _UNCORROBORATED_TIMING_CAUSE = re.compile(
     r"\b(?:congestion|routing change|load[- ]balanc|different path).{0,80}"
     r"\b(?:caused?|explains?|indicates?|suggests?)\b",
     re.IGNORECASE | re.DOTALL,
+)
+_RTT_DISTANCE_PROMOTION = re.compile(
+    r"\b(?:rtt|latenc(?:y|ies)|milliseconds?|\bms\b).{0,100}"
+    r"\b(?:indicat|suggest|imply|show|consistent with).{0,80}"
+    r"\b(?:short[- ]haul|long[- ]haul|local path|nearby|physical distance|distant)\b|"
+    r"\b(?:short[- ]haul|long[- ]haul|local path|nearby).{0,80}"
+    r"\b(?:because|given|based on|from).{0,40}\b(?:rtt|latency)\b",
+    re.IGNORECASE | re.DOTALL,
+)
+_PATH_END_PROMOTION = re.compile(
+    r"\b(?:path|route)\s+(?:ends?|terminates?|stops?)\s+(?:at|with|there)|"
+    r"\b(?:reaches?|enters?)\s+(?:an?\s+)?(?:amazon|comcast|isp|edge)\s+(?:edge|network|node)\b",
+    re.IGNORECASE,
+)
+_ABSENCE_TOPOLOGY_PROMOTION = re.compile(
+    r"\b(?:no|without|lacks?)\s+(?:direct\s+)?evidence\s+(?:of|for)\s+(?:an?\s+)?"
+    r"(?:long[- ]haul|vpn|relay|tunnel|distant leg|route)|"
+    r"\b(?:no|not)\s+(?:long[- ]haul|vpn|relay|tunnel)\b",
+    re.IGNORECASE,
 )
 
 
@@ -471,6 +496,39 @@ def validate_cloud_report(report: Dict[str, Any], capsule: Dict[str, Any]) -> Di
     if timing_removed:
         confidence = min(confidence, 0.35)
         constraints.append(f"SINGLE_TRACE_CAUSAL_ATTRIBUTION_REMOVED:{','.join(timing_removed)}")
+    distance_removed = []
+    for key in ("situation", "measuredVsInferred", "assessment", "falsifier"):
+        if _RTT_DISTANCE_PROMOTION.search(normalized[key]):
+            normalized[key] = (
+                "RTT-TO-DISTANCE PROMOTION REMOVED — measured response time does not establish "
+                "physical path length, locality, or a short/long-haul classification."
+            )
+            distance_removed.append(key.upper())
+    if distance_removed:
+        confidence = min(confidence, 0.25)
+        constraints.append(f"RTT_DISTANCE_PROMOTION_REMOVED:{','.join(distance_removed)}")
+    path_end_removed = []
+    for key in ("situation", "assessment", "falsifier"):
+        if _PATH_END_PROMOTION.search(normalized[key]):
+            normalized[key] = (
+                "TRACEROUTE-TERMINATION CLAIM REMOVED — the last responding TTL is observed; "
+                "it does not establish that the packet path ended at that interface or network."
+            )
+            path_end_removed.append(key.upper())
+    if path_end_removed:
+        confidence = min(confidence, 0.25)
+        constraints.append(f"PATH_TERMINATION_PROMOTION_REMOVED:{','.join(path_end_removed)}")
+    absence_removed = []
+    for key in ("situation", "assessment"):
+        if _ABSENCE_TOPOLOGY_PROMOTION.search(normalized[key]):
+            normalized[key] = (
+                "TOPOLOGY-ABSENCE CLAIM WITHHELD — an unobserved VPN, relay, distant leg, or "
+                "route cannot be excluded without compatible coverage and negative evidence."
+            )
+            absence_removed.append(key.upper())
+    if absence_removed:
+        confidence = min(confidence, 0.20)
+        constraints.append(f"TOPOLOGY_ABSENCE_INFERENCE_WITHHELD:{','.join(absence_removed)}")
     hops = (capsule.get("hostTrace") or {}).get("traceroute", {}).get("hops", [])
     if any(item.get("physics_anomaly") for item in hops):
         confidence = min(confidence, 0.50)

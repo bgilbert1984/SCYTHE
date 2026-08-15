@@ -179,6 +179,33 @@
     .graph-explorer__entity-id { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
     .graph-explorer__entity-summary { color:#7f9bad; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
     .graph-explorer__pager { display:flex; justify-content:space-between; gap:6px; margin-top:6px; }
+    .workbench { overflow:auto; padding:7px; box-sizing:border-box; color:#b8cad6;
+      font:9px/1.4 ui-monospace,monospace; }
+    .workbench__toolbar { display:grid; grid-template-columns:1fr auto auto; gap:5px; align-items:start;
+      position:sticky; top:0; z-index:2; padding-bottom:6px; background:rgba(0,8,20,.96); }
+    .workbench__status { min-width:0; margin:0; padding:5px; color:#63ffd1; white-space:pre-wrap;
+      border:1px solid rgba(99,255,209,.3); background:rgba(3,9,20,.75); }
+    .workbench__status--error,.workbench__error { color:#ff7890; }
+    .workbench__action,.workbench__entity { padding:4px 7px; color:#ccefff; background:#071422;
+      border:1px solid #24506a; font:9px ui-monospace,monospace; cursor:pointer; }
+    .workbench__action:hover,.workbench__entity:hover,.workbench__action:focus-visible,
+    .workbench__entity:focus-visible { border-color:#00d4ff; outline:none; color:#fff; }
+    .workbench__action:disabled { opacity:.45; cursor:not-allowed; }
+    .workbench__grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(260px,100%),1fr)); gap:7px; }
+    .workbench__card { min-width:0; padding:6px; border:1px solid rgba(0,212,255,.26);
+      background:rgba(3,9,20,.72); }
+    .workbench__card--unavailable { border-color:rgba(255,120,144,.4); }
+    .workbench__card-title { color:#66ddff; letter-spacing:.04em; }
+    .workbench__authority { margin:3px 0; color:#f7d154; font-size:8px; }
+    .workbench__payload { max-height:210px; overflow:auto; margin:4px 0; padding:4px;
+      color:#a9bfd0; background:rgba(0,0,0,.23); white-space:pre-wrap; overflow-wrap:anywhere; }
+    .workbench__entities { display:flex; flex-wrap:wrap; gap:3px; margin-top:5px; }
+    .workbench__entity { max-width:100%; overflow:hidden; text-overflow:ellipsis; color:#63ffd1; }
+    .workbench__proposals { margin-top:7px; padding:6px; border:1px dashed rgba(247,209,84,.45); }
+    .workbench__proposal-title { color:#f7d154; margin-bottom:3px; }
+    .workbench__proposal { color:#91a5b8; }
+    .workbench__boundary { margin-top:7px; color:#ffb25e; }
+    .workbench__empty { padding:8px; color:#7f9bad; }
     @media (max-width:600px) { .graph-explorer__form { grid-template-columns:1fr 1fr; }
       .graph-explorer__results { grid-template-columns:1fr; } }
     .graph-result__source { margin-top:3px; color:#9eb6c7; overflow-wrap:anywhere; }
@@ -232,6 +259,10 @@
         <button id="hypergraph-mode-location" type="button" role="tab" aria-pressed="false" aria-selected="false">LOCATION ESTIMATES</button>
         <button id="hypergraph-mode-infrastructure" type="button" role="tab" aria-pressed="false" aria-selected="false">INFRASTRUCTURE LENS</button>
         <button id="hypergraph-mode-explorer" type="button" role="tab" aria-pressed="false" aria-selected="false">GRAPH EXPLORER</button>
+        <button id="hypergraph-mode-autopilot" type="button" role="tab" aria-pressed="false" aria-selected="false">AUTOPILOT</button>
+        <button id="hypergraph-mode-semantic" type="button" role="tab" aria-pressed="false" aria-selected="false">SEMANTIC</button>
+        <button id="hypergraph-mode-spectrum" type="button" role="tab" aria-pressed="false" aria-selected="false">SPECTRUM</button>
+        <button id="hypergraph-mode-events" type="button" role="tab" aria-pressed="false" aria-selected="false">EVENTS</button>
       </div>
       <div id="live-hypergraph-3d-viewport" class="live-hypergraph__viewport">
         <div class="live-hypergraph__three" data-live-graph-3d></div>
@@ -269,6 +300,14 @@
         </div>
         <div class="graph-result__boundary">BOUNDARY // SEARCH AND NEIGHBORHOOD RESULTS ARE A BOUNDED GRAPH INDEX; ADJACENCY IS NOT CAUSALITY</div>
       </section>
+      <section id="live-hypergraph-autopilot-viewport" class="live-hypergraph__viewport workbench"
+        aria-label="GraphOps Autopilot observations and suggestions" hidden></section>
+      <section id="live-hypergraph-semantic-viewport" class="live-hypergraph__viewport workbench"
+        aria-label="Selection-aware semantic memory" hidden></section>
+      <section id="live-hypergraph-spectrum-viewport" class="live-hypergraph__viewport workbench"
+        aria-label="Bounded RF spectrum evidence" hidden></section>
+      <section id="live-hypergraph-events-viewport" class="live-hypergraph__viewport workbench"
+        aria-label="Bounded tactical graph event stream" hidden></section>
       <div class="live-hypergraph__legend">PURPOSE // <span style="color:#fff">● SELECTED</span> · <span style="color:#00d4ff">● ACTIVE TRAFFIC</span> · <span style="color:#ff8c42">● SIGNAL</span> · <span style="color:#bb83ff">● NEW</span> · <span style="color:#f7d154">● DIVERSITY</span> · <span style="color:#7890a8">● CONTEXT</span><br>STATUS BADGE ABOVE HOST // <span style="color:#38f28f">● ACTIVE</span> · <span style="color:#ff4f64">● INACTIVE</span> · ABSENT UNKNOWN<br>TOPOLOGY // NOT GEOLOCATION · SHAPE = EVIDENCE · CLICK NODE, EDGE, OR HYPEREDGE</div>
     </aside>
     <aside id="causal-world-stack" class="world-stack" aria-label="Causal hypothesis world stack" hidden></aside>
@@ -351,6 +390,7 @@
     import { InfrastructureController } from "./infrastructureController.js";
     import { InfrastructureLensView } from "./infrastructureLensView.js";
     import { InfrastructureGlobeLayer } from "./infrastructureGlobeLayer.js";
+    import { ContextualWorkbench } from "./contextualWorkbench.js";
 
     const viewerOptions = {
       animation: false,
@@ -459,10 +499,16 @@
     const modeLocation = document.getElementById("hypergraph-mode-location");
     const modeInfrastructure = document.getElementById("hypergraph-mode-infrastructure");
     const modeExplorer = document.getElementById("hypergraph-mode-explorer");
+    const workbenchModes = Object.fromEntries(["autopilot", "semantic", "spectrum", "events"].map((name) =>
+      [name, document.getElementById(`hypergraph-mode-${name}`)]));
     const viewport3D = document.getElementById("live-hypergraph-3d-viewport");
     const viewport2D = document.getElementById("live-hypergraph-2d-viewport");
     const viewportLocation = document.getElementById("live-hypergraph-location-viewport");
     const viewportInfrastructure = document.getElementById("live-hypergraph-infrastructure-viewport");
+    const workbenchRoots = Object.fromEntries(["autopilot", "semantic", "spectrum", "events"].map((name) =>
+      [name, document.getElementById(`live-hypergraph-${name}-viewport`)]));
+    const contextualWorkbench = new ContextualWorkbench({roots: workbenchRoots});
+    window.scytheContextualWorkbench = contextualWorkbench;
     let graphExplorer = null;
     const locationView = new HypergraphLocationView({root: viewportLocation, controller: liveGraphController}).start();
     const infrastructureController = new InfrastructureController();
@@ -482,8 +528,10 @@
       const showExplorer = mode === "explorer";
       const showLocation = mode === "location";
       const showInfrastructure = mode === "infrastructure";
+      const showWorkbench = Object.hasOwn(workbenchModes, mode);
       viewport3D.hidden = !show3D; viewport2D.hidden = !show2D; viewportLocation.hidden = !showLocation;
       viewportInfrastructure.hidden = !showInfrastructure;
+      for (const [name, root] of Object.entries(workbenchRoots)) root.hidden = name !== mode;
       mode3D.setAttribute("aria-pressed", String(Boolean(show3D)));
       mode3D.setAttribute("aria-selected", String(Boolean(show3D)));
       mode2D.setAttribute("aria-pressed", String(Boolean(show2D)));
@@ -494,11 +542,16 @@
       modeInfrastructure.setAttribute("aria-selected", String(showInfrastructure));
       modeExplorer.setAttribute("aria-pressed", String(showExplorer));
       modeExplorer.setAttribute("aria-selected", String(showExplorer));
+      for (const [name, button] of Object.entries(workbenchModes)) {
+        button.setAttribute("aria-pressed", String(name === mode));
+        button.setAttribute("aria-selected", String(name === mode));
+      }
       liveHypergraph3D?.setVisible(Boolean(show3D));
       locationView.setVisible(showLocation);
       infrastructureView.setVisible(showInfrastructure);
       infrastructureGlobe.setVisible(showInfrastructure);
       graphExplorer?.setVisible(showExplorer);
+      contextualWorkbench.setVisible(showWorkbench ? mode : null);
       resultTabs?.setVisible(mode);
     }
     resultTabs = new GraphResultTabs({root: liveRoot, onSelect: setHypergraphMode});
@@ -510,6 +563,8 @@
     modeLocation.addEventListener("click", () => setHypergraphMode("location"));
     modeInfrastructure.addEventListener("click", () => setHypergraphMode("infrastructure"));
     modeExplorer.addEventListener("click", () => setHypergraphMode("explorer"));
+    for (const [name, button] of Object.entries(workbenchModes))
+      button.addEventListener("click", () => setHypergraphMode(name));
     try {
       const [THREE, controlsModule] = await Promise.all([import("three"), import("three/addons/controls/OrbitControls.js")]);
       liveHypergraph3D = new LiveHypergraph3DView({root: liveRoot, controller: liveGraphController,
@@ -558,7 +613,9 @@
         renderGraphOpsRecord(record);
         selections.upsert(record.selection);
         liveGraphController.setFocus(record.selection.entityId);
+        infrastructureController.setFocus(record.selection.entityId);
         graphExplorer.setSelection(record.selection);
+        contextualWorkbench.setSelection(record.selection);
         updateInvestigation();
       },
     });
@@ -859,6 +916,7 @@
       liveGraphController.setFocus(typedSelection.entityId);
       infrastructureController.setFocus(typedSelection.entityId);
       graphExplorer.setSelection(typedSelection);
+      contextualWorkbench.setSelection(typedSelection);
       updateInvestigation();
       const hasRf = selections.items.some((item) => item.kind === "rf-cell");
       document.getElementById("execute-correlation").disabled = !hasRf;
@@ -872,6 +930,22 @@
         await submitDirective(selections.directiveRequest({directive: "correlate.rf-cell-graph",
           utterance: "Connect this RF cell to this graph node", mode: "preview"}));
       } catch (error) { status.textContent = `GRAPHOPS // REFUSED // ${error.message}`; }
+    });
+    document.getElementById("globe-root").addEventListener("scythe-web:workbench-investigate", ({detail}) => {
+      const typedSelection = detail?.selection;
+      if (!typedSelection?.entityId) return;
+      showDirective(); captureActiveTab();
+      investigationTabs.open(typedSelection, {label: typedSelection.entityId});
+      const key = investigationKey(typedSelection);
+      patchInvestigation(key, {outputHidden: false, output: detail.output,
+        status: `GRAPHOPS // ${String(detail.panel).toUpperCase()} // MCP EVIDENCE`,
+        conversationState: "MCP // READ-ONLY OBSERVATION // REVISION RETAINED"});
+      selections.upsert(typedSelection);
+      liveGraphController.setFocus(typedSelection.entityId);
+      infrastructureController.setFocus(typedSelection.entityId);
+      graphExplorer.setSelection(typedSelection);
+      contextualWorkbench.setSelection(typedSelection);
+      updateInvestigation();
     });
     document.getElementById("globe-root").addEventListener("scythe-web:graph-status", ({detail}) => {
       if (detail.status === "empty" || detail.status === "unavailable") {
