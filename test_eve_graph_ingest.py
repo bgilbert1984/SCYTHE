@@ -1,5 +1,6 @@
 import unittest
 import json
+from unittest.mock import patch
 
 from eve_graph_ingest import EveIngestError, commit_eve_events, validate_eve_batch
 from graphops_graph_resolver import GraphSelectionResolver
@@ -58,6 +59,51 @@ class EveGraphIngestTests(unittest.TestCase):
         self.assertTrue(bus.calls[0]["audit"])
         self.assertEqual(bus.calls[0]["graph_ops"][-1].entity_data["metadata"]["evidence_class"], "OBSERVED")
 
+    def test_allow_listed_packet_dissections_enter_flow_labels_without_payloads(self):
+        bus = _Bus(); decoded = event("tls")
+        decoded["entities"].extend([
+            {"key": "app_proto", "value": "tls"},
+            {"key": "tls_sni", "value": "example.org"},
+            {"key": "tls_version", "value": "TLS 1.3"},
+        ])
+        commit_eve_events(validate_eve_batch({"events": [decoded]}), bus)
+        labels = bus.calls[0]["graph_ops"][-1].entity_data["labels"]
+        self.assertEqual(labels["app_proto"], "tls")
+        self.assertEqual(labels["tls_sni"], "example.org")
+        self.assertEqual(labels["flow_type"], "TLS")
+        self.assertEqual(labels["flow_type_basis"], "OBSERVED_DECODED")
+        self.assertNotIn("payload", labels)
+
+    def test_multicast_ssdp_tuple_is_display_classified_without_claiming_decoder_authority(self):
+        bus = _Bus(); discovery = event()
+        discovery["entities"][1] = {"key": "dest_ip", "value": "239.255.255.250"}
+        discovery["entities"][3] = {"key": "dest_port", "value": "1900"}
+        commit_eve_events(validate_eve_batch({"events": [discovery]}), bus)
+        labels = bus.calls[0]["graph_ops"][-1].entity_data["labels"]
+        self.assertEqual(labels["flow_type"], "SERVICE_DISCOVERY")
+        self.assertEqual(labels["flow_type_basis"], "INFERRED_TUPLE")
+
+    @patch.dict("os.environ", {"SCYTHE_SENSOR_LOCAL_CIDRS": "10.0.0.0/24"}, clear=False)
+    def test_flow_direction_is_boundary_relative_and_tuple_provenance_is_retained(self):
+        bus = _Bus()
+        commit_eve_events(validate_eve_batch({"events": [event()]}), bus)
+        labels = bus.calls[0]["graph_ops"][-1].entity_data["labels"]
+        self.assertEqual(labels["tuple_direction"], "SOURCE_TO_DESTINATION")
+        self.assertEqual(labels["tuple_direction_basis"], "OBSERVED_EVE_TUPLE")
+        self.assertEqual(labels["operational_direction"], "OUTBOUND")
+        self.assertEqual(labels["direction_basis"], "CONFIGURED_SENSOR_BOUNDARY")
+
+    def test_reinforced_flow_retains_latest_decoded_summary(self):
+        engine = HypergraphEngine()
+        base = {"id": "flow:a", "kind": "network_flow",
+                "nodes": ["host:a", "host:b"], "metadata": {"source": "eve-streamer"}}
+        engine.add_edge({**base, "labels": {"app_proto": "unknown"}})
+        engine.add_edge({**base, "labels": {"app_proto": "tls", "tls_sni": "example.org"}})
+        edge = engine.edges["flow:a"]
+        self.assertEqual(edge.labels["app_proto"], "tls")
+        self.assertEqual(edge.labels["tls_sni"], "example.org")
+        self.assertEqual(edge.metadata["reinforcement_count"], 2)
+
     def test_idempotency_is_scoped_to_the_graph_session(self):
         bus = _Bus(); normalized = validate_eve_batch({"events": [event()]})
         commit_eve_events(normalized, bus, idempotency_scope="session-42")
@@ -73,6 +119,20 @@ class EveGraphIngestTests(unittest.TestCase):
         bus = _Bus(); normalized = validate_eve_batch({"events": [event("test_flow")]})
         result = commit_eve_events(normalized, bus)
         self.assertEqual(result["evidenceClasses"], ["SYNTHETIC"])
+
+    def test_multicast_and_unspecified_addresses_are_not_typed_as_hosts(self):
+        bus = _Bus(); multicast = event()
+        multicast["entities"][1] = {"key": "dest_ip", "value": "ff02::1:3"}
+        commit_eve_events(validate_eve_batch({"events": [multicast]}), bus)
+        nodes = bus.calls[0]["graph_ops"][:2]
+        self.assertEqual(nodes[1].entity_data["kind"], "network_multicast_group")
+        self.assertEqual(nodes[1].entity_data["labels"]["addressClass"], "MULTICAST_GROUP")
+
+        bus = _Bus(); unspecified = event()
+        unspecified["entities"][1] = {"key": "dest_ip", "value": "0.0.0.0"}
+        commit_eve_events(validate_eve_batch({"events": [unspecified]}), bus)
+        self.assertEqual(bus.calls[0]["graph_ops"][1].entity_data["kind"],
+                         "network_unspecified_address")
 
     def test_bootstrap_replay_is_observed_history_with_explicit_ingest_mode(self):
         bus = _Bus(); replay = event()

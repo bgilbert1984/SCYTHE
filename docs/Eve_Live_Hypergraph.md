@@ -99,6 +99,73 @@ are never added to the retry path. Recovery is visible in
 `runtime/eve-streamer.log` as `remote send attempt ... reconnecting`, followed
 by `remote stream recovered ...`.
 
+### Flow activity capsules
+
+Clicking a `network_flow` line in either live hypergraph view now prepares a
+revision-pinned GraphOps flow evidence capsule. Preparation is local: it does
+not contact Ollama Cloud. The GraphOps panel displays the exact transport tuple,
+directional counters, endpoint context, evidence class, and any allow-listed
+Suricata Eve dissections available for that flow. The operator must still use
+`ASK CLOUD // FULL FIDELITY` and confirm the exact disclosure before transmission.
+
+The streamer retains a bounded decoded vocabulary: application protocol, flow
+identity/state/counters, TCP state/flags, DNS name/type/result, HTTP host/path/
+method/status, TLS SNI/version/JA3 hash, and Suricata alert signature/category/
+severity. Raw packet payloads, packet bytes, authorization material, cookies,
+and a complete packet sequence do not enter this path. GraphOps treats decoded
+fields as observed sensor summaries while application purpose, user intent, and
+maliciousness remain model interpretations. Missing decoded fields are never
+treated as evidence that the corresponding activity was absent on the wire.
+
+The orchestrator additionally retains an in-memory temporal dissection ring
+for each recently observed flow: at most the latest 32 accepted, deduplicated
+Eve summaries. The ring is a sidecar rather than graph-edge metadata, so normal
+200-node/300-edge polling and immutable graph snapshots do not multiply the
+sequence payload across every displayed edge. Only the explicitly selected
+flow receives its ordered ring, inter-arrival cadence, window, omitted-event
+count, post-selection exclusion count, and decoded fields. Events newer than a
+retained selection revision are excluded. The ring remains payload-free and is explicitly labelled
+`BOUNDED_DECODED_EVENT_TAIL; NOT A COMPLETE PACKET SEQUENCE`. A restart clears
+the sidecar; bounded Eve bootstrap replay begins rebuilding it.
+
+Live 2D and Three.js flow edges use a shared display taxonomy: security signal,
+DNS, HTTP, TLS, TLS/QUIC candidate, service discovery, ICMP, and other transport.
+Color communicates that display type while dash pattern continues to communicate
+evidence class. Decoded protocol fields carry an `OBSERVED_DECODED` basis;
+port/multicast candidates carry `INFERRED_TUPLE`. Hover text exposes the basis,
+and neither classification changes the edge's underlying evidence authority.
+
+Every two-member flow also carries a static source-to-destination chevron in
+the 2D and Three.js views. That orientation is an observed Eve tuple, not a
+claim about local ingress or egress. `INBOUND`, `OUTBOUND`, `EAST_WEST`, and
+`EXTERNAL_TRANSIT` are assigned only against the current capture-adapter
+boundary written to `runtime/sensor-boundary.json`; SCYTHE deliberately does
+not equate RFC1918 space with the local sensor zone. The Windows Suricata
+startup task refreshes this boundary on every run, including when Suricata is
+already active, and the server reads it on demand so Wi-Fi roaming does not
+require an orchestrator restart.
+
+When two accepted summaries provide monotonic Suricata directional counters,
+one bounded particle per active direction moves along the edge. Its rate is
+derived from the measured counter interval and its size only summarizes the
+packet delta. No delta means no animation. Reduced-motion clients always retain
+the static chevron, direction color, and complete hover wording without moving
+particles. Flow capsules carry the same boundary classification and compact
+counter delta while the latest-32 sidecar remains the authority for sequence
+and cadence analysis.
+
+### Non-unicast address context
+
+Eve endpoints that are multicast or unspecified are typed as
+`network_multicast_group` or `network_unspecified_address`, rather than as
+ordinary hosts. They are excluded from ICMP liveness rotation and unicast
+traceroute. Selecting one prepares passive GraphOps context instead: known-group
+semantics (including mDNS, LLMNR, and SSDP), incident flows, decoded protocol
+counts, and bounded observed senders/receivers. An unspecified address is
+explained as a capture/binding wildcard or sentinel requiring source-record
+inspection—not as a remote device. These investigations can be sent to the
+local interpretive Ollama path; they do not invent a unique multicast responder.
+
 ## Production sensor deployment
 
 Production cutover completed on 2026-08-07. WSL2 is using its default NAT

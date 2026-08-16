@@ -204,6 +204,30 @@ class FullFidelityCapsuleTests(unittest.TestCase):
         self.assertTrue(any(item.startswith('RTT_DISTANCE_PROMOTION_REMOVED')
                             for item in report['validationConstraints']))
 
+    def test_flow_validator_bounds_zero_counters_and_repairs_ssdp_falsifier(self):
+        capsule = {'flowEvidence': {'flow': {'transport': {
+            'src_ip': '10.0.40.162', 'src_port': 49152,
+            'dest_ip': '239.255.255.250', 'dest_port': 1900, 'proto': 'udp'}}}}
+        report = validate_cloud_report({
+            'situation': 'One packet was seen and no return traffic or errors were seen.',
+            'anomalies': 'No retransmissions or timeouts occurred.',
+            'measuredVsInferred': 'The tuple is observed; SSDP is inferred.',
+            'assessment': 'Benign SSDP is plausible.',
+            'falsifier': 'A packet on a different destination port or a response packet would challenge it.',
+            'direction': 'Capture the next decoded packet.', 'confidence': .8,
+        }, capsule)
+        self.assertIn('BOUNDED FLOW ABSENCE REFRAMED', report['situation'])
+        self.assertIn('outside this summarized flow window remain unmeasured', report['anomalies'])
+        self.assertIn('SSDP M-SEARCH', report['falsifier'])
+        self.assertIn('SSDP_FALSIFIER_REPAIRED', report['validationConstraints'])
+        self.assertEqual(report['confidence'], .45)
+
+    def test_cadence_question_requires_more_than_one_temporal_event(self):
+        compatibility = evaluate_evidence_compatibility('Explain the sequence and cadence',
+            flow_evidence={'packetDissections': [{'eventId': 'one'}]})
+        self.assertFalse(compatibility['compatible'])
+        self.assertEqual(compatibility['missing'][0]['class'], 'FLOW_TEMPORAL_DISSECTION')
+
     @patch('graphops_full_fidelity.ask_ollama_cloud')
     @patch('scythe_orchestrator._graphops_directive_authorized', return_value=True)
     def test_endpoint_requires_acknowledgement_and_matching_server_evidence(self, _authorized, ask_cloud):

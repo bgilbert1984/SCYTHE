@@ -49,3 +49,11 @@ test("prompt context carries tooltip claims without promoting display enrichment
   assert.match(value, /CONTEXT AUTHORITY \/\/ MIXED/);
   assert.match(value, /SERVER-RESOLVED GRAPH EVIDENCE GOVERNS ANSWERS/);
 });
+
+test("multicast tooltip describes a group and suppresses unicast liveness", () => {
+  const value = graphEntityTooltip({id:"host:ff02::1:3",kind:"network_multicast_group",
+    evidenceClass:"OBSERVED",labels:{ip:"ff02::1:3"},enrichment:{scope:"MULTICAST"}});
+  assert.match(value,/MULTICAST GROUP/);
+  assert.match(value,/LIVENESS \/\/ NOT APPLICABLE/);
+  assert.doesNotMatch(value,/NOT YET MEASURED/);
+});

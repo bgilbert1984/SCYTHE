@@ -10,6 +10,7 @@ $stdout = Join-Path $base "runtime\suricata-stdout.log"
 $stderr = Join-Path $base "runtime\suricata-stderr.log"
 $pidFile = Join-Path $base "runtime\suricata.pid"
 $startupLog = Join-Path $base "runtime\suricata-startup.log"
+$boundaryFile = Join-Path $base "runtime\sensor-boundary.json"
 
 Set-Content -Path $startupLog -Value "$(Get-Date -Format o) START // adapter=$AdapterName" -Encoding utf8
 trap {
@@ -24,15 +25,6 @@ $env:TZ = "UTC"
 
 if (-not (Test-Path $exe) -or -not (Test-Path $config)) {
     throw "SCYTHE Suricata deployment is incomplete under $base"
-}
-
-$existing = Get-Process suricata -ErrorAction SilentlyContinue |
-    Where-Object { $_.Path -eq $exe } |
-    Select-Object -First 1
-if ($existing) {
-    Set-Content -Path $pidFile -Value $existing.Id -Encoding ascii
-    Write-Output "SCYTHE Suricata is already running as PID $($existing.Id)."
-    exit 0
 }
 
 $expectedExeSha256 = "10F4922E317E8776BC0C8554B03DBD6EFF62A36950EC1DD17B9F1FC27D992623"
@@ -56,6 +48,33 @@ if (-not $adapter -or $adapter.Status -ne "Up") {
     throw "Capture adapter '$AdapterName' did not become ready within 120 seconds."
 }
 Add-Content -Path $startupLog -Value "$(Get-Date -Format o) ADAPTER_READY // $($adapter.InterfaceDescription)" -Encoding utf8
+$localCidrs = @(Get-NetIPAddress -InterfaceIndex $adapter.ifIndex -AddressState Preferred -ErrorAction Stop |
+    Where-Object { $_.IPAddress -and $_.PrefixLength -and $_.IPAddress -notin @("127.0.0.1", "::1") } |
+    ForEach-Object { "$($_.IPAddress.Split('%')[0])/$($_.PrefixLength)" })
+if (-not $localCidrs.Count) {
+    throw "Capture adapter '$AdapterName' has no preferred IP boundary."
+}
+$boundary = [ordered]@{
+    schemaVersion = "scythe.sensor-boundary.v1"
+    sensorId = "$env:COMPUTERNAME/$AdapterName"
+    adapterName = $AdapterName
+    interfaceDescription = $adapter.InterfaceDescription
+    capturedAt = (Get-Date).ToUniversalTime().ToString("o")
+    authority = "DISCOVERED_SENSOR_INTERFACE"
+    localCidrs = $localCidrs
+}
+$boundary | ConvertTo-Json -Depth 3 | Set-Content -Path $boundaryFile -Encoding utf8
+Add-Content -Path $startupLog -Value "$(Get-Date -Format o) SENSOR_BOUNDARY // $($localCidrs -join ',')" -Encoding utf8
+
+$existing = Get-Process suricata -ErrorAction SilentlyContinue |
+    Where-Object { $_.Path -eq $exe } |
+    Select-Object -First 1
+if ($existing) {
+    Set-Content -Path $pidFile -Value $existing.Id -Encoding ascii
+    Write-Output "SCYTHE Suricata is already running as PID $($existing.Id); sensor boundary refreshed."
+    exit 0
+}
+
 $adapterGuid = $adapter.InterfaceGuid.ToString().Trim("{} ").ToUpperInvariant()
 $device = "\Device\NPF_{$adapterGuid}"
 $process = Start-Process -FilePath $exe `

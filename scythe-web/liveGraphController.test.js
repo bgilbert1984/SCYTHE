@@ -58,7 +58,9 @@ test("controller retains the last bounded snapshot when the endpoint is unavaila
   };
   const controller = new LiveGraphController({fetchImpl, refreshMilliseconds: 60_000}); const updates = [];
   controller.subscribe((update) => updates.push(update)); await controller.start(); fail = true; await controller.refresh();
-  assert.equal(updates.at(-1).available, false); assert.equal(updates.at(-1).graph.status, "unavailable");
+  assert.equal(updates.at(-1).available, false); assert.equal(updates.at(-1).graph.graphRevision, "stable");
+  assert.equal(updates.at(-1).retained, true);
+  assert.match(updates.at(-1).message, /DEGRADED \/\/ RETAINING LAST SNAPSHOT/);
   assert.equal(controller.snapshot.graphRevision, "stable"); controller.destroy();
 });
 
@@ -90,5 +92,21 @@ test("controller sends a bounded focus id for adaptive selection", async () => {
   await controller.start(); controller.running = false;
   controller.setFocus("host:203.0.113.7"); await controller.refresh();
   assert.ok(urls.some((url) => url.includes("focus_id=host%3A203.0.113.7")));
+  controller.destroy();
+});
+
+test("multicast groups are excluded from unicast liveness rotation", async () => {
+  let livenessCalls = 0;
+  const fetchImpl = async (url) => {
+    if (url.includes("eve/status")) return new Response(JSON.stringify({status:"ok"}));
+    if (url.includes("host-liveness")) { livenessCalls += 1; return new Response("{}", {status:400}); }
+    return new Response(JSON.stringify({status:"ok",graphRevision:"multicast",nodes:[
+      {id:"host:ff02::1:3",kind:"network_multicast_group",enrichment:{scope:"MULTICAST"}},
+    ],edges:[]}));
+  };
+  const controller = new LiveGraphController({fetchImpl,refreshMilliseconds:60_000});
+  const updates=[]; controller.subscribe((value)=>updates.push(value)); await controller.start();
+  assert.equal(livenessCalls,0);
+  assert.match(updates.at(-1).message,/HOST PING \/\/ 0 ACTIVE \/\/ 0 INACTIVE \/\/ 0 UNKNOWN/);
   controller.destroy();
 });

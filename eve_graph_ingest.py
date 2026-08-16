@@ -108,6 +108,31 @@ def _port(value: str | None) -> int:
     return port
 
 
+def _address_node_kind(value: str) -> tuple[str, str]:
+    address = ipaddress.ip_address(value)
+    if address.is_multicast:
+        return "network_multicast_group", "MULTICAST_GROUP"
+    if address.is_unspecified:
+        return "network_unspecified_address", "UNSPECIFIED_ADDRESS"
+    return "network_host", "UNICAST_HOST"
+
+
+def temporal_dissection_for_event(event: Dict[str, Any]) -> tuple[str, Dict[str, Any]]:
+    """Project one validated Eve event into a payload-free temporal record."""
+    from graphops_flow_evidence import DISSECTION_LABELS
+    fields = _entity_map(event)
+    src = _ip(fields.get("src_ip", ""), "src_ip")
+    dst = _ip(fields.get("dest_ip") or fields.get("dst_ip") or "", "dest_ip")
+    src_port = _port(fields.get("src_port")); dst_port = _port(fields.get("dest_port") or fields.get("dst_port"))
+    proto = (fields.get("proto") or "unknown").lower()[:32]
+    flow_id = f"flow:{proto}:{src}:{src_port}->{dst}:{dst_port}"
+    evidence_class = "SYNTHETIC" if event["type"].lower().startswith(("test", "synthetic")) else "OBSERVED"
+    decoded = {key: fields[key] for key in DISSECTION_LABELS if fields.get(key)}
+    return flow_id, {"eventId": event["event_id"], "eventType": event["type"],
+                     "observedAt": event["timestamp"], "observedAtEpoch": event["observed_at"],
+                     "evidenceClass": evidence_class, "fields": decoded}
+
+
 def graph_ops_for_event(event: Dict[str, Any]):
     from writebus import GraphOp
 
@@ -127,15 +152,25 @@ def graph_ops_for_event(event: Dict[str, Any]):
     node_ops = []
     for role, address in (("source", src), ("destination", dst)):
         entity_id = f"host:{address}"
+        node_kind, address_class = _address_node_kind(address)
         node_ops.append(GraphOp(event_type="NODE_UPDATE", entity_id=entity_id, entity_data={
-            "id": entity_id, "kind": "network_host", "labels": {"ip": address, "flowRole": role},
+            "id": entity_id, "kind": node_kind,
+            "labels": {"ip": address, "flowRole": role, "addressClass": address_class},
             "metadata": dict(metadata), "created_at": event["observed_at"],
         }))
-    flow_id = f"flow:{proto}:{src}:{src_port}->{dst}:{dst_port}"
+    flow_id, temporal_record = temporal_dissection_for_event(event)
+    dissection = temporal_record["fields"]
+    from graphops_flow_evidence import classify_flow_type
+    from graphops_flow_direction import classify_flow_direction, preview_flow_motion
+    flow_type, flow_type_basis = classify_flow_type(fields)
+    direction = classify_flow_direction(src, dst)
+    motion = preview_flow_motion(flow_id, fields, event["observed_at"])
     edge = {"id": flow_id, "kind": "network_flow", "nodes": [f"host:{src}", f"host:{dst}"],
             "labels": {"src_ip": src, "dest_ip": dst, "src_port": str(src_port),
                        "dest_port": str(dst_port), "proto": proto,
-                       "packets": fields.get("packets", ""), "bytes": fields.get("bytes", "")},
+                       "flow_type": flow_type, "flow_type_basis": flow_type_basis,
+                       "packets": fields.get("packets", ""), "bytes": fields.get("bytes", ""),
+                       **direction, **motion, **dissection},
             "metadata": dict(metadata), "timestamp": event["observed_at"]}
     return [*node_ops, GraphOp(event_type="EDGE_UPDATE", entity_id=flow_id, entity_data=edge)], flow_id, evidence_class
 
@@ -191,6 +226,9 @@ def commit_eve_events(events: Iterable[Dict[str, Any]], bus: Any,
             if not result.ok:
                 raise EveIngestError("WriteBus commit failed: " + "; ".join(result.errors))
             is_duplicate = bool((getattr(result, "debug", None) or {}).get("idempotent_replay"))
+            if not is_duplicate:
+                from graphops_flow_direction import record_flow_motion
+                record_flow_motion(flow_id, _entity_map(event), event["observed_at"])
             accepted += int(not is_duplicate); replayed += int(is_replay)
             deduplicated += int(is_duplicate); evidence_classes.add(evidence_class)
             STATS.record(received=1, committed=int(not is_duplicate), replayed=int(is_replay),

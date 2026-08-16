@@ -109,7 +109,8 @@ def _trace_frame(trace: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def evaluate_evidence_compatibility(question: str, infrastructure: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+def evaluate_evidence_compatibility(question: str, infrastructure: Optional[Dict[str, Any]] = None,
+                                    flow_evidence: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Declare whether this capsule contains the evidence classes a question requires."""
     lower = question.lower()
     requirements = []
@@ -133,11 +134,25 @@ def evaluate_evidence_compatibility(question: str, infrastructure: Optional[Dict
         (("contradiction", "source disagreement", "evidence tension", "origin change"),
          "INFRASTRUCTURE_CONTRADICTIONS",
          "revision-pinned contradiction findings, alternatives, falsifiers, and withheld tests"),
+        (("activity", "application", "packet", "dissection", "protocol", "malicious"),
+         "FLOW_DISSECTION",
+         "allow-listed decoded flow fields with counters, direction, and capture provenance"),
+        (("cadence", "sequence", "temporal dissection", "event timing"),
+         "FLOW_TEMPORAL_DISSECTION",
+         "at least two ordered decoded events inside the bounded temporal ring"),
     )
     for keywords, name, needed in checks:
         if any(keyword in lower for keyword in keywords):
             requirements.append({"class": name, "needed": needed})
-    available = {"HOST_TRACE", "PINNED_GRAPH_ENTITY"}
+    available = {"PINNED_GRAPH_ENTITY"}
+    if flow_evidence:
+        available.add("FLOW_TRANSPORT_SUMMARY")
+        if flow_evidence.get("packetDissections"):
+            available.add("FLOW_DISSECTION")
+        if len(flow_evidence.get("packetDissections") or []) >= 2:
+            available.add("FLOW_TEMPORAL_DISSECTION")
+    else:
+        available.add("HOST_TRACE")
     if infrastructure and infrastructure.get("schemaVersion") == "graphops.infrastructure.v1":
         available.add("INFRASTRUCTURE")
         if (infrastructure.get("peeringdbEvidence") or {}).get("networks"):
@@ -268,11 +283,12 @@ def _focused_infrastructure_frame(infrastructure: Optional[Dict[str, Any]],
 
 def build_full_fidelity_capsule(question: str, selection: Dict[str, Any],
                                 resolved: Dict[str, Any], trace: Dict[str, Any],
-                                infrastructure: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+                                infrastructure: Optional[Dict[str, Any]] = None,
+                                flow_evidence: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Build a deterministic-content, exact-value capsule from server-owned evidence."""
     entity = resolved.get("node") or resolved.get("edge") or {}
     capsule = {
-        "schemaVersion": "graphops.full-fidelity.v1",
+        "schemaVersion": "graphops.full-fidelity.v2",
         "capsuleId": f"ffc-{uuid.uuid4().hex}",
         "generatedAt": datetime.now(timezone.utc).isoformat(),
         "operatorQuestion": _safe_mapping(question),
@@ -286,12 +302,14 @@ def build_full_fidelity_capsule(question: str, selection: Dict[str, Any],
                           list(resolved.get("incidentEdges") or [])[:24]],
         "memberNodes": [_entity_frame(item) for item in
                         list(resolved.get("memberNodes") or [])[:24]],
-        "hostTrace": _trace_frame(trace),
+        "hostTrace": _trace_frame(trace) if trace else None,
+        "flowEvidence": _safe_mapping(flow_evidence) if flow_evidence else None,
         "infrastructureEvidence": _focused_infrastructure_frame(infrastructure, selection),
         "authority": {
             "graph": "REVISION_PINNED_SERVER_RESOLVED",
-            "target": "OBSERVED",
+            "target": "OBSERVED" if trace else None,
             "routeAndRtt": (trace.get("evidenceClasses") or {}),
+            "flowDissection": ((flow_evidence or {}).get("flow") or {}).get("evidenceClass", "UNAVAILABLE"),
             "model": "INTERPRETIVE_ONLY",
         },
         "exclusions": [
@@ -304,7 +322,7 @@ def build_full_fidelity_capsule(question: str, selection: Dict[str, Any],
         ),
     }
     capsule["evidenceCompatibility"] = evaluate_evidence_compatibility(
-        question, capsule["infrastructureEvidence"])
+        question, capsule["infrastructureEvidence"], flow_evidence)
     canonical = json.dumps(capsule, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     capsule["sha256"] = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
     return capsule
@@ -316,8 +334,17 @@ def disclosure_receipt(capsule: Dict[str, Any], model: str) -> Dict[str, Any]:
     target = (capsule.get("hostTrace") or {}).get("target")
     if target:
         addresses.add(str(target))
+    flow_evidence = capsule.get("flowEvidence") or {}
+    for endpoint in (flow_evidence.get("flow") or {}).get("endpoints") or []:
+        if endpoint.get("ip"):
+            addresses.add(str(endpoint["ip"]))
+    dissection_fields = sum(len(item.get("fields") or {}) for item in
+                             flow_evidence.get("packetDissections") or [])
     locations = sum(1 for item in hops if item.get("geo") or
                     (item.get("lat") is not None and item.get("lon") is not None))
+    locations += sum(1 for endpoint in (flow_evidence.get("flow") or {}).get("endpoints") or []
+                     if (endpoint.get("geoip") or {}).get("latitude") is not None and
+                     (endpoint.get("geoip") or {}).get("longitude") is not None)
     infrastructure = capsule.get("infrastructureEvidence") or {}
     projection = infrastructure.get("capsuleProjection") or {}
     return {
@@ -343,6 +370,11 @@ def disclosure_receipt(capsule: Dict[str, Any], model: str) -> Dict[str, Any]:
             "infrastructureContradictions": len((infrastructure.get("infrastructureContradictions") or {}).get("findings") or []),
             "controlPlaneChanges": len((infrastructure.get("infrastructureContradictions") or {}).get("changes") or []),
             "withheldInfrastructureTests": len((infrastructure.get("infrastructureContradictions") or {}).get("withheld") or []),
+            "packetDissections": len(flow_evidence.get("packetDissections") or []),
+            "decodedPacketFields": dissection_fields,
+            "temporalRingLimit": int((flow_evidence.get("temporalDissection") or {}).get("ringLimit") or 0),
+            "temporalEventsOmitted": int((flow_evidence.get("temporalDissection") or {}).get("eventsOmittedBeforeRing") or 0),
+            "rawPacketPayloads": 0,
         },
         "capsuleProjection": {key: projection.get(key) for key in
                               ("mode", "sourceSnapshotSha256", "sourceCounts", "includedCounts", "omittedCounts", "boundary")},
@@ -391,6 +423,24 @@ omitted from the wider environment, and a SHA-256 binding to the complete source
 infer anything from an omitted record. "Full fidelity" means included values are exact; it does not
 mean the entire unrelated environment was disclosed.
 
+When flowEvidence is present, classify only what its allow-listed packetDissections, temporalDissection,
+and flow counters
+support. Transport tuples, byte/packet counters, DNS names, HTTP fields, TLS SNI/version/fingerprints,
+and Suricata alert labels are OBSERVED decoded summaries at the named sensor boundary. They can support
+candidate activity classes, but application purpose, user identity or intent, compromise, malware,
+and maliciousness remain INFERRED. A port number alone is not an application identification. TLS SNI
+does not reveal encrypted content. An alert signature is a sensor observation, not a verdict. Never
+claim that absent decoded fields were absent on the wire. A zero directional counter describes only
+the retained flow summary; it does not establish that no response, error, timeout, or retransmission
+occurred outside that boundary. Suricata app_proto="failed" means decoder classification was
+unsuccessful, not that the application or flow failed. Raw payloads and a complete packet sequence are
+excluded. temporalDissection is an ordered tail ring of at most 32 decoded Eve summaries, not a complete
+packet capture; reason about cadence only inside its declared window and account for omitted earlier events.
+For 239.255.255.250:1900, SSDP is a strong protocol hypothesis, but normal unicast discovery
+responses do not falsify it and an unrelated packet on another port is not a falsifier. Prefer a bounded
+header/signature observation that can distinguish SSDP M-SEARCH/NOTIFY/HTTP response syntax from an
+alternative protocol. State at least one benign and one adverse alternative when the evidence permits both.
+
 Return one JSON object with exactly these string fields plus numeric confidence:
 {"situation":"...","anomalies":"...","measuredVsInferred":"...","assessment":"...",
  "falsifier":"...","direction":"...","confidence":0.0}
@@ -435,6 +485,23 @@ _ABSENCE_TOPOLOGY_PROMOTION = re.compile(
     r"\b(?:no|not)\s+(?:long[- ]haul|vpn|relay|tunnel)\b",
     re.IGNORECASE,
 )
+_FLOW_VERDICT_PROMOTION = re.compile(
+    r"\b(?:this|the)\s+(?:flow|traffic|activity)\s+(?:is|was|confirms?|proves?|demonstrates?)\s+"
+    r"(?:malicious|malware|command[- ]and[- ]control|c2|exfiltration|compromise)|"
+    r"\b(?:confirms?|proves?|demonstrates?)\s+(?:maliciousness|malware|compromise|exfiltration)\b",
+    re.IGNORECASE,
+)
+_FLOW_UNBOUNDED_ABSENCE = re.compile(
+    r"\bno\s+(?:return traffic|responses?|errors?|retransmissions?|timeouts?)\b|"
+    r"\bwithout\s+(?:return traffic|responses?|errors?|retransmissions?|timeouts?)\b",
+    re.IGNORECASE,
+)
+_SSDP_WEAK_FALSIFIER = re.compile(
+    r"\bdifferent\s+(?:destination\s+)?port\b|"
+    r"\bresponse packet\b.{0,100}\b(?:challenge|falsif|contradict)\b|"
+    r"\b(?:challenge|falsif|contradict)\b.{0,100}\bresponse packet\b",
+    re.IGNORECASE | re.DOTALL,
+)
 
 
 def validate_cloud_report(report: Dict[str, Any], capsule: Dict[str, Any]) -> Dict[str, Any]:
@@ -464,10 +531,13 @@ def validate_cloud_report(report: Dict[str, Any], capsule: Dict[str, Any]) -> Di
         confidence = min(confidence, 0.10)
         constraints.append(f"QUESTION_EVIDENCE_INCOMPATIBLE:{names}")
     if not _CONCRETE_OBSERVATION.search(normalized["direction"]):
-        normalized["direction"] = (
+        normalized["direction"] = ((
+            "Capture the next bounded bidirectional flow window with Suricata application decoding; "
+            "compare directional counters, protocol transitions, DNS/TLS/HTTP fields, and alert provenance."
+        ) if capsule.get("flowEvidence") else (
             "Run repeated fixed-flow traceroutes or MTR, compare minimum per-hop RTTs, route "
             "stability, reverse DNS, BGP ownership, and independent geolocation sources."
-        )
+        ))
         constraints.append("NON_ACTIONABLE_DIRECTION_REPLACED")
     if geography == "INFERRED":
         confidence = min(confidence, 0.60)
@@ -529,6 +599,41 @@ def validate_cloud_report(report: Dict[str, Any], capsule: Dict[str, Any]) -> Di
     if absence_removed:
         confidence = min(confidence, 0.20)
         constraints.append(f"TOPOLOGY_ABSENCE_INFERENCE_WITHHELD:{','.join(absence_removed)}")
+    if capsule.get("flowEvidence"):
+        absence_reframed = []
+        for key in ("situation", "anomalies", "assessment"):
+            if _FLOW_UNBOUNDED_ABSENCE.search(normalized[key]):
+                normalized[key] = (
+                    "BOUNDED FLOW ABSENCE REFRAMED — the retained directional counters contain no "
+                    "packets-to-client; responses, errors, retransmissions, timeouts, and activity "
+                    "outside this summarized flow window remain unmeasured."
+                )
+                absence_reframed.append(key.upper())
+        if absence_reframed:
+            confidence = min(confidence, 0.45)
+            constraints.append(f"FLOW_ABSENCE_BOUNDARY_ENFORCED:{','.join(absence_reframed)}")
+        promoted = []
+        for key in ("situation", "assessment"):
+            if _FLOW_VERDICT_PROMOTION.search(normalized[key]):
+                normalized[key] = (
+                    "UNSUPPORTED FLOW VERDICT REMOVED — decoded metadata can support candidate "
+                    "activity classes, not user intent, compromise, or maliciousness as fact."
+                )
+                promoted.append(key.upper())
+        if promoted:
+            confidence = min(confidence, 0.35)
+            constraints.append(f"FLOW_VERDICT_PROMOTION_REMOVED:{','.join(promoted)}")
+        transport = ((capsule.get("flowEvidence") or {}).get("flow") or {}).get("transport") or {}
+        if (str(transport.get("dest_ip")) == "239.255.255.250" and
+                str(transport.get("dest_port")) == "1900" and
+                _SSDP_WEAK_FALSIFIER.search(normalized["falsifier"])):
+            normalized["falsifier"] = (
+                "Capture one bounded payload-signature or decoder result for this flow and test for "
+                "SSDP M-SEARCH, NOTIFY, or HTTP response start-lines plus HOST/ST/NT/USN headers; a "
+                "non-SSDP signature in this same flow would falsify the leading protocol hypothesis."
+            )
+            confidence = min(confidence, 0.45)
+            constraints.append("SSDP_FALSIFIER_REPAIRED")
     hops = (capsule.get("hostTrace") or {}).get("traceroute", {}).get("hops", [])
     if any(item.get("physics_anomaly") for item in hops):
         confidence = min(confidence, 0.50)

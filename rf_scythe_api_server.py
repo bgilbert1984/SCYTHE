@@ -4258,14 +4258,34 @@ if FLASK_AVAILABLE:
                     logger.warning(f'HypergraphEngine snapshot load failed: {exc}')
 
             def _start_snapshot_persistence(engine=hypergraph_engine):
-                """Start background snapshot thread + atexit hook."""
+                """Persist snapshots without blocking the eventlet request hub."""
                 spath = os.path.join(_data_dir(), 'hypergraph_snapshot.json')
+                try:
+                    # threading is eventlet-patched in this process.  The tpool
+                    # moves JSON serialization and atomic filesystem writes to a
+                    # real OS thread while the green request hub keeps serving.
+                    from eventlet import tpool as _eventlet_tpool
+                except ImportError:
+                    _eventlet_tpool = None
+
                 def _runner():
                     while True:
                         try:
-                            engine.save_snapshot(spath)
-                        except Exception:
-                            pass
+                            started = time.monotonic()
+                            # Capture while running in eventlet's green-thread
+                            # domain.  Its patched RLock is not safe to acquire
+                            # from a native tpool worker during sustained ingest.
+                            dump = engine.snapshot()
+                            if _eventlet_tpool is not None:
+                                _eventlet_tpool.execute(engine.write_snapshot_dump, spath, dump)
+                            else:
+                                engine.write_snapshot_dump(spath, dump)
+                            elapsed = time.monotonic() - started
+                            if elapsed >= 2.0:
+                                logger.warning(
+                                    'HypergraphEngine snapshot persistence took %.2fs', elapsed)
+                        except Exception as exc:
+                            logger.warning('HypergraphEngine snapshot persistence failed: %s', exc)
                         time.sleep(60)
                 t = threading.Thread(target=_runner, daemon=True)
                 t.start()

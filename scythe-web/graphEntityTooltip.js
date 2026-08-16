@@ -28,10 +28,17 @@ export function graphEntityTooltip(entity = {}) {
   const purpose = text(entity.display?.selectionPurpose).replaceAll("_", " ");
   const activityScore = compact(entity.display?.activityScore);
   if (ip) {
-    lines.push(`${scope || "NETWORK"} HOST`, ip);
+    const kind = text(entity.kind).toLowerCase();
+    const addressTitle = kind === "network_multicast_group" || scope === "MULTICAST"
+      ? "MULTICAST GROUP" : kind === "network_unspecified_address"
+        ? "UNSPECIFIED ADDRESS" : `${scope || "NETWORK"} HOST`;
+    lines.push(addressTitle, ip);
     if (purpose) lines.push("", `DISPLAY PURPOSE // ${purpose}${activityScore ? ` · ACTIVITY ${activityScore}` : ""}`);
     const liveness = entity.liveness ?? {};
-    if (["active", "inactive"].includes(liveness.state)) {
+    if (["network_multicast_group", "network_unspecified_address"].includes(kind) ||
+        ["MULTICAST", "RESERVED"].includes(scope)) {
+      lines.push("", "LIVENESS // NOT APPLICABLE · NOT A UNICAST PROBE TARGET");
+    } else if (["active", "inactive"].includes(liveness.state)) {
       const rtt = Number(liveness.rttMs);
       lines.push("", `LIVENESS // ${liveness.state.toUpperCase()} · ICMP MEASURED`,
         `${liveness.tool || "PING"}${Number.isFinite(rtt) ? ` · ${compact(rtt)} ms` : " · NO REPLY"}`);

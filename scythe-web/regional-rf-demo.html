@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>SCYTHE // NTIA ITM Regional RF Demo</title>
+  <link rel="icon" href="data:,">
   <script src="https://cesium.com/downloads/cesiumjs/releases/1.114/Build/Cesium/Cesium.js"></script>
   <link rel="stylesheet" href="https://cesium.com/downloads/cesiumjs/releases/1.114/Build/Cesium/Widgets/widgets.css">
   <style>
@@ -308,7 +309,7 @@
         aria-label="Bounded RF spectrum evidence" hidden></section>
       <section id="live-hypergraph-events-viewport" class="live-hypergraph__viewport workbench"
         aria-label="Bounded tactical graph event stream" hidden></section>
-      <div class="live-hypergraph__legend">PURPOSE // <span style="color:#fff">● SELECTED</span> · <span style="color:#00d4ff">● ACTIVE TRAFFIC</span> · <span style="color:#ff8c42">● SIGNAL</span> · <span style="color:#bb83ff">● NEW</span> · <span style="color:#f7d154">● DIVERSITY</span> · <span style="color:#7890a8">● CONTEXT</span><br>STATUS BADGE ABOVE HOST // <span style="color:#38f28f">● ACTIVE</span> · <span style="color:#ff4f64">● INACTIVE</span> · ABSENT UNKNOWN<br>TOPOLOGY // NOT GEOLOCATION · SHAPE = EVIDENCE · CLICK NODE, EDGE, OR HYPEREDGE</div>
+      <div class="live-hypergraph__legend">PURPOSE // <span style="color:#fff">● SELECTED</span> · <span style="color:#00d4ff">● ACTIVE TRAFFIC</span> · <span style="color:#ff8c42">● SIGNAL</span> · <span style="color:#bb83ff">● NEW</span> · <span style="color:#f7d154">● DIVERSITY</span> · <span style="color:#7890a8">● CONTEXT</span><br>FLOW TYPE // <span style="color:#ff4f64">━ SECURITY</span> · <span style="color:#f7d154">━ DNS</span> · <span style="color:#00d4ff">━ HTTP</span> · <span style="color:#bb83ff">━ TLS</span> · <span style="color:#9d7cff">━ TLS/QUIC?</span> · <span style="color:#ff8c42">━ DISCOVERY</span> · <span style="color:#63ffd1">━ ICMP</span> · <span style="color:#7890a8">━ OTHER</span><br>DIRECTION CHEVRON // <span style="color:#00d4ff">▶ OUT</span> · <span style="color:#ff6fb7">▶ IN</span> · <span style="color:#f7d154">▶ LOCAL</span> · <span style="color:#7890a8">▶ TRANSIT</span> · <span style="color:#fff">▶ TUPLE ONLY</span> · MOVING DOTS = MEASURED COUNTER DELTAS · STATIC WHEN REDUCED MOTION OR INSUFFICIENT TEMPORAL EVIDENCE<br>STATUS BADGE ABOVE HOST // <span style="color:#38f28f">● ACTIVE</span> · <span style="color:#ff4f64">● INACTIVE</span> · ABSENT UNKNOWN<br>TOPOLOGY // NOT GEOLOCATION · EDGE COLOR = FLOW TYPE · EDGE PATTERN = EVIDENCE · CHEVRON = OBSERVED SOURCE→DESTINATION · IN/OUT REQUIRES SENSOR BOUNDARY · CLICK NODE, EDGE, OR HYPEREDGE</div>
     </aside>
     <aside id="causal-world-stack" class="world-stack" aria-label="Causal hypothesis world stack" hidden></aside>
     <aside id="graphops-directive" class="directive" aria-label="GraphOps directive controls" hidden>
@@ -380,6 +381,9 @@
     import { GraphResultTabs } from "./graphResultTabs.js";
     import { WorldStack } from "./worldStack.js";
     import { formatHostTracePrompt, geoPathPoints, runHostTrace } from "./hostTraceWorkflow.js";
+    import { formatFlowEvidencePrompt, prepareFlowEvidence } from "./flowEvidenceWorkflow.js";
+    import { formatAddressContextPrompt, prepareAddressContext } from "./addressContextWorkflow.js";
+    import { graphTransportNotice } from "./graphOpsTransportStatus.js";
     import { graphEntityPromptContext } from "./graphEntityTooltip.js";
     import { askGraphOps, askGraphOpsCloudFullFidelity, formatCloudFullFidelityConversation,
       formatGraphOpsConversation, operatorQuestionOnly } from "./graphOpsConversation.js";
@@ -462,8 +466,8 @@
     const graphOverlay = new GraphOverlayLayer({viewer, Cesium, container: document.getElementById("globe-root"),
       controller: liveGraphController});
     graphOverlay.start().catch((error) => {
-      document.getElementById("correlation-status").hidden = false;
-      document.getElementById("correlation-status").textContent = `GRAPH // UNAVAILABLE // ${error.message}`;
+      document.querySelector("[data-live-graph-status]").textContent =
+        `LIVE HYPERGRAPH // UNAVAILABLE // ${error.message}`;
     });
     const liveRoot = document.getElementById("live-hypergraph");
     const livePanelResize = new ResizablePanel({panel: liveRoot,
@@ -628,7 +632,7 @@
       return record;
     }
 
-    function activeTraceEvidence() { return investigationTabs.active()?.state?.traceEvidence ?? null; }
+    function activeCloudEvidence() { return investigationTabs.active()?.state?.traceEvidence ?? null; }
 
     function selectedGraphEntity(selection) {
       const graph = liveHypergraph.latestGraph ?? liveGraphController.latestGraph ?? {};
@@ -699,6 +703,46 @@
       }
     }
 
+    async function performFlowEvidence(selection) {
+      const key = investigationKey(selection);
+      patchInvestigation(key, {traceEvidence: null, outputHidden: false,
+        output: `GRAPHOPS PROMPT // FLOW ACTIVITY CAPSULE\nFLOW // ${selection.entityId}\nSTATUS // PREPARING BOUNDED DISSECTION EVIDENCE…`,
+        status: "GRAPHOPS // FLOW CAPSULE // PREPARING"});
+      updateInvestigation();
+      try {
+        const result = await prepareFlowEvidence(selection);
+        patchInvestigation(key, {traceEvidence: result, question: result.suggestedQuestion,
+          outputHidden: false, output: formatFlowEvidencePrompt(result),
+          status: "GRAPHOPS // FLOW CAPSULE // PREPARED",
+          conversationState: "OLLAMA CLOUD // READY // EXACT DISCLOSURE NOT YET SENT"});
+      } catch (error) {
+        patchInvestigation(key, {traceEvidence: null, outputHidden: false,
+          output: `GRAPHOPS PROMPT // FLOW ACTIVITY CAPSULE\nFLOW // ${selection.entityId}\nSTATUS // REFUSED OR UNAVAILABLE\nREASON // ${error.message}`,
+          status: "GRAPHOPS // FLOW CAPSULE // UNAVAILABLE"});
+      }
+      updateInvestigation();
+    }
+
+    async function performAddressContext(selection) {
+      const key = investigationKey(selection);
+      patchInvestigation(key, {traceEvidence: null, outputHidden: false,
+        output: `GRAPHOPS PROMPT // ADDRESS CONTEXT\nTARGET // ${selection.entityId}\nSTATUS // RESOLVING PASSIVE EVIDENCE…`,
+        status: "GRAPHOPS // ADDRESS CONTEXT // PREPARING"});
+      updateInvestigation();
+      try {
+        const result = await prepareAddressContext(selection);
+        patchInvestigation(key, {question: result.suggestedQuestion, outputHidden: false,
+          output: formatAddressContextPrompt(result),
+          status: `GRAPHOPS // ${result.address.addressClass} // PREPARED`,
+          conversationState: "OLLAMA // READY // PASSIVE ADDRESS EVIDENCE"});
+      } catch (error) {
+        patchInvestigation(key, {outputHidden: false,
+          output: `GRAPHOPS PROMPT // ADDRESS CONTEXT\nTARGET // ${selection.entityId}\nSTATUS // REFUSED OR UNAVAILABLE\nREASON // ${error.message}`,
+          status: "GRAPHOPS // ADDRESS CONTEXT // UNAVAILABLE"});
+      }
+      updateInvestigation();
+    }
+
     function updateInvestigation() {
       const graphSelection = selections.items.find((item) => ["graph-node", "graph-edge", "event"].includes(item.kind));
       const conversationKey = investigationTabs.activeKey;
@@ -711,10 +755,11 @@
       document.getElementById("compare-worlds").disabled = !(kinds.has("rf-cell") &&
         (["graph-node", "graph-edge", "event"].some((kind) => kinds.has(kind))));
       document.getElementById("ask-graphops").disabled = !graphSelection;
-      const traceEvidence = activeTraceEvidence();
-      const cloudTraceMatches = Boolean(graphSelection && traceEvidence?.evidenceId &&
-        traceEvidence?.selection?.entityId === graphSelection.entityId);
-      document.getElementById("ask-cloud-full-fidelity").disabled = !cloudTraceMatches;
+      const cloudEvidence = activeCloudEvidence();
+      const cloudEvidenceMatches = Boolean(graphSelection && cloudEvidence?.evidenceId &&
+        cloudEvidence?.selection?.entityId === graphSelection.entityId &&
+        (cloudEvidence?.selection?.kind ?? "graph-node") === graphSelection.kind);
+      document.getElementById("ask-cloud-full-fidelity").disabled = !cloudEvidenceMatches;
     }
 
     let graphOpsConversationController = null;
@@ -774,21 +819,28 @@
 
     document.getElementById("ask-cloud-full-fidelity").addEventListener("click", async () => {
       if (graphOpsConversationController) return;
-      const latestHostTraceEvidence = activeTraceEvidence();
+      const latestEvidence = activeCloudEvidence();
       const conversationKey = investigationTabs.activeKey;
-      const graphSelection = selections.items.find((item) => item.kind === "graph-node" &&
-        item.entityId === latestHostTraceEvidence?.selection?.entityId);
+      const evidenceKind = latestEvidence?.selection?.kind ?? "graph-node";
+      const graphSelection = selections.items.find((item) => item.kind === evidenceKind &&
+        item.entityId === latestEvidence?.selection?.entityId);
       const question = operatorQuestionOnly(document.getElementById("graphops-question").value);
-      if (!graphSelection || !latestHostTraceEvidence?.evidenceId) return;
-      const hops = latestHostTraceEvidence?.traceroute?.hops ?? [];
-      const exactIps = new Set([latestHostTraceEvidence.target, ...hops.map((hop) => hop.ip)].filter(Boolean)).size;
+      if (!graphSelection || !latestEvidence?.evidenceId) return;
+      const isFlow = evidenceKind === "graph-edge";
+      const hops = latestEvidence?.traceroute?.hops ?? [];
+      const flowEndpoints = latestEvidence?.flow?.endpoints ?? [];
+      const exactIps = new Set([latestEvidence.target, ...hops.map((hop) => hop.ip),
+        ...flowEndpoints.map((item) => item.ip)].filter(Boolean)).size;
       const exactLocations = hops.filter((hop) => hop.geo ||
         (hop.lat != null && hop.lon != null)).length;
+      const decodedFields = (latestEvidence?.packetDissections ?? []).reduce(
+        (total, item) => total + Object.keys(item.fields ?? {}).length, 0);
       const acknowledged = window.confirm(
         `FULL-FIDELITY CLOUD DISCLOSURE\n\n` +
         `Destination: Ollama Cloud\n` +
-        `Scope: selected host + measured trace + incident graph evidence\n` +
+        `Scope: ${isFlow ? "selected flow + decoded packet summaries + endpoint context" : "selected host + measured trace + incident graph evidence"}\n` +
         `Exact IP addresses: ${exactIps}\nExact locations: ${exactLocations}\n` +
+        `${isFlow ? `Decoded packet fields: ${decodedFields}\nRaw packet payloads: 0\n` : ""}` +
         `Exact timestamps: included\n` +
         `Credentials, raw packet payloads, and execution authority: excluded\n\n` +
         `Transmit this bounded evidence capsule?`);
@@ -816,10 +868,10 @@
       const timeoutTimer = setTimeout(() => graphOpsConversationController?.abort(
         new DOMException("Cloud conversation exceeded 235 seconds", "TimeoutError")), 235_000);
       try {
-        const traceSelection = {...graphSelection,
-          graphRevision: latestHostTraceEvidence.selection.graphRevision};
-        const result = await askGraphOpsCloudFullFidelity(question, traceSelection,
-          latestHostTraceEvidence.evidenceId, {signal: graphOpsConversationController.signal,
+        const evidenceSelection = {...graphSelection,
+          graphRevision: latestEvidence.selection.graphRevision};
+        const result = await askGraphOpsCloudFullFidelity(question, evidenceSelection,
+          latestEvidence.evidenceId, {signal: graphOpsConversationController.signal,
             acknowledgeExactDisclosure: true});
         patchInvestigation(conversationKey, {outputHidden: false,
           output: formatCloudFullFidelityConversation(result,
@@ -922,8 +974,18 @@
       document.getElementById("execute-correlation").disabled = !hasRf;
       document.getElementById("trace-provenance").disabled = false;
       document.getElementById("expose-contradictions").disabled = false;
-      if (entityType === "network_host" || String(typedSelection.entityId).startsWith("host:")) {
+      const selectedEntity = selectedGraphEntity(typedSelection);
+      const addressScope = String(selectedEntity?.enrichment?.scope ?? "").toUpperCase();
+      const addressValue = String(selectedEntity?.labels?.ip ?? typedSelection.entityId.replace(/^host:/, ""));
+      const nonUnicastContext = ["network_multicast_group", "network_unspecified_address"].includes(entityType) ||
+        addressScope === "MULTICAST" || ["::", "0.0.0.0"].includes(addressValue);
+      if (nonUnicastContext) {
+        void performAddressContext(typedSelection);
+      } else if (entityType === "network_host" || String(typedSelection.entityId).startsWith("host:")) {
         void performHostTrace(typedSelection);
+      } else if (typedSelection.kind === "graph-edge" &&
+          (entityType === "network_flow" || String(typedSelection.entityId).startsWith("flow:"))) {
+        void performFlowEvidence(typedSelection);
       }
       if (document.getElementById("execute-correlation").disabled) return;
       try {
@@ -948,10 +1010,10 @@
       updateInvestigation();
     });
     document.getElementById("globe-root").addEventListener("scythe-web:graph-status", ({detail}) => {
-      if (detail.status === "empty" || detail.status === "unavailable") {
-        document.getElementById("correlation-status").hidden = false;
-        document.getElementById("correlation-status").textContent = `GRAPH // ${detail.status.toUpperCase()}\n${detail.message ?? detail.reason ?? "No graph data"}`;
-      }
+      const notice = graphTransportNotice(detail, investigationTabs.active());
+      if (!notice) return;
+      document.getElementById("correlation-status").hidden = false;
+      document.getElementById("correlation-status").textContent = notice;
     });
     document.getElementById("apply-threshold").addEventListener("click", async () => {
       try {

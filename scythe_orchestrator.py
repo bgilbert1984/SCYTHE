@@ -479,6 +479,7 @@ def _health_loop():
                     continue
                 if info:
                     inst['status'] = 'running'
+                    inst['health_failures'] = 0
                     inst['last_health'] = datetime.now(timezone.utc).isoformat()
                     inst['info'] = info.get('info', {})
                     if info.get('authority') is not None:
@@ -489,7 +490,13 @@ def _health_loop():
                     if pid:
                         try:
                             os.kill(pid, 0)
-                            inst['status'] = 'starting'
+                            failures = int(inst.get('health_failures', 0)) + 1
+                            inst['health_failures'] = failures
+                            # A busy graph can miss one short health deadline
+                            # while remaining fully alive. Preserve its routable
+                            # state until three consecutive checks fail.
+                            if failures >= 3:
+                                inst['status'] = 'starting'
                         except OSError:
                             inst['status'] = 'dead'
                     else:
@@ -1356,24 +1363,29 @@ def graphops_cloud_full_fidelity():
     if not isinstance(selection, dict):
         return jsonify({'status': 'refused', 'error': 'selection is required'}), 400
     selection_unknown = set(selection) - {'kind', 'entityId', 'graphRevision'}
-    if selection_unknown or selection.get('kind') != 'graph-node':
+    if selection_unknown or selection.get('kind') not in {'graph-node', 'graph-edge'}:
         return jsonify({'status': 'refused',
-                        'error': 'full-fidelity Cloud analysis requires a pinned graph-node selection'}), 400
+                        'error': 'full-fidelity Cloud analysis requires a pinned graph node or edge'}), 400
     if payload.get('acknowledgeExactDisclosure') is not True:
         return jsonify({'status': 'refused',
                         'error': 'explicit acknowledgement of exact Cloud disclosure is required'}), 400
     evidence_id = str(payload.get('evidenceId') or '').strip()
     now = time.time()
-    with _HOST_TRACE_EVIDENCE_LOCK:
-        retained = _HOST_TRACE_EVIDENCE.get(evidence_id)
-        if retained and now - retained['capturedAt'] > _HOST_TRACE_EVIDENCE_TTL_SECONDS:
-            _HOST_TRACE_EVIDENCE.pop(evidence_id, None)
+    is_flow = selection.get('kind') == 'graph-edge'
+    evidence_store = _FLOW_EVIDENCE if is_flow else _HOST_TRACE_EVIDENCE
+    evidence_lock = _FLOW_EVIDENCE_LOCK if is_flow else _HOST_TRACE_EVIDENCE_LOCK
+    evidence_ttl = _FLOW_EVIDENCE_TTL_SECONDS if is_flow else _HOST_TRACE_EVIDENCE_TTL_SECONDS
+    with evidence_lock:
+        retained = evidence_store.get(evidence_id)
+        if retained and now - retained['capturedAt'] > evidence_ttl:
+            evidence_store.pop(evidence_id, None)
             retained = None
     if not retained:
         return jsonify({'status': 'refused',
-                        'error': 'host trace evidence is unavailable or expired; trace the selected host again'}), 409
-    trace = retained['result']
-    expected = trace.get('selection') or {}
+                        'error': ('flow evidence is unavailable or expired; select the flow again' if is_flow else
+                                  'host trace evidence is unavailable or expired; trace the selected host again')}), 409
+    evidence = retained['result']
+    expected = evidence.get('selection') or {}
     if (str(selection.get('entityId')) != str(expected.get('entityId')) or
             str(selection.get('graphRevision')) != str(expected.get('graphRevision'))):
         return jsonify({'status': 'refused',
@@ -1390,7 +1402,8 @@ def graphops_cloud_full_fidelity():
                 'focus_id': str(selection.get('entityId') or '')[:256],
             }), timeout=90)
         capsule = build_full_fidelity_capsule(
-            question, selection, retained['resolved'], trace, infrastructure)
+            question, selection, retained['resolved'], evidence if not is_flow else {}, infrastructure,
+            flow_evidence=evidence if is_flow else None)
         cloud_result = ask_ollama_cloud(capsule)
         receipt = disclosure_receipt(capsule, cloud_result['model'])
         return jsonify({
@@ -2053,7 +2066,8 @@ def debug_operators():
 def _get_primary_instance_port() -> int | None:
     """Return the port of the healthy/starting instance with the most nodes."""
     with _registry_lock:
-        running = [v for v in _instances.values() if v.get('status') in {'running', 'ready'}]
+        running = [v for v in _instances.values()
+                   if v.get('status') in {'running', 'ready', 'starting'} and v.get('port')]
     if not running:
         return None
     best = max(running, key=lambda i: i.get('info', {}).get('node_count', 0))
@@ -2064,11 +2078,15 @@ def _proxy_get(instance_port: int, path: str, timeout: int = 5):
     """Forward a GET request to a scythe instance and return the JSON response."""
     import urllib.request as _ureq
     url = f"http://127.0.0.1:{instance_port}{path}"
+    started = time.monotonic()
     try:
         req = _ureq.Request(url, headers={'X-Internal-Token': _INTERNAL_TOKEN})
         with _ureq.urlopen(req, timeout=timeout) as resp:
             return json.loads(resp.read().decode('utf-8'))
-    except Exception as e:
+    except Exception as exc:
+        log.warning('[proxy] GET child :%s %s failed after %.2fs: %s',
+                    instance_port, path.split('?', 1)[0], time.monotonic() - started,
+                    type(exc).__name__)
         return None
 
 
@@ -2110,7 +2128,7 @@ def orchestrator_graphops_selection_graph():
     focus_id = str(request.args.get('focus_id', ''))[:256]
     query = "?" + urlencode({'node_limit': node_limit, 'edge_limit': edge_limit,
                               **({'focus_id': focus_id} if focus_id else {})})
-    data = _proxy_get(port, '/api/graphops/selection/graph' + query)
+    data = _proxy_get(port, '/api/graphops/selection/graph' + query, timeout=15)
     if data is None:
         return jsonify({'status': 'unavailable', 'message': 'Graph instance unreachable',
                         'nodes': [], 'edges': [], 'bounded': True}), 502
@@ -2384,6 +2402,12 @@ _HOST_TRACE_EVIDENCE = {}
 _HOST_TRACE_EVIDENCE_LOCK = threading.RLock()
 _HOST_TRACE_EVIDENCE_TTL_SECONDS = 30 * 60
 
+# A click prepares one bounded flow summary locally. Nothing leaves the server
+# until the operator explicitly confirms the full-fidelity Cloud disclosure.
+_FLOW_EVIDENCE = {}
+_FLOW_EVIDENCE_LOCK = threading.RLock()
+_FLOW_EVIDENCE_TTL_SECONDS = 30 * 60
+
 _HOST_LIVENESS_CACHE = {}
 _HOST_LIVENESS_CACHE_LOCK = threading.RLock()
 _HOST_LIVENESS_CACHE_TTL_SECONDS = 5
@@ -2504,13 +2528,16 @@ def orchestrator_graphops_host_liveness():
     if not port:
         return jsonify({'status': 'unavailable', 'state': 'unknown',
                         'error': 'No active SCYTHE graph instance'}), 503
-    resolved = _proxy_post(port, '/api/graphops/selection/resolve', {
+    resolved, resolve_status = _proxy_post_with_status(port, '/api/graphops/selection/resolve', {
         'kind': 'graph-node', 'entityId': payload['entityId'],
         'graphRevision': payload['graphRevision'],
-    }, timeout=8)
-    if resolved is None:
+    }, timeout=15)
+    if resolved is None or resolve_status >= 500:
+        return jsonify({'status': 'unavailable', 'state': 'unknown',
+                        'error': 'Graph instance did not answer; liveness was not measured'}), 503
+    if resolve_status != 200:
         return jsonify({'status': 'refused', 'state': 'unknown',
-                        'error': 'graph selection is stale or unavailable'}), 409
+                        'error': resolved.get('error', 'graph selection is stale')}), 409
     try:
         target, _ = _host_trace_target(
             {'graphRevision': resolved.get('graphRevision'), 'nodes': [resolved.get('node') or {}]},
@@ -2538,6 +2565,84 @@ def orchestrator_graphops_host_liveness():
     return jsonify(observation)
 
 
+@app.route('/api/graphops/flow-evidence', methods=['POST'])
+def orchestrator_graphops_flow_evidence():
+    """Prepare a bounded decoded-evidence capsule for one pinned flow edge."""
+    if not _graphops_directive_authorized():
+        return jsonify({'error': 'Authentication required'}), 401
+    payload = request.get_json(silent=True) or {}
+    if not isinstance(payload, dict) or set(payload) - {'selection'}:
+        return jsonify({'status': 'refused', 'error': 'only a selection object is accepted'}), 400
+    selection = payload.get('selection') or {}
+    if (not isinstance(selection, dict) or
+            set(selection) - {'kind', 'entityId', 'graphRevision'} or
+            selection.get('kind') != 'graph-edge' or
+            not selection.get('entityId') or not selection.get('graphRevision')):
+        return jsonify({'status': 'refused',
+                        'error': 'a pinned graph-edge selection is required'}), 400
+    port = _get_primary_instance_port()
+    if not port:
+        return jsonify({'status': 'unavailable', 'error': 'No active SCYTHE graph instance'}), 503
+    resolved, resolve_status = _proxy_post_with_status(
+        port, '/api/graphops/selection/resolve', selection, timeout=15)
+    if resolved is None or resolve_status >= 500:
+        return jsonify({'status': 'unavailable',
+                        'error': 'Graph instance did not answer; no flow capsule was prepared'}), 503
+    if resolve_status != 200:
+        return jsonify({'status': 'refused',
+                        'error': resolved.get('error', 'graph selection is stale')}), 409
+    try:
+        from graphops_flow_evidence import prepare_flow_evidence
+        result = prepare_flow_evidence(selection, resolved)
+    except (TypeError, ValueError) as exc:
+        return jsonify({'status': 'refused', 'error': str(exc)}), 400
+    with _FLOW_EVIDENCE_LOCK:
+        _FLOW_EVIDENCE[result['evidenceId']] = {
+            'capturedAt': result['capturedAt'], 'result': result, 'resolved': resolved,
+        }
+        expired = [key for key, value in _FLOW_EVIDENCE.items()
+                   if time.time() - value['capturedAt'] > _FLOW_EVIDENCE_TTL_SECONDS]
+        for key in expired:
+            _FLOW_EVIDENCE.pop(key, None)
+        while len(_FLOW_EVIDENCE) > 128:
+            oldest = min(_FLOW_EVIDENCE, key=lambda key: _FLOW_EVIDENCE[key]['capturedAt'])
+            _FLOW_EVIDENCE.pop(oldest, None)
+    return jsonify({'status': 'prepared', **result}), 200
+
+
+@app.route('/api/graphops/address-context', methods=['POST'])
+def orchestrator_graphops_address_context():
+    """Resolve multicast/unspecified addresses as passive graph context."""
+    if not _graphops_directive_authorized():
+        return jsonify({'error': 'Authentication required'}), 401
+    payload = request.get_json(silent=True) or {}
+    if not isinstance(payload, dict) or set(payload) - {'selection'}:
+        return jsonify({'status': 'refused', 'error': 'only a selection object is accepted'}), 400
+    selection = payload.get('selection') or {}
+    if (not isinstance(selection, dict) or
+            set(selection) - {'kind', 'entityId', 'graphRevision'} or
+            selection.get('kind') != 'graph-node' or
+            not selection.get('entityId') or not selection.get('graphRevision')):
+        return jsonify({'status': 'refused',
+                        'error': 'a pinned graph-node selection is required'}), 400
+    port = _get_primary_instance_port()
+    if not port:
+        return jsonify({'status': 'unavailable', 'error': 'No active SCYTHE graph instance'}), 503
+    resolved, resolve_status = _proxy_post_with_status(
+        port, '/api/graphops/selection/resolve', selection, timeout=15)
+    if resolved is None or resolve_status >= 500:
+        return jsonify({'status': 'unavailable',
+                        'error': 'Graph instance did not answer; no address context was prepared'}), 503
+    if resolve_status != 200:
+        return jsonify({'status': 'refused',
+                        'error': resolved.get('error', 'graph selection is stale')}), 409
+    try:
+        from graphops_address_context import prepare_address_context
+        return jsonify(prepare_address_context(selection, resolved)), 200
+    except (TypeError, ValueError) as exc:
+        return jsonify({'status': 'refused', 'error': str(exc)}), 400
+
+
 @app.route('/api/graphops/host-trace', methods=['POST'])
 def orchestrator_graphops_host_trace():
     """Run bounded RTT/traceroute measurements for a selected graph host."""
@@ -2554,13 +2659,16 @@ def orchestrator_graphops_host_trace():
         return jsonify({'status': 'refused',
                         'error': ('entityId and graphRevision are required' if not unknown else
                                   f'unknown host trace fields: {", ".join(sorted(unknown))}')}), 400
-    resolved = _proxy_post(port, '/api/graphops/selection/resolve', {
+    resolved, resolve_status = _proxy_post_with_status(port, '/api/graphops/selection/resolve', {
         'kind': 'graph-node', 'entityId': payload['entityId'],
         'graphRevision': payload['graphRevision'],
-    }, timeout=8)
-    if resolved is None:
+    }, timeout=15)
+    if resolved is None or resolve_status >= 500:
+        return jsonify({'status': 'unavailable',
+                        'error': 'Graph instance did not answer; no trace was started'}), 503
+    if resolve_status != 200:
         return jsonify({'status': 'refused',
-                        'error': 'graph selection is stale or unavailable; select the host again'}), 409
+                        'error': resolved.get('error', 'graph selection is stale; select the host again')}), 409
     snapshot = {'graphRevision': resolved.get('graphRevision'),
                 'nodes': [resolved.get('node') or {}]}
     try:
@@ -2723,9 +2831,25 @@ def orchestrator_graphops_eve_events():
     if not port:
         return jsonify({'status': 'unavailable', 'error': 'No active SCYTHE graph instance',
                         'rawPacketsAccepted': False}), 503
-    result = _proxy_post(port, '/api/graphops/eve/events', request.get_json(silent=True) or {}, timeout=15)
+    payload = request.get_json(silent=True) or {}
+    result = _proxy_post(port, '/api/graphops/eve/events', payload, timeout=15)
     if result is None:
         return jsonify({'status': 'unavailable', 'error': 'Graph instance rejected or did not answer'}), 502
+    # Retain only decoded, payload-free temporal summaries after the graph
+    # child accepted the batch. This sidecar avoids inflating every graph edge
+    # and is attached only when that flow is explicitly selected.
+    try:
+        from eve_graph_ingest import validate_eve_batch, temporal_dissection_for_event
+        from graphops_flow_evidence import record_temporal_dissection
+        rejected = {str(item.get('eventId')) for item in (result.get('rejected') or [])}
+        for event in validate_eve_batch(payload):
+            if event['event_id'] in rejected:
+                continue
+            flow_id, temporal_record = temporal_dissection_for_event(event)
+            record_temporal_dissection(flow_id, temporal_record)
+    except Exception as exc:
+        log.warning('[eve] Temporal dissection sidecar rejected a batch projection: %s',
+                    type(exc).__name__)
     return jsonify(result)
 
 
@@ -2737,7 +2861,7 @@ def orchestrator_graphops_eve_status():
     if not port:
         return jsonify({'status': 'empty', 'received': 0, 'committed': 0,
                         'graphInstanceActive': False, 'rawPacketsAccepted': False}), 200
-    result = _proxy_get(port, '/api/graphops/eve/status')
+    result = _proxy_get(port, '/api/graphops/eve/status', timeout=15)
     if result is None:
         return jsonify({'status': 'unavailable', 'graphInstanceActive': True}), 502
     result['graphInstanceActive'] = True

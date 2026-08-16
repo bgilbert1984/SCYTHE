@@ -1,4 +1,4 @@
-import { evidenceStyle, graphPurposeStyle, hostLivenessStyle } from "./evidenceStyles.js";
+import { evidenceStyle, flowDirectionStyle, flowMotion, flowTypeStyle, graphPurposeStyle, hostLivenessStyle } from "./evidenceStyles.js";
 import { graphEntityTooltip } from "./graphEntityTooltip.js";
 
 function hash(value) {
@@ -181,33 +181,57 @@ export class LiveHypergraph3DView {
   #addEdge(edge, revision) {
     const T = this.THREE; const members = (edge.nodes ?? []).filter((id) => this.positions.has(id));
     if (members.length < 2) return;
-    const evidence = safeEvidence(edge.evidenceClass); const selection = {kind: "graph-edge", entityId: edge.id,
+    const evidence = safeEvidence(edge.evidenceClass); const visual = flowTypeStyle(edge);
+    const directionStyle = flowDirectionStyle(edge); const motion = flowMotion(edge);
+    const flowLabel = visual.type ? `${visual.label} · ${String(visual.basis).replaceAll("_", " ")}` : evidence.name;
+    const selection = {kind: "graph-edge", entityId: edge.id,
+      entityType: edge.kind,
       graphRevision: revision, observedAt: edge.observedAt ?? edge.timestamp ?? null};
     const points = members.map((id) => this.positions.get(id));
     let object;
     if (members.length === 2) {
       const geometry = new T.BufferGeometry().setFromPoints(points.map((point) => new T.Vector3(point.x, point.y, point.z)));
       const dashed = evidence.style.line !== "solid";
-      const material = dashed ? new T.LineDashedMaterial({color: evidence.style.color, transparent: true,
+      const material = dashed ? new T.LineDashedMaterial({color: visual.color, transparent: true,
         opacity: evidence.style.alpha, dashSize: evidence.style.line === "dotted" ? 1.5 : 4, gapSize: 2.5}) :
-        new T.LineBasicMaterial({color: evidence.style.color, transparent: true, opacity: evidence.style.alpha});
+        new T.LineBasicMaterial({color: visual.color, transparent: true, opacity: visual.alpha});
       object = new T.Line(geometry, material); if (dashed) object.computeLineDistances();
-      object.userData = {selection, label: `${edge.kind ?? "edge"}\n${edge.id}\n${evidence.name}`};
+      object.userData = {selection, label: `${edge.kind ?? "edge"}\n${edge.id}\n${flowLabel}\nTUPLE // SOURCE → DESTINATION · ${String(directionStyle.tupleBasis).replaceAll("_", " ")}\nOPERATIONAL // ${directionStyle.label} · ${String(directionStyle.basis).replaceAll("_", " ")}\nMOTION // ${motion.measured ? `${motion.forwardPackets} FORWARD · ${motion.reversePackets} REVERSE PACKETS / ${motion.intervalMilliseconds} ms` : "STATIC · INSUFFICIENT TEMPORAL COUNTER DELTAS"}\n${evidence.name}`};
+      const start = new T.Vector3(points[0].x, points[0].y, points[0].z);
+      const end = new T.Vector3(points[1].x, points[1].y, points[1].z);
+      const vector = new T.Vector3().subVectors(end, start); const unit = vector.clone().normalize();
+      const arrow = new T.Mesh(new T.ConeGeometry(1.8, 5.5, 8),
+        new T.MeshBasicMaterial({color: directionStyle.color}));
+      arrow.name = "scythe-flow-direction"; arrow.position.copy(start).lerp(end, .58);
+      arrow.quaternion.setFromUnitVectors(new T.Vector3(0, 1, 0), unit); object.add(arrow);
+      if (motion.measured && !this.reducedMotion) {
+        const addParticle = (reverse, count) => {
+          if (!(count > 0)) return;
+          const particle = new T.Mesh(new T.SphereGeometry(Math.min(2.2, 1 + Math.log2(count + 1) * .2), 8, 6),
+            new T.MeshBasicMaterial({color: reverse ? 0xff6fb7 : 0xffffff}));
+          particle.name = reverse ? "scythe-flow-particle-reverse" : "scythe-flow-particle-forward";
+          particle.userData.motion = {start: reverse ? end.clone() : start.clone(),
+            end: reverse ? start.clone() : end.clone(), duration: motion.durationSeconds * 1000,
+            phase: (hash(`${edge.id}:${reverse}`) % 1000) / 1000};
+          object.add(particle);
+        };
+        addParticle(false, motion.forwardPackets); addParticle(true, motion.reversePackets);
+      }
       this.edgeGroup.add(object); this.pickTargets.push(object);
     } else {
       const center = points.reduce((sum, point) => ({x: sum.x + point.x, y: sum.y + point.y,
         z: sum.z + point.z}), {x: 0, y: 0, z: 0});
       center.x /= points.length; center.y /= points.length; center.z /= points.length;
       object = new T.Group();
-      const hub = new T.Mesh(new T.TorusGeometry(3.5, 1.1, 8, 20), new T.MeshStandardMaterial({color: evidence.style.color,
-        emissive: new T.Color(evidence.style.color).multiplyScalar(0.35), transparent: true, opacity: evidence.style.alpha}));
+      const hub = new T.Mesh(new T.TorusGeometry(3.5, 1.1, 8, 20), new T.MeshStandardMaterial({color: visual.color,
+        emissive: new T.Color(visual.color).multiplyScalar(0.35), transparent: true, opacity: visual.alpha}));
       hub.position.set(center.x, center.y, center.z); hub.userData = {selection,
-        label: `HYPEREDGE\n${edge.id}\n${members.length} MEMBERS · ${evidence.name}`};
+        label: `HYPEREDGE\n${edge.id}\n${members.length} MEMBERS · ${flowLabel} · ${evidence.name}`};
       object.add(hub); this.pickTargets.push(hub);
       const vertices = [];
       for (const point of points) vertices.push(center.x, center.y, center.z, point.x, point.y, point.z);
       const geometry = new T.BufferGeometry(); geometry.setAttribute("position", new T.Float32BufferAttribute(vertices, 3));
-      const spokes = new T.LineSegments(geometry, new T.LineDashedMaterial({color: evidence.style.color,
+      const spokes = new T.LineSegments(geometry, new T.LineDashedMaterial({color: visual.color,
         transparent: true, opacity: evidence.style.alpha * 0.7, dashSize: 3, gapSize: 2}));
       spokes.computeLineDistances(); spokes.userData = {selection, label: hub.userData.label};
       object.add(spokes); this.pickTargets.push(spokes); this.edgeGroup.add(object);
@@ -267,6 +291,11 @@ export class LiveHypergraph3DView {
           const age = now - mesh.userData.arrivedAt; const bloom = age < 700 ? 1 + (1 - age / 700) * 0.7 : 1;
           mesh.scale.setScalar(bloom);
         }
+        for (const edge of this.edgeObjects.values()) edge.traverse?.((child) => {
+          const motion = child.userData?.motion; if (!motion) return;
+          const progress = ((now / motion.duration) + motion.phase) % 1;
+          child.position.copy(motion.start).lerp(motion.end, progress);
+        });
       }
       this.renderer.render(this.scene, this.camera);
     } : null);

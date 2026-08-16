@@ -46,8 +46,12 @@ export class LiveGraphController {
       const graph = await graphResponse.json();
       const eve = eveResponse.ok ? await eveResponse.json() : {status: "unavailable", committed: 0};
       if (!graphResponse.ok || !["ok", "empty"].includes(graph.status)) {
-        return this.#publish({kind: "status", graph, eve, available: false,
-          message: `LIVE HYPERGRAPH // UNAVAILABLE // HTTP ${graphResponse.status}`});
+        const retained = this.snapshot;
+        return this.#publish({kind: "status", graph: retained ?? graph, eve, available: false,
+          retained: Boolean(retained), transportGraph: graph,
+          message: retained
+            ? `LIVE HYPERGRAPH // DEGRADED // RETAINING LAST SNAPSHOT // HTTP ${graphResponse.status}`
+            : `LIVE HYPERGRAPH // UNAVAILABLE // HTTP ${graphResponse.status}`});
       }
       const changed = graph.graphRevision !== this.graphRevision;
       this.graphRevision = graph.graphRevision;
@@ -59,7 +63,7 @@ export class LiveGraphController {
           ...(this.liveness.has(node.id) ? {liveness: this.liveness.get(node.id)} : {})}))};
       const counts = {active: 0, inactive: 0};
       for (const node of this.snapshot.nodes) if (node.liveness?.state in counts) counts[node.liveness.state] += 1;
-      const hostCount = this.snapshot.nodes.filter((node) => this.#isHost(node)).length;
+      const hostCount = this.snapshot.nodes.filter((node) => this.#isProbeableHost(node)).length;
       const unknown = Math.max(0, hostCount - counts.active - counts.inactive);
       const detectedNodes = graph.detectedNodeCount ?? graph.nodeCount ?? graph.nodes?.length ?? 0;
       const detectedEdges = graph.detectedEdgeCount ?? graph.edgeCount ?? graph.edges?.length ?? 0;
@@ -74,7 +78,10 @@ export class LiveGraphController {
         message: `LIVE HYPERGRAPH // ${graph.status.toUpperCase()}\nDETECTED // ${detectedNodes} NODES // ${detectedEdges} EDGES\nDISPLAYED // ${displayedNodes} / ${detectedNodes} NODES // ${displayedEdges} / ${detectedEdges} EDGES // BOUNDED ${this.nodeLimit}N·${this.edgeLimit}E\nLENS // ${lens} // SUPPRESSED ${suppressedNodes}N·${suppressedEdges}E${ranking.focusId ? ` // PINNED ${ranking.focusId}` : ""}\nHOST PING // ${counts.active} ACTIVE // ${counts.inactive} INACTIVE // ${unknown} UNKNOWN // ROUND ROBIN\nEVE // ${eve.status?.toUpperCase() ?? "UNKNOWN"} // ${eve.committed ?? 0} COMMITTED // ${eve.replayed ?? 0} BOOTSTRAP REPLAYED // ${eve.deduplicated ?? 0} DEDUPLICATED // RAW PACKETS NOT EXPOSED`});
     } catch (error) {
       return this.#publish({kind: "status", graph: this.snapshot, eve: null, available: false,
-        error, message: `LIVE HYPERGRAPH // UNAVAILABLE // ${error.message}`});
+        retained: Boolean(this.snapshot), error,
+        message: this.snapshot
+          ? `LIVE HYPERGRAPH // DEGRADED // RETAINING LAST SNAPSHOT // ${error.message}`
+          : `LIVE HYPERGRAPH // UNAVAILABLE // ${error.message}`});
     }
   }
 
@@ -82,8 +89,16 @@ export class LiveGraphController {
     return String(node?.kind ?? "").toLowerCase() === "network_host" || String(node?.id ?? "").startsWith("host:");
   }
 
+  #isProbeableHost(node) {
+    const kind = String(node?.kind ?? "").toLowerCase();
+    const scope = String(node?.enrichment?.scope ?? "").toUpperCase();
+    if (["network_multicast_group", "network_unspecified_address"].includes(kind)) return false;
+    if (["MULTICAST", "RESERVED", "LOOPBACK"].includes(scope)) return false;
+    return this.#isHost(node);
+  }
+
   async #probeNextHost(graph) {
-    const hosts = (graph.nodes ?? []).filter((node) => this.#isHost(node));
+    const hosts = (graph.nodes ?? []).filter((node) => this.#isProbeableHost(node));
     if (!hosts.length || !graph.graphRevision) return false;
     const node = hosts[this.livenessCursor % hosts.length];
     this.livenessCursor = (this.livenessCursor + 1) % hosts.length;

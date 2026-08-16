@@ -43,7 +43,8 @@ class IpEnrichmentTests(unittest.TestCase):
     def test_private_and_reserved_addresses_never_receive_geoip_claims(self):
         for address, scope in (("192.168.1.4", "PRIVATE"), ("127.0.0.1", "LOOPBACK"),
                                ("224.0.0.1", "MULTICAST"), ("169.254.1.2", "LINK_LOCAL"),
-                               ("100.64.0.1", "RESERVED")):
+                               ("100.64.0.1", "RESERVED"), ("0.0.0.0", "RESERVED"),
+                               ("::", "RESERVED")):
             result = _resolver().resolve(address)
             self.assertEqual(result["scope"], scope)
             self.assertNotIn("network", result)
@@ -57,6 +58,13 @@ class IpEnrichmentTests(unittest.TestCase):
         self.assertIsNone(enriched["position"])
         self.assertEqual(enriched["enrichment"]["geo"]["evidenceClass"], "INFERRED")
         self.assertNotIn("enrichment", node)
+
+    def test_multicast_group_kind_retains_non_authoritative_scope_context(self):
+        node = {"id": "host:ff02::1:3", "kind": "network_multicast_group",
+                "labels": {"ip": "ff02::1:3"}, "evidenceClass": "OBSERVED"}
+        enriched = enrich_graph_node(node, _resolver())
+        self.assertEqual(enriched["enrichment"]["scope"], "MULTICAST")
+        self.assertNotIn("geo", enriched["enrichment"])
 
 
 if __name__ == "__main__":

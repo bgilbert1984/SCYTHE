@@ -26,9 +26,11 @@ def _scope(address: ipaddress.IPv4Address | ipaddress.IPv6Address) -> str:
         return "LINK_LOCAL"
     if address.is_multicast:
         return "MULTICAST"
+    if address.is_unspecified:
+        return "RESERVED"
     if address.is_private:
         return "PRIVATE"
-    if address.is_reserved or address.is_unspecified or not address.is_global:
+    if address.is_reserved or not address.is_global:
         return "RESERVED"
     return "PUBLIC"
 
@@ -147,7 +149,8 @@ _DEFAULT_RESOLVER = IpEnrichmentResolver()
 
 def enrich_graph_node(node: Dict[str, Any], resolver: IpEnrichmentResolver = _DEFAULT_RESOLVER) -> Dict[str, Any]:
     """Return a shallow node copy carrying non-authoritative display enrichment."""
-    if str(node.get("kind") or "").lower() != "network_host":
+    if str(node.get("kind") or "").lower() not in {
+            "network_host", "network_multicast_group", "network_unspecified_address"}:
         return node
     labels = node.get("labels") or {}
     ip = labels.get("ip")

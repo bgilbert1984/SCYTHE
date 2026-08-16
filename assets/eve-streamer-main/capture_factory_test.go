@@ -178,6 +178,30 @@ func TestNormalizeEventIDIsStableAcrossReplay(t *testing.T) {
 	}
 }
 
+func TestNormalizeEventRetainsAllowListedDissectionsWithoutPayload(t *testing.T) {
+	raw := map[string]interface{}{
+		"timestamp": "2026-08-15T12:00:00Z", "event_type": "tls",
+		"src_ip": "10.0.0.1", "dest_ip": "8.8.8.8", "src_port": 49152,
+		"dest_port": 443, "proto": "TCP", "app_proto": "tls",
+		"flow": map[string]interface{}{"pkts_toserver": float64(7), "bytes_toserver": float64(2048)},
+		"tls": map[string]interface{}{"sni": "example.org", "version": "TLS 1.3",
+			"ja3": map[string]interface{}{"hash": "abc123"}},
+		"payload": "must-not-leave", "packet": "must-not-leave",
+	}
+	event := normalizeEvent(raw)
+	values := map[string]string{}
+	for _, entity := range event.Entities {
+		values[entity.Key] = entity.Value
+	}
+	if values["app_proto"] != "tls" || values["tls_sni"] != "example.org" ||
+		values["tls_ja3_hash"] != "abc123" || values["flow_pkts_toserver"] != "7" {
+		t.Fatalf("decoded fields were not retained: %+v", values)
+	}
+	if _, ok := values["payload"]; ok {
+		t.Fatal("payload crossed the allow-listed dissection boundary")
+	}
+}
+
 func TestCaptureEngineFactory(t *testing.T) {
 	factory := NewCaptureEngineFactory()
 

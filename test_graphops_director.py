@@ -115,6 +115,26 @@ class GraphOpsDirectorTests(unittest.TestCase):
         with self.assertRaisesRegex(GraphResolutionError, "stale"):
             resolver.resolve(stale)
 
+    def test_graph_snapshot_reads_live_engine_state_only_once(self):
+        class CountingResolver(GraphSelectionResolver):
+            def __init__(self, engine):
+                super().__init__(engine)
+                self.node_reads = 0
+                self.edge_reads = 0
+
+            def _nodes(self):
+                self.node_reads += 1
+                return super()._nodes()
+
+            def _edges(self):
+                self.edge_reads += 1
+                return super()._edges()
+
+        resolver = CountingResolver(_GraphEngine())
+        resolver.snapshot()
+        self.assertEqual(resolver.node_reads, 1)
+        self.assertEqual(resolver.edge_reads, 1)
+
     def test_graph_snapshot_separates_detected_counts_from_display_limits(self):
         engine = _GraphEngine()
         engine.nodes.update({f"node-{index}": {"id": f"node-{index}"}

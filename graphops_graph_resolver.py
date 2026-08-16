@@ -320,6 +320,12 @@ class GraphSelectionResolver:
                        key=lambda item: item["id"])
         edges = sorted((self._normalize_edge(edge) for edge in self._edges()),
                        key=lambda item: item["id"])
+        return self._revision_from_normalized(nodes, edges)
+
+    @staticmethod
+    def _revision_from_normalized(nodes: list[Dict[str, Any]],
+                                  edges: list[Dict[str, Any]]) -> str:
+        """Hash one captured graph state without fetching it a second time."""
         payload = json.dumps({"nodes": nodes, "edges": edges}, separators=(",", ":"),
                              sort_keys=True, default=str)
         return "graph-" + hashlib.blake2s(payload.encode(), digest_size=8).hexdigest()
@@ -384,8 +390,11 @@ class GraphSelectionResolver:
         canonical_edges = [{key: value for key, value in edge.items() if key != "display"}
                            for edge in _adaptive_rank_edges(
                                normalized_edges, canonical_allowed, 1000)]
+        graph_revision = (self._pinned_revision or self._revision_from_normalized(
+            sorted(normalized_nodes, key=lambda item: item["id"]),
+            sorted(normalized_edges, key=lambda item: item["id"])))
         canonical = {
-            "status": "ok", "graphRevision": self.revision(), "nodes": canonical_nodes,
+            "status": "ok", "graphRevision": graph_revision, "nodes": canonical_nodes,
             "edges": canonical_edges, "bounded": True, "nodeLimit": 500,
             "edgeLimit": 1000, "nodeCount": len(canonical_nodes), "edgeCount": len(canonical_edges),
             "detectedNodeCount": detected_node_count, "detectedEdgeCount": detected_edge_count,

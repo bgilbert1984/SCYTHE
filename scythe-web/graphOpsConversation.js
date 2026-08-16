@@ -35,8 +35,8 @@ export async function askGraphOpsCloudFullFidelity(question, selection, evidence
 } = {}) {
   const utterance = operatorQuestionOnly(question);
   if (!utterance) throw new Error("Enter a GraphOps question");
-  if (!selection?.entityId || !selection?.graphRevision) throw new Error("Select a traced graph host first");
-  if (!String(evidenceId ?? "").trim()) throw new Error("Trace the selected host before asking Cloud");
+  if (!selection?.entityId || !selection?.graphRevision) throw new Error("Select a prepared graph entity first");
+  if (!String(evidenceId ?? "").trim()) throw new Error("Prepare bounded evidence before asking Cloud");
   if (acknowledgeExactDisclosure !== true) throw new Error("Exact Cloud disclosure was not acknowledged");
   const response = await fetchImpl.call(globalThis,
     `${apiBase}/api/graphops/conversation/cloud-full-fidelity`, {
@@ -94,7 +94,7 @@ export function formatCloudFullFidelityConversation(payload, {entityContext = ""
     `QUESTION // ${text(payload?.question)}`,
     `SELECTION // ${text(payload?.selection?.kind)}:${text(payload?.selection?.entityId)}`,
     `GRAPH REVISION // ${text(payload?.selection?.graphRevision)}`,
-    `TRACE EVIDENCE // ${text(payload?.evidenceId)}`,
+    `EVIDENCE CAPSULE // ${text(payload?.evidenceId)}`,
     `MODEL // ${text(result.model)}`,
     `OLLAMA ROUTE // ${text(payload?.ollamaRoute)}`,
     "MODEL AUTHORITY // INTERPRETIVE ONLY",
@@ -117,6 +117,7 @@ export function formatCloudFullFidelityConversation(payload, {entityContext = ""
   `DECLARED // ${text(disclosed.peeringdbNetworks, "0")} PEERINGDB NETWORKS · ${text(disclosed.declaredIxMemberships, "0")} IX MEMBERSHIPS`,
   `CONTROL PLANE // ${text(disclosed.controlPlaneObservations, "0")} RIS COLLECTOR-VANTAGE OBSERVATIONS · NON-AUTHORITATIVE FOR DATA PLANE`,
   `EVIDENCE TENSIONS // ${text(disclosed.infrastructureContradictions, "0")} UNRESOLVED FINDINGS · ${text(disclosed.controlPlaneChanges, "0")} OBSERVED CHANGES · ${text(disclosed.withheldInfrastructureTests, "0")} TESTS WITHHELD`,
+  `PACKET DISSECTION // ${text(disclosed.packetDissections, "0")} TEMPORAL EVENTS / ${text(disclosed.temporalRingLimit, "0")} RING · ${text(disclosed.decodedPacketFields, "0")} DECODED FIELDS · ${text(disclosed.temporalEventsOmitted, "0")} EARLIER EVENTS OMITTED · ${text(disclosed.rawPacketPayloads, "0")} RAW PAYLOADS`,
   `CAPSULE PROJECTION // ${text(projection.mode)} // ${includedRecords} EXACT RECORDS INCLUDED · ${omittedRecords} ENVIRONMENT RECORDS OMITTED AND HASH-BOUND`,
   `GRAPH SCOPE // 1 SELECTED ENTITY · ${text(disclosed.incidentEdges, "0")} INCIDENT EDGES · ${text(disclosed.memberNodes, "0")} MEMBER NODES`,
   `EXCLUDED // ${(receipt.excluded ?? []).join(" · ") || "UNAVAILABLE"}`,

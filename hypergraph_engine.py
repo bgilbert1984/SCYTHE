@@ -761,6 +761,14 @@ class HypergraphEngine:
                     existing.weight = existing.weight * math.exp(-self.decay_lambda * age)
                 existing.weight = existing.weight + edge.weight
                 existing.timestamp = now
+                # EDGE_UPDATE carries the latest bounded observation. Merge
+                # decoded labels and provenance while preserving accumulated
+                # lifecycle fields maintained by this engine.
+                existing.labels.update(edge.labels or {})
+                incoming_metadata = dict(edge.metadata or {})
+                incoming_metadata.pop('reinforcement_count', None)
+                incoming_metadata.pop('first_seen', None)
+                existing.metadata.update(incoming_metadata)
                 # update reinforcement counter in metadata
                 rc = existing.metadata.get('reinforcement_count', 1)
                 existing.metadata['reinforcement_count'] = rc + 1
@@ -900,8 +908,11 @@ class HypergraphEngine:
         # run every minute by default; wheel backoff if desired in the future
         while True:
             time.sleep(60)
+            # A zero decay rate cannot alter weights. Avoid walking and locking
+            # the full edge collection for a maintenance pass that is a no-op.
+            if self.decay_lambda <= 0:
+                continue
             try:
-                # use configured lambda, zero min_weight means only decay
                 self.decay_edges()
             except Exception:
                 # swallow exceptions so the thread doesn't die silently
@@ -1222,18 +1233,26 @@ class HypergraphEngine:
     def save_snapshot(self, path: str, include_traces: bool = False) -> None:
         try:
             dump = self.snapshot(include_traces=include_traces)
-            tmp = f"{path}.tmp"
-            ddir = os.path.dirname(path) or '.'
-            if not os.path.exists(ddir):
-                try:
-                    os.makedirs(ddir, exist_ok=True)
-                except Exception:
-                    pass
-            with open(tmp, 'w') as f:
-                json.dump(dump, f)
-            os.replace(tmp, path)
+            self.write_snapshot_dump(path, dump)
         except Exception:
             return
+
+    @staticmethod
+    def write_snapshot_dump(path: str, dump: Dict[str, Any]) -> None:
+        """Atomically encode an already-captured snapshot.
+
+        Keeping capture separate from encoding lets eventlet callers acquire
+        the engine's patched RLock in the green-thread domain, then move only
+        CPU/disk work to a native worker.  A native tpool worker must never
+        attempt to acquire the engine lock: under sustained Eve ingestion that
+        can starve the child HTTP server indefinitely.
+        """
+        tmp = f"{path}.tmp"
+        ddir = os.path.dirname(path) or '.'
+        os.makedirs(ddir, exist_ok=True)
+        with open(tmp, 'w') as f:
+            json.dump(dump, f)
+        os.replace(tmp, path)
 
     def load_snapshot(self, path: str) -> bool:
         try:

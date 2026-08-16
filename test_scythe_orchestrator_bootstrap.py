@@ -2,7 +2,8 @@ import unittest
 
 import requests
 
-from scythe_orchestrator import _bootstrap_instance_when_ready
+from scythe_orchestrator import (_bootstrap_instance_when_ready, _get_primary_instance_port,
+                                 _instances, _registry_lock)
 
 
 class _Response:
@@ -37,6 +38,10 @@ class _Session:
 
 
 class BootstrapInstanceTests(unittest.TestCase):
+    def tearDown(self):
+        with _registry_lock:
+            _instances.clear()
+
     def test_existing_registry_is_left_untouched(self):
         session = _Session([1])
         ok = _bootstrap_instance_when_ready('http://127.0.0.1:5001', 'Live GraphOps',
@@ -53,6 +58,12 @@ class BootstrapInstanceTests(unittest.TestCase):
         self.assertTrue(ok)
         self.assertEqual(len(session.posts), 1)
         self.assertEqual(session.posts[0][1], {'name': 'Live GraphOps'})
+
+    def test_transient_starting_instance_remains_routable(self):
+        with _registry_lock:
+            _instances['busy-child'] = {'status': 'starting', 'port': 37471,
+                                        'info': {'node_count': 213}}
+        self.assertEqual(_get_primary_instance_port(), 37471)
 
 
 if __name__ == '__main__':

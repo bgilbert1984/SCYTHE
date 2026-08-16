@@ -50,12 +50,13 @@ class GraphOpsHostTraceTests(unittest.TestCase):
 
     @patch('scythe_orchestrator._graphops_directive_authorized', return_value=True)
     @patch('scythe_orchestrator._get_primary_instance_port', return_value=36501)
+    @patch('scythe_orchestrator._proxy_post_with_status')
     @patch('scythe_orchestrator._proxy_post')
     def test_endpoint_runs_bounded_measurements_and_labels_geo_estimates(
-            self, proxy_post, _port, _authorized):
+            self, proxy_post, resolve, _port, _authorized):
+        resolve.return_value = ({'graphRevision': 'graph-1',
+                                 'node': snapshot()['nodes'][0]}, 200)
         def response(port, path, body, timeout):
-            if path.endswith('/selection/resolve'):
-                return {'graphRevision': 'graph-1', 'node': snapshot()['nodes'][0]}
             if path.endswith('/probe'):
                 return {'status': 'ok', 'rtt_avg_ms': 8.5}
             return {'status': 'ok', 'hops': [
@@ -78,12 +79,13 @@ class GraphOpsHostTraceTests(unittest.TestCase):
 
     @patch('scythe_orchestrator._graphops_directive_authorized', return_value=True)
     @patch('scythe_orchestrator._get_primary_instance_port', return_value=36501)
+    @patch('scythe_orchestrator._proxy_post_with_status')
     @patch('scythe_orchestrator._proxy_post')
     def test_synthetic_fallback_is_never_described_as_active_measurement(
-            self, proxy_post, _port, _authorized):
+            self, proxy_post, resolve, _port, _authorized):
+        resolve.return_value = ({'graphRevision': 'graph-1',
+                                 'node': snapshot()['nodes'][0]}, 200)
         def response(port, path, body, timeout):
-            if path.endswith('/selection/resolve'):
-                return {'graphRevision': 'graph-1', 'node': snapshot()['nodes'][0]}
             if path.endswith('/probe'):
                 return {'status': 'unavailable', 'reason': 'INSUFFICIENT_PRIVILEGE'}
             return {'status': 'simulated', 'simulated': True, 'hops': [
@@ -103,10 +105,11 @@ class GraphOpsHostTraceTests(unittest.TestCase):
     @patch('scythe_orchestrator._measure_host_liveness')
     @patch('scythe_orchestrator._graphops_directive_authorized', return_value=True)
     @patch('scythe_orchestrator._get_primary_instance_port', return_value=36501)
-    @patch('scythe_orchestrator._proxy_post')
+    @patch('scythe_orchestrator._proxy_post_with_status')
     def test_liveness_endpoint_probes_only_a_revision_pinned_host(
-            self, proxy_post, _port, _authorized, measure):
-        proxy_post.return_value = {'graphRevision': 'graph-1', 'node': snapshot()['nodes'][0]}
+            self, resolve, _port, _authorized, measure):
+        resolve.return_value = ({'graphRevision': 'graph-1',
+                                 'node': snapshot()['nodes'][0]}, 200)
         measure.return_value = {'state': 'active', 'alive': True, 'rttMs': 7.2,
                                 'tool': 'ping', 'evidenceClass': 'MEASURED'}
         response = app.test_client().post('/api/graphops/host-liveness', json={
@@ -118,6 +121,17 @@ class GraphOpsHostTraceTests(unittest.TestCase):
         self.assertTrue(payload['bounded'])
         self.assertFalse(payload['rawPacketsExposed'])
         measure.assert_called_once_with('8.8.8.8')
+
+    @patch('scythe_orchestrator._graphops_directive_authorized', return_value=True)
+    @patch('scythe_orchestrator._get_primary_instance_port', return_value=36501)
+    @patch('scythe_orchestrator._proxy_post_with_status', return_value=(None, 502))
+    def test_liveness_transport_failure_is_not_mislabeled_as_stale(
+            self, _resolve, _port, _authorized):
+        response = app.test_client().post('/api/graphops/host-liveness', json={
+            'entityId': 'host:8.8.8.8', 'graphRevision': 'graph-1',
+        })
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.get_json()['state'], 'unknown')
 
 
 if __name__ == '__main__':

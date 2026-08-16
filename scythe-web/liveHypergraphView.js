@@ -1,4 +1,4 @@
-import { evidenceStyle, graphPurposeStyle, hostLivenessStyle } from "./evidenceStyles.js";
+import { evidenceStyle, flowDirectionStyle, flowMotion, flowTypeStyle, graphPurposeStyle, hostLivenessStyle } from "./evidenceStyles.js";
 import { LiveGraphController } from "./liveGraphController.js";
 import { graphEntityTooltip } from "./graphEntityTooltip.js";
 
@@ -44,6 +44,7 @@ export class LiveHypergraphView {
     this.svg = root.querySelector("svg");
     this.document = root.ownerDocument ?? globalThis.document;
     this.window = this.document?.defaultView ?? globalThis;
+    this.reducedMotion = Boolean(this.window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches);
     this.latestGraph = null; this.resizeObserver = null;
     this.tooltip = this.document?.createElement?.("div") ?? null;
     if (this.tooltip) {
@@ -90,16 +91,52 @@ export class LiveHypergraphView {
       const origin = positions.get(members[0]);
       for (const member of members.slice(1)) {
         const target = positions.get(member); const line = document.createElementNS(SVG_NS, "line");
-        const style = evidenceStyle(edge.evidenceClass ?? "INFERRED");
+        const evidence = evidenceStyle(edge.evidenceClass ?? "INFERRED");
+        const style = flowTypeStyle(edge);
+        const direction = flowDirectionStyle(edge); const motion = flowMotion(edge);
         line.setAttribute("x1", origin.x); line.setAttribute("y1", origin.y);
         line.setAttribute("x2", target.x); line.setAttribute("y2", target.y);
         line.setAttribute("stroke", style.color); line.setAttribute("stroke-opacity", String(style.alpha));
         line.setAttribute("stroke-width", edge.evidenceClass === "OBSERVED" ? "2.5" : "1.4");
-        if (edge.evidenceClass === "INFERRED") line.setAttribute("stroke-dasharray", "5 5");
+        if (evidence.line !== "solid") line.setAttribute("stroke-dasharray",
+          evidence.line === "dotted" ? "2 4" : "5 5");
         line.classList.add("live-hypergraph__edge"); line.dataset.entityId = edge.id;
-        line.addEventListener("click", () => this.#select({kind: "graph-edge", entityId: edge.id,
-          graphRevision: graph.graphRevision, observedAt: edge.observedAt ?? edge.timestamp ?? null}));
+        line.dataset.flowType = style.type ?? "";
+        const title = document.createElementNS(SVG_NS, "title");
+        title.textContent = `${style.label ?? "GRAPH EDGE"}\n${edge.id}\nTUPLE // SOURCE → DESTINATION · ${String(direction.tupleBasis).replaceAll("_", " ")}\nOPERATIONAL // ${direction.label} · ${String(direction.basis).replaceAll("_", " ")}\nMOTION // ${motion.measured ? `${motion.forwardPackets} FORWARD · ${motion.reversePackets} REVERSE PACKETS / ${motion.intervalMilliseconds} ms` : "STATIC · INSUFFICIENT TEMPORAL COUNTER DELTAS"}\n${String(style.basis ?? "DISPLAY CLASSIFICATION").replaceAll("_", " ")}\n${evidence.label}`;
+        line.appendChild(title);
+        const selectEdge = () => this.#select({kind: "graph-edge", entityId: edge.id,
+          entityType: edge.kind,
+          graphRevision: graph.graphRevision, observedAt: edge.observedAt ?? edge.timestamp ?? null});
+        line.addEventListener("click", selectEdge);
         this.svg.appendChild(line);
+        const dx = target.x - origin.x; const dy = target.y - origin.y;
+        const length = Math.hypot(dx, dy) || 1; const ux = dx / length; const uy = dy / length;
+        const mx = origin.x + dx * .58; const my = origin.y + dy * .58;
+        const arrow = this.document.createElementNS(SVG_NS, "polygon");
+        arrow.setAttribute("points", `${mx + ux * 5},${my + uy * 5} ${mx - ux * 4 - uy * 3},${my - uy * 4 + ux * 3} ${mx - ux * 4 + uy * 3},${my - uy * 4 - ux * 3}`);
+        arrow.setAttribute("fill", direction.color); arrow.setAttribute("stroke", "#071422");
+        arrow.setAttribute("stroke-width", "1"); arrow.classList.add("live-hypergraph__direction-arrow");
+        arrow.dataset.entityId = edge.id; arrow.dataset.operationalDirection = direction.direction;
+        const arrowTitle = this.document.createElementNS(SVG_NS, "title"); arrowTitle.textContent = title.textContent;
+        arrow.appendChild(arrowTitle); arrow.addEventListener("click", selectEdge);
+        this.svg.appendChild(arrow);
+        if (motion.measured && !this.reducedMotion) {
+          const addParticle = (from, to, reverse, count) => {
+            if (!(count > 0)) return;
+            const particle = this.document.createElementNS(SVG_NS, "circle");
+            particle.setAttribute("r", String(Math.min(3.2, 1.5 + Math.log2(count + 1) * .35)));
+            particle.setAttribute("fill", reverse ? "#ff6fb7" : "#ffffff");
+            particle.setAttribute("pointer-events", "none");
+            particle.classList.add("live-hypergraph__flow-particle"); particle.dataset.direction = reverse ? "reverse" : "forward";
+            const animation = this.document.createElementNS(SVG_NS, "animateMotion");
+            animation.setAttribute("path", `M ${from.x} ${from.y} L ${to.x} ${to.y}`);
+            animation.setAttribute("dur", `${motion.durationSeconds}s`); animation.setAttribute("repeatCount", "indefinite");
+            particle.appendChild(animation); this.svg.appendChild(particle);
+          };
+          addParticle(origin, target, false, motion.forwardPackets);
+          addParticle(target, origin, true, motion.reversePackets);
+        }
       }
     }
     for (const node of nodes) {

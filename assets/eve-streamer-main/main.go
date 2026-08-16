@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -137,7 +138,72 @@ func extractEntities(raw map[string]interface{}) []*pb.Entity {
 		}
 	}
 
+	// Preserve an allow-listed packet-dissection surface from Suricata Eve.
+	// Payload-bearing fields are deliberately absent. Keys are flattened so the
+	// existing protobuf remains compatible and the receiver can validate each
+	// semantic field independently.
+	dissections := []struct {
+		key  string
+		path []string
+	}{
+		{"app_proto", []string{"app_proto"}},
+		{"flow_id", []string{"flow_id"}},
+		{"flow_pkts_toserver", []string{"flow", "pkts_toserver"}},
+		{"flow_pkts_toclient", []string{"flow", "pkts_toclient"}},
+		{"flow_bytes_toserver", []string{"flow", "bytes_toserver"}},
+		{"flow_bytes_toclient", []string{"flow", "bytes_toclient"}},
+		{"flow_state", []string{"flow", "state"}},
+		{"flow_age", []string{"flow", "age"}},
+		{"tcp_flags", []string{"tcp", "tcp_flags"}},
+		{"tcp_state", []string{"tcp", "state"}},
+		{"dns_rrname", []string{"dns", "rrname"}},
+		{"dns_rrtype", []string{"dns", "rrtype"}},
+		{"dns_rcode", []string{"dns", "rcode"}},
+		{"http_hostname", []string{"http", "hostname"}},
+		{"http_url", []string{"http", "url"}},
+		{"http_method", []string{"http", "http_method"}},
+		{"http_status", []string{"http", "status"}},
+		{"tls_sni", []string{"tls", "sni"}},
+		{"tls_version", []string{"tls", "version"}},
+		{"tls_ja3_hash", []string{"tls", "ja3", "hash"}},
+		{"alert_signature", []string{"alert", "signature"}},
+		{"alert_category", []string{"alert", "category"}},
+		{"alert_severity", []string{"alert", "severity"}},
+	}
+	for _, field := range dissections {
+		if value, ok := nestedScalar(raw, field.path...); ok {
+			entities = append(entities, &pb.Entity{Key: field.key, Value: value})
+		}
+	}
+
 	return entities
+}
+
+func nestedScalar(raw map[string]interface{}, path ...string) (string, bool) {
+	var current interface{} = raw
+	for _, part := range path {
+		object, ok := current.(map[string]interface{})
+		if !ok {
+			return "", false
+		}
+		current, ok = object[part]
+		if !ok {
+			return "", false
+		}
+	}
+	switch current.(type) {
+	case string, float64, bool, json.Number:
+		value := strings.TrimSpace(fmt.Sprintf("%v", current))
+		if value == "" {
+			return "", false
+		}
+		if len(value) > 1024 {
+			value = value[:1024]
+		}
+		return value, true
+	default:
+		return "", false
+	}
 }
 
 func extractEdges(raw map[string]interface{}) []string {
