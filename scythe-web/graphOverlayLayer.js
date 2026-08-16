@@ -1,13 +1,16 @@
-import { cesiumPolylineMaterial, evidenceStyle, graphNodeStyle } from "./evidenceStyles.js";
-
-function finitePosition(position) {
-  return Array.isArray(position) && position.length >= 2 &&
-    Number.isFinite(Number(position[0])) && Number.isFinite(Number(position[1]));
-}
+import {cesiumPolylineMaterial, flowDirectionStyle, flowMotion, flowTypeStyle,
+  graphPurposeStyle, hostLivenessStyle} from "./evidenceStyles.js";
+import {geographicArcWaypoints, geographicGraphPlacement,
+  geographicProjectionRevision} from "./geographicGraphProjection.js";
 
 function readProperty(entity, key, time) {
   const value = entity?.properties?.[key];
   return value?.getValue?.(time) ?? value ?? null;
+}
+
+function escapeHtml(value) {
+  return String(value ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#39;");
 }
 
 export function summarizeGraphCluster(entities, time, limit = 24) {
@@ -15,8 +18,11 @@ export function summarizeGraphCluster(entities, time, limit = 24) {
     id: String(readProperty(entity, "graphEntityId", time) ?? "").slice(0, 256),
     kind: String(readProperty(entity, "graphKind", time) ?? "entity").slice(0, 64),
     evidence: String(readProperty(entity, "evidenceClass", time) ?? "UNAVAILABLE").slice(0, 32),
+    graphEvidence: String(readProperty(entity, "graphEvidenceClass", time) ?? "UNAVAILABLE").slice(0, 32),
     organization: String(readProperty(entity, "organization", time) ?? "").slice(0, 160),
     place: String(readProperty(entity, "placeLabel", time) ?? "").slice(0, 160),
+    placement: String(readProperty(entity, "placementAuthority", time) ?? "UNAVAILABLE").slice(0, 64),
+    uncertainty: Number(readProperty(entity, "uncertaintyRadiusKm", time)),
   })).filter((row) => row.id);
   const hosts = rows.filter((row) => /host/i.test(row.kind) || row.id.startsWith("host:"));
   const listed = (hosts.length ? hosts : rows).slice(0, Math.max(1, limit));
@@ -27,7 +33,8 @@ export function summarizeGraphCluster(entities, time, limit = 24) {
     text: [
       `SCREEN CLUSTER // ${rows.length} ENTITIES // ${hosts.length} HOSTS`,
       ...listed.map((row) => `${row.id}${row.organization ? ` // ${row.organization}` : ""}` +
-        `${row.place ? ` // ${row.place}` : ""} // ${row.evidence}`),
+        `${row.place ? ` // ${row.place}` : ""} // GRAPH ${row.graphEvidence} · PLACEMENT ${row.evidence} // ${row.placement}` +
+        `${Number.isFinite(row.uncertainty) && row.uncertainty > 0 ? ` ±${row.uncertainty} km` : ""}`),
       ...(remainder > 0 ? [`+ ${remainder} MORE`] : []),
       "BOUNDARY // SCREEN-SPACE PROXIMITY; GEOIP REMAINS INFERRED",
     ].join("\n"),
@@ -38,7 +45,7 @@ export class GraphOverlayLayer {
   constructor({ viewer, Cesium, apiBase = "", fetchImpl = globalThis.fetch,
                 container = globalThis.document?.getElementById("globe-root"),
                 nodeLimit = 200, edgeLimit = 300, refreshMilliseconds = 2500,
-                controller = null }) {
+                controller = null, sensorVantage = null, reducedMotion = null }) {
     if (!viewer?.entities || !Cesium?.Cartesian3) throw new TypeError("Cesium viewer is required");
     this.viewer = viewer; this.Cesium = Cesium; this.apiBase = apiBase;
     this.fetchImpl = fetchImpl; this.container = container;
@@ -46,6 +53,11 @@ export class GraphOverlayLayer {
     this.nodeLimit = Math.min(Math.max(nodeLimit, 1), 500);
     this.edgeLimit = Math.min(Math.max(edgeLimit, 1), 1000);
     this.entityIds = new Set(); this.nodes = new Map(); this.graphRevision = null; this.renderKey = null;
+    this.latestGraph = null; this.sensorVantage = sensorVantage;
+    this.visible = true; this.overlays = {hosts: true, flows: true, uncertainty: true,
+      direction: true, motion: true, localVantage: true, aggregateFlows: true};
+    const window = container?.ownerDocument?.defaultView ?? globalThis;
+    this.reducedMotion = reducedMotion ?? Boolean(window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches);
     this.clickHandler = null; this.clusterSource = null; this.collection = viewer.entities;
     this.removeClusterListener = null; this.tooltip = null;
     this.refreshMilliseconds = Math.max(500, refreshMilliseconds);
@@ -58,7 +70,7 @@ export class GraphOverlayLayer {
       this.clusterSource = new this.Cesium.CustomDataSource("SCYTHE Graph Hosts // CLUSTERED DISPLAY");
       await this.viewer.dataSources.add(this.clusterSource); this.collection = this.clusterSource.entities;
       const clustering = this.clusterSource.clustering;
-      clustering.enabled = true; clustering.pixelRange = 45; clustering.minimumClusterSize = 2;
+      clustering.enabled = this.overlays.aggregateFlows; clustering.pixelRange = 45; clustering.minimumClusterSize = 2;
       clustering.clusterBillboards = true; clustering.clusterLabels = true; clustering.clusterPoints = true;
       this.removeClusterListener = clustering.clusterEvent.addEventListener((entities, cluster) => {
         const summary = summarizeGraphCluster(entities, this.viewer.clock?.currentTime);
@@ -107,6 +119,13 @@ export class GraphOverlayLayer {
       }, this.Cesium.ScreenSpaceEventType.LEFT_CLICK);
       if (this.Cesium.ScreenSpaceEventType.MOUSE_MOVE) this.clickHandler.setInputAction((movement) => {
         const picked = this.viewer.scene.pick(movement.endPosition)?.id;
+        if (picked?.id?.startsWith?.("scythe-web:graph-flow-cluster:")) {
+          const description = readProperty(picked, "hoverText", this.viewer.clock?.currentTime);
+          if (!description) return this.#hideTooltip();
+          this.tooltip.textContent = description; this.tooltip.hidden = false;
+          this.tooltip.style.left = `${Number(movement.endPosition?.x ?? 0) + 13}px`;
+          this.tooltip.style.top = `${Number(movement.endPosition?.y ?? 0) + 13}px`; return;
+        }
         if (!Array.isArray(picked) || picked.length < 2) return this.#hideTooltip();
         const graphEntities = picked.filter((entity) => entity?.id?.startsWith("scythe-web:graph-node:"));
         if (graphEntities.length < 2) return this.#hideTooltip();
@@ -140,59 +159,185 @@ export class GraphOverlayLayer {
     return this.renderSnapshot(graph);
   }
 
+  setVisible(value) {
+    this.visible = Boolean(value);
+    if (this.clusterSource) this.clusterSource.show = this.visible;
+    else for (const id of this.entityIds) { const entity = this.collection.getById?.(id); if (entity) entity.show = this.visible; }
+  }
+
+  setOverlayVisibility(value = {}) {
+    this.overlays = {...this.overlays, ...value};
+    if (this.clusterSource) this.clusterSource.clustering.enabled = Boolean(this.overlays.aggregateFlows);
+    this.renderKey = null; if (this.latestGraph) this.renderSnapshot(this.latestGraph);
+  }
+
+  setSensorVantage(value) {
+    this.sensorVantage = value || null; this.renderKey = null;
+    if (this.latestGraph) this.renderSnapshot(this.latestGraph);
+  }
+
   renderSnapshot(graph) {
+    this.latestGraph = graph;
     if (graph.status === "empty") { this.#clearEntities(); this.graphRevision = graph.graphRevision; this.#emitStatus(graph); return graph; }
     if (graph.status !== "ok") { this.#emitStatus(graph); return graph; }
-    const renderKey = `${graph.graphRevision}:${graph.livenessRevision ?? 0}`;
+    const projectionRevision = geographicProjectionRevision(graph.nodes, this.sensorVantage);
+    const renderKey = `${graph.graphRevision}:${graph.livenessRevision ?? 0}:${projectionRevision}:${JSON.stringify(this.overlays)}`;
     if (renderKey === this.renderKey) { this.#emitStatus({status: "ok", graphRevision: graph.graphRevision,
       nodeCount: graph.nodeCount, edgeCount: graph.edgeCount}); return graph; }
     this.#clearEntities(); this.graphRevision = graph.graphRevision; this.renderKey = renderKey;
     for (const node of graph.nodes.slice(0, this.nodeLimit)) {
-      if (!node.id || !finitePosition(node.position)) continue;
-      const [lat, lon, height = 0] = node.position.map(Number);
-      const evidenceClass = ["OBSERVED", "MEASURED", "SYNTHETIC", "INFERRED"].includes(node.evidenceClass)
-        ? node.evidenceClass : "INFERRED";
-      const style = graphNodeStyle({...node, evidenceClass});
+      if (!node.id) continue;
+      const placement = geographicGraphPlacement(node, this.sensorVantage); if (!placement) continue;
+      if (placement.coLocatedAtSensor && !this.overlays.localVantage) continue;
+      const lat = placement.latitude; const lon = placement.longitude; const height = placement.heightMeters;
+      const evidenceClass = ["OBSERVED", "MEASURED", "SYNTHETIC", "INFERRED", "ILLUSTRATIVE"]
+        .includes(node.evidenceClass) ? node.evidenceClass : "INFERRED";
+      const style = graphPurposeStyle({...node, evidenceClass}); const liveness = hostLivenessStyle(node);
       const network = node.enrichment?.network ?? {}; const geo = node.enrichment?.geo ?? {};
       const placeLabel = [geo.city, geo.region, geo.country].filter(Boolean).join(", ");
       const entityId = `scythe-web:graph-node:${encodeURIComponent(node.id)}`;
-      this.collection.add({id: entityId,
-        position: this.Cesium.Cartesian3.fromDegrees(lon, lat, Math.max(height, 500)),
-        point: {pixelSize: 9, color: this.Cesium.Color.fromCssColorString(style.color).withAlpha(style.alpha),
-          outlineColor: this.Cesium.Color.BLACK, outlineWidth: 1},
-        label: {text: String(node.id).slice(0, 32), font: "10px ui-monospace,monospace",
-          fillColor: this.Cesium.Color.fromCssColorString(style.color),
-          pixelOffset: new this.Cesium.Cartesian2(0, 16),
-          distanceDisplayCondition: new this.Cesium.DistanceDisplayCondition(0, 2_000_000)},
-        properties: {graphEntityId: node.id, graphRevision: graph.graphRevision, graphKind: node.kind,
-          latitudeDegrees: lat, longitudeDegrees: lon, heightMeters: height,
-          observedAt: node.observedAt ?? null, evidenceClass,
-          organization: network.organization ?? "", placeLabel},
-      });
-      this.entityIds.add(entityId); this.nodes.set(node.id, {lat, lon, height, evidenceClass});
+      if (this.overlays.hosts) {
+        const uncertainty = Math.max(0, Number(placement.uncertaintyRadiusKm) || 0);
+        this.collection.add({id: entityId,
+          position: this.Cesium.Cartesian3.fromDegrees(lon, lat, Math.max(height, 500)),
+          point: {pixelSize: 9, color: this.Cesium.Color.fromCssColorString(style.color).withAlpha(style.alpha),
+            outlineColor: liveness ? this.Cesium.Color.fromCssColorString(liveness.color) : this.Cesium.Color.BLACK,
+            outlineWidth: liveness ? 3 : 1},
+          ...(this.overlays.uncertainty && uncertainty > 0 && this.Cesium.Color ? {ellipse: {
+            semiMajorAxis: uncertainty * 1000, semiMinorAxis: uncertainty * 1000,
+            material: this.Cesium.Color.fromCssColorString(style.color).withAlpha(.025), outline: true,
+            outlineColor: this.Cesium.Color.fromCssColorString(style.color).withAlpha(.32), height: 0}} : {}),
+          label: {text: String(node.id).slice(0, 32), font: "10px ui-monospace,monospace",
+            fillColor: this.Cesium.Color.fromCssColorString(style.color),
+            pixelOffset: new this.Cesium.Cartesian2(0, 16),
+            distanceDisplayCondition: new this.Cesium.DistanceDisplayCondition(0, 2_000_000)},
+          description: `${node.id} // ${placement.placementAuthority}` +
+            `${uncertainty ? ` ±${uncertainty} km` : ""} // ${placement.coLocatedAtSensor ? "CO-LOCATED AT SENSOR FOR DISPLAY; NOT DEVICE LOCATION" : "IP NETWORK LOCATION ESTIMATE; NOT DEVICE LOCATION"}`,
+          properties: {graphEntityId: node.id, graphRevision: graph.graphRevision, graphKind: node.kind,
+            latitudeDegrees: lat, longitudeDegrees: lon, heightMeters: height,
+            observedAt: node.observedAt ?? null, evidenceClass: placement.placementEvidenceClass,
+            graphEvidenceClass: evidenceClass,
+            placementAuthority: placement.placementAuthority, uncertaintyRadiusKm: uncertainty,
+            organization: network.organization ?? "", placeLabel},
+        });
+        this.entityIds.add(entityId);
+      }
+      this.nodes.set(node.id, {lat, lon, height, evidenceClass, placement, node});
     }
+    if (this.sensorVantage && this.overlays.localVantage && this.overlays.hosts) this.#addSensorVantage();
+    const drawable = [];
     for (const edge of graph.edges.slice(0, this.edgeLimit)) {
       if (!Array.isArray(edge.nodes) || edge.nodes.length < 2) continue;
       const endpoints = edge.nodes.slice(0, 2).map((id) => this.nodes.get(id));
       if (endpoints.some((value) => !value)) continue;
-      const id = `scythe-web:graph-edge:${encodeURIComponent(edge.id)}`;
-      const edgeClass = endpoints.every((value) => value.evidenceClass === "SYNTHETIC")
-        ? "SYNTHETIC" : "INFERRED";
-      this.collection.add({id, polyline: {positions: endpoints.map((p) =>
-        this.Cesium.Cartesian3.fromDegrees(p.lon, p.lat, Math.max(p.height, 300))), width: 1.5,
-        material: cesiumPolylineMaterial(this.Cesium, edgeClass)},
-        properties: {graphEntityId: edge.id, graphRevision: graph.graphRevision,
-          graphKind: edge.kind, observedAt: edge.observedAt ?? edge.timestamp ?? null,
-          latitudeDegrees: (endpoints[0].lat + endpoints[1].lat) / 2,
-          longitudeDegrees: (endpoints[0].lon + endpoints[1].lon) / 2,
-          heightMeters: (endpoints[0].height + endpoints[1].height) / 2,
-          evidenceClass: edge.evidenceClass ?? edgeClass,
-          scytheSemantics: "GRAPH RELATIONSHIP; NOT CAUSAL PROOF"}});
-      this.entityIds.add(id);
+      drawable.push({edge, endpoints});
     }
+    if (this.overlays.flows) this.#renderFlowGroups(drawable, graph);
+    if (this.clusterSource) this.clusterSource.show = this.visible;
     this.#emitStatus({status: "ok", graphRevision: graph.graphRevision,
-      nodeCount: this.nodes.size, edgeCount: graph.edges.length});
+      nodeCount: this.nodes.size, edgeCount: drawable.length,
+      inferredGeoCount: [...this.nodes.values()].filter((item) =>
+        item.placement.placementAuthority === "GEOIP_ESTIMATE").length,
+      sensorColocatedCount: [...this.nodes.values()].filter((item) => item.placement.coLocatedAtSensor).length});
     return graph;
+  }
+
+  #addSensorVantage() {
+    const placement = geographicGraphPlacement({kind: "network_multicast_group",
+      enrichment: {scope: "PRIVATE"}}, this.sensorVantage);
+    if (!placement) return;
+    const C = this.Cesium; const id = "scythe-web:sensor-vantage";
+    const uncertainty = Math.max(.005, placement.uncertaintyRadiusKm || 0);
+    this.collection.add({id, position: C.Cartesian3.fromDegrees(placement.longitude, placement.latitude, 750),
+      point: {pixelSize: 13, color: C.Color.fromCssColorString("#ffffff"),
+        outlineColor: C.Color.fromCssColorString("#00d4ff"), outlineWidth: 3},
+      ...(this.overlays.uncertainty ? {ellipse: {semiMajorAxis: uncertainty * 1000,
+        semiMinorAxis: uncertainty * 1000, material: C.Color.CYAN.withAlpha(.045), outline: true,
+        outlineColor: C.Color.CYAN.withAlpha(.7), height: 0}} : {}),
+      label: {text: "SENSOR VANTAGE", font: "bold 10px ui-monospace,monospace",
+        fillColor: C.Color.WHITE, pixelOffset: new C.Cartesian2(0, -18), showBackground: true,
+        backgroundColor: C.Color.BLACK.withAlpha(.72)},
+      description: `SENSOR VANTAGE // ${this.sensorVantage.authority ?? "OPERATOR PROVIDED"} // PRIVATE AND MULTICAST HOSTS ARE CO-LOCATED FOR DISPLAY ONLY`});
+    this.entityIds.add(id);
+  }
+
+  #renderFlowGroups(drawable, graph) {
+    const groups = new Map(); const focusId = graph.ranking?.focusId;
+    for (const item of drawable) {
+      const visual = flowTypeStyle(item.edge); const direction = flowDirectionStyle(item.edge);
+      const endpoints = item.endpoints;
+      const sourceKey = endpoints[0].node?.enrichment?.network?.asn ??
+        `${endpoints[0].lat.toFixed(1)},${endpoints[0].lon.toFixed(1)}`;
+      const targetKey = endpoints[1].node?.enrichment?.network?.asn ??
+        `${endpoints[1].lat.toFixed(1)},${endpoints[1].lon.toFixed(1)}`;
+      const aggregate = this.overlays.aggregateFlows && item.edge.id !== focusId;
+      const key = aggregate ? `${sourceKey}>${targetKey}:${visual.type}:${direction.direction}` : item.edge.id;
+      if (!groups.has(key)) groups.set(key, []); groups.get(key).push(item);
+    }
+    for (const [key, items] of groups) this.#addFlowArc(key, items, graph);
+  }
+
+  #addFlowArc(key, items, graph) {
+    const C = this.Cesium; const representative = items[0]; const edge = representative.edge;
+    const source = representative.endpoints[0]; const target = representative.endpoints[1];
+    const waypoints = geographicArcWaypoints({latitude: source.lat, longitude: source.lon, heightMeters: source.height},
+      {latitude: target.lat, longitude: target.lon, heightMeters: target.height});
+    const positions = waypoints.map((point) => C.Cartesian3.fromDegrees(
+      point.longitude, point.latitude, point.heightMeters));
+    const visual = flowTypeStyle(edge); const direction = flowDirectionStyle(edge); const motion = flowMotion(edge);
+    const aggregate = items.length > 1;
+    const evidenceClass = ["OBSERVED", "MEASURED", "SOLVER_OUTPUT", "REDUCED_ORDER", "SYNTHETIC",
+      "ILLUSTRATIVE", "INFERRED", "COUNTERFACTUAL"].includes(edge.evidenceClass) ? edge.evidenceClass : "INFERRED";
+    const id = aggregate ? `scythe-web:graph-flow-cluster:${encodeURIComponent(key)}` :
+      `scythe-web:graph-edge:${encodeURIComponent(edge.id)}`;
+    const flowIds = items.map((item) => item.edge.id); const hoverText = [
+      `${aggregate ? "GEOGRAPHIC FLOW AGGREGATE" : "GEOGRAPHIC FLOW"} // ${items.length} FLOW${items.length === 1 ? "" : "S"}`,
+      `TYPE // ${visual.label} // DIRECTION // ${direction.label}`,
+      ...flowIds.slice(0, 20), ...(flowIds.length > 20 ? [`+ ${flowIds.length - 20} MORE`] : []),
+      "BOUNDARY // ENDPOINT PLACEMENTS ARE INFERRED OR VANTAGE-COLOCATED; ARC IS NOT A PHYSICAL ROUTE",
+    ].join("\n");
+    this.collection.add({id, polyline: {positions, width: Math.min(7, 1.5 + Math.log2(items.length + 1)),
+      arcType: C.ArcType?.NONE, material: cesiumPolylineMaterial(C, evidenceClass, visual.color, visual.alpha)},
+      description: escapeHtml(hoverText).replaceAll("\n", "<br>"), properties: {
+        graphEntityId: aggregate ? "" : edge.id, graphEntityIdsJson: JSON.stringify(flowIds.slice(0, 64)),
+        graphRevision: graph.graphRevision, graphKind: aggregate ? "network_flow_aggregate" : edge.kind,
+        observedAt: edge.observedAt ?? edge.timestamp ?? null,
+        latitudeDegrees: waypoints[Math.floor(waypoints.length / 2)].latitude,
+        longitudeDegrees: waypoints[Math.floor(waypoints.length / 2)].longitude,
+        heightMeters: waypoints[Math.floor(waypoints.length / 2)].heightMeters,
+        evidenceClass, placementAuthority: "DISPLAY_ARC_NOT_ROUTE", hoverText,
+        scytheSemantics: "OBSERVED COMMUNICATION BETWEEN INFERRED OR VANTAGE-COLOCATED ENDPOINTS; NOT PHYSICAL ROUTE"}});
+    this.entityIds.add(id);
+    if (this.overlays.direction) {
+      const start = Math.floor(waypoints.length * .54); const arrowPositions = positions.slice(start, start + 3);
+      const arrowId = `scythe-web:graph-direction:${encodeURIComponent(key)}`;
+      const arrowMaterial = C.PolylineArrowMaterialProperty ?
+        new C.PolylineArrowMaterialProperty(C.Color.fromCssColorString(direction.color).withAlpha(.96)) :
+        C.Color.fromCssColorString(direction.color).withAlpha(.96);
+      this.collection.add({id: arrowId, polyline: {positions: arrowPositions, width: 5,
+        arcType: C.ArcType?.NONE, material: arrowMaterial}, description: hoverText}); this.entityIds.add(arrowId);
+    }
+    if (items.length === 1 && this.overlays.motion && motion.measured && !this.reducedMotion)
+      this.#addFlowParticles(key, positions, motion, visual.color);
+  }
+
+  #addFlowParticles(key, positions, motion, color) {
+    const C = this.Cesium; if (!C.CallbackProperty || !C.Cartesian3?.lerp) return;
+    const add = (reverse, count) => {
+      if (!(count > 0)) return;
+      const path = reverse ? [...positions].reverse() : positions; const duration = motion.durationSeconds * 1000;
+      const phase = reverse ? .5 : 0;
+      const position = new C.CallbackProperty((_time, result) => {
+        const progress = ((Date.now() / duration) + phase) % 1;
+        const scaled = progress * (path.length - 1); const index = Math.min(path.length - 2, Math.floor(scaled));
+        return C.Cartesian3.lerp(path[index], path[index + 1], scaled - index, result);
+      }, false);
+      const id = `scythe-web:graph-motion:${reverse ? "reverse" : "forward"}:${encodeURIComponent(key)}`;
+      this.collection.add({id, position, point: {pixelSize: Math.min(8, 4 + Math.log2(count + 1)),
+        color: C.Color.fromCssColorString(reverse ? "#ff6fb7" : color),
+        outlineColor: C.Color.WHITE, outlineWidth: 1}}); this.entityIds.add(id);
+    };
+    add(false, motion.forwardPackets); add(true, motion.reversePackets);
   }
 
   #emitStatus(detail) {

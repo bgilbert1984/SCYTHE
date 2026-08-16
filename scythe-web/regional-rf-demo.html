@@ -90,6 +90,26 @@
       font:9px ui-monospace,monospace; padding:3px 8px; cursor:pointer; }
     .live-hypergraph__modes button[aria-pressed="true"] { color:#ccefff; border-color:#00d4ff;
       box-shadow:inset 0 0 8px rgba(0,212,255,.18); }
+    .live-hypergraph__geo-controls { position:absolute; z-index:7; top:4px; right:101px;
+      color:#8ca3b3; font:8px ui-monospace,monospace; }
+    .live-hypergraph__geo-controls button { padding:2px 6px; color:#708797; background:#071422;
+      border:1px solid #284655; font:8px ui-monospace,monospace; cursor:pointer; }
+    .live-hypergraph__geo-controls button[aria-pressed="true"] { color:#eafaff; border-color:#f7d154;
+      box-shadow:inset 0 0 7px rgba(247,209,84,.14); }
+    .live-hypergraph__geo-controls button[data-state="error"] { color:#ff7890; border-color:#ff4f64; }
+    .live-hypergraph__geo-more { position:relative; }
+    .live-hypergraph__geo-more summary { list-style:none; width:24px; height:19px; box-sizing:border-box;
+      padding:2px 0; color:#f7d154; background:#071422; border:1px solid #665c2b;
+      cursor:pointer; text-align:center; font:11px/1 ui-monospace,monospace; }
+    .live-hypergraph__geo-more summary::-webkit-details-marker { display:none; }
+    .live-hypergraph__geo-more[open] summary { color:#fff; border-color:#f7d154; }
+    .live-hypergraph__geo-menu { position:absolute; z-index:12; top:calc(100% + 4px); right:0;
+      display:grid; grid-template-columns:1fr 1fr; gap:3px; width:174px; padding:5px;
+      background:rgba(3,9,20,.97); border:1px solid rgba(247,209,84,.55);
+      box-shadow:0 5px 18px rgba(0,0,0,.55); }
+    .live-hypergraph__geo-menu button { text-align:left; }
+    .live-hypergraph__geo-status { grid-column:1/-1; padding:2px 3px 5px; color:#8299a8;
+      border-bottom:1px dashed rgba(247,209,84,.18); font:8px/1.3 ui-monospace,monospace; }
     .live-hypergraph__context-tab { display:inline-flex; }
     .live-hypergraph__context-tab-main { border-right:0!important; }
     .live-hypergraph__context-tab-close { width:18px; padding:2px!important; color:#ff7890!important; }
@@ -264,6 +284,25 @@
         <button id="hypergraph-mode-semantic" type="button" role="tab" aria-pressed="false" aria-selected="false">SEMANTIC</button>
         <button id="hypergraph-mode-spectrum" type="button" role="tab" aria-pressed="false" aria-selected="false">SPECTRUM</button>
         <button id="hypergraph-mode-events" type="button" role="tab" aria-pressed="false" aria-selected="false">EVENTS</button>
+      </div>
+      <div class="live-hypergraph__geo-controls" aria-label="Cesium live geographic overlay controls">
+        <details class="live-hypergraph__geo-more">
+          <summary aria-label="Cesium Live Geo controls" title="Cesium Live Geo controls">◎</summary>
+          <div class="live-hypergraph__geo-menu">
+            <div class="live-hypergraph__geo-status" data-live-geo-status aria-live="polite">GEO // CONNECTING…</div>
+            <button type="button" data-live-geo="visible" aria-pressed="true"
+              title="Show or hide the Cesium geographic graph overlay">OVERLAY</button>
+            <button type="button" data-live-geo-vantage aria-pressed="false"
+              title="Explicitly anchor private and multicast entities at this browser's measured location">⌖ VANTAGE</button>
+            <button type="button" data-live-geo="hosts" aria-pressed="true">HOSTS</button>
+            <button type="button" data-live-geo="flows" aria-pressed="true">FLOWS</button>
+            <button type="button" data-live-geo="uncertainty" aria-pressed="true">UNCERTAINTY</button>
+            <button type="button" data-live-geo="direction" aria-pressed="true">DIRECTION</button>
+            <button type="button" data-live-geo="motion" aria-pressed="true">MOTION</button>
+            <button type="button" data-live-geo="localVantage" aria-pressed="true">LOCAL ZONE</button>
+            <button type="button" data-live-geo="aggregateFlows" aria-pressed="true">AGGREGATE</button>
+          </div>
+        </details>
       </div>
       <div id="live-hypergraph-3d-viewport" class="live-hypergraph__viewport">
         <div class="live-hypergraph__three" data-live-graph-3d></div>
@@ -465,11 +504,63 @@
     const liveGraphController = new LiveGraphController();
     const graphOverlay = new GraphOverlayLayer({viewer, Cesium, container: document.getElementById("globe-root"),
       controller: liveGraphController});
+    window.scytheGraphOverlay = graphOverlay;
+    document.getElementById("globe-root").addEventListener("scythe-web:graph-status", ({detail}) => {
+      const target = document.querySelector("[data-live-geo-status]");
+      if (detail.status !== "ok") {
+        target.textContent = `GEO // ${String(detail.status ?? "UNAVAILABLE").toUpperCase()} // ${detail.reason ?? "NO SNAPSHOT"}`;
+        return;
+      }
+      target.textContent = `GEO // ${detail.nodeCount ?? 0} LOC · ${detail.edgeCount ?? 0} FLOW · ${detail.inferredGeoCount ?? 0} GEOIP · ${detail.sensorColocatedCount ?? 0} LOCAL`;
+    });
     graphOverlay.start().catch((error) => {
       document.querySelector("[data-live-graph-status]").textContent =
         `LIVE HYPERGRAPH // UNAVAILABLE // ${error.message}`;
     });
     const liveRoot = document.getElementById("live-hypergraph");
+    for (const button of liveRoot.querySelectorAll("[data-live-geo]")) button.addEventListener("click", () => {
+      const key = button.dataset.liveGeo; const enabled = button.getAttribute("aria-pressed") !== "true";
+      button.setAttribute("aria-pressed", String(enabled));
+      if (key === "visible") graphOverlay.setVisible(enabled);
+      else graphOverlay.setOverlayVisibility({[key]: enabled});
+      button.closest("details")?.removeAttribute("open");
+    });
+    const geoMore = liveRoot.querySelector(".live-hypergraph__geo-more");
+    document.addEventListener("pointerdown", (event) => {
+      if (geoMore.open && !geoMore.contains(event.target)) geoMore.removeAttribute("open");
+    });
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && geoMore.open) geoMore.removeAttribute("open");
+    });
+    const vantageButton = liveRoot.querySelector("[data-live-geo-vantage]");
+    let browserSensorVantage = null;
+    vantageButton.addEventListener("click", () => {
+      if (browserSensorVantage) {
+        browserSensorVantage = null; graphOverlay.setSensorVantage(null);
+        vantageButton.textContent = "⌖ VANTAGE"; vantageButton.setAttribute("aria-pressed", "false");
+        vantageButton.dataset.state = "";
+        vantageButton.title = "Private and multicast entities are unlocated until an explicit sensor vantage is set";
+        return;
+      }
+      if (!navigator.geolocation) {
+        vantageButton.textContent = "⌖ UNAVAILABLE"; vantageButton.dataset.state = "error"; return;
+      }
+      vantageButton.textContent = "⌖ …"; vantageButton.disabled = true;
+      navigator.geolocation.getCurrentPosition((position) => {
+        browserSensorVantage = {latitude: position.coords.latitude, longitude: position.coords.longitude,
+          heightMeters: position.coords.altitude ?? 0, accuracyMeters: position.coords.accuracy,
+          authority: "MEASURED_BROWSER_GEOLOCATION", evidenceClass: "MEASURED",
+          sensorId: "browser-capture-vantage", capturedAt: new Date(position.timestamp).toISOString()};
+        graphOverlay.setSensorVantage(browserSensorVantage);
+        vantageButton.textContent = `⌖ ±${Math.round(position.coords.accuracy)}m`;
+        vantageButton.title = "Measured browser location used only for local Cesium display; click to clear";
+        vantageButton.setAttribute("aria-pressed", "true"); vantageButton.dataset.state = "ready";
+        vantageButton.disabled = false;
+      }, (error) => {
+        vantageButton.textContent = "⌖ REFUSED"; vantageButton.title = error.message;
+        vantageButton.dataset.state = "error"; vantageButton.disabled = false;
+      }, {enableHighAccuracy: true, timeout: 12_000, maximumAge: 60_000});
+    });
     const livePanelResize = new ResizablePanel({panel: liveRoot,
       handle: liveRoot.querySelector("[data-live-graph-resize]")}).start();
     window.scytheLivePanelResize = livePanelResize;

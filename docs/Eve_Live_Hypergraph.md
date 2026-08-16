@@ -154,6 +154,49 @@ particles. Flow capsules carry the same boundary classification and compact
 counter delta while the latest-32 sidecar remains the authority for sequence
 and cadence analysis.
 
+### Cesium Live Geo projection
+
+The regional RF page projects the same bounded live graph onto Cesium through
+a display-only geographic adapter. This adapter never copies GeoIP coordinates
+into `node.position` and never changes the content-addressed graph revision.
+Every marker instead carries two independent claims: the graph entity's
+evidence class and its placement evidence class.
+
+- Explicit graph positions are accepted unless their metadata declares
+  `geospatialAuthority: ABSENT`.
+- Public-host GeoIP coordinates render as `INFERRED // GEOIP_ESTIMATE`, with
+  local database identity and accuracy radius retained.
+- Private and multicast entities remain unlocated until the operator presses
+  `SET VANTAGE` and grants browser geolocation. They are then marked
+  `VANTAGE_COLOCATED_DISPLAY`; this does not claim individual device location.
+- Unspecified addresses are never projected.
+- Clearing the vantage immediately removes the sensor anchor and every
+  vantage-co-located entity. The exact browser position remains display-side
+  and is not written into the graph.
+
+Cesium marker bodies retain adaptive relevance colors; measured host liveness
+is a distinct marker outline. Accuracy circles show placement uncertainty.
+Screen-space clustering displays the number of hosts and a bounded hover list
+with graph evidence, placement evidence, organization, place label, and
+uncertainty.
+
+Flow edges whose endpoints both have usable display placements become elevated
+arcs. Flow type controls arc color, evidence class controls solid/dashed style,
+and a short colored arrow segment communicates observed tuple direction plus
+the sensor-boundary-relative direction class. Measured Suricata counter deltas
+may drive a bounded forward or reverse particle; reduced-motion clients retain
+the static arrow. Global clutter is bounded by grouping non-focused flows by
+endpoint ASN or geographic cell, flow type, and operational direction. A
+focused graph edge remains individual and selectable.
+
+Every marker and arc declares the geographic boundary:
+
+`ENDPOINT PLACEMENTS ARE INFERRED OR VANTAGE-COLOCATED; ARC IS NOT A PHYSICAL ROUTE`
+
+The `VISIBLE`, `HOSTS`, `FLOWS`, `UNCERTAINTY`, `DIRECTION`, `MOTION`,
+`LOCAL ZONE`, and `AGGREGATE` controls affect Cesium presentation only. They
+do not mutate the graph, execute GraphOps directives, or change evidence.
+
 ### Non-unicast address context
 
 Eve endpoints that are multicast or unspecified are typed as

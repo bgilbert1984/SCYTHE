@@ -39,6 +39,7 @@ test("bounded graph overlay renders geospatial nodes and inferred edges", async 
   await layer.start();
   assert.equal(viewer.entities.values.filter((entity) => entity.id.startsWith("scythe-web:graph-node:")).length, 2);
   assert.equal(viewer.entities.values.filter((entity) => entity.id.startsWith("scythe-web:graph-edge:")).length, 1);
+  assert.equal(viewer.entities.values.filter((entity) => entity.id.startsWith("scythe-web:graph-direction:")).length, 1);
   assert.equal(events.at(-1).detail.graphRevision, "graph-1");
   layer.destroy();
   assert.equal(viewer.entities.values.length, 0);
@@ -73,7 +74,24 @@ test("screen clusters count hosts and retain a bounded evidence-labelled hover l
   const summary = summarizeGraphCluster(entities);
   assert.equal(summary.entityCount, 3); assert.equal(summary.hostCount, 2); assert.equal(summary.markerCount, 2);
   assert.match(summary.text, /SCREEN CLUSTER \/\/ 3 ENTITIES \/\/ 2 HOSTS/);
-  assert.match(summary.text, /host:192\.0\.2\.1 \/\/ Example Network \/\/ Seattle, Washington \/\/ OBSERVED/);
+  assert.match(summary.text, /host:192\.0\.2\.1 \/\/ Example Network \/\/ Seattle, Washington \/\/ GRAPH UNAVAILABLE · PLACEMENT OBSERVED/);
   assert.doesNotMatch(summary.text, /event:burst-1/);
   assert.match(summary.text, /SCREEN-SPACE PROXIMITY; GEOIP REMAINS INFERRED/);
+});
+
+test("GeoIP-enriched hosts project onto Cesium without acquiring graph position authority", async () => {
+  const {viewer, Cesium, container} = fixture();
+  const node = {id:"host:203.0.113.7",kind:"network_host",position:null,evidenceClass:"OBSERVED",
+    enrichment:{scope:"PUBLIC",geo:{latitude:47.61,longitude:-122.33,uncertaintyRadiusKm:20,
+      authority:"GEOIP_ESTIMATE"}}};
+  const graph = {status:"ok",graphRevision:"geo-1",nodes:[node],edges:[]};
+  const layer = new GraphOverlayLayer({viewer,Cesium,container,
+    fetchImpl:async()=>new Response(JSON.stringify(graph),{status:200})});
+  await layer.start();
+  const marker = viewer.entities.values.find((entity)=>entity.id.startsWith("scythe-web:graph-node:"));
+  assert.deepEqual(marker.position,{lon:-122.33,lat:47.61,height:500});
+  assert.equal(marker.properties.placementAuthority,"GEOIP_ESTIMATE");
+  assert.equal(marker.properties.evidenceClass,"INFERRED");
+  assert.equal(node.position,null);
+  layer.destroy();
 });

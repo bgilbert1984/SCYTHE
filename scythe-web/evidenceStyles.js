@@ -192,13 +192,14 @@ export function graphNodeStyle(node) {
  * Build a Cesium Entity polyline material without making Cesium a dependency
  * of the sampler or tests.
  */
-export function cesiumPolylineMaterial(Cesium, evidenceClass) {
+export function cesiumPolylineMaterial(Cesium, evidenceClass, colorOverride = null, alphaOverride = null) {
   if (!Cesium?.Color || !Cesium?.PolylineDashMaterialProperty) {
     throw new Error("A compatible Cesium namespace is required");
   }
 
   const style = evidenceStyle(evidenceClass);
-  const color = Cesium.Color.fromCssColorString(style.color).withAlpha(style.alpha);
+  const color = Cesium.Color.fromCssColorString(colorOverride ?? style.color)
+    .withAlpha(alphaOverride ?? style.alpha);
 
   if (style.line === "solid") {
     return color;
