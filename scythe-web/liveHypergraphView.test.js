@@ -38,8 +38,10 @@ test("live hypergraph polls bounded graph and Eve status without inventing geogr
     const renderedEdge = svg.children.find((child) => child.dataset.entityId === "flow:a");
     assert.equal(renderedEdge.dataset.flowType, "OTHER");
     assert.equal(renderedEdge.attributes.stroke, "#7890a8");
+    assert.ok(Number(renderedEdge.attributes["stroke-width"]) > 1.4);
     const arrow = svg.children.find((child) => child.dataset.operationalDirection === "OUTBOUND");
     assert.equal(arrow.attributes.fill, "#00d4ff");
+    assert.match(arrow.children[0].textContent, /VISUAL SCALE/);
     assert.equal(svg.children.filter((child) => child.classes?.includes("live-hypergraph__flow-particle")).length, 2);
     assert.equal(events[0].detail.graphRevision, "graph-live-1");
     svg.children.find((child) => child.dataset.entityId === "host:a").listeners.click();

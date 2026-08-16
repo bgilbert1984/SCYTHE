@@ -27,6 +27,9 @@ test("offline bundle is self-contained, revision-pinned, hashed, and script-safe
   assert.match(html, /id="cfg-hop" type="number" min="1" max="4" value="1"/);
   assert.match(html, /id="cfg-max" type="number" min="1" max="100" value="24"/);
   assert.match(html, /Graph-distance depth for persistent labels/);
+  assert.match(html, /NODE SIZE = BOUNDED ACTIVITY/);
+  assert.match(html, /function flowScale\(e\)/);
+  assert.match(html, /function directionColor\(e\)/);
   assert.doesNotMatch(html, /https?:\/\//);
   assert.doesNotMatch(html, /<script>not executable<\/script>/);
   assert.match(html, /\\u003c\/script>/);

@@ -189,6 +189,24 @@ the static arrow. Global clutter is bounded by grouping non-focused flows by
 endpoint ASN or geographic cell, flow type, and operational direction. A
 focused graph edge remains individual and selectable.
 
+All live and offline graph renderers share a bounded magnitude grammar:
+
+- Flow length is controlled only by topology layout or display endpoint
+  separation. It never encodes bytes, packets, latency, hop count, or a
+  physical route.
+- Node size uses the server-computed adaptive-relevance `activityScore` on a
+  bounded logarithmic scale. Selection remains a purpose color or halo and
+  host liveness remains a separate badge or outline.
+- Flow width uses bounded observed packet/byte counters. A measured temporal
+  Suricata delta takes precedence over accumulated flow counters.
+- Direction-arrow size uses the same bounded counter intensity. Missing
+  counters retain a readable baseline and do not imply zero traffic.
+- Geographic aggregates combine the counters of all included bounded flows;
+  they never borrow the magnitude of a single representative edge.
+
+Hover text declares the scale basis. These dimensions are presentation
+metadata and never promote evidence authority.
+
 Every marker and arc declares the geographic boundary:
 
 `ENDPOINT PLACEMENTS ARE INFERRED OR VANTAGE-COLOCATED; ARC IS NOT A PHYSICAL ROUTE`

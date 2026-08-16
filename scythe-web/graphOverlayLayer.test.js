@@ -40,6 +40,7 @@ test("bounded graph overlay renders geospatial nodes and inferred edges", async 
   assert.equal(viewer.entities.values.filter((entity) => entity.id.startsWith("scythe-web:graph-node:")).length, 2);
   assert.equal(viewer.entities.values.filter((entity) => entity.id.startsWith("scythe-web:graph-edge:")).length, 1);
   assert.equal(viewer.entities.values.filter((entity) => entity.id.startsWith("scythe-web:graph-direction:")).length, 1);
+  assert.equal(viewer.entities.values.find((entity) => entity.id.startsWith("scythe-web:graph-edge:")).polyline.width, 1.5);
   assert.equal(events.at(-1).detail.graphRevision, "graph-1");
   layer.destroy();
   assert.equal(viewer.entities.values.length, 0);

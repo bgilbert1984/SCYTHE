@@ -2,6 +2,7 @@ import {cesiumPolylineMaterial, flowDirectionStyle, flowMotion, flowTypeStyle,
   graphPurposeStyle, hostLivenessStyle} from "./evidenceStyles.js";
 import {geographicArcWaypoints, geographicGraphPlacement,
   geographicProjectionRevision} from "./geographicGraphProjection.js";
+import {GRAPH_VISUAL_SCALE_BOUNDARY, graphFlowGroupScale, graphNodeScale} from "./graphVisualScale.js";
 
 function readProperty(entity, key, time) {
   const value = entity?.properties?.[key];
@@ -193,6 +194,7 @@ export class GraphOverlayLayer {
       const evidenceClass = ["OBSERVED", "MEASURED", "SYNTHETIC", "INFERRED", "ILLUSTRATIVE"]
         .includes(node.evidenceClass) ? node.evidenceClass : "INFERRED";
       const style = graphPurposeStyle({...node, evidenceClass}); const liveness = hostLivenessStyle(node);
+      const scale = graphNodeScale(node);
       const network = node.enrichment?.network ?? {}; const geo = node.enrichment?.geo ?? {};
       const placeLabel = [geo.city, geo.region, geo.country].filter(Boolean).join(", ");
       const entityId = `scythe-web:graph-node:${encodeURIComponent(node.id)}`;
@@ -200,7 +202,7 @@ export class GraphOverlayLayer {
         const uncertainty = Math.max(0, Number(placement.uncertaintyRadiusKm) || 0);
         this.collection.add({id: entityId,
           position: this.Cesium.Cartesian3.fromDegrees(lon, lat, Math.max(height, 500)),
-          point: {pixelSize: 9, color: this.Cesium.Color.fromCssColorString(style.color).withAlpha(style.alpha),
+          point: {pixelSize: scale.cesiumPixels, color: this.Cesium.Color.fromCssColorString(style.color).withAlpha(style.alpha),
             outlineColor: liveness ? this.Cesium.Color.fromCssColorString(liveness.color) : this.Cesium.Color.BLACK,
             outlineWidth: liveness ? 3 : 1},
           ...(this.overlays.uncertainty && uncertainty > 0 && this.Cesium.Color ? {ellipse: {
@@ -212,7 +214,9 @@ export class GraphOverlayLayer {
             pixelOffset: new this.Cesium.Cartesian2(0, 16),
             distanceDisplayCondition: new this.Cesium.DistanceDisplayCondition(0, 2_000_000)},
           description: `${node.id} // ${placement.placementAuthority}` +
-            `${uncertainty ? ` ±${uncertainty} km` : ""} // ${placement.coLocatedAtSensor ? "CO-LOCATED AT SENSOR FOR DISPLAY; NOT DEVICE LOCATION" : "IP NETWORK LOCATION ESTIMATE; NOT DEVICE LOCATION"}`,
+            `${uncertainty ? ` ±${uncertainty} km` : ""} // ${placement.coLocatedAtSensor ? "CO-LOCATED AT SENSOR FOR DISPLAY; NOT DEVICE LOCATION" : "IP NETWORK LOCATION ESTIMATE; NOT DEVICE LOCATION"}` +
+            `<br>VISUAL SCALE // ${scale.basis.replaceAll("_", " ")} // ${scale.cesiumPixels.toFixed(2)} PX` +
+            `<br>BOUNDARY // SIZE IS PRESENTATION METADATA; IT DOES NOT CHANGE EVIDENCE AUTHORITY`,
           properties: {graphEntityId: node.id, graphRevision: graph.graphRevision, graphKind: node.kind,
             latitudeDegrees: lat, longitudeDegrees: lon, heightMeters: height,
             observedAt: node.observedAt ?? null, evidenceClass: placement.placementEvidenceClass,
@@ -285,6 +289,7 @@ export class GraphOverlayLayer {
     const positions = waypoints.map((point) => C.Cartesian3.fromDegrees(
       point.longitude, point.latitude, point.heightMeters));
     const visual = flowTypeStyle(edge); const direction = flowDirectionStyle(edge); const motion = flowMotion(edge);
+    const scale = graphFlowGroupScale(items.map((item) => item.edge));
     const aggregate = items.length > 1;
     const evidenceClass = ["OBSERVED", "MEASURED", "SOLVER_OUTPUT", "REDUCED_ORDER", "SYNTHETIC",
       "ILLUSTRATIVE", "INFERRED", "COUNTERFACTUAL"].includes(edge.evidenceClass) ? edge.evidenceClass : "INFERRED";
@@ -293,10 +298,12 @@ export class GraphOverlayLayer {
     const flowIds = items.map((item) => item.edge.id); const hoverText = [
       `${aggregate ? "GEOGRAPHIC FLOW AGGREGATE" : "GEOGRAPHIC FLOW"} // ${items.length} FLOW${items.length === 1 ? "" : "S"}`,
       `TYPE // ${visual.label} // DIRECTION // ${direction.label}`,
+      `VISUAL SCALE // ${scale.basis.replaceAll("_", " ")} // WIDTH ${scale.cesiumWidth.toFixed(2)} // ARROW ${scale.arrowPixels.toFixed(2)} PX`,
       ...flowIds.slice(0, 20), ...(flowIds.length > 20 ? [`+ ${flowIds.length - 20} MORE`] : []),
       "BOUNDARY // ENDPOINT PLACEMENTS ARE INFERRED OR VANTAGE-COLOCATED; ARC IS NOT A PHYSICAL ROUTE",
+      `BOUNDARY // ${GRAPH_VISUAL_SCALE_BOUNDARY}`,
     ].join("\n");
-    this.collection.add({id, polyline: {positions, width: Math.min(7, 1.5 + Math.log2(items.length + 1)),
+    this.collection.add({id, polyline: {positions, width: scale.cesiumWidth,
       arcType: C.ArcType?.NONE, material: cesiumPolylineMaterial(C, evidenceClass, visual.color, visual.alpha)},
       description: escapeHtml(hoverText).replaceAll("\n", "<br>"), properties: {
         graphEntityId: aggregate ? "" : edge.id, graphEntityIdsJson: JSON.stringify(flowIds.slice(0, 64)),
@@ -314,7 +321,8 @@ export class GraphOverlayLayer {
       const arrowMaterial = C.PolylineArrowMaterialProperty ?
         new C.PolylineArrowMaterialProperty(C.Color.fromCssColorString(direction.color).withAlpha(.96)) :
         C.Color.fromCssColorString(direction.color).withAlpha(.96);
-      this.collection.add({id: arrowId, polyline: {positions: arrowPositions, width: 5,
+      this.collection.add({id: arrowId, polyline: {positions: arrowPositions,
+        width: Math.max(4, scale.arrowPixels * .65),
         arcType: C.ArcType?.NONE, material: arrowMaterial}, description: hoverText}); this.entityIds.add(arrowId);
     }
     if (items.length === 1 && this.overlays.motion && motion.measured && !this.reducedMotion)

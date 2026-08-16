@@ -1,6 +1,7 @@
 import { evidenceStyle, flowDirectionStyle, flowMotion, flowTypeStyle, graphPurposeStyle, hostLivenessStyle } from "./evidenceStyles.js";
 import { LiveGraphController } from "./liveGraphController.js";
 import { graphEntityTooltip } from "./graphEntityTooltip.js";
+import {GRAPH_VISUAL_SCALE_BOUNDARY, graphFlowScale, graphNodeScale} from "./graphVisualScale.js";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 
@@ -94,16 +95,17 @@ export class LiveHypergraphView {
         const evidence = evidenceStyle(edge.evidenceClass ?? "INFERRED");
         const style = flowTypeStyle(edge);
         const direction = flowDirectionStyle(edge); const motion = flowMotion(edge);
+        const scale = graphFlowScale(edge);
         line.setAttribute("x1", origin.x); line.setAttribute("y1", origin.y);
         line.setAttribute("x2", target.x); line.setAttribute("y2", target.y);
         line.setAttribute("stroke", style.color); line.setAttribute("stroke-opacity", String(style.alpha));
-        line.setAttribute("stroke-width", edge.evidenceClass === "OBSERVED" ? "2.5" : "1.4");
+        line.setAttribute("stroke-width", String(scale.topologyWidth));
         if (evidence.line !== "solid") line.setAttribute("stroke-dasharray",
           evidence.line === "dotted" ? "2 4" : "5 5");
         line.classList.add("live-hypergraph__edge"); line.dataset.entityId = edge.id;
         line.dataset.flowType = style.type ?? "";
         const title = document.createElementNS(SVG_NS, "title");
-        title.textContent = `${style.label ?? "GRAPH EDGE"}\n${edge.id}\nTUPLE // SOURCE → DESTINATION · ${String(direction.tupleBasis).replaceAll("_", " ")}\nOPERATIONAL // ${direction.label} · ${String(direction.basis).replaceAll("_", " ")}\nMOTION // ${motion.measured ? `${motion.forwardPackets} FORWARD · ${motion.reversePackets} REVERSE PACKETS / ${motion.intervalMilliseconds} ms` : "STATIC · INSUFFICIENT TEMPORAL COUNTER DELTAS"}\n${String(style.basis ?? "DISPLAY CLASSIFICATION").replaceAll("_", " ")}\n${evidence.label}`;
+        title.textContent = `${style.label ?? "GRAPH EDGE"}\n${edge.id}\nTUPLE // SOURCE → DESTINATION · ${String(direction.tupleBasis).replaceAll("_", " ")}\nOPERATIONAL // ${direction.label} · ${String(direction.basis).replaceAll("_", " ")}\nMOTION // ${motion.measured ? `${motion.forwardPackets} FORWARD · ${motion.reversePackets} REVERSE PACKETS / ${motion.intervalMilliseconds} ms` : "STATIC · INSUFFICIENT TEMPORAL COUNTER DELTAS"}\nVISUAL SCALE // ${scale.basis.replaceAll("_", " ")} · WIDTH ${scale.topologyWidth.toFixed(2)} · ARROW ${scale.arrowPixels.toFixed(2)} PX\n${String(style.basis ?? "DISPLAY CLASSIFICATION").replaceAll("_", " ")}\n${evidence.label}\nBOUNDARY // ${GRAPH_VISUAL_SCALE_BOUNDARY}`;
         line.appendChild(title);
         const selectEdge = () => this.#select({kind: "graph-edge", entityId: edge.id,
           entityType: edge.kind,
@@ -113,8 +115,9 @@ export class LiveHypergraphView {
         const dx = target.x - origin.x; const dy = target.y - origin.y;
         const length = Math.hypot(dx, dy) || 1; const ux = dx / length; const uy = dy / length;
         const mx = origin.x + dx * .58; const my = origin.y + dy * .58;
+        const arrowLength = scale.arrowPixels; const arrowHalfWidth = arrowLength * .48;
         const arrow = this.document.createElementNS(SVG_NS, "polygon");
-        arrow.setAttribute("points", `${mx + ux * 5},${my + uy * 5} ${mx - ux * 4 - uy * 3},${my - uy * 4 + ux * 3} ${mx - ux * 4 + uy * 3},${my - uy * 4 - ux * 3}`);
+        arrow.setAttribute("points", `${mx + ux * arrowLength * .56},${my + uy * arrowLength * .56} ${mx - ux * arrowLength * .44 - uy * arrowHalfWidth},${my - uy * arrowLength * .44 + ux * arrowHalfWidth} ${mx - ux * arrowLength * .44 + uy * arrowHalfWidth},${my - uy * arrowLength * .44 - ux * arrowHalfWidth}`);
         arrow.setAttribute("fill", direction.color); arrow.setAttribute("stroke", "#071422");
         arrow.setAttribute("stroke-width", "1"); arrow.classList.add("live-hypergraph__direction-arrow");
         arrow.dataset.entityId = edge.id; arrow.dataset.operationalDirection = direction.direction;
@@ -142,22 +145,23 @@ export class LiveHypergraphView {
     for (const node of nodes) {
       const point = positions.get(node.id); if (!point) continue;
       const style = graphPurposeStyle(node);
+      const scale = graphNodeScale(node);
       const group = document.createElementNS(SVG_NS, "g"); group.classList.add("live-hypergraph__node");
       group.setAttribute("transform", `translate(${point.x} ${point.y})`); group.dataset.entityId = node.id;
       const circle = document.createElementNS(SVG_NS, "circle");
-      circle.setAttribute("r", node.kind === "network_host" ? "7" : "6");
+      circle.setAttribute("r", String(scale.topologyRadius));
       circle.setAttribute("fill", style.color); circle.setAttribute("fill-opacity", String(style.alpha));
       circle.setAttribute("stroke", "#071422"); circle.setAttribute("stroke-width", "2");
       const liveness = hostLivenessStyle(node);
       if (liveness) {
         const badge = document.createElementNS(SVG_NS, "circle");
-        badge.setAttribute("cy", "-12"); badge.setAttribute("r", "3.5");
+        badge.setAttribute("cy", String(-scale.topologyRadius - 5)); badge.setAttribute("r", "3.5");
         badge.setAttribute("fill", liveness.color); badge.setAttribute("stroke", "#fff");
         badge.setAttribute("stroke-width", "1"); badge.classList.add("live-hypergraph__liveness-badge");
         group.appendChild(badge);
       }
       const title = document.createElementNS(SVG_NS, "title");
-      const tooltipText = graphEntityTooltip(node);
+      const tooltipText = `${graphEntityTooltip(node)}\n\nVISUAL SCALE // ${scale.basis.replaceAll("_", " ")} · NODE RADIUS ${scale.topologyRadius.toFixed(2)} PX\nBOUNDARY // SIZE IS PRESENTATION METADATA; IT DOES NOT CHANGE EVIDENCE AUTHORITY`;
       title.textContent = tooltipText; group.append(circle, title);
       group.addEventListener("pointerenter", (event) => this.#showTooltip(event, tooltipText));
       group.addEventListener("pointermove", (event) => this.#showTooltip(event, tooltipText));

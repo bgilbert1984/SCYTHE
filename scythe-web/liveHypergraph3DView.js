@@ -1,5 +1,6 @@
 import { evidenceStyle, flowDirectionStyle, flowMotion, flowTypeStyle, graphPurposeStyle, hostLivenessStyle } from "./evidenceStyles.js";
 import { graphEntityTooltip } from "./graphEntityTooltip.js";
+import {GRAPH_VISUAL_SCALE_BOUNDARY, graphFlowScale, graphNodeScale} from "./graphVisualScale.js";
 
 function hash(value) {
   let result = 2166136261;
@@ -149,16 +150,22 @@ export class LiveHypergraph3DView {
   #upsertNode(node, revision) {
     const T = this.THREE; const evidence = safeEvidence(node.evidenceClass);
     const visual = graphPurposeStyle(node);
+    const scale = graphNodeScale(node);
     let mesh = this.nodeMeshes.get(node.id);
     if (!mesh) {
-      const radius = node.kind === "network_host" ? 4.6 : graphKind(node) === "event" ? 3.7 : 3.2;
+      const radius = scale.threeRadius;
       const material = new T.MeshStandardMaterial({color: visual.color,
         emissive: new T.Color(visual.color).multiplyScalar(0.28), metalness: 0.25,
         roughness: 0.52, transparent: visual.alpha < 1, opacity: visual.alpha});
       mesh = new T.Mesh(this.#nodeGeometry(evidence.name, radius), material);
+      mesh.userData.visualRadius = radius;
       mesh.userData.arrivedAt = this.window.performance?.now?.() ?? Date.now();
       this.nodeMeshes.set(node.id, mesh); this.nodeGroup.add(mesh);
     } else {
+      if (Math.abs(Number(mesh.userData.visualRadius) - scale.threeRadius) > .01) {
+        mesh.geometry?.dispose?.(); mesh.geometry = this.#nodeGeometry(evidence.name, scale.threeRadius);
+        mesh.userData.visualRadius = scale.threeRadius;
+      }
       mesh.material.color.set(visual.color); mesh.material.emissive.set(visual.color).multiplyScalar(0.28);
       mesh.material.opacity = visual.alpha; mesh.material.transparent = visual.alpha < 1;
     }
@@ -167,15 +174,16 @@ export class LiveHypergraph3DView {
     if (liveness && !badge) {
       badge = new T.Mesh(new T.SphereGeometry(1.35, 10, 8),
         new T.MeshBasicMaterial({color: liveness.color}));
-      badge.name = "scythe-liveness-badge"; badge.position.set(0, 8, 0); mesh.add(badge);
+      badge.name = "scythe-liveness-badge"; badge.position.set(0, scale.threeRadius + 3.4, 0); mesh.add(badge);
     } else if (liveness && badge) {
-      badge.material.color.set(liveness.color); badge.visible = true;
+      badge.material.color.set(liveness.color); badge.position.set(0, scale.threeRadius + 3.4, 0); badge.visible = true;
     } else if (badge) badge.visible = false;
     const point = this.positions.get(node.id); mesh.position.set(point.x, point.y, point.z);
     mesh.userData = {...mesh.userData, selection: {kind: graphKind(node), entityId: node.id,
       entityType: node.kind, graphRevision: revision,
       ...(node.position ? {position: node.position} : {}), observedAt: node.observedAt ?? null},
-      label: graphEntityTooltip(node), evidenceClass: evidence.name};
+      label: `${graphEntityTooltip(node)}\n\nVISUAL SCALE // ${scale.basis.replaceAll("_", " ")} · NODE RADIUS ${scale.threeRadius.toFixed(2)} UNITS\nBOUNDARY // SIZE IS PRESENTATION METADATA; IT DOES NOT CHANGE EVIDENCE AUTHORITY`,
+      evidenceClass: evidence.name};
   }
 
   #addEdge(edge, revision) {
@@ -183,6 +191,7 @@ export class LiveHypergraph3DView {
     if (members.length < 2) return;
     const evidence = safeEvidence(edge.evidenceClass); const visual = flowTypeStyle(edge);
     const directionStyle = flowDirectionStyle(edge); const motion = flowMotion(edge);
+    const scale = graphFlowScale(edge);
     const flowLabel = visual.type ? `${visual.label} · ${String(visual.basis).replaceAll("_", " ")}` : evidence.name;
     const selection = {kind: "graph-edge", entityId: edge.id,
       entityType: edge.kind,
@@ -193,14 +202,26 @@ export class LiveHypergraph3DView {
       const geometry = new T.BufferGeometry().setFromPoints(points.map((point) => new T.Vector3(point.x, point.y, point.z)));
       const dashed = evidence.style.line !== "solid";
       const material = dashed ? new T.LineDashedMaterial({color: visual.color, transparent: true,
-        opacity: evidence.style.alpha, dashSize: evidence.style.line === "dotted" ? 1.5 : 4, gapSize: 2.5}) :
-        new T.LineBasicMaterial({color: visual.color, transparent: true, opacity: visual.alpha});
+        opacity: evidence.style.alpha, linewidth: scale.topologyWidth,
+        dashSize: evidence.style.line === "dotted" ? 1.5 : 4, gapSize: 2.5}) :
+        new T.LineBasicMaterial({color: visual.color, transparent: true, opacity: visual.alpha,
+          linewidth: scale.topologyWidth});
       object = new T.Line(geometry, material); if (dashed) object.computeLineDistances();
-      object.userData = {selection, label: `${edge.kind ?? "edge"}\n${edge.id}\n${flowLabel}\nTUPLE // SOURCE → DESTINATION · ${String(directionStyle.tupleBasis).replaceAll("_", " ")}\nOPERATIONAL // ${directionStyle.label} · ${String(directionStyle.basis).replaceAll("_", " ")}\nMOTION // ${motion.measured ? `${motion.forwardPackets} FORWARD · ${motion.reversePackets} REVERSE PACKETS / ${motion.intervalMilliseconds} ms` : "STATIC · INSUFFICIENT TEMPORAL COUNTER DELTAS"}\n${evidence.name}`};
+      object.userData = {selection, label: `${edge.kind ?? "edge"}\n${edge.id}\n${flowLabel}\nTUPLE // SOURCE → DESTINATION · ${String(directionStyle.tupleBasis).replaceAll("_", " ")}\nOPERATIONAL // ${directionStyle.label} · ${String(directionStyle.basis).replaceAll("_", " ")}\nMOTION // ${motion.measured ? `${motion.forwardPackets} FORWARD · ${motion.reversePackets} REVERSE PACKETS / ${motion.intervalMilliseconds} ms` : "STATIC · INSUFFICIENT TEMPORAL COUNTER DELTAS"}\nVISUAL SCALE // ${scale.basis.replaceAll("_", " ")} · WIDTH ${scale.topologyWidth.toFixed(2)} · ARROW ×${scale.threeArrowScale.toFixed(2)}\n${evidence.name}\nBOUNDARY // ${GRAPH_VISUAL_SCALE_BOUNDARY}`};
       const start = new T.Vector3(points[0].x, points[0].y, points[0].z);
       const end = new T.Vector3(points[1].x, points[1].y, points[1].z);
       const vector = new T.Vector3().subVectors(end, start); const unit = vector.clone().normalize();
-      const arrow = new T.Mesh(new T.ConeGeometry(1.8, 5.5, 8),
+      // WebGL commonly ignores LineBasicMaterial.linewidth. A restrained
+      // translucent tube makes bounded counter magnitude visible while the
+      // original line continues to carry evidence pattern semantics.
+      const tube = new T.Mesh(new T.CylinderGeometry(.11 + scale.intensity * .42,
+        .11 + scale.intensity * .42, vector.length(), 6, 1, true),
+      new T.MeshBasicMaterial({color: visual.color, transparent: true,
+        opacity: visual.alpha * .28, depthWrite: false}));
+      tube.name = "scythe-flow-magnitude"; tube.position.copy(start).lerp(end, .5);
+      tube.quaternion.setFromUnitVectors(new T.Vector3(0, 1, 0), unit); object.add(tube);
+      const arrow = new T.Mesh(new T.ConeGeometry(1.8 * scale.threeArrowScale,
+        5.5 * scale.threeArrowScale, 8),
         new T.MeshBasicMaterial({color: directionStyle.color}));
       arrow.name = "scythe-flow-direction"; arrow.position.copy(start).lerp(end, .58);
       arrow.quaternion.setFromUnitVectors(new T.Vector3(0, 1, 0), unit); object.add(arrow);
