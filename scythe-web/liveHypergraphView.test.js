@@ -23,8 +23,10 @@ test("live hypergraph polls bounded graph and Eve status without inventing geogr
     const root = {querySelector: (selector) => selector === "svg" ? svg : status,
       dispatchEvent: (event) => events.push(event)};
     const graph = {status: "ok", graphRevision: "graph-live-1", nodeCount: 2, edgeCount: 1,
-      nodes: [{id: "host:a", kind: "network_host", evidenceClass: "OBSERVED"},
-              {id: "host:b", kind: "network_host", evidenceClass: "OBSERVED"}],
+      nodes: [{id: "host:a", kind: "network_host", evidenceClass: "OBSERVED",
+                enrichment:{geo:{city:"Seattle",region:"Washington",country:"United States",latitude:47.61,longitude:-122.33}}},
+              {id: "host:b", kind: "network_host", evidenceClass: "OBSERVED",
+                enrichment:{geo:{city:"Seattle",region:"Washington",country:"United States",latitude:47.62,longitude:-122.34}}}],
       edges: [{id: "flow:a", kind: "network_flow", nodes: ["host:a", "host:b"], evidenceClass: "OBSERVED",
         labels:{operational_direction:"OUTBOUND",direction_basis:"DISCOVERED_SENSOR_INTERFACE",
           motion_basis:"OBSERVED_SURICATA_COUNTER_DELTA",motion_interval_ms:"1000",
@@ -43,6 +45,10 @@ test("live hypergraph polls bounded graph and Eve status without inventing geogr
     assert.equal(arrow.attributes.fill, "#00d4ff");
     assert.match(arrow.children[0].textContent, /VISUAL SCALE/);
     assert.equal(svg.children.filter((child) => child.classes?.includes("live-hypergraph__flow-particle")).length, 2);
+    const city = svg.children.find((child) => child.dataset.entityId?.startsWith("city:"));
+    assert.ok(city); assert.equal(city.listeners.click, undefined);
+    const membership = svg.children.find((child) => child.dataset.entityId?.startsWith("city-membership:"));
+    assert.ok(membership); assert.equal(membership.listeners.click, undefined);
     assert.equal(events[0].detail.graphRevision, "graph-live-1");
     svg.children.find((child) => child.dataset.entityId === "host:a").listeners.click();
     assert.equal(events.at(-1).detail.entityType, "network_host");

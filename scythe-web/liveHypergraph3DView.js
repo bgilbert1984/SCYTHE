@@ -1,6 +1,8 @@
 import { evidenceStyle, flowDirectionStyle, flowMotion, flowTypeStyle, graphPurposeStyle, hostLivenessStyle } from "./evidenceStyles.js";
 import { graphEntityTooltip } from "./graphEntityTooltip.js";
 import {GRAPH_VISUAL_SCALE_BOUNDARY, graphFlowScale, graphNodeScale} from "./graphVisualScale.js";
+import {projectCityContext} from "./cityContextProjection.js";
+import {separateNewSpatialPoint} from "./topologyGeometry.js";
 
 function hash(value) {
   let result = 2166136261;
@@ -49,9 +51,10 @@ export function stableTopologyLayout(previous, nodes, edges, radius = 100) {
     if (known.length) {
       const center = known.reduce((sum, point) => ({x: sum.x + point.x, y: sum.y + point.y,
         z: sum.z + point.z}), {x: 0, y: 0, z: 0});
-      positions.set(node.id, {x: center.x / known.length + seed.x * 0.18,
-        y: center.y / known.length + seed.y * 0.18, z: center.z / known.length + seed.z * 0.18});
-    } else positions.set(node.id, seed);
+      const candidate = {x: center.x / known.length + seed.x * 0.18,
+        y: center.y / known.length + seed.y * 0.18, z: center.z / known.length + seed.z * 0.18};
+      positions.set(node.id, separateNewSpatialPoint(node.id, candidate, positions, 48));
+    } else positions.set(node.id, separateNewSpatialPoint(node.id, seed, positions, 48));
   }
   return positions;
 }
@@ -123,7 +126,9 @@ export class LiveHypergraph3DView {
   }
 
   render(graph) {
-    const nodes = (graph.nodes ?? []).slice(0, 500); const edges = (graph.edges ?? []).slice(0, 1000);
+    const displayGraph = projectCityContext(graph);
+    const nodes = (displayGraph.nodes ?? []).slice(0, 500 + displayGraph.cityContext.nodeCount);
+    const edges = (displayGraph.edges ?? []).slice(0, 1000 + displayGraph.cityContext.edgeCount);
     this.positions = stableTopologyLayout(this.positions, nodes, edges, Math.max(70, Math.sqrt(nodes.length || 1) * 22));
     const nodeIds = new Set(nodes.map((node) => node.id));
     for (const [id, mesh] of this.nodeMeshes) if (!nodeIds.has(id)) {
@@ -134,7 +139,7 @@ export class LiveHypergraph3DView {
     this.edgeObjects.clear(); this.pickTargets = [...this.nodeMeshes.values()];
     for (const edge of edges) this.#addEdge(edge, graph.graphRevision);
     const hyperedges = edges.filter((edge) => (edge.nodes ?? []).filter((id) => nodeIds.has(id)).length > 2).length;
-    this.stats.textContent = `${nodes.length} NODES · ${edges.length - hyperedges} EDGES · ${hyperedges} HYPEREDGES · THREE r${this.THREE.REVISION}`;
+    this.stats.textContent = `${nodes.length} NODES · ${edges.length - hyperedges} EDGES · ${hyperedges} HYPEREDGES · ${displayGraph.cityContext.nodeCount} INFERRED CITIES · THREE r${this.THREE.REVISION}`;
     this.graphRevision = graph.graphRevision;
     if (!this.hasFramed && nodes.length) { this.#frame(); this.hasFramed = true; }
   }
@@ -179,7 +184,7 @@ export class LiveHypergraph3DView {
       badge.material.color.set(liveness.color); badge.position.set(0, scale.threeRadius + 3.4, 0); badge.visible = true;
     } else if (badge) badge.visible = false;
     const point = this.positions.get(node.id); mesh.position.set(point.x, point.y, point.z);
-    mesh.userData = {...mesh.userData, selection: {kind: graphKind(node), entityId: node.id,
+    mesh.userData = {...mesh.userData, selection: node.display?.selectionDisabled ? null : {kind: graphKind(node), entityId: node.id,
       entityType: node.kind, graphRevision: revision,
       ...(node.position ? {position: node.position} : {}), observedAt: node.observedAt ?? null},
       label: `${graphEntityTooltip(node)}\n\nVISUAL SCALE // ${scale.basis.replaceAll("_", " ")} · NODE RADIUS ${scale.threeRadius.toFixed(2)} UNITS\nBOUNDARY // SIZE IS PRESENTATION METADATA; IT DOES NOT CHANGE EVIDENCE AUTHORITY`,
@@ -193,13 +198,21 @@ export class LiveHypergraph3DView {
     const directionStyle = flowDirectionStyle(edge); const motion = flowMotion(edge);
     const scale = graphFlowScale(edge);
     const flowLabel = visual.type ? `${visual.label} · ${String(visual.basis).replaceAll("_", " ")}` : evidence.name;
-    const selection = {kind: "graph-edge", entityId: edge.id,
+    const selection = edge.display?.selectionDisabled ? null : {kind: "graph-edge", entityId: edge.id,
       entityType: edge.kind,
       graphRevision: revision, observedAt: edge.observedAt ?? edge.timestamp ?? null};
     const points = members.map((id) => this.positions.get(id));
     let object;
     if (members.length === 2) {
-      const geometry = new T.BufferGeometry().setFromPoints(points.map((point) => new T.Vector3(point.x, point.y, point.z)));
+      const sourceCenter = new T.Vector3(points[0].x, points[0].y, points[0].z);
+      const targetCenter = new T.Vector3(points[1].x, points[1].y, points[1].z);
+      const centerVector = new T.Vector3().subVectors(targetCenter, sourceCenter);
+      const centerUnit = centerVector.clone().normalize();
+      const sourceRadius = this.nodeMeshes.get(members[0])?.userData?.visualRadius ?? 3.5;
+      const targetRadius = this.nodeMeshes.get(members[1])?.userData?.visualRadius ?? 3.5;
+      const start = sourceCenter.clone().add(centerUnit.clone().multiplyScalar(sourceRadius + 1.5));
+      const end = targetCenter.clone().add(centerUnit.clone().multiplyScalar(-(targetRadius + 1.5)));
+      const geometry = new T.BufferGeometry().setFromPoints([start,end]);
       const dashed = evidence.style.line !== "solid";
       const material = dashed ? new T.LineDashedMaterial({color: visual.color, transparent: true,
         opacity: evidence.style.alpha, linewidth: scale.topologyWidth,
@@ -207,9 +220,9 @@ export class LiveHypergraph3DView {
         new T.LineBasicMaterial({color: visual.color, transparent: true, opacity: visual.alpha,
           linewidth: scale.topologyWidth});
       object = new T.Line(geometry, material); if (dashed) object.computeLineDistances();
-      object.userData = {selection, label: `${edge.kind ?? "edge"}\n${edge.id}\n${flowLabel}\nTUPLE // SOURCE → DESTINATION · ${String(directionStyle.tupleBasis).replaceAll("_", " ")}\nOPERATIONAL // ${directionStyle.label} · ${String(directionStyle.basis).replaceAll("_", " ")}\nMOTION // ${motion.measured ? `${motion.forwardPackets} FORWARD · ${motion.reversePackets} REVERSE PACKETS / ${motion.intervalMilliseconds} ms` : "STATIC · INSUFFICIENT TEMPORAL COUNTER DELTAS"}\nVISUAL SCALE // ${scale.basis.replaceAll("_", " ")} · WIDTH ${scale.topologyWidth.toFixed(2)} · ARROW ×${scale.threeArrowScale.toFixed(2)}\n${evidence.name}\nBOUNDARY // ${GRAPH_VISUAL_SCALE_BOUNDARY}`};
-      const start = new T.Vector3(points[0].x, points[0].y, points[0].z);
-      const end = new T.Vector3(points[1].x, points[1].y, points[1].z);
+      object.userData = {selection, label: edge.kind === "geoip_city_membership" ?
+        `CITY MEMBERSHIP // INFERRED\n${edge.id}\nDISPLAY-DERIVED FROM HOST GEOIP ESTIMATE\nNOT A PHYSICAL LINK OR GRAPHOPS EXECUTION TARGET` :
+        `${edge.kind ?? "edge"}\n${edge.id}\n${flowLabel}\nTUPLE // SOURCE → DESTINATION · ${String(directionStyle.tupleBasis).replaceAll("_", " ")}\nOPERATIONAL // ${directionStyle.label} · ${String(directionStyle.basis).replaceAll("_", " ")}\nMOTION // ${motion.measured ? `${motion.forwardPackets} FORWARD · ${motion.reversePackets} REVERSE PACKETS / ${motion.intervalMilliseconds} ms` : "STATIC · INSUFFICIENT TEMPORAL COUNTER DELTAS"}\nVISUAL SCALE // ${scale.basis.replaceAll("_", " ")} · WIDTH ${scale.topologyWidth.toFixed(2)} · ARROW ×${scale.threeArrowScale.toFixed(2)}\n${evidence.name}\nBOUNDARY // ${GRAPH_VISUAL_SCALE_BOUNDARY}`};
       const vector = new T.Vector3().subVectors(end, start); const unit = vector.clone().normalize();
       // WebGL commonly ignores LineBasicMaterial.linewidth. A restrained
       // translucent tube makes bounded counter magnitude visible while the
@@ -220,12 +233,16 @@ export class LiveHypergraph3DView {
         opacity: visual.alpha * .28, depthWrite: false}));
       tube.name = "scythe-flow-magnitude"; tube.position.copy(start).lerp(end, .5);
       tube.quaternion.setFromUnitVectors(new T.Vector3(0, 1, 0), unit); object.add(tube);
-      const arrow = new T.Mesh(new T.ConeGeometry(1.8 * scale.threeArrowScale,
-        5.5 * scale.threeArrowScale, 8),
-        new T.MeshBasicMaterial({color: directionStyle.color}));
-      arrow.name = "scythe-flow-direction"; arrow.position.copy(start).lerp(end, .58);
-      arrow.quaternion.setFromUnitVectors(new T.Vector3(0, 1, 0), unit); object.add(arrow);
-      if (motion.measured && !this.reducedMotion) {
+      const directional = edge.display?.directional !== false;
+      const arrowLength = 5.5 * scale.threeArrowScale;
+      const arrowClear = vector.length() >= arrowLength + 16;
+      if (directional && arrowClear) {
+        const arrow = new T.Mesh(new T.ConeGeometry(1.8 * scale.threeArrowScale,
+          arrowLength, 8), new T.MeshBasicMaterial({color: directionStyle.color}));
+        arrow.name = "scythe-flow-direction"; arrow.position.copy(start).lerp(end, .5);
+        arrow.quaternion.setFromUnitVectors(new T.Vector3(0, 1, 0), unit); object.add(arrow);
+      }
+      if (directional && motion.measured && !this.reducedMotion) {
         const addParticle = (reverse, count) => {
           if (!(count > 0)) return;
           const particle = new T.Mesh(new T.SphereGeometry(Math.min(2.2, 1 + Math.log2(count + 1) * .2), 8, 6),
@@ -280,7 +297,7 @@ export class LiveHypergraph3DView {
       if (distance < nearestPixelsSquared) { nearestPixelsSquared = distance; nodeHit = mesh; }
     }
     const hit = nodeHit ?? this.raycaster.intersectObjects(this.pickTargets, false)[0]?.object;
-    this.renderer.domElement.style.cursor = hit ? "pointer" : "grab";
+    this.renderer.domElement.style.cursor = hit ? (hit.userData?.selection ? "pointer" : "help") : "grab";
     this.tooltip.hidden = !hit;
     if (hit) {
       this.tooltip.textContent = hit.userData.label ?? "GRAPH ENTITY";

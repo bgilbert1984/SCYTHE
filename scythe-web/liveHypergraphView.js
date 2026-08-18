@@ -2,6 +2,8 @@ import { evidenceStyle, flowDirectionStyle, flowMotion, flowTypeStyle, graphPurp
 import { LiveGraphController } from "./liveGraphController.js";
 import { graphEntityTooltip } from "./graphEntityTooltip.js";
 import {GRAPH_VISUAL_SCALE_BOUNDARY, graphFlowScale, graphNodeScale} from "./graphVisualScale.js";
+import {projectCityContext} from "./cityContextProjection.js";
+import {separatePlanarNodes, topologyEdgeGeometry} from "./topologyGeometry.js";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 
@@ -84,9 +86,19 @@ export class LiveHypergraphView {
     const width = Math.max(this.svg.clientWidth || 420, 240);
     const height = Math.max(this.svg.clientHeight || 260, 160);
     this.svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
-    const nodes = graph.nodes.slice(0, this.nodeLimit);
-    const positions = layout(nodes, width, height);
-    for (const edge of graph.edges.slice(0, this.edgeLimit)) {
+    const displayGraph = projectCityContext(graph);
+    const nodes = displayGraph.nodes.slice(0, this.nodeLimit + displayGraph.cityContext.nodeCount);
+    const initial = layout(nodes, width, height);
+    for (const city of nodes.filter((node) => node.kind === "geographic_city_context")) {
+      const hosts = displayGraph.edges.filter((edge) => edge.kind === "geoip_city_membership" &&
+        edge.nodes?.includes(city.id)).flatMap((edge) => edge.nodes.filter((id) => id !== city.id))
+        .map((id) => initial.get(id)).filter(Boolean);
+      if (hosts.length) initial.set(city.id, {x:hosts.reduce((sum,p)=>sum+p.x,0)/hosts.length,
+        y:hosts.reduce((sum,p)=>sum+p.y,0)/hosts.length});
+    }
+    const positions = separatePlanarNodes(nodes, initial, width, height);
+    const radii = new Map(nodes.map((node) => [node.id, graphNodeScale(node).topologyRadius]));
+    for (const edge of displayGraph.edges.slice(0, this.edgeLimit + displayGraph.cityContext.edgeCount)) {
       const members = (edge.nodes ?? []).filter((id) => positions.has(id));
       if (members.length < 2) continue;
       const origin = positions.get(members[0]);
@@ -96,35 +108,41 @@ export class LiveHypergraphView {
         const style = flowTypeStyle(edge);
         const direction = flowDirectionStyle(edge); const motion = flowMotion(edge);
         const scale = graphFlowScale(edge);
-        line.setAttribute("x1", origin.x); line.setAttribute("y1", origin.y);
-        line.setAttribute("x2", target.x); line.setAttribute("y2", target.y);
+        const geometry = topologyEdgeGeometry(origin, target, radii.get(members[0]), radii.get(member),
+          scale.arrowPixels);
+        line.setAttribute("x1", geometry.start.x); line.setAttribute("y1", geometry.start.y);
+        line.setAttribute("x2", geometry.end.x); line.setAttribute("y2", geometry.end.y);
         line.setAttribute("stroke", style.color); line.setAttribute("stroke-opacity", String(style.alpha));
         line.setAttribute("stroke-width", String(scale.topologyWidth));
         if (evidence.line !== "solid") line.setAttribute("stroke-dasharray",
           evidence.line === "dotted" ? "2 4" : "5 5");
         line.classList.add("live-hypergraph__edge"); line.dataset.entityId = edge.id;
+        if (edge.kind === "geoip_city_membership") line.classList.add("live-hypergraph__edge--context");
         line.dataset.flowType = style.type ?? "";
         const title = document.createElementNS(SVG_NS, "title");
-        title.textContent = `${style.label ?? "GRAPH EDGE"}\n${edge.id}\nTUPLE // SOURCE → DESTINATION · ${String(direction.tupleBasis).replaceAll("_", " ")}\nOPERATIONAL // ${direction.label} · ${String(direction.basis).replaceAll("_", " ")}\nMOTION // ${motion.measured ? `${motion.forwardPackets} FORWARD · ${motion.reversePackets} REVERSE PACKETS / ${motion.intervalMilliseconds} ms` : "STATIC · INSUFFICIENT TEMPORAL COUNTER DELTAS"}\nVISUAL SCALE // ${scale.basis.replaceAll("_", " ")} · WIDTH ${scale.topologyWidth.toFixed(2)} · ARROW ${scale.arrowPixels.toFixed(2)} PX\n${String(style.basis ?? "DISPLAY CLASSIFICATION").replaceAll("_", " ")}\n${evidence.label}\nBOUNDARY // ${GRAPH_VISUAL_SCALE_BOUNDARY}`;
+        title.textContent = edge.kind === "geoip_city_membership" ?
+          `CITY MEMBERSHIP // INFERRED\n${edge.id}\nRELATION // HOST GEOIP ESTIMATE → CITY CONTEXT\nBOUNDARY // DISPLAY-DERIVED; NOT A PHYSICAL LINK OR GRAPHOPS EXECUTION TARGET` :
+          `${style.label ?? "GRAPH EDGE"}\n${edge.id}\nTUPLE // SOURCE → DESTINATION · ${String(direction.tupleBasis).replaceAll("_", " ")}\nOPERATIONAL // ${direction.label} · ${String(direction.basis).replaceAll("_", " ")}\nMOTION // ${motion.measured ? `${motion.forwardPackets} FORWARD · ${motion.reversePackets} REVERSE PACKETS / ${motion.intervalMilliseconds} ms` : "STATIC · INSUFFICIENT TEMPORAL COUNTER DELTAS"}\nVISUAL SCALE // ${scale.basis.replaceAll("_", " ")} · WIDTH ${scale.topologyWidth.toFixed(2)} · ARROW ${scale.arrowPixels.toFixed(2)} PX\n${String(style.basis ?? "DISPLAY CLASSIFICATION").replaceAll("_", " ")}\n${evidence.label}\nBOUNDARY // ${GRAPH_VISUAL_SCALE_BOUNDARY}`;
         line.appendChild(title);
         const selectEdge = () => this.#select({kind: "graph-edge", entityId: edge.id,
           entityType: edge.kind,
           graphRevision: graph.graphRevision, observedAt: edge.observedAt ?? edge.timestamp ?? null});
-        line.addEventListener("click", selectEdge);
+        if (!edge.display?.selectionDisabled) line.addEventListener("click", selectEdge);
         this.svg.appendChild(line);
-        const dx = target.x - origin.x; const dy = target.y - origin.y;
-        const length = Math.hypot(dx, dy) || 1; const ux = dx / length; const uy = dy / length;
-        const mx = origin.x + dx * .58; const my = origin.y + dy * .58;
-        const arrowLength = scale.arrowPixels; const arrowHalfWidth = arrowLength * .48;
-        const arrow = this.document.createElementNS(SVG_NS, "polygon");
-        arrow.setAttribute("points", `${mx + ux * arrowLength * .56},${my + uy * arrowLength * .56} ${mx - ux * arrowLength * .44 - uy * arrowHalfWidth},${my - uy * arrowLength * .44 + ux * arrowHalfWidth} ${mx - ux * arrowLength * .44 + uy * arrowHalfWidth},${my - uy * arrowLength * .44 - ux * arrowHalfWidth}`);
-        arrow.setAttribute("fill", direction.color); arrow.setAttribute("stroke", "#071422");
-        arrow.setAttribute("stroke-width", "1"); arrow.classList.add("live-hypergraph__direction-arrow");
-        arrow.dataset.entityId = edge.id; arrow.dataset.operationalDirection = direction.direction;
-        const arrowTitle = this.document.createElementNS(SVG_NS, "title"); arrowTitle.textContent = title.textContent;
-        arrow.appendChild(arrowTitle); arrow.addEventListener("click", selectEdge);
-        this.svg.appendChild(arrow);
-        if (motion.measured && !this.reducedMotion) {
+        const directional = edge.display?.directional !== false;
+        if (directional && geometry.arrowVisible) {
+          const {x:mx,y:my} = geometry.arrow; const {ux,uy,arrowLength} = geometry;
+          const arrowHalfWidth = arrowLength * .48;
+          const arrow = this.document.createElementNS(SVG_NS, "polygon");
+          arrow.setAttribute("points", `${mx + ux * arrowLength * .56},${my + uy * arrowLength * .56} ${mx - ux * arrowLength * .44 - uy * arrowHalfWidth},${my - uy * arrowLength * .44 + ux * arrowHalfWidth} ${mx - ux * arrowLength * .44 + uy * arrowHalfWidth},${my - uy * arrowLength * .44 - ux * arrowHalfWidth}`);
+          arrow.setAttribute("fill", direction.color); arrow.setAttribute("stroke", "#071422");
+          arrow.setAttribute("stroke-width", "1"); arrow.classList.add("live-hypergraph__direction-arrow");
+          arrow.dataset.entityId = edge.id; arrow.dataset.operationalDirection = direction.direction;
+          const arrowTitle = this.document.createElementNS(SVG_NS, "title"); arrowTitle.textContent = title.textContent;
+          arrow.appendChild(arrowTitle); arrow.addEventListener("click", selectEdge);
+          this.svg.appendChild(arrow);
+        }
+        if (directional && motion.measured && !this.reducedMotion) {
           const addParticle = (from, to, reverse, count) => {
             if (!(count > 0)) return;
             const particle = this.document.createElementNS(SVG_NS, "circle");
@@ -137,8 +155,8 @@ export class LiveHypergraphView {
             animation.setAttribute("dur", `${motion.durationSeconds}s`); animation.setAttribute("repeatCount", "indefinite");
             particle.appendChild(animation); this.svg.appendChild(particle);
           };
-          addParticle(origin, target, false, motion.forwardPackets);
-          addParticle(target, origin, true, motion.reversePackets);
+          addParticle(geometry.start, geometry.end, false, motion.forwardPackets);
+          addParticle(geometry.end, geometry.start, true, motion.reversePackets);
         }
       }
     }
@@ -147,6 +165,7 @@ export class LiveHypergraphView {
       const style = graphPurposeStyle(node);
       const scale = graphNodeScale(node);
       const group = document.createElementNS(SVG_NS, "g"); group.classList.add("live-hypergraph__node");
+      if (node.kind === "geographic_city_context") group.classList.add("live-hypergraph__node--city");
       group.setAttribute("transform", `translate(${point.x} ${point.y})`); group.dataset.entityId = node.id;
       const circle = document.createElementNS(SVG_NS, "circle");
       circle.setAttribute("r", String(scale.topologyRadius));
@@ -166,7 +185,7 @@ export class LiveHypergraphView {
       group.addEventListener("pointerenter", (event) => this.#showTooltip(event, tooltipText));
       group.addEventListener("pointermove", (event) => this.#showTooltip(event, tooltipText));
       group.addEventListener("pointerleave", () => { if (this.tooltip) this.tooltip.hidden = true; });
-      group.addEventListener("click", () => this.#select({kind: graphKind(node), entityId: node.id,
+      if (!node.display?.selectionDisabled) group.addEventListener("click", () => this.#select({kind: graphKind(node), entityId: node.id,
         entityType: node.kind, graphRevision: graph.graphRevision,
         ...(node.position ? {position: node.position} : {}), observedAt: node.observedAt ?? null}));
       this.svg.appendChild(group);

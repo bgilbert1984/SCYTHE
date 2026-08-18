@@ -57,3 +57,13 @@ test("multicast tooltip describes a group and suppresses unicast liveness", () =
   assert.match(value,/LIVENESS \/\/ NOT APPLICABLE/);
   assert.doesNotMatch(value,/NOT YET MEASURED/);
 });
+
+test("city tooltip stays inferred and refuses GraphOps execution authority", () => {
+  const value = graphEntityTooltip({id:"city:abc",kind:"geographic_city_context",
+    evidenceClass:"INFERRED",labels:{name:"Seattle",region:"Washington",country:"United States",
+      host_count:"4"},display:{memberIds:["host:a","host:b"]},
+    enrichment:{geo:{latitude:47.61,longitude:-122.33}}});
+  assert.match(value,/CITY CONTEXT \/\/ INFERRED/); assert.match(value,/4 GEOIP-ESTIMATED MEMBERS/);
+  assert.match(value,/NOT A GRAPHOPS EXECUTION TARGET/); assert.match(value,/NOT PHYSICAL DEVICE LOCATION/);
+  assert.match(value,/· host:a/);
+});

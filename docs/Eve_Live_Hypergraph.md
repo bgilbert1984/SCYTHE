@@ -207,6 +207,21 @@ All live and offline graph renderers share a bounded magnitude grammar:
 Hover text declares the scale basis. These dimensions are presentation
 metadata and never promote evidence authority.
 
+The non-geographic SVG and Three.js views apply deterministic collision
+separation. Flow geometry begins and ends outside node bodies, and a direction
+arrow is withheld when the visible segment cannot preserve at least eight
+display pixels (SVG) or topology units (Three.js) before and after it. Motion
+particles follow the same trimmed segment. Overlap therefore has no meaning in
+topology space. Cesium is the
+intentional exception: screen overlap represents geographic/display
+co-location and becomes a numbered cluster with a bounded host tooltip.
+
+The topology views also derive at most 24 `geographic_city_context` nodes and
+200 `geoip_city_membership` links from the already bounded host GeoIP sidecar.
+They are styled as `INFERRED`, remain non-directional, and cannot become
+GraphOps execution selections. A City node is geographic display context—not
+an observed network device, physical device location, or causal assertion.
+
 Every marker and arc declares the geographic boundary:
 
 `ENDPOINT PLACEMENTS ARE INFERRED OR VANTAGE-COLOCATED; ARC IS NOT A PHYSICAL ROUTE`

@@ -27,6 +27,21 @@ export function graphEntityTooltip(entity = {}) {
   const lines = [];
   const purpose = text(entity.display?.selectionPurpose).replaceAll("_", " ");
   const activityScore = compact(entity.display?.activityScore);
+  if (text(entity.kind).toLowerCase() === "geographic_city_context") {
+    const geo = enrichment.geo ?? {}; const place = [labels.city || labels.name, labels.region,
+      labels.country].map(text).filter(Boolean).join(", ");
+    const members = Array.isArray(entity.display?.memberIds) ? entity.display.memberIds : [];
+    return ["CITY CONTEXT // INFERRED", place || text(entity.id),
+      `HOSTS // ${text(labels.host_count) || "0"} GEOIP-ESTIMATED MEMBERS`,
+      ...members.slice(0,12).map((id)=>`· ${text(id).slice(0,96)}`),
+      entity.display?.membersOmitted > 0 ? `+ ${entity.display.membersOmitted} MEMBERS OMITTED` : "",
+      geo.latitude != null && geo.longitude != null ?
+        `CENTROID // ${fixed(geo.latitude)}°, ${fixed(geo.longitude)}°` : "",
+      "AUTHORITY // DERIVED FROM HOST GEOIP ESTIMATES",
+      "INTERACTION // DISPLAY CONTEXT ONLY · NOT A GRAPHOPS EXECUTION TARGET",
+      "BOUNDARY // CITY MEMBERSHIP AND CENTROID ARE INFERRED; NOT PHYSICAL DEVICE LOCATION"]
+      .filter(Boolean).join("\n");
+  }
   if (ip) {
     const kind = text(entity.kind).toLowerCase();
     const addressTitle = kind === "network_multicast_group" || scope === "MULTICAST"
