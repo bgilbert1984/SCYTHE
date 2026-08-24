@@ -56,6 +56,33 @@ export async function askGraphOpsCloudFullFidelity(question, selection, evidence
   return payload;
 }
 
+export function formatTraversalReceipt(retrieval) {
+  if (!retrieval?.projection) return "";
+  const graph = retrieval.graph ?? {}; const projection = retrieval.projection ?? {};
+  const traversal = retrieval.traversal; const paths = retrieval.paths ?? [];
+  const lines = [
+    "GRAPHFUSION // TRAVERSAL RECEIPT",
+    `MODE // ${text(retrieval.mode).toUpperCase()} // ${text(retrieval.version)}`,
+    `GRAPH // ${text(graph.revision)} // ${text(graph.detectedNodes, "0")} DETECTED NODES · ${text(graph.detectedEdges, "0")} DETECTED EDGES`,
+    `PROJECTION // ${text(projection.hash)} // ${text(projection.nodes, "0")} / ${text(projection.nodeLimit, "0")} NODES · ${text(projection.edges, "0")} / ${text(projection.edgeLimit, "0")} EDGES${projection.truncated ? " · TRUNCATED" : ""}`,
+  ];
+  if (traversal) {
+    lines.push(
+      `TRAVERSAL // ${text(traversal.hash)} // ${text(traversal.maxHops, "0")} HOPS · ${text(traversal.seeds, "0")} SEEDS`,
+      `INSPECTED // ${text(traversal.nodesVisited, "0")} NODES · ${text(traversal.edgesInspected, "0")} EDGES · ${text(traversal.candidatePaths, "0")} CANDIDATE PATHS`,
+      `ADMITTED // ${text(traversal.admittedPaths, "0")} PATHS`);
+    for (const path of paths) {
+      const route = (path.steps ?? []).map((step) => text(step.id)).join(" → ");
+      lines.push(`${text(path.pathId)} // ${text(path.role)} // ${Number(path.score || 0).toFixed(3)}`,
+        `PATH // ${route}`);
+    }
+  } else {
+    lines.push("TRAVERSAL // DISABLED FOR ABLATION MODE");
+  }
+  lines.push(`BOUNDARY // ${text(retrieval.boundary)}`);
+  return lines.join("\n");
+}
+
 export function formatGraphOpsConversation(payload, {entityContext = ""} = {}) {
   const result = payload?.result ?? {};
   const report = result.report ?? {};
@@ -71,6 +98,8 @@ export function formatGraphOpsConversation(payload, {entityContext = ""} = {}) {
     `CONFIDENCE // ${Number.isFinite(Number(result.confidence)) ? Number(result.confidence).toFixed(3) : "UNAVAILABLE"}`,
   ];
   if (String(entityContext).trim()) lines.push("", String(entityContext).trim());
+  const traversalReceipt = formatTraversalReceipt(payload?.retrieval);
+  if (traversalReceipt) lines.push("", traversalReceipt);
   for (const [label, key] of [["SITUATION", "situation"], ["CHANGE", "change"],
     ["STRUCTURE", "structure"], ["GEOGRAPHY", "geography"],
     ["ASSESSMENT", "assessment"], ["DIRECTION", "direction"]]) {

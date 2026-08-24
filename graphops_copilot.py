@@ -57,6 +57,7 @@ import os
 import re
 import time
 from collections import Counter, defaultdict
+from contextlib import contextmanager
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
@@ -257,7 +258,18 @@ class InvestigativeDSLExecutor:
             except Exception:
                 rf_observation_provider = None
         self._rf_observations = rf_observation_provider
+        self._blocked_verbs: set[str] = set()
         self.reset()
+
+    @contextmanager
+    def block_verbs(self, verbs):
+        """Temporarily refuse retrieval verbs excluded by a server-owned policy."""
+        previous = set(self._blocked_verbs)
+        self._blocked_verbs.update(str(verb).upper() for verb in verbs)
+        try:
+            yield
+        finally:
+            self._blocked_verbs = previous
 
     def reset(self) -> None:
         """Clear all session state."""
@@ -309,6 +321,9 @@ class InvestigativeDSLExecutor:
             return {}
 
         verb = tok[0]
+        if verb in self._blocked_verbs:
+            return {"refused": f"{verb} is disabled by the active retrieval policy",
+                    "boundary": "MODEL-DIRECTED SEMANTIC RETRIEVAL IS DISABLED"}
         try:
             if verb == "FOCUS":
                 return self._do_focus(line)
@@ -2650,6 +2665,24 @@ class GraphOpsAgent:
         self._embedding_engine = embedding_engine  # optional EmbeddingEngine for RAG
         self._allow_sensor_mutation = allow_sensor_mutation
 
+    @contextmanager
+    def bound_engine(self, engine):
+        """Bind one read-only graph view for every DSL operation in an investigation."""
+        original_agent_engine = self.engine
+        original_executor_engine = self.executor.engine
+        self.engine = engine
+        self.executor.engine = engine
+        try:
+            yield
+        finally:
+            self.executor.engine = original_executor_engine
+            self.engine = original_agent_engine
+
+    def bounded_retrieval_policy(self, *, structured_semantic: bool):
+        """Keep semantic retrieval server-owned in deterministic GraphFusion modes."""
+        blocked = {"VECTOR_SEARCH", "CLUSTER_SIMILAR"} if structured_semantic else set()
+        return self.executor.block_verbs(blocked)
+
     def _pick_models(self) -> List[str]:
         """Select the best available Ollama chat models in preference order."""
         for endpoint in self._ollama_candidates:
@@ -2761,50 +2794,14 @@ class GraphOpsAgent:
         Injects protocol violation context when present so the LLM knows
         which neighbors are anomalous vs clean.
         """
-        vec = self.executor._embed_intent(question)
+        from graphops.evidence_fabric import SemanticSeedProvider
+        provider = SemanticSeedProvider(executor=self.executor,
+                                        embedding_engine=self._embedding_engine)
+        return provider.render_legacy(provider.search(question, limit=8))
 
-        # ── TurboQuant primary ────────────────────────────────────────────────
-        if vec is not None:
-            try:
-                from turbo_quant_store import embedding_store as _emb_store
-                tq = _emb_store()
-                if len(tq) > 0:
-                    results = tq.search(vec, k=8)
-                    if results:
-                        lines = ["[Semantic Memory — behaviorally similar entities:]"]
-                        for eid, sim in results[:5]:
-                            node   = self.executor._get_node(eid)
-                            labels = node.get("labels", {}) if node else {}
-                            pa     = labels.get("protocol_anomaly_score", 0.0)
-                            viols  = labels.get("protocol_violations", [])
-                            vstr   = f" violations={viols}" if viols else ""
-                            lines.append(
-                                f"  [{sim:.2f}] {eid}"
-                                f" proto_anomaly={pa:.2f}{vstr}"
-                            )
-                        return "\n".join(lines)
-            except Exception as exc:
-                logger.debug("[GraphOpsAgent] TQ RAG failed: %s", exc)
-
-        # ── FAISS fallback ────────────────────────────────────────────────────
-        if not self._embedding_engine:
-            return ""
-        try:
-            results = self._embedding_engine.search_similar(question, k=5)
-            if not results:
-                return ""
-            lines = ["[Semantic Memory — similar historical entities:]"]
-            for r in results:
-                sim  = r.get("similarity", 0.0)
-                eid  = r.get("entity_id", "unknown")
-                desc = r.get("description", "")[:200]
-                lines.append(f"  [{sim:.2f}] {eid}: {desc}")
-            return "\n".join(lines)
-        except Exception as exc:
-            logger.debug("[GraphOpsAgent] RAG context retrieval failed: %s", exc)
-            return ""
-
-    def investigate(self, question: str, max_steps: int = MAX_AGENT_STEPS) -> Dict[str, Any]:
+    def investigate(self, question: str, max_steps: int = MAX_AGENT_STEPS, *,
+                    retrieval_context: str | None = None,
+                    legacy_rag: bool = True) -> Dict[str, Any]:
         """Run a full investigation loop for the given question.
 
         Returns a structured intelligence report including belief_state tracking
@@ -2824,7 +2821,8 @@ class GraphOpsAgent:
             logger.info("[GraphOpsAgent] compiled hints: %s", dsl_hints)
 
         # ── RAG: retrieve similar historical entities for grounding ───────────
-        rag_context = self._rag_context(question)
+        rag_context = (str(retrieval_context or "").strip() or
+                       (self._rag_context(question) if legacy_rag else ""))
 
         context = {
             "question":    question,
@@ -3812,7 +3810,10 @@ def register_graphops_tools(engine, mcp_handler, embedding_engine=None,
         if not question:
             return {"error": "question is required"}
         max_steps = int(params.get("max_steps", MAX_AGENT_STEPS))
-        report = _agent.investigate(question, max_steps=max_steps)
+        report = _agent.investigate(
+            question, max_steps=max_steps,
+            retrieval_context=params.get('_retrieval_context'),
+            legacy_rag=bool(params.get('_legacy_rag', True)))
         return report
 
     def _dsl_exec(params: dict) -> dict:

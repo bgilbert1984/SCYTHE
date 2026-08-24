@@ -2,13 +2,22 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {askGraphOps, askGraphOpsCloudFullFidelity, formatCloudFullFidelityConversation,
-  formatGraphOpsConversation, operatorQuestionOnly} from "./graphOpsConversation.js";
+  formatGraphOpsConversation, formatTraversalReceipt, operatorQuestionOnly} from "./graphOpsConversation.js";
 
 const payload = {status: "completed", bounded: true, modelAuthority: "INTERPRETIVE_ONLY",
   ollamaRoute: "LOCAL_FALLBACK", maxSteps: 1,
   question: "What changed?", selection: {kind: "graph-node", entityId: "host:a", graphRevision: "graph-1"},
   boundary: "OLLAMA INTERPRETS; IT DOES NOT EXECUTE DIRECTIVES", result: {model: "gemma3:1b", confidence: .7,
-    report: {situation: "One host changed", assessment: "Evidence is sparse", direction: "Measure again"}}};
+    report: {situation: "One host changed", assessment: "Evidence is sparse", direction: "Measure again"}},
+  retrieval: {mode: "pinned_fused", version: "graphfusion.traversal.v1",
+    graph: {revision: "graph-1", detectedNodes: 10, detectedEdges: 20},
+    projection: {hash: "proj-1", nodes: 10, edges: 20, nodeLimit: 500, edgeLimit: 1000, truncated: false},
+    traversal: {hash: "trav-1", maxHops: 2, seeds: 2, nodesVisited: 5, edgesInspected: 6,
+      candidatePaths: 4, admittedPaths: 1},
+    paths: [{pathId: "path-1", role: "RELATIONAL_SUPPORT", score: .8,
+      steps: [{type: "node", id: "host:a"}, {type: "edge", id: "flow:1"},
+        {type: "node", id: "host:b"}]}],
+    boundary: "PATHS ARE EVIDENCE CHAINS, NOT CAUSAL PROOF"}};
 
 test("conversation sends only a pinned selection reference and read-only mode", async () => {
   let request; const controller = new AbortController();
@@ -37,7 +46,17 @@ test("conversation rendering includes tooltip context and epistemic boundary", (
   assert.match(output, /REASONING BUDGET \/\/ 1 BOUNDED STEP/);
   assert.match(output, /SELECTION PIN \/\/ ORIGINAL REVISION RETAINED/);
   assert.match(output, /ASSESSMENT \/\/ Evidence is sparse/);
+  assert.match(output, /GRAPHFUSION \/\/ TRAVERSAL RECEIPT/);
+  assert.match(output, /TRAVERSAL \/\/ trav-1 \/\/ 2 HOPS · 2 SEEDS/);
+  assert.match(output, /PATH \/\/ host:a → flow:1 → host:b/);
   assert.match(output, /DOES NOT EXECUTE DIRECTIVES/);
+});
+
+test("pinned legacy receipt distinguishes projection from disabled traversal", () => {
+  const output = formatTraversalReceipt({...payload.retrieval, mode: "pinned_legacy",
+    traversal: null, paths: []});
+  assert.match(output, /PROJECTION \/\/ proj-1/);
+  assert.match(output, /TRAVERSAL \/\/ DISABLED FOR ABLATION MODE/);
 });
 
 test("conversation rejects responses that claim execution authority", async () => {

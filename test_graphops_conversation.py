@@ -47,6 +47,11 @@ class GraphOpsConversationTests(unittest.TestCase):
         self.assertEqual(body['maxSteps'], 2)
         self.assertIn('203.0.113.7', self.calls[0]['question'])
         self.assertEqual(self.calls[0]['max_steps'], 2)
+        self.assertEqual(body['retrieval']['mode'], 'pinned_fused')
+        self.assertEqual(body['retrieval']['graph']['revision'], self.revision)
+        self.assertTrue(body['retrieval']['projection']['hash'].startswith('proj-'))
+        self.assertTrue(body['retrieval']['traversal']['hash'].startswith('trav-'))
+        self.assertFalse(self.calls[0]['_legacy_rag'])
 
     def test_directive_mode_and_client_context_are_refused(self):
         selection = {'kind': 'graph-node', 'entityId': 'host:a',
@@ -70,6 +75,31 @@ class GraphOpsConversationTests(unittest.TestCase):
         self.assertTrue(body['selectionRebased'])
         self.assertEqual(body['requestedGraphRevision'], 'graph-definitely-evicted')
         self.assertEqual(body['selection']['graphRevision'], self.revision)
+
+    def test_pinned_graph_mode_disables_legacy_rag_and_discloses_no_semantic_seeds(self):
+        self.app.config['SCYTHE_GRAPHOPS_RETRIEVAL_MODE'] = 'pinned_graph'
+        response = self.client.post('/api/graphops/conversation', json={
+            'mode': 'ask', 'question': 'What is connected?',
+            'selection': {'kind': 'graph-node', 'entityId': 'host:a',
+                          'graphRevision': self.revision},
+        })
+        self.assertEqual(response.status_code, 200)
+        body = response.get_json()
+        self.assertEqual(body['retrieval']['mode'], 'pinned_graph')
+        self.assertEqual(body['retrieval']['semanticSeeds'], [])
+        self.assertFalse(self.calls[-1]['_legacy_rag'])
+
+    def test_pinned_legacy_is_transactional_without_mandatory_traversal(self):
+        self.app.config['SCYTHE_GRAPHOPS_RETRIEVAL_MODE'] = 'pinned_legacy'
+        response = self.client.post('/api/graphops/conversation', json={
+            'mode': 'ask', 'question': 'What changed?',
+            'selection': {'kind': 'graph-node', 'entityId': 'host:a',
+                          'graphRevision': self.revision},
+        })
+        self.assertEqual(response.status_code, 200)
+        body = response.get_json()
+        self.assertIsNone(body['retrieval']['traversal'])
+        self.assertTrue(self.calls[-1]['_legacy_rag'])
 
 
 if __name__ == '__main__':

@@ -16,6 +16,7 @@ import hmac
 import os
 import threading
 from collections import defaultdict
+from contextlib import nullcontext
 from typing import Any, Dict
 
 logger = logging.getLogger(__name__)
@@ -618,24 +619,37 @@ def register_mcp_routes(app, engine, use_orchestrator: bool = False, auth_valida
 
             from graphops_graph_resolver import GraphResolutionError, GraphSelectionResolver
             resolver = GraphSelectionResolver(graph_selection_engine)
-            selection_rebased = False
             requested_revision = str(selection.get('graphRevision'))
-            try:
-                resolved = resolver.resolve(selection)
-            except GraphResolutionError as exc:
-                if 'retained snapshot is unavailable' not in str(exc):
-                    raise
-                # Conversation is read-only: when a rapidly changing live graph has
-                # evicted the selected revision, preserve identity but explicitly re-pin
-                # only if that same entity still exists in current bounded state.
-                current = resolver.snapshot(node_limit=500, edge_limit=1000)
-                entity_id = str(selection.get('entityId'))
-                collection = current.get('edges', []) if selection.get('kind') == 'graph-edge' else current.get('nodes', [])
-                if not any(str(item.get('id')) == entity_id for item in collection):
-                    raise
-                resolved = resolver.resolve({**selection,
-                                             'graphRevision': current['graphRevision']})
-                selection_rebased = True
+            configured_mode = str(app.config.get(
+                'SCYTHE_GRAPHOPS_RETRIEVAL_MODE',
+                os.getenv('SCYTHE_GRAPHOPS_RETRIEVAL_MODE', 'pinned_fused'))).lower()
+            aliases = {'baseline': 'legacy', 'graph': 'pinned_graph',
+                       'fused': 'pinned_fused'}
+            retrieval_mode = aliases.get(configured_mode, configured_mode)
+            if retrieval_mode not in {'legacy', 'pinned_legacy',
+                                       'pinned_graph', 'pinned_fused'}:
+                raise ValueError('invalid SCYTHE_GRAPHOPS_RETRIEVAL_MODE')
+            pinned_view = None
+            if retrieval_mode == 'legacy':
+                selection_rebased = False
+                try:
+                    resolved = resolver.resolve(selection)
+                except GraphResolutionError as exc:
+                    if 'retained snapshot is unavailable' not in str(exc):
+                        raise
+                    current = resolver.snapshot(node_limit=500, edge_limit=1000)
+                    entity_id = str(selection.get('entityId'))
+                    collection = (current.get('edges', []) if selection.get('kind') == 'graph-edge'
+                                  else current.get('nodes', []))
+                    if not any(str(item.get('id')) == entity_id for item in collection):
+                        raise
+                    resolved = resolver.resolve({**selection,
+                                                 'graphRevision': current['graphRevision']})
+                    selection_rebased = True
+            else:
+                pinned_view = resolver.pin_selection(selection, allow_rebase=True)
+                resolved = pinned_view.resolve_selection()
+                selection_rebased = pinned_view.selection_rebased
             entity = resolved.get('node') or resolved.get('edge') or {}
             evidence_context = {
                 'graphRevision': resolved.get('graphRevision'),
@@ -673,7 +687,49 @@ def register_mcp_routes(app, engine, use_orchestrator: bool = False, auth_valida
                 'LOCAL_FALLBACK', 'CONFIGURED_LOCAL'} else max_steps)
             # GraphOpsAgent owns mutable executor state; serialize conversations.
             with conversation_lock:
-                result = tool.fn({'question': grounded_question, 'max_steps': effective_steps})
+                agent = getattr(handler, '_graphops_agent', None)
+                engine_context = (agent.bound_engine(pinned_view.engine_adapter())
+                                  if agent is not None and pinned_view is not None
+                                  else nullcontext())
+                retrieval_policy_context = (agent.bounded_retrieval_policy(structured_semantic=True)
+                                            if agent is not None and retrieval_mode in {
+                                                'pinned_graph', 'pinned_fused'}
+                                            else nullcontext())
+                with engine_context, retrieval_policy_context:
+                    retrieval = None
+                    retrieval_context = None
+                    legacy_rag = retrieval_mode in {'legacy', 'pinned_legacy'}
+                    if pinned_view is not None and retrieval_mode in {
+                            'pinned_graph', 'pinned_fused'}:
+                        from graphops.evidence_fabric import (
+                            GraphFusionEvidenceFabric, SemanticSeedProvider)
+                        semantic_seeds = []
+                        if retrieval_mode == 'pinned_fused' and agent is not None:
+                            semantic_seeds = SemanticSeedProvider(
+                                executor=agent.executor,
+                                embedding_engine=getattr(agent, '_embedding_engine', None),
+                            ).search(question, limit=6,
+                                     projection_ids={item['id'] for item in pinned_view.nodes})
+                        fabric = GraphFusionEvidenceFabric()
+                        retrieval = fabric.build(
+                            question=question, view=pinned_view, mode=retrieval_mode,
+                            semantic_seeds=semantic_seeds)
+                        retrieval_context = fabric.render_context(retrieval)
+                    elif pinned_view is not None:
+                        retrieval = {
+                            'mode': retrieval_mode, 'version': 'graphfusion.pin.v1',
+                            'graph': {'revision': pinned_view.graph_revision,
+                                      'detectedNodes': pinned_view.detected_node_count,
+                                      'detectedEdges': pinned_view.detected_edge_count},
+                            'projection': pinned_view.to_receipt(),
+                            'traversal': None, 'paths': [],
+                            'boundary': 'PINNED LEGACY MODE; MANDATORY TRAVERSAL DISABLED',
+                        }
+                    result = tool.fn({
+                        'question': grounded_question, 'max_steps': effective_steps,
+                        '_retrieval_context': retrieval_context,
+                        '_legacy_rag': legacy_rag,
+                    })
             if isinstance(result, dict) and result.get('error'):
                 return jsonify({'status': 'unavailable', 'error': result['error']}), 503
             return jsonify({
@@ -684,6 +740,7 @@ def register_mcp_routes(app, engine, use_orchestrator: bool = False, auth_valida
                 'result': result, 'bounded': True, 'modelAuthority': 'INTERPRETIVE_ONLY',
                 'ollamaRoute': ollama_route,
                 'maxSteps': effective_steps,
+                'retrieval': retrieval,
                 'directiveExecution': False,
                 'boundary': ('OLLAMA INTERPRETS BOUNDED GRAPH EVIDENCE; IT DOES NOT EXECUTE '
                              'DIRECTIVES OR ESTABLISH CAUSALITY'),

@@ -8,7 +8,9 @@ import json
 import math
 import time
 from collections import Counter, defaultdict, OrderedDict
+from contextlib import ExitStack
 from copy import deepcopy
+from dataclasses import dataclass, field
 from threading import RLock
 from typing import Any, Dict, Iterable
 
@@ -32,6 +34,145 @@ _PURPOSE_SCHEDULE = (
     "MOST_ACTIVE", "NETWORK_DIVERSITY", "NEW_ARRIVAL", "MOST_ACTIVE",
     "STABLE_CONTEXT", "EXPLICIT_SIGNAL",
 )
+
+_PINNED_PROJECTION_VERSION = "graphfusion.projection.v1"
+
+
+def _canonical_json(value: Any) -> str:
+    return json.dumps(value, sort_keys=True, separators=(",", ":"),
+                      ensure_ascii=False, allow_nan=False, default=str)
+
+
+@dataclass(frozen=True)
+class PinnedGraphView:
+    """One immutable, selection-aware graph projection for one investigation."""
+
+    requested_revision: str
+    graph_revision: str
+    projection_hash: str
+    captured_at: float
+    selection_kind: str
+    selection_entity_id: str
+    detected_node_count: int
+    detected_edge_count: int
+    retained_node_count: int
+    retained_edge_count: int
+    node_limit: int
+    edge_limit: int
+    projection_truncated: bool
+    selection_rebased: bool = False
+    _nodes_json: str = field(default="[]", repr=False)
+    _edges_json: str = field(default="[]", repr=False)
+
+    @property
+    def nodes(self) -> tuple[Dict[str, Any], ...]:
+        return tuple(json.loads(self._nodes_json))
+
+    @property
+    def edges(self) -> tuple[Dict[str, Any], ...]:
+        return tuple(json.loads(self._edges_json))
+
+    def to_receipt(self) -> Dict[str, Any]:
+        return {
+            "hash": self.projection_hash,
+            "version": _PINNED_PROJECTION_VERSION,
+            "nodeLimit": self.node_limit,
+            "edgeLimit": self.edge_limit,
+            "nodes": self.retained_node_count,
+            "edges": self.retained_edge_count,
+            "truncated": self.projection_truncated,
+        }
+
+    def resolve_selection(self) -> Dict[str, Any]:
+        nodes = list(self.nodes); edges = list(self.edges)
+        nodes_by_id = {item["id"]: item for item in nodes}
+        if self.selection_kind == "graph-edge":
+            edge = next((item for item in edges if item["id"] == self.selection_entity_id), None)
+            if edge is None:
+                raise GraphResolutionError("selected graph edge is outside the pinned projection")
+            members = [nodes_by_id[node_id] for node_id in edge.get("nodes", [])
+                       if node_id in nodes_by_id]
+            positions = [member["position"] for member in members if member.get("position")]
+            selected = deepcopy(edge)
+            selected["position"] = ([sum(item[index] for item in positions) / len(positions)
+                                      for index in range(3)] if positions else None)
+            from ip_enrichment import enrich_graph_node
+            return {"graphRevision": self.graph_revision,
+                    "selectionKind": self.selection_kind, "edge": selected,
+                    "memberNodes": [enrich_graph_node(item) for item in members[:20]],
+                    "incidentEdges": [selected], "bounded": True,
+                    "projectionHash": self.projection_hash}
+        node = nodes_by_id.get(self.selection_entity_id)
+        if node is None:
+            raise GraphResolutionError("selected graph entity is outside the pinned projection")
+        incident = [edge for edge in edges if self.selection_entity_id in edge.get("nodes", [])][:50]
+        from ip_enrichment import enrich_graph_node
+        return {"graphRevision": self.graph_revision,
+                "selectionKind": self.selection_kind,
+                "node": enrich_graph_node(node), "incidentEdges": incident,
+                "bounded": True, "projectionHash": self.projection_hash}
+
+    def engine_adapter(self) -> "PinnedGraphEngine":
+        return PinnedGraphEngine(self)
+
+
+class _PinnedEntity:
+    """Small HGNode/HGEdge-compatible immutable record used by the DSL."""
+
+    def __init__(self, value: Dict[str, Any]):
+        self._json = _canonical_json(value)
+        data = json.loads(self._json)
+        self.id = data.get("id")
+        self.kind = data.get("kind", "entity")
+        self.nodes = tuple(data.get("nodes") or ())
+        self.labels = deepcopy(data.get("labels") or {})
+        self.metadata = deepcopy(data.get("metadata") or {})
+        self.position = deepcopy(data.get("position"))
+        self.frequency = data.get("frequency")
+        self.timestamp = data.get("observedAt", data.get("timestamp"))
+        self.weight = data.get("weight", 1.0)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return json.loads(self._json)
+
+
+class PinnedGraphEngine:
+    """Read-only HypergraphEngine-shaped adapter over a PinnedGraphView."""
+
+    def __init__(self, view: PinnedGraphView):
+        self.view = view
+        self.nodes = {item["id"]: _PinnedEntity(item) for item in view.nodes}
+        self.edges = {item["id"]: _PinnedEntity(item) for item in view.edges}
+        self.node_to_edges: Dict[str, set[str]] = defaultdict(set)
+        self.degree: Dict[str, int] = defaultdict(int)
+        self.label_index: Dict[str, Dict[Any, set[str]]] = defaultdict(lambda: defaultdict(set))
+        for node_id, node in self.nodes.items():
+            for key, value in node.labels.items():
+                values = value if isinstance(value, (list, tuple, set)) else (value,)
+                for item in values:
+                    try:
+                        self.label_index[key][item].add(node_id)
+                    except TypeError:
+                        continue
+        for edge_id, edge in self.edges.items():
+            for node_id in edge.nodes:
+                self.node_to_edges[node_id].add(edge_id)
+                self.degree[node_id] += 1
+
+    def get_node(self, node_id: str) -> _PinnedEntity | None:
+        return self.nodes.get(node_id)
+
+    def edges_for_node(self, node_id: str) -> Iterable[_PinnedEntity]:
+        for edge_id in sorted(self.node_to_edges.get(node_id, ())):
+            edge = self.edges.get(edge_id)
+            if edge is not None:
+                yield edge
+
+    def nodes_with_label(self, key: str, value: Any) -> Iterable[_PinnedEntity]:
+        for node_id in sorted(self.label_index.get(key, {}).get(value, ())):
+            node = self.nodes.get(node_id)
+            if node is not None:
+                yield node
 
 
 def _display_signal(node: Dict[str, Any]) -> float:
@@ -329,6 +470,100 @@ class GraphSelectionResolver:
         payload = json.dumps({"nodes": nodes, "edges": edges}, separators=(",", ":"),
                              sort_keys=True, default=str)
         return "graph-" + hashlib.blake2s(payload.encode(), digest_size=8).hexdigest()
+
+    def _capture_normalized(self) -> tuple[list[Dict[str, Any]], list[Dict[str, Any]]]:
+        """Capture graph nodes and edges once while honoring available engine locks."""
+        locks = []
+        for candidate in (self.engine, getattr(self.engine, "hypergraph_engine", None)):
+            lock = getattr(candidate, "_lock", None)
+            if lock is not None and all(lock is not item for item in locks):
+                locks.append(lock)
+        with ExitStack() as stack:
+            for lock in sorted(locks, key=id):
+                stack.enter_context(lock)
+            raw_nodes = self._nodes()
+            raw_edges = self._edges()
+        return ([self._normalize_node(node) for node in raw_nodes],
+                [self._normalize_edge(edge) for edge in raw_edges])
+
+    def pin_selection(self, selection: Dict[str, Any], *, allow_rebase: bool = False,
+                      node_limit: int = 500, edge_limit: int = 1000) -> PinnedGraphView:
+        """Create one immutable selection-aware projection for an investigation."""
+        if not isinstance(selection, dict):
+            raise GraphResolutionError("selection is required")
+        selection_kind = str(selection.get("kind") or "graph-node")
+        if selection_kind not in {"graph-node", "graph-edge", "event"}:
+            raise GraphResolutionError("unsupported graph selection kind")
+        entity_id = str(selection.get("entityId") or "")
+        requested_revision = str(selection.get("graphRevision") or "")
+        if not entity_id or not requested_revision:
+            raise GraphResolutionError("selection entityId and graphRevision are required")
+        node_limit = min(max(int(node_limit), 1), 500)
+        edge_limit = min(max(int(edge_limit), 1), 1000)
+
+        current_nodes, current_edges = self._capture_normalized()
+        current_revision = self._revision_from_normalized(
+            sorted(current_nodes, key=lambda item: item["id"]),
+            sorted(current_edges, key=lambda item: item["id"]))
+        selection_rebased = False
+        if requested_revision == current_revision:
+            source_nodes = current_nodes; source_edges = current_edges
+            detected_nodes = len(current_nodes); detected_edges = len(current_edges)
+            captured_at = time.time(); graph_revision = current_revision
+        else:
+            retained = _cached_snapshot(requested_revision)
+            if retained is None:
+                collection = current_edges if selection_kind == "graph-edge" else current_nodes
+                if not allow_rebase or not any(item.get("id") == entity_id for item in collection):
+                    raise GraphResolutionError("graph selection is stale; retained snapshot is unavailable")
+                source_nodes = current_nodes; source_edges = current_edges
+                detected_nodes = len(current_nodes); detected_edges = len(current_edges)
+                captured_at = time.time(); graph_revision = current_revision
+                selection_rebased = True
+            else:
+                source_nodes = list(retained.get("nodes") or [])
+                source_edges = list(retained.get("edges") or [])
+                detected_nodes = int(retained.get("detectedNodeCount", len(source_nodes)))
+                detected_edges = int(retained.get("detectedEdgeCount", len(source_edges)))
+                captured_at = float(retained.get("capturedAt") or time.time())
+                graph_revision = requested_revision
+
+        ranked_nodes, _ = _adaptive_rank_nodes(source_nodes, source_edges, node_limit, entity_id)
+        projection_nodes = [{key: value for key, value in node.items() if key != "display"}
+                            for node in ranked_nodes]
+        allowed = {node["id"] for node in projection_nodes}
+        projection_edges = [{key: value for key, value in edge.items() if key != "display"}
+                            for edge in _adaptive_rank_edges(source_edges, allowed, edge_limit, entity_id)]
+        collection = projection_edges if selection_kind == "graph-edge" else projection_nodes
+        if not any(item.get("id") == entity_id for item in collection):
+            raise GraphResolutionError("selected graph entity is outside the retained projection")
+
+        projection_identity = {
+            "version": _PINNED_PROJECTION_VERSION,
+            "graphRevision": graph_revision,
+            "selection": {"kind": selection_kind, "entityId": entity_id},
+            "limits": {"nodes": node_limit, "edges": edge_limit},
+            "nodes": sorted(projection_nodes, key=lambda item: item["id"]),
+            "edges": sorted(projection_edges, key=lambda item: item["id"]),
+        }
+        projection_hash = "proj-" + hashlib.sha256(
+            _canonical_json(projection_identity).encode()).hexdigest()
+        self._pinned_nodes = deepcopy(projection_nodes)
+        self._pinned_edges = deepcopy(projection_edges)
+        self._pinned_revision = graph_revision
+        return PinnedGraphView(
+            requested_revision=requested_revision, graph_revision=graph_revision,
+            projection_hash=projection_hash, captured_at=captured_at,
+            selection_kind=selection_kind, selection_entity_id=entity_id,
+            detected_node_count=detected_nodes, detected_edge_count=detected_edges,
+            retained_node_count=len(projection_nodes), retained_edge_count=len(projection_edges),
+            node_limit=node_limit, edge_limit=edge_limit,
+            projection_truncated=(detected_nodes > len(projection_nodes) or
+                                  detected_edges > len(projection_edges)),
+            selection_rebased=selection_rebased,
+            _nodes_json=_canonical_json(projection_nodes),
+            _edges_json=_canonical_json(projection_edges),
+        )
 
     @staticmethod
     def _normalize_node(node: Dict[str, Any]) -> Dict[str, Any]:
