@@ -114,8 +114,19 @@ operator-local evidence `O`, structured semantic evidence `S`, graph-only paths
 `FusionExclusive = Relevant(F) - (Relevant(O) ∪ Relevant(S) ∪ Relevant(G))`
 
 It also reports relevant recall, unsupported fused candidates, and admitted
-relationship overlap across prompt paraphrases. Judgments attach to stable
-edge/path fixture identities, never to the fluency of answer prose.
+relationship overlap across prompt paraphrases. The conservative edge metric is
+retained as `EdgeFusionExclusive`. A second `PathFusionExclusive` metric compares
+canonical ordered node/edge step signatures and reports the same value as
+`CompositionLift`, detecting relational joins even when every constituent edge
+was independently available. Paraphrase evaluation likewise retains
+`constituentOverlap` while adding complete `pathSignatureOverlap`. Judgments
+attach to stable edge/path fixture identities, never to answer prose.
+
+The benchmark also includes an operator-member fairness diagnostic for selected
+hyperedges. It measures admitted-path coverage across every selected member
+root. This is deliberately an evaluation fixture rather than a traversal change:
+round-robin operator expansion is justified only if the corpus shows that
+sequential root processing suppresses relevant relationships.
 
 ## Response contract
 

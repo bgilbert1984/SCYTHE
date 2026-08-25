@@ -2,7 +2,9 @@ import unittest
 
 from graphops.evidence_fabric import (GraphFusionEvidenceFabric, RetrievalPolicy,
                                       SemanticSeed)
-from graphops.benchmark import admitted_path_overlap, evaluate_relational_lift
+from graphops.benchmark import (admitted_path_overlap, canonical_path_signature,
+                                evaluate_relational_lift, operator_root_coverage,
+                                path_constituents, path_signature_overlap)
 from graphops_copilot import InvestigativeDSLExecutor
 from graphops_graph_resolver import GraphSelectionResolver
 
@@ -33,12 +35,21 @@ class _Graph:
         }
 
 
-def _pin(engine, entity_id='host:a'):
+def _pin(engine, entity_id='host:a', kind='graph-node'):
     resolver = GraphSelectionResolver(engine)
     return resolver.pin_selection({
-        'kind': 'graph-node', 'entityId': entity_id,
+        'kind': kind, 'entityId': entity_id,
         'graphRevision': resolver.revision(),
     })
+
+
+def _path(*steps):
+    return {
+        'steps': [{'type': step_type, 'id': entity_id}
+                  for step_type, entity_id in steps],
+        'edgeIds': [entity_id for step_type, entity_id in steps
+                    if step_type == 'edge'],
+    }
 
 
 class GraphFusionTests(unittest.TestCase):
@@ -173,8 +184,79 @@ class GraphFusionTests(unittest.TestCase):
                 'edge:local', 'edge:semantic', 'edge:known', 'edge:exclusive'])
         self.assertEqual(result['fusionExclusive'], ['edge:exclusive'])
         self.assertEqual(result['fusedUnsupportedCandidates'], ['edge:noise'])
+        self.assertEqual(result['pathMetricsStatus'], 'NOT_ADJUDICATED')
+        self.assertEqual(result['fusedUnsupportedPathCandidates'], [])
         self.assertAlmostEqual(admitted_path_overlap(graph_paths, fused_paths), 1 / 3,
                                places=6)
+
+    def test_benchmark_detects_composition_lift_when_edges_are_not_novel(self):
+        operator_path = _path(
+            ('node', 'host:a'), ('edge', 'edge:e1'), ('node', 'host:b'))
+        semantic_path = _path(
+            ('node', 'host:b'), ('edge', 'edge:e2'), ('node', 'host:c'))
+        fused_path = _path(
+            ('node', 'host:a'), ('edge', 'edge:e1'), ('node', 'host:b'),
+            ('edge', 'edge:e2'), ('node', 'host:c'))
+        relevant_composition = canonical_path_signature(fused_path)
+        result = evaluate_relational_lift(
+            operator_evidence_ids=['edge:e1'],
+            semantic_evidence_ids=['edge:e2'],
+            operator_paths=[operator_path], semantic_paths=[semantic_path],
+            graph_paths=[operator_path, semantic_path], fused_paths=[fused_path],
+            relevant_fixture_ids=['edge:e1', 'edge:e2'],
+            relevant_path_signatures=[relevant_composition])
+        self.assertEqual(result['edgeFusionExclusive'], [])
+        self.assertEqual(result['pathMetricsStatus'], 'ADJUDICATED')
+        self.assertEqual(result['pathFusionExclusive'], [relevant_composition])
+        self.assertEqual(result['compositionLiftCount'], 1)
+
+    def test_paraphrase_metrics_distinguish_constituents_from_composition(self):
+        first = _path(
+            ('node', 'host:a'), ('edge', 'edge:e1'), ('node', 'host:b'),
+            ('edge', 'edge:e2'), ('node', 'host:c'))
+        rearranged = _path(
+            ('node', 'host:a'), ('edge', 'edge:e2'), ('node', 'host:b'),
+            ('edge', 'edge:e1'), ('node', 'host:c'))
+        self.assertEqual(admitted_path_overlap([first], [rearranged]), 1.0)
+        self.assertEqual(path_signature_overlap([first], [rearranged]), 0.0)
+
+    def test_operator_member_fairness_fixture_detects_sequential_starvation(self):
+        engine = _Graph()
+        engine.nodes = {
+            'host:a': {'id': 'host:a', 'kind': 'network_host'},
+            'host:b': {'id': 'host:b', 'kind': 'network_host'},
+            'host:c': {'id': 'host:c', 'kind': 'network_host'},
+            'host:relevant': {'id': 'host:relevant', 'kind': 'network_host'},
+        }
+        engine.edges = {
+            'edge:selected': {
+                'id': 'edge:selected', 'kind': 'coordination',
+                'nodes': ['host:a', 'host:b', 'host:c'],
+                'evidenceClass': 'OBSERVED',
+            },
+            'edge:b-relevant': {
+                'id': 'edge:b-relevant', 'kind': 'asn-transition',
+                'nodes': ['host:b', 'host:relevant'],
+                'evidenceClass': 'OBSERVED',
+            },
+        }
+        for index in range(8):
+            node_id = f'host:a-fanout-{index:02d}'
+            edge_id = f'edge:a-fanout-{index:02d}'
+            engine.nodes[node_id] = {'id': node_id, 'kind': 'network_host'}
+            engine.edges[edge_id] = {
+                'id': edge_id, 'kind': 'fanout', 'nodes': ['host:a', node_id],
+                'evidenceClass': 'OBSERVED',
+            }
+        view = _pin(engine, 'edge:selected', kind='graph-edge')
+        result = GraphFusionEvidenceFabric(RetrievalPolicy(
+            max_hops=1, candidate_path_limit=4, admitted_path_limit=4)).build(
+                question='Find the relevant relation', view=view,
+                mode='pinned_graph')
+        coverage = operator_root_coverage(
+            result['paths'], ['host:a', 'host:b', 'host:c'])
+        self.assertIn('host:b', coverage['missingRoots'])
+        self.assertNotIn('edge:b-relevant', path_constituents(result['paths']))
 
 
 if __name__ == '__main__':
