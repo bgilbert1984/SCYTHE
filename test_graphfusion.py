@@ -2,6 +2,7 @@ import unittest
 
 from graphops.evidence_fabric import (GraphFusionEvidenceFabric, RetrievalPolicy,
                                       SemanticSeed)
+from graphops.benchmark import admitted_path_overlap, evaluate_relational_lift
 from graphops_copilot import InvestigativeDSLExecutor
 from graphops_graph_resolver import GraphSelectionResolver
 
@@ -110,6 +111,70 @@ class GraphFusionTests(unittest.TestCase):
             result = executor.run(['VECTOR_SEARCH "similar host" k=5'])
         self.assertIn('disabled by the active retrieval policy',
                       result['steps'][0]['result']['refused'])
+
+    def test_semantic_widening_cannot_starve_operator_paths(self):
+        engine = _Graph()
+        engine.nodes['host:0001'] = {'id': 'host:0001', 'kind': 'network_host'}
+        for index in range(12):
+            node_id = f'host:semantic-{index:02d}'
+            edge_id = f'edge:semantic-{index:02d}'
+            engine.nodes[node_id] = {'id': node_id, 'kind': 'network_host'}
+            engine.edges[edge_id] = {
+                'id': edge_id, 'kind': 'semantic-fanout',
+                'nodes': ['host:0001', node_id], 'evidenceClass': 'OBSERVED',
+            }
+        view = _pin(engine, 'host:d')
+        result = GraphFusionEvidenceFabric(RetrievalPolicy(
+            candidate_path_limit=4, operator_candidate_floor=1,
+            admitted_path_limit=2)).build(
+                question='Find related activity', view=view, mode='pinned_fused',
+                semantic_seeds=[SemanticSeed(
+                    'host:0001', .99, 'fixture',
+                    resolution='RESOLVED_IN_PROJECTION')])
+        self.assertTrue(any(path['seedOrigin'] == 'OPERATOR_SELECTION'
+                            for path in result['paths']))
+        self.assertLessEqual(result['traversal']['candidatePaths'], 4)
+
+    def test_semantic_state_is_part_of_traversal_identity(self):
+        view = _pin(_Graph())
+        fabric = GraphFusionEvidenceFabric()
+        first = fabric.build(
+            question='Find similar hosts', view=view, mode='pinned_fused',
+            semantic_state={'provider': 'turboquant', 'providerRevision': 'tq-a',
+                            'indexCount': 4, 'seedSetHash': 'seed-x'})
+        second = fabric.build(
+            question='Find similar hosts', view=view, mode='pinned_fused',
+            semantic_state={'provider': 'turboquant', 'providerRevision': 'tq-b',
+                            'indexCount': 4, 'seedSetHash': 'seed-x'})
+        self.assertNotEqual(first['traversal']['hash'], second['traversal']['hash'])
+        self.assertEqual(first['semanticState']['providerRevision'], 'tq-a')
+
+    def test_unpinned_auxiliary_dsl_sources_are_refused(self):
+        executor = InvestigativeDSLExecutor(_pin(_Graph()).engine_adapter())
+        with executor.contain_live_auxiliary():
+            results = executor.run([
+                'FILTER degree_delta > 3',
+                'ANALYZE temporal_sync',
+                'CLUSTER timing',
+                'RF_CORRELATE freq=900MHz',
+                'STITCH_IDENTITIES field=embedding',
+            ])
+        self.assertTrue(all('unpinned auxiliary evidence' in step['result']['refused']
+                            for step in results['steps']))
+
+    def test_benchmark_measures_fixture_ids_not_answer_prose(self):
+        graph_paths = [{'edgeIds': ['edge:known']}]
+        fused_paths = [{'edgeIds': ['edge:known', 'edge:exclusive', 'edge:noise']}]
+        result = evaluate_relational_lift(
+            operator_evidence_ids=['edge:local'],
+            semantic_evidence_ids=['edge:semantic'],
+            graph_paths=graph_paths, fused_paths=fused_paths,
+            relevant_fixture_ids=[
+                'edge:local', 'edge:semantic', 'edge:known', 'edge:exclusive'])
+        self.assertEqual(result['fusionExclusive'], ['edge:exclusive'])
+        self.assertEqual(result['fusedUnsupportedCandidates'], ['edge:noise'])
+        self.assertAlmostEqual(admitted_path_overlap(graph_paths, fused_paths), 1 / 3,
+                               places=6)
 
 
 if __name__ == '__main__':

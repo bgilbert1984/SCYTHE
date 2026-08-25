@@ -704,16 +704,29 @@ def register_mcp_routes(app, engine, use_orchestrator: bool = False, auth_valida
                         from graphops.evidence_fabric import (
                             GraphFusionEvidenceFabric, SemanticSeedProvider)
                         semantic_seeds = []
+                        semantic_state = None
                         if retrieval_mode == 'pinned_fused' and agent is not None:
-                            semantic_seeds = SemanticSeedProvider(
+                            semantic_result = SemanticSeedProvider(
                                 executor=agent.executor,
                                 embedding_engine=getattr(agent, '_embedding_engine', None),
-                            ).search(question, limit=6,
-                                     projection_ids={item['id'] for item in pinned_view.nodes})
+                            ).search_with_receipt(
+                                question, limit=6,
+                                projection_ids={item['id'] for item in pinned_view.nodes})
+                            semantic_seeds = semantic_result.seeds
+                            semantic_state = semantic_result.state
                         fabric = GraphFusionEvidenceFabric()
                         retrieval = fabric.build(
                             question=question, view=pinned_view, mode=retrieval_mode,
-                            semantic_seeds=semantic_seeds)
+                            semantic_seeds=semantic_seeds,
+                            semantic_state=semantic_state,
+                            auxiliary_state={
+                                'mode': 'CONTAINED', 'replayable': True,
+                                'liveProvidersUsed': [],
+                                'blockedSources': [
+                                    'TOPOLOGY_DETECTOR', 'FANIN_EVENT_BUFFER',
+                                    'RF_OBSERVATION_STORE', 'SEMANTIC_VECTOR_STORE',
+                                ],
+                            })
                         retrieval_context = fabric.render_context(retrieval)
                     elif pinned_view is not None:
                         retrieval = {
@@ -722,6 +735,10 @@ def register_mcp_routes(app, engine, use_orchestrator: bool = False, auth_valida
                                       'detectedNodes': pinned_view.detected_node_count,
                                       'detectedEdges': pinned_view.detected_edge_count},
                             'projection': pinned_view.to_receipt(),
+                            'auxiliaryEvidence': {
+                                'mode': 'LIVE_UNPINNED', 'replayable': False,
+                                'identity': None,
+                            },
                             'traversal': None, 'paths': [],
                             'boundary': 'PINNED LEGACY MODE; MANDATORY TRAVERSAL DISABLED',
                         }

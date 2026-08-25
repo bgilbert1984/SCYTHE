@@ -259,6 +259,7 @@ class InvestigativeDSLExecutor:
                 rf_observation_provider = None
         self._rf_observations = rf_observation_provider
         self._blocked_verbs: set[str] = set()
+        self._contain_live_auxiliary = False
         self.reset()
 
     @contextmanager
@@ -270,6 +271,32 @@ class InvestigativeDSLExecutor:
             yield
         finally:
             self._blocked_verbs = previous
+
+    @contextmanager
+    def contain_live_auxiliary(self):
+        """Refuse DSL branches whose evidence is not represented by the pinned view."""
+        previous = self._contain_live_auxiliary
+        self._contain_live_auxiliary = True
+        try:
+            yield
+        finally:
+            self._contain_live_auxiliary = previous
+
+    @staticmethod
+    def _live_auxiliary_source(line: str) -> Optional[str]:
+        up = line.upper()
+        if up.startswith("FILTER ") and "DEGREE_DELTA" in up:
+            return "TOPOLOGY_DETECTOR"
+        if up.startswith("ANALYZE ") and any(
+                token in up for token in ("DEGREE", "TEMPORAL_SYNC", "SYNC")):
+            return "LIVE_DETECTOR_STATE"
+        if up.startswith("CLUSTER ") and "TIMING" in up:
+            return "FANIN_EVENT_BUFFER"
+        if up.startswith("RF_CORRELATE"):
+            return "RF_OBSERVATION_STORE"
+        if up.startswith("STITCH_IDENTITIES") and "FIELD=EMBEDDING" in up:
+            return "SEMANTIC_VECTOR_STORE"
+        return None
 
     def reset(self) -> None:
         """Clear all session state."""
@@ -324,6 +351,16 @@ class InvestigativeDSLExecutor:
         if verb in self._blocked_verbs:
             return {"refused": f"{verb} is disabled by the active retrieval policy",
                     "boundary": "MODEL-DIRECTED SEMANTIC RETRIEVAL IS DISABLED"}
+        auxiliary_source = self._live_auxiliary_source(line)
+        if self._contain_live_auxiliary and auxiliary_source:
+            return {
+                "refused": f"{line} requires unpinned auxiliary evidence",
+                "auxiliarySource": auxiliary_source,
+                "boundary": (
+                    "DETERMINISTIC GRAPHFUSION MODES REFUSE LIVE EVIDENCE "
+                    "SOURCES WITHOUT A PINNED STATE IDENTITY"
+                ),
+            }
         try:
             if verb == "FOCUS":
                 return self._do_focus(line)
@@ -1442,9 +1479,10 @@ class InvestigativeDSLExecutor:
         if self.engine is None:
             return {"error": "no engine"}
 
-        import math, time as _time
+        import math
 
-        now      = _time.time()
+        now = (self.engine.view.captured_at
+               if hasattr(self.engine, "view") else time.time())
         cutoff   = now - window
         entropy_rows: List[Dict[str, Any]] = []
 
@@ -1519,8 +1557,8 @@ class InvestigativeDSLExecutor:
         if self.engine is None:
             return {"error": "no engine"}
 
-        import time as _time
-        now    = _time.time()
+        now = (self.engine.view.captured_at
+               if hasattr(self.engine, "view") else time.time())
         cutoff = now - window
 
         candidates = list(self.engine.nodes.keys())[:1000]
@@ -1815,8 +1853,8 @@ class InvestigativeDSLExecutor:
         if self.engine is None:
             return {"error": "no engine"}
 
-        import time as _time
-        now    = _time.time()
+        now = (self.engine.view.captured_at
+               if hasattr(self.engine, "view") else time.time())
         cutoff = now - window
         slice_dur = window / slices
 
@@ -2137,9 +2175,11 @@ class InvestigativeDSLExecutor:
             "edge_count":   e,
             "top_degrees":  [{"node": k, "degree": v} for k, v in top_degrees],
         }
-        if self._topo and hasattr(self._topo, "alerts_fired"):
+        if (not self._contain_live_auxiliary and self._topo and
+                hasattr(self._topo, "alerts_fired")):
             summary["drift_alerts_total"] = self._topo.alerts_fired
-        if self._fanin and hasattr(self._fanin, "alerts_fired"):
+        if (not self._contain_live_auxiliary and self._fanin and
+                hasattr(self._fanin, "alerts_fired")):
             summary["fanin_alerts_total"] = self._fanin.alerts_fired
 
         return {"summary": summary}
@@ -2272,10 +2312,12 @@ class InvestigativeDSLExecutor:
                     confidence = max(confidence, 0.68)
 
         # ── Live detector alerts ──────────────────────────────────────────────
-        if self._topo and self._topo.alerts_fired > 0:
+        if (not self._contain_live_auxiliary and self._topo and
+                self._topo.alerts_fired > 0):
             signals.append(f"{self._topo.alerts_fired} drift alerts active")
             confidence = max(confidence, 0.80)
-        if self._fanin and self._fanin.alerts_fired > 0:
+        if (not self._contain_live_auxiliary and self._fanin and
+                self._fanin.alerts_fired > 0):
             signals.append(f"{self._fanin.alerts_fired} fan-in (botnet) alerts active")
             confidence = max(confidence, 0.90)
 
@@ -2681,7 +2723,11 @@ class GraphOpsAgent:
     def bounded_retrieval_policy(self, *, structured_semantic: bool):
         """Keep semantic retrieval server-owned in deterministic GraphFusion modes."""
         blocked = {"VECTOR_SEARCH", "CLUSTER_SIMILAR"} if structured_semantic else set()
-        return self.executor.block_verbs(blocked)
+        @contextmanager
+        def _policy():
+            with self.executor.block_verbs(blocked), self.executor.contain_live_auxiliary():
+                yield
+        return _policy()
 
     def _pick_models(self) -> List[str]:
         """Select the best available Ollama chat models in preference order."""

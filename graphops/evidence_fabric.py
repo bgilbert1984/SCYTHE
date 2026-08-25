@@ -13,7 +13,7 @@ from typing import Any, Iterable, Optional
 from graphops_graph_resolver import PinnedGraphView
 
 
-VERSION = "graphfusion.traversal.v1"
+VERSION = "graphfusion.traversal.v2"
 
 
 def _canonical(value: Any) -> str:
@@ -74,6 +74,12 @@ class SemanticSeed:
         return result
 
 
+@dataclass(frozen=True)
+class SemanticSearchResult:
+    seeds: tuple[SemanticSeed, ...]
+    state: dict[str, Any]
+
+
 class SemanticSeedProvider:
     """Expose existing TurboQuant/FAISS retrieval as structured search leads."""
 
@@ -83,8 +89,26 @@ class SemanticSeedProvider:
 
     def search(self, question: str, *, limit: int = 8,
                projection_ids: Optional[set[str]] = None) -> list[SemanticSeed]:
+        return list(self.search_with_receipt(
+            question, limit=limit, projection_ids=projection_ids).seeds)
+
+    def search_with_receipt(self, question: str, *, limit: int = 8,
+                            projection_ids: Optional[set[str]] = None
+                            ) -> SemanticSearchResult:
         limit = min(max(int(limit), 1), 16)
         projection_ids = projection_ids or set()
+        embedding_model = str(
+            getattr(self.embedding_engine, "_model", None) or
+            getattr(self.executor, "_embedding_model", None) or
+            "UNAVAILABLE"
+        )
+
+        def _result(seeds: list[SemanticSeed], state: dict[str, Any]
+                    ) -> SemanticSearchResult:
+            records = [item.to_dict() for item in seeds]
+            state = {**state, "seedSetHash": _digest("seed-", records)}
+            return SemanticSearchResult(tuple(seeds), state)
+
         vector = self.executor._embed_intent(question)
         if vector is not None:
             try:
@@ -92,7 +116,9 @@ class SemanticSeedProvider:
                 store = embedding_store()
                 if len(store) > 0:
                     seeds = []
-                    for entity_id, similarity in store.search(vector, k=limit):
+                    matches, state = store.search_with_receipt(
+                        vector, k=limit, embedding_model=embedding_model)
+                    for entity_id, similarity in matches:
                         entity_id = str(entity_id)
                         node = self.executor._get_node(entity_id) or {}
                         labels = node.get("labels") or {}
@@ -109,15 +135,21 @@ class SemanticSeedProvider:
                                         else "OUTSIDE_RETAINED_PROJECTION"),
                         ))
                     if seeds:
-                        return seeds
+                        return _result(seeds, state)
             except Exception:
                 pass
         if self.embedding_engine is None:
-            return []
+            return _result([], {
+                "provider": "none", "providerRevision": "none",
+                "embeddingModel": embedding_model, "indexCount": 0,
+            })
         try:
             results = self.embedding_engine.search_similar(question, k=limit) or []
         except Exception:
-            return []
+            return _result([], {
+                "provider": "faiss", "providerRevision": "unavailable",
+                "embeddingModel": embedding_model, "indexCount": 0,
+            })
         seeds = []
         for result in results[:limit]:
             entity_id = str(result.get("entity_id") or "")
@@ -131,7 +163,32 @@ class SemanticSeedProvider:
                 resolution=("RESOLVED_IN_PROJECTION" if entity_id in projection_ids
                             else "OUTSIDE_RETAINED_PROJECTION"),
             ))
-        return seeds
+        try:
+            stats = self.embedding_engine.stats() or {}
+        except Exception:
+            stats = {}
+        metadata_identity = []
+        for index, item in sorted(
+                getattr(self.embedding_engine, "_meta", {}).items(),
+                key=lambda pair: str(pair[0])):
+            metadata_identity.append({
+                "index": index,
+                "entityId": item.get("entity_id"),
+                "description": item.get("description"),
+                "model": item.get("model"),
+                "createdAt": item.get("created_at"),
+            })
+        stable_state = {
+            "embeddingModel": stats.get("model") or embedding_model,
+            "dimension": stats.get("dim"),
+            "indexCount": stats.get("total_vectors", len(results)),
+            "metadataHash": _digest("meta-", metadata_identity),
+        }
+        return _result(seeds, {
+            "provider": "faiss",
+            "providerRevision": _digest("faiss-", stable_state),
+            **stable_state,
+        })
 
     @staticmethod
     def render_legacy(seeds: Iterable[SemanticSeed]) -> str:
@@ -160,6 +217,7 @@ class RetrievalPolicy:
     admitted_path_limit: int = 8
     node_budget: int = 96
     edge_budget: int = 160
+    operator_candidate_floor: int = 16
     synthetic_allowed: bool = False
 
     def to_dict(self) -> dict[str, Any]:
@@ -170,6 +228,7 @@ class RetrievalPolicy:
             "pathLimit": self.admitted_path_limit,
             "nodeBudget": self.node_budget,
             "edgeBudget": self.edge_budget,
+            "operatorCandidateFloor": self.operator_candidate_floor,
             "syntheticAllowed": self.synthetic_allowed,
         }
 
@@ -242,7 +301,9 @@ class GraphFusionEvidenceFabric:
         return len(a & b) / len(a | b) if a and b else 0.0
 
     def build(self, *, question: str, view: PinnedGraphView, mode: str,
-              semantic_seeds: Iterable[SemanticSeed] = ()) -> dict[str, Any]:
+              semantic_seeds: Iterable[SemanticSeed] = (),
+              semantic_state: Optional[dict[str, Any]] = None,
+              auxiliary_state: Optional[dict[str, Any]] = None) -> dict[str, Any]:
         nodes = {item["id"]: item for item in view.nodes}
         edges = {item["id"]: item for item in view.edges}
         adjacency: dict[str, list[str]] = {node_id: [] for node_id in nodes}
@@ -270,75 +331,103 @@ class GraphFusionEvidenceFabric:
         deduplicated = {}
         for entity_id, origin, score in seeds:
             current = deduplicated.get(entity_id)
-            if current is None or score > current[2]:
+            if (current is None or origin == "OPERATOR_SELECTION" or
+                    (current[1] != "OPERATOR_SELECTION" and score > current[2])):
                 deduplicated[entity_id] = (entity_id, origin, score)
-        seeds = [deduplicated[key] for key in sorted(deduplicated)]
+        operator_seeds = sorted(
+            (item for item in deduplicated.values()
+             if item[1] == "OPERATOR_SELECTION"), key=lambda item: item[0])
+        semantic_roots = sorted(
+            (item for item in deduplicated.values()
+             if item[1] == "SEMANTIC_RETRIEVAL"),
+            key=lambda item: (-item[2], item[0]))
+        seeds = [*operator_seeds, *semantic_roots]
 
         candidates = []
         nodes_visited: set[str] = set()
         edges_inspected: set[str] = set()
-        for seed_id, origin, seed_score in seeds:
-            frontier = [(seed_id, [{"type": "node", "id": seed_id}], {seed_id}, [])]
-            nodes_visited.add(seed_id)
-            for _depth in range(self.policy.max_hops):
-                next_frontier = []
-                for tail, steps, visited, path_edges in frontier:
-                    for edge_id in adjacency.get(tail, []):
-                        if len(edges_inspected) >= self.policy.edge_budget:
-                            break
-                        edges_inspected.add(edge_id)
-                        edge = edges[edge_id]
-                        for member in sorted(edge.get("nodes") or []):
-                            if member == tail or member in visited or member not in nodes:
-                                continue
-                            if self._blocked(nodes[member], synthetic_allowed=self.policy.synthetic_allowed):
-                                continue
-                            if len(nodes_visited) >= self.policy.node_budget and member not in nodes_visited:
-                                continue
-                            nodes_visited.add(member)
-                            candidate_steps = [*steps, {"type": "edge", "id": edge_id},
-                                               {"type": "node", "id": member}]
-                            edge_ids = [*path_edges, edge_id]
-                            evidence = []
-                            for step in candidate_steps:
-                                item = deepcopy((nodes if step["type"] == "node" else edges)[step["id"]])
-                                item["_stepType"] = step["type"]
-                                evidence.append(item)
-                            score, role, reasons = self._score(
-                                question, seed_score, evidence, len(edge_ids))
-                            identity = {"projectionHash": view.projection_hash,
-                                        "seed": seed_id, "steps": candidate_steps}
-                            path = {
-                                "pathId": _digest("path-", identity), "seedId": seed_id,
-                                "seedOrigin": origin, "score": score, "role": role,
-                                "steps": candidate_steps, "edgeIds": edge_ids,
-                                "admissionReasons": reasons,
-                                "authorityCeiling": min(
-                                    (str(item.get("evidenceClass") or "INFERRED").upper()
-                                     for item in evidence if item["_stepType"] == "edge"),
-                                    key=lambda value: self._AUTHORITY.get(value, .4), default="NONE"),
-                                "evidence": [{"type": item.pop("_stepType"), **_bounded(item)}
-                                             for item in evidence],
-                            }
-                            candidates.append(path)
-                            next_frontier.append((member, candidate_steps,
-                                                  visited | {member}, edge_ids))
-                            if len(candidates) >= self.policy.candidate_path_limit:
+
+        def _traverse(seed_pool, pool_limit):
+            if pool_limit <= 0:
+                return
+            pool_start = len(candidates)
+            for seed_id, origin, seed_score in seed_pool:
+                frontier = [(seed_id, [{"type": "node", "id": seed_id}], {seed_id}, [])]
+                nodes_visited.add(seed_id)
+                for _depth in range(self.policy.max_hops):
+                    next_frontier = []
+                    for tail, steps, visited, path_edges in frontier:
+                        for edge_id in adjacency.get(tail, []):
+                            if len(edges_inspected) >= self.policy.edge_budget:
                                 break
-                        if len(candidates) >= self.policy.candidate_path_limit:
+                            edges_inspected.add(edge_id)
+                            edge = edges[edge_id]
+                            for member in sorted(edge.get("nodes") or []):
+                                if member == tail or member in visited or member not in nodes:
+                                    continue
+                                if self._blocked(nodes[member], synthetic_allowed=self.policy.synthetic_allowed):
+                                    continue
+                                if len(nodes_visited) >= self.policy.node_budget and member not in nodes_visited:
+                                    continue
+                                nodes_visited.add(member)
+                                candidate_steps = [*steps, {"type": "edge", "id": edge_id},
+                                                   {"type": "node", "id": member}]
+                                edge_ids = [*path_edges, edge_id]
+                                evidence = []
+                                for step in candidate_steps:
+                                    item = deepcopy((nodes if step["type"] == "node" else edges)[step["id"]])
+                                    item["_stepType"] = step["type"]
+                                    evidence.append(item)
+                                score, role, reasons = self._score(
+                                    question, seed_score, evidence, len(edge_ids))
+                                identity = {"projectionHash": view.projection_hash,
+                                            "seed": seed_id, "steps": candidate_steps}
+                                candidates.append({
+                                    "pathId": _digest("path-", identity), "seedId": seed_id,
+                                    "seedOrigin": origin, "score": score, "role": role,
+                                    "steps": candidate_steps, "edgeIds": edge_ids,
+                                    "admissionReasons": reasons,
+                                    "authorityCeiling": min(
+                                        (str(item.get("evidenceClass") or "INFERRED").upper()
+                                         for item in evidence if item["_stepType"] == "edge"),
+                                        key=lambda value: self._AUTHORITY.get(value, .4), default="NONE"),
+                                    "evidence": [{"type": item.pop("_stepType"), **_bounded(item)}
+                                                 for item in evidence],
+                                })
+                                next_frontier.append((member, candidate_steps,
+                                                      visited | {member}, edge_ids))
+                                if (len(candidates) >= self.policy.candidate_path_limit or
+                                        len(candidates) - pool_start >= pool_limit):
+                                    break
+                            if (len(candidates) >= self.policy.candidate_path_limit or
+                                    len(candidates) - pool_start >= pool_limit):
+                                break
+                        if (len(candidates) >= self.policy.candidate_path_limit or
+                                len(candidates) - pool_start >= pool_limit):
                             break
-                    if len(candidates) >= self.policy.candidate_path_limit:
+                    frontier = next_frontier
+                    if (not frontier or len(candidates) >= self.policy.candidate_path_limit or
+                            len(candidates) - pool_start >= pool_limit):
                         break
-                frontier = next_frontier
-                if not frontier or len(candidates) >= self.policy.candidate_path_limit:
+                if (len(candidates) >= self.policy.candidate_path_limit or
+                        len(candidates) - pool_start >= pool_limit):
                     break
-            if len(candidates) >= self.policy.candidate_path_limit:
-                break
+
+        operator_limit = (self.policy.candidate_path_limit if not semantic_roots else
+                          min(max(1, self.policy.operator_candidate_floor),
+                              self.policy.candidate_path_limit))
+        _traverse(operator_seeds, operator_limit)
+        _traverse(semantic_roots, self.policy.candidate_path_limit - len(candidates))
 
         ranked = sorted(candidates, key=lambda item: (-item["score"], item["pathId"]))
         admitted = []
+        operator_candidates = [item for item in ranked
+                               if item["seedOrigin"] == "OPERATOR_SELECTION"]
+        if operator_candidates and self.policy.admitted_path_limit > 0:
+            admitted.append(operator_candidates[0])
         contradictions = [item for item in ranked if item["role"] == "EXPLICIT_CONTRADICTION"]
-        if contradictions:
+        if (contradictions and contradictions[0] not in admitted and
+                len(admitted) < self.policy.admitted_path_limit):
             admitted.append(contradictions[0])
         for candidate in ranked:
             if candidate in admitted:
@@ -351,12 +440,22 @@ class GraphFusionEvidenceFabric:
             if len(admitted) >= self.policy.admitted_path_limit:
                 break
 
+        semantic_state = deepcopy(semantic_state or {
+            "provider": "none", "providerRevision": "none", "indexCount": 0,
+            "seedSetHash": _digest("seed-", [item.to_dict() for item in semantic_seeds]),
+        })
+        auxiliary_state = deepcopy(auxiliary_state or {
+            "mode": "CONTAINED", "replayable": True,
+            "liveProvidersUsed": [],
+        })
         traversal_identity = {
             "version": VERSION, "graphRevision": view.graph_revision,
             "projectionHash": view.projection_hash,
             "questionDigest": sha256(question.encode()).hexdigest(), "mode": mode,
             "policy": self.policy.to_dict(),
             "semanticSeeds": [item.to_dict() for item in semantic_seeds],
+            "semanticState": semantic_state,
+            "auxiliaryEvidence": auxiliary_state,
             "admittedPaths": [{key: path[key] for key in
                                ("pathId", "role", "steps", "admissionReasons")}
                               for path in admitted],
@@ -369,6 +468,8 @@ class GraphFusionEvidenceFabric:
                       "detectedEdges": view.detected_edge_count},
             "projection": view.to_receipt(),
             "semanticSeeds": [item.to_dict() for item in semantic_seeds],
+            "semanticState": semantic_state,
+            "auxiliaryEvidence": auxiliary_state,
             "traversal": {"hash": traversal_hash, "maxHops": self.policy.max_hops,
                           "seeds": len(seeds), "nodesVisited": len(nodes_visited),
                           "edgesInspected": len(edges_inspected),

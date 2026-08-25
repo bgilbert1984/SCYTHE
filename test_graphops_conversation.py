@@ -51,6 +51,10 @@ class GraphOpsConversationTests(unittest.TestCase):
         self.assertEqual(body['retrieval']['graph']['revision'], self.revision)
         self.assertTrue(body['retrieval']['projection']['hash'].startswith('proj-'))
         self.assertTrue(body['retrieval']['traversal']['hash'].startswith('trav-'))
+        self.assertEqual(body['retrieval']['version'], 'graphfusion.traversal.v2')
+        self.assertIn('providerRevision', body['retrieval']['semanticState'])
+        self.assertTrue(body['retrieval']['auxiliaryEvidence']['replayable'])
+        self.assertEqual(body['retrieval']['auxiliaryEvidence']['liveProvidersUsed'], [])
         self.assertFalse(self.calls[0]['_legacy_rag'])
 
     def test_directive_mode_and_client_context_are_refused(self):
@@ -87,6 +91,8 @@ class GraphOpsConversationTests(unittest.TestCase):
         body = response.get_json()
         self.assertEqual(body['retrieval']['mode'], 'pinned_graph')
         self.assertEqual(body['retrieval']['semanticSeeds'], [])
+        self.assertEqual(body['retrieval']['semanticState']['provider'], 'none')
+        self.assertEqual(body['retrieval']['auxiliaryEvidence']['mode'], 'CONTAINED')
         self.assertFalse(self.calls[-1]['_legacy_rag'])
 
     def test_pinned_legacy_is_transactional_without_mandatory_traversal(self):
@@ -99,6 +105,7 @@ class GraphOpsConversationTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         body = response.get_json()
         self.assertIsNone(body['retrieval']['traversal'])
+        self.assertFalse(body['retrieval']['auxiliaryEvidence']['replayable'])
         self.assertTrue(self.calls[-1]['_legacy_rag'])
 
 

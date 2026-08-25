@@ -43,6 +43,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import uuid
 from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
@@ -88,6 +89,8 @@ class TurboQuantStore:
         self.bits   = bits
         self.name   = name
         self._lock  = threading.RLock()
+        self._instance_id = uuid.uuid4().hex
+        self._generation = 0
 
         # Choose device
         if device == "auto":
@@ -160,6 +163,7 @@ class TurboQuantStore:
                 self._qjl_list.append(qjl.squeeze(0))
                 self._rn_list.append(rn.squeeze(0))
 
+            self._generation += 1
             return True
 
     def search(
@@ -167,19 +171,29 @@ class TurboQuantStore:
         query_vec: "np.ndarray | torch.Tensor",
         k: int = 10,
     ) -> List[Tuple[str, float]]:
+        results, _receipt = self.search_with_receipt(query_vec, k=k)
+        return results
+
+    def search_with_receipt(
+        self,
+        query_vec: "np.ndarray | torch.Tensor",
+        k: int = 10,
+        *,
+        embedding_model: str = "UNAVAILABLE",
+    ) -> Tuple[List[Tuple[str, float]], Dict[str, Any]]:
         """
-        Return top-k most similar entity IDs with cosine similarity scores.
+        Return top-k matches and the index identity used for that exact search.
 
         Uses float16 matmul against the dense cache — fast, no graph walk.
         Falls back to empty list if store is empty or encoder not ready.
         """
         if not self._tq_ready or self._size == 0:
-            return []
+            return [], self.state_receipt(embedding_model=embedding_model)
 
         with self._lock:
             t = self._to_unit_tensor(query_vec)
             if t is None:
-                return []
+                return [], self.state_receipt(embedding_model=embedding_model)
 
             # fp16 query × fp16 dense cache → inner products (= cosine, unit vecs)
             q16 = t.half().unsqueeze(0)          # (1, dim)
@@ -193,7 +207,7 @@ class TurboQuantStore:
             for i, v in zip(topk_idx.tolist(), topk_vals.tolist()):
                 eid = self._idx_to_id[i]
                 results.append((eid, round(float(v), 4)))
-            return results
+            return results, self.state_receipt(embedding_model=embedding_model)
 
     def remove(self, entity_id: str) -> bool:
         """Mark an entity as removed (tombstone via zeroing its row)."""
@@ -203,6 +217,7 @@ class TurboQuantStore:
             idx = self._id_to_idx.pop(entity_id)
             self._idx_to_id[idx] = ""  # tombstone
             self._dense[idx].zero_()
+            self._generation += 1
             return True
 
     def __len__(self) -> int:
@@ -210,6 +225,22 @@ class TurboQuantStore:
 
     def __contains__(self, entity_id: str) -> bool:
         return entity_id in self._id_to_idx
+
+    def state_receipt(self, *, embedding_model: str = "UNAVAILABLE") -> Dict[str, Any]:
+        """Identify the exact in-process semantic index generation used by a search."""
+        with self._lock:
+            return {
+                "provider": "turboquant",
+                "providerRevision": (
+                    f"tq-{self._instance_id[:16]}-g{self._generation}"
+                ),
+                "embeddingModel": embedding_model,
+                "indexCount": len(self._id_to_idx),
+                "indexGeneration": self._generation,
+                "store": self.name,
+                "dimension": self.dim,
+                "bits": self.bits,
+            }
 
     def memory_report(self) -> Dict[str, int]:
         """Return memory breakdown in bytes."""
