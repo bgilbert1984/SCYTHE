@@ -4,6 +4,36 @@ RF SCYTHE keeps SDR++ as a separate native process. The browser and Flask
 server never load or link SDR++ libraries; the bridge connects only to the two
 local interfaces supplied by SDR++ modules.
 
+## AlmaLinux 10 / WSL NESDR setup
+
+The repository vendors SDR++ source but does not install a system-wide build.
+For the minimal SCYTHE edge build, install the required packages from AlmaLinux
+and EPEL, then use the checked-in builder:
+
+```bash
+sudo dnf --disablerepo=tailscale-stable,unityhub install -y \
+  cmake gcc-c++ fftw-devel glfw-devel volk-devel libzstd-devel \
+  libusb1-devel rtl-sdr-devel
+scripts/build_sdrpp_edge_alma10.sh
+scripts/run_sdrpp_edge.sh
+```
+
+The builder installs under `~/.local/share/scythe/sdrpp-edge` and enables only
+the RTL-SDR source, a GUI VFO path, IQ Exporter, and Rigctl Server plus their
+small supporting modules. It does not modify `/usr`.
+
+For the SCYTHE NESDR SMArt v5 sensor used by this deployment, configure SDR++
+for serial `14530058`, 2.048 MS/s, localhost Int16 IQ Exporter on port 1234,
+and localhost Rigctl on port 4532. A 4096-point FFT then has 500 Hz native bin
+spacing before the bridge's bounded display downsampling.
+
+The running SCYTHE instance is a child of the user-level orchestrator service,
+so set the `SDRPP_*` variables on `scythe-orchestrator.service`, not on a
+nonexistent per-instance service. The child inherits that environment when the
+orchestrator starts it. SDR++ itself owns the USB device and must run from a
+login session whose active groups include `rtlsdr`; the web process does not
+need direct USB access.
+
 ## SDR++ configuration
 
 Create and enable these module instances in SDR++:
@@ -68,6 +98,14 @@ RF facts are labelled `OBSERVED`; temporal graph correlations are labelled
 GraphOps Copilot DSL uses the same evidence store and applies real frequency
 and time-window filters. GraphOps Autopilot subscribes to new evidence records
 and routes them through its existing confidence tiers.
+
+Local Ollama may continuously interpret these bounded observations and graph
+correlations. Cloud analysis remains an explicit disclosure event: send only
+selected observation windows, derived peak tracks/noise statistics, pinned
+graph evidence, calibration metadata, and evidence hashes. Never include raw
+IQ, unbounded waterfall history, receiver credentials, or hardware-control
+authority in a Cloud capsule. Measured RF stays `OBSERVED`; correlations and
+model explanations stay `INFERRED`.
 
 `rf_tune`, `rf_capture_control`, and sensor ingestion cannot be called through
 direct `tools/call`. They require the orchestrator proposal path. The default
