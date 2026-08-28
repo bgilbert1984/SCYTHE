@@ -11,4 +11,20 @@ if [[ ! -x "$binary" ]]; then
 fi
 
 export LD_LIBRARY_PATH="$install_dir/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-exec "$binary" "$@"
+
+# Default to --autostart so the NESDR begins after the first waterfall layout.
+# Set SCYTHE_SDRPP_AUTOSTART=0 for a manual Play click.
+args=("$@")
+if [[ "${SCYTHE_SDRPP_AUTOSTART:-1}" != "0" ]]; then
+    has_autostart=0
+    for arg in "${args[@]}"; do
+        if [[ "$arg" == "--autostart" ]]; then
+            has_autostart=1
+        fi
+    done
+    if ((has_autostart == 0)); then
+        args+=(--autostart)
+    fi
+fi
+
+exec "$binary" "${args[@]}"

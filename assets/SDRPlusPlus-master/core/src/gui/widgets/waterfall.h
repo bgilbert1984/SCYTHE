@@ -87,6 +87,7 @@ namespace ImGui {
         void init();
 
         void draw();
+        bool fftLayoutReady() const;
         float* getFFTBuffer();
         void pushFFT();
 

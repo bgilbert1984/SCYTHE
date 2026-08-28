@@ -2337,6 +2337,8 @@ def orchestrator_graphops_workbench():
             ('rf_bridge_status', {}),
             ('rf_spectrum_snapshot', {'include_bins': False}),
             ('rf_observations_query', {'since': now - 300, 'limit': 25}),
+            ('rf_sparse_status', {}),
+            ('rf_sparse_supports_query', {'limit': 12}),
         ],
         'events': [
             ('get_engine_metrics', {}),
@@ -2817,6 +2819,42 @@ def orchestrator_graphops_rf_observation_status():
     return jsonify({'status': 'ok', **get_rf_observation_store().stats(),
                     'authority': 'MEASURED_SPECTRAL_SUMMARY', 'rawIqAccepted': False,
                     'graphInstanceActive': _get_primary_instance_port() is not None})
+
+
+@app.route('/api/graphops/rf-sparse/status', methods=['GET'])
+def orchestrator_graphops_rf_sparse_status():
+    if not _graphops_directive_authorized():
+        return jsonify({'error': 'Authentication required'}), 401
+    from rf_bridge import get_rf_sparse_analyzer
+    analyzer = get_rf_sparse_analyzer()
+    if analyzer is None:
+        return jsonify({'status': 'unavailable', 'evidenceClass': 'DERIVED_INFERENCE',
+                        'rawIqAccepted': False}), 503
+    return jsonify({'status': 'ok', **analyzer.stats(), 'rawIqAccepted': False,
+                    'graphInstanceActive': _get_primary_instance_port() is not None})
+
+
+@app.route('/api/graphops/rf-sparse/supports', methods=['GET'])
+def orchestrator_graphops_rf_sparse_supports():
+    if not _graphops_directive_authorized():
+        return jsonify({'error': 'Authentication required'}), 401
+    from rf_bridge import get_rf_sparse_analyzer
+    analyzer = get_rf_sparse_analyzer()
+    if analyzer is None:
+        return jsonify({'status': 'unavailable', 'supports': [], 'rawIqAccepted': False}), 503
+    try:
+        supports = analyzer.query_supports(
+            since=request.args.get('since', type=float),
+            until=request.args.get('until', type=float),
+            atom_family=request.args.get('atom_family') or None,
+            sensor_id=request.args.get('sensor_id') or None,
+            limit=request.args.get('limit', default=50, type=int),
+        )
+    except (TypeError, ValueError) as exc:
+        return jsonify({'status': 'rejected', 'error': str(exc), 'supports': []}), 400
+    return jsonify({'status': 'ok', 'supports': supports, 'count': len(supports),
+                    'evidenceClass': 'DERIVED_INFERENCE', 'rawIqAccepted': False,
+                    'claimsWithheld': ['range', 'aoa', 'blade_length']})
 
 
 @app.route('/api/graphops/eve/events', methods=['POST'])

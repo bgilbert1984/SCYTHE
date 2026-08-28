@@ -806,6 +806,39 @@ def register_mcp_routes(app, engine, use_orchestrator: bool = False, auth_valida
         return jsonify({'status': 'ok', **get_rf_observation_store().stats(),
                         'authority': 'MEASURED_SPECTRAL_SUMMARY', 'rawIqAccepted': False})
 
+    @app.route('/api/graphops/rf-sparse/status', methods=['GET'])
+    def graphops_rf_sparse_status():
+        if not _authorized():
+            return _unauthorized()
+        from rf_bridge import get_rf_sparse_analyzer
+        analyzer = get_rf_sparse_analyzer()
+        if analyzer is None:
+            return jsonify({'status': 'unavailable', 'evidenceClass': 'DERIVED_INFERENCE',
+                            'rawIqAccepted': False}), 503
+        return jsonify({'status': 'ok', **analyzer.stats(), 'rawIqAccepted': False})
+
+    @app.route('/api/graphops/rf-sparse/supports', methods=['GET'])
+    def graphops_rf_sparse_supports():
+        if not _authorized():
+            return _unauthorized()
+        from rf_bridge import get_rf_sparse_analyzer
+        analyzer = get_rf_sparse_analyzer()
+        if analyzer is None:
+            return jsonify({'status': 'unavailable', 'supports': [], 'rawIqAccepted': False}), 503
+        try:
+            supports = analyzer.query_supports(
+                since=request.args.get('since', type=float),
+                until=request.args.get('until', type=float),
+                atom_family=request.args.get('atom_family') or None,
+                sensor_id=request.args.get('sensor_id') or None,
+                limit=request.args.get('limit', default=50, type=int),
+            )
+        except (TypeError, ValueError) as exc:
+            return jsonify({'status': 'rejected', 'error': str(exc), 'supports': []}), 400
+        return jsonify({'status': 'ok', 'supports': supports, 'count': len(supports),
+                        'evidenceClass': 'DERIVED_INFERENCE', 'rawIqAccepted': False,
+                        'claimsWithheld': ['range', 'aoa', 'blade_length']})
+
     @app.route('/api/graphops/eve/events', methods=['POST'])
     def graphops_eve_events():
         if not _authorized():

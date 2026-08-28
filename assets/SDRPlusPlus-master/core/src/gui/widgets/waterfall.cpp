@@ -873,11 +873,14 @@ namespace ImGui {
         buf_mtx.unlock();
     }
 
+    bool WaterFall::fftLayoutReady() const {
+        // Waterfall height is assigned on the first successful onResize().
+        // Until then, FFT producers must skip the frame rather than modulo 0.
+        return rawFFTs != NULL && (!waterfallVisible || waterfallHeight > 0);
+    }
+
     float* WaterFall::getFFTBuffer() {
-        // The source can autostart before the first GUI layout pass assigns a
-        // waterfall height. Avoid modulo-by-zero until that layout is ready;
-        // FFT producers already treat a null buffer as "try next frame".
-        if (rawFFTs == NULL || (waterfallVisible && waterfallHeight <= 0)) { return NULL; }
+        if (!fftLayoutReady()) { return NULL; }
         buf_mtx.lock();
         if (waterfallVisible) {
             currentFFTLine--;
@@ -890,7 +893,9 @@ namespace ImGui {
     }
 
     void WaterFall::pushFFT() {
-        if (rawFFTs == NULL) { return; }
+        // Pair with getFFTBuffer(): a null/not-ready acquire never locks, so
+        // this must return without unlocking. Height<=0 is the autostart race.
+        if (!fftLayoutReady()) { return; }
         std::lock_guard<std::recursive_mutex> lck(latestFFTMtx);
         double offsetRatio = viewOffset / (wholeBandwidth / 2.0);
         int drawDataSize = (viewBandwidth / wholeBandwidth) * rawFFTSize;

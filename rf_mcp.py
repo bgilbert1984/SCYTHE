@@ -6,7 +6,7 @@ import time
 from typing import Any, Dict, Iterable, Optional
 
 from mcp_registry import Tool
-from rf_bridge import get_rf_bridge, get_rf_observation_store
+from rf_bridge import get_rf_bridge, get_rf_observation_store, get_rf_sparse_analyzer
 
 
 def _edge_values(engine) -> Iterable[Any]:
@@ -69,7 +69,12 @@ def _read_tools():
 
     def status(*, engine, params):
         bridge = get_rf_bridge()
-        return {"bridge": bridge.status(False), "observations": bridge.observations.stats()}
+        sparse = get_rf_sparse_analyzer()
+        return {
+            "bridge": bridge.status(False),
+            "observations": bridge.observations.stats(),
+            "sparse": None if sparse is None else sparse.stats(),
+        }
 
     def snapshot(*, engine, params):
         frame = get_rf_bridge().latest_frame()
@@ -126,6 +131,39 @@ def _read_tools():
             "evidence_class": "OBSERVED", "raw_iq_exposed": False,
         }
 
+    sparse_query_schema = {
+        "type": "object",
+        "properties": {
+            "since": {"type": "number"}, "until": {"type": "number"},
+            "atom_family": {"type": "string"}, "sensor_id": {"type": "string"},
+            "limit": {"type": "integer", "minimum": 1, "maximum": 200},
+        },
+        "additionalProperties": False,
+    }
+
+    def sparse_status(*, engine, params):
+        analyzer = get_rf_sparse_analyzer()
+        if analyzer is None:
+            return {"available": False, "evidence_class": "DERIVED_INFERENCE", "raw_iq_exposed": False}
+        return {"available": True, **analyzer.stats()}
+
+    def sparse_query(*, engine, params):
+        analyzer = get_rf_sparse_analyzer()
+        if analyzer is None:
+            return {"supports": [], "count": 0, "evidence_class": "DERIVED_INFERENCE", "raw_iq_exposed": False}
+        supports = analyzer.query_supports(**params)
+        return {"supports": supports, "count": len(supports),
+                "evidence_class": "DERIVED_INFERENCE", "raw_iq_exposed": False,
+                "claims_withheld": ["range", "aoa", "blade_length"]}
+
+    def sparse_context(*, engine, params):
+        from rf_sparse_analyzer import compact_model_context
+        analyzer = get_rf_sparse_analyzer()
+        if analyzer is None:
+            return compact_model_context(None, [])
+        limit = int(params.get("limit", 6))
+        return compact_model_context(analyzer.latest_window(), analyzer.query_supports(limit=limit), limit)
+
     return [
         Tool("rf_bridge_status", "Return SDR++ edge bridge and RF evidence-store status.", obj, obj, status),
         Tool("rf_spectrum_snapshot", "Return the latest bounded FFT summary; raw IQ is never exposed.",
@@ -136,6 +174,13 @@ def _read_tools():
              {"type": "object", "properties": {"window_s": {"type": "number", "minimum": 0, "maximum": 86400},
               "min_snr_db": {"type": "number"}, "limit": {"type": "integer", "minimum": 1, "maximum": 100}},
               "additionalProperties": False}, obj, context),
+        Tool("rf_sparse_status", "Return residual-window and OMP-support stats. Derived inference only; no range/AoA.",
+             obj, obj, sparse_status),
+        Tool("rf_sparse_supports_query", "Query OMP-selected RF model components. Evidence class is DERIVED_INFERENCE.",
+             sparse_query_schema, obj, sparse_query),
+        Tool("rf_sparse_insight_context", "Return compact sparse-support context for local Ollama. No IQ, no hardware authority.",
+             {"type": "object", "properties": {"limit": {"type": "integer", "minimum": 1, "maximum": 12}},
+              "additionalProperties": False}, obj, sparse_context),
     ]
 
 

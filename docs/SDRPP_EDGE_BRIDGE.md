@@ -22,6 +22,13 @@ The builder installs under `~/.local/share/scythe/sdrpp-edge` and enables only
 the RTL-SDR source, a GUI VFO path, IQ Exporter, and Rigctl Server plus their
 small supporting modules. It does not modify `/usr`.
 
+The vendored SDR++ tree carries a bounded first-frame guard: waterfall FFT
+producers skip the frame until `waterfallHeight > 0`, and `--autostart` waits
+for that layout. That avoids the upstream `WaterFall::getFFTBuffer()`
+modulo-by-zero on the first FFT frame. `scripts/run_sdrpp_edge.sh` passes
+`--autostart` by default. Set `SCYTHE_SDRPP_AUTOSTART=0` to keep a manual Play
+click.
+
 For the SCYTHE NESDR SMArt v5 sensor used by this deployment, configure SDR++
 for serial `14530058`, 2.048 MS/s, localhost Int16 IQ Exporter on port 1234,
 and localhost Rigctl on port 4532. A 4096-point FFT then has 500 Hz native bin
@@ -92,6 +99,20 @@ Authenticated self-hosted AI clients can use these read-only MCP tools:
 - `rf_observations_query`
 - `rf_correlate_graph`
 - `rf_insight_context`
+- `rf_sparse_status`
+- `rf_sparse_supports_query`
+- `rf_sparse_insight_context`
+
+Peak FFT detections remain `OBSERVED` on `/api/graphops/rf-observations`.
+Residual windows and OMP supports are a second family:
+
+- `GET /api/graphops/rf-sparse/status`
+- `GET /api/graphops/rf-sparse/supports`
+
+Those records are `DERIVED_INFERENCE`. They never claim range, AoA, or blade
+length. Raw IQ and full waterfalls stay on the edge. Sparse recovery currently
+supports stationary carrier, linear drift, and periodic sideband atoms against
+a four-second bounded FFT window.
 
 RF facts are labelled `OBSERVED`; temporal graph correlations are labelled
 `INFERRED` and explicitly do not claim causality. `RF_CORRELATE` in the
@@ -124,7 +145,7 @@ API should be exposed through the instance proxy.
 Run the self-contained bridge tests with:
 
 ```bash
-python -m unittest -v test_rf_bridge.py test_rf_mcp.py
+python -m unittest -v test_rf_bridge.py test_rf_mcp.py test_rf_sparse_analyzer.py test_graphops_rf_ingest.py
 ```
 
 They use local fake IQ and Rigctl servers; SDR hardware is not required.

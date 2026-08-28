@@ -361,12 +361,6 @@ void MainWindow::draw() {
     }
     if (playButtonLocked && !tmpPlaySate) { style::endDisabled(); }
 
-    // Handle auto-start
-    if (autostart) {
-        autostart = false;
-        setPlayState(true);
-    }
-
     ImGui::SameLine();
     float origY = ImGui::GetCursorPosY();
 
@@ -548,6 +542,14 @@ void MainWindow::draw() {
     gui::waterfall.draw();
 
     ImGui::EndChild();
+
+    // Autostart after the first layout that gives the waterfall a positive
+    // height. Doing this at the play button races WaterFall::getFFTBuffer()
+    // and divides by waterfallHeight == 0 on the first FFT frame.
+    if (autostart && gui::waterfall.fftLayoutReady()) {
+        autostart = false;
+        setPlayState(true);
+    }
 
     if (!lockWaterfallControls) {
         // Handle arrow keys

@@ -373,6 +373,12 @@ class SDRPlusPlusBridge:
         self._bytes_received = 0
         self._callbacks: list[Callable[[Dict], None]] = []
         self.observations = RFObservationStore.from_env()
+        try:
+            from rf_sparse_analyzer import RFSparseAnalyzer
+            self.sparse = RFSparseAnalyzer()
+        except Exception:
+            LOG.exception("RF sparse analyzer unavailable")
+            self.sparse = None
 
     def add_frame_callback(self, callback: Callable[[Dict], None]) -> None:
         with self._lock:
@@ -477,6 +483,7 @@ class SDRPlusPlusBridge:
                 "latest_sequence": self._sequence,
                 "latest_frame_at": latest.get("timestamp") if latest else None,
                 "config": asdict(self.config),
+                "sparse": None if self.sparse is None else self.sparse.stats(),
             }
         if include_control:
             status["rigctl"] = self.control_status()
@@ -562,6 +569,12 @@ class SDRPlusPlusBridge:
             except Exception:
                 LOG.exception("SDR++ frame callback failed")
         self.observations.ingest_frame(frame)
+        sparse = getattr(self, "sparse", None)
+        if sparse is not None:
+            try:
+                sparse.ingest_frame(frame)
+            except Exception:
+                LOG.exception("RF sparse analyzer failed")
 
 
 _bridge_lock = threading.Lock()
@@ -580,6 +593,10 @@ def get_rf_bridge() -> SDRPlusPlusBridge:
 
 def get_rf_observation_store() -> RFObservationStore:
     return get_rf_bridge().observations
+
+
+def get_rf_sparse_analyzer():
+    return getattr(get_rf_bridge(), "sparse", None)
 
 
 def reset_rf_bridge_for_tests() -> None:

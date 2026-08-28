@@ -47,7 +47,10 @@ class GraphOpsWorkbenchTests(unittest.TestCase):
         response = app.test_client().post('/api/graphops/workbench', json={'panel': 'spectrum'})
         self.assertEqual(response.status_code, 200)
         called = [call.args[2]['params']['name'] for call in proxy_post.call_args_list]
-        self.assertEqual(called, ['rf_bridge_status', 'rf_spectrum_snapshot', 'rf_observations_query'])
+        self.assertEqual(called, [
+            'rf_bridge_status', 'rf_spectrum_snapshot', 'rf_observations_query',
+            'rf_sparse_status', 'rf_sparse_supports_query',
+        ])
         proposed = [item['tool'] for item in response.get_json()['proposals']]
         self.assertEqual(proposed, ['rf_tune', 'rf_capture_control'])
 
