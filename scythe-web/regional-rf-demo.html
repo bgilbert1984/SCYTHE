@@ -155,6 +155,14 @@
     .infra-lens__toggle { padding:3px 7px; color:#7890a8; background:#071422; border:1px solid #24506a;
       font:8px ui-monospace,monospace; cursor:pointer; }
     .infra-lens__toggle[aria-pressed="true"] { color:#fff; border-color:#f7d154; }
+    .infra-lens__selection { margin:0 0 7px; padding:7px; color:#ffc66d;
+      border:1px solid rgba(255,166,65,.62); background:rgba(48,27,5,.72); }
+    .infra-lens__selection-title { margin:0 0 5px; color:#ffd596; font:9px ui-monospace,monospace; }
+    .infra-lens__selection-body { white-space:pre-wrap; overflow-wrap:anywhere; }
+    .infra-lens__selection-actions { display:grid; grid-template-columns:repeat(2,minmax(0,1fr));
+      gap:4px; margin-top:6px; }
+    .infra-lens__selection-boundary { margin-top:5px; padding-top:5px; color:#ffb25e;
+      border-top:1px dashed rgba(255,178,94,.45); }
     .infra-lens__column { min-width:0; padding:5px; border:1px solid rgba(0,212,255,.22); }
     .infra-lens__title { margin:0 0 5px; color:#66ddff; font:9px ui-monospace,monospace; }
     .infra-lens__card { display:block; width:100%; margin:0 0 4px; padding:5px; color:#ccefff;
@@ -643,6 +651,10 @@
     window.scytheInfrastructureController = infrastructureController;
     window.scytheInfrastructureGlobe = infrastructureGlobe;
     liveRoot.addEventListener("scythe-web:infra-overlay", ({detail}) => infrastructureGlobe.setOverlayVisibility(detail));
+    document.getElementById("globe-root").addEventListener("scythe-web:infrastructure-selection", ({detail}) => {
+      infrastructureView.setInfrastructureSelection(detail);
+      setHypergraphMode("infrastructure");
+    });
     let resultTabs = null;
     function setHypergraphMode(mode) {
       const show3D = mode === "3d" && liveHypergraph3D;

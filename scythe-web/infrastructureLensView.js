@@ -7,6 +7,7 @@ export class InfrastructureLensView {
     if (!root || !controller) throw new TypeError("infrastructure lens root and controller are required");
     this.root = root; this.controller = controller; this.document = root.ownerDocument ?? globalThis.document;
     this.window = this.document.defaultView ?? globalThis; this.snapshot = null; this.visible = false;
+    this.infrastructureSelection = null;
     this.overlays = {declared: true, controlPlane: true, contradictions: true};
   }
   start() {
@@ -16,6 +17,10 @@ export class InfrastructureLensView {
     }); return this;
   }
   setVisible(value) { this.visible = Boolean(value); if (this.visible) this.render(); }
+  setInfrastructureSelection(selection) {
+    this.infrastructureSelection = selection?.kind === "peeringdb-facility" ? selection : null;
+    if (this.visible) this.render();
+  }
   render(error = null) {
     this.root.replaceChildren();
     if (error && !this.snapshot) { this.root.append(el(this.document, "pre", "infra-lens__status", `INFRAFLOW // UNAVAILABLE // ${error.message}`)); return; }
@@ -24,8 +29,31 @@ export class InfrastructureLensView {
     const summary = data.summary ?? {};
     const contradictions = data.infrastructureContradictions ?? {};
     const contradictionSummary = contradictions.summary ?? {};
+    const domainByAsn = new Map((data.domains ?? []).filter((item) => item.asn)
+      .map((item) => [Number(item.asn), item]));
     this.root.append(el(this.document, "pre", "infra-lens__status",
       `INFRAFLOW // ${String(data.status).toUpperCase()} // ${summary.domains ?? 0} DOMAINS // ${summary.observedFlows ?? 0} OBSERVED FLOWS\nPEERINGDB // ${summary.peeringdbNetworks ?? 0} DECLARED NETWORKS // RIS // ${summary.controlPlaneObservations ?? 0} CONTROL-PLANE OBSERVATIONS\nTENSIONS // ${contradictionSummary.findings ?? 0} FINDINGS // ${contradictionSummary.changes ?? 0} CHANGES // ${contradictionSummary.withheldTests ?? 0} TESTS WITHHELD`));
+    if (this.infrastructureSelection) {
+      const selection = this.infrastructureSelection; const facility = selection.facility ?? {};
+      const relatedDomains = (facility.environmentAsns ?? []).map((asn) => domainByAsn.get(Number(asn))).filter(Boolean);
+      const panel = el(this.document, "section", "infra-lens__selection");
+      panel.append(el(this.document, "h3", "infra-lens__selection-title",
+        `SELECTED FAC ${facility.id ?? "UNKNOWN"} // PEERINGDB SELF-REPORTED`));
+      panel.append(el(this.document, "div", "infra-lens__selection-body",
+        `${facility.name ?? "UNNAMED"}\n${[facility.city, facility.state, facility.country].filter(Boolean).join(", ") || "LOCATION UNDECLARED"}\nCOORDINATES // ${Number.isFinite(facility.latitude) && Number.isFinite(facility.longitude) ? `${facility.latitude.toFixed(5)}°, ${facility.longitude.toFixed(5)}°` : "UNAVAILABLE"}\nENVIRONMENT ASNs // ${(facility.environmentAsns ?? []).join(", ") || "NONE IN CURRENT SCOPE"}\nUPDATED // ${facility.updated ?? "UNKNOWN"}`));
+      const actions = el(this.document, "div", "infra-lens__selection-actions");
+      for (const domain of relatedDomains) {
+        const hostId = domain.observedHostIds?.[0]; if (!hostId) continue;
+        const button = el(this.document, "button", "infra-lens__card infra-lens__card--declared",
+          `OPEN RELATED ${domain.id} // ${domain.organization ?? "OWNERSHIP UNRESOLVED"}\n${hostId}`);
+        button.type = "button"; button.addEventListener("click", () => this.#select("graph-node", hostId));
+        actions.append(button);
+      }
+      if (!actions.children.length) actions.append(el(this.document, "div", "infra-lens__empty",
+        "NO OBSERVED HOST IN THE CURRENT GRAPH MATCHES THIS FACILITY'S DECLARED ASN PRESENCE"));
+      panel.append(actions, el(this.document, "div", "infra-lens__selection-boundary", selection.boundary));
+      this.root.append(panel);
+    }
     const toggles = el(this.document, "div", "infra-lens__toggles");
     for (const [key, label] of [["declared", "DECLARED PDB"], ["controlPlane", "RIS CONTROL PLANE"],
       ["contradictions", "EVIDENCE TENSIONS"]]) {
@@ -59,7 +87,6 @@ export class InfrastructureLensView {
     if (!(data.observedFlows ?? []).length) flows.append(el(this.document, "div", "infra-lens__empty", "NO CROSS-DOMAIN FLOW IN BOUNDED SNAPSHOT"));
     const declared = el(this.document, "section", "infra-lens__column");
     const pdb = data.peeringdbEvidence ?? {};
-    const domainByAsn = new Map((data.domains ?? []).filter((item) => item.asn).map((item) => [Number(item.asn), item]));
     declared.append(el(this.document, "h3", "infra-lens__title", "PEERINGDB // SELF-REPORTED"));
     for (const network of pdb.networks ?? []) {
       const card = el(this.document, "button", "infra-lens__card infra-lens__card--declared",

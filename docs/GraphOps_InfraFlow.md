@@ -24,9 +24,15 @@ While the lens is active, the Cesium globe renders:
 
 - cyan points at inferred domain centroids;
 - translucent uncertainty regions using GeoIP accuracy radius;
-- cyan geodesic endpoint connectors for observed graph flow aggregates.
+- cyan geodesic endpoint connectors for observed graph flow aggregates;
+- interactive orange `FAC <id>` PeeringDB facility markers. Hovering discloses
+  bounded declared metadata; clicking opens the Cesium entity and an
+  Infrastructure Lens evidence panel with any current observed hosts whose ASN
+  matches the facility's declared presence.
 
 The connectors communicate association and activity at a glance. They do not claim the physical packet path, BGP AS path, cable, exchange point, relay, or device location.
+Facility interaction likewise remains `PEERINGDB_SELF_REPORTED`: declared
+co-location does not prove traffic, path, or device presence.
 
 ## Full-Fidelity Cloud
 

@@ -3,6 +3,41 @@ function value(entity, key, time) {
   return property?.getValue?.(time) ?? property ?? null;
 }
 
+function boundedJsonList(raw, limit = 64) {
+  try {
+    const values = JSON.parse(String(raw ?? "[]"));
+    return Array.isArray(values) ? [...new Set(values.map(Number).filter(Number.isFinite))].slice(0, limit) : [];
+  } catch { return []; }
+}
+
+function escapeHtml(input) {
+  return String(input ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#39;");
+}
+
+export function infrastructureSelectionDetail(entity, time, graphRevision = null) {
+  if (String(value(entity, "infrastructureKind", time) ?? "") !== "peeringdb_facility") return null;
+  const facilityId = String(value(entity, "facilityId", time) ?? "").slice(0, 64);
+  if (!facilityId) return null;
+  return {
+    kind: "peeringdb-facility", entityId: `peeringdb:facility:${facilityId}`,
+    graphRevision: String(value(entity, "graphRevision", time) ?? graphRevision ?? "").slice(0, 128) || null,
+    evidenceClass: "INFRASTRUCTURE_EVIDENCE", authority: "PEERINGDB_SELF_REPORTED",
+    facility: {
+      id: facilityId, name: String(value(entity, "facilityName", time) ?? "UNNAMED").slice(0, 256),
+      organizationId: String(value(entity, "organizationId", time) ?? "").slice(0, 64) || null,
+      city: String(value(entity, "city", time) ?? "").slice(0, 128),
+      state: String(value(entity, "state", time) ?? "").slice(0, 128),
+      country: String(value(entity, "country", time) ?? "").slice(0, 32),
+      latitude: Number(value(entity, "latitudeDegrees", time)),
+      longitude: Number(value(entity, "longitudeDegrees", time)),
+      updated: String(value(entity, "recordUpdated", time) ?? "").slice(0, 64) || null,
+      environmentAsns: boundedJsonList(value(entity, "environmentAsnsJson", time)),
+    },
+    boundary: "PEERINGDB IS SELF-REPORTED DECLARED INFRASTRUCTURE; CO-LOCATION DOES NOT PROVE TRAFFIC, PATH, OR DEVICE PRESENCE",
+  };
+}
+
 export function summarizeInfrastructureCluster(entities, time, limit = 24) {
   const domains = []; const hostIds = new Set();
   for (const entity of Array.isArray(entities) ? entities : []) {
@@ -32,7 +67,8 @@ export class InfrastructureGlobeLayer {
     this.viewer = viewer; this.Cesium = Cesium; this.controller = controller; this.visible = false;
     this.overlays = {declared: true, controlPlane: true, contradictions: true}; this.snapshot = null;
     this.source = new Cesium.CustomDataSource("SCYTHE InfraFlow // DISPLAY ONLY");
-    this.hoverHandler = null; this.tooltip = null; this.removeClusterListener = null;
+    this.interactionHandler = null; this.tooltip = null; this.removeClusterListener = null;
+    this.facilityHovered = false;
   }
   async start() {
     await this.viewer.dataSources.add(this.source);
@@ -94,20 +130,36 @@ export class InfrastructureGlobeLayer {
     const C = this.Cesium; const pdb = snapshot.peeringdbEvidence ?? {};
     const presenceByFacility = new Map();
     for (const row of pdb.facilityPresences ?? []) {
-      if (!presenceByFacility.has(row.fac_id)) presenceByFacility.set(row.fac_id, []);
-      presenceByFacility.get(row.fac_id).push(row.asn);
+      const key = String(row.fac_id ?? ""); if (!key) continue;
+      if (!presenceByFacility.has(key)) presenceByFacility.set(key, new Set());
+      if (Number.isFinite(Number(row.asn))) presenceByFacility.get(key).add(Number(row.asn));
     }
     for (const facility of pdb.facilities ?? []) {
       const lat = Number(facility.latitude), lon = Number(facility.longitude);
       if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
-      const asns = presenceByFacility.get(facility.id) ?? [];
+      const asns = [...(presenceByFacility.get(String(facility.id)) ?? [])];
+      const hoverText = [
+        `PEERINGDB FACILITY ${facility.id} // SELF-REPORTED`,
+        facility.name ?? "UNNAMED",
+        [facility.city, facility.state, facility.country].filter(Boolean).join(", ") || "LOCATION UNDECLARED",
+        `ENVIRONMENT ASNs // ${asns.join(", ") || "NONE IN CURRENT SCOPE"}`,
+        `UPDATED // ${facility.updated ?? "UNKNOWN"}`,
+        "CLICK // OPEN DECLARED FACILITY EVIDENCE",
+        "BOUNDARY // CO-LOCATION DOES NOT PROVE TRAFFIC, PATH, OR DEVICE PRESENCE",
+      ].join("\n");
       this.source.entities.add({id: `scythe-infra:pdb-fac:${facility.id}`,
         position: C.Cartesian3.fromDegrees(lon, lat, 600),
         ellipse: {semiMajorAxis: 18000, semiMinorAxis: 18000,
           material: C.Color.ORANGE.withAlpha(.035), outline: true, outlineColor: C.Color.ORANGE.withAlpha(.7), height: 0},
         label: {text: `FAC ${facility.id}`, font: "9px monospace", fillColor: C.Color.ORANGE,
           pixelOffset: new C.Cartesian2(0, -12), showBackground: true, backgroundColor: C.Color.BLACK.withAlpha(.65)},
-        description: `PEERINGDB FACILITY // SELF-REPORTED // ${facility.name ?? "UNNAMED"} // ENVIRONMENT ASNs ${asns.join(", ") || "NONE"} // CO-LOCATION DOES NOT PROVE TRAFFIC`});
+        properties: {infrastructureKind: "peeringdb_facility", facilityId: String(facility.id),
+          facilityName: facility.name ?? "UNNAMED", organizationId: facility.org_id ?? "",
+          city: facility.city ?? "", state: facility.state ?? "", country: facility.country ?? "",
+          latitudeDegrees: lat, longitudeDegrees: lon, recordUpdated: facility.updated ?? null,
+          environmentAsnsJson: JSON.stringify(asns.slice(0, 64)), graphRevision: snapshot.graphRevision,
+          evidenceClass: "INFRASTRUCTURE_EVIDENCE", authority: "PEERINGDB_SELF_REPORTED", hoverText},
+        description: escapeHtml(hoverText).replaceAll("\n", "<br>")});
     }
     for (const row of snapshot.declaredSharedIxCandidates ?? []) {
       const source = domains.get(`asn:${row.sourceAsn}`)?.centroid; const target = domains.get(`asn:${row.targetAsn}`)?.centroid;
@@ -157,10 +209,20 @@ export class InfrastructureGlobeLayer {
       this.tooltip = document.createElement("div"); this.tooltip.className = "graph-globe-cluster-tooltip";
       this.tooltip.hidden = true; this.tooltip.setAttribute("role", "tooltip"); this.viewer.container.append(this.tooltip);
     }
-    if (!this.Cesium.ScreenSpaceEventHandler || !this.Cesium.ScreenSpaceEventType?.MOUSE_MOVE) return;
-    this.hoverHandler = new this.Cesium.ScreenSpaceEventHandler(this.viewer.scene.canvas);
-    this.hoverHandler.setInputAction((movement) => {
+    if (!this.Cesium.ScreenSpaceEventHandler) return;
+    this.interactionHandler = new this.Cesium.ScreenSpaceEventHandler(this.viewer.scene.canvas);
+    if (this.Cesium.ScreenSpaceEventType?.MOUSE_MOVE) this.interactionHandler.setInputAction((movement) => {
       const picked = this.viewer.scene.pick(movement.endPosition)?.id;
+      const facility = infrastructureSelectionDetail(picked, this.viewer.clock?.currentTime, this.snapshot?.graphRevision);
+      if (facility && this.tooltip) {
+        this.tooltip.textContent = String(value(picked, "hoverText", this.viewer.clock?.currentTime) ?? facility.boundary);
+        this.tooltip.hidden = false; this.tooltip.style.left = `${Number(movement.endPosition?.x ?? 0) + 13}px`;
+        this.tooltip.style.top = `${Number(movement.endPosition?.y ?? 0) + 13}px`;
+        if (this.viewer.scene.canvas?.style) this.viewer.scene.canvas.style.cursor = "pointer";
+        this.facilityHovered = true; return;
+      }
+      if (this.facilityHovered && this.viewer.scene.canvas?.style) this.viewer.scene.canvas.style.cursor = "default";
+      this.facilityHovered = false;
       if (!Array.isArray(picked) || picked.length < 2 || !this.tooltip) {
         if (this.tooltip) this.tooltip.hidden = true; return;
       }
@@ -170,8 +232,17 @@ export class InfrastructureGlobeLayer {
       this.tooltip.hidden = false; this.tooltip.style.left = `${Number(movement.endPosition?.x ?? 0) + 13}px`;
       this.tooltip.style.top = `${Number(movement.endPosition?.y ?? 0) + 13}px`;
     }, this.Cesium.ScreenSpaceEventType.MOUSE_MOVE);
+    if (this.Cesium.ScreenSpaceEventType?.LEFT_CLICK) this.interactionHandler.setInputAction((movement) => {
+      const picked = this.viewer.scene.pick(movement.position)?.id;
+      const detail = infrastructureSelectionDetail(picked, this.viewer.clock?.currentTime, this.snapshot?.graphRevision);
+      if (!detail) return;
+      this.viewer.selectedEntity = picked;
+      const EventClass = this.viewer.container?.ownerDocument?.defaultView?.CustomEvent ?? globalThis.CustomEvent;
+      this.viewer.container?.dispatchEvent(new EventClass("scythe-web:infrastructure-selection",
+        {bubbles: true, detail}));
+    }, this.Cesium.ScreenSpaceEventType.LEFT_CLICK);
   }
-  destroy() { this.unsubscribe?.(); this.hoverHandler?.destroy(); this.hoverHandler = null;
+  destroy() { this.unsubscribe?.(); this.interactionHandler?.destroy(); this.interactionHandler = null;
     this.tooltip?.remove(); this.tooltip = null; this.removeClusterListener?.(); this.removeClusterListener = null;
     this.viewer.dataSources.remove(this.source, true); }
 }
