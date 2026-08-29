@@ -90,6 +90,12 @@
       font:9px ui-monospace,monospace; padding:3px 8px; cursor:pointer; }
     .live-hypergraph__modes button[aria-pressed="true"] { color:#ccefff; border-color:#00d4ff;
       box-shadow:inset 0 0 8px rgba(0,212,255,.18); }
+    .live-hypergraph__modes .live-hypergraph__detail { margin-left:auto; color:#f7d154;
+      border-color:#665c2b; }
+    .live-hypergraph__modes .live-hypergraph__detail[aria-pressed="true"] { color:#071422;
+      background:#f7d154; border-color:#fff1a3; box-shadow:0 0 9px rgba(247,209,84,.35); }
+    .live-hypergraph__modes .live-hypergraph__detail[data-state="limited"] { color:#ffcf70;
+      background:#3a2510; border-color:#ff8c42; }
     .live-hypergraph__geo-controls { position:absolute; z-index:7; top:4px; right:101px;
       color:#8ca3b3; font:8px ui-monospace,monospace; }
     .live-hypergraph__geo-controls button { padding:2px 6px; color:#708797; background:#071422;
@@ -287,6 +293,8 @@
         <button id="hypergraph-mode-semantic" type="button" role="tab" aria-pressed="false" aria-selected="false">SEMANTIC</button>
         <button id="hypergraph-mode-spectrum" type="button" role="tab" aria-pressed="false" aria-selected="false">SPECTRUM</button>
         <button id="hypergraph-mode-events" type="button" role="tab" aria-pressed="false" aria-selected="false">EVENTS</button>
+        <button id="live-hypergraph-max-detail" class="live-hypergraph__detail" type="button"
+          role="switch" aria-pressed="false" title="Request the bounded 500-node / 1000-edge operator lens">MAX DETAIL</button>
       </div>
       <div class="live-hypergraph__geo-controls" aria-label="Cesium live geographic overlay controls">
         <details class="live-hypergraph__geo-more">
@@ -521,6 +529,22 @@
         `LIVE HYPERGRAPH // UNAVAILABLE // ${error.message}`;
     });
     const liveRoot = document.getElementById("live-hypergraph");
+    const maxDetailButton = document.getElementById("live-hypergraph-max-detail");
+    const syncDetailButton = (detail = liveGraphController.detailState()) => {
+      maxDetailButton.setAttribute("aria-pressed", String(detail.maxDetailRequested));
+      maxDetailButton.dataset.state = detail.performanceLimited ? "limited" : detail.tierId;
+      maxDetailButton.textContent = detail.maxDetailRequested
+        ? `MAX DETAIL // ${detail.nodeLimit}N·${detail.edgeLimit}E` : "MAX DETAIL";
+      maxDetailButton.title = detail.performanceLimited
+        ? `Frame guard stepped ${detail.requestedTier} down to ${detail.tier}; toggle off and on to retry`
+        : `Current ${detail.tier} lens: ${detail.nodeLimit} nodes / ${detail.edgeLimit} edges`;
+    };
+    liveGraphController.subscribe((update) => syncDetailButton(update.detail));
+    maxDetailButton.addEventListener("click", () => {
+      liveGraphController.setMaxDetail(maxDetailButton.getAttribute("aria-pressed") !== "true");
+      syncDetailButton();
+    });
+    syncDetailButton();
     for (const button of liveRoot.querySelectorAll("[data-live-geo]")) button.addEventListener("click", () => {
       const key = button.dataset.liveGeo; const enabled = button.getAttribute("aria-pressed") !== "true";
       button.setAttribute("aria-pressed", String(enabled));

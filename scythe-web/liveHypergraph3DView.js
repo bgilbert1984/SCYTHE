@@ -70,7 +70,7 @@ export class LiveHypergraph3DView {
     this.reducedMotion = reducedMotion ?? Boolean(this.window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches);
     this.positions = new Map(); this.nodeMeshes = new Map(); this.edgeObjects = new Map();
     this.pickTargets = []; this.graphRevision = null; this.unsubscribe = null;
-    this.visible = !this.container.hidden; this.selected = null; this.started = false;
+    this.visible = !this.container.hidden; this.selected = null; this.started = false; this.lastFrameAt = null;
   }
 
   async start() {
@@ -90,7 +90,7 @@ export class LiveHypergraph3DView {
     const height = Math.max(this.container.clientHeight || 220, 160);
     this.scene = new T.Scene(); this.scene.background = new T.Color(0x030914);
     // The bounded production graph can span hundreds of topology units. Keep
-    // atmospheric depth subtle enough that a fitted 200-node scene is visible.
+    // atmospheric depth subtle enough that a fitted bounded scene is visible.
     this.scene.fog = new T.FogExp2(0x030914, 0.00045);
     this.camera = new T.PerspectiveCamera(56, width / height, 0.1, 3000);
     this.camera.position.set(170, 125, 190);
@@ -282,7 +282,7 @@ export class LiveHypergraph3DView {
     this.pointer.x = ((event.clientX - bounds.left) / bounds.width) * 2 - 1;
     this.pointer.y = -((event.clientY - bounds.top) / bounds.height) * 2 + 1;
     this.raycaster.setFromCamera(this.pointer, this.camera);
-    // Give every node a small screen-space hit target. At a 200-node camera fit
+    // Give every node a small screen-space hit target. At a dense bounded camera fit
     // a sphere can be visually meaningful yet sub-pixel to mesh raycasting.
     // Nodes take precedence inside this target so dense lines cannot steal an
     // intentional click.
@@ -323,8 +323,11 @@ export class LiveHypergraph3DView {
     if (!this.renderer) return;
     this.renderer.setAnimationLoop(enabled ? () => {
       this.controls?.update();
+      const frameAt = this.window.performance?.now?.() ?? Date.now();
+      if (this.lastFrameAt != null) this.controller.reportFrameTime?.(frameAt - this.lastFrameAt);
+      this.lastFrameAt = frameAt;
       if (!this.reducedMotion) {
-        const now = this.window.performance?.now?.() ?? Date.now();
+        const now = frameAt;
         for (const mesh of this.nodeMeshes.values()) {
           const age = now - mesh.userData.arrivedAt; const bloom = age < 700 ? 1 + (1 - age / 700) * 0.7 : 1;
           mesh.scale.setScalar(bloom);
@@ -337,6 +340,7 @@ export class LiveHypergraph3DView {
       }
       this.renderer.render(this.scene, this.camera);
     } : null);
+    if (!enabled) this.lastFrameAt = null;
   }
 
   setVisible(visible) { this.visible = Boolean(visible); this.container.hidden = !this.visible;

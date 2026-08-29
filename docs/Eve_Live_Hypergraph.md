@@ -45,8 +45,9 @@ one stable five-tuple `network_flow` edge through WriteBus.
 - Event types beginning with `test` or `synthetic` are `SYNTHETIC`.
 - Network entities declare `geospatialAuthority: ABSENT` and have no position.
 - The 2D layout is topology only; it is explicitly labelled `NOT GEOLOCATION`.
-- Snapshot responses are bounded to 500 nodes and 1,000 edges server-side; the
-  demo requests 200 nodes and 300 edges.
+- Snapshot responses are bounded to 500 nodes and 1,000 edges server-side. The
+  demo requests 300 nodes and 600 edges for its overview, 400/800 while focused,
+  and 500/1,000 only when the operator enables MAX DETAIL.
 - The Eve gRPC method is unauthenticated only on the existing loopback-bound
   gRPC server. Its content is validated again before WriteBus mutation.
 
@@ -78,7 +79,7 @@ Inspect it with:
 systemctl --user status eve-streamer.service
 curl http://127.0.0.1:8081/capture/metrics
 curl http://127.0.0.1:5001/api/graphops/eve/status
-curl 'http://127.0.0.1:5001/api/graphops/selection/graph?node_limit=200&edge_limit=300'
+curl 'http://127.0.0.1:5001/api/graphops/selection/graph?node_limit=300&edge_limit=600'
 ```
 
 The originally bundled executable was older than the checked-in source and its
@@ -120,7 +121,7 @@ treated as evidence that the corresponding activity was absent on the wire.
 The orchestrator additionally retains an in-memory temporal dissection ring
 for each recently observed flow: at most the latest 32 accepted, deduplicated
 Eve summaries. The ring is a sidecar rather than graph-edge metadata, so normal
-200-node/300-edge polling and immutable graph snapshots do not multiply the
+Tiered live polling and immutable graph snapshots do not multiply the
 sequence payload across every displayed edge. Only the explicitly selected
 flow receives its ordered ring, inter-arrival cadence, window, omitted-event
 count, post-selection exclusion count, and decoded fields. Events newer than a
@@ -397,6 +398,8 @@ Verification includes:
 - live regional-demo browser acceptance.
 - live node selection and executed provenance traversal against the exact
   retained render revision, with no HTTP, console, or page errors.
-- live Three.js rendering of the bounded 200-node/300-edge production snapshot,
-  2D/3D mode switching, and executed provenance traversal from a selectable 3D
-  graph edge.
+- live Three.js rendering of the tiered bounded production snapshot (300/600
+  overview, 400/800 focused, operator-requested 500/1,000 maximum), 2D/3D mode
+  switching, and executed provenance traversal from a selectable 3D graph edge;
+- automatic frame-time protection that steps detail down after sustained frames
+  above 28 ms without reacting to isolated stalls.

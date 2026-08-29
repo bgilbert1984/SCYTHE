@@ -33,7 +33,7 @@ function layout(nodes, width, height) {
 
 export class LiveHypergraphView {
   constructor({root, apiBase = "", fetchImpl = globalThis.fetch, refreshMilliseconds = 2000,
-               nodeLimit = 200, edgeLimit = 300, controller = null}) {
+               nodeLimit = 300, edgeLimit = 600, controller = null}) {
     if (!root) throw new TypeError("live hypergraph root is required");
     this.root = root; this.apiBase = apiBase; this.fetchImpl = fetchImpl;
     this.refreshMilliseconds = Math.max(500, Number(refreshMilliseconds) || 2000);
@@ -82,12 +82,15 @@ export class LiveHypergraphView {
   }
 
   render(graph) {
+    const startedAt = this.window.performance?.now?.() ?? Date.now();
     while (this.svg.firstChild) this.svg.removeChild(this.svg.firstChild);
     const width = Math.max(this.svg.clientWidth || 420, 240);
     const height = Math.max(this.svg.clientHeight || 260, 160);
     this.svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
     const displayGraph = projectCityContext(graph);
-    const nodes = displayGraph.nodes.slice(0, this.nodeLimit + displayGraph.cityContext.nodeCount);
+    const nodeLimit = this.controller?.nodeLimit ?? this.nodeLimit;
+    const edgeLimit = this.controller?.edgeLimit ?? this.edgeLimit;
+    const nodes = displayGraph.nodes.slice(0, nodeLimit + displayGraph.cityContext.nodeCount);
     const initial = layout(nodes, width, height);
     for (const city of nodes.filter((node) => node.kind === "geographic_city_context")) {
       const hosts = displayGraph.edges.filter((edge) => edge.kind === "geoip_city_membership" &&
@@ -98,7 +101,7 @@ export class LiveHypergraphView {
     }
     const positions = separatePlanarNodes(nodes, initial, width, height);
     const radii = new Map(nodes.map((node) => [node.id, graphNodeScale(node).topologyRadius]));
-    for (const edge of displayGraph.edges.slice(0, this.edgeLimit + displayGraph.cityContext.edgeCount)) {
+    for (const edge of displayGraph.edges.slice(0, edgeLimit + displayGraph.cityContext.edgeCount)) {
       const members = (edge.nodes ?? []).filter((id) => positions.has(id));
       if (members.length < 2) continue;
       const origin = positions.get(members[0]);
@@ -190,6 +193,8 @@ export class LiveHypergraphView {
         ...(node.position ? {position: node.position} : {}), observedAt: node.observedAt ?? null}));
       this.svg.appendChild(group);
     }
+    const finishedAt = this.window.performance?.now?.() ?? Date.now();
+    this.controller?.reportFrameTime?.(finishedAt - startedAt);
   }
 
   #select(detail) {

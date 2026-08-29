@@ -1,14 +1,26 @@
+export const LIVE_GRAPH_DETAIL_TIERS = Object.freeze([
+  Object.freeze({id: "overview", label: "OVERVIEW", nodeLimit: 300, edgeLimit: 600}),
+  Object.freeze({id: "focused", label: "FOCUSED", nodeLimit: 400, edgeLimit: 800}),
+  Object.freeze({id: "max", label: "MAX", nodeLimit: 500, edgeLimit: 1000}),
+]);
+
 export class LiveGraphController {
   constructor({apiBase = "", fetchImpl = globalThis.fetch, refreshMilliseconds = 2000,
-               nodeLimit = 200, edgeLimit = 300} = {}) {
+               nodeLimit = 300, edgeLimit = 600, slowFrameMilliseconds = 28,
+               slowFrameBudget = 45} = {}) {
     this.apiBase = apiBase; this.fetchImpl = fetchImpl;
     this.refreshMilliseconds = Math.max(500, Number(refreshMilliseconds) || 2000);
-    this.nodeLimit = Math.min(Math.max(Number(nodeLimit) || 200, 1), 500);
-    this.edgeLimit = Math.min(Math.max(Number(edgeLimit) || 300, 1), 1000);
+    this.detailTiers = LIVE_GRAPH_DETAIL_TIERS.map((tier, index) => index ? tier : Object.freeze({...tier,
+      nodeLimit: Math.min(Math.max(Number(nodeLimit) || 300, 1), 400),
+      edgeLimit: Math.min(Math.max(Number(edgeLimit) || 600, 1), 800)}));
+    this.operatorMaxDetail = false; this.performanceTierCap = this.detailTiers.length - 1;
+    this.slowFrameMilliseconds = Math.max(16, Number(slowFrameMilliseconds) || 28);
+    this.slowFrameBudget = Math.max(3, Number(slowFrameBudget) || 45); this.slowFrameCount = 0;
+    this.detailTierIndex = 0; this.nodeLimit = 300; this.edgeLimit = 600;
     this.listeners = new Set(); this.timer = null; this.running = false;
-    this.graphRevision = null; this.snapshot = null; this.status = null;
+    this.graphRevision = null; this.presentationKey = null; this.snapshot = null; this.status = null;
     this.liveness = new Map(); this.livenessCursor = 0; this.livenessRevision = 0;
-    this.focusId = "";
+    this.focusId = ""; this.#applyDetailPolicy();
   }
 
   subscribe(listener) {
@@ -34,8 +46,11 @@ export class LiveGraphController {
   }
 
   async refresh() {
-    const graphQuery = new URLSearchParams({node_limit: String(this.nodeLimit), edge_limit: String(this.edgeLimit)});
-    if (this.focusId) graphQuery.set("focus_id", this.focusId);
+    const requestedNodeLimit = this.nodeLimit; const requestedEdgeLimit = this.edgeLimit;
+    const requestedFocusId = this.focusId;
+    const graphQuery = new URLSearchParams({node_limit: String(requestedNodeLimit),
+      edge_limit: String(requestedEdgeLimit)});
+    if (requestedFocusId) graphQuery.set("focus_id", requestedFocusId);
     const graphUrl = `${this.apiBase}/api/graphops/selection/graph?${graphQuery}`;
     const statusUrl = `${this.apiBase}/api/graphops/eve/status`;
     try {
@@ -53,8 +68,11 @@ export class LiveGraphController {
             ? `LIVE HYPERGRAPH // DEGRADED // RETAINING LAST SNAPSHOT // HTTP ${graphResponse.status}`
             : `LIVE HYPERGRAPH // UNAVAILABLE // HTTP ${graphResponse.status}`});
       }
-      const changed = graph.graphRevision !== this.graphRevision;
+      const graphChanged = graph.graphRevision !== this.graphRevision;
+      const presentationKey = `${graph.graphRevision}:${requestedNodeLimit}:${requestedEdgeLimit}:${requestedFocusId}`;
+      const changed = presentationKey !== this.presentationKey;
       this.graphRevision = graph.graphRevision;
+      this.presentationKey = presentationKey;
       const livenessChanged = await this.#probeNextHost(graph);
       const currentIds = new Set((graph.nodes ?? []).map((node) => node.id));
       for (const id of this.liveness.keys()) if (!currentIds.has(id)) this.liveness.delete(id);
@@ -73,9 +91,10 @@ export class LiveGraphController {
       const lens = ranking.lens ?? "SOURCE ORDER";
       const suppressedNodes = ranking.suppressedNodes ?? Math.max(0, detectedNodes - displayedNodes);
       const suppressedEdges = ranking.suppressedEdges ?? Math.max(0, detectedEdges - displayedEdges);
-      return this.#publish({kind: "snapshot", graph: this.snapshot, eve,
-        changed: changed || livenessChanged, graphChanged: changed, livenessChanged, available: true,
-        message: `LIVE HYPERGRAPH // ${graph.status.toUpperCase()}\nDETECTED // ${detectedNodes} NODES // ${detectedEdges} EDGES\nDISPLAYED // ${displayedNodes} / ${detectedNodes} NODES // ${displayedEdges} / ${detectedEdges} EDGES // BOUNDED ${this.nodeLimit}N·${this.edgeLimit}E\nLENS // ${lens} // SUPPRESSED ${suppressedNodes}N·${suppressedEdges}E${ranking.focusId ? ` // PINNED ${ranking.focusId}` : ""}\nHOST PING // ${counts.active} ACTIVE // ${counts.inactive} INACTIVE // ${unknown} UNKNOWN // ROUND ROBIN\nEVE // ${eve.status?.toUpperCase() ?? "UNKNOWN"} // ${eve.committed ?? 0} COMMITTED // ${eve.replayed ?? 0} BOOTSTRAP REPLAYED // ${eve.deduplicated ?? 0} DEDUPLICATED // RAW PACKETS NOT EXPOSED`});
+      const detail = this.detailState();
+      return this.#publish({kind: "snapshot", graph: this.snapshot, eve, detail,
+        changed: changed || livenessChanged, graphChanged, livenessChanged, available: true,
+        message: `LIVE HYPERGRAPH // ${graph.status.toUpperCase()}\nDETECTED // ${detectedNodes} NODES // ${detectedEdges} EDGES\nDISPLAYED // ${displayedNodes} / ${detectedNodes} NODES // ${displayedEdges} / ${detectedEdges} EDGES // BOUNDED ${requestedNodeLimit}N·${requestedEdgeLimit}E\nDETAIL // ${detail.tier}${detail.performanceLimited ? ` // FRAME GUARD STEPPED DOWN FROM ${detail.requestedTier}` : ""}\nLENS // ${lens} // SUPPRESSED ${suppressedNodes}N·${suppressedEdges}E${ranking.focusId ? ` // PINNED ${ranking.focusId}` : ""}\nHOST PING // ${counts.active} ACTIVE // ${counts.inactive} INACTIVE // ${unknown} UNKNOWN // ROUND ROBIN\nEVE // ${eve.status?.toUpperCase() ?? "UNKNOWN"} // ${eve.committed ?? 0} COMMITTED // ${eve.replayed ?? 0} BOOTSTRAP REPLAYED // ${eve.deduplicated ?? 0} DEDUPLICATED // RAW PACKETS NOT EXPOSED`});
     } catch (error) {
       return this.#publish({kind: "status", graph: this.snapshot, eve: null, available: false,
         retained: Boolean(this.snapshot), error,
@@ -137,10 +156,53 @@ export class LiveGraphController {
     return update.graph;
   }
 
+  #desiredTierIndex() {
+    if (this.operatorMaxDetail) return 2;
+    return this.focusId ? 1 : 0;
+  }
+
+  #applyDetailPolicy() {
+    const desired = this.#desiredTierIndex();
+    const effective = Math.min(desired, this.performanceTierCap);
+    const tier = this.detailTiers[effective];
+    const changed = effective !== this.detailTierIndex || tier.nodeLimit !== this.nodeLimit ||
+      tier.edgeLimit !== this.edgeLimit;
+    this.detailTierIndex = effective; this.nodeLimit = tier.nodeLimit; this.edgeLimit = tier.edgeLimit;
+    return changed;
+  }
+
+  detailState() {
+    const desired = this.#desiredTierIndex(); const tier = this.detailTiers[this.detailTierIndex];
+    return {tier: tier.label, tierId: tier.id, requestedTier: this.detailTiers[desired].label,
+      nodeLimit: tier.nodeLimit, edgeLimit: tier.edgeLimit,
+      maxDetailRequested: this.operatorMaxDetail, performanceLimited: this.detailTierIndex < desired};
+  }
+
+  setMaxDetail(enabled) {
+    const next = Boolean(enabled);
+    if (next === this.operatorMaxDetail) return false;
+    this.operatorMaxDetail = next; this.slowFrameCount = 0;
+    if (next) this.performanceTierCap = this.detailTiers.length - 1;
+    const changed = this.#applyDetailPolicy();
+    if (changed && this.running) void this.refresh();
+    return changed;
+  }
+
+  reportFrameTime(milliseconds) {
+    const elapsed = Number(milliseconds);
+    if (!Number.isFinite(elapsed) || elapsed <= 0 || this.detailTierIndex === 0) return false;
+    this.slowFrameCount = elapsed > this.slowFrameMilliseconds ? this.slowFrameCount + 1 : 0;
+    if (this.slowFrameCount < this.slowFrameBudget) return false;
+    this.slowFrameCount = 0; this.performanceTierCap = Math.max(0, this.detailTierIndex - 1);
+    const changed = this.#applyDetailPolicy();
+    if (changed && this.running) void this.refresh();
+    return changed;
+  }
+
   setFocus(entityId) {
     const next = String(entityId ?? "").slice(0, 256);
     if (next === this.focusId) return false;
-    this.focusId = next;
+    this.focusId = next; this.slowFrameCount = 0; this.#applyDetailPolicy();
     if (this.running) void this.refresh();
     return true;
   }

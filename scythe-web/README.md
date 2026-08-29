@@ -193,8 +193,9 @@ plus evidence-distinct geometry. Its layout is explicitly topology space, not
 geolocation. Three.js is an exact local dependency; an import or WebGL failure
 leaves the SVG view available.
 
-The adjacent Graph Explorer tab searches the current graph without raising the
-live chamber's 200-node/300-edge limits. It supports text, protocol, explicit
+The adjacent Graph Explorer tab searches the current graph independently of the
+live chamber's tiered 300/600 overview, 400/800 focused, and operator-requested
+500/1,000 maximum lenses. It supports text, protocol, explicit
 entity-time bounds, paging, and selected-entity neighborhoods through
 `/api/graphops/explorer`. Server scans and response pages are independently
 bounded, their counts are displayed separately, and adjacency is not presented

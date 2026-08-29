@@ -77,21 +77,53 @@ test("status separates complete detected counts from the bounded display", async
   const updates = []; controller.subscribe((update) => updates.push(update)); await controller.start();
   assert.match(updates.at(-1).message, /DETECTED \/\/ 847 NODES \/\/ 4219 EDGES/);
   assert.match(updates.at(-1).message,
-    /DISPLAYED \/\/ 200 \/ 847 NODES \/\/ 300 \/ 4219 EDGES \/\/ BOUNDED 200N·300E/);
+    /DISPLAYED \/\/ 200 \/ 847 NODES \/\/ 300 \/ 4219 EDGES \/\/ BOUNDED 300N·600E/);
+  assert.match(updates.at(-1).message, /DETAIL \/\/ OVERVIEW/);
   assert.match(updates.at(-1).message,
     /LENS \/\/ ADAPTIVE_RELEVANCE \/\/ SUPPRESSED 647N·3919E/);
   controller.destroy();
 });
 
 test("controller sends a bounded focus id for adaptive selection", async () => {
-  const urls = [];
+  const urls = []; const updates = [];
   const fetchImpl = async (url) => { urls.push(url);
     if (url.includes("eve/status")) return new Response("{}");
     return new Response(JSON.stringify({status: "ok", graphRevision: "focused", nodes: [], edges: []})); };
   const controller = new LiveGraphController({fetchImpl, refreshMilliseconds: 60_000});
+  controller.subscribe((update) => updates.push(update));
   await controller.start(); controller.running = false;
   controller.setFocus("host:203.0.113.7"); await controller.refresh();
   assert.ok(urls.some((url) => url.includes("focus_id=host%3A203.0.113.7")));
+  assert.ok(urls.some((url) => url.includes("node_limit=400&edge_limit=800")));
+  assert.equal(updates.at(-1).changed, true);
+  assert.equal(updates.at(-1).detail.tier, "FOCUSED");
+  controller.destroy();
+});
+
+test("operator max detail requests the bounded 500-node 1000-edge tier", async () => {
+  const urls = [];
+  const fetchImpl = async (url) => { urls.push(url);
+    if (url.includes("eve/status")) return new Response("{}");
+    return new Response(JSON.stringify({status:"ok",graphRevision:"max",nodes:[],edges:[]})); };
+  const controller = new LiveGraphController({fetchImpl, refreshMilliseconds:60_000});
+  controller.setMaxDetail(true); await controller.refresh();
+  assert.ok(urls.some((url) => url.includes("node_limit=500&edge_limit=1000")));
+  assert.deepEqual(controller.detailState(), {tier:"MAX",tierId:"max",requestedTier:"MAX",
+    nodeLimit:500,edgeLimit:1000,maxDetailRequested:true,performanceLimited:false});
+  controller.destroy();
+});
+
+test("sustained slow frames step max detail down one tier at a time", () => {
+  const controller = new LiveGraphController({slowFrameMilliseconds:20, slowFrameBudget:3});
+  controller.setMaxDetail(true);
+  assert.equal(controller.detailState().tier, "MAX");
+  assert.equal(controller.reportFrameTime(35), false);
+  assert.equal(controller.reportFrameTime(35), false);
+  assert.equal(controller.reportFrameTime(35), true);
+  assert.equal(controller.detailState().tier, "FOCUSED");
+  controller.reportFrameTime(35); controller.reportFrameTime(35); controller.reportFrameTime(35);
+  assert.equal(controller.detailState().tier, "OVERVIEW");
+  assert.equal(controller.detailState().performanceLimited, true);
   controller.destroy();
 });
 

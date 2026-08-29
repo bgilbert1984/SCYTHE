@@ -45,7 +45,7 @@ export function summarizeGraphCluster(entities, time, limit = 24) {
 export class GraphOverlayLayer {
   constructor({ viewer, Cesium, apiBase = "", fetchImpl = globalThis.fetch,
                 container = globalThis.document?.getElementById("globe-root"),
-                nodeLimit = 200, edgeLimit = 300, refreshMilliseconds = 2500,
+                nodeLimit = 300, edgeLimit = 600, refreshMilliseconds = 2500,
                 controller = null, sensorVantage = null, reducedMotion = null }) {
     if (!viewer?.entities || !Cesium?.Cartesian3) throw new TypeError("Cesium viewer is required");
     this.viewer = viewer; this.Cesium = Cesium; this.apiBase = apiBase;
@@ -181,12 +181,14 @@ export class GraphOverlayLayer {
     this.latestGraph = graph;
     if (graph.status === "empty") { this.#clearEntities(); this.graphRevision = graph.graphRevision; this.#emitStatus(graph); return graph; }
     if (graph.status !== "ok") { this.#emitStatus(graph); return graph; }
+    const nodeLimit = this.controller?.nodeLimit ?? this.nodeLimit;
+    const edgeLimit = this.controller?.edgeLimit ?? this.edgeLimit;
     const projectionRevision = geographicProjectionRevision(graph.nodes, this.sensorVantage);
-    const renderKey = `${graph.graphRevision}:${graph.livenessRevision ?? 0}:${projectionRevision}:${JSON.stringify(this.overlays)}`;
+    const renderKey = `${graph.graphRevision}:${graph.livenessRevision ?? 0}:${projectionRevision}:${nodeLimit}:${edgeLimit}:${JSON.stringify(this.overlays)}`;
     if (renderKey === this.renderKey) { this.#emitStatus({status: "ok", graphRevision: graph.graphRevision,
       nodeCount: graph.nodeCount, edgeCount: graph.edgeCount}); return graph; }
     this.#clearEntities(); this.graphRevision = graph.graphRevision; this.renderKey = renderKey;
-    for (const node of graph.nodes.slice(0, this.nodeLimit)) {
+    for (const node of graph.nodes.slice(0, nodeLimit)) {
       if (!node.id) continue;
       const placement = geographicGraphPlacement(node, this.sensorVantage); if (!placement) continue;
       if (placement.coLocatedAtSensor && !this.overlays.localVantage) continue;
@@ -230,7 +232,7 @@ export class GraphOverlayLayer {
     }
     if (this.sensorVantage && this.overlays.localVantage && this.overlays.hosts) this.#addSensorVantage();
     const drawable = [];
-    for (const edge of graph.edges.slice(0, this.edgeLimit)) {
+    for (const edge of graph.edges.slice(0, edgeLimit)) {
       if (!Array.isArray(edge.nodes) || edge.nodes.length < 2) continue;
       const endpoints = edge.nodes.slice(0, 2).map((id) => this.nodes.get(id));
       if (endpoints.some((value) => !value)) continue;

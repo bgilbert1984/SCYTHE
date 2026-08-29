@@ -1308,7 +1308,8 @@ execution protocol.
 ## 30. Implemented bounded Graph Explorer
 
 The resizable live-hypergraph instrument now includes a **Graph Explorer** tab
-for deliberate inspection beyond the chamber's fixed 200-node/300-edge render.
+for deliberate inspection beyond the chamber's tiered bounded render (300/600
+overview, 400/800 focused, and operator-requested 500/1,000 maximum).
 The explorer does not widen live polling. It executes a separate bounded index
 query through the stable orchestrator and reports four different quantities
 without conflation: entities available in the source graph, entities examined
