@@ -22,7 +22,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install RF test dependencies
-        run: python -m pip install numpy flask PyJWT requests
+        run: python -m pip install numpy flask Flask-Cors PyJWT requests
       - name: Run RF estimator and bridge tests
         run: python -m unittest -v test_rf_sparse_analyzer.py test_rf_bridge.py test_rf_mcp.py test_graphops_rf_ingest.py
 
@@ -34,13 +34,13 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install GraphOps test dependencies
-        run: python -m pip install numpy flask PyJWT requests
+        run: python -m pip install numpy flask Flask-Cors PyJWT requests
       - name: Compile GraphOps Python modules
         run: python -m compileall rf_sparse_analyzer.py rf_bridge.py rf_mcp.py graphops_rf_ingest.py scythe_orchestrator.py
       - name: Run GraphOps workbench tests
         run: python -m unittest -v test_graphops_workbench.py test_graphops_rf_ingest.py
 
-  sdrpp-lock-contract:
+  sdrpp-lock-source-contract:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

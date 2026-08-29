@@ -34,6 +34,7 @@ DICTIONARY_REVISION = "scythe.rf-sparse-dict.m1.v1"
 ATOM_FAMILIES = ("stationary_carrier", "linear_drift", "periodic_amplitude")
 RESERVED_ATOM_FAMILIES = ("periodic_sideband",)
 NULL_OUTCOMES = ("NO_SUPPORT", "INSUFFICIENT_EVIDENCE", "NOISE_COMPATIBLE")
+NOISE_COMPATIBLE_MAX_RESIDUAL_DBFS = -70.0
 
 
 def _env_bool(name: str, default: bool = False) -> bool:
@@ -135,7 +136,7 @@ class ResidualWindow:
     compression_ratio: float
     sampling_pattern_hash: str
     background_method: str
-    residual_energy_db: float
+    residual_energy_db: float  # mean positive excess power vs temporal-median background, dBFS
     candidate_regions: list[Dict[str, Any]]
     outcome: str = "NO_SUPPORT"
     chain: Dict[str, Any] = field(default_factory=dict)
@@ -177,6 +178,13 @@ def _linear_power(dbfs: np.ndarray) -> np.ndarray:
 
 def _db(power: np.ndarray | float) -> float:
     return float(10.0 * np.log10(max(float(np.asarray(power).mean()), 1e-18)))
+
+
+def _residual_excess_db(spectrogram_db: np.ndarray, background: np.ndarray) -> float:
+    """Return mean positive residual power in dBFS, computed in linear power."""
+    observed_power = _linear_power(spectrogram_db)
+    background_power = _linear_power(background)[None, :]
+    return _db(np.maximum(observed_power - background_power, 0.0))
 
 
 def median_background(spectrogram_db: np.ndarray) -> np.ndarray:
@@ -327,19 +335,23 @@ def _signal_chain(*, sample_rate_hz: float, fft_size: int, bin_count: int,
     return payload
 
 
-def _candidate_persistence(residual_db: np.ndarray, bin_index: int, mad_k: float) -> float:
-    column = residual_db[:, bin_index]
-    scale = max(_mad(column), 0.05)
-    threshold = float(np.median(column)) + mad_k * scale
-    return float(np.mean(column >= threshold))
+def _candidate_signal_db(spectrogram_db: np.ndarray, bin_index: int) -> np.ndarray:
+    """Per-frame candidate level using the strongest bin in a three-bin neighborhood."""
+    lo = max(0, bin_index - 1)
+    hi = min(spectrogram_db.shape[1], bin_index + 2)
+    return np.max(spectrogram_db[:, lo:hi], axis=1)
 
 
-def _null_outcome(retained: int, min_frames: int, bins: Sequence[int], residual_energy_db: float) -> str:
+def _candidate_persistence(candidate_signal_db: np.ndarray, noise_floor_db: float,
+                           min_snr_db: float) -> float:
+    return float(np.mean(candidate_signal_db - noise_floor_db >= min_snr_db))
+
+
+def _null_outcome(retained: int, min_frames: int, bins: Sequence[int],
+                  residual_energy_db: float) -> str:
     if retained < min_frames:
         return "INSUFFICIENT_EVIDENCE"
-    if not bins:
-        return "NO_SUPPORT"
-    if residual_energy_db < -70.0:
+    if not bins and residual_energy_db <= NOISE_COMPATIBLE_MAX_RESIDUAL_DBFS:
         return "NOISE_COMPATIBLE"
     return "NO_SUPPORT"
 
@@ -375,7 +387,7 @@ def recover_support(
     dt = (timestamps[-1] - timestamps[0]) / max(retained - 1, 1)
     dt = dt if dt > 1e-6 else 0.1
     bins = candidate_bins(residual_db, mad_k, max_candidates)
-    residual_energy_db = _db(_linear_power(residual_db))
+    residual_energy_db = _residual_excess_db(spectrogram_db, background)
     peak_hz = _peak_track_hz(spectrogram_db, center_frequency_hz, sample_rate_hz, fft_size)
     t = np.arange(retained, dtype=np.float64) * dt
     duration = max(float(timestamps[-1] - timestamps[0]), 1e-6)
@@ -457,11 +469,14 @@ def recover_support(
     for rank, bin_index in enumerate(bins, start=1):
         frequency = _bin_hz(center_frequency_hz, sample_rate_hz, fft_size, bin_count, bin_index)
         slow = _slow_time(residual_db, bin_index)
-        persistence = _candidate_persistence(residual_db, bin_index, mad_k)
+        candidate_signal_db = _candidate_signal_db(spectrogram_db, bin_index)
+        candidate_snr_db = float(np.max(candidate_signal_db) - noise_db)
+        persistence = _candidate_persistence(candidate_signal_db, noise_db, min_snr_db)
         regions.append({
             "peak_frequency_hz": round(frequency, 3),
             "residual_db": round(float(np.median(slow)), 2),
             "bin_index": bin_index,
+            "snr_db": round(candidate_snr_db, 2),
             "persistence": round(persistence, 4),
         })
         y = slow - np.median(slow)
@@ -470,8 +485,11 @@ def recover_support(
         selected, coefficients, leftover = _omp(y, dictionary, max_support)
         leftover_norm = float(np.linalg.norm(leftover))
         reduction = max(0.0, 1.0 - leftover_norm / y_norm)
-        amplitude_score = float(np.std(y))
-        if reduction < min_residual_reduction or amplitude_score < 1.0:
+        if (
+            candidate_snr_db < min_snr_db
+            or persistence < min_persistence
+            or reduction < min_residual_reduction
+        ):
             continue
         for atom_index in selected:
             family = meta[atom_index]["atom_family"]
@@ -498,6 +516,7 @@ def recover_support(
                 fit={
                     "residual_reduction": round(reduction, 4),
                     "normalized_error": round(leftover_norm / y_norm, 4),
+                    "snr_db": round(candidate_snr_db, 2),
                     "persistence": round(persistence, 4),
                     "support_rank": 2,
                     "candidate_rank": rank,
@@ -508,7 +527,9 @@ def recover_support(
             ))
             break
 
-    outcome = "SUPPORT" if supports else _null_outcome(retained, min_frames, bins, residual_energy_db)
+    outcome = "SUPPORT" if supports else _null_outcome(
+        retained, min_frames, bins, residual_energy_db,
+    )
     window = ResidualWindow(
         schema=SCHEMA_RESIDUAL,
         window_id=window_id,

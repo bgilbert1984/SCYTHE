@@ -1,5 +1,8 @@
 import json
+import os
 import unittest
+from unittest.mock import patch
+from urllib.parse import urlsplit
 
 from graphops_autopilot import GraphOpsAutopilot
 from graphops_copilot import InvestigativeDSLExecutor
@@ -86,6 +89,58 @@ class RFMCPTests(unittest.TestCase):
         self.assertTrue(shadow["ok"])
         self.assertTrue(shadow["result"]["_shadow_mode"])
         self.assertFalse(get_rf_bridge().status()["running"])
+
+    def test_child_broker_proxy_depends_on_orchestrator_loopback_authorization(self):
+        from scythe_orchestrator import app
+
+        client = app.test_client()
+        remote = client.get(
+            "/api/graphops/rf-bridge/status",
+            environ_base={"REMOTE_ADDR": "203.0.113.10"},
+        )
+        self.assertEqual(remote.status_code, 401)
+
+        requested_urls = []
+
+        class LoopbackResponse:
+            def __init__(self, response):
+                self.response = response
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def read(self):
+                return self.response.data
+
+        def loopback_urlopen(request, timeout):
+            self.assertEqual(timeout, 5)
+            requested_urls.append(request.full_url)
+            parsed = urlsplit(request.full_url)
+            target = parsed.path + (f"?{parsed.query}" if parsed.query else "")
+            response = client.get(target, environ_base={"REMOTE_ADDR": "127.0.0.1"})
+            self.assertEqual(response.status_code, 200)
+            return LoopbackResponse(response)
+
+        with patch.dict(os.environ, {
+            "SCYTHE_RF_CAPTURE_OWNER": "orchestrator",
+            "SCYTHE_PROCESS_ROLE": "child",
+            "SCYTHE_ORCHESTRATOR_URL": "http://127.0.0.1:8765",
+        }, clear=False), patch("rf_mcp.urlopen", side_effect=loopback_urlopen):
+            handler = MCPHandler(_Engine(), use_orchestrator=True)
+            register_rf_tools(handler.engine, handler)
+            result = handler.handle({
+                "jsonrpc": "2.0", "id": 3, "method": "tools/call",
+                "params": {"name": "rf_bridge_status", "arguments": {}},
+            })
+
+        self.assertEqual(
+            requested_urls, ["http://127.0.0.1:8765/api/graphops/rf-bridge/status"],
+        )
+        self.assertEqual(result["result"]["capture_owner"], "orchestrator")
+        self.assertFalse(result["result"]["raw_iq_exposed"])
 
     def test_autopilot_routes_rf_evidence_to_suggestion_queue(self):
         pilot = GraphOpsAutopilot(_Engine())
