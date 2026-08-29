@@ -20,7 +20,7 @@ export class LiveGraphController {
     this.listeners = new Set(); this.timer = null; this.running = false;
     this.graphRevision = null; this.presentationKey = null; this.snapshot = null; this.status = null;
     this.liveness = new Map(); this.livenessCursor = 0; this.livenessRevision = 0;
-    this.focusId = ""; this.#applyDetailPolicy();
+    this.focusId = ""; this.rfSensorContext = null; this.#applyDetailPolicy();
   }
 
   subscribe(listener) {
@@ -77,6 +77,7 @@ export class LiveGraphController {
       const currentIds = new Set((graph.nodes ?? []).map((node) => node.id));
       for (const id of this.liveness.keys()) if (!currentIds.has(id)) this.liveness.delete(id);
       this.snapshot = {...graph, livenessRevision: this.livenessRevision,
+        ...(this.rfSensorContext ? {rfSensorContext: this.rfSensorContext} : {}),
         nodes: (graph.nodes ?? []).map((node) => ({...node,
           ...(this.liveness.has(node.id) ? {liveness: this.liveness.get(node.id)} : {})}))};
       const counts = {active: 0, inactive: 0};
@@ -204,6 +205,19 @@ export class LiveGraphController {
     if (next === this.focusId) return false;
     this.focusId = next; this.slowFrameCount = 0; this.#applyDetailPolicy();
     if (this.running) void this.refresh();
+    return true;
+  }
+
+  setRfSensorContext(context) {
+    const next = context ? Object.freeze({...context}) : null;
+    if (JSON.stringify(next) === JSON.stringify(this.rfSensorContext)) return false;
+    this.rfSensorContext = next;
+    if (this.snapshot) {
+      this.snapshot = {...this.snapshot, ...(next ? {rfSensorContext: next} : {})};
+      if (!next) delete this.snapshot.rfSensorContext;
+      this.#publish({...this.status, kind:"snapshot",graph:this.snapshot,changed:true,
+        rfSensorChanged:true,available:true});
+    }
     return true;
   }
 

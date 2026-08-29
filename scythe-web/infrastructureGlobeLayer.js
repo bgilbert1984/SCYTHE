@@ -18,6 +18,42 @@ function boundedStringJsonList(raw, limit = 64) {
   } catch { return []; }
 }
 
+function boundedAsnValues(values, limit = 64) {
+  const output = [];
+  const visit = (item) => {
+    if (Array.isArray(item)) { for (const child of item) visit(child); return; }
+    const number = Number(item);
+    if (Number.isInteger(number) && number > 0 && number <= 4_294_967_295 && !output.includes(number))
+      output.push(number);
+  };
+  visit(values); return output.slice(0, limit);
+}
+
+function boundedAsPath(raw, limit = 64) {
+  try {
+    const values = JSON.parse(String(raw ?? "[]"));
+    if (!Array.isArray(values)) return [];
+    return values.slice(0, limit).map((hop) => Array.isArray(hop)
+      ? boundedAsnValues(hop, 16) : boundedAsnValues([hop], 1)[0]).filter((hop) => hop != null);
+  } catch { return []; }
+}
+
+function boundedClaims(raw, limit = 16) {
+  try {
+    const values = JSON.parse(String(raw ?? "[]"));
+    if (!Array.isArray(values)) return [];
+    return values.slice(0, limit).map((claim) => ({
+      value: Array.isArray(claim?.value) ? claim.value.slice(0, 16).map((item) => String(item).slice(0, 128))
+        : String(claim?.value ?? "").slice(0, 512),
+      authority: String(claim?.authority ?? "UNSPECIFIED").slice(0, 128),
+      evidenceClass: String(claim?.evidenceClass ?? "").slice(0, 64) || null,
+      sourceRevision: String(claim?.sourceRevision ?? "").slice(0, 128) || null,
+      collectorId: String(claim?.collectorId ?? "").slice(0, 128) || null,
+      observedAt: String(claim?.observedAt ?? "").slice(0, 64) || null,
+    }));
+  } catch { return []; }
+}
+
 function escapeHtml(input) {
   return String(input ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#39;");
@@ -46,6 +82,74 @@ export function infrastructureSelectionDetail(entity, time, graphRevision = null
           .slice(0, 128),
       },
       boundary: "ASN OWNERSHIP COMES FROM LOCAL PREFIX ENRICHMENT AND GEOGRAPHY FROM GEOIP; BOTH ARE INFERRED; THE CENTROID DOES NOT LOCATE A DEVICE OR PROVE A ROUTE",
+    };
+  }
+  if (infrastructureKind === "evidence_tension") {
+    const findingId = String(value(entity, "findingId", time) ?? "").slice(0, 128);
+    if (!findingId) return null;
+    return {
+      kind: "infrastructure-evidence-tension", entityId: `infrastructure:tension:${findingId}`,
+      graphRevision: String(value(entity, "graphRevision", time) ?? graphRevision ?? "").slice(0, 128) || null,
+      evidenceClass: String(value(entity, "evidenceClass", time) ?? "EVIDENCE_TENSION").slice(0, 64),
+      authority: "PRESERVED_SOURCE_DISAGREEMENT",
+      finding: {
+        id: findingId, kind: String(value(entity, "findingKind", time) ?? "UNKNOWN").slice(0, 128),
+        status: String(value(entity, "findingStatus", time) ?? "UNRESOLVED").slice(0, 64),
+        severity: String(value(entity, "severity", time) ?? "REVIEW").slice(0, 64),
+        subject: String(value(entity, "subject", time) ?? "").slice(0, 128) || null,
+        prefix: String(value(entity, "prefix", time) ?? "").slice(0, 128) || null,
+        claims: boundedClaims(value(entity, "claimsJson", time)),
+        alternatives: boundedStringJsonList(value(entity, "alternativesJson", time), 16),
+        falsifier: String(value(entity, "falsifier", time) ?? "").slice(0, 1024),
+        relatedHostIds: boundedStringJsonList(value(entity, "relatedHostIdsJson", time)),
+      },
+      boundary: String(value(entity, "evidenceBoundary", time) ??
+        "SOURCE DISAGREEMENT IS NOT CONSENSUS, CAUSALITY, OR A HIJACK DETERMINATION").slice(0, 1024),
+    };
+  }
+  if (infrastructureKind === "observed_domain_flow") {
+    const flowId = String(value(entity, "flowId", time) ?? "").slice(0, 128);
+    if (!flowId) return null;
+    return {
+      kind: "infrastructure-observed-flow", entityId: flowId,
+      graphRevision: String(value(entity, "graphRevision", time) ?? graphRevision ?? "").slice(0, 128) || null,
+      evidenceClass: "OBSERVED", authority: "OBSERVED_GRAPH_EDGES",
+      flow: {
+        id: flowId, sourceDomain: String(value(entity, "sourceDomain", time) ?? "").slice(0, 128),
+        targetDomain: String(value(entity, "targetDomain", time) ?? "").slice(0, 128),
+        protocol: String(value(entity, "protocol", time) ?? "unknown").slice(0, 32),
+        flowCount: Math.max(0, Number(value(entity, "flowCount", time)) || 0),
+        bytes: Math.max(0, Number(value(entity, "bytes", time)) || 0),
+        packets: Math.max(0, Number(value(entity, "packets", time)) || 0),
+        firstSeen: String(value(entity, "firstSeen", time) ?? "").slice(0, 64) || null,
+        lastSeen: String(value(entity, "lastSeen", time) ?? "").slice(0, 64) || null,
+        memberEdgeIds: boundedStringJsonList(value(entity, "memberEdgeIdsJson", time)),
+      },
+      boundary: "TRAFFIC EDGES ARE OBSERVED; ASN ENDPOINTS AND GEOIP ARE INFERRED; THE GLOBE ARC IS DISPLAY-ONLY AND NOT A PHYSICAL OR BGP ROUTE",
+    };
+  }
+  if (infrastructureKind === "ris_control_plane_path") {
+    const observationId = String(value(entity, "observationId", time) ?? "").slice(0, 128);
+    if (!observationId) return null;
+    return {
+      kind: "infrastructure-ris-path", entityId: `ris:observation:${observationId}`,
+      graphRevision: String(value(entity, "graphRevision", time) ?? graphRevision ?? "").slice(0, 128) || null,
+      evidenceClass: "CONTROL_PLANE_OBSERVATION", authority: "RIS_LIVE_COLLECTOR_VANTAGE",
+      controlPlaneRevision: String(value(entity, "controlPlaneRevision", time) ?? "").slice(0, 128) || null,
+      observation: {
+        id: observationId, messageType: String(value(entity, "messageType", time) ?? "UNKNOWN").slice(0, 32),
+        prefix: String(value(entity, "prefix", time) ?? "").slice(0, 128),
+        collectorId: String(value(entity, "collectorId", time) ?? "").slice(0, 128),
+        collectorReceivedIso: String(value(entity, "collectorReceivedIso", time) ?? "").slice(0, 64) || null,
+        peerAsn: Number(value(entity, "peerAsn", time)) || null,
+        originAsns: boundedJsonList(value(entity, "originAsnsJson", time)),
+        asPath: boundedAsPath(value(entity, "asPathJson", time)),
+        segmentIndex: Math.max(0, Number(value(entity, "segmentIndex", time)) || 0),
+        segmentSourceAsns: boundedJsonList(value(entity, "segmentSourceAsnsJson", time), 16),
+        segmentTargetAsns: boundedJsonList(value(entity, "segmentTargetAsnsJson", time), 16),
+        relatedHostIds: boundedStringJsonList(value(entity, "relatedHostIdsJson", time)),
+      },
+      boundary: "RIS LIVE RECORDS A CONTROL-PLANE UPDATE AT ONE COLLECTOR VANTAGE; IT IS NOT AN OBSERVED DATA-PLANE ROUTE OR GLOBAL ROUTING STATE",
     };
   }
   if (infrastructureKind !== "peeringdb_facility") return null;
@@ -162,11 +266,26 @@ export class InfrastructureGlobeLayer {
     for (const flow of snapshot.observedFlows ?? []) {
       const source = domains.get(flow.sourceDomain)?.centroid; const target = domains.get(flow.targetDomain)?.centroid;
       if (!source || !target || flow.sourceDomain === flow.targetDomain) continue;
+      const memberEdgeIds = (flow.memberEdgeIds ?? []).slice(0, 64);
+      const hoverText = [
+        `OBSERVED DOMAIN FLOW // ${String(flow.protocol ?? "unknown").toUpperCase()}`,
+        `${flow.sourceDomain} → ${flow.targetDomain}`,
+        `${flow.flowCount ?? 0} FLOWS // ${flow.packets ?? 0} PACKETS // ${flow.bytes ?? 0} BYTES`,
+        `MEMBER GRAPH EDGES // ${memberEdgeIds.length}`,
+        "CLICK // OPEN OBSERVED FLOW EVIDENCE",
+        "BOUNDARY // ENDPOINT ASN + GEOIP INFERRED; ARC IS NOT A ROUTE",
+      ].join("\n");
       this.source.entities.add({id: `scythe-infra:${flow.id}`,
         polyline: {positions: C.Cartesian3.fromDegreesArray([source.longitude, source.latitude, target.longitude, target.latitude]),
           width: Math.min(6, 1.5 + Math.log2(1 + flow.flowCount)), arcType: C.ArcType.GEODESIC,
           material: new C.PolylineGlowMaterialProperty({glowPower: .16, color: C.Color.CYAN.withAlpha(.72)})},
-        description: `OBSERVED FLOW // ENDPOINT ASN AND REGIONS INFERRED // PATH DISPLAY ONLY // NOT ROUTE`});
+        properties: {infrastructureKind: "observed_domain_flow", flowId: flow.id,
+          sourceDomain: flow.sourceDomain, targetDomain: flow.targetDomain, protocol: flow.protocol,
+          flowCount: flow.flowCount, bytes: flow.bytes, packets: flow.packets,
+          firstSeen: flow.firstSeen ?? null, lastSeen: flow.lastSeen ?? null,
+          memberEdgeIdsJson: JSON.stringify(memberEdgeIds), graphRevision: snapshot.graphRevision,
+          evidenceClass: flow.evidenceClass ?? "OBSERVED", authority: "OBSERVED_GRAPH_EDGES", hoverText},
+        description: escapeHtml(hoverText).replaceAll("\n", "<br>")});
     }
     if (this.overlays.declared) this.#renderPeeringDb(snapshot, domains);
     if (this.overlays.controlPlane) this.#renderControlPlane(snapshot, domains);
@@ -222,15 +341,37 @@ export class InfrastructureGlobeLayer {
     const C = this.Cesium;
     for (const row of (snapshot.controlPlaneEvidence?.controlPlanePaths ?? []).slice(-64)) {
       const flattened = (row.asPath ?? []).flatMap((hop) => Array.isArray(hop) ? hop : [hop]);
+      const originAsns = boundedAsnValues(row.originAsn);
+      const relatedHostIds = [...new Set(originAsns.flatMap((asn) =>
+        domains.get(`asn:${asn}`)?.observedHostIds ?? []))].slice(0, 64);
+      const pathText = (row.asPath ?? []).map((hop) => Array.isArray(hop) ? `{${hop.join(",")}}` : hop).join(" → ") || "NO AS PATH";
       for (let index = 0; index < flattened.length - 1; index += 1) {
         const source = domains.get(`asn:${flattened[index]}`)?.centroid;
         const target = domains.get(`asn:${flattened[index + 1]}`)?.centroid;
         if (!source || !target) continue;
+        const hoverText = [
+          `RIS LIVE ${row.messageType ?? "UPDATE"} // CONTROL PLANE`,
+          `${row.prefix ?? "PREFIX UNAVAILABLE"} // ${row.collectorId ?? "COLLECTOR UNKNOWN"}`,
+          `AS PATH // ${pathText}`,
+          `SEGMENT ${index + 1} // AS${flattened[index]} → AS${flattened[index + 1]}`,
+          `RECEIVED // ${row.collectorReceivedIso ?? "UNKNOWN"}`,
+          "CLICK // OPEN COLLECTOR-VANTAGE EVIDENCE",
+          "BOUNDARY // NOT AN OBSERVED DATA-PLANE ROUTE",
+        ].join("\n");
         this.source.entities.add({id: `scythe-infra:ris:${row.id}:${index}`,
           polyline: {positions: C.Cartesian3.fromDegreesArray([source.longitude, source.latitude, target.longitude, target.latitude]),
             width: 2, arcType: C.ArcType.GEODESIC,
             material: new C.PolylineDashMaterialProperty({color: C.Color.MAGENTA.withAlpha(.85), dashLength: 8})},
-          description: `RIS LIVE ${row.messageType} ${row.prefix} // ${row.collectorId} COLLECTOR VANTAGE // CONTROL PLANE ONLY // NOT DATA-PLANE ROUTE`});
+          properties: {infrastructureKind: "ris_control_plane_path", observationId: row.id,
+            messageType: row.messageType, prefix: row.prefix, collectorId: row.collectorId,
+            collectorReceivedIso: row.collectorReceivedIso, peerAsn: row.peerAsn,
+            originAsnsJson: JSON.stringify(originAsns), asPathJson: JSON.stringify((row.asPath ?? []).slice(0, 64)),
+            segmentIndex: index, segmentSourceAsnsJson: JSON.stringify([Number(flattened[index])]),
+            segmentTargetAsnsJson: JSON.stringify([Number(flattened[index + 1])]),
+            relatedHostIdsJson: JSON.stringify(relatedHostIds), graphRevision: snapshot.graphRevision,
+            controlPlaneRevision: snapshot.controlPlaneEvidence?.snapshotRevision,
+            evidenceClass: "CONTROL_PLANE_OBSERVATION", authority: "RIS_LIVE_COLLECTOR_VANTAGE", hoverText},
+          description: escapeHtml(hoverText).replaceAll("\n", "<br>")});
       }
     }
   }
@@ -239,6 +380,15 @@ export class InfrastructureGlobeLayer {
     for (const finding of snapshot.infrastructureContradictions?.findings ?? []) {
       const domain = domains.get(finding.subject); const point = domain?.centroid;
       if (!point) continue;
+      const relatedHostIds = (domain.observedHostIds ?? []).slice(0, 64);
+      const hoverText = [
+        `EVIDENCE TENSION // ${finding.kind ?? "SOURCE DISAGREEMENT"}`,
+        `${finding.status ?? "UNRESOLVED"} // ${finding.severity ?? "REVIEW"}`,
+        `${finding.subject ?? "SUBJECT UNAVAILABLE"}${finding.prefix ? ` // ${finding.prefix}` : ""}`,
+        `CLAIMS // ${(finding.claims ?? []).length} // ALTERNATIVES // ${(finding.alternatives ?? []).length}`,
+        "CLICK // OPEN DISAGREEMENT + FALSIFIER",
+        `BOUNDARY // ${finding.boundary ?? "NO CONSENSUS OR CAUSALITY CLAIM"}`,
+      ].join("\n");
       this.source.entities.add({id: `scythe-infra:tension:${finding.id}`,
         position: C.Cartesian3.fromDegrees(point.longitude, point.latitude, 2200),
         point: {pixelSize: 14, color: C.Color.TRANSPARENT, outlineColor: C.Color.RED.withAlpha(.95), outlineWidth: 3},
@@ -247,7 +397,15 @@ export class InfrastructureGlobeLayer {
           material: C.Color.RED.withAlpha(.025), outline: true, outlineColor: C.Color.RED.withAlpha(.85), height: 0},
         label: {text: "EVIDENCE TENSION", font: "9px monospace", fillColor: C.Color.RED,
           pixelOffset: new C.Cartesian2(0, -18), showBackground: true, backgroundColor: C.Color.BLACK.withAlpha(.72)},
-        description: `${finding.kind} // ${finding.status} // ${finding.boundary} // FALSIFIER: ${finding.falsifier}`});
+        properties: {infrastructureKind: "evidence_tension", findingId: finding.id,
+          findingKind: finding.kind, findingStatus: finding.status, severity: finding.severity,
+          subject: finding.subject, prefix: finding.prefix ?? null,
+          claimsJson: JSON.stringify((finding.claims ?? []).slice(0, 16)),
+          alternativesJson: JSON.stringify((finding.alternatives ?? []).slice(0, 16)),
+          falsifier: finding.falsifier, relatedHostIdsJson: JSON.stringify(relatedHostIds),
+          evidenceBoundary: finding.boundary, graphRevision: snapshot.graphRevision,
+          evidenceClass: finding.evidenceClass ?? "EVIDENCE_TENSION", hoverText},
+        description: escapeHtml(hoverText).replaceAll("\n", "<br>")});
     }
   }
   #installHover() {

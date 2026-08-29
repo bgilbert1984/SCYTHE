@@ -45,6 +45,37 @@ export function operatorGeodetic(viewer, Cesium) {
   return getOperatorGeodetic(viewer, Cesium);
 }
 
+function readEntityProperty(entity, name, time) {
+  const property = entity?.properties?.[name];
+  return property?.getValue?.(time) ?? property ?? null;
+}
+
+export function coverageCellDetail(entity, time) {
+  if (!entity?.id?.startsWith?.("scythe-web:coverage:")) return null;
+  const read = (name) => readEntityProperty(entity, name, time);
+  return {
+    evidence_class: read("evidenceClass"), visualization_is_authoritative: read("visualizationIsAuthoritative"),
+    dataset_id: read("datasetId"), tile_id: read("tileId"), display_asset_hash: read("displayAssetHash"),
+    longitude_degrees: Number(read("longitudeDegrees")), latitude_degrees: Number(read("latitudeDegrees")),
+    height_meters: Number(read("heightMeters")) || 0, frequency_hz: Number(read("frequencyHz")),
+    quantity: read("quantity"), value: Number(read("value")), display_value: Number(read("displayValue")),
+    display_delta: Number(read("displayDelta")), units: read("units"), coverage: read("coverage"),
+    coverage_threshold: read("coverageThreshold"), coverage_comparison: read("coverageComparison"),
+    coverage_threshold_units: read("coverageThresholdUnits"), transmitter_id: read("transmitterId"),
+    uncertainty: {kind: read("uncertaintyKind"), value: read("uncertaintyValue"), units: read("uncertaintyUnits")},
+    provenance: {solverName: read("solverName"), solverVersion: read("solverVersion"),
+      sourceRevision: read("sourceRevision"), runId: read("runId")},
+  };
+}
+
+function frequencyLabel(value) {
+  const frequency = Number(value);
+  if (!Number.isFinite(frequency)) return "RF";
+  if (frequency >= 1e9) return `${Number((frequency / 1e9).toFixed(3))} GHz`;
+  if (frequency >= 1e6) return `${Number((frequency / 1e6).toFixed(3))} MHz`;
+  return `${Number((frequency / 1e3).toFixed(3))} kHz`;
+}
+
 function injectStyles(documentRoot) {
   if (!documentRoot?.head || documentRoot.getElementById(STYLE_ELEMENT_ID)) return;
   const element = documentRoot.createElement("style");
@@ -53,7 +84,7 @@ function injectStyles(documentRoot) {
     .scythe-web-monocle {
       position: absolute; left: 50%; bottom: 28px; transform: translateX(-50%);
       min-width: 390px; max-width: min(620px, calc(100vw - 24px));
-      padding: 10px 14px; z-index: 45; pointer-events: none;
+      padding: 8px 12px; z-index: 45; pointer-events: auto;
       color: #ccefff; background: rgba(0, 12, 28, .84);
       border: 1px solid rgba(0, 212, 255, .42); border-radius: 4px;
       box-shadow: 0 0 24px rgba(0, 150, 255, .14);
@@ -61,9 +92,19 @@ function injectStyles(documentRoot) {
       backdrop-filter: blur(5px);
     }
     .scythe-web-monocle__row { display:flex; gap:12px; align-items:baseline; }
+    .scythe-web-monocle__row--controls { margin-top:6px; align-items:center; }
     .scythe-web-monocle__title { color:#00d4ff; font-weight:800; letter-spacing:.14em; }
     .scythe-web-monocle__value { color:#fff; font-size:16px; font-weight:700; flex:1; }
     .scythe-web-monocle__detail { color:#86a9ba; overflow:hidden; text-overflow:ellipsis; }
+    .scythe-web-monocle__body { margin-top:6px; display:grid; gap:2px; }
+    .scythe-web-monocle--compact .scythe-web-monocle__body { display:none; }
+    .scythe-web-monocle__mode, .scythe-web-monocle__correlate {
+      color:#86a9ba; background:#071422; border:1px solid #24506a; padding:3px 7px;
+      font:10px ui-monospace,monospace; cursor:pointer;
+    }
+    .scythe-web-monocle__mode[aria-pressed="true"] { color:#00d4ff; border-color:#00d4ff; }
+    .scythe-web-monocle__correlate { margin-left:auto; color:#63ffd1; }
+    .scythe-web-monocle__correlate:disabled { color:#526675; cursor:not-allowed; opacity:.7; }
     .scythe-web-monocle__badge {
       border:1px solid currentColor; padding:2px 6px; font-size:10px;
       letter-spacing:.08em; white-space:nowrap;
@@ -80,23 +121,30 @@ function injectStyles(documentRoot) {
   documentRoot.head.appendChild(element);
 }
 
-function createHud(documentRoot, container) {
+function createHud(documentRoot, container, {frequencyHz = null, showOptical = false} = {}) {
   injectStyles(documentRoot);
   const root = documentRoot.createElement("section");
-  root.className = "scythe-web-monocle";
+  root.className = "scythe-web-monocle scythe-web-monocle--compact";
   root.setAttribute("aria-live", "polite");
   root.innerHTML = `
     <div class="scythe-web-monocle__row">
-      <span class="scythe-web-monocle__title">SCYTHE // WEB MONOCLE</span>
+      <span class="scythe-web-monocle__title">RF FIELD INSPECTOR // ${frequencyLabel(frequencyHz)}</span>
       <span data-role="evidence" class="scythe-web-monocle__badge">UNCLASSIFIED</span>
-    </div>
-    <div class="scythe-web-monocle__row">
       <span data-role="value" class="scythe-web-monocle__value">NO VALIDATED SOLVER DATA</span>
     </div>
-    <div data-role="detail" class="scythe-web-monocle__detail">Awaiting fixed-step sample</div>
-    <div data-role="uncertainty" class="scythe-web-monocle__detail">UNCERTAINTY // UNKNOWN</div>
-    <div data-role="provenance" class="scythe-web-monocle__detail">PROVENANCE // UNAVAILABLE</div>
-    <div data-role="optical" class="scythe-web-monocle__detail">OPTICS // NO VALIDATED OPTICAL DATA</div>
+    <div class="scythe-web-monocle__row scythe-web-monocle__row--controls">
+      ${["CAMERA", "HOVER", "PINNED"].map((mode) => `<button type="button" data-rf-mode="${mode}" class="scythe-web-monocle__mode" aria-pressed="${mode === "CAMERA"}">${mode}</button>`).join("")}
+      <button type="button" data-role="correlate" class="scythe-web-monocle__correlate" disabled>CORRELATE WITH SELECTED HOST</button>
+    </div>
+    <div class="scythe-web-monocle__body">
+      <div data-role="mode" class="scythe-web-monocle__detail">MODE // CAMERA</div>
+      <div data-role="detail" class="scythe-web-monocle__detail">Awaiting fixed-step sample</div>
+      <div data-role="decision" class="scythe-web-monocle__detail">THRESHOLD // UNAVAILABLE</div>
+      <div data-role="uncertainty" class="scythe-web-monocle__detail">UNCERTAINTY // UNKNOWN</div>
+      <div data-role="provenance" class="scythe-web-monocle__detail">PROVENANCE // UNAVAILABLE</div>
+      <div data-role="hash" class="scythe-web-monocle__detail">DISPLAY ASSET // UNAVAILABLE</div>
+      ${showOptical ? '<div data-role="optical" class="scythe-web-monocle__detail">OPTICS // WAITING</div>' : ""}
+    </div>
   `;
   container.appendChild(root);
   return root;
@@ -159,13 +207,29 @@ export class MonocleOverlayLayer {
     this.entityIds = new Set();
     this.coverageGridEntityIds = new Set();
     this.coverageClickHandler = null;
+    this.samplingMode = "CAMERA";
+    this.hoverCell = null;
+    this.pinnedCell = null;
+    this.receiverSensor = null;
+    this.correlationAvailable = false;
     this.destroyed = false;
   }
 
   start() {
     if (this.removePostRender) return this;
     if (!this.container) throw new Error("A HUD container is required");
-    this.hud = createHud(this.documentRoot, this.container);
+    this.hud = createHud(this.documentRoot, this.container, {
+      frequencyHz: this.rfSampler?.descriptor?.physics?.rf?.frequencyHz,
+      showOptical: Boolean(this.opticsSampler),
+    });
+    for (const button of this.hud.querySelectorAll?.("[data-rf-mode]") ?? [])
+      button.addEventListener("click", () => this.setSamplingMode(button.dataset.rfMode));
+    this.hud.querySelector?.('[data-role="correlate"]')?.addEventListener("click", () => {
+      if (!this.correlationAvailable) return;
+      const EventClass = this.documentRoot?.defaultView?.CustomEvent ?? globalThis.CustomEvent;
+      this.container?.dispatchEvent(new EventClass("scythe-web:rf-correlate-requested", {bubbles: true,
+        detail: {cell: this.pinnedCell}}));
+    });
     this.#addTransmitterMarkers();
     this.#addRangeRings();
     this.#installCoverageCellInteraction();
@@ -185,7 +249,11 @@ export class MonocleOverlayLayer {
     this.inFlight = true;
 
     try {
-      const position = operatorGeodetic(this.viewer, this.Cesium);
+      const activeCell = this.samplingMode === "PINNED" ? this.pinnedCell :
+        this.samplingMode === "HOVER" ? this.hoverCell : null;
+      const position = activeCell ? {longitudeDegrees: activeCell.longitude_degrees,
+        latitudeDegrees: activeCell.latitude_degrees, heightMeters: activeCell.height_meters ?? 0} :
+        operatorGeodetic(this.viewer, this.Cesium);
       if (!this.#scenarioTimeContains(utc)) {
         const unavailable = { status: "OUTSIDE_SCENARIO_TIME", available: false,
           reason: "UTC outside scenario window", evidenceClass: null };
@@ -214,7 +282,8 @@ export class MonocleOverlayLayer {
       ]);
       if (!this.destroyed) {
         if (sample) {
-          this.#renderHud(sample);
+          if (!activeCell) this.#renderHud(sample);
+          else this.#renderCellHud(activeCell);
           this.#renderBearing(position, sample);
           this.#renderCoverageFootprint(position, sample);
           this.#renderUncertaintyHalo(position, sample);
@@ -238,6 +307,51 @@ export class MonocleOverlayLayer {
     }
   }
 
+  setSamplingMode(mode) {
+    const next = String(mode ?? "").toUpperCase();
+    if (!["CAMERA", "HOVER", "PINNED"].includes(next)) throw new TypeError("RF sampling mode is invalid");
+    this.samplingMode = next;
+    for (const button of this.hud?.querySelectorAll?.("[data-rf-mode]") ?? [])
+      button.setAttribute("aria-pressed", String(button.dataset.rfMode === next));
+    const element = this.hud?.querySelector?.('[data-role="mode"]');
+    if (element) element.textContent = `MODE // ${next}${next === "PINNED" && !this.pinnedCell ? " // NO CELL SELECTED" : ""}`;
+    this.#setExpanded(next === "PINNED" && Boolean(this.pinnedCell));
+    if (next === "PINNED" && this.pinnedCell) this.#renderCellHud(this.pinnedCell);
+    this.lastStep = null; return next;
+  }
+
+  pinCoverageCell(detail) {
+    if (!detail?.dataset_id || !Number.isFinite(Number(detail.longitude_degrees)) ||
+        !Number.isFinite(Number(detail.latitude_degrees))) return false;
+    this.pinnedCell = Object.freeze({...detail, provenance: {...(detail.provenance ?? {})},
+      uncertainty: {...(detail.uncertainty ?? {})}});
+    this.setSamplingMode("PINNED"); this.#renderCellHud(this.pinnedCell); return true;
+  }
+
+  setCorrelationAvailable(value) {
+    this.correlationAvailable = Boolean(value && this.pinnedCell);
+    const button = this.hud?.querySelector?.('[data-role="correlate"]');
+    if (button) button.disabled = !this.correlationAvailable;
+  }
+
+  setReceiverSensor(sensor) {
+    this.receiverSensor = sensor ? Object.freeze({...sensor}) : null;
+    if (!sensor || !this.hud) return;
+    this.#setExpanded(true);
+    const set = (role, text) => { const element = this.hud.querySelector(`[data-role="${role}"]`);
+      if (element) element.textContent = text; };
+    set("mode", "MODE // RECEIVER SENSOR");
+    set("detail", `${sensor.sensorId ?? "RF RECEIVER"} // ${String(sensor.bridgeState ?? "UNKNOWN").toUpperCase()} // IQ ${sensor.iqConnected ? "CONNECTED" : "DISCONNECTED"}`);
+    set("decision", `TUNING // ${frequencyLabel(sensor.centerFrequencyHz)} // SAMPLE RATE ${frequencyLabel(sensor.sampleRateHz)}`);
+    set("uncertainty", `LOCATION // ${sensor.locationAuthority ?? "NOT PROVIDED"}${Number.isFinite(sensor.accuracyMeters) ? ` // ±${Math.round(sensor.accuracyMeters)} m` : ""}`);
+    set("provenance", `CAPTURE OWNER // ${sensor.captureOwner ?? "UNKNOWN"} // RAW IQ NOT EXPOSED`);
+    set("hash", `LATEST FRAME // ${sensor.latestFrameAt ?? "NONE"}`);
+  }
+
+  #setExpanded(value) {
+    this.hud?.classList?.toggle("scythe-web-monocle--compact", !value);
+  }
+
   #installCoverageCellInteraction() {
     if (!this.Cesium.ScreenSpaceEventHandler || this.coverageClickHandler) return;
     this.coverageClickHandler = new this.Cesium.ScreenSpaceEventHandler(this.viewer.scene.canvas);
@@ -245,36 +359,21 @@ export class MonocleOverlayLayer {
       const picked = this.viewer.scene.pick(movement.position);
       const entity = picked?.id;
       if (!entity?.id?.startsWith("scythe-web:coverage:")) return;
-      const at = this.viewer.clock.currentTime;
-      const read = (name) => entity.properties?.[name]?.getValue?.(at) ?? null;
-      const detail = {
-        evidence_class: read("evidenceClass"),
-        visualization_is_authoritative: read("visualizationIsAuthoritative"),
-        dataset_id: read("datasetId"),
-        tile_id: read("tileId"),
-        display_asset_hash: read("displayAssetHash"),
-        longitude_degrees: read("longitudeDegrees"),
-        latitude_degrees: read("latitudeDegrees"),
-        height_meters: read("heightMeters"),
-        frequency_hz: read("frequencyHz"),
-        quantity: read("quantity"),
-        value: read("value"),
-        units: read("units"),
-        coverage: read("coverage"),
-        coverage_threshold: read("coverageThreshold"),
-        coverage_comparison: read("coverageComparison"),
-        coverage_threshold_units: read("coverageThresholdUnits"),
-        transmitter_id: read("transmitterId"),
-        provenance: {
-          solverName: read("solverName"), solverVersion: read("solverVersion"),
-          sourceRevision: read("sourceRevision"), runId: read("runId"),
-        },
-      };
+      const detail = coverageCellDetail(entity, this.viewer.clock.currentTime);
+      this.pinCoverageCell(detail);
       const EventClass = this.documentRoot?.defaultView?.CustomEvent ?? globalThis.CustomEvent;
       this.container?.dispatchEvent(new EventClass("scythe-web:coverage-cell-selected", {
         bubbles: true, detail,
       }));
     }, this.Cesium.ScreenSpaceEventType.LEFT_CLICK);
+    if (this.Cesium.ScreenSpaceEventType.MOUSE_MOVE) this.coverageClickHandler.setInputAction((movement) => {
+      const entity = this.viewer.scene.pick(movement.endPosition)?.id;
+      const detail = coverageCellDetail(entity, this.viewer.clock.currentTime);
+      this.hoverCell = detail;
+      if (this.samplingMode === "HOVER" && detail) {
+        this.#setExpanded(true); this.#renderCellHud(detail); this.lastStep = null;
+      } else if (this.samplingMode === "HOVER") this.#setExpanded(false);
+    }, this.Cesium.ScreenSpaceEventType.MOUSE_MOVE);
   }
 
   #renderHud(sample) {
@@ -286,8 +385,12 @@ export class MonocleOverlayLayer {
     };
     set("value", model.value);
     set("detail", `${model.state} // ${model.detail}`);
+    set("mode", `MODE // ${this.samplingMode}`);
+    set("decision", sample?.coverage == null ? "THRESHOLD // UNAVAILABLE" :
+      `THRESHOLD // ${sample.query?.coverageThreshold?.comparison ?? "?"} ${sample.query?.coverageThreshold?.value ?? "?"} ${sample.query?.coverageThreshold?.units ?? sample.units ?? ""} // ${sample.coverage ? "PASS" : "FAIL"}`);
     set("uncertainty", `UNCERTAINTY // ${model.uncertainty ?? "NOT QUANTIFIED"}`);
     set("provenance", `PROVENANCE // ${model.provenance ?? "UNAVAILABLE"}`);
+    set("hash", `DISPLAY ASSET // ${sample?.displayAssetHash ?? "UNAVAILABLE"}`);
 
     const badge = this.hud.querySelector('[data-role="evidence"]');
     if (badge) {
@@ -299,6 +402,28 @@ export class MonocleOverlayLayer {
       } else {
         badge.textContent = "UNCLASSIFIED";
       }
+    }
+  }
+
+  #renderCellHud(cell) {
+    if (!this.hud || !cell) return;
+    const set = (role, text) => { const element = this.hud.querySelector(`[data-role="${role}"]`);
+      if (element) element.textContent = text; };
+    const displayValue = Number.isFinite(Number(cell.display_value)) ? Number(cell.display_value) : Number(cell.value);
+    const delta = Number.isFinite(Number(cell.display_delta)) ? Number(cell.display_delta) : displayValue - Number(cell.value);
+    set("value", `${Number(cell.value).toPrecision(6)} ${cell.units ?? ""}`);
+    set("mode", `MODE // ${this.samplingMode} // ${Number(cell.latitude_degrees).toFixed(5)}°, ${Number(cell.longitude_degrees).toFixed(5)}°`);
+    set("detail", `CONTRACT VALUE // ${cell.value} ${cell.units ?? ""} // DISPLAY VALUE // ${displayValue} ${cell.units ?? ""} // Δ ${Number(delta).toPrecision(4)}`);
+    set("decision", `THRESHOLD // ${cell.coverage_comparison ?? "?"} ${cell.coverage_threshold ?? "?"} ${cell.coverage_threshold_units ?? cell.units ?? ""} // ${cell.coverage ? "PASS" : "FAIL"}`);
+    const uncertainty = cell.uncertainty ?? {};
+    set("uncertainty", `UNCERTAINTY // ${uncertainty.value == null ? uncertainty.kind ?? "NOT QUANTIFIED" : `±${uncertainty.value} ${uncertainty.units ?? ""} // ${uncertainty.kind ?? "UNSPECIFIED"}`}`);
+    const provenance = cell.provenance ?? {};
+    set("provenance", `SOLVER // ${provenance.solverName ?? "UNKNOWN"} ${provenance.solverVersion ?? ""} // RUN ${provenance.runId ?? "UNKNOWN"} // SOURCE ${provenance.sourceRevision ?? "UNKNOWN"}`);
+    set("hash", `DISPLAY ASSET // ${cell.display_asset_hash ?? "UNAVAILABLE"} // VISUAL AUTHORITY ${cell.visualization_is_authoritative ? "AUTHORITATIVE" : "NON-AUTHORITATIVE"}`);
+    const badge = this.hud.querySelector('[data-role="evidence"]');
+    if (badge && cell.evidence_class) {
+      const style = evidenceStyle(cell.evidence_class); badge.textContent = style.label;
+      badge.className = `scythe-web-monocle__badge ${style.cssClass}`;
     }
   }
 
@@ -450,6 +575,8 @@ export class MonocleOverlayLayer {
           evidenceClass: sample.evidenceClass,
           quantity: sample.quantity,
           value: sample.value,
+          displayValue: sample.value,
+          displayDelta: 0,
           units: sample.units,
           coverage: sample.coverage,
           coverageThreshold: threshold?.value ?? null,
@@ -464,6 +591,9 @@ export class MonocleOverlayLayer {
           solverVersion: sample.provenance?.solverVersion,
           sourceRevision: sample.provenance?.sourceRevision,
           runId: sample.provenance?.runId,
+          uncertaintyKind: sample.uncertainty?.kind ?? null,
+          uncertaintyValue: sample.uncertainty?.value ?? null,
+          uncertaintyUnits: sample.uncertainty?.units ?? null,
           visualizationIsAuthoritative: false,
         },
       });

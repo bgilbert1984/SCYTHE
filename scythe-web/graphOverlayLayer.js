@@ -104,6 +104,15 @@ export class GraphOverlayLayer {
       this.clickHandler.setInputAction((movement) => {
         const entity = this.viewer.scene.pick(movement.position)?.id;
         if (Array.isArray(entity)) return;
+        if (entity?.id === "scythe-web:sensor-vantage") {
+          const raw = readProperty(entity, "sensorDetailJson", this.viewer.clock?.currentTime);
+          let detail = null; try { detail = JSON.parse(String(raw ?? "null")); } catch { /* fail closed */ }
+          if (!detail) return;
+          const EventClass = this.container?.ownerDocument?.defaultView?.CustomEvent ?? globalThis.CustomEvent;
+          this.container?.dispatchEvent(new EventClass("scythe-web:rf-sensor-selection",
+            {bubbles:true,detail:{kind:"rf-sensor",entityId:`sensor:${detail.sensorId}`,sensor:detail}}));
+          return;
+        }
         const isNode = entity?.id?.startsWith("scythe-web:graph-node:");
         const isEdge = entity?.id?.startsWith("scythe-web:graph-edge:");
         if (!isNode && !isEdge) return;
@@ -120,6 +129,13 @@ export class GraphOverlayLayer {
       }, this.Cesium.ScreenSpaceEventType.LEFT_CLICK);
       if (this.Cesium.ScreenSpaceEventType.MOUSE_MOVE) this.clickHandler.setInputAction((movement) => {
         const picked = this.viewer.scene.pick(movement.endPosition)?.id;
+        if (picked?.id === "scythe-web:sensor-vantage") {
+          const description = readProperty(picked, "hoverText", this.viewer.clock?.currentTime);
+          if (!description) return this.#hideTooltip();
+          this.tooltip.textContent = description; this.tooltip.hidden = false;
+          this.tooltip.style.left = `${Number(movement.endPosition?.x ?? 0) + 13}px`;
+          this.tooltip.style.top = `${Number(movement.endPosition?.y ?? 0) + 13}px`; return;
+        }
         if (picked?.id?.startsWith?.("scythe-web:graph-flow-cluster:")) {
           const description = readProperty(picked, "hoverText", this.viewer.clock?.currentTime);
           if (!description) return this.#hideTooltip();
@@ -254,16 +270,28 @@ export class GraphOverlayLayer {
     if (!placement) return;
     const C = this.Cesium; const id = "scythe-web:sensor-vantage";
     const uncertainty = Math.max(.005, placement.uncertaintyRadiusKm || 0);
+    const receiver = this.sensorVantage.receiver ?? {};
+    const sensorId = receiver.sensorId ?? this.sensorVantage.sensorId ?? "browser-capture-vantage";
+    const detail = {...receiver, sensorId, latitude:placement.latitude,longitude:placement.longitude,
+      accuracyMeters:uncertainty*1000,locationAuthority:this.sensorVantage.authority ?? "OPERATOR PROVIDED",
+      locationEvidenceClass:this.sensorVantage.evidenceClass ?? "MEASURED"};
+    const hoverText = ["RF RECEIVER SENSOR // DISPLAY CONTEXT", sensorId,
+      `BRIDGE // ${String(receiver.bridgeState ?? "UNKNOWN").toUpperCase()} // IQ ${receiver.iqConnected ? "CONNECTED" : "DISCONNECTED"}`,
+      `CENTER // ${receiver.centerFrequencyHz ?? "UNKNOWN"} Hz // SAMPLE RATE ${receiver.sampleRateHz ?? "UNKNOWN"} Hz`,
+      `LOCATION // ${placement.latitude.toFixed(5)}°, ${placement.longitude.toFixed(5)}° ±${Math.round(uncertainty*1000)} m`,
+      `AUTHORITY // ${detail.locationAuthority}`, "CLICK // OPEN RF FIELD INSPECTOR",
+      "BOUNDARY // CONFIGURED RECEIVER; USB ATTACHMENT NOT ATTESTED; RAW IQ NOT EXPOSED"].join("\n");
     this.collection.add({id, position: C.Cartesian3.fromDegrees(placement.longitude, placement.latitude, 750),
       point: {pixelSize: 13, color: C.Color.fromCssColorString("#ffffff"),
         outlineColor: C.Color.fromCssColorString("#00d4ff"), outlineWidth: 3},
       ...(this.overlays.uncertainty ? {ellipse: {semiMajorAxis: uncertainty * 1000,
         semiMinorAxis: uncertainty * 1000, material: C.Color.CYAN.withAlpha(.045), outline: true,
         outlineColor: C.Color.CYAN.withAlpha(.7), height: 0}} : {}),
-      label: {text: "SENSOR VANTAGE", font: "bold 10px ui-monospace,monospace",
+      label: {text: `RF RX // ${sensorId}`, font: "bold 10px ui-monospace,monospace",
         fillColor: C.Color.WHITE, pixelOffset: new C.Cartesian2(0, -18), showBackground: true,
         backgroundColor: C.Color.BLACK.withAlpha(.72)},
-      description: `SENSOR VANTAGE // ${this.sensorVantage.authority ?? "OPERATOR PROVIDED"} // PRIVATE AND MULTICAST HOSTS ARE CO-LOCATED FOR DISPLAY ONLY`});
+      properties:{sensorDetailJson:JSON.stringify(detail),hoverText},
+      description: hoverText.replaceAll("\n","<br>")});
     this.entityIds.add(id);
   }
 

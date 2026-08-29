@@ -26,11 +26,19 @@ While the lens is active, the Cesium globe renders:
   bounded ownership, host, prefix, and uncertainty metadata; clicking opens an
   Infrastructure Lens evidence panel with explicit observed-host actions;
 - translucent uncertainty regions using GeoIP accuracy radius;
-- cyan geodesic endpoint connectors for observed graph flow aggregates;
+- interactive cyan geodesic endpoint connectors for observed graph flow
+  aggregates. Clicking opens their counters, time bounds, and retained member
+  graph-edge actions; the displayed connector remains explicitly non-route;
 - interactive orange `FAC <id>` PeeringDB facility markers. Hovering discloses
   bounded declared metadata; clicking opens the Cesium entity and an
   Infrastructure Lens evidence panel with any current observed hosts whose ASN
   matches the facility's declared presence.
+- interactive magenta RIS path segments. Clicking exposes the bounded update,
+  collector vantage, full AS path, selected segment, source revision, and any
+  current observed hosts matching its origin ASN;
+- interactive red evidence-tension markers. Clicking preserves each source
+  claim separately and exposes alternatives, the falsifier, and implicated
+  observed-host actions without synthesizing consensus.
 
 The connectors communicate association and activity at a glance. They do not claim the physical packet path, BGP AS path, cable, exchange point, relay, or device location.
 Facility interaction likewise remains `PEERINGDB_SELF_REPORTED`: declared
@@ -38,6 +46,9 @@ co-location does not prove traffic, path, or device presence.
 ASN/domain interaction remains `INFERRED`: local prefix enrichment estimates
 ownership and GeoIP estimates the centroid; neither locates a device nor proves
 a data-plane route.
+RIS interaction remains `CONTROL_PLANE_OBSERVATION` at one collector vantage,
+and evidence-tension interaction remains an unresolved disagreement rather than
+a hijack determination or causal conclusion.
 
 ## Full-Fidelity Cloud
 

@@ -58,7 +58,43 @@ test("ASN domain markers expose bounded inferred evidence and observed hosts", (
   assert.match(detail.boundary, /DOES NOT LOCATE A DEVICE OR PROVE A ROUTE/);
 });
 
-test("clicking ASN and facility markers selects the Cesium entity and emits typed evidence", async () => {
+test("tension, observed-flow, and RIS entities expose distinct bounded evidence contracts", () => {
+  const tension = infrastructureSelectionDetail({properties: {infrastructureKind: "evidence_tension",
+    findingId: "finding-1", findingKind: "ORIGIN_DISAGREEMENT", findingStatus: "UNRESOLVED",
+    severity: "REVIEW", subject: "asn:20940", prefix: "23.32.0.0/11",
+    claimsJson: JSON.stringify([{value: 20940, authority: "HOST_PREFIX_ENRICHMENT"},
+      {value: [64500], authority: "RIS_LIVE_COLLECTOR_VANTAGE", collectorId: "rrc21"}]),
+    alternativesJson: JSON.stringify(["LOCAL ENRICHMENT IS STALE"]), falsifier: "COMPARE SOURCES",
+    relatedHostIdsJson: JSON.stringify(["host:23.1.1.1"]), evidenceBoundary: "NOT A HIJACK DETERMINATION",
+    graphRevision: "graph-interactions-1"}});
+  assert.equal(tension.kind, "infrastructure-evidence-tension");
+  assert.equal(tension.finding.claims[1].collectorId, "rrc21");
+  assert.deepEqual(tension.finding.relatedHostIds, ["host:23.1.1.1"]);
+  assert.match(tension.boundary, /NOT A HIJACK/);
+
+  const flow = infrastructureSelectionDetail({properties: {infrastructureKind: "observed_domain_flow",
+    flowId: "infra-flow-1", sourceDomain: "asn:20940", targetDomain: "asn:64500", protocol: "tcp",
+    flowCount: 3, bytes: 1200, packets: 12, memberEdgeIdsJson: JSON.stringify(["flow:1", "flow:2"]),
+    graphRevision: "graph-interactions-1"}});
+  assert.equal(flow.kind, "infrastructure-observed-flow");
+  assert.equal(flow.authority, "OBSERVED_GRAPH_EDGES");
+  assert.deepEqual(flow.flow.memberEdgeIds, ["flow:1", "flow:2"]);
+  assert.match(flow.boundary, /NOT A PHYSICAL OR BGP ROUTE/);
+
+  const ris = infrastructureSelectionDetail({properties: {infrastructureKind: "ris_control_plane_path",
+    observationId: "ris-1", messageType: "ANNOUNCE", prefix: "23.32.0.0/11", collectorId: "rrc21",
+    collectorReceivedIso: "2026-08-29T12:00:00Z", peerAsn: 64496,
+    originAsnsJson: JSON.stringify([20940]), asPathJson: JSON.stringify([64496, 3356, [20940, 20941]]),
+    segmentIndex: 1, segmentSourceAsnsJson: JSON.stringify([3356]),
+    segmentTargetAsnsJson: JSON.stringify([20940]), relatedHostIdsJson: JSON.stringify(["host:23.1.1.1"]),
+    controlPlaneRevision: "ris-revision-1", graphRevision: "graph-interactions-1"}});
+  assert.equal(ris.kind, "infrastructure-ris-path");
+  assert.deepEqual(ris.observation.asPath, [64496, 3356, [20940, 20941]]);
+  assert.equal(ris.controlPlaneRevision, "ris-revision-1");
+  assert.match(ris.boundary, /ONE COLLECTOR VANTAGE/);
+});
+
+test("clicking interactive infrastructure entities emits typed bounded evidence", async () => {
   const actions = {}; const events = []; let listener = null; let picked = null;
   class Color { withAlpha() { return this; } static fromCssColorString() { return new Color(); } }
   class Entities {
@@ -99,12 +135,25 @@ test("clicking ASN and facility markers selects the Cesium entity and emits type
     {id: "asn:20940", asn: 20940, organization: "Akamai International B.V.", hostCount: 1,
       observedHostIds: ["host:23.48.99.72"], prefixes: ["23.32.0.0/11"],
       centroid: {latitude: 42.1167, longitude: -86.4542, uncertaintyRadiusKm: 50}},
-  ], observedFlows: [],
+    {id: "asn:64500", asn: 64500, organization: "Example Network", hostCount: 1,
+      observedHostIds: ["host:192.0.2.10"], prefixes: ["192.0.2.0/24"],
+      centroid: {latitude: 47.61, longitude: -122.33, uncertaintyRadiusKm: 20}},
+  ], observedFlows: [{id: "infra-flow-1", sourceDomain: "asn:20940", targetDomain: "asn:64500",
+    protocol: "tcp", flowCount: 3, bytes: 1200, packets: 12, firstSeen: "2026-08-29T11:59:00Z",
+    lastSeen: "2026-08-29T12:00:00Z", memberEdgeIds: ["flow:1", "flow:2"]}],
     peeringdbEvidence: {facilityPresences: [{fac_id: 14445, asn: 64500}], facilities: [
       {id: 14445, name: "Facility", city: "La Courneuve", country: "FR", latitude: 48.927,
         longitude: 2.397, updated: "2026-08-28T00:00:00Z"}]},
-    declaredSharedIxCandidates: [], controlPlaneEvidence: {controlPlanePaths: []},
-    infrastructureContradictions: {findings: []}}});
+    declaredSharedIxCandidates: [], controlPlaneEvidence: {snapshotRevision: "ris-revision-1",
+      controlPlanePaths: [{id: "ris-1", messageType: "ANNOUNCE", prefix: "23.32.0.0/11",
+        collectorId: "rrc21", collectorReceivedIso: "2026-08-29T12:00:00Z", peerAsn: 64496,
+        originAsn: 64500, asPath: [20940, 64500]}]},
+    infrastructureContradictions: {findings: [{id: "finding-1", kind: "ORIGIN_DISAGREEMENT",
+      status: "UNRESOLVED", severity: "REVIEW", subject: "asn:20940", prefix: "23.32.0.0/11",
+      claims: [{value: 20940, authority: "HOST_PREFIX_ENRICHMENT"},
+        {value: [64500], authority: "RIS_LIVE_COLLECTOR_VANTAGE", collectorId: "rrc21"}],
+      alternatives: ["LOCAL ENRICHMENT IS STALE"], falsifier: "COMPARE MULTIPLE SOURCES",
+      boundary: "NOT A HIJACK DETERMINATION"}]}}});
   picked = layer.source.entities.values.find((entity) => entity.id === "scythe-infra:asn:20940");
   actions.move({endPosition: {x: 11, y: 12}});
   assert.equal(tooltip.hidden, false); assert.equal(viewer.scene.canvas.style.cursor, "pointer");
@@ -122,5 +171,21 @@ test("clicking ASN and facility markers selects the Cesium entity and emits type
   assert.equal(events[1].type, "scythe-web:infrastructure-selection");
   assert.equal(events[1].detail.entityId, "peeringdb:facility:14445");
   assert.deepEqual(events[1].detail.facility.environmentAsns, [64500]);
+
+  picked = layer.source.entities.values.find((entity) => entity.id === "scythe-infra:tension:finding-1");
+  actions.click({position: {x: 1, y: 2}});
+  assert.equal(events[2].detail.kind, "infrastructure-evidence-tension");
+  assert.equal(events[2].detail.finding.falsifier, "COMPARE MULTIPLE SOURCES");
+
+  picked = layer.source.entities.values.find((entity) => entity.id === "scythe-infra:infra-flow-1");
+  actions.click({position: {x: 1, y: 2}});
+  assert.equal(events[3].detail.kind, "infrastructure-observed-flow");
+  assert.deepEqual(events[3].detail.flow.memberEdgeIds, ["flow:1", "flow:2"]);
+
+  picked = layer.source.entities.values.find((entity) => entity.id === "scythe-infra:ris:ris-1:0");
+  actions.click({position: {x: 1, y: 2}});
+  assert.equal(events[4].detail.kind, "infrastructure-ris-path");
+  assert.equal(events[4].detail.observation.collectorId, "rrc21");
+  assert.deepEqual(events[4].detail.observation.relatedHostIds, ["host:192.0.2.10"]);
   layer.destroy(); assert.equal(listener, null);
 });

@@ -92,6 +92,7 @@ export const DISPLAY_PURPOSE_STYLES = Object.freeze({
   NETWORK_DIVERSITY: Object.freeze({label: "NETWORK DIVERSITY", color: "#f7d154", alpha: .96}),
   STABLE_CONTEXT: Object.freeze({label: "STABLE CONTEXT", color: "#7890a8", alpha: .9}),
   GEOGRAPHIC_CONTEXT: Object.freeze({label: "CITY CONTEXT", color: "#5de1c5", alpha: .9}),
+  RF_SENSOR_CONTEXT: Object.freeze({label: "RF RECEIVER", color: "#63ffd1", alpha: 1}),
 });
 
 export function graphPurposeStyle(node) {

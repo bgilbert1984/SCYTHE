@@ -18,8 +18,9 @@ export class InfrastructureLensView {
   }
   setVisible(value) { this.visible = Boolean(value); if (this.visible) this.render(); }
   setInfrastructureSelection(selection) {
-    this.infrastructureSelection = ["peeringdb-facility", "infrastructure-domain"].includes(selection?.kind)
-      ? selection : null;
+    const supported = ["peeringdb-facility", "infrastructure-domain", "infrastructure-evidence-tension",
+      "infrastructure-observed-flow", "infrastructure-ris-path"];
+    this.infrastructureSelection = supported.includes(selection?.kind) ? selection : null;
     if (this.visible) this.render();
   }
   render(error = null) {
@@ -52,6 +53,51 @@ export class InfrastructureLensView {
         }
         if (!actions.children.length) actions.append(el(this.document, "div", "infra-lens__empty",
           "NO OBSERVED HOST IS AVAILABLE FOR THIS INFERRED DOMAIN"));
+      } else if (selection.kind === "infrastructure-evidence-tension") {
+        const finding = selection.finding ?? {};
+        const claimText = (finding.claims ?? []).map((claim, index) =>
+          `CLAIM ${index + 1} // ${Array.isArray(claim.value) ? claim.value.join(", ") : claim.value || "UNAVAILABLE"}\nAUTHORITY // ${claim.authority}${claim.collectorId ? ` // ${claim.collectorId}` : ""}${claim.observedAt ? ` @ ${claim.observedAt}` : ""}`).join("\n");
+        panel.append(el(this.document, "h3", "infra-lens__selection-title",
+          `SELECTED EVIDENCE TENSION // ${finding.kind ?? "SOURCE DISAGREEMENT"}`));
+        panel.append(el(this.document, "div", "infra-lens__selection-body",
+          `${finding.status ?? "UNRESOLVED"} // ${finding.severity ?? "REVIEW"}\nSUBJECT // ${finding.subject ?? "UNAVAILABLE"}\nPREFIX // ${finding.prefix ?? "UNAVAILABLE"}\n${claimText || "CLAIMS // UNAVAILABLE"}\nALTERNATIVES // ${(finding.alternatives ?? []).join(" | ") || "NONE RECORDED"}\nFALSIFIER // ${finding.falsifier || "NOT RECORDED"}`));
+        for (const hostId of (finding.relatedHostIds ?? []).slice(0, 64)) {
+          const button = el(this.document, "button", "infra-lens__card infra-lens__card--contradiction",
+            `OPEN IMPLICATED HOST // ${hostId}`);
+          button.type = "button"; button.addEventListener("click", () => this.#select("graph-node", hostId));
+          actions.append(button);
+        }
+        if (!actions.children.length) actions.append(el(this.document, "div", "infra-lens__empty",
+          "NO OBSERVED HOST IS AVAILABLE FOR THIS SOURCE DISAGREEMENT"));
+      } else if (selection.kind === "infrastructure-observed-flow") {
+        const flow = selection.flow ?? {};
+        panel.append(el(this.document, "h3", "infra-lens__selection-title",
+          `SELECTED OBSERVED FLOW // ${String(flow.protocol ?? "unknown").toUpperCase()}`));
+        panel.append(el(this.document, "div", "infra-lens__selection-body",
+          `${flow.sourceDomain ?? "UNKNOWN"} → ${flow.targetDomain ?? "UNKNOWN"}\nAGGREGATE // ${flow.flowCount ?? 0} FLOWS // ${flow.packets ?? 0} PACKETS // ${flow.bytes ?? 0} BYTES\nMEMBER GRAPH EDGES // ${(flow.memberEdgeIds ?? []).length}\nFIRST SEEN // ${flow.firstSeen ?? "UNKNOWN"}\nLAST SEEN // ${flow.lastSeen ?? "UNKNOWN"}\nAUTHORITY // ${selection.authority ?? "OBSERVED_GRAPH_EDGES"}`));
+        for (const edgeId of (flow.memberEdgeIds ?? []).slice(0, 64)) {
+          const button = el(this.document, "button", "infra-lens__card infra-lens__card--flow",
+            `OPEN OBSERVED GRAPH EDGE // ${edgeId}`);
+          button.type = "button"; button.addEventListener("click", () => this.#select("graph-edge", edgeId));
+          actions.append(button);
+        }
+        if (!actions.children.length) actions.append(el(this.document, "div", "infra-lens__empty",
+          "NO RETAINED MEMBER EDGE IS AVAILABLE FOR THIS AGGREGATE"));
+      } else if (selection.kind === "infrastructure-ris-path") {
+        const observation = selection.observation ?? {};
+        const path = (observation.asPath ?? []).map((hop) => Array.isArray(hop) ? `{${hop.join(",")}}` : hop).join(" → ") || "NO AS PATH";
+        panel.append(el(this.document, "h3", "infra-lens__selection-title",
+          `SELECTED RIS ${observation.messageType ?? "UPDATE"} // CONTROL PLANE`));
+        panel.append(el(this.document, "div", "infra-lens__selection-body",
+          `PREFIX // ${observation.prefix ?? "UNAVAILABLE"}\nCOLLECTOR // ${observation.collectorId || "UNKNOWN"} @ ${observation.collectorReceivedIso ?? "UNKNOWN"}\nPEER ASN // ${observation.peerAsn ?? "UNKNOWN"}\nORIGIN ASN // ${(observation.originAsns ?? []).join(", ") || "NONE"}\nAS PATH // ${path}\nSELECTED SEGMENT ${Number(observation.segmentIndex ?? 0) + 1} // AS${(observation.segmentSourceAsns ?? []).join("|") || "?"} → AS${(observation.segmentTargetAsns ?? []).join("|") || "?"}\nRIS REVISION // ${selection.controlPlaneRevision ?? "UNKNOWN"}`));
+        for (const hostId of (observation.relatedHostIds ?? []).slice(0, 64)) {
+          const button = el(this.document, "button", "infra-lens__card infra-lens__card--control",
+            `OPEN OBSERVED ORIGIN HOST // ${hostId}`);
+          button.type = "button"; button.addEventListener("click", () => this.#select("graph-node", hostId));
+          actions.append(button);
+        }
+        if (!actions.children.length) actions.append(el(this.document, "div", "infra-lens__empty",
+          "NO OBSERVED HOST IN THE CURRENT GRAPH MATCHES THIS RIS ORIGIN"));
       } else {
         const facility = selection.facility ?? {};
         const relatedDomains = (facility.environmentAsns ?? []).map((asn) => domainByAsn.get(Number(asn))).filter(Boolean);

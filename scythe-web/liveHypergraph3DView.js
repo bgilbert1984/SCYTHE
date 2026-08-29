@@ -127,7 +127,8 @@ export class LiveHypergraph3DView {
 
   render(graph) {
     const displayGraph = projectCityContext(graph);
-    const nodes = (displayGraph.nodes ?? []).slice(0, 500 + displayGraph.cityContext.nodeCount);
+    const displayNodeCount = displayGraph.cityContext.nodeCount + (displayGraph.rfSensorDisplayContext?.nodeCount ?? 0);
+    const nodes = (displayGraph.nodes ?? []).slice(0, 500 + displayNodeCount);
     const edges = (displayGraph.edges ?? []).slice(0, 1000 + displayGraph.cityContext.edgeCount);
     this.positions = stableTopologyLayout(this.positions, nodes, edges, Math.max(70, Math.sqrt(nodes.length || 1) * 22));
     const nodeIds = new Set(nodes.map((node) => node.id));
@@ -139,7 +140,7 @@ export class LiveHypergraph3DView {
     this.edgeObjects.clear(); this.pickTargets = [...this.nodeMeshes.values()];
     for (const edge of edges) this.#addEdge(edge, graph.graphRevision);
     const hyperedges = edges.filter((edge) => (edge.nodes ?? []).filter((id) => nodeIds.has(id)).length > 2).length;
-    this.stats.textContent = `${nodes.length} NODES · ${edges.length - hyperedges} EDGES · ${hyperedges} HYPEREDGES · ${displayGraph.cityContext.nodeCount} INFERRED CITIES · THREE r${this.THREE.REVISION}`;
+    this.stats.textContent = `${nodes.length} NODES · ${edges.length - hyperedges} EDGES · ${hyperedges} HYPEREDGES · ${displayGraph.cityContext.nodeCount} INFERRED CITIES · ${displayGraph.rfSensorDisplayContext?.nodeCount ?? 0} RF SENSORS · THREE r${this.THREE.REVISION}`;
     this.graphRevision = graph.graphRevision;
     if (!this.hasFramed && nodes.length) { this.#frame(); this.hasFramed = true; }
   }
@@ -184,8 +185,10 @@ export class LiveHypergraph3DView {
       badge.material.color.set(liveness.color); badge.position.set(0, scale.threeRadius + 3.4, 0); badge.visible = true;
     } else if (badge) badge.visible = false;
     const point = this.positions.get(node.id); mesh.position.set(point.x, point.y, point.z);
-    mesh.userData = {...mesh.userData, selection: node.display?.selectionDisabled ? null : {kind: graphKind(node), entityId: node.id,
+    mesh.userData = {...mesh.userData, selection: node.display?.selectionDisabled ? null : {
+      kind: node.kind === "rf_receiver_sensor" ? "rf-sensor" : graphKind(node), entityId: node.id,
       entityType: node.kind, graphRevision: revision,
+      ...(node.kind === "rf_receiver_sensor" ? {sensor: node} : {}),
       ...(node.position ? {position: node.position} : {}), observedAt: node.observedAt ?? null},
       label: `${graphEntityTooltip(node)}\n\nVISUAL SCALE // ${scale.basis.replaceAll("_", " ")} · NODE RADIUS ${scale.threeRadius.toFixed(2)} UNITS\nBOUNDARY // SIZE IS PRESENTATION METADATA; IT DOES NOT CHANGE EVIDENCE AUTHORITY`,
       evidenceClass: evidence.name};
@@ -306,7 +309,9 @@ export class LiveHypergraph3DView {
     }
     if (select && hit?.userData?.selection) {
       this.selected = hit.userData.selection.entityId;
-      this.root.dispatchEvent(new this.window.CustomEvent("scythe-web:graph-selection", {bubbles: true,
+      const type = hit.userData.selection.kind === "rf-sensor" ?
+        "scythe-web:rf-sensor-selection" : "scythe-web:graph-selection";
+      this.root.dispatchEvent(new this.window.CustomEvent(type, {bubbles: true,
         detail: {...hit.userData.selection}}));
     }
   }

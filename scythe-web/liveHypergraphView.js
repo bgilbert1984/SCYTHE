@@ -90,7 +90,8 @@ export class LiveHypergraphView {
     const displayGraph = projectCityContext(graph);
     const nodeLimit = this.controller?.nodeLimit ?? this.nodeLimit;
     const edgeLimit = this.controller?.edgeLimit ?? this.edgeLimit;
-    const nodes = displayGraph.nodes.slice(0, nodeLimit + displayGraph.cityContext.nodeCount);
+    const displayNodeCount = displayGraph.cityContext.nodeCount + (displayGraph.rfSensorDisplayContext?.nodeCount ?? 0);
+    const nodes = displayGraph.nodes.slice(0, nodeLimit + displayNodeCount);
     const initial = layout(nodes, width, height);
     for (const city of nodes.filter((node) => node.kind === "geographic_city_context")) {
       const hosts = displayGraph.edges.filter((edge) => edge.kind === "geoip_city_membership" &&
@@ -169,6 +170,7 @@ export class LiveHypergraphView {
       const scale = graphNodeScale(node);
       const group = document.createElementNS(SVG_NS, "g"); group.classList.add("live-hypergraph__node");
       if (node.kind === "geographic_city_context") group.classList.add("live-hypergraph__node--city");
+      if (node.kind === "rf_receiver_sensor") group.classList.add("live-hypergraph__node--rf-sensor");
       group.setAttribute("transform", `translate(${point.x} ${point.y})`); group.dataset.entityId = node.id;
       const circle = document.createElementNS(SVG_NS, "circle");
       circle.setAttribute("r", String(scale.topologyRadius));
@@ -188,9 +190,15 @@ export class LiveHypergraphView {
       group.addEventListener("pointerenter", (event) => this.#showTooltip(event, tooltipText));
       group.addEventListener("pointermove", (event) => this.#showTooltip(event, tooltipText));
       group.addEventListener("pointerleave", () => { if (this.tooltip) this.tooltip.hidden = true; });
-      if (!node.display?.selectionDisabled) group.addEventListener("click", () => this.#select({kind: graphKind(node), entityId: node.id,
-        entityType: node.kind, graphRevision: graph.graphRevision,
-        ...(node.position ? {position: node.position} : {}), observedAt: node.observedAt ?? null}));
+      if (!node.display?.selectionDisabled) group.addEventListener("click", () => {
+        const detail = {kind: node.kind === "rf_receiver_sensor" ? "rf-sensor" : graphKind(node),
+          entityId: node.id, entityType: node.kind, graphRevision: graph.graphRevision,
+          ...(node.kind === "rf_receiver_sensor" ? {sensor: node} : {}),
+          ...(node.position ? {position: node.position} : {}), observedAt: node.observedAt ?? null};
+        if (node.kind === "rf_receiver_sensor") this.root.dispatchEvent(new CustomEvent(
+          "scythe-web:rf-sensor-selection", {bubbles:true,detail}));
+        else this.#select(detail);
+      });
       this.svg.appendChild(group);
     }
     const finishedAt = this.window.performance?.now?.() ?? Date.now();

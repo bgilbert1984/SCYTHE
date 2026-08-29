@@ -42,6 +42,21 @@ export function graphEntityTooltip(entity = {}) {
       "BOUNDARY // CITY MEMBERSHIP AND CENTROID ARE INFERRED; NOT PHYSICAL DEVICE LOCATION"]
       .filter(Boolean).join("\n");
   }
+  if (text(entity.kind).toLowerCase() === "rf_receiver_sensor") {
+    const geo = enrichment.geo ?? {};
+    return ["RF RECEIVER SENSOR // DISPLAY CONTEXT", labels.receiver_model || "Nooelec NESDR SMArt",
+      text(entity.id), `BRIDGE // ${labels.bridge_state || "UNKNOWN"} // IQ ${labels.iq_connected === "true" ? "CONNECTED" : "DISCONNECTED"}`,
+      labels.center_frequency_hz ? `CENTER // ${labels.center_frequency_hz} Hz` : "",
+      labels.sample_rate_hz ? `SAMPLE RATE // ${labels.sample_rate_hz} Hz` : "",
+      geo.latitude != null && geo.longitude != null ?
+        `LOCATION // ${fixed(geo.latitude,5)}°, ${fixed(geo.longitude,5)}° · ±${compact((geo.uncertaintyRadiusKm ?? 0)*1000)} m` :
+        "LOCATION // NOT PROVIDED",
+      `LOCATION AUTHORITY // ${text(geo.authority) || "NONE"}`,
+      "DEVICE PRESENCE // CONFIGURED · USB ATTACHMENT NOT ATTESTED BY GRAPH",
+      "RAW IQ // NOT EXPOSED", "INTERACTION // OPENS RF FIELD INSPECTOR",
+      "BOUNDARY // DISPLAY-DERIVED SENSOR CONTEXT; NOT A CANONICAL GRAPHOPS NODE"]
+      .filter(Boolean).join("\n");
+  }
   if (ip) {
     const kind = text(entity.kind).toLowerCase();
     const addressTitle = kind === "network_multicast_group" || scope === "MULTICAST"

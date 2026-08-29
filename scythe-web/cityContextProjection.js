@@ -53,7 +53,26 @@ export function projectCityContext(graph, {cityLimit = 24, membershipLimit = 200
           selectionDisabled:true}});
     }
   }
-  return {...graph, nodes:[...nodes,...cityNodes], edges:[...(graph?.edges ?? []),...membershipEdges],
+  const sensor = graph?.rfSensorContext;
+  const sensorId = String(sensor?.sensorId ?? "").slice(0,128);
+  const latitude = finite(sensor?.latitude); const longitude = finite(sensor?.longitude);
+  const sensorNodes = sensorId ? [{id:`sensor:${sensorId}`,kind:"rf_receiver_sensor",evidenceClass:"OBSERVED",
+    position:null, observedAt:sensor.latestFrameAt ?? sensor.capturedAt ?? null,
+    labels:{name:sensorId,receiver_model:sensor.model ?? "Nooelec NESDR SMArt",
+      bridge_state:String(sensor.bridgeState ?? "unknown").toUpperCase(),
+      iq_connected:String(Boolean(sensor.iqConnected)),center_frequency_hz:String(sensor.centerFrequencyHz ?? ""),
+      sample_rate_hz:String(sensor.sampleRateHz ?? "")},
+    metadata:{capture_owner:sensor.captureOwner ?? "unknown",raw_iq_exposed:false,
+      latest_frame_at:sensor.latestFrameAt ?? null,device_presence:"CONFIGURED_NOT_USB_ATTESTED"},
+    enrichment:{scope:"LOCAL_RF_SENSOR",geo:latitude !== null && longitude !== null ? {
+      latitude,longitude,uncertaintyRadiusKm:Math.max(0,finite(sensor.accuracyMeters) ?? 0)/1000,
+      evidenceClass:sensor.locationEvidenceClass ?? "MEASURED",
+      authority:sensor.locationAuthority ?? "BROWSER_GEOLOCATION_WITH_OPERATOR_CONSENT"}:null},
+    display:{selectionPurpose:"RF_SENSOR_CONTEXT",displayDerived:true,selectionDisabled:false,
+      interactionEvent:"scythe-web:rf-sensor-selection"}}] : [];
+  return {...graph, nodes:[...nodes,...cityNodes,...sensorNodes], edges:[...(graph?.edges ?? []),...membershipEdges],
     cityContext:{nodeCount:cityNodes.length,edgeCount:membershipEdges.length,
-      authority:"INFERRED_GEOIP_DISPLAY_CONTEXT",bounded:true,cityLimit,membershipLimit}};
+      authority:"INFERRED_GEOIP_DISPLAY_CONTEXT",bounded:true,cityLimit,membershipLimit},
+    rfSensorDisplayContext:{nodeCount:sensorNodes.length,edgeCount:0,
+      authority:"RF_BRIDGE_RUNTIME_STATUS_PLUS_CONSENTED_BROWSER_LOCATION",bounded:true}};
 }
