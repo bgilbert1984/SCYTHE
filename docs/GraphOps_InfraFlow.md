@@ -22,7 +22,9 @@ The live hypergraph includes an **Infrastructure Lens** tab. Domain cards select
 
 While the lens is active, the Cesium globe renders:
 
-- cyan points at inferred domain centroids;
+- interactive cyan ASN/domain points at inferred centroids. Hovering discloses
+  bounded ownership, host, prefix, and uncertainty metadata; clicking opens an
+  Infrastructure Lens evidence panel with explicit observed-host actions;
 - translucent uncertainty regions using GeoIP accuracy radius;
 - cyan geodesic endpoint connectors for observed graph flow aggregates;
 - interactive orange `FAC <id>` PeeringDB facility markers. Hovering discloses
@@ -33,6 +35,9 @@ While the lens is active, the Cesium globe renders:
 The connectors communicate association and activity at a glance. They do not claim the physical packet path, BGP AS path, cable, exchange point, relay, or device location.
 Facility interaction likewise remains `PEERINGDB_SELF_REPORTED`: declared
 co-location does not prove traffic, path, or device presence.
+ASN/domain interaction remains `INFERRED`: local prefix enrichment estimates
+ownership and GeoIP estimates the centroid; neither locates a device nor proves
+a data-plane route.
 
 ## Full-Fidelity Cloud
 

@@ -18,7 +18,8 @@ export class InfrastructureLensView {
   }
   setVisible(value) { this.visible = Boolean(value); if (this.visible) this.render(); }
   setInfrastructureSelection(selection) {
-    this.infrastructureSelection = selection?.kind === "peeringdb-facility" ? selection : null;
+    this.infrastructureSelection = ["peeringdb-facility", "infrastructure-domain"].includes(selection?.kind)
+      ? selection : null;
     if (this.visible) this.render();
   }
   render(error = null) {
@@ -34,23 +35,40 @@ export class InfrastructureLensView {
     this.root.append(el(this.document, "pre", "infra-lens__status",
       `INFRAFLOW // ${String(data.status).toUpperCase()} // ${summary.domains ?? 0} DOMAINS // ${summary.observedFlows ?? 0} OBSERVED FLOWS\nPEERINGDB // ${summary.peeringdbNetworks ?? 0} DECLARED NETWORKS // RIS // ${summary.controlPlaneObservations ?? 0} CONTROL-PLANE OBSERVATIONS\nTENSIONS // ${contradictionSummary.findings ?? 0} FINDINGS // ${contradictionSummary.changes ?? 0} CHANGES // ${contradictionSummary.withheldTests ?? 0} TESTS WITHHELD`));
     if (this.infrastructureSelection) {
-      const selection = this.infrastructureSelection; const facility = selection.facility ?? {};
-      const relatedDomains = (facility.environmentAsns ?? []).map((asn) => domainByAsn.get(Number(asn))).filter(Boolean);
+      const selection = this.infrastructureSelection;
       const panel = el(this.document, "section", "infra-lens__selection");
-      panel.append(el(this.document, "h3", "infra-lens__selection-title",
-        `SELECTED FAC ${facility.id ?? "UNKNOWN"} // PEERINGDB SELF-REPORTED`));
-      panel.append(el(this.document, "div", "infra-lens__selection-body",
-        `${facility.name ?? "UNNAMED"}\n${[facility.city, facility.state, facility.country].filter(Boolean).join(", ") || "LOCATION UNDECLARED"}\nCOORDINATES // ${Number.isFinite(facility.latitude) && Number.isFinite(facility.longitude) ? `${facility.latitude.toFixed(5)}°, ${facility.longitude.toFixed(5)}°` : "UNAVAILABLE"}\nENVIRONMENT ASNs // ${(facility.environmentAsns ?? []).join(", ") || "NONE IN CURRENT SCOPE"}\nUPDATED // ${facility.updated ?? "UNKNOWN"}`));
       const actions = el(this.document, "div", "infra-lens__selection-actions");
-      for (const domain of relatedDomains) {
-        const hostId = domain.observedHostIds?.[0]; if (!hostId) continue;
-        const button = el(this.document, "button", "infra-lens__card infra-lens__card--declared",
-          `OPEN RELATED ${domain.id} // ${domain.organization ?? "OWNERSHIP UNRESOLVED"}\n${hostId}`);
-        button.type = "button"; button.addEventListener("click", () => this.#select("graph-node", hostId));
-        actions.append(button);
+      if (selection.kind === "infrastructure-domain") {
+        const domain = selection.domain ?? {};
+        panel.append(el(this.document, "h3", "infra-lens__selection-title",
+          `SELECTED ${domain.asn ? `ASN ${domain.asn}` : domain.id ?? "NETWORK DOMAIN"} // OWNERSHIP + GEOIP INFERRED`));
+        panel.append(el(this.document, "div", "infra-lens__selection-body",
+          `${domain.organization ?? "OWNERSHIP UNRESOLVED"}\nDOMAIN // ${domain.id ?? "UNKNOWN"}\nOBSERVED HOSTS // ${(domain.hostIds ?? []).length}\nPREFIXES // ${(domain.prefixes ?? []).join(", ") || "NONE IN CURRENT SCOPE"}\nOWNERSHIP AUTHORITY // ${selection.authority ?? "HOST_PREFIX_ENRICHMENT"}\nPLACEMENT AUTHORITY // ${domain.placementAuthority ?? "GEOIP_ESTIMATE_CENTROID"}\nINFERRED CENTROID // ${Number.isFinite(domain.latitude) && Number.isFinite(domain.longitude) ? `${domain.latitude.toFixed(5)}°, ${domain.longitude.toFixed(5)}° ±${domain.uncertaintyRadiusKm ?? 0} km` : "UNAVAILABLE"}`));
+        for (const hostId of (domain.hostIds ?? []).slice(0, 64)) {
+          const button = el(this.document, "button", "infra-lens__card",
+            `OPEN OBSERVED HOST // ${hostId}`);
+          button.type = "button"; button.addEventListener("click", () => this.#select("graph-node", hostId));
+          actions.append(button);
+        }
+        if (!actions.children.length) actions.append(el(this.document, "div", "infra-lens__empty",
+          "NO OBSERVED HOST IS AVAILABLE FOR THIS INFERRED DOMAIN"));
+      } else {
+        const facility = selection.facility ?? {};
+        const relatedDomains = (facility.environmentAsns ?? []).map((asn) => domainByAsn.get(Number(asn))).filter(Boolean);
+        panel.append(el(this.document, "h3", "infra-lens__selection-title",
+          `SELECTED FAC ${facility.id ?? "UNKNOWN"} // PEERINGDB SELF-REPORTED`));
+        panel.append(el(this.document, "div", "infra-lens__selection-body",
+          `${facility.name ?? "UNNAMED"}\n${[facility.city, facility.state, facility.country].filter(Boolean).join(", ") || "LOCATION UNDECLARED"}\nCOORDINATES // ${Number.isFinite(facility.latitude) && Number.isFinite(facility.longitude) ? `${facility.latitude.toFixed(5)}°, ${facility.longitude.toFixed(5)}°` : "UNAVAILABLE"}\nENVIRONMENT ASNs // ${(facility.environmentAsns ?? []).join(", ") || "NONE IN CURRENT SCOPE"}\nUPDATED // ${facility.updated ?? "UNKNOWN"}`));
+        for (const domain of relatedDomains) {
+          const hostId = domain.observedHostIds?.[0]; if (!hostId) continue;
+          const button = el(this.document, "button", "infra-lens__card infra-lens__card--declared",
+            `OPEN RELATED ${domain.id} // ${domain.organization ?? "OWNERSHIP UNRESOLVED"}\n${hostId}`);
+          button.type = "button"; button.addEventListener("click", () => this.#select("graph-node", hostId));
+          actions.append(button);
+        }
+        if (!actions.children.length) actions.append(el(this.document, "div", "infra-lens__empty",
+          "NO OBSERVED HOST IN THE CURRENT GRAPH MATCHES THIS FACILITY'S DECLARED ASN PRESENCE"));
       }
-      if (!actions.children.length) actions.append(el(this.document, "div", "infra-lens__empty",
-        "NO OBSERVED HOST IN THE CURRENT GRAPH MATCHES THIS FACILITY'S DECLARED ASN PRESENCE"));
       panel.append(actions, el(this.document, "div", "infra-lens__selection-boundary", selection.boundary));
       this.root.append(panel);
     }

@@ -10,13 +10,45 @@ function boundedJsonList(raw, limit = 64) {
   } catch { return []; }
 }
 
+function boundedStringJsonList(raw, limit = 64) {
+  try {
+    const values = JSON.parse(String(raw ?? "[]"));
+    return Array.isArray(values) ? [...new Set(values.map((item) => String(item).slice(0, 256))
+      .filter(Boolean))].slice(0, limit) : [];
+  } catch { return []; }
+}
+
 function escapeHtml(input) {
   return String(input ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#39;");
 }
 
 export function infrastructureSelectionDetail(entity, time, graphRevision = null) {
-  if (String(value(entity, "infrastructureKind", time) ?? "") !== "peeringdb_facility") return null;
+  const infrastructureKind = String(value(entity, "infrastructureKind", time) ?? "");
+  if (infrastructureKind === "network_domain") {
+    const domainId = String(value(entity, "domainId", time) ?? "").slice(0, 128);
+    if (!domainId) return null;
+    const asnValue = Number(value(entity, "asn", time));
+    return {
+      kind: "infrastructure-domain", entityId: domainId,
+      graphRevision: String(value(entity, "graphRevision", time) ?? graphRevision ?? "").slice(0, 128) || null,
+      evidenceClass: String(value(entity, "evidenceClass", time) ?? "INFERRED").slice(0, 64),
+      authority: String(value(entity, "authority", time) ?? "HOST_PREFIX_ENRICHMENT").slice(0, 128),
+      domain: {
+        id: domainId, asn: Number.isFinite(asnValue) && asnValue > 0 ? asnValue : null,
+        organization: String(value(entity, "organization", time) ?? "OWNERSHIP UNRESOLVED").slice(0, 256),
+        hostIds: boundedStringJsonList(value(entity, "hostIdsJson", time)),
+        prefixes: boundedStringJsonList(value(entity, "prefixesJson", time), 16),
+        latitude: Number(value(entity, "latitudeDegrees", time)),
+        longitude: Number(value(entity, "longitudeDegrees", time)),
+        uncertaintyRadiusKm: Math.max(0, Number(value(entity, "uncertaintyRadiusKm", time)) || 0),
+        placementAuthority: String(value(entity, "placementAuthority", time) ?? "GEOIP_ESTIMATE_CENTROID")
+          .slice(0, 128),
+      },
+      boundary: "ASN OWNERSHIP COMES FROM LOCAL PREFIX ENRICHMENT AND GEOGRAPHY FROM GEOIP; BOTH ARE INFERRED; THE CENTROID DOES NOT LOCATE A DEVICE OR PROVE A ROUTE",
+    };
+  }
+  if (infrastructureKind !== "peeringdb_facility") return null;
   const facilityId = String(value(entity, "facilityId", time) ?? "").slice(0, 64);
   if (!facilityId) return null;
   return {
@@ -68,7 +100,7 @@ export class InfrastructureGlobeLayer {
     this.overlays = {declared: true, controlPlane: true, contradictions: true}; this.snapshot = null;
     this.source = new Cesium.CustomDataSource("SCYTHE InfraFlow // DISPLAY ONLY");
     this.interactionHandler = null; this.tooltip = null; this.removeClusterListener = null;
-    this.facilityHovered = false;
+    this.interactiveHovered = false;
   }
   async start() {
     await this.viewer.dataSources.add(this.source);
@@ -102,15 +134,30 @@ export class InfrastructureGlobeLayer {
     for (const domain of domains.values()) {
       const point = domain.centroid; if (!point) continue;
       const position = C.Cartesian3.fromDegrees(point.longitude, point.latitude, 1500);
+      const hostIds = (domain.observedHostIds ?? []).slice(0, 64);
+      const prefixes = (domain.prefixes ?? []).slice(0, 16);
+      const asnLabel = Number.isFinite(Number(domain.asn)) ? `ASN ${Number(domain.asn)}` : domain.id;
+      const hoverText = [
+        `${asnLabel} // OWNERSHIP + GEOIP INFERRED`,
+        domain.organization ?? "OWNERSHIP UNRESOLVED",
+        `${domain.hostCount ?? hostIds.length} OBSERVED HOSTS // ${prefixes.length} PREFIXES`,
+        `CENTROID // ${Number(point.latitude).toFixed(5)}°, ${Number(point.longitude).toFixed(5)}° ±${point.uncertaintyRadiusKm} km`,
+        "CLICK // OPEN INFERRED DOMAIN EVIDENCE",
+        "BOUNDARY // CENTROID DOES NOT LOCATE A DEVICE OR PROVE A ROUTE",
+      ].join("\n");
       this.source.entities.add({id: `scythe-infra:${domain.id}`, position,
         point: {pixelSize: 8, color: C.Color.CYAN, outlineColor: C.Color.WHITE, outlineWidth: 1},
         ellipse: {semiMajorAxis: point.uncertaintyRadiusKm * 1000, semiMinorAxis: point.uncertaintyRadiusKm * 1000,
           material: C.Color.CYAN.withAlpha(.06), outline: true, outlineColor: C.Color.CYAN.withAlpha(.35), height: 0},
         label: {text: domain.id, font: "10px monospace", fillColor: C.Color.CYAN,
           pixelOffset: new C.Cartesian2(0, -14), showBackground: true, backgroundColor: C.Color.BLACK.withAlpha(.65)},
-        properties: {domainId: domain.id, organization: domain.organization,
-          hostIdsJson: JSON.stringify(domain.observedHostIds ?? [])},
-        description: `${domain.id} // ${domain.hostCount} OBSERVED HOSTS // ASN OWNERSHIP INFERRED // GEOIP CENTROID INFERRED ±${point.uncertaintyRadiusKm} km`});
+        properties: {infrastructureKind: "network_domain", domainId: domain.id, asn: domain.asn,
+          organization: domain.organization, hostIdsJson: JSON.stringify(hostIds), prefixesJson: JSON.stringify(prefixes),
+          latitudeDegrees: point.latitude, longitudeDegrees: point.longitude,
+          uncertaintyRadiusKm: point.uncertaintyRadiusKm, graphRevision: snapshot.graphRevision,
+          evidenceClass: domain.evidenceClass ?? "INFERRED", authority: domain.authority ?? "HOST_PREFIX_ENRICHMENT",
+          placementAuthority: point.authority ?? "GEOIP_ESTIMATE_CENTROID", hoverText},
+        description: escapeHtml(hoverText).replaceAll("\n", "<br>")});
     }
     for (const flow of snapshot.observedFlows ?? []) {
       const source = domains.get(flow.sourceDomain)?.centroid; const target = domains.get(flow.targetDomain)?.centroid;
@@ -213,16 +260,16 @@ export class InfrastructureGlobeLayer {
     this.interactionHandler = new this.Cesium.ScreenSpaceEventHandler(this.viewer.scene.canvas);
     if (this.Cesium.ScreenSpaceEventType?.MOUSE_MOVE) this.interactionHandler.setInputAction((movement) => {
       const picked = this.viewer.scene.pick(movement.endPosition)?.id;
-      const facility = infrastructureSelectionDetail(picked, this.viewer.clock?.currentTime, this.snapshot?.graphRevision);
-      if (facility && this.tooltip) {
-        this.tooltip.textContent = String(value(picked, "hoverText", this.viewer.clock?.currentTime) ?? facility.boundary);
+      const detail = infrastructureSelectionDetail(picked, this.viewer.clock?.currentTime, this.snapshot?.graphRevision);
+      if (detail && this.tooltip) {
+        this.tooltip.textContent = String(value(picked, "hoverText", this.viewer.clock?.currentTime) ?? detail.boundary);
         this.tooltip.hidden = false; this.tooltip.style.left = `${Number(movement.endPosition?.x ?? 0) + 13}px`;
         this.tooltip.style.top = `${Number(movement.endPosition?.y ?? 0) + 13}px`;
         if (this.viewer.scene.canvas?.style) this.viewer.scene.canvas.style.cursor = "pointer";
-        this.facilityHovered = true; return;
+        this.interactiveHovered = true; return;
       }
-      if (this.facilityHovered && this.viewer.scene.canvas?.style) this.viewer.scene.canvas.style.cursor = "default";
-      this.facilityHovered = false;
+      if (this.interactiveHovered && this.viewer.scene.canvas?.style) this.viewer.scene.canvas.style.cursor = "default";
+      this.interactiveHovered = false;
       if (!Array.isArray(picked) || picked.length < 2 || !this.tooltip) {
         if (this.tooltip) this.tooltip.hidden = true; return;
       }
