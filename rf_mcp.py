@@ -2,11 +2,42 @@
 
 from __future__ import annotations
 
+import json
+import os
 import time
 from typing import Any, Dict, Iterable, Optional
+from urllib.error import URLError
+from urllib.parse import urlencode
+from urllib.request import Request, urlopen
 
 from mcp_registry import Tool
 from rf_bridge import get_rf_bridge, get_rf_observation_store, get_rf_sparse_analyzer
+
+
+def _should_proxy_rf_reads() -> bool:
+    owner = os.getenv("SCYTHE_RF_CAPTURE_OWNER", "orchestrator").strip().lower()
+    role = os.getenv("SCYTHE_PROCESS_ROLE", "").strip().lower()
+    return owner == "orchestrator" and role == "child"
+
+
+def _orchestrator_rf_get(path: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    base = (os.getenv("SCYTHE_ORCHESTRATOR_URL") or "").rstrip("/")
+    if not base:
+        return {"available": False, "error": "SCYTHE_ORCHESTRATOR_URL missing",
+                "evidence_class": "DERIVED_INFERENCE", "raw_iq_exposed": False}
+    query = urlencode({key: value for key, value in (params or {}).items() if value is not None})
+    url = f"{base}{path}" + (f"?{query}" if query else "")
+    request = Request(url, headers={"Accept": "application/json"})
+    try:
+        with urlopen(request, timeout=5) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except (URLError, TimeoutError, ValueError, json.JSONDecodeError) as exc:
+        return {"available": False, "error": str(exc), "raw_iq_exposed": False}
+    if isinstance(payload, dict):
+        payload.setdefault("capture_owner", "orchestrator")
+        payload.setdefault("raw_iq_exposed", False)
+        return payload
+    return {"available": False, "error": "orchestrator returned a non-object", "raw_iq_exposed": False}
 
 
 def _edge_values(engine) -> Iterable[Any]:
@@ -68,15 +99,26 @@ def _read_tools():
     obj = {"type": "object"}
 
     def status(*, engine, params):
+        if _should_proxy_rf_reads():
+            return _orchestrator_rf_get("/api/graphops/rf-bridge/status")
         bridge = get_rf_bridge()
         sparse = get_rf_sparse_analyzer()
         return {
             "bridge": bridge.status(False),
             "observations": bridge.observations.stats(),
             "sparse": None if sparse is None else sparse.stats(),
+            "capture_owner": bridge.config.capture_owner,
+            "owns_capture": bridge.config.owns_capture(),
         }
 
     def snapshot(*, engine, params):
+        if _should_proxy_rf_reads():
+            remote = _orchestrator_rf_get("/api/graphops/rf-spectrum/latest")
+            if not bool(params.get("include_bins", False)):
+                spectrum = remote.get("spectrum")
+                if isinstance(spectrum, dict):
+                    spectrum.pop("bins_dbfs", None)
+            return remote
         frame = get_rf_bridge().latest_frame()
         if frame is None:
             return {"available": False, "raw_iq_exposed": False}
@@ -102,6 +144,8 @@ def _read_tools():
     }
 
     def query(*, engine, params):
+        if _should_proxy_rf_reads():
+            return _orchestrator_rf_get("/api/graphops/rf-observations/query", params)
         observations = get_rf_observation_store().query(**params)
         return {"observations": observations, "count": len(observations),
                 "evidence_class": "OBSERVED", "raw_iq_exposed": False}
@@ -142,22 +186,30 @@ def _read_tools():
     }
 
     def sparse_status(*, engine, params):
+        if _should_proxy_rf_reads():
+            return _orchestrator_rf_get("/api/graphops/rf-sparse/status")
         analyzer = get_rf_sparse_analyzer()
         if analyzer is None:
             return {"available": False, "evidence_class": "DERIVED_INFERENCE", "raw_iq_exposed": False}
         return {"available": True, **analyzer.stats()}
 
     def sparse_query(*, engine, params):
+        if _should_proxy_rf_reads():
+            return _orchestrator_rf_get("/api/graphops/rf-sparse/supports", params)
         analyzer = get_rf_sparse_analyzer()
         if analyzer is None:
             return {"supports": [], "count": 0, "evidence_class": "DERIVED_INFERENCE", "raw_iq_exposed": False}
         supports = analyzer.query_supports(**params)
         return {"supports": supports, "count": len(supports),
                 "evidence_class": "DERIVED_INFERENCE", "raw_iq_exposed": False,
-                "claims_withheld": ["range", "aoa", "blade_length"]}
+                "claims_withheld": ["range", "aoa", "blade_length", "periodic_sideband"]}
 
     def sparse_context(*, engine, params):
         from rf_sparse_analyzer import compact_model_context
+        if _should_proxy_rf_reads():
+            remote = _orchestrator_rf_get("/api/graphops/rf-sparse/supports", {"limit": params.get("limit", 6)})
+            status = _orchestrator_rf_get("/api/graphops/rf-sparse/status")
+            return compact_model_context(status, remote.get("supports") or [], int(params.get("limit", 6)))
         analyzer = get_rf_sparse_analyzer()
         if analyzer is None:
             return compact_model_context(None, [])
@@ -174,9 +226,9 @@ def _read_tools():
              {"type": "object", "properties": {"window_s": {"type": "number", "minimum": 0, "maximum": 86400},
               "min_snr_db": {"type": "number"}, "limit": {"type": "integer", "minimum": 1, "maximum": 100}},
               "additionalProperties": False}, obj, context),
-        Tool("rf_sparse_status", "Return residual-window and OMP-support stats. Derived inference only; no range/AoA.",
+        Tool("rf_sparse_status", "Return residual-window stats and derived supports. Peak-track plus OMP-assisted periodic amplitude; no range/AoA.",
              obj, obj, sparse_status),
-        Tool("rf_sparse_supports_query", "Query OMP-selected RF model components. Evidence class is DERIVED_INFERENCE.",
+        Tool("rf_sparse_supports_query", "Query derived RF model components. Evidence class is DERIVED_INFERENCE.",
              sparse_query_schema, obj, sparse_query),
         Tool("rf_sparse_insight_context", "Return compact sparse-support context for local Ollama. No IQ, no hardware authority.",
              {"type": "object", "properties": {"limit": {"type": "integer", "minimum": 1, "maximum": 12}},

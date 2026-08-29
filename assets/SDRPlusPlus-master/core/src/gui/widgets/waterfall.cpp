@@ -91,6 +91,7 @@ inline void doZoom(int offset, int width, int inSize, int outSize, float* in, fl
 
 namespace ImGui {
     WaterFall::WaterFall() {
+        fftBufferHeld = false;
         fftMin = -70.0;
         fftMax = 0.0;
         waterfallMin = -70.0;
@@ -882,6 +883,11 @@ namespace ImGui {
     float* WaterFall::getFFTBuffer() {
         if (!fftLayoutReady()) { return NULL; }
         buf_mtx.lock();
+        if (!fftLayoutReady()) {
+            buf_mtx.unlock();
+            return NULL;
+        }
+        fftBufferHeld = true;
         if (waterfallVisible) {
             currentFFTLine--;
             fftLines++;
@@ -893,9 +899,15 @@ namespace ImGui {
     }
 
     void WaterFall::pushFFT() {
-        // Pair with getFFTBuffer(): a null/not-ready acquire never locks, so
-        // this must return without unlocking. Height<=0 is the autostart race.
-        if (!fftLayoutReady()) { return; }
+        // Release is owned by the acquire flag, not a second layout check.
+        // Layout can change between getFFTBuffer() and pushFFT(); unlocking
+        // must not depend on waterfallHeight remaining non-zero.
+        if (!fftBufferHeld) { return; }
+        if (!fftLayoutReady()) {
+            fftBufferHeld = false;
+            buf_mtx.unlock();
+            return;
+        }
         std::lock_guard<std::recursive_mutex> lck(latestFFTMtx);
         double offsetRatio = viewOffset / (wholeBandwidth / 2.0);
         int drawDataSize = (viewBandwidth / wholeBandwidth) * rawFFTSize;
@@ -946,6 +958,7 @@ namespace ImGui {
             }
         }
 
+        fftBufferHeld = false;
         buf_mtx.unlock();
     }
 

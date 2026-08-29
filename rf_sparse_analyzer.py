@@ -2,11 +2,13 @@
 
 Transplant from MIMO-FMCW sparse recovery, not a radar drop-in:
 
-  bounded FFT frames -> median background -> residual -> coarse-to-fine OMP
+  bounded FFT frames -> median background -> residual -> candidate bins
+  -> peak-track carrier/drift, plus OMP-assisted periodic-amplitude recovery
 
 The NESDR remains a passive single-channel receiver. This module never claims
 range, AoA, or blade length. Peak FFT measurements stay OBSERVED elsewhere;
-records emitted here are DERIVED_INFERENCE.
+records emitted here are DERIVED_INFERENCE. Noise and null windows are valid
+outcomes: NO_SUPPORT, INSUFFICIENT_EVIDENCE, NOISE_COMPATIBLE.
 
 Raw IQ and full waterfalls never leave the edge.
 """
@@ -14,8 +16,9 @@ Raw IQ and full waterfalls never leave the edge.
 from __future__ import annotations
 
 from collections import deque
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 import hashlib
+import json
 import math
 import os
 import threading
@@ -28,7 +31,9 @@ import numpy as np
 SCHEMA_SUPPORT = "scythe.rf-sparse-support.v1"
 SCHEMA_RESIDUAL = "scythe.rf-residual-window.v1"
 DICTIONARY_REVISION = "scythe.rf-sparse-dict.m1.v1"
-ATOM_FAMILIES = ("stationary_carrier", "linear_drift", "periodic_sideband")
+ATOM_FAMILIES = ("stationary_carrier", "linear_drift", "periodic_amplitude")
+RESERVED_ATOM_FAMILIES = ("periodic_sideband",)
+NULL_OUTCOMES = ("NO_SUPPORT", "INSUFFICIENT_EVIDENCE", "NOISE_COMPATIBLE")
 
 
 def _env_bool(name: str, default: bool = False) -> bool:
@@ -70,6 +75,13 @@ class SparseAnalyzerConfig:
     max_candidates: int = 4
     mad_k: float = 4.0
     max_records: int = 256
+    min_residual_reduction: float = 0.35
+    min_snr_db: float = 6.0
+    min_persistence: float = 0.35
+    tuner_ppm: float = 0.0
+    gain_db: float = float("nan")
+    antenna_id: str = "unspecified"
+    clock_quality: str = "unknown"
 
     @classmethod
     def from_env(cls) -> "SparseAnalyzerConfig":
@@ -84,6 +96,13 @@ class SparseAnalyzerConfig:
             max_candidates=int(os.getenv("SDRPP_SPARSE_MAX_CANDIDATES", "4")),
             mad_k=float(os.getenv("SDRPP_SPARSE_MAD_K", "4")),
             max_records=int(os.getenv("SDRPP_SPARSE_MAX_RECORDS", "256")),
+            min_residual_reduction=float(os.getenv("SDRPP_SPARSE_MIN_REDUCTION", "0.35")),
+            min_snr_db=float(os.getenv("SDRPP_SPARSE_MIN_SNR_DB", "6")),
+            min_persistence=float(os.getenv("SDRPP_SPARSE_MIN_PERSISTENCE", "0.35")),
+            tuner_ppm=float(os.getenv("SDRPP_TUNER_PPM", "0")),
+            gain_db=float(os.getenv("SDRPP_GAIN_DB", "nan")),
+            antenna_id=os.getenv("SDRPP_ANTENNA_ID", "unspecified"),
+            clock_quality=os.getenv("SDRPP_CLOCK_QUALITY", "unknown"),
         ).validated()
 
     def validated(self) -> "SparseAnalyzerConfig":
@@ -118,6 +137,8 @@ class ResidualWindow:
     background_method: str
     residual_energy_db: float
     candidate_regions: list[Dict[str, Any]]
+    outcome: str = "NO_SUPPORT"
+    chain: Dict[str, Any] = field(default_factory=dict)
     authority: str = "DERIVED_SIGNAL_PROCESSING"
     evidence_class: str = "DERIVED_INFERENCE"
     raw_iq_exposed: bool = False
@@ -174,13 +195,12 @@ def _mad(values: np.ndarray) -> float:
 
 
 def candidate_bins(residual_db: np.ndarray, mad_k: float, limit: int) -> List[int]:
+    """Return bins that beat an explicit MAD threshold. Empty is a valid result."""
     energy = np.mean(np.abs(residual_db), axis=0)
     scale = max(_mad(energy), 0.05)
     threshold = float(np.median(energy)) + mad_k * scale
     ranked = np.argsort(energy)[::-1]
     selected = [int(index) for index in ranked if energy[index] >= threshold]
-    if not selected:
-        selected = [int(ranked[0])]
     return selected[:limit]
 
 
@@ -255,26 +275,73 @@ def _build_dictionary(slow_time: np.ndarray, dt: float) -> Tuple[np.ndarray, Lis
             atoms.append(_normalize(np.cos(omega * t)))
             atoms.append(_normalize(np.sin(omega * t)))
             meta.append({
-                "atom_family": "periodic_sideband",
-                "parameters": {"repetition_hz": round(repetition_hz * harmonic, 4)},
+                "atom_family": "periodic_amplitude",
+                "parameters": {"modulation_rate_hz": round(repetition_hz * harmonic, 4)},
             })
             meta.append({
-                "atom_family": "periodic_sideband",
-                "parameters": {"repetition_hz": round(repetition_hz * harmonic, 4), "quadrature": True},
+                "atom_family": "periodic_amplitude",
+                "parameters": {"modulation_rate_hz": round(repetition_hz * harmonic, 4), "quadrature": True},
             })
 
     dictionary = np.column_stack(atoms) if atoms else np.ones((samples, 1))
     return dictionary, meta
 
 
-def _peak_track_hz(residual_db: np.ndarray, center_frequency_hz: float,
+def _peak_track_hz(spectrogram_db: np.ndarray, center_frequency_hz: float,
                    sample_rate_hz: float, fft_size: int) -> np.ndarray:
-    bin_count = residual_db.shape[1]
-    peaks = np.argmax(residual_db, axis=1)
+    bin_count = spectrogram_db.shape[1]
+    peaks = np.argmax(spectrogram_db, axis=1)
     return np.array([
         _bin_hz(center_frequency_hz, sample_rate_hz, fft_size, bin_count, int(index))
         for index in peaks
     ], dtype=np.float64)
+
+
+def _bin_widths(sample_rate_hz: float, fft_size: int, bin_count: int) -> Dict[str, float]:
+    native = float(sample_rate_hz) / max(int(fft_size), 1)
+    analysis = float(sample_rate_hz) / max(int(bin_count), 1)
+    return {
+        "native_fft_bin_width_hz": round(native, 6),
+        "analysis_bin_width_hz": round(analysis, 6),
+        "frequency_uncertainty_hz": round(analysis / 2.0, 6),
+    }
+
+
+def _signal_chain(*, sample_rate_hz: float, fft_size: int, bin_count: int,
+                  center_frequency_hz: float, tuner_ppm: float, gain_db: float,
+                  antenna_id: str, clock_quality: str, dropped_frames: int) -> Dict[str, Any]:
+    widths = _bin_widths(sample_rate_hz, fft_size, bin_count)
+    payload = {
+        "tuner_frequency_hz": round(float(center_frequency_hz), 3),
+        "tuner_ppm": round(float(tuner_ppm), 4),
+        "gain_db": None if not math.isfinite(gain_db) else round(float(gain_db), 2),
+        "antenna_id": antenna_id,
+        "clock_quality": clock_quality,
+        "dropped_usb_sample_count": None,
+        "dropped_frames": int(dropped_frames),
+        **widths,
+    }
+    payload["signal_chain_hash"] = "sha256:" + hashlib.sha256(
+        json.dumps(payload, sort_keys=True, default=str).encode("utf-8")
+    ).hexdigest()
+    return payload
+
+
+def _candidate_persistence(residual_db: np.ndarray, bin_index: int, mad_k: float) -> float:
+    column = residual_db[:, bin_index]
+    scale = max(_mad(column), 0.05)
+    threshold = float(np.median(column)) + mad_k * scale
+    return float(np.mean(column >= threshold))
+
+
+def _null_outcome(retained: int, min_frames: int, bins: Sequence[int], residual_energy_db: float) -> str:
+    if retained < min_frames:
+        return "INSUFFICIENT_EVIDENCE"
+    if not bins:
+        return "NO_SUPPORT"
+    if residual_energy_db < -70.0:
+        return "NOISE_COMPATIBLE"
+    return "NO_SUPPORT"
 
 
 def recover_support(
@@ -293,8 +360,16 @@ def recover_support(
     max_support: int,
     max_candidates: int,
     mad_k: float,
+    min_residual_reduction: float = 0.35,
+    min_snr_db: float = 6.0,
+    min_persistence: float = 0.35,
+    tuner_ppm: float = 0.0,
+    gain_db: float = float("nan"),
+    antenna_id: str = "unspecified",
+    clock_quality: str = "unknown",
+    min_frames: int = 8,
 ) -> Tuple[ResidualWindow, List[SparseSupport]]:
-    residual_db, _background = residual_spectrogram(spectrogram_db)
+    residual_db, background = residual_spectrogram(spectrogram_db)
     retained = int(spectrogram_db.shape[0])
     bin_count = int(spectrogram_db.shape[1])
     dt = (timestamps[-1] - timestamps[0]) / max(retained - 1, 1)
@@ -304,15 +379,15 @@ def recover_support(
     peak_hz = _peak_track_hz(spectrogram_db, center_frequency_hz, sample_rate_hz, fft_size)
     t = np.arange(retained, dtype=np.float64) * dt
     duration = max(float(timestamps[-1] - timestamps[0]), 1e-6)
-    slope, intercept = np.polyfit(t, peak_hz, 1)
-    centered_track = peak_hz - np.mean(peak_hz)
-    drift_line = intercept + slope * t
-    track_scale = max(float(np.linalg.norm(centered_track)), 1e-12)
-    drift_err = float(np.linalg.norm(peak_hz - drift_line)) / track_scale
-    stationary_err = float(np.linalg.norm(centered_track)) / max(abs(float(np.mean(peak_hz))), 1.0)
+    analysis_bin_hz = sample_rate_hz / max(bin_count, 1)
     regions = []
     supports: List[SparseSupport] = []
     window_id = f"rfwin-{_digest(sensor_id, timestamps[0], timestamps[-1], sequences[0], sequences[-1])}"
+    chain = _signal_chain(
+        sample_rate_hz=sample_rate_hz, fft_size=fft_size, bin_count=bin_count,
+        center_frequency_hz=center_frequency_hz, tuner_ppm=tuner_ppm, gain_db=gain_db,
+        antenna_id=antenna_id, clock_quality=clock_quality, dropped_frames=dropped_frames,
+    )
     measurement = {
         "available_frames": available_frames,
         "retained_frames": retained,
@@ -320,58 +395,94 @@ def recover_support(
         "compression_ratio": compression_ratio,
         "sampling_pattern_hash": _pattern_hash(sequences, sampling_seed),
         "dictionary_revision": DICTIONARY_REVISION,
+        "estimator": "peak_track_plus_omp_periodic_amplitude",
+        **chain,
     }
 
-    carrier_hz = float(np.median(peak_hz))
-    carrier_family = "linear_drift" if abs(slope) > (sample_rate_hz / bin_count) / max(duration, 1.0) and drift_err < 0.65 else "stationary_carrier"
-    supports.append(SparseSupport(
-        schema=SCHEMA_SUPPORT,
-        support_id=f"rfss-{_digest(window_id, carrier_family, carrier_hz)}",
-        window_id=window_id,
-        sensor_id=sensor_id,
-        observed_start=float(timestamps[0]),
-        observed_end=float(timestamps[-1]),
-        center_frequency_hz=float(center_frequency_hz),
-        sample_rate_hz=float(sample_rate_hz),
-        fft_size=int(fft_size),
-        atom_family=carrier_family,
-        parameters={
-            "carrier_hz": round(carrier_hz, 3),
-            "drift_hz_per_second": round(float(slope), 4),
-        },
-        fit={
-            "residual_reduction": round(max(0.0, 1.0 - (drift_err if carrier_family == "linear_drift" else min(stationary_err, 1.0))), 4),
-            "normalized_error": round(min(drift_err if carrier_family == "linear_drift" else stationary_err, 4.0), 4),
-            "support_rank": 1,
-            "candidate_rank": 1,
-        },
-        measurement=dict(measurement),
-    ))
+    peak_bins = np.argmax(spectrogram_db, axis=1)
+    dominant = int(np.bincount(peak_bins, minlength=bin_count).argmax())
+    stationary_persistence = float(np.mean(np.abs(peak_bins - dominant) <= 1))
+    continuity = 1.0 if retained < 2 else float(np.mean(np.abs(np.diff(peak_bins.astype(np.float64))) <= 2))
+    carrier_db = float(np.median(np.max(spectrogram_db, axis=1)))
+    noise_db = float(np.median(background))
+    snr_db = carrier_db - noise_db
+    slope, intercept = np.polyfit(t, peak_hz, 1)
+    drift_line = intercept + slope * t
+    bin_wander = peak_bins.astype(np.float64) - float(dominant)
+    wander_rms = float(np.sqrt(np.mean(bin_wander ** 2)))
+    drift_residual_bins = (peak_hz - drift_line) / max(analysis_bin_hz, 1e-9)
+    drift_rms = float(np.sqrt(np.mean(drift_residual_bins ** 2)))
+    stationary_reduction = max(0.0, 1.0 - wander_rms / 3.0)
+    drift_reduction = max(0.0, 1.0 - drift_rms / 3.0)
+    carrier_family = (
+        "linear_drift"
+        if abs(slope) > analysis_bin_hz / max(duration, 1.0) and drift_reduction >= stationary_reduction
+        else "stationary_carrier"
+    )
+    reduction = drift_reduction if carrier_family == "linear_drift" else stationary_reduction
+    persistence = continuity if carrier_family == "linear_drift" else stationary_persistence
+    if (
+        persistence >= min_persistence
+        and snr_db >= min_snr_db
+        and reduction >= min_residual_reduction
+    ):
+        carrier_hz = float(np.median(peak_hz))
+        supports.append(SparseSupport(
+            schema=SCHEMA_SUPPORT,
+            support_id=f"rfss-{_digest(window_id, carrier_family, carrier_hz)}",
+            window_id=window_id,
+            sensor_id=sensor_id,
+            observed_start=float(timestamps[0]),
+            observed_end=float(timestamps[-1]),
+            center_frequency_hz=float(center_frequency_hz),
+            sample_rate_hz=float(sample_rate_hz),
+            fft_size=int(fft_size),
+            atom_family=carrier_family,
+            parameters={
+                "carrier_hz": round(carrier_hz, 3),
+                "drift_hz_per_second": round(float(slope), 4),
+            },
+            fit={
+                "residual_reduction": round(reduction, 4),
+                "normalized_error": round(1.0 - reduction, 4),
+                "snr_db": round(snr_db, 2),
+                "persistence": round(persistence, 4),
+                "support_rank": 1,
+                "candidate_rank": 1,
+                "null_model": "peak_bin_wander",
+            },
+            measurement=dict(measurement),
+        ))
 
     for rank, bin_index in enumerate(bins, start=1):
         frequency = _bin_hz(center_frequency_hz, sample_rate_hz, fft_size, bin_count, bin_index)
         slow = _slow_time(residual_db, bin_index)
+        persistence = _candidate_persistence(residual_db, bin_index, mad_k)
         regions.append({
             "peak_frequency_hz": round(frequency, 3),
             "residual_db": round(float(np.median(slow)), 2),
             "bin_index": bin_index,
+            "persistence": round(persistence, 4),
         })
         y = slow - np.median(slow)
+        y_norm = max(float(np.linalg.norm(y)), 1e-12)
         dictionary, meta = _build_dictionary(y, dt)
         selected, coefficients, leftover = _omp(y, dictionary, max_support)
-        y_norm = max(float(np.linalg.norm(y)), 1e-12)
         leftover_norm = float(np.linalg.norm(leftover))
         reduction = max(0.0, 1.0 - leftover_norm / y_norm)
+        amplitude_score = float(np.std(y))
+        if reduction < min_residual_reduction or amplitude_score < 1.0:
+            continue
         for atom_index in selected:
             family = meta[atom_index]["atom_family"]
-            if family != "periodic_sideband":
+            if family != "periodic_amplitude":
                 continue
-            spacing = abs(float(meta[atom_index]["parameters"].get("repetition_hz", 0.0)))
-            if spacing <= 0:
+            rate = abs(float(meta[atom_index]["parameters"].get("modulation_rate_hz", 0.0)))
+            if rate <= 0:
                 continue
             supports.append(SparseSupport(
                 schema=SCHEMA_SUPPORT,
-                support_id=f"rfss-{_digest(window_id, family, frequency, spacing, rank)}",
+                support_id=f"rfss-{_digest(window_id, family, frequency, rate, rank)}",
                 window_id=window_id,
                 sensor_id=sensor_id,
                 observed_start=float(timestamps[0]),
@@ -382,20 +493,22 @@ def recover_support(
                 atom_family=family,
                 parameters={
                     "carrier_hz": round(frequency, 3),
-                    "spacing_hz": round(spacing, 4),
-                    "repetition_hz": round(spacing, 4),
+                    "modulation_rate_hz": round(rate, 4),
                 },
                 fit={
                     "residual_reduction": round(reduction, 4),
                     "normalized_error": round(leftover_norm / y_norm, 4),
+                    "persistence": round(persistence, 4),
                     "support_rank": 2,
                     "candidate_rank": rank,
                     "coefficient": round(float(coefficients[atom_index]), 4),
+                    "null_model": "zero_mean_slow_time",
                 },
                 measurement=dict(measurement),
             ))
             break
 
+    outcome = "SUPPORT" if supports else _null_outcome(retained, min_frames, bins, residual_energy_db)
     window = ResidualWindow(
         schema=SCHEMA_RESIDUAL,
         window_id=window_id,
@@ -413,6 +526,8 @@ def recover_support(
         background_method="temporal_median",
         residual_energy_db=round(residual_energy_db, 2),
         candidate_regions=regions,
+        outcome=outcome,
+        chain=chain,
     )
     return window, supports
 
@@ -512,6 +627,14 @@ class RFSparseAnalyzer:
                 max_support=self.config.max_support,
                 max_candidates=self.config.max_candidates,
                 mad_k=self.config.mad_k,
+                min_residual_reduction=self.config.min_residual_reduction,
+                min_snr_db=self.config.min_snr_db,
+                min_persistence=self.config.min_persistence,
+                tuner_ppm=self.config.tuner_ppm,
+                gain_db=self.config.gain_db,
+                antenna_id=self.config.antenna_id,
+                clock_quality=self.config.clock_quality,
+                min_frames=self.config.min_frames,
             )
         except Exception as exc:
             self._last_error = str(exc)
@@ -570,11 +693,14 @@ class RFSparseAnalyzer:
                 "dictionary_revision": DICTIONARY_REVISION,
                 "atom_families": list(ATOM_FAMILIES),
                 "latest_window_id": None if latest is None else latest["window_id"],
+                "latest_outcome": None if latest is None else latest.get("outcome"),
                 "last_error": self._last_error,
                 "authority": "DERIVED_SIGNAL_PROCESSING",
                 "evidence_class": "DERIVED_INFERENCE",
                 "raw_iq_exposed": False,
-                "claims_withheld": ["range", "aoa", "blade_length"],
+                "null_outcomes": list(NULL_OUTCOMES),
+                "reserved_atom_families": list(RESERVED_ATOM_FAMILIES),
+                "claims_withheld": ["range", "aoa", "blade_length", "periodic_sideband"],
             }
 
 
@@ -585,6 +711,7 @@ def compact_model_context(window: Optional[Dict[str, Any]], supports: Iterable[D
     return {
         "window": None if window is None else {
             "id": window.get("window_id"),
+            "outcome": window.get("outcome"),
             "observed_start": window.get("observed_start"),
             "observed_end": window.get("observed_end"),
             "center_frequency_hz": window.get("center_frequency_hz"),
@@ -596,7 +723,7 @@ def compact_model_context(window: Optional[Dict[str, Any]], supports: Iterable[D
         "supports": [{
             "family": item.get("atom_family"),
             "carrier_hz": (item.get("parameters") or {}).get("carrier_hz"),
-            "spacing_hz": (item.get("parameters") or {}).get("spacing_hz"),
+            "modulation_rate_hz": (item.get("parameters") or {}).get("modulation_rate_hz"),
             "drift_hz_per_second": (item.get("parameters") or {}).get("drift_hz_per_second"),
             "normalized_error": (item.get("fit") or {}).get("normalized_error"),
             "residual_reduction": (item.get("fit") or {}).get("residual_reduction"),

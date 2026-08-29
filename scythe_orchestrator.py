@@ -1029,14 +1029,22 @@ def spawn_instance():
         # to the same port.  The gap between close() and Popen() is microseconds;
         # SO_REUSEADDR ensures the child can bind even in TIME_WAIT state.
         _reserved_sock.close()
+        child_env = {
+            **os.environ,
+            'SCYTHE_PROCESS_ROLE': 'child',
+            'SCYTHE_RF_CAPTURE_OWNER': os.environ.get('SCYTHE_RF_CAPTURE_OWNER', 'orchestrator'),
+            'SDRPP_AUTO_START': 'false',
+            'SCYTHE_ORCHESTRATOR_URL': orchestrator_url,
+        }
+        if _parsed_args is not None:
+            child_env['OLLAMA_URL'] = _parsed_args.ollama_url
         proc = subprocess.Popen(
             cmd,
             stdout=log_file,
             stderr=log_file,
             cwd=str(_SCRIPT_DIR),
             start_new_session=True,  # Detach from orchestrator's process group
-            env={**os.environ, **({'OLLAMA_URL': _parsed_args.ollama_url}
-                                  if _parsed_args is not None else {})},
+            env=child_env,
         )
     except Exception as e:
         log.error(f"Failed to spawn instance: {e}")
@@ -2811,6 +2819,60 @@ def orchestrator_graphops_rf_observation_ingest():
         return jsonify({'status': 'rejected', 'error': str(exc), 'rawIqAccepted': False}), 400
 
 
+@app.route('/api/graphops/rf-bridge/status', methods=['GET'])
+def orchestrator_graphops_rf_bridge_status():
+    if not _graphops_directive_authorized():
+        return jsonify({'error': 'Authentication required'}), 401
+    from rf_bridge import get_rf_bridge, get_rf_sparse_analyzer
+    bridge = get_rf_bridge()
+    sparse = get_rf_sparse_analyzer()
+    return jsonify({
+        'status': 'ok',
+        'bridge': bridge.status(False),
+        'observations': bridge.observations.stats(),
+        'sparse': None if sparse is None else sparse.stats(),
+        'capture_owner': bridge.config.capture_owner,
+        'owns_capture': bridge.config.owns_capture(),
+        'rawIqAccepted': False,
+    })
+
+
+@app.route('/api/graphops/rf-spectrum/latest', methods=['GET'])
+def orchestrator_graphops_rf_spectrum_latest():
+    if not _graphops_directive_authorized():
+        return jsonify({'error': 'Authentication required'}), 401
+    from rf_bridge import get_rf_bridge
+    frame = get_rf_bridge().latest_frame()
+    if frame is None:
+        return jsonify({'available': False, 'raw_iq_exposed': False, 'capture_owner': 'orchestrator'})
+    bounded = dict(frame)
+    include_bins = str(request.args.get('include_bins', '')).lower() in {'1', 'true', 'yes'}
+    if not include_bins:
+        bounded.pop('bins_dbfs', None)
+    elif len(bounded.get('bins_dbfs') or []) > 256:
+        bounded['bins_dbfs'] = bounded['bins_dbfs'][:256]
+        bounded['bins_truncated'] = True
+    return jsonify({'available': True, 'spectrum': bounded, 'raw_iq_exposed': False})
+
+
+@app.route('/api/graphops/rf-observations/query', methods=['GET'])
+def orchestrator_graphops_rf_observation_query():
+    if not _graphops_directive_authorized():
+        return jsonify({'error': 'Authentication required'}), 401
+    from rf_bridge import get_rf_observation_store
+    observations = get_rf_observation_store().query(
+        since=request.args.get('since', type=float),
+        until=request.args.get('until', type=float),
+        frequency_hz=request.args.get('frequency_hz', type=float),
+        tolerance_hz=request.args.get('tolerance_hz', type=float) or 0.0,
+        min_snr_db=request.args.get('min_snr_db', type=float),
+        sensor_id=request.args.get('sensor_id') or None,
+        limit=request.args.get('limit', default=100, type=int),
+    )
+    return jsonify({'observations': observations, 'count': len(observations),
+                    'evidence_class': 'OBSERVED', 'raw_iq_exposed': False})
+
+
 @app.route('/api/graphops/rf-observations/status', methods=['GET'])
 def orchestrator_graphops_rf_observation_status():
     if not _graphops_directive_authorized():
@@ -3098,6 +3160,8 @@ Examples:
     _EVE_STREAM_HTTP_URL = args.eve_stream_http_url
     _parsed_args       = args   # used by _start_services() for OLLAMA_URL propagation
     _ORCHESTRATOR_PORT = int(args.port)
+    os.environ['SCYTHE_PROCESS_ROLE'] = 'orchestrator'
+    os.environ.setdefault('SCYTHE_RF_CAPTURE_OWNER', 'orchestrator')
 
     # Launch companion WS services unless caller opted out
     _launch_services(auto=not args.no_services)

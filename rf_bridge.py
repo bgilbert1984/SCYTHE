@@ -66,6 +66,7 @@ class RFBridgeConfig:
     reconnect_max_s: float = 10.0
     auto_start: bool = False
     sensor_id: str = "SDRPP-EDGE-01"
+    capture_owner: str = "orchestrator"
 
     @classmethod
     def from_env(cls) -> "RFBridgeConfig":
@@ -84,6 +85,7 @@ class RFBridgeConfig:
             reconnect_max_s=float(os.getenv("SDRPP_RECONNECT_MAX_S", "10")),
             auto_start=_env_bool("SDRPP_AUTO_START", False),
             sensor_id=os.getenv("SDRPP_SENSOR_ID", "SDRPP-EDGE-01"),
+            capture_owner=os.getenv("SCYTHE_RF_CAPTURE_OWNER", "orchestrator").strip().lower(),
         ).validated()
 
     def validated(self) -> "RFBridgeConfig":
@@ -100,7 +102,17 @@ class RFBridgeConfig:
         for name, port in (("SDRPP_IQ_PORT", self.iq_port), ("SDRPP_RIGCTL_PORT", self.rigctl_port)):
             if not 1 <= port <= 65535:
                 raise ValueError(f"{name} must be between 1 and 65535")
+        if self.capture_owner not in {"orchestrator", "child", "standalone"}:
+            raise ValueError("SCYTHE_RF_CAPTURE_OWNER must be orchestrator, child, or standalone")
         return self
+
+    def owns_capture(self) -> bool:
+        role = os.getenv("SCYTHE_PROCESS_ROLE", "").strip().lower()
+        if self.capture_owner == "standalone":
+            return True
+        if self.capture_owner == "orchestrator":
+            return role != "child"
+        return role == "child"
 
 
 @dataclass(frozen=True)
@@ -385,6 +397,13 @@ class SDRPlusPlusBridge:
             self._callbacks.append(callback)
 
     def start(self) -> bool:
+        if not self.config.owns_capture():
+            LOG.info("SDR++ capture owned by %s; this process will not open the IQ socket",
+                     self.config.capture_owner)
+            with self._lock:
+                self._state = "delegated"
+                self._last_error = f"capture_owner={self.config.capture_owner}"
+            return False
         with self._lock:
             if self._thread and self._thread.is_alive():
                 return False
@@ -483,6 +502,9 @@ class SDRPlusPlusBridge:
                 "latest_sequence": self._sequence,
                 "latest_frame_at": latest.get("timestamp") if latest else None,
                 "config": asdict(self.config),
+                "capture_owner": self.config.capture_owner,
+                "owns_capture": self.config.owns_capture(),
+                "process_role": os.getenv("SCYTHE_PROCESS_ROLE") or "unspecified",
                 "sparse": None if self.sparse is None else self.sparse.stats(),
             }
         if include_control:
@@ -586,7 +608,7 @@ def get_rf_bridge() -> SDRPlusPlusBridge:
     with _bridge_lock:
         if _bridge is None:
             _bridge = SDRPlusPlusBridge()
-            if _bridge.config.auto_start:
+            if _bridge.config.auto_start and _bridge.config.owns_capture():
                 _bridge.start()
         return _bridge
 

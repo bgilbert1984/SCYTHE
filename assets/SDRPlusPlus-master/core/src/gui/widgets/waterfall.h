@@ -248,6 +248,7 @@ namespace ImGui {
         GLuint textureId;
 
         std::recursive_mutex buf_mtx;
+        bool fftBufferHeld = false;
         std::recursive_mutex latestFFTMtx;
         std::mutex texMtx;
         std::mutex smoothingBufMtx;

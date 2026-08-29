@@ -25,9 +25,10 @@ small supporting modules. It does not modify `/usr`.
 The vendored SDR++ tree carries a bounded first-frame guard: waterfall FFT
 producers skip the frame until `waterfallHeight > 0`, and `--autostart` waits
 for that layout. That avoids the upstream `WaterFall::getFFTBuffer()`
-modulo-by-zero on the first FFT frame. `scripts/run_sdrpp_edge.sh` passes
-`--autostart` by default. Set `SCYTHE_SDRPP_AUTOSTART=0` to keep a manual Play
-click.
+modulo-by-zero on the first FFT frame. `getFFTBuffer()` / `pushFFT()` now use
+an acquire flag (`fftBufferHeld`) so unlock does not depend on a second layout
+check. `scripts/run_sdrpp_edge.sh` passes `--autostart` by default. Set
+`SCYTHE_SDRPP_AUTOSTART=0` to keep a manual Play click.
 
 For the SCYTHE NESDR SMArt v5 sensor used by this deployment, configure SDR++
 for serial `14530058`, 2.048 MS/s, localhost Int16 IQ Exporter on port 1234,
@@ -68,6 +69,11 @@ startup. Otherwise the first **Scan Spectrum** action or `POST /api/sdr/start`
 starts it. A failed connection backs off automatically and does not substitute
 mock RF samples.
 
+`SCYTHE_RF_CAPTURE_OWNER=orchestrator` makes the orchestrator the only process
+that opens the IQ exporter. Child instances are spawned with
+`SDRPP_AUTO_START=false` and `SCYTHE_PROCESS_ROLE=child`. Their Spectrum
+workbench MCP tools proxy bounded reads to the orchestrator broker.
+
 ## Browser/API boundary
 
 All routes require the normal operator session in production. Internal callers
@@ -105,9 +111,13 @@ Authenticated self-hosted AI clients can use these read-only MCP tools:
 
 Peak FFT detections remain `OBSERVED` on `/api/graphops/rf-observations`.
 Residual windows and OMP supports are a second family:
-
-- `GET /api/graphops/rf-sparse/status`
-- `GET /api/graphops/rf-sparse/supports`
+M1 uses deterministic
+peak-track estimation for stationary or drifting carriers, plus OMP-assisted
+periodic-amplitude recovery against a four-second bounded FFT window. Noise
+and empty windows emit `NO_SUPPORT`, `INSUFFICIENT_EVIDENCE`, or
+`NOISE_COMPATIBLE`. `periodic_sideband` / `spacing_hz` are reserved until a
+spectral triplet at `fc ± fm` is actually detected. Supports record both
+native FFT bin width and analysis bin width after display downsamplingupports`
 
 Those records are `DERIVED_INFERENCE`. They never claim range, AoA, or blade
 length. Raw IQ and full waterfalls stay on the edge. Sparse recovery currently

@@ -1,3 +1,4 @@
+import os
 import socketserver
 import threading
 import time
@@ -152,6 +153,17 @@ class RFBridgeTests(unittest.TestCase):
             server.server_close()
             thread.join(timeout=2)
 
-
-if __name__ == "__main__":
-    unittest.main()
+    def test_child_process_does_not_own_orchestrator_capture(self):
+        previous_role = os.environ.get("SCYTHE_PROCESS_ROLE")
+        os.environ["SCYTHE_PROCESS_ROLE"] = "child"
+        try:
+            config = RFBridgeConfig(capture_owner="orchestrator")
+            self.assertFalse(config.owns_capture())
+            bridge = SDRPlusPlusBridge(config)
+            self.assertFalse(bridge.start())
+            self.assertEqual(bridge.status()["bridge_state"], "delegated")
+        finally:
+            if previous_role is None:
+                os.environ.pop("SCYTHE_PROCESS_ROLE", None)
+            else:
+                os.environ["SCYTHE_PROCESS_ROLE"] = previous_role

@@ -5,7 +5,7 @@ on:
   pull_request:
 
 jobs:
-  preflight:
+  secret-scan:
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -13,3 +13,40 @@ jobs:
 
       - name: Reject hardcoded feed tokens
         run: tools/preflight_secret_scan.sh
+
+  python-rf:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install RF test dependencies
+        run: python -m pip install numpy flask PyJWT requests
+      - name: Run RF estimator and bridge tests
+        run: python -m unittest -v test_rf_sparse_analyzer.py test_rf_bridge.py test_rf_mcp.py test_graphops_rf_ingest.py
+
+  python-graphops:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install GraphOps test dependencies
+        run: python -m pip install numpy flask PyJWT requests
+      - name: Compile GraphOps Python modules
+        run: python -m compileall rf_sparse_analyzer.py rf_bridge.py rf_mcp.py graphops_rf_ingest.py scythe_orchestrator.py
+      - name: Run GraphOps workbench tests
+        run: python -m unittest -v test_graphops_workbench.py test_graphops_rf_ingest.py
+
+  sdrpp-lock-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Require paired waterfall FFT acquire/release
+        run: |
+          grep -q 'bool fftBufferHeld' assets/SDRPlusPlus-master/core/src/gui/widgets/waterfall.h
+          grep -q 'fftBufferHeld = true' assets/SDRPlusPlus-master/core/src/gui/widgets/waterfall.cpp
+          grep -q 'if (!fftBufferHeld) { return; }' assets/SDRPlusPlus-master/core/src/gui/widgets/waterfall.cpp
+          grep -q 'fftBufferHeld = false' assets/SDRPlusPlus-master/core/src/gui/widgets/waterfall.cpp
