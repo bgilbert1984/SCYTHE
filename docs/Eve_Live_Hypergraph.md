@@ -147,13 +147,18 @@ already active, and the server reads it on demand so Wi-Fi roaming does not
 require an orchestrator restart.
 
 When two accepted summaries provide monotonic Suricata directional counters,
-one bounded particle per active direction moves along the edge. Its rate is
-derived from the measured counter interval and its size only summarizes the
-packet delta. No delta means no animation. Reduced-motion clients always retain
-the static chevron, direction color, and complete hover wording without moving
-particles. Flow capsules carry the same boundary classification and compact
-counter delta while the latest-32 sidecar remains the authority for sequence
-and cadence analysis.
+one bright bounded particle per active direction moves along the edge. Its rate
+is derived from the measured counter interval and its size only summarizes the
+packet delta. Production Suricata commonly emits a single terminal flow
+summary instead. A one-shot summary with directional packet totals receives a
+dimmer traversal tracer labelled `OBSERVED_SURICATA_FLOW_SUMMARY`; this depicts
+the direction of the observed summary and is explicitly not a live rate or a
+temporal-delta claim. Tracers are capped at 120 particles for the 600-edge
+overview and 200 for MAX DETAIL, preventing the larger lens from overwhelming
+either renderer. Reduced-motion clients always retain the static chevron,
+direction color, and complete hover wording without moving particles. Flow
+capsules carry the same boundary classification and compact counter delta while
+the latest-32 sidecar remains the authority for sequence and cadence analysis.
 
 ### Cesium Live Geo projection
 

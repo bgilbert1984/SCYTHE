@@ -1,4 +1,4 @@
-import { evidenceStyle, flowDirectionStyle, flowMotion, flowTypeStyle, graphPurposeStyle, hostLivenessStyle } from "./evidenceStyles.js";
+import { evidenceStyle, flowAnimationBudget, flowDirectionStyle, flowMotion, flowTypeStyle, graphPurposeStyle, hostLivenessStyle } from "./evidenceStyles.js";
 import { LiveGraphController } from "./liveGraphController.js";
 import { graphEntityTooltip } from "./graphEntityTooltip.js";
 import {GRAPH_VISUAL_SCALE_BOUNDARY, graphFlowScale, graphNodeScale} from "./graphVisualScale.js";
@@ -102,7 +102,9 @@ export class LiveHypergraphView {
     }
     const positions = separatePlanarNodes(nodes, initial, width, height);
     const radii = new Map(nodes.map((node) => [node.id, graphNodeScale(node).topologyRadius]));
-    for (const edge of displayGraph.edges.slice(0, edgeLimit + displayGraph.cityContext.edgeCount)) {
+    const edges = displayGraph.edges.slice(0, edgeLimit + displayGraph.cityContext.edgeCount);
+    const particleLimit = flowAnimationBudget(edgeLimit); let particleCount = 0;
+    for (const edge of edges) {
       const members = (edge.nodes ?? []).filter((id) => positions.has(id));
       if (members.length < 2) continue;
       const origin = positions.get(members[0]);
@@ -126,7 +128,7 @@ export class LiveHypergraphView {
         const title = document.createElementNS(SVG_NS, "title");
         title.textContent = edge.kind === "geoip_city_membership" ?
           `CITY MEMBERSHIP // INFERRED\n${edge.id}\nRELATION // HOST GEOIP ESTIMATE → CITY CONTEXT\nBOUNDARY // DISPLAY-DERIVED; NOT A PHYSICAL LINK OR GRAPHOPS EXECUTION TARGET` :
-          `${style.label ?? "GRAPH EDGE"}\n${edge.id}\nTUPLE // SOURCE → DESTINATION · ${String(direction.tupleBasis).replaceAll("_", " ")}\nOPERATIONAL // ${direction.label} · ${String(direction.basis).replaceAll("_", " ")}\nMOTION // ${motion.measured ? `${motion.forwardPackets} FORWARD · ${motion.reversePackets} REVERSE PACKETS / ${motion.intervalMilliseconds} ms` : "STATIC · INSUFFICIENT TEMPORAL COUNTER DELTAS"}\nVISUAL SCALE // ${scale.basis.replaceAll("_", " ")} · WIDTH ${scale.topologyWidth.toFixed(2)} · ARROW ${scale.arrowPixels.toFixed(2)} PX\n${String(style.basis ?? "DISPLAY CLASSIFICATION").replaceAll("_", " ")}\n${evidence.label}\nBOUNDARY // ${GRAPH_VISUAL_SCALE_BOUNDARY}`;
+          `${style.label ?? "GRAPH EDGE"}\n${edge.id}\nTUPLE // SOURCE → DESTINATION · ${String(direction.tupleBasis).replaceAll("_", " ")}\nOPERATIONAL // ${direction.label} · ${String(direction.basis).replaceAll("_", " ")}\nMOTION // ${motion.label}\nMOTION BASIS // ${motion.basis.replaceAll("_", " ")}\nVISUAL SCALE // ${scale.basis.replaceAll("_", " ")} · WIDTH ${scale.topologyWidth.toFixed(2)} · ARROW ${scale.arrowPixels.toFixed(2)} PX\n${String(style.basis ?? "DISPLAY CLASSIFICATION").replaceAll("_", " ")}\n${evidence.label}\nBOUNDARY // ${GRAPH_VISUAL_SCALE_BOUNDARY}`;
         line.appendChild(title);
         const selectEdge = () => this.#select({kind: "graph-edge", entityId: edge.id,
           entityType: edge.kind,
@@ -146,18 +148,20 @@ export class LiveHypergraphView {
           arrow.appendChild(arrowTitle); arrow.addEventListener("click", selectEdge);
           this.svg.appendChild(arrow);
         }
-        if (directional && motion.measured && !this.reducedMotion) {
+        if (directional && motion.animatable && !this.reducedMotion) {
           const addParticle = (from, to, reverse, count) => {
-            if (!(count > 0)) return;
+            if (!(count > 0) || particleCount >= particleLimit) return;
             const particle = this.document.createElementNS(SVG_NS, "circle");
             particle.setAttribute("r", String(Math.min(3.2, 1.5 + Math.log2(count + 1) * .35)));
             particle.setAttribute("fill", reverse ? "#ff6fb7" : "#ffffff");
+            particle.setAttribute("fill-opacity", String(motion.particleAlpha));
             particle.setAttribute("pointer-events", "none");
             particle.classList.add("live-hypergraph__flow-particle"); particle.dataset.direction = reverse ? "reverse" : "forward";
+            particle.dataset.motionBasis = motion.basis;
             const animation = this.document.createElementNS(SVG_NS, "animateMotion");
             animation.setAttribute("path", `M ${from.x} ${from.y} L ${to.x} ${to.y}`);
             animation.setAttribute("dur", `${motion.durationSeconds}s`); animation.setAttribute("repeatCount", "indefinite");
-            particle.appendChild(animation); this.svg.appendChild(particle);
+            particle.appendChild(animation); this.svg.appendChild(particle); particleCount += 1;
           };
           addParticle(geometry.start, geometry.end, false, motion.forwardPackets);
           addParticle(geometry.end, geometry.start, true, motion.reversePackets);

@@ -47,6 +47,8 @@ test("live hypergraph polls bounded graph and Eve status without inventing geogr
     assert.equal(arrow.attributes.fill, "#00d4ff");
     assert.match(arrow.children[0].textContent, /VISUAL SCALE/);
     assert.equal(svg.children.filter((child) => child.classes?.includes("live-hypergraph__flow-particle")).length, 2);
+    assert.ok(svg.children.filter((child) => child.classes?.includes("live-hypergraph__flow-particle"))
+      .every((child) => child.dataset.motionBasis === "OBSERVED_SURICATA_COUNTER_DELTA"));
     const city = svg.children.find((child) => child.dataset.entityId?.startsWith("city:"));
     assert.ok(city); assert.equal(city.listeners.click, undefined);
     const membership = svg.children.find((child) => child.dataset.entityId?.startsWith("city-membership:"));
@@ -61,4 +63,25 @@ test("live hypergraph polls bounded graph and Eve status without inventing geogr
     assert.equal(graph.nodes.some((node) => "position" in node), false);
     view.destroy();
   } finally { globalThis.document = previousDocument; globalThis.CustomEvent = previousEvent; }
+});
+
+test("observed one-shot flow summaries receive dim bounded tracers without claiming a live rate", () => {
+  const previousDocument = globalThis.document;
+  globalThis.document = {createElementNS: () => new Element()};
+  try {
+    const svg = new Element(); const root = {querySelector: (selector) => selector === "svg" ? svg : {textContent:""},
+      ownerDocument:{createElementNS:()=>new Element(),createElement:()=>new Element(),
+        defaultView:{matchMedia:()=>({matches:false}),performance:{now:()=>1}}},appendChild(){},dispatchEvent(){}};
+    const controller = {nodeLimit:300,edgeLimit:600,reportFrameTime(){}};
+    const view = new LiveHypergraphView({root,controller});
+    view.render({graphRevision:"summary",nodes:[{id:"host:a",kind:"network_host",evidenceClass:"OBSERVED"},
+      {id:"host:b",kind:"network_host",evidenceClass:"OBSERVED"}],edges:[{id:"flow:summary",kind:"network_flow",
+        nodes:["host:a","host:b"],evidenceClass:"OBSERVED",labels:{flow_pkts_toserver:"8",flow_pkts_toclient:"3",
+          motion_basis:"INSUFFICIENT_TEMPORAL_COUNTERS"}}]});
+    const particles = svg.children.filter((child) => child.classes?.includes("live-hypergraph__flow-particle"));
+    assert.equal(particles.length,2); assert.equal(particles[0].dataset.motionBasis,"OBSERVED_SURICATA_FLOW_SUMMARY");
+    assert.equal(particles[0].attributes["fill-opacity"],"0.48");
+    assert.match(svg.children.find((child)=>child.dataset.entityId==="flow:summary").children[0].textContent,
+      /NOT A LIVE RATE/);
+  } finally { globalThis.document = previousDocument; }
 });

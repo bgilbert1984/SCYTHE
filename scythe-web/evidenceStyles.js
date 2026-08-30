@@ -173,14 +173,38 @@ export function flowDirectionStyle(edge) {
 
 export function flowMotion(edge) {
   const labels = edge?.labels ?? {};
-  const forwardPackets = Math.max(0, Number(labels.motion_forward_delta_packets) || 0);
-  const reversePackets = Math.max(0, Number(labels.motion_reverse_delta_packets) || 0);
+  const deltaForwardPackets = Math.max(0, Number(labels.motion_forward_delta_packets) || 0);
+  const deltaReversePackets = Math.max(0, Number(labels.motion_reverse_delta_packets) || 0);
   const intervalMilliseconds = Math.max(0, Number(labels.motion_interval_ms) || 0);
   const measured = labels.motion_basis === "OBSERVED_SURICATA_COUNTER_DELTA" &&
-    intervalMilliseconds > 0 && (forwardPackets > 0 || reversePackets > 0);
-  return {measured, forwardPackets, reversePackets, intervalMilliseconds,
-    durationSeconds: Math.min(3, Math.max(.6, intervalMilliseconds / 1000 || 1.5)),
-    basis: labels.motion_basis ?? "INSUFFICIENT_TEMPORAL_COUNTERS"};
+    intervalMilliseconds > 0 && (deltaForwardPackets > 0 || deltaReversePackets > 0);
+  // Production Suricata commonly emits one terminal flow record rather than
+  // two cumulative observations. Its directional totals still support a
+  // traversal tracer, but not a rate or temporal-delta claim.
+  const summaryForwardPackets = Math.max(0, Number(labels.flow_pkts_toserver) || 0);
+  const summaryReversePackets = Math.max(0, Number(labels.flow_pkts_toclient) || 0);
+  const observedSummary = !measured &&
+    (summaryForwardPackets > 0 || summaryReversePackets > 0);
+  const forwardPackets = measured ? deltaForwardPackets : summaryForwardPackets;
+  const reversePackets = measured ? deltaReversePackets : summaryReversePackets;
+  const basis = measured ? "OBSERVED_SURICATA_COUNTER_DELTA" : observedSummary
+    ? "OBSERVED_SURICATA_FLOW_SUMMARY" : "INSUFFICIENT_TEMPORAL_COUNTERS";
+  return {measured, observedSummary, animatable: measured || observedSummary,
+    forwardPackets, reversePackets, intervalMilliseconds,
+    durationSeconds: measured
+      ? Math.min(3, Math.max(.6, intervalMilliseconds / 1000 || 1.5))
+      : Math.min(4.2, Math.max(1.8, 3.4 - Math.log2(forwardPackets + reversePackets + 1) * .18)),
+    particleAlpha: measured ? 1 : .48, basis,
+    label: measured
+      ? `${forwardPackets} FORWARD · ${reversePackets} REVERSE PACKETS / ${intervalMilliseconds} ms`
+      : observedSummary
+        ? `${forwardPackets} FORWARD · ${reversePackets} REVERSE PACKETS · OBSERVED FLOW SUMMARY · NOT A LIVE RATE`
+        : "STATIC · INSUFFICIENT DIRECTIONAL PACKET COUNTERS"};
+}
+
+/** Keep motion legible without allowing MAX DETAIL to create 2,000 particles. */
+export function flowAnimationBudget(edgeCount) {
+  return Math.min(200, Math.max(48, Math.ceil(Math.max(0, Number(edgeCount) || 0) * .2)));
 }
 
 /** Host liveness may override node color, but never its evidence-class shape. */

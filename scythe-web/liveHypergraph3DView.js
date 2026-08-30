@@ -1,4 +1,4 @@
-import { evidenceStyle, flowDirectionStyle, flowMotion, flowTypeStyle, graphPurposeStyle, hostLivenessStyle } from "./evidenceStyles.js";
+import { evidenceStyle, flowAnimationBudget, flowDirectionStyle, flowMotion, flowTypeStyle, graphPurposeStyle, hostLivenessStyle } from "./evidenceStyles.js";
 import { graphEntityTooltip } from "./graphEntityTooltip.js";
 import {GRAPH_VISUAL_SCALE_BOUNDARY, graphFlowScale, graphNodeScale} from "./graphVisualScale.js";
 import {projectCityContext} from "./cityContextProjection.js";
@@ -138,6 +138,7 @@ export class LiveHypergraph3DView {
     for (const node of nodes) this.#upsertNode(node, graph.graphRevision);
     for (const object of this.edgeObjects.values()) { this.edgeGroup.remove(object); this.#disposeObject(object); }
     this.edgeObjects.clear(); this.pickTargets = [...this.nodeMeshes.values()];
+    this.animationParticleCount = 0; this.animationParticleLimit = flowAnimationBudget(edges.length);
     for (const edge of edges) this.#addEdge(edge, graph.graphRevision);
     const hyperedges = edges.filter((edge) => (edge.nodes ?? []).filter((id) => nodeIds.has(id)).length > 2).length;
     this.stats.textContent = `${nodes.length} NODES · ${edges.length - hyperedges} EDGES · ${hyperedges} HYPEREDGES · ${displayGraph.cityContext.nodeCount} INFERRED CITIES · ${displayGraph.rfSensorDisplayContext?.nodeCount ?? 0} RF SENSORS · THREE r${this.THREE.REVISION}`;
@@ -225,7 +226,7 @@ export class LiveHypergraph3DView {
       object = new T.Line(geometry, material); if (dashed) object.computeLineDistances();
       object.userData = {selection, label: edge.kind === "geoip_city_membership" ?
         `CITY MEMBERSHIP // INFERRED\n${edge.id}\nDISPLAY-DERIVED FROM HOST GEOIP ESTIMATE\nNOT A PHYSICAL LINK OR GRAPHOPS EXECUTION TARGET` :
-        `${edge.kind ?? "edge"}\n${edge.id}\n${flowLabel}\nTUPLE // SOURCE → DESTINATION · ${String(directionStyle.tupleBasis).replaceAll("_", " ")}\nOPERATIONAL // ${directionStyle.label} · ${String(directionStyle.basis).replaceAll("_", " ")}\nMOTION // ${motion.measured ? `${motion.forwardPackets} FORWARD · ${motion.reversePackets} REVERSE PACKETS / ${motion.intervalMilliseconds} ms` : "STATIC · INSUFFICIENT TEMPORAL COUNTER DELTAS"}\nVISUAL SCALE // ${scale.basis.replaceAll("_", " ")} · WIDTH ${scale.topologyWidth.toFixed(2)} · ARROW ×${scale.threeArrowScale.toFixed(2)}\n${evidence.name}\nBOUNDARY // ${GRAPH_VISUAL_SCALE_BOUNDARY}`};
+        `${edge.kind ?? "edge"}\n${edge.id}\n${flowLabel}\nTUPLE // SOURCE → DESTINATION · ${String(directionStyle.tupleBasis).replaceAll("_", " ")}\nOPERATIONAL // ${directionStyle.label} · ${String(directionStyle.basis).replaceAll("_", " ")}\nMOTION // ${motion.label}\nMOTION BASIS // ${motion.basis.replaceAll("_", " ")}\nVISUAL SCALE // ${scale.basis.replaceAll("_", " ")} · WIDTH ${scale.topologyWidth.toFixed(2)} · ARROW ×${scale.threeArrowScale.toFixed(2)}\n${evidence.name}\nBOUNDARY // ${GRAPH_VISUAL_SCALE_BOUNDARY}`};
       const vector = new T.Vector3().subVectors(end, start); const unit = vector.clone().normalize();
       // WebGL commonly ignores LineBasicMaterial.linewidth. A restrained
       // translucent tube makes bounded counter magnitude visible while the
@@ -245,16 +246,17 @@ export class LiveHypergraph3DView {
         arrow.name = "scythe-flow-direction"; arrow.position.copy(start).lerp(end, .5);
         arrow.quaternion.setFromUnitVectors(new T.Vector3(0, 1, 0), unit); object.add(arrow);
       }
-      if (directional && motion.measured && !this.reducedMotion) {
+      if (directional && motion.animatable && !this.reducedMotion) {
         const addParticle = (reverse, count) => {
-          if (!(count > 0)) return;
+          if (!(count > 0) || this.animationParticleCount >= this.animationParticleLimit) return;
           const particle = new T.Mesh(new T.SphereGeometry(Math.min(2.2, 1 + Math.log2(count + 1) * .2), 8, 6),
-            new T.MeshBasicMaterial({color: reverse ? 0xff6fb7 : 0xffffff}));
+            new T.MeshBasicMaterial({color: reverse ? 0xff6fb7 : 0xffffff, transparent: motion.particleAlpha < 1,
+              opacity: motion.particleAlpha}));
           particle.name = reverse ? "scythe-flow-particle-reverse" : "scythe-flow-particle-forward";
           particle.userData.motion = {start: reverse ? end.clone() : start.clone(),
             end: reverse ? start.clone() : end.clone(), duration: motion.durationSeconds * 1000,
-            phase: (hash(`${edge.id}:${reverse}`) % 1000) / 1000};
-          object.add(particle);
+            phase: (hash(`${edge.id}:${reverse}`) % 1000) / 1000, basis: motion.basis};
+          object.add(particle); this.animationParticleCount += 1;
         };
         addParticle(false, motion.forwardPackets); addParticle(true, motion.reversePackets);
       }
