@@ -12,10 +12,24 @@
     body { background:#000; color:#ccefff; font-family:ui-monospace,monospace; }
     #globe-root { position:relative; }
     .notice {
-      position:absolute; top:12px; left:50%; transform:translateX(-50%); z-index:50;
-      padding:7px 12px; border:1px dashed #00d4ff; background:rgba(0,12,28,.86);
-      color:#ccefff; font-size:11px; letter-spacing:.08em; pointer-events:none;
+      position:absolute; top:0; left:0; z-index:50;
+      width:100%; height:31px; box-sizing:border-box; overflow:hidden;
+      display:flex; align-items:center; padding:0; border:1px dashed #00d4ff; background:rgba(0,12,28,.9);
+      color:#ccefff; font-size:10px; letter-spacing:.07em; box-shadow:0 0 16px rgba(0,212,255,.12);
     }
+    .notice__viewport { min-width:0; flex:1; overflow:hidden; mask-image:linear-gradient(90deg,transparent,#000 3%,#000 97%,transparent); }
+    .notice__track { display:flex; width:max-content; will-change:transform; animation:system-ticker-scroll 42s linear infinite; }
+    .notice__group { flex:none; padding-right:46px; white-space:nowrap; }
+    .notice:hover .notice__track,.notice:focus-within .notice__track,.notice[data-paused="true"] .notice__track { animation-play-state:paused; }
+    .notice__toggle { flex:0 0 28px; align-self:stretch; padding:0; border:0; border-left:1px solid rgba(0,212,255,.35);
+      color:#66ddff; background:rgba(7,20,34,.94); font:11px/1 ui-monospace,monospace; cursor:pointer; }
+    .notice__toggle:hover,.notice__toggle:focus-visible { color:#fff; outline:1px solid #00d4ff; outline-offset:-2px; }
+    .notice__summary { position:absolute!important; width:1px!important; height:1px!important; padding:0!important;
+      margin:-1px!important; overflow:hidden!important; clip:rect(0,0,0,0)!important; white-space:nowrap!important; border:0!important; }
+    @keyframes system-ticker-scroll { to { transform:translateX(-50%); } }
+    @media (prefers-reduced-motion:reduce) { .notice__track { animation:none; max-width:100%; overflow:hidden; }
+      .notice__group:nth-child(2) { display:none; } }
+    @media (max-width:720px) { .notice { font-size:9px; } }
     .directive {
       position:absolute; top:52px; right:12px; z-index:58; width:min(390px,calc(100vw - 24px));
       height:min(690px,calc(100vh - 64px)); min-width:min(340px,calc(100vw - 24px));
@@ -285,7 +299,12 @@
 <body>
   <main id="globe-root">
     <div id="cesium-container"></div>
-    <div class="notice">SOLVER OUTPUT // DERIVED UINT16 VIEW // VISUALIZATION IS NOT AUTHORITATIVE</div>
+    <div id="system-evidence-ticker" class="notice" role="region" aria-label="Bounded system evidence ticker">
+      <div class="notice__viewport" aria-hidden="true"><div class="notice__track" data-system-ticker-track></div></div>
+      <button class="notice__toggle" type="button" data-system-ticker-toggle aria-label="Pause evidence ticker"
+        aria-pressed="false" title="Pause evidence ticker">Ⅱ</button>
+      <span class="notice__summary" data-system-ticker-summary aria-live="polite"></span>
+    </div>
     <aside id="live-hypergraph" class="live-hypergraph" aria-label="Live network hypergraph">
       <button class="live-hypergraph__resize" type="button" data-live-graph-resize aria-label="Resize live hypergraph">↗</button>
       <button id="live-hypergraph-bundle" class="live-hypergraph__bundle" type="button"
@@ -453,6 +472,7 @@
     import { InfrastructureLensView } from "./infrastructureLensView.js";
     import { InfrastructureGlobeLayer } from "./infrastructureGlobeLayer.js";
     import { ContextualWorkbench } from "./contextualWorkbench.js";
+    import { SystemEvidenceTicker } from "./systemEvidenceTicker.js";
 
     const viewerOptions = {
       animation: false,
@@ -521,6 +541,17 @@
       worldStack,
     });
     const liveGraphController = new LiveGraphController();
+    const evidenceTicker = new SystemEvidenceTicker({root:document.getElementById("system-evidence-ticker")}).start();
+    window.scytheEvidenceTicker = evidenceTicker;
+    const tickerRoot = document.getElementById("globe-root");
+    tickerRoot.addEventListener("scythe-web:graph-selection", ({detail}) => evidenceTicker.note("selection",
+      `OPERATOR FOCUS // ${String(detail?.kind ?? "GRAPH ENTITY").toUpperCase()} · ${detail?.entityId ?? "UNAVAILABLE"}`));
+    tickerRoot.addEventListener("scythe-web:coverage-cell-selected", ({detail}) => evidenceTicker.note("rf-cell",
+      `RF CELL PINNED // ${detail?.tile_id ?? "UNKNOWN TILE"} · ${detail?.coverage ? "THRESHOLD PASS" : "THRESHOLD FAIL"} · ${detail?.value ?? "—"} ${detail?.units ?? ""}`));
+    tickerRoot.addEventListener("scythe-web:rf-sensor-selection", ({detail}) => evidenceTicker.note("rf-sensor",
+      `RF RECEIVER SELECTED // ${detail?.sensor?.sensorId ?? detail?.entityId ?? "UNKNOWN SENSOR"}`));
+    tickerRoot.addEventListener("scythe-web:infrastructure-selection", ({detail}) => evidenceTicker.note("infrastructure",
+      `INFRASTRUCTURE FOCUS // ${detail?.kind ?? "ENTITY"} · ${detail?.entityId ?? detail?.id ?? "BOUNDED SELECTION"}`));
     const graphOverlay = new GraphOverlayLayer({viewer, Cesium, container: document.getElementById("globe-root"),
       controller: liveGraphController});
     window.scytheGraphOverlay = graphOverlay;
@@ -547,7 +578,7 @@
         ? `Frame guard stepped ${detail.requestedTier} down to ${detail.tier}; toggle off and on to retry`
         : `Current ${detail.tier} lens: ${detail.nodeLimit} nodes / ${detail.edgeLimit} edges`;
     };
-    liveGraphController.subscribe((update) => syncDetailButton(update.detail));
+    liveGraphController.subscribe((update) => { syncDetailButton(update.detail); evidenceTicker.updateGraph(update); });
     maxDetailButton.addEventListener("click", () => {
       liveGraphController.setMaxDetail(maxDetailButton.getAttribute("aria-pressed") !== "true");
       syncDetailButton();

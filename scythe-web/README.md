@@ -17,6 +17,9 @@ The modules are:
 - `rfSampler.js`: deterministic RF sampling and coverage classification.
 - `opticsSampler.js`: deterministic optical quantity/depth-plane sampling.
 - `evidenceStyles.js`: evidence-preserving Cesium and HUD styles.
+- `systemEvidenceTicker.js`: pausable, reduced-motion-aware summaries of the
+  already-bounded graph, Eve, RF bridge, liveness, flow-mix, and investigation
+  state. It creates no new evidence authority.
 - `monocleOverlayLayer.js`: fixed-step Cesium camera sampling, RF coverage
   cells/point footprints, declared range geometry, physically dimensioned
   uncertainty halos, optical cues, and an evidence-labelled browser HUD.
