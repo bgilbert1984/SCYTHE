@@ -145,13 +145,17 @@ The end-to-end regional demo can be served from the repository root:
 python -m http.server 8765 --bind 127.0.0.1
 ```
 
-Open `http://127.0.0.1:8765/scythe-web/regional-rf-demo.html`. It shows the
-contract-backed TX and range ring, sampled coverage cells, evidence class,
-basic transmission loss, uncertainty status, and pinned solver provenance.
+Open `http://127.0.0.1:8765/scythe-web/regional-rf-demo.html`. Its compact
+**RF FIELD INSPECTOR** shows the contract-backed TX and range ring, sampled
+coverage cells, evidence class, transmission loss, uncertainty, and solver
+provenance. `CAMERA` samples the current Cesium camera, `HOVER` previews a
+coverage cell, and `PINNED` retains a clicked cell while the camera moves.
+The optical row is present only when an optical dataset is active.
 Every overlay and the page banner state that the visualization is
 non-authoritative.
 
-Clicking a coverage cell now sends only a typed dataset/tile/location reference
+Clicking a coverage cell pins the inspector, opens a dedicated RF investigation
+tab, and sends only a typed dataset/tile/location reference
 and the non-authoritative display value to GraphOps. The server verifies the
 manifest, tile metadata, and authoritative Float64 asset hashes, samples the
 authority independently, and returns a declarative EffectPlan. The Reality
@@ -166,6 +170,8 @@ Execution searches for measured RF observations at the modeled frequency. A
 solver cell is never treated as event-time evidence: absent measured support is
 rendered as `TEMPORAL_EVIDENCE: ABSENT`, while any temporal match is rendered
 as a dashed `INFERRED` correlation fiber explicitly labelled “not causation.”
+When both selections exist, the inspector exposes an explicit **CORRELATE WITH
+SELECTED HOST** action; selecting a host no longer silently launches correlation.
 
 Phase 2B adds three read-only graph operations. Select a node, event, or edge
 to trace bounded declared provenance or expose explicit contradiction

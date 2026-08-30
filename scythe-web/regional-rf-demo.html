@@ -572,6 +572,7 @@
     vantageButton.addEventListener("click", () => {
       if (browserSensorVantage) {
         browserSensorVantage = null; graphOverlay.setSensorVantage(null);
+        liveGraphController.setRfSensorContext(null); client.layer.setReceiverSensor(null);
         vantageButton.textContent = "⌖ VANTAGE"; vantageButton.setAttribute("aria-pressed", "false");
         vantageButton.dataset.state = "";
         vantageButton.title = "Private and multicast entities are unlocated until an explicit sensor vantage is set";
@@ -581,12 +582,27 @@
         vantageButton.textContent = "⌖ UNAVAILABLE"; vantageButton.dataset.state = "error"; return;
       }
       vantageButton.textContent = "⌖ …"; vantageButton.disabled = true;
-      navigator.geolocation.getCurrentPosition((position) => {
+      navigator.geolocation.getCurrentPosition(async (position) => {
+        let receiver = {sensorId:"NESDR-SMART",model:"Nooelec NESDR SMArt",bridgeState:"UNAVAILABLE",
+          iqConnected:false,centerFrequencyHz:null,sampleRateHz:null,captureOwner:"UNKNOWN",latestFrameAt:null};
+        try {
+          const response = await fetch("/api/graphops/rf-bridge/status", {credentials:"same-origin",cache:"no-store"});
+          const payload = await response.json(); const bridge = payload.bridge ?? {}; const config = bridge.config ?? {};
+          if (response.ok) receiver = {sensorId:config.sensor_id ?? receiver.sensorId,model:"Nooelec NESDR SMArt",
+            bridgeState:bridge.bridge_state ?? "unknown",iqConnected:Boolean(bridge.iq_connected),
+            centerFrequencyHz:config.center_frequency_hz ?? null,sampleRateHz:config.sample_rate_hz ?? null,
+            captureOwner:bridge.capture_owner ?? payload.capture_owner ?? "unknown",
+            latestFrameAt:bridge.latest_frame_at ?? null,rawIqExposed:Boolean(payload.rawIqAccepted)};
+        } catch { /* receiver remains explicitly unavailable */ }
         browserSensorVantage = {latitude: position.coords.latitude, longitude: position.coords.longitude,
           heightMeters: position.coords.altitude ?? 0, accuracyMeters: position.coords.accuracy,
           authority: "MEASURED_BROWSER_GEOLOCATION", evidenceClass: "MEASURED",
-          sensorId: "browser-capture-vantage", capturedAt: new Date(position.timestamp).toISOString()};
+          sensorId: receiver.sensorId, capturedAt: new Date(position.timestamp).toISOString(),receiver};
         graphOverlay.setSensorVantage(browserSensorVantage);
+        liveGraphController.setRfSensorContext({...receiver,latitude:position.coords.latitude,
+          longitude:position.coords.longitude,accuracyMeters:position.coords.accuracy,
+          locationAuthority:"MEASURED_BROWSER_GEOLOCATION",locationEvidenceClass:"MEASURED",
+          capturedAt:browserSensorVantage.capturedAt});
         vantageButton.textContent = `⌖ ±${Math.round(position.coords.accuracy)}m`;
         vantageButton.title = "Measured browser location used only for local Cesium display; click to clear";
         vantageButton.setAttribute("aria-pressed", "true"); vantageButton.dataset.state = "ready";
@@ -654,6 +670,18 @@
     document.getElementById("globe-root").addEventListener("scythe-web:infrastructure-selection", ({detail}) => {
       infrastructureView.setInfrastructureSelection(detail);
       setHypergraphMode("infrastructure");
+    });
+    document.getElementById("globe-root").addEventListener("scythe-web:rf-sensor-selection", ({detail}) => {
+      const source = detail?.sensor ?? {}; const labels = source.labels ?? {}; const metadata = source.metadata ?? {};
+      const geo = source.enrichment?.geo ?? {};
+      client.layer.setReceiverSensor(source.sensorId ? source : {
+        sensorId:String(source.id ?? detail?.entityId ?? "sensor:unknown").replace(/^sensor:/,""),
+        model:labels.receiver_model ?? "Nooelec NESDR SMArt",bridgeState:labels.bridge_state ?? "unknown",
+        iqConnected:labels.iq_connected === "true",centerFrequencyHz:Number(labels.center_frequency_hz) || null,
+        sampleRateHz:Number(labels.sample_rate_hz) || null,captureOwner:metadata.capture_owner ?? "unknown",
+        latestFrameAt:metadata.latest_frame_at ?? null,locationAuthority:geo.authority ?? "NOT PROVIDED",
+        accuracyMeters:Number(geo.uncertaintyRadiusKm ?? 0)*1000,
+      });
     });
     let resultTabs = null;
     function setHypergraphMode(mode) {
@@ -746,10 +774,12 @@
       onActivate: (record) => {
         renderGraphOpsRecord(record);
         selections.upsert(record.selection);
-        liveGraphController.setFocus(record.selection.entityId);
-        infrastructureController.setFocus(record.selection.entityId);
-        graphExplorer.setSelection(record.selection);
-        contextualWorkbench.setSelection(record.selection);
+        if (["graph-node","graph-edge","event"].includes(record.selection.kind)) {
+          liveGraphController.setFocus(record.selection.entityId);
+          infrastructureController.setFocus(record.selection.entityId);
+          graphExplorer.setSelection(record.selection);
+          contextualWorkbench.setSelection(record.selection);
+        }
         updateInvestigation();
       },
     });
@@ -882,6 +912,8 @@
           ? `TIME:${new Date(item.timestamp * 1000).toISOString()}` : `${item.kind.toUpperCase()}:${item.entityId}`);
       document.getElementById("selection-tray").textContent = `INVESTIGATION // ${labels.join(" // ") || "NO SELECTION"}`;
       const kinds = new Set(selections.items.map((item) => item.kind));
+      client.layer.setCorrelationAvailable(kinds.has("rf-cell") &&
+        ["graph-node", "graph-edge", "event"].some((kind) => kinds.has(kind)));
       document.getElementById("compare-worlds").disabled = !(kinds.has("rf-cell") &&
         (["graph-node", "graph-edge", "event"].some((kind) => kinds.has(kind))));
       document.getElementById("ask-graphops").disabled = !graphSelection;
@@ -1069,15 +1101,21 @@
     document.getElementById("globe-root").addEventListener(
       "scythe-web:coverage-cell-selected", async ({ detail: sample }) => {
         showDirective();
-        status.textContent = "GRAPHOPS // RESOLVING AUTHORITATIVE CELL…";
-        selections.replace({
-          kind: "rf-cell", datasetId: sample.dataset_id, tileId: sample.tile_id,
+        status.textContent = "GRAPHOPS // RESOLVING CONTRACT-BACKED CELL…";
+        const rfSelection = {
+          kind: "rf-cell", entityId:`rf-cell:${sample.dataset_id}:${sample.tile_id}:${Number(sample.longitude_degrees).toFixed(5)}:${Number(sample.latitude_degrees).toFixed(5)}`,
+          datasetId: sample.dataset_id, tileId: sample.tile_id,
           longitudeDegrees: sample.longitude_degrees, latitudeDegrees: sample.latitude_degrees,
           displayValue: sample.value, displayUnits: sample.units,
           ...(sample.display_asset_hash ? { displayAssetHash: sample.display_asset_hash } : {}),
           coverageThreshold: { value: sample.coverage_threshold,
             units: sample.coverage_threshold_units, comparison: sample.coverage_comparison },
-        });
+        };
+        captureActiveTab();
+        investigationTabs.open(rfSelection,{label:`RF ${sample.tile_id}`,state:{outputHidden:false,
+          output:`RF FIELD CELL // PINNED\nDATASET // ${sample.dataset_id}\nTILE // ${sample.tile_id}\nCOORDINATES // ${Number(sample.latitude_degrees).toFixed(5)}°, ${Number(sample.longitude_degrees).toFixed(5)}°\nCONTRACT VALUE // ${sample.value} ${sample.units}\nDISPLAY VALUE // ${sample.display_value ?? sample.value} ${sample.units}\nDISPLAY DELTA // ${sample.display_delta ?? 0}\nTHRESHOLD // ${sample.coverage_comparison} ${sample.coverage_threshold} ${sample.coverage_threshold_units} // ${sample.coverage ? "PASS" : "FAIL"}\nSOLVER // ${sample.provenance?.solverName ?? "UNKNOWN"} ${sample.provenance?.solverVersion ?? ""}\nSOURCE // ${sample.provenance?.sourceRevision ?? "UNKNOWN"}\nRUN // ${sample.provenance?.runId ?? "UNKNOWN"}\nHASH // ${sample.display_asset_hash ?? "UNAVAILABLE"}\nUNCERTAINTY // ${sample.uncertainty?.value ?? sample.uncertainty?.kind ?? "NOT QUANTIFIED"} ${sample.uncertainty?.units ?? ""}\nBOUNDARY // CONTRACT-BACKED SOLVER OUTPUT; VISUALIZATION IS NON-AUTHORITATIVE`,
+          status:"GRAPHOPS // RF CELL // PINNED",conversationState:"RF EVIDENCE // LOCAL // NOT YET SENT"}});
+        selections.upsert(rfSelection);
         captureTimePins();
         updateInvestigation();
         try {
@@ -1117,10 +1155,11 @@
           (entityType === "network_flow" || String(typedSelection.entityId).startsWith("flow:"))) {
         void performFlowEvidence(typedSelection);
       }
-      if (document.getElementById("execute-correlation").disabled) return;
+    });
+    document.getElementById("globe-root").addEventListener("scythe-web:rf-correlate-requested", async () => {
       try {
-        await submitDirective(selections.directiveRequest({directive: "correlate.rf-cell-graph",
-          utterance: "Connect this RF cell to this graph node", mode: "preview"}));
+        await submitDirective(selections.directiveRequest({directive:"correlate.rf-cell-graph",
+          utterance:"Correlate the pinned RF field cell with the selected graph entity",mode:"preview"}));
       } catch (error) { status.textContent = `GRAPHOPS // REFUSED // ${error.message}`; }
     });
     document.getElementById("globe-root").addEventListener("scythe-web:workbench-investigate", ({detail}) => {

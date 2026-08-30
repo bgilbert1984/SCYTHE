@@ -90,6 +90,23 @@ may use the configured `X-Internal-Token`.
 The stream is bounded to `SDRPP_MAX_BINS` bins and `SDRPP_FPS` frames per
 second. Raw IQ remains on the edge and is not forwarded to browsers.
 
+## Receiver display context
+
+The regional page can show the configured NESDR as an `rf_receiver_sensor`
+display-context node and as an interactive Cesium `RF RX` vantage marker. The
+operator must explicitly press **VANTAGE** and grant browser geolocation; the
+coordinate remains session-local and is never written into the canonical graph
+or its content-addressed revision. Clearing VANTAGE removes both projections.
+
+The node keeps three claims separate:
+
+- RF bridge configuration/runtime status (`RF_BRIDGE_RUNTIME_STATUS`);
+- browser location (`MEASURED_BROWSER_GEOLOCATION`, with browser accuracy);
+- device presence (`CONFIGURED_NOT_USB_ATTESTED`).
+
+Consequently, `reconnecting` or `IQ DISCONNECTED` remains visible and is never
+presented as a successful USB or RF capture attestation. Raw IQ is not exposed.
+
 ## MCP evidence bridge
 
 Significant edge FFT peaks are reduced to a bounded observation record with a

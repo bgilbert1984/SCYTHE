@@ -142,3 +142,16 @@ test("multicast groups are excluded from unicast liveness rotation", async () =>
   assert.match(updates.at(-1).message,/HOST PING \/\/ 0 ACTIVE \/\/ 0 INACTIVE \/\/ 0 UNKNOWN/);
   controller.destroy();
 });
+
+test("receiver context republishes locally without changing the canonical graph revision", async () => {
+  const fetchImpl=async(url)=>new Response(JSON.stringify(url.includes("eve/status")?{}:
+    {status:"ok",graphRevision:"graph-sensor",nodes:[],edges:[]}),{status:200});
+  const controller=new LiveGraphController({fetchImpl,refreshMilliseconds:60_000}); const updates=[];
+  controller.subscribe((update)=>updates.push(update)); await controller.start();
+  controller.setRfSensorContext({sensorId:"NESDR",bridgeState:"reconnecting",iqConnected:false});
+  assert.equal(updates.at(-1).rfSensorChanged,true);
+  assert.equal(updates.at(-1).graph.graphRevision,"graph-sensor");
+  assert.equal(updates.at(-1).graph.rfSensorContext.sensorId,"NESDR");
+  controller.setRfSensorContext(null); assert.equal("rfSensorContext" in updates.at(-1).graph,false);
+  controller.destroy();
+});

@@ -180,6 +180,54 @@ test("real browser verifies and samples the regional Uint16 ITM fixture", async 
   assert.equal(typeof result.coverage, "boolean");
 });
 
+test("RF Field Inspector hovers, pins, and preserves a correlation-ready cell", async (context) => {
+  const {server,origin}=await startServer(); context.after(()=>new Promise((done)=>server.close(done)));
+  const browser=await chromium.launch({headless:true}); context.after(()=>browser.close());
+  const page=await browser.newPage(); await page.goto(`${origin}/scythe-web/browser-harness.html`);
+  const result=await page.evaluate(async()=>{
+    const {MonocleOverlayLayer}=await import("./monocleOverlayLayer.js");
+    const actions={}; const entities=new Map(); let picked=null; const events=[];
+    class Color {withAlpha(){return this;} static fromCssColorString(){return new Color();}}
+    class Handler {setInputAction(callback,type){actions[type]=callback;} destroy(){}}
+    const Cesium={Ellipsoid:{WGS84:{cartesianToCartographic:()=>({longitude:0,latitude:0,height:10})}},
+      Math:{toDegrees:(value)=>value*180/Math.PI},Cartesian3:{fromDegrees:(longitude,latitude,height=0)=>({longitude,latitude,height})},
+      Cartesian2:class{constructor(x,y){this.x=x;this.y=y;}},Rectangle:{fromDegrees:(...values)=>values},
+      Color:Object.assign(Color,{BLACK:new Color(),WHITE:new Color()}),ArcType:{GEODESIC:"GEODESIC"},
+      PolylineDashMaterialProperty:class{},ScreenSpaceEventHandler:Handler,
+      ScreenSpaceEventType:{LEFT_CLICK:"click",MOUSE_MOVE:"move"}};
+    const sample={available:true,status:"OK",datasetId:"itm",tileId:"z0",displayAssetHash:"hash-1",
+      evidenceClass:"SOLVER_OUTPUT",visualizationIsAuthoritative:false,quantity:"path_loss",value:141.25,units:"dB",
+      coverage:true,uncertainty:{kind:"MODEL_BOUND",value:2.5,units:"dB"},
+      query:{frequencyHz:900e6,coverageThreshold:{value:145,units:"dB",comparison:"LTE"}},
+      provenance:{solverName:"ITM",solverVersion:"1.2",sourceRevision:"source-1",runId:"run-1"}};
+    const rfSampler={descriptor:{evidenceClass:"SOLVER_OUTPUT",physics:{rf:{frequencyHz:900e6}}},
+      sample:async()=>sample,sampleGrid:async()=>[{x:0,y:0,boundsDegrees:[-123,47,-122,48],sample}]};
+    const viewer={scene:{canvas:{},camera:{positionWC:{}},pick:()=>({id:picked}),
+      postRender:{addEventListener:()=>()=>{}}},clock:{currentTime:1},entities:{add:(entity)=>{entities.set(entity.id,entity);return entity;},
+        removeById:(id)=>entities.delete(id)}};
+    const container=document.getElementById("globe-root");
+    for(const type of ["scythe-web:coverage-cell-selected","scythe-web:rf-correlate-requested"])
+      container.addEventListener(type,(event)=>events.push({type,detail:event.detail}));
+    const layer=new MonocleOverlayLayer({viewer,Cesium,rfSampler,container,documentRoot:document,
+      fixedStepSeconds:1,timeSource:()=>new Date("2026-08-29T12:00:00Z"),scenario:{coverageThreshold:{value:145,units:"dB",comparison:"LTE"},
+        coverageGrid:{westDegrees:-123,southDegrees:47,eastDegrees:-122,northDegrees:48,longitudeCells:1,latitudeCells:1,heightMeters:0}}}).start();
+    await layer.tick(); picked=entities.get("scythe-web:coverage:0:0"); layer.setSamplingMode("HOVER");
+    actions.move({endPosition:{x:4,y:5}}); actions.click({position:{x:4,y:5}}); layer.setCorrelationAvailable(true);
+    document.querySelector('[data-role="correlate"]').click();
+    const output={title:document.querySelector(".scythe-web-monocle__title").textContent,
+      mode:document.querySelector('[data-role="mode"]').textContent,
+      detail:document.querySelector('[data-role="detail"]').textContent,
+      provenance:document.querySelector('[data-role="provenance"]').textContent,
+      optical:Boolean(document.querySelector('[data-role="optical"]')),events}; layer.destroy(); return output;
+  });
+  assert.match(result.title,/RF FIELD INSPECTOR \/\/ 900 MHz/); assert.match(result.mode,/PINNED/);
+  assert.match(result.detail,/CONTRACT VALUE.*DISPLAY VALUE.*Δ 0\.000/);
+  assert.match(result.provenance,/ITM 1\.2.*source-1/); assert.equal(result.optical,false);
+  assert.deepEqual(result.events.map((event)=>event.type),
+    ["scythe-web:coverage-cell-selected","scythe-web:rf-correlate-requested"]);
+  assert.equal(result.events[0].detail.uncertainty.value,2.5);
+});
+
 test("real browser renders bounded contextual MCP evidence and routes it to GraphOps", async (context) => {
   const {server, origin} = await startServer();
   context.after(() => new Promise((done) => server.close(done)));

@@ -23,6 +23,8 @@ test("live hypergraph polls bounded graph and Eve status without inventing geogr
     const root = {querySelector: (selector) => selector === "svg" ? svg : status,
       dispatchEvent: (event) => events.push(event)};
     const graph = {status: "ok", graphRevision: "graph-live-1", nodeCount: 2, edgeCount: 1,
+      rfSensorContext:{sensorId:"NESDR",bridgeState:"reconnecting",iqConnected:false,
+        centerFrequencyHz:100e6,sampleRateHz:2.048e6,latitude:47.79,longitude:-122.36,accuracyMeters:20},
       nodes: [{id: "host:a", kind: "network_host", evidenceClass: "OBSERVED",
                 enrichment:{geo:{city:"Seattle",region:"Washington",country:"United States",latitude:47.61,longitude:-122.33}}},
               {id: "host:b", kind: "network_host", evidenceClass: "OBSERVED",
@@ -49,6 +51,10 @@ test("live hypergraph polls bounded graph and Eve status without inventing geogr
     assert.ok(city); assert.equal(city.listeners.click, undefined);
     const membership = svg.children.find((child) => child.dataset.entityId?.startsWith("city-membership:"));
     assert.ok(membership); assert.equal(membership.listeners.click, undefined);
+    const receiver = svg.children.find((child) => child.dataset.entityId === "sensor:NESDR");
+    assert.ok(receiver); receiver.listeners.click();
+    assert.equal(events.at(-1).type,"scythe-web:rf-sensor-selection");
+    assert.equal(events.at(-1).detail.kind,"rf-sensor");
     assert.equal(events[0].detail.graphRevision, "graph-live-1");
     svg.children.find((child) => child.dataset.entityId === "host:a").listeners.click();
     assert.equal(events.at(-1).detail.entityType, "network_host");

@@ -174,6 +174,11 @@ evidence class and its placement evidence class.
 - Clearing the vantage immediately removes the sensor anchor and every
   vantage-co-located entity. The exact browser position remains display-side
   and is not written into the graph.
+- When RF bridge status identifies a configured receiver, the same consented
+  vantage adds one bounded `rf_receiver_sensor` display-context node to the 2D
+  and 3D topology views and labels the Cesium anchor `RF RX`. Clicking either
+  opens the RF Field Inspector. This node is not a canonical GraphOps target,
+  and configuration does not attest USB presence or an active IQ stream.
 
 Cesium marker bodies retain adaptive relevance colors; measured host liveness
 is a distinct marker outline. Accuracy circles show placement uncertainty.

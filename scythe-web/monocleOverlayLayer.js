@@ -282,7 +282,8 @@ export class MonocleOverlayLayer {
       ]);
       if (!this.destroyed) {
         if (sample) {
-          if (!activeCell) this.#renderHud(sample);
+          if (this.receiverSensor) this.setReceiverSensor(this.receiverSensor);
+          else if (!activeCell) this.#renderHud(sample);
           else this.#renderCellHud(activeCell);
           this.#renderBearing(position, sample);
           this.#renderCoverageFootprint(position, sample);
@@ -310,7 +311,7 @@ export class MonocleOverlayLayer {
   setSamplingMode(mode) {
     const next = String(mode ?? "").toUpperCase();
     if (!["CAMERA", "HOVER", "PINNED"].includes(next)) throw new TypeError("RF sampling mode is invalid");
-    this.samplingMode = next;
+    this.samplingMode = next; this.receiverSensor = null;
     for (const button of this.hud?.querySelectorAll?.("[data-rf-mode]") ?? [])
       button.setAttribute("aria-pressed", String(button.dataset.rfMode === next));
     const element = this.hud?.querySelector?.('[data-role="mode"]');
@@ -336,7 +337,7 @@ export class MonocleOverlayLayer {
 
   setReceiverSensor(sensor) {
     this.receiverSensor = sensor ? Object.freeze({...sensor}) : null;
-    if (!sensor || !this.hud) return;
+    if (!sensor || !this.hud) { if (this.samplingMode === "CAMERA") this.#setExpanded(false); return; }
     this.#setExpanded(true);
     const set = (role, text) => { const element = this.hud.querySelector(`[data-role="${role}"]`);
       if (element) element.textContent = text; };

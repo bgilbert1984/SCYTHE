@@ -96,3 +96,23 @@ test("GeoIP-enriched hosts project onto Cesium without acquiring graph position 
   assert.equal(node.position,null);
   layer.destroy();
 });
+
+test("consented receiver vantage emits RF sensor interaction without becoming a graph node", async () => {
+  const {viewer,Cesium,events,container}=fixture(); const actions={}; let picked=null;
+  Cesium.Color.CYAN=new Cesium.Color(); Cesium.Color.WHITE=new Cesium.Color();
+  Cesium.ScreenSpaceEventType={LEFT_CLICK:"click",MOUSE_MOVE:"move"};
+  Cesium.ScreenSpaceEventHandler=class {setInputAction(callback,type){actions[type]=callback;} destroy(){}};
+  viewer.clock={currentTime:1}; viewer.scene.pick=()=>({id:picked});
+  const graph={status:"ok",graphRevision:"sensor-graph",nodes:[],edges:[]};
+  const layer=new GraphOverlayLayer({viewer,Cesium,container,sensorVantage:{latitude:47.79,longitude:-122.36,
+    heightMeters:0,accuracyMeters:18,authority:"MEASURED_BROWSER_GEOLOCATION",evidenceClass:"MEASURED",
+    receiver:{sensorId:"NESDR-SMART-V5-14530058",bridgeState:"reconnecting",iqConnected:false,
+      centerFrequencyHz:100e6,sampleRateHz:2.048e6,captureOwner:"orchestrator"}},
+    fetchImpl:async()=>new Response(JSON.stringify(graph),{status:200})});
+  await layer.start(); picked=viewer.entities.values.find((entity)=>entity.id==="scythe-web:sensor-vantage");
+  assert.ok(picked); assert.match(picked.label.text,/NESDR-SMART/);
+  actions.click({position:{x:1,y:2}});
+  assert.equal(events.find((event)=>event.type==="scythe-web:rf-sensor-selection").detail.sensor.iqConnected,false);
+  assert.equal(viewer.entities.values.some((entity)=>entity.id.startsWith("scythe-web:graph-node:sensor")),false);
+  layer.destroy();
+});
