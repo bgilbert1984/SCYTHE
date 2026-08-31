@@ -44,9 +44,12 @@ export function tickerItemsFromRfStatus(payload, {statusObservedAt = null} = {})
   const products = bridge.products ?? {};
   const fftState = sanitizeTickerText(products.fft_frames?.state, "UNAVAILABLE", 20).toUpperCase();
   const sparseState = sanitizeTickerText(products.sparse_supports?.state, "UNAVAILABLE", 20).toUpperCase();
+  const classifications = payload?.observations?.signal_classifications;
+  const count = (name) => Math.max(0, Number(classifications?.[name]) || 0);
   return [
     `RF RECEIVER // ${sanitizeTickerText(config.sensor_id, "UNNAMED SENSOR", 80)} · ${sanitizeTickerText(bridge.bridge_state).toUpperCase()} · IQ ${bridge.iq_connected ? "CONNECTED" : "DISCONNECTED"}`,
     `RF PRODUCTS // FFT ${fftState} · SPARSE EVENTS ${sparseState} · RAW IQ LOCAL ONLY`,
+    classifications ? `RF DETECTIONS // DIGITAL ${count("digital")} · ANALOGUE ${count("analogue")} · UNCLASSIFIED ${count("unclassified")} · RETAINED EVENTS ${count("total")}` : "RF DETECTIONS // COUNTS UNAVAILABLE",
     `RF TUNING // ${Number.isFinite(frequency) ? `${(frequency / 1e6).toFixed(3)} MHz` : "UNAVAILABLE"} · ${Number.isFinite(sampleRate) ? `${(sampleRate / 1e6).toFixed(3)} MS/s` : "RATE UNAVAILABLE"}`,
     `RF FRESHNESS // STATUS POLLED ${statusObservedAt ? new Date(statusObservedAt).toISOString() : "UNAVAILABLE"} · LAST FFT FRAME ${sanitizeTickerText(bridge.latest_frame_at, "UNAVAILABLE", 40)}`,
   ];
@@ -90,8 +93,10 @@ export class SystemEvidenceTicker {
     this.channels.set("rf", tickerItemsFromRfStatus(payload, {statusObservedAt: observedAt}));
     const bridge = payload?.bridge ?? {};
     const products = bridge.products ?? {};
+    const classifications = payload?.observations?.signal_classifications ?? {};
     this.#render(`rf:${bridge.bridge_state ?? "unavailable"}:${Boolean(bridge.iq_connected)}:`
-      + `${products.fft_frames?.state ?? "unavailable"}:${products.sparse_supports?.state ?? "unavailable"}`);
+      + `${products.fft_frames?.state ?? "unavailable"}:${products.sparse_supports?.state ?? "unavailable"}:`
+      + `${classifications.digital ?? "?"}:${classifications.analogue ?? "?"}:${classifications.unclassified ?? "?"}`);
   }
 
   note(key, value) {

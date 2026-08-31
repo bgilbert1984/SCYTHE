@@ -129,6 +129,10 @@ class RFObservation:
     peak_dbfs: float
     noise_floor_dbfs: float
     snr_db: float
+    signal_family: str = "UNCLASSIFIED"
+    classification_authority: str = "UNCLASSIFIED"
+    classification_method: Optional[str] = None
+    classification_confidence: Optional[float] = None
     evidence_class: str = "OBSERVED"
     source: str = "sdrpp_iq_exporter"
 
@@ -174,6 +178,27 @@ class RFObservationStore:
         sensor_id = str(frame.get("sensor_id", "unknown"))
         bucket = int(round(frequency / self._bucket_hz))
         key = (sensor_id, bucket)
+        classification = frame.get("signal_classification")
+        signal_family = "UNCLASSIFIED"
+        classification_authority = "UNCLASSIFIED"
+        classification_method = None
+        classification_confidence = None
+        if isinstance(classification, dict):
+            candidate = str(classification.get("family") or "").strip().upper()
+            if candidate == "ANALOG":
+                candidate = "ANALOGUE"
+            authority = str(classification.get("authority") or "").strip().upper()
+            try:
+                confidence = float(classification.get("confidence"))
+            except (TypeError, ValueError):
+                confidence = float("nan")
+            method = str(classification.get("method") or "").strip()
+            if (candidate in {"DIGITAL", "ANALOGUE"} and authority == "DERIVED_INFERENCE"
+                    and math.isfinite(confidence) and 0.0 <= confidence <= 1.0 and method):
+                signal_family = candidate
+                classification_authority = authority
+                classification_method = method[:96]
+                classification_confidence = round(confidence, 4)
         with self._lock:
             if observed_at - self._last_seen.get(key, float("-inf")) < self._cooldown_s:
                 return None
@@ -194,6 +219,10 @@ class RFObservationStore:
                 peak_dbfs=peak,
                 noise_floor_dbfs=floor,
                 snr_db=snr,
+                signal_family=signal_family,
+                classification_authority=classification_authority,
+                classification_method=classification_method,
+                classification_confidence=classification_confidence,
             )
             self._items.append(observation)
             subscribers = list(self._subscribers)
@@ -233,11 +262,17 @@ class RFObservationStore:
     def stats(self) -> Dict[str, Any]:
         with self._lock:
             items = list(self._items)
+        classifications = {"digital": 0, "analogue": 0, "unclassified": 0}
+        for item in items:
+            key = item.signal_family.lower()
+            classifications[key if key in classifications else "unclassified"] += 1
         return {
             "count": len(items),
             "capacity": self._items.maxlen,
             "min_snr_db": self._min_snr_db,
             "latest_observed_at": items[-1].observed_at if items else None,
+            "signal_classifications": {**classifications, "total": len(items)},
+            "classification_scope": "bounded_retained_detection_events",
             "evidence_class": "OBSERVED",
             "raw_iq_exposed": False,
         }

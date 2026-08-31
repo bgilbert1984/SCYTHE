@@ -34,12 +34,14 @@ test("ticker summarizes only bounded graph, Eve, direction, liveness, and tensio
 });
 
 test("ticker declares RF products independently from connection state", () => {
-  const items = tickerItemsFromRfStatus({bridge:{bridge_state:"streaming",iq_connected:true,
+  const items = tickerItemsFromRfStatus({observations:{signal_classifications:{
+      digital:3,analogue:2,unclassified:7,total:12}},bridge:{bridge_state:"streaming",iq_connected:true,
     products:{fft_frames:{state:"stale"},sparse_supports:{state:"live"}},
     config:{sensor_id:"NESDR-SMART",center_frequency_hz:100e6,sample_rate_hz:2.048e6}}});
   assert.match(items[0],/STREAMING · IQ CONNECTED/);
   assert.equal(items[1],"RF PRODUCTS // FFT STALE · SPARSE EVENTS LIVE · RAW IQ LOCAL ONLY");
-  assert.match(items[2],/100.000 MHz · 2.048 MS\/s/);
+  assert.equal(items[2],"RF DETECTIONS // DIGITAL 3 · ANALOGUE 2 · UNCLASSIFIED 7 · RETAINED EVENTS 12");
+  assert.match(items[3],/100.000 MHz · 2.048 MS\/s/);
 });
 
 test("degraded and missing RF inputs remain explicit", () => {
@@ -47,7 +49,8 @@ test("degraded and missing RF inputs remain explicit", () => {
   assert.equal(tickerItemsFromRfStatus(null)[0],"RF RECEIVER // STATUS UNAVAILABLE");
   const missing = tickerItemsFromRfStatus({bridge:{bridge_state:"ok",config:{}}});
   assert.match(missing[0],/UNNAMED SENSOR/); assert.match(missing[1],/FFT UNAVAILABLE/);
-  assert.match(missing[2],/UNAVAILABLE · RATE UNAVAILABLE/);
+  assert.equal(missing[2],"RF DETECTIONS // COUNTS UNAVAILABLE");
+  assert.match(missing[3],/UNAVAILABLE · RATE UNAVAILABLE/);
 });
 
 test("ticker text removes control characters, collapses whitespace, and remains bounded", () => {

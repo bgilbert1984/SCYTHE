@@ -69,11 +69,36 @@ class RFBridgeTests(unittest.TestCase):
         observation = store.ingest_frame(frame)
         self.assertTrue(observation["evidence_id"].startswith("rf-"))
         self.assertEqual(observation["evidence_class"], "OBSERVED")
+        self.assertEqual(observation["signal_family"], "UNCLASSIFIED")
         self.assertNotIn("bins_dbfs", observation)
         self.assertEqual(len(received), 1)
         self.assertIsNone(store.ingest_frame({**frame, "timestamp": 100.5, "sequence": 8}))
         self.assertEqual(len(store.query(frequency_hz=433_920_000, tolerance_hz=2_000)), 1)
         self.assertEqual(store.query(frequency_hz=100_000_000, tolerance_hz=2_000), [])
+
+        classified = store.ingest_frame({**frame, "timestamp": 102.0, "sequence": 9,
+            "peak_frequency_hz": 433_925_000, "signal_classification": {
+                "family": "DIGITAL", "authority": "DERIVED_INFERENCE",
+                "method": "validated-test-classifier.v1", "confidence": 0.82}})
+        self.assertEqual(classified["signal_family"], "DIGITAL")
+        self.assertEqual(classified["classification_authority"], "DERIVED_INFERENCE")
+        counts = store.stats()["signal_classifications"]
+        self.assertEqual(counts, {"digital": 1, "analogue": 0, "unclassified": 1, "total": 2})
+
+    def test_observation_store_refuses_unqualified_signal_family_claims(self):
+        store = RFObservationStore(min_snr_db=10, cooldown_s=0)
+        base = {"timestamp": 100.0, "sequence": 1, "sensor_id": "edge-a",
+                "center_frequency_hz": 100_000_000, "peak_frequency_hz": 100_010_000,
+                "sample_rate_hz": 1_000_000, "peak_dbfs": -30, "noise_floor_dbfs": -55}
+        for index, classification in enumerate((
+                {"family": "DIGITAL", "authority": "OBSERVED", "method": "guess", "confidence": .9},
+                {"family": "ANALOGUE", "authority": "DERIVED_INFERENCE", "method": "", "confidence": .9},
+                {"family": "ALIEN", "authority": "DERIVED_INFERENCE", "method": "x", "confidence": .9})):
+            item = store.ingest_frame({**base, "timestamp": 100 + index,
+                "sequence": index + 1, "peak_frequency_hz": 100_010_000 + index * 5_000,
+                "signal_classification": classification})
+            self.assertEqual(item["signal_family"], "UNCLASSIFIED")
+        self.assertEqual(store.stats()["signal_classifications"]["unclassified"], 3)
 
     def test_fft_processor_preserves_alignment_and_locates_peak(self):
         config = RFBridgeConfig(

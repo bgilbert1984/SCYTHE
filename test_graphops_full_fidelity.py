@@ -3,7 +3,7 @@ import time
 import unittest
 from unittest.mock import patch
 
-from graphops_full_fidelity import (OllamaCloudTimeoutError, ask_ollama_cloud,
+from graphops_full_fidelity import (OllamaCloudReportError, OllamaCloudTimeoutError, _parse_cloud_report, ask_ollama_cloud,
                                     build_full_fidelity_capsule, disclosure_receipt,
                                     evaluate_evidence_compatibility, validate_cloud_report)
 from scythe_orchestrator import (_HOST_TRACE_EVIDENCE, app)
@@ -241,6 +241,23 @@ class FullFidelityCapsuleTests(unittest.TestCase):
         self.assertEqual(request_body['model'], 'gpt-oss:20b')
         self.assertLessEqual(request_body['options']['num_predict'], 2048)
 
+    def test_cloud_report_parser_accepts_one_fenced_or_reasoning_prefixed_report(self):
+        report = {"situation": "Measured route", "anomalies": "Non-monotonic RTT",
+                  "measuredVsInferred": "RTT measured; GeoIP inferred", "assessment": "Bounded",
+                  "falsifier": "Repeat trace", "direction": "Run MTR", "confidence": .5}
+        fenced = "Analysis follows.\n```json\n" + json.dumps(report) + "\n```"
+        self.assertEqual(_parse_cloud_report(fenced), report)
+        self.assertEqual(_parse_cloud_report("<think>bounded</think>\n" + json.dumps(report)), report)
+
+    def test_cloud_report_parser_rejects_truncated_and_ambiguous_reports(self):
+        with self.assertRaisesRegex(OllamaCloudReportError, "no complete seven-field"):
+            _parse_cloud_report('{"situation":"truncated"')
+        report = {"situation": "A", "anomalies": "B", "measuredVsInferred": "C",
+                  "assessment": "D", "falsifier": "E", "direction": "Measure", "confidence": .2}
+        second = {**report, "situation": "different"}
+        with self.assertRaisesRegex(OllamaCloudReportError, "multiple evidence reports"):
+            _parse_cloud_report(json.dumps(report) + "\n" + json.dumps(second))
+
     @patch('graphops_full_fidelity.ask_ollama_cloud', side_effect=OllamaCloudTimeoutError(15))
     @patch('scythe_orchestrator._graphops_directive_authorized', return_value=True)
     def test_endpoint_returns_structured_retryable_cloud_timeout(self, _authorized, _ask_cloud):
@@ -259,6 +276,27 @@ class FullFidelityCapsuleTests(unittest.TestCase):
         self.assertTrue(payload['retryable'])
         self.assertEqual(payload['failureStage'], 'OLLAMA_CLOUD_RESPONSE_START')
         self.assertEqual(payload['deadlineSeconds'], 15)
+        self.assertFalse(payload['automaticModelRetry'])
+
+    @patch('graphops_full_fidelity.ask_ollama_cloud',
+           side_effect=OllamaCloudReportError('no complete seven-field JSON report was found'))
+    @patch('scythe_orchestrator._graphops_directive_authorized', return_value=True)
+    def test_endpoint_reports_provider_report_validation_stage(self, _authorized, _ask_cloud):
+        trace, resolved = evidence_fixture()
+        _HOST_TRACE_EVIDENCE['trace-invalid-report'] = {
+            'capturedAt': time.time(), 'result': trace, 'resolved': resolved,
+        }
+        response = app.test_client().post('/api/graphops/conversation/cloud-full-fidelity', json={
+            'mode': 'cloud-full-fidelity', 'question': 'Explain this path',
+            'evidenceId': 'trace-invalid-report', 'acknowledgeExactDisclosure': True,
+            'selection': {'kind': 'graph-node', 'entityId': 'host:20.189.172.33',
+                          'graphRevision': 'graph-exact'},
+        })
+        self.assertEqual(response.status_code, 502)
+        payload = response.get_json()
+        self.assertEqual(payload['failureStage'], 'OLLAMA_CLOUD_REPORT_VALIDATION')
+        self.assertTrue(payload['providerResponseReceived'])
+        self.assertFalse(payload['retryable'])
         self.assertFalse(payload['automaticModelRetry'])
 
     @patch('graphops_full_fidelity.ask_ollama_cloud')

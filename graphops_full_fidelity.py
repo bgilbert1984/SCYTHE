@@ -41,6 +41,14 @@ class OllamaCloudTimeoutError(RuntimeError):
         )
 
 
+class OllamaCloudReportError(RuntimeError):
+    """The provider responded, but no unambiguous evidence report was present."""
+
+    def __init__(self, reason: str):
+        self.reason = reason
+        super().__init__(f"Ollama Cloud returned an invalid evidence report: {reason}")
+
+
 def _bounded_environment_integer(name: str, default: int, minimum: int, maximum: int) -> int:
     try:
         value = int(os.environ.get(name, default))
@@ -469,6 +477,57 @@ Use capsule evidence paths such as hostTrace.traceroute.hops[3] inline when supp
 Confidence must reflect evidence coverage and cannot establish causality."""
 
 
+_REPORT_REQUIRED = {"situation", "anomalies", "measuredVsInferred", "assessment",
+                    "falsifier", "direction", "confidence"}
+
+
+def _parse_cloud_report(content: str) -> Dict[str, Any]:
+    """Extract one strict report from exact, fenced, or reasoning-prefixed JSON."""
+    text = str(content or "").strip()
+    if not text:
+        raise OllamaCloudReportError("provider response content was empty")
+
+    candidates: list[Dict[str, Any]] = []
+
+    def retain(value: Any) -> None:
+        for _ in range(2):
+            if not isinstance(value, str):
+                break
+            try:
+                value = json.loads(value)
+            except json.JSONDecodeError:
+                break
+        if isinstance(value, dict) and _REPORT_REQUIRED.issubset(value) and value not in candidates:
+            candidates.append(value)
+
+    try:
+        retain(json.loads(text))
+    except json.JSONDecodeError:
+        pass
+
+    for fenced in re.findall(r"```(?:json)?\s*([\s\S]*?)```", text, flags=re.IGNORECASE):
+        try:
+            retain(json.loads(fenced.strip()))
+        except json.JSONDecodeError:
+            continue
+
+    decoder = json.JSONDecoder()
+    for index, character in enumerate(text):
+        if character != "{":
+            continue
+        try:
+            value, _end = decoder.raw_decode(text[index:])
+        except json.JSONDecodeError:
+            continue
+        retain(value)
+
+    if len(candidates) == 1:
+        return candidates[0]
+    if len(candidates) > 1:
+        raise OllamaCloudReportError("provider response contained multiple evidence reports")
+    raise OllamaCloudReportError("no complete seven-field JSON report was found")
+
+
 _FORBIDDEN_ROUTE_ASSERTIONS = re.compile(
     r"\b(?:actually|likely|appears to)\s+(?:routes?|follows?|traverses?|crosses?|returns?)\b.{0,90}"
     r"\b(?:geoip|city|seattle|virginia|everett|location|long[- ]haul)\b|"
@@ -714,12 +773,5 @@ def ask_ollama_cloud(capsule: Dict[str, Any], *, model: Optional[str] = None,
     except json.JSONDecodeError as exc:
         raise RuntimeError("Ollama Cloud request failed") from exc
     content = str((envelope.get("message") or {}).get("content") or "").strip()
-    try:
-        report = json.loads(content)
-    except json.JSONDecodeError as exc:
-        raise RuntimeError("Ollama Cloud returned an invalid evidence report") from exc
-    required = {"situation", "anomalies", "measuredVsInferred", "assessment",
-                "falsifier", "direction", "confidence"}
-    if not isinstance(report, dict) or not required.issubset(report):
-        raise RuntimeError("Ollama Cloud report violated the response contract")
+    report = _parse_cloud_report(content)
     return {"model": selected_model, "report": validate_cloud_report(report, capsule)}

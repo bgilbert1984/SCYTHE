@@ -1398,7 +1398,7 @@ def graphops_cloud_full_fidelity():
             str(selection.get('graphRevision')) != str(expected.get('graphRevision'))):
         return jsonify({'status': 'refused',
                         'error': 'host trace evidence does not belong to the selected graph revision'}), 409
-    from graphops_full_fidelity import (OllamaCloudTimeoutError, ask_ollama_cloud,
+    from graphops_full_fidelity import (OllamaCloudReportError, OllamaCloudTimeoutError, ask_ollama_cloud,
                                         build_full_fidelity_capsule, disclosure_receipt)
     try:
         infrastructure = None
@@ -1428,6 +1428,12 @@ def graphops_cloud_full_fidelity():
                         'failureStage': 'OLLAMA_CLOUD_RESPONSE_START',
                         'deadlineSeconds': exc.timeout_seconds,
                         'automaticModelRetry': False}), 504
+    except OllamaCloudReportError as exc:
+        log.warning('GraphOps full-fidelity Cloud report validation failed: %s', exc.reason)
+        return jsonify({'status': 'unavailable', 'error': str(exc), 'retryable': False,
+                        'failureStage': 'OLLAMA_CLOUD_REPORT_VALIDATION',
+                        'providerResponseReceived': True,
+                        'automaticModelRetry': False}), 502
     except (OSError, RuntimeError, TypeError, ValueError) as exc:
         log.warning('GraphOps full-fidelity Cloud analysis unavailable: %s', type(exc).__name__)
         return jsonify({'status': 'unavailable', 'error': str(exc)}), 503
