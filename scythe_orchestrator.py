@@ -2830,13 +2830,17 @@ def orchestrator_graphops_rf_bridge_status():
     if not _graphops_directive_authorized():
         return jsonify({'error': 'Authentication required'}), 401
     from rf_bridge import get_rf_bridge, get_rf_sparse_analyzer
+    from rf_products import declare_rf_products
     bridge = get_rf_bridge()
     sparse = get_rf_sparse_analyzer()
+    bridge_status = bridge.status(False)
+    sparse_status = None if sparse is None else sparse.stats()
+    bridge_status.update(declare_rf_products(bridge_status, sparse_status))
     return jsonify({
         'status': 'ok',
-        'bridge': bridge.status(False),
+        'bridge': bridge_status,
         'observations': bridge.observations.stats(),
-        'sparse': None if sparse is None else sparse.stats(),
+        'sparse': sparse_status,
         'capture_owner': bridge.config.capture_owner,
         'owns_capture': bridge.config.owns_capture(),
         'rawIqAccepted': False,

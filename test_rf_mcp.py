@@ -141,6 +141,11 @@ class RFMCPTests(unittest.TestCase):
         )
         self.assertEqual(result["result"]["capture_owner"], "orchestrator")
         self.assertFalse(result["result"]["raw_iq_exposed"])
+        bridge_result = result["result"]["bridge"]
+        self.assertEqual(bridge_result["raw_iq_scope"], "local_process_only")
+        self.assertFalse(bridge_result["raw_iq_browser_exposed"])
+        self.assertIn(bridge_result["products"]["fft_frames"]["state"], {"live", "stale"})
+        self.assertIn(bridge_result["products"]["sparse_supports"]["state"], {"live", "stale"})
 
     def test_autopilot_routes_rf_evidence_to_suggestion_queue(self):
         pilot = GraphOpsAutopilot(_Engine())

@@ -41,10 +41,14 @@ export function tickerItemsFromRfStatus(payload, {statusObservedAt = null} = {})
   const bridge = payload?.bridge ?? {}; const config = bridge.config ?? {};
   if (!Object.keys(bridge).length) return ["RF RECEIVER // STATUS UNAVAILABLE"];
   const frequency = Number(config.center_frequency_hz); const sampleRate = Number(config.sample_rate_hz);
+  const products = bridge.products ?? {};
+  const fftState = sanitizeTickerText(products.fft_frames?.state, "UNAVAILABLE", 20).toUpperCase();
+  const sparseState = sanitizeTickerText(products.sparse_supports?.state, "UNAVAILABLE", 20).toUpperCase();
   return [
     `RF RECEIVER // ${sanitizeTickerText(config.sensor_id, "UNNAMED SENSOR", 80)} · ${sanitizeTickerText(bridge.bridge_state).toUpperCase()} · IQ ${bridge.iq_connected ? "CONNECTED" : "DISCONNECTED"}`,
-    `RF TUNING // ${Number.isFinite(frequency) ? `${(frequency / 1e6).toFixed(3)} MHz` : "UNAVAILABLE"} · ${Number.isFinite(sampleRate) ? `${(sampleRate / 1e6).toFixed(3)} MS/s` : "RATE UNAVAILABLE"} · RAW IQ NOT EXPOSED`,
-    `RF FRESHNESS // STATUS POLLED ${statusObservedAt ? new Date(statusObservedAt).toISOString() : "UNAVAILABLE"} · LAST IQ FRAME ${sanitizeTickerText(bridge.latest_frame_at, "UNAVAILABLE", 40)}`,
+    `RF PRODUCTS // FFT ${fftState} · SPARSE EVENTS ${sparseState} · RAW IQ LOCAL ONLY`,
+    `RF TUNING // ${Number.isFinite(frequency) ? `${(frequency / 1e6).toFixed(3)} MHz` : "UNAVAILABLE"} · ${Number.isFinite(sampleRate) ? `${(sampleRate / 1e6).toFixed(3)} MS/s` : "RATE UNAVAILABLE"}`,
+    `RF FRESHNESS // STATUS POLLED ${statusObservedAt ? new Date(statusObservedAt).toISOString() : "UNAVAILABLE"} · LAST FFT FRAME ${sanitizeTickerText(bridge.latest_frame_at, "UNAVAILABLE", 40)}`,
   ];
 }
 
@@ -85,7 +89,9 @@ export class SystemEvidenceTicker {
   updateRf(payload, observedAt = this.now()) {
     this.channels.set("rf", tickerItemsFromRfStatus(payload, {statusObservedAt: observedAt}));
     const bridge = payload?.bridge ?? {};
-    this.#render(`rf:${bridge.bridge_state ?? "unavailable"}:${Boolean(bridge.iq_connected)}`);
+    const products = bridge.products ?? {};
+    this.#render(`rf:${bridge.bridge_state ?? "unavailable"}:${Boolean(bridge.iq_connected)}:`
+      + `${products.fft_frames?.state ?? "unavailable"}:${products.sparse_supports?.state ?? "unavailable"}`);
   }
 
   note(key, value) {
