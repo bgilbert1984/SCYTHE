@@ -1,7 +1,25 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import {tickerItemsFromGraphUpdate, tickerItemsFromRfStatus} from "./systemEvidenceTicker.js";
+import {sanitizeTickerText, SystemEvidenceTicker, tickerItemsFromGraphUpdate,
+  tickerItemsFromRfStatus} from "./systemEvidenceTicker.js";
+
+class Element {
+  constructor() { this.children=[]; this.dataset={}; this.attributes={}; this.listeners={}; this.textContent=""; }
+  querySelector(selector) { return this.queries?.[selector] ?? null; }
+  replaceChildren(...children) { this.children=children; }
+  setAttribute(name,value) { this.attributes[name]=String(value); }
+  addEventListener(name,listener) { this.listeners[name]=listener; }
+  removeEventListener(name,listener) { if (this.listeners[name]===listener) delete this.listeners[name]; }
+}
+
+function tickerFixture({fetchImpl = () => new Promise(()=>{}), now = () => 1788051600000} = {}) {
+  const root=new Element(),track=new Element(),summary=new Element(),toggle=new Element();
+  root.queries={"[data-system-ticker-track]":track,"[data-system-ticker-summary]":summary,
+    "[data-system-ticker-toggle]":toggle};
+  root.ownerDocument={createElement:()=>new Element()};
+  return {root,track,summary,toggle,ticker:new SystemEvidenceTicker({root,fetchImpl,now,rfRefreshMilliseconds:60_000})};
+}
 
 test("ticker summarizes only bounded graph, Eve, direction, liveness, and tension state", () => {
   const items = tickerItemsFromGraphUpdate({available:true,detail:{tier:"MAX"},eve:{committed:42,replayed:3},graph:{
@@ -11,7 +29,7 @@ test("ticker summarizes only bounded graph, Eve, direction, liveness, and tensio
         labels:{app_proto:"dns",operational_direction:"INBOUND"}}]}});
   assert.match(items[0],/2\/10 NODES · 2\/20 EDGES · MAX LENS/);
   assert.match(items[1],/42 COMMITTED/); assert.match(items[2],/DNS 1 · TCP 1/);
-  assert.match(items[3],/INBOUND 1 · OUTBOUND 1/); assert.match(items[4],/1 ACTIVE/);
+  assert.match(items[3],/INBOUND 1 · OUTBOUND 1/); assert.match(items[4],/BOUNDED HOST STATE \/\/ 1 ACTIVE/);
   assert.match(items[5],/1 DECLARED CONTRADICTIONS/);
 });
 
@@ -20,4 +38,37 @@ test("ticker distinguishes RF bridge state, tuning, and raw-IQ boundary", () => 
     config:{sensor_id:"NESDR-SMART",center_frequency_hz:100e6,sample_rate_hz:2.048e6}}});
   assert.match(items[0],/RECONNECTING · IQ DISCONNECTED/);
   assert.match(items[1],/100.000 MHz · 2.048 MS\/s · RAW IQ NOT EXPOSED/);
+});
+
+test("degraded and missing RF inputs remain explicit", () => {
+  assert.match(tickerItemsFromGraphUpdate({available:false,retained:true})[0],/RETAINING LAST SNAPSHOT/);
+  assert.equal(tickerItemsFromRfStatus(null)[0],"RF RECEIVER // STATUS UNAVAILABLE");
+  const missing = tickerItemsFromRfStatus({bridge:{bridge_state:"ok",config:{}}});
+  assert.match(missing[0],/UNNAMED SENSOR/); assert.match(missing[1],/UNAVAILABLE · RATE UNAVAILABLE/);
+});
+
+test("ticker text removes control characters, collapses whitespace, and remains bounded", () => {
+  const value=sanitizeTickerText(" host:\u0000evil\n\t<script>  "+"x".repeat(200),"",32);
+  assert.equal(/[\u0000-\u001f\u007f]/.test(value),false); assert.equal(value.length,32);
+  assert.match(value,/host: evil <script>/);
+});
+
+test("pause is labelled as motion-only while material announcements are throttled", () => {
+  const {ticker,toggle,summary,track}=tickerFixture(); ticker.start();
+  const update={available:true,detail:{tier:"OVERVIEW"},eve:{committed:1},graph:{graphRevision:"graph-1",
+    nodes:[],edges:[]}};
+  ticker.updateGraph(update); const firstAnnouncement=summary.textContent;
+  ticker.updateGraph({...update,eve:{committed:2}});
+  assert.equal(summary.textContent,firstAnnouncement); assert.match(track.children[0].textContent,/2 COMMITTED/);
+  ticker.updateGraph({...update,detail:{tier:"MAX"}}); assert.notEqual(summary.textContent,firstAnnouncement);
+  toggle.listeners.click(); assert.equal(toggle.attributes["aria-label"],"Resume evidence ticker motion");
+  assert.equal(toggle.attributes["aria-pressed"],"true");
+  toggle.listeners.click(); assert.equal(toggle.attributes["aria-label"],"Pause evidence ticker motion");
+  ticker.destroy();
+});
+
+test("destroy aborts an in-flight RF status request", () => {
+  let signal;
+  const {ticker}=tickerFixture({fetchImpl:(_url,init)=>{signal=init.signal; return new Promise(()=>{});}});
+  ticker.start(); assert.equal(signal.aborted,false); ticker.destroy(); assert.equal(signal.aborted,true);
 });

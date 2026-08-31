@@ -73,9 +73,20 @@ Every successful response reports the capsule ID, capsule SHA-256, destination, 
 ```ini
 Environment=OLLAMA_API_KEY_FILE=/home/spectrcyde/SCYTHE/.ollama
 Environment=OLLAMA_CLOUD_MODEL=gpt-oss:20b
+Environment=OLLAMA_CLOUD_TIMEOUT_SECONDS=75
+Environment=OLLAMA_CLOUD_MAX_TOKENS=1200
 ```
 
 The API credential is sent only to the fixed HTTPS origin `https://ollama.com`. Do not place the credential in browser JavaScript, request bodies, command-line arguments, or logs.
+
+Cloud model discovery and Cloud chat generation are separate health surfaces.
+The server gives the selected model 75 seconds to start a response and the
+browser applies a 90-second outer deadline. A response-start timeout returns a
+structured retryable `504` naming `OLLAMA_CLOUD_RESPONSE_START`; it does not
+silently retransmit the exact capsule to another model. The operator may retry
+the same selected evidence explicitly after provider capacity recovers. Output
+is bounded to 1,200 predicted tokens by default. Both limits are environment
+configurable within server-enforced bounds.
 # Infrastructure evidence and compatibility
 
 Full-Fidelity capsules may include a bounded `graphops.infrastructure.v1` snapshot. Observed traffic, inferred ASN/GeoIP, modeled AS-path candidates, and display-only geometry retain separate authority labels. Disclosure receipts count each infrastructure class.

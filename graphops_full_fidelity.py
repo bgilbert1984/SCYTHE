@@ -15,6 +15,8 @@ from urllib import error, request
 
 _CLOUD_ENDPOINT = "https://ollama.com"
 _DEFAULT_MODEL = "gpt-oss:20b"
+_DEFAULT_CLOUD_TIMEOUT_SECONDS = 75
+_DEFAULT_CLOUD_MAX_TOKENS = 1200
 _SECRET_KEY = re.compile(
     r"(?:authorization|password|passwd|secret|api[_-]?key|access[_-]?token|"
     r"refresh[_-]?token|cookie|set-cookie|credential|environment|packet[_-]?payload|raw[_-]?packet)",
@@ -26,6 +28,25 @@ _SECRET_VALUE = re.compile(
     r"\beyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)",
     re.IGNORECASE,
 )
+
+
+class OllamaCloudTimeoutError(RuntimeError):
+    """The disclosed request reached Ollama Cloud but generation never started in time."""
+
+    def __init__(self, timeout_seconds: int):
+        self.timeout_seconds = timeout_seconds
+        super().__init__(
+            f"Ollama Cloud did not start a response within {timeout_seconds} seconds; "
+            "the provider chat queue or model is unavailable. No automatic model retry was attempted."
+        )
+
+
+def _bounded_environment_integer(name: str, default: int, minimum: int, maximum: int) -> int:
+    try:
+        value = int(os.environ.get(name, default))
+    except (TypeError, ValueError):
+        value = default
+    return min(max(value, minimum), maximum)
 
 
 def load_ollama_api_key() -> Optional[str]:
@@ -642,12 +663,16 @@ def validate_cloud_report(report: Dict[str, Any], capsule: Dict[str, Any]) -> Di
 
 
 def ask_ollama_cloud(capsule: Dict[str, Any], *, model: Optional[str] = None,
-                     timeout: int = 240) -> Dict[str, Any]:
+                     timeout: Optional[int] = None) -> Dict[str, Any]:
     """Transmit one explicit full-fidelity capsule to the fixed Ollama Cloud origin."""
     api_key = load_ollama_api_key()
     if not api_key:
         raise RuntimeError("Ollama Cloud API key is unavailable")
     selected_model = (model or os.environ.get("OLLAMA_CLOUD_MODEL") or _DEFAULT_MODEL).strip()
+    timeout_seconds = min(max(int(timeout), 5), 120) if timeout is not None else \
+        _bounded_environment_integer("OLLAMA_CLOUD_TIMEOUT_SECONDS", _DEFAULT_CLOUD_TIMEOUT_SECONDS, 15, 120)
+    max_tokens = _bounded_environment_integer(
+        "OLLAMA_CLOUD_MAX_TOKENS", _DEFAULT_CLOUD_MAX_TOKENS, 256, 2048)
     body = json.dumps({
         "model": selected_model,
         "stream": False,
@@ -656,14 +681,14 @@ def ask_ollama_cloud(capsule: Dict[str, Any], *, model: Optional[str] = None,
             {"role": "system", "content": _SYSTEM_PROMPT},
             {"role": "user", "content": json.dumps(capsule, sort_keys=True, ensure_ascii=False)},
         ],
-        "options": {"temperature": 0.1},
+        "options": {"temperature": 0.1, "num_predict": max_tokens},
     }).encode("utf-8")
     cloud_request = request.Request(
         f"{_CLOUD_ENDPOINT}/api/chat", data=body, method="POST",
         headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
     )
     try:
-        with request.urlopen(cloud_request, timeout=timeout) as response:
+        with request.urlopen(cloud_request, timeout=timeout_seconds) as response:
             envelope = json.loads(response.read())
     except error.HTTPError as exc:
         try:
@@ -680,7 +705,13 @@ def ask_ollama_cloud(capsule: Dict[str, Any], *, model: Optional[str] = None,
         else:
             reason = "request was rejected"
         raise RuntimeError(f"Ollama Cloud {reason} (HTTP {exc.code})") from exc
-    except (error.URLError, TimeoutError, json.JSONDecodeError) as exc:
+    except TimeoutError as exc:
+        raise OllamaCloudTimeoutError(timeout_seconds) from exc
+    except error.URLError as exc:
+        if isinstance(getattr(exc, "reason", None), TimeoutError):
+            raise OllamaCloudTimeoutError(timeout_seconds) from exc
+        raise RuntimeError("Ollama Cloud request failed") from exc
+    except json.JSONDecodeError as exc:
         raise RuntimeError("Ollama Cloud request failed") from exc
     content = str((envelope.get("message") or {}).get("content") or "").strip()
     try:

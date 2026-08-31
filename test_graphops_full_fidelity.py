@@ -3,7 +3,8 @@ import time
 import unittest
 from unittest.mock import patch
 
-from graphops_full_fidelity import (build_full_fidelity_capsule, disclosure_receipt,
+from graphops_full_fidelity import (OllamaCloudTimeoutError, ask_ollama_cloud,
+                                    build_full_fidelity_capsule, disclosure_receipt,
                                     evaluate_evidence_compatibility, validate_cloud_report)
 from scythe_orchestrator import (_HOST_TRACE_EVIDENCE, app)
 
@@ -227,6 +228,38 @@ class FullFidelityCapsuleTests(unittest.TestCase):
             flow_evidence={'packetDissections': [{'eventId': 'one'}]})
         self.assertFalse(compatibility['compatible'])
         self.assertEqual(compatibility['missing'][0]['class'], 'FLOW_TEMPORAL_DISSECTION')
+
+    @patch('graphops_full_fidelity.request.urlopen', side_effect=TimeoutError('queued'))
+    @patch('graphops_full_fidelity.load_ollama_api_key', return_value='test-key')
+    def test_cloud_response_start_timeout_is_explicit_and_never_retries_models(self, _key, urlopen):
+        with self.assertRaises(OllamaCloudTimeoutError) as raised:
+            ask_ollama_cloud({'question': 'bounded test'}, model='gpt-oss:20b', timeout=17)
+        self.assertEqual(raised.exception.timeout_seconds, 17)
+        self.assertIn('No automatic model retry was attempted', str(raised.exception))
+        self.assertEqual(urlopen.call_count, 1)
+        request_body = json.loads(urlopen.call_args.args[0].data)
+        self.assertEqual(request_body['model'], 'gpt-oss:20b')
+        self.assertLessEqual(request_body['options']['num_predict'], 2048)
+
+    @patch('graphops_full_fidelity.ask_ollama_cloud', side_effect=OllamaCloudTimeoutError(15))
+    @patch('scythe_orchestrator._graphops_directive_authorized', return_value=True)
+    def test_endpoint_returns_structured_retryable_cloud_timeout(self, _authorized, _ask_cloud):
+        trace, resolved = evidence_fixture()
+        _HOST_TRACE_EVIDENCE['trace-timeout'] = {
+            'capturedAt': time.time(), 'result': trace, 'resolved': resolved,
+        }
+        response = app.test_client().post('/api/graphops/conversation/cloud-full-fidelity', json={
+            'mode': 'cloud-full-fidelity', 'question': 'Explain this path',
+            'evidenceId': 'trace-timeout', 'acknowledgeExactDisclosure': True,
+            'selection': {'kind': 'graph-node', 'entityId': 'host:20.189.172.33',
+                          'graphRevision': 'graph-exact'},
+        })
+        self.assertEqual(response.status_code, 504)
+        payload = response.get_json()
+        self.assertTrue(payload['retryable'])
+        self.assertEqual(payload['failureStage'], 'OLLAMA_CLOUD_RESPONSE_START')
+        self.assertEqual(payload['deadlineSeconds'], 15)
+        self.assertFalse(payload['automaticModelRetry'])
 
     @patch('graphops_full_fidelity.ask_ollama_cloud')
     @patch('scythe_orchestrator._graphops_directive_authorized', return_value=True)

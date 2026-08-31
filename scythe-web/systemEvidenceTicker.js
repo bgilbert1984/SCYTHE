@@ -1,4 +1,4 @@
-const text = (value, fallback = "UNKNOWN", limit = 120) => {
+export const sanitizeTickerText = (value, fallback = "UNKNOWN", limit = 120) => {
   const result = String(value ?? "").replace(/[\u0000-\u001f\u007f]+/g, " ").replace(/\s+/g, " ").trim();
   return (result || fallback).slice(0, limit);
 };
@@ -6,7 +6,7 @@ const text = (value, fallback = "UNKNOWN", limit = 120) => {
 const countBy = (items, value) => {
   const counts = new Map();
   for (const item of items) {
-    const key = text(value(item), "UNCLASSIFIED", 40).toUpperCase();
+    const key = sanitizeTickerText(value(item), "UNCLASSIFIED", 40).toUpperCase();
     counts.set(key, (counts.get(key) ?? 0) + 1);
   }
   return [...counts].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
@@ -14,7 +14,7 @@ const countBy = (items, value) => {
 
 export function tickerItemsFromGraphUpdate(update) {
   if (!update?.available || !update.graph) return [
-    `LIVE GRAPH // ${text(update?.retained ? "DEGRADED · RETAINING LAST SNAPSHOT" : update?.message, "UNAVAILABLE", 140)}`,
+    `LIVE GRAPH // ${sanitizeTickerText(update?.retained ? "DEGRADED · RETAINING LAST SNAPSHOT" : update?.message, "UNAVAILABLE", 140)}`,
   ];
   const graph = update.graph; const nodes = graph.nodes ?? []; const edges = graph.edges ?? [];
   const detectedNodes = Number(graph.detectedNodeCount ?? graph.nodeCount ?? nodes.length) || 0;
@@ -28,35 +28,38 @@ export function tickerItemsFromGraphUpdate(update) {
     sum + Math.min(Array.isArray(entity.contradictions) ? entity.contradictions.length : 0, 20), 0);
   const eve = update.eve ?? {}; const detail = update.detail ?? {};
   return [
-    `GRAPH // ${nodes.length}/${detectedNodes} NODES · ${edges.length}/${detectedEdges} EDGES · ${text(detail.tier, "BOUNDED")} LENS`,
+    `GRAPH // ${nodes.length}/${detectedNodes} NODES · ${edges.length}/${detectedEdges} EDGES · ${sanitizeTickerText(detail.tier, "BOUNDED")} LENS · REV ${sanitizeTickerText(graph.graphRevision, "UNAVAILABLE", 16)}`,
     `EVE // ${Number(eve.committed) || 0} COMMITTED · ${Number(eve.replayed) || 0} REPLAYED · ${Number(eve.deduplicated) || 0} DEDUPLICATED`,
     `FLOW MIX // ${protocols.slice(0, 3).map(([name, count]) => `${name} ${count}`).join(" · ") || "NO RETAINED FLOWS"}`,
     `DIRECTION // ${directions.slice(0, 3).map(([name, count]) => `${name} ${count}`).join(" · ") || "UNRESOLVED"}`,
-    `HOST PING // ${active} ACTIVE · ${inactive} INACTIVE · ${Math.max(0, nodes.length - active - inactive)} UNCLASSIFIED`,
+    `BOUNDED HOST STATE // ${active} ACTIVE · ${inactive} INACTIVE · ${Math.max(0, nodes.length - active - inactive)} UNCLASSIFIED · CURRENT LENS`,
     `EVIDENCE TENSIONS // ${tensions} DECLARED CONTRADICTIONS IN BOUNDED VIEW`,
   ];
 }
 
-export function tickerItemsFromRfStatus(payload) {
+export function tickerItemsFromRfStatus(payload, {statusObservedAt = null} = {}) {
   const bridge = payload?.bridge ?? {}; const config = bridge.config ?? {};
   if (!Object.keys(bridge).length) return ["RF RECEIVER // STATUS UNAVAILABLE"];
   const frequency = Number(config.center_frequency_hz); const sampleRate = Number(config.sample_rate_hz);
   return [
-    `RF RECEIVER // ${text(config.sensor_id, "UNNAMED SENSOR", 80)} · ${text(bridge.bridge_state).toUpperCase()} · IQ ${bridge.iq_connected ? "CONNECTED" : "DISCONNECTED"}`,
+    `RF RECEIVER // ${sanitizeTickerText(config.sensor_id, "UNNAMED SENSOR", 80)} · ${sanitizeTickerText(bridge.bridge_state).toUpperCase()} · IQ ${bridge.iq_connected ? "CONNECTED" : "DISCONNECTED"}`,
     `RF TUNING // ${Number.isFinite(frequency) ? `${(frequency / 1e6).toFixed(3)} MHz` : "UNAVAILABLE"} · ${Number.isFinite(sampleRate) ? `${(sampleRate / 1e6).toFixed(3)} MS/s` : "RATE UNAVAILABLE"} · RAW IQ NOT EXPOSED`,
+    `RF FRESHNESS // STATUS POLLED ${statusObservedAt ? new Date(statusObservedAt).toISOString() : "UNAVAILABLE"} · LAST IQ FRAME ${sanitizeTickerText(bridge.latest_frame_at, "UNAVAILABLE", 40)}`,
   ];
 }
 
 export class SystemEvidenceTicker {
-  constructor({root, fetchImpl = globalThis.fetch, rfRefreshMilliseconds = 15_000} = {}) {
+  constructor({root, fetchImpl = globalThis.fetch, rfRefreshMilliseconds = 15_000,
+               now = () => Date.now()} = {}) {
     if (!root) throw new TypeError("system evidence ticker root is required");
     this.root = root; this.document = root.ownerDocument ?? globalThis.document;
     this.track = root.querySelector("[data-system-ticker-track]");
     this.summary = root.querySelector("[data-system-ticker-summary]");
     this.toggle = root.querySelector("[data-system-ticker-toggle]");
-    this.fetchImpl = fetchImpl; this.rfRefreshMilliseconds = Math.max(5_000, Number(rfRefreshMilliseconds) || 15_000);
+    this.fetchImpl = fetchImpl; this.now = now;
+    this.rfRefreshMilliseconds = Math.max(5_000, Number(rfRefreshMilliseconds) || 15_000);
     this.channels = new Map([["boot", ["SYSTEM EVIDENCE // CONNECTING TO BOUNDED SOURCES"]]]);
-    this.timer = null; this.started = false;
+    this.timer = null; this.started = false; this.rfController = null; this.accessibleSignature = "";
   }
 
   start() {
@@ -65,26 +68,43 @@ export class SystemEvidenceTicker {
     this.toggle?.addEventListener("click", this.onToggle = () => {
       const paused = this.root.dataset.paused !== "true";
       this.root.dataset.paused = String(paused); this.toggle.setAttribute("aria-pressed", String(paused));
-      this.toggle.textContent = paused ? "▶" : "Ⅱ"; this.toggle.title = paused ? "Resume evidence ticker" : "Pause evidence ticker";
+      const action = paused ? "Resume evidence ticker motion" : "Pause evidence ticker motion";
+      this.toggle.textContent = paused ? "▶" : "Ⅱ"; this.toggle.title = action;
+      this.toggle.setAttribute("aria-label", action);
     });
-    this.#render(); void this.refreshRf(); this.#scheduleRf(); return this;
+    this.#render("boot"); void this.refreshRf(); this.#scheduleRf(); return this;
   }
 
-  updateGraph(update) { this.channels.delete("boot"); this.channels.set("graph", tickerItemsFromGraphUpdate(update)); this.#render(); }
+  updateGraph(update) {
+    this.channels.delete("boot"); this.channels.set("graph", tickerItemsFromGraphUpdate(update));
+    const graph = update?.graph; const tensions = [...(graph?.nodes ?? []), ...(graph?.edges ?? [])]
+      .reduce((sum, entity) => sum + (Array.isArray(entity.contradictions) ? entity.contradictions.length : 0), 0);
+    this.#render(`graph:${Boolean(update?.available)}:${Boolean(update?.retained)}:${update?.detail?.tier ?? ""}:${tensions}`);
+  }
 
-  updateRf(payload) { this.channels.set("rf", tickerItemsFromRfStatus(payload)); this.#render(); }
+  updateRf(payload, observedAt = this.now()) {
+    this.channels.set("rf", tickerItemsFromRfStatus(payload, {statusObservedAt: observedAt}));
+    const bridge = payload?.bridge ?? {};
+    this.#render(`rf:${bridge.bridge_state ?? "unavailable"}:${Boolean(bridge.iq_connected)}`);
+  }
 
   note(key, value) {
-    this.channels.set(`note:${text(key, "EVENT", 32)}`, [text(value, "BOUNDED EVENT", 180)]); this.#render();
+    const noteKey = sanitizeTickerText(key, "EVENT", 32); const observedAt = new Date(this.now()).toISOString();
+    this.channels.set(`note:${noteKey}`, [`CURRENT FOCUS // ${sanitizeTickerText(value, "BOUNDED EVENT", 180)} · SELECTED ${observedAt}`]);
+    this.#render(`note:${noteKey}:${observedAt}`);
   }
 
   async refreshRf() {
+    const controller = new AbortController(); this.rfController?.abort(); this.rfController = controller;
     try {
       const response = await this.fetchImpl.call(globalThis, "/api/graphops/rf-bridge/status",
-        {credentials:"same-origin",cache:"no-store"});
+        {credentials:"same-origin",cache:"no-store",signal:controller.signal});
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      this.updateRf(await response.json());
-    } catch { this.updateRf(null); }
+      const payload = await response.json();
+      if (this.started && !controller.signal.aborted) this.updateRf(payload, this.now());
+    } catch {
+      if (this.started && !controller.signal.aborted) this.updateRf(null, this.now());
+    } finally { if (this.rfController === controller) this.rfController = null; }
   }
 
   #scheduleRf() {
@@ -93,16 +113,19 @@ export class SystemEvidenceTicker {
       this.rfRefreshMilliseconds);
   }
 
-  #render() {
+  #render(announcementSignature = "") {
     const items = [...this.channels.values()].flat().filter(Boolean).slice(0, 12);
     if (!items.length || !this.track) return;
     const content = items.join("   ◆   ");
     const group = () => { const span = this.document.createElement("span"); span.className = "notice__group";
       span.textContent = content; return span; };
     this.track.replaceChildren(group(), group());
-    if (this.summary) this.summary.textContent = items.join(". ");
+    if (this.summary && announcementSignature && announcementSignature !== this.accessibleSignature) {
+      this.accessibleSignature = announcementSignature; this.summary.textContent = items.join(". ");
+    }
   }
 
   destroy() { this.started = false; clearTimeout(this.timer); this.timer = null;
+    this.rfController?.abort(); this.rfController = null;
     if (this.onToggle) this.toggle?.removeEventListener("click", this.onToggle); }
 }

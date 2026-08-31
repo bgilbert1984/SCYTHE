@@ -301,8 +301,8 @@
     <div id="cesium-container"></div>
     <div id="system-evidence-ticker" class="notice" role="region" aria-label="Bounded system evidence ticker">
       <div class="notice__viewport" aria-hidden="true"><div class="notice__track" data-system-ticker-track></div></div>
-      <button class="notice__toggle" type="button" data-system-ticker-toggle aria-label="Pause evidence ticker"
-        aria-pressed="false" title="Pause evidence ticker">Ⅱ</button>
+      <button class="notice__toggle" type="button" data-system-ticker-toggle aria-label="Pause evidence ticker motion"
+        aria-pressed="false" title="Pause evidence ticker motion">Ⅱ</button>
       <span class="notice__summary" data-system-ticker-summary aria-live="polite"></span>
     </div>
     <aside id="live-hypergraph" class="live-hypergraph" aria-label="Live network hypergraph">
@@ -545,7 +545,7 @@
     window.scytheEvidenceTicker = evidenceTicker;
     const tickerRoot = document.getElementById("globe-root");
     tickerRoot.addEventListener("scythe-web:graph-selection", ({detail}) => evidenceTicker.note("selection",
-      `OPERATOR FOCUS // ${String(detail?.kind ?? "GRAPH ENTITY").toUpperCase()} · ${detail?.entityId ?? "UNAVAILABLE"}`));
+      `${String(detail?.kind ?? "GRAPH ENTITY").toUpperCase()} · ${detail?.entityId ?? "UNAVAILABLE"}`));
     tickerRoot.addEventListener("scythe-web:coverage-cell-selected", ({detail}) => evidenceTicker.note("rf-cell",
       `RF CELL PINNED // ${detail?.tile_id ?? "UNKNOWN TILE"} · ${detail?.coverage ? "THRESHOLD PASS" : "THRESHOLD FAIL"} · ${detail?.value ?? "—"} ${detail?.units ?? ""}`));
     tickerRoot.addEventListener("scythe-web:rf-sensor-selection", ({detail}) => evidenceTicker.note("rf-sensor",
@@ -1056,10 +1056,10 @@
         const elapsed = Math.floor((Date.now() - startedAt) / 1000);
         cloudButton.textContent = `CLOUD ANALYZING… ${elapsed}s`;
         patchInvestigation(conversationKey, {conversationState:
-          `OLLAMA CLOUD // FULL-FIDELITY CAPSULE // ${elapsed}s // STOP WAITING AVAILABLE`});
+          `OLLAMA CLOUD // ${elapsed < 10 ? "CONNECTING OR QUEUED" : "AWAITING RESPONSE START"} // ${elapsed}s // SERVER DEADLINE 75s // STOP WAITING AVAILABLE`});
       }, 1000);
       const timeoutTimer = setTimeout(() => graphOpsConversationController?.abort(
-        new DOMException("Cloud conversation exceeded 235 seconds", "TimeoutError")), 235_000);
+        new DOMException("Cloud conversation exceeded the 90-second browser deadline", "TimeoutError")), 90_000);
       try {
         const evidenceSelection = {...graphSelection,
           graphRevision: latestEvidence.selection.graphRevision};

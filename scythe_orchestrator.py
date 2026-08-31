@@ -1398,9 +1398,9 @@ def graphops_cloud_full_fidelity():
             str(selection.get('graphRevision')) != str(expected.get('graphRevision'))):
         return jsonify({'status': 'refused',
                         'error': 'host trace evidence does not belong to the selected graph revision'}), 409
+    from graphops_full_fidelity import (OllamaCloudTimeoutError, ask_ollama_cloud,
+                                        build_full_fidelity_capsule, disclosure_receipt)
     try:
-        from graphops_full_fidelity import (ask_ollama_cloud, build_full_fidelity_capsule,
-                                            disclosure_receipt)
         infrastructure = None
         port = _get_primary_instance_port()
         if port:
@@ -1408,7 +1408,7 @@ def graphops_cloud_full_fidelity():
             infrastructure = _proxy_get(port, '/api/graphops/infrastructure/snapshot?' + urlencode({
                 'node_limit': 500, 'edge_limit': 1000,
                 'focus_id': str(selection.get('entityId') or '')[:256],
-            }), timeout=90)
+            }), timeout=10)
         capsule = build_full_fidelity_capsule(
             question, selection, retained['resolved'], evidence if not is_flow else {}, infrastructure,
             flow_evidence=evidence if is_flow else None)
@@ -1422,6 +1422,12 @@ def graphops_cloud_full_fidelity():
             'ollamaRoute': 'OLLAMA_CLOUD_FULL_FIDELITY', 'directiveExecution': False,
             'boundary': capsule['boundary'],
         })
+    except OllamaCloudTimeoutError as exc:
+        log.warning('GraphOps full-fidelity Cloud response deadline exceeded')
+        return jsonify({'status': 'unavailable', 'error': str(exc), 'retryable': True,
+                        'failureStage': 'OLLAMA_CLOUD_RESPONSE_START',
+                        'deadlineSeconds': exc.timeout_seconds,
+                        'automaticModelRetry': False}), 504
     except (OSError, RuntimeError, TypeError, ValueError) as exc:
         log.warning('GraphOps full-fidelity Cloud analysis unavailable: %s', type(exc).__name__)
         return jsonify({'status': 'unavailable', 'error': str(exc)}), 503

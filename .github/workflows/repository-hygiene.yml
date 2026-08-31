@@ -36,9 +36,24 @@ jobs:
       - name: Install GraphOps test dependencies
         run: python -m pip install numpy flask Flask-Cors PyJWT requests
       - name: Compile GraphOps Python modules
-        run: python -m compileall rf_sparse_analyzer.py rf_bridge.py rf_mcp.py graphops_rf_ingest.py scythe_orchestrator.py
+        run: python -m compileall rf_sparse_analyzer.py rf_bridge.py rf_mcp.py graphops_rf_ingest.py graphops_full_fidelity.py scythe_orchestrator.py
       - name: Run GraphOps workbench tests
-        run: python -m unittest -v test_graphops_workbench.py test_graphops_rf_ingest.py
+        run: python -m unittest -v test_graphops_workbench.py test_graphops_rf_ingest.py test_graphops_full_fidelity.py
+
+  node-scythe-web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: scythe-web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: scythe-web/package-lock.json
+      - run: npm ci
+      - run: npm test
 
   sdrpp-lock-source-contract:
     runs-on: ubuntu-latest
