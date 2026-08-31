@@ -1,9 +1,13 @@
+import io
 import json
 import time
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
+from urllib import error
 
-from graphops_full_fidelity import (OllamaCloudReportError, OllamaCloudTimeoutError, _parse_cloud_report, ask_ollama_cloud,
+from graphops_full_fidelity import (OllamaCloudReportError, OllamaCloudTimeoutError,
+                                    OllamaCloudTruncatedReportError, _cloud_reasoning_effort,
+                                    _fold_confusable_text, _parse_cloud_report, ask_ollama_cloud,
                                     build_full_fidelity_capsule, disclosure_receipt,
                                     evaluate_evidence_compatibility, validate_cloud_report)
 from scythe_orchestrator import (_HOST_TRACE_EVIDENCE, app)
@@ -257,6 +261,146 @@ class FullFidelityCapsuleTests(unittest.TestCase):
         second = {**report, "situation": "different"}
         with self.assertRaisesRegex(OllamaCloudReportError, "multiple evidence reports"):
             _parse_cloud_report(json.dumps(report) + "\n" + json.dumps(second))
+
+    def test_guardrails_survive_typographic_punctuation_from_the_model(self):
+        """U+2011 in "long‑haul" must not slip an RTT-to-distance promotion past the ceiling."""
+        report = {
+            "situation": ("The measured RTTs are all in the 0.3–16 ms range, with no dramatic "
+                          "increases that would indicate a long‑haul leg or VPN tunnel."),
+            "anomalies": "non‑monotonic RTT at hops 9‑11.",
+            "measuredVsInferred": "RTT measured; GeoIP inferred.",
+            "assessment": "No evidence of a long‑haul leg, VPN, or relay is present.",
+            "falsifier": "Repeat the trace from a second vantage.",
+            "direction": "Run MTR and compare minimum per-hop RTTs.",
+            "confidence": 0.65,
+        }
+        capsule = {"hostTrace": {"evidenceClasses": {"route": "MEASURED", "geography": "INFERRED"},
+                                 "traceroute": {"hops": []}}}
+        result = validate_cloud_report(report, capsule)
+        constraints = " ".join(result["validationConstraints"])
+        self.assertIn("RTT_DISTANCE_PROMOTION_REMOVED", constraints)
+        self.assertIn("TOPOLOGY_ABSENCE_INFERENCE_WITHHELD", constraints)
+        self.assertLessEqual(result["confidence"], 0.25)
+        self.assertNotIn("\u2011", "".join(str(v) for v in result.values()))
+
+    def test_confusable_folding_covers_dashes_quotes_and_zero_width(self):
+        folded = _fold_confusable_text(" long\u2011haul \u201cquoted\u201d \u2014 non\u200bmonotonic\u00a0end ")
+        self.assertEqual(folded, 'long-haul "quoted" - nonmonotonic end')
+
+    def test_cloud_reasoning_effort_is_bounded_and_disablable(self):
+        with patch.dict('os.environ', {}, clear=True):
+            self.assertEqual(_cloud_reasoning_effort(), 'low')
+        for value, expected in (('HIGH', 'high'), ('medium', 'medium'), ('nonsense', 'low'),
+                                ('off', None), ('none', None), ('', 'low')):
+            with patch.dict('os.environ', {'OLLAMA_CLOUD_REASONING_EFFORT': value}):
+                self.assertEqual(_cloud_reasoning_effort(), expected, value)
+
+    @patch('graphops_full_fidelity.load_ollama_api_key', return_value='test-key')
+    def test_cloud_request_bounds_provider_reasoning_against_the_report_budget(self, _key):
+        """Reasoning bills against num_predict, so it is bounded on every request."""
+        report = {"situation": "A", "anomalies": "B", "measuredVsInferred": "C", "assessment": "D",
+                  "falsifier": "E", "direction": "Run MTR", "confidence": .2}
+        with patch('graphops_full_fidelity.request.urlopen') as urlopen:
+            urlopen.return_value.__enter__.return_value.read.return_value = json.dumps(
+                {'done_reason': 'stop', 'message': {'content': json.dumps(report)}}).encode()
+            result = ask_ollama_cloud({'question': 'bounded test'}, model='gpt-oss:20b')
+        body = json.loads(urlopen.call_args.args[0].data)
+        self.assertEqual(body['think'], 'low')
+        self.assertLessEqual(body['options']['num_predict'], 2048)
+        self.assertEqual(result['reasoningEffort'], 'low')
+
+    @patch('graphops_full_fidelity.load_ollama_api_key', return_value='test-key')
+    def test_truncated_report_is_named_as_a_budget_failure_and_never_completed(self, _key):
+        """A report cut off at the ceiling fails closed; no field is inferred to close it."""
+        partial = '{"situation":"Hops 1-3 are private_backbone","anomalies":"non_monotonic","assess'
+        with patch('graphops_full_fidelity.request.urlopen') as urlopen:
+            urlopen.return_value.__enter__.return_value.read.return_value = json.dumps({
+                'done_reason': 'length', 'eval_count': 1600,
+                'message': {'content': partial, 'thinking': 'x' * 3544}}).encode()
+            with self.assertRaises(OllamaCloudTruncatedReportError) as raised:
+                ask_ollama_cloud({'question': 'bounded test'}, model='gpt-oss:20b')
+        exc = raised.exception
+        self.assertTrue(exc.retryable)
+        self.assertEqual(exc.failure_stage, 'OLLAMA_CLOUD_GENERATION_BUDGET')
+        self.assertEqual(exc.reasoning_characters, 3544)
+        self.assertIn('3544 characters of provider reasoning', str(exc))
+        self.assertIsInstance(exc, OllamaCloudReportError)
+
+    @patch('graphops_full_fidelity.load_ollama_api_key', return_value='test-key')
+    def test_unparseable_report_that_stopped_normally_keeps_its_original_reason(self, _key):
+        """Only a run that actually hit the ceiling may be reported as truncated."""
+        with patch('graphops_full_fidelity.request.urlopen') as urlopen:
+            urlopen.return_value.__enter__.return_value.read.return_value = json.dumps({
+                'done_reason': 'stop', 'message': {'content': 'I cannot answer that.'}}).encode()
+            with self.assertRaises(OllamaCloudReportError) as raised:
+                ask_ollama_cloud({'question': 'bounded test'}, model='gpt-oss:20b')
+        self.assertNotIsInstance(raised.exception, OllamaCloudTruncatedReportError)
+        self.assertIn('no complete seven-field', raised.exception.reason)
+        self.assertFalse(raised.exception.retryable)
+
+    @patch('graphops_full_fidelity.load_ollama_api_key', return_value='test-key')
+    def test_report_complete_at_the_ceiling_is_still_accepted(self, _key):
+        """done_reason=length is not itself a rejection when the report actually closed."""
+        report = {"situation": "A", "anomalies": "B", "measuredVsInferred": "C", "assessment": "D",
+                  "falsifier": "E", "direction": "Run MTR", "confidence": .2}
+        with patch('graphops_full_fidelity.request.urlopen') as urlopen:
+            urlopen.return_value.__enter__.return_value.read.return_value = json.dumps(
+                {'done_reason': 'length', 'message': {'content': json.dumps(report)}}).encode()
+            result = ask_ollama_cloud({'question': 'bounded test'}, model='gpt-oss:20b')
+        self.assertEqual(result['report']['situation'], 'A')
+
+    @patch('graphops_full_fidelity.load_ollama_api_key', return_value='test-key')
+    def test_model_without_reasoning_control_retries_same_model_without_think(self, _key):
+        """Dropping an unsupported parameter is capability negotiation, not redisclosure."""
+        report = {"situation": "A", "anomalies": "B", "measuredVsInferred": "C", "assessment": "D",
+                  "falsifier": "E", "direction": "Run MTR", "confidence": .2}
+        rejection = error.HTTPError('https://ollama.com/api/chat', 400, 'Bad Request', {},
+                                    io.BytesIO(json.dumps({'error': 'model does not support thinking'}).encode()))
+        accepted = MagicMock()
+        accepted.__enter__.return_value.read.return_value = json.dumps(
+            {'done_reason': 'stop', 'message': {'content': json.dumps(report)}}).encode()
+        with patch('graphops_full_fidelity.request.urlopen',
+                   side_effect=[rejection, accepted]) as urlopen:
+            result = ask_ollama_cloud({'question': 'bounded test'}, model='no-think:1b')
+        self.assertEqual(urlopen.call_count, 2)
+        first, second = (json.loads(call.args[0].data) for call in urlopen.call_args_list)
+        self.assertEqual(first['think'], 'low')
+        self.assertNotIn('think', second)
+        self.assertEqual(first['model'], second['model'], 'the capsule must not move models')
+        self.assertEqual(first['messages'], second['messages'], 'the capsule must be identical')
+        self.assertEqual(result['reasoningEffort'], 'unsupported_by_model')
+
+    @patch('graphops_full_fidelity.load_ollama_api_key', return_value='test-key')
+    def test_unrelated_rejection_is_not_retried_and_keeps_its_diagnosis(self, _key):
+        """A body read during think-negotiation must not erase the real provider reason."""
+        rejection = error.HTTPError('https://ollama.com/api/chat', 400, 'Bad Request', {},
+                                    io.BytesIO(json.dumps({'error': 'prompt is too long'}).encode()))
+        with patch('graphops_full_fidelity.request.urlopen', side_effect=rejection) as urlopen:
+            with self.assertRaisesRegex(RuntimeError, 'exceeded the model context window'):
+                ask_ollama_cloud({'question': 'bounded test'}, model='gpt-oss:20b')
+        self.assertEqual(urlopen.call_count, 1)
+
+    @patch('graphops_full_fidelity.ask_ollama_cloud',
+           side_effect=OllamaCloudTruncatedReportError(1600, 3544))
+    @patch('scythe_orchestrator._graphops_directive_authorized', return_value=True)
+    def test_endpoint_reports_budget_exhaustion_as_a_retryable_stage(self, _authorized, _ask_cloud):
+        trace, resolved = evidence_fixture()
+        _HOST_TRACE_EVIDENCE['trace-truncated'] = {
+            'capturedAt': time.time(), 'result': trace, 'resolved': resolved,
+        }
+        response = app.test_client().post('/api/graphops/conversation/cloud-full-fidelity', json={
+            'mode': 'cloud-full-fidelity', 'question': 'Explain this path',
+            'evidenceId': 'trace-truncated', 'acknowledgeExactDisclosure': True,
+            'selection': {'kind': 'graph-node', 'entityId': 'host:20.189.172.33',
+                          'graphRevision': 'graph-exact'},
+        })
+        self.assertEqual(response.status_code, 502)
+        payload = response.get_json()
+        self.assertEqual(payload['failureStage'], 'OLLAMA_CLOUD_GENERATION_BUDGET')
+        self.assertTrue(payload['retryable'])
+        self.assertFalse(payload['partialReportAccepted'])
+        self.assertFalse(payload['automaticModelRetry'])
+        self.assertEqual(payload['generationBudgetTokens'], 1600)
 
     @patch('graphops_full_fidelity.ask_ollama_cloud', side_effect=OllamaCloudTimeoutError(15))
     @patch('scythe_orchestrator._graphops_directive_authorized', return_value=True)

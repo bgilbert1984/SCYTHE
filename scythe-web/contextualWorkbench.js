@@ -1,6 +1,8 @@
-const PANELS = Object.freeze(["autopilot", "semantic", "spectrum", "events"]);
+// "spectrum" was retired from the generic record viewer: the SPECTRUM tab is now
+// served by NesdrSpectrumView, a receiver instrument rather than a JSON panel.
+const PANELS = Object.freeze(["autopilot", "semantic", "events"]);
 const LABELS = Object.freeze({autopilot: "AUTOPILOT", semantic: "SEMANTIC MEMORY",
-  spectrum: "SPECTRUM / FIELD", events: "EVENT STREAM"});
+  events: "EVENT STREAM"});
 
 function el(document, tag, className, text = "") {
   const node = document.createElement(tag); node.className = className; node.textContent = text; return node;

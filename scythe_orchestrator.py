@@ -1398,7 +1398,8 @@ def graphops_cloud_full_fidelity():
             str(selection.get('graphRevision')) != str(expected.get('graphRevision'))):
         return jsonify({'status': 'refused',
                         'error': 'host trace evidence does not belong to the selected graph revision'}), 409
-    from graphops_full_fidelity import (OllamaCloudReportError, OllamaCloudTimeoutError, ask_ollama_cloud,
+    from graphops_full_fidelity import (OllamaCloudReportError, OllamaCloudTimeoutError,
+                                        OllamaCloudTruncatedReportError, ask_ollama_cloud,
                                         build_full_fidelity_capsule, disclosure_receipt)
     try:
         infrastructure = None
@@ -1428,10 +1429,19 @@ def graphops_cloud_full_fidelity():
                         'failureStage': 'OLLAMA_CLOUD_RESPONSE_START',
                         'deadlineSeconds': exc.timeout_seconds,
                         'automaticModelRetry': False}), 504
+    except OllamaCloudTruncatedReportError as exc:
+        log.warning('GraphOps full-fidelity Cloud generation budget exhausted after %d tokens',
+                    exc.budget_tokens)
+        return jsonify({'status': 'unavailable', 'error': str(exc), 'retryable': True,
+                        'failureStage': exc.failure_stage,
+                        'providerResponseReceived': True,
+                        'generationBudgetTokens': exc.budget_tokens,
+                        'partialReportAccepted': False,
+                        'automaticModelRetry': False}), 502
     except OllamaCloudReportError as exc:
         log.warning('GraphOps full-fidelity Cloud report validation failed: %s', exc.reason)
-        return jsonify({'status': 'unavailable', 'error': str(exc), 'retryable': False,
-                        'failureStage': 'OLLAMA_CLOUD_REPORT_VALIDATION',
+        return jsonify({'status': 'unavailable', 'error': str(exc), 'retryable': exc.retryable,
+                        'failureStage': exc.failure_stage,
                         'providerResponseReceived': True,
                         'automaticModelRetry': False}), 502
     except (OSError, RuntimeError, TypeError, ValueError) as exc:
@@ -2865,9 +2875,16 @@ def orchestrator_graphops_rf_spectrum_latest():
     include_bins = str(request.args.get('include_bins', '')).lower() in {'1', 'true', 'yes'}
     if not include_bins:
         bounded.pop('bins_dbfs', None)
-    elif len(bounded.get('bins_dbfs') or []) > 256:
-        bounded['bins_dbfs'] = bounded['bins_dbfs'][:256]
-        bounded['bins_truncated'] = True
+    else:
+        # The published product is already peak-downsampled to max_bins by the bridge.
+        # Serve that whole bounded product; a further slice would silently narrow the
+        # displayed span while the frequency axis still claimed the full sample rate.
+        published = len(bounded.get('bins_dbfs') or [])
+        ceiling = min(int(get_rf_bridge().config.max_bins or published), 2048)
+        if published > ceiling:
+            bounded['bins_dbfs'] = bounded['bins_dbfs'][:ceiling]
+            bounded['bins_truncated'] = True
+            bounded['bins_truncated_span'] = 'FREQUENCY_AXIS_NO_LONGER_SPANS_SAMPLE_RATE'
     return jsonify({'available': True, 'spectrum': bounded, 'raw_iq_exposed': False})
 
 

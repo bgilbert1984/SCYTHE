@@ -74,7 +74,8 @@ Every successful response reports the capsule ID, capsule SHA-256, destination, 
 Environment=OLLAMA_API_KEY_FILE=/home/spectrcyde/SCYTHE/.ollama
 Environment=OLLAMA_CLOUD_MODEL=gpt-oss:20b
 Environment=OLLAMA_CLOUD_TIMEOUT_SECONDS=75
-Environment=OLLAMA_CLOUD_MAX_TOKENS=1200
+Environment=OLLAMA_CLOUD_MAX_TOKENS=1600
+Environment=OLLAMA_CLOUD_REASONING_EFFORT=low
 ```
 
 The API credential is sent only to the fixed HTTPS origin `https://ollama.com`. Do not place the credential in browser JavaScript, request bodies, command-line arguments, or logs.
@@ -85,8 +86,20 @@ browser applies a 90-second outer deadline. A response-start timeout returns a
 structured retryable `504` naming `OLLAMA_CLOUD_RESPONSE_START`; it does not
 silently retransmit the exact capsule to another model. The operator may retry
 the same selected evidence explicitly after provider capacity recovers. Output
-is bounded to 1,200 predicted tokens by default. Both limits are environment
-configurable within server-enforced bounds.
+is bounded to 1,600 predicted tokens by default. Reasoning-capable models use
+bounded `low` reasoning by default because private reasoning and the JSON
+report share the same generation budget. Models that explicitly reject the
+reasoning control are retried once with the same capsule and same model but
+without that unsupported parameter; there is no cross-model retransmission.
+
+Provider responses may contain an exact JSON object, a single fenced JSON
+object, or a reasoning preamble followed by one complete object. SCYTHE extracts
+only one unambiguous report that satisfies the seven-field contract. Multiple,
+partial, or field-incomplete objects remain invalid. If the provider declares
+that generation stopped at the token ceiling, SCYTHE discards the partial
+report and returns the retryable `OLLAMA_CLOUD_GENERATION_BUDGET` stage. Other
+invalid reports return `OLLAMA_CLOUD_REPORT_VALIDATION` and remain fail-closed.
+No missing report field is completed by inference.
 # Infrastructure evidence and compatibility
 
 Full-Fidelity capsules may include a bounded `graphops.infrastructure.v1` snapshot. Observed traffic, inferred ASN/GeoIP, modeled AS-path candidates, and display-only geometry retain separate authority labels. Disclosure receipts count each infrastructure class.

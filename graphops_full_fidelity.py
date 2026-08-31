@@ -16,7 +16,13 @@ from urllib import error, request
 _CLOUD_ENDPOINT = "https://ollama.com"
 _DEFAULT_MODEL = "gpt-oss:20b"
 _DEFAULT_CLOUD_TIMEOUT_SECONDS = 75
-_DEFAULT_CLOUD_MAX_TOKENS = 1200
+_DEFAULT_CLOUD_MAX_TOKENS = 1600
+# Reasoning-capable cloud models bill their private reasoning against the same
+# generation budget as the report. An unbounded reasoning effort exhausts the
+# budget and truncates the seven-field report mid-object.
+_DEFAULT_CLOUD_REASONING_EFFORT = "low"
+_REASONING_EFFORTS = ("low", "medium", "high")
+_REASONING_UNSUPPORTED = re.compile(r"think|reasoning", re.IGNORECASE)
 _SECRET_KEY = re.compile(
     r"(?:authorization|password|passwd|secret|api[_-]?key|access[_-]?token|"
     r"refresh[_-]?token|cookie|set-cookie|credential|environment|packet[_-]?payload|raw[_-]?packet)",
@@ -44,9 +50,33 @@ class OllamaCloudTimeoutError(RuntimeError):
 class OllamaCloudReportError(RuntimeError):
     """The provider responded, but no unambiguous evidence report was present."""
 
+    retryable = False
+    failure_stage = "OLLAMA_CLOUD_REPORT_VALIDATION"
+
     def __init__(self, reason: str):
         self.reason = reason
         super().__init__(f"Ollama Cloud returned an invalid evidence report: {reason}")
+
+
+class OllamaCloudTruncatedReportError(OllamaCloudReportError):
+    """Generation reached the token budget before the evidence report closed."""
+
+    retryable = True
+    failure_stage = "OLLAMA_CLOUD_GENERATION_BUDGET"
+
+    def __init__(self, budget_tokens: int, reasoning_characters: int = 0):
+        self.budget_tokens = int(budget_tokens)
+        self.reasoning_characters = int(reasoning_characters)
+        reasoning = (f" {self.reasoning_characters} characters of provider reasoning preceded it."
+                     if self.reasoning_characters else "")
+        RuntimeError.__init__(
+            self,
+            f"Ollama Cloud stopped generating at the {self.budget_tokens}-token budget before the "
+            f"evidence report closed.{reasoning} The partial report was discarded rather than "
+            "completed by inference; raise OLLAMA_CLOUD_MAX_TOKENS or lower "
+            "OLLAMA_CLOUD_REASONING_EFFORT and retry the same capsule."
+        )
+        self.reason = "generation budget exhausted before the report closed"
 
 
 def _bounded_environment_integer(name: str, default: int, minimum: int, maximum: int) -> int:
@@ -55,6 +85,31 @@ def _bounded_environment_integer(name: str, default: int, minimum: int, maximum:
     except (TypeError, ValueError):
         value = default
     return min(max(value, minimum), maximum)
+
+
+def _cloud_reasoning_effort() -> Optional[str]:
+    """Bound provider reasoning so it cannot consume the report's generation budget."""
+    value = os.environ.get("OLLAMA_CLOUD_REASONING_EFFORT", _DEFAULT_CLOUD_REASONING_EFFORT)
+    value = str(value or "").strip().lower()
+    if value in {"off", "none", "disabled"}:
+        return None
+    return value if value in _REASONING_EFFORTS else _DEFAULT_CLOUD_REASONING_EFFORT
+
+
+def _provider_error_text(exc: "error.HTTPError") -> str:
+    """Read the bounded provider error body once; the stream yields nothing on reread."""
+    cached = getattr(exc, "_scythe_provider_error", None)
+    if cached is not None:
+        return cached
+    try:
+        detail = str(json.loads(exc.read(4096)).get("error") or "")
+    except (json.JSONDecodeError, AttributeError, UnicodeDecodeError, ValueError, OSError):
+        detail = ""
+    try:
+        exc._scythe_provider_error = detail
+    except AttributeError:
+        pass
+    return detail
 
 
 def load_ollama_api_key() -> Optional[str]:
@@ -470,7 +525,8 @@ responses do not falsify it and an unrelated packet on another port is not a fal
 header/signature observation that can distinguish SSDP M-SEARCH/NOTIFY/HTTP response syntax from an
 alternative protocol. State at least one benign and one adverse alternative when the evidence permits both.
 
-Return one JSON object with exactly these string fields plus numeric confidence:
+Return one JSON object only, with no Markdown fence, analysis preamble, or trailing prose, using
+exactly these string fields plus numeric confidence:
 {"situation":"...","anomalies":"...","measuredVsInferred":"...","assessment":"...",
  "falsifier":"...","direction":"...","confidence":0.0}
 Use capsule evidence paths such as hostTrace.traceroute.hops[3] inline when supporting a claim.
@@ -584,9 +640,32 @@ _SSDP_WEAK_FALSIFIER = re.compile(
 )
 
 
+_CONFUSABLE_PUNCTUATION = {
+    # Typographic dashes. Models emit U+2011 in "long‑haul" and "non‑monotonic"; NFKC does
+    # not fold it, so every guardrail written as `long[- ]haul` silently stops matching.
+    **{character: "-" for character in "‐‑‒–—―−﹘﹣－"},
+    **{character: "'" for character in "‘’‚‛′＇"},
+    **{character: '"' for character in "“”„‟″＂"},
+    **{character: " " for character in "         "
+                                       "      　"},
+    # Zero-width characters can split a guarded phrase without changing how it reads.
+    **{character: "" for character in "​‌‍⁠﻿"},
+}
+_CONFUSABLE_TABLE = str.maketrans(_CONFUSABLE_PUNCTUATION)
+
+
+def _fold_confusable_text(value: Any) -> str:
+    """Fold look-alike punctuation to ASCII so guardrails cannot be evaded by typography.
+
+    The report's prose is model interpretation, never measured evidence, so folding it
+    keeps the text that is checked identical to the text that is retained.
+    """
+    return str(value or "").translate(_CONFUSABLE_TABLE).strip()
+
+
 def validate_cloud_report(report: Dict[str, Any], capsule: Dict[str, Any]) -> Dict[str, Any]:
     """Apply deterministic epistemic ceilings after model generation."""
-    normalized = {key: str(report.get(key) or "").strip() for key in (
+    normalized = {key: _fold_confusable_text(report.get(key)) for key in (
         "situation", "anomalies", "measuredVsInferred", "assessment", "falsifier", "direction")}
     if not all(normalized.values()):
         raise RuntimeError("Ollama Cloud report contains empty required findings")
@@ -732,34 +811,52 @@ def ask_ollama_cloud(capsule: Dict[str, Any], *, model: Optional[str] = None,
         _bounded_environment_integer("OLLAMA_CLOUD_TIMEOUT_SECONDS", _DEFAULT_CLOUD_TIMEOUT_SECONDS, 15, 120)
     max_tokens = _bounded_environment_integer(
         "OLLAMA_CLOUD_MAX_TOKENS", _DEFAULT_CLOUD_MAX_TOKENS, 256, 2048)
-    body = json.dumps({
-        "model": selected_model,
-        "stream": False,
-        "format": "json",
-        "messages": [
-            {"role": "system", "content": _SYSTEM_PROMPT},
-            {"role": "user", "content": json.dumps(capsule, sort_keys=True, ensure_ascii=False)},
-        ],
-        "options": {"temperature": 0.1, "num_predict": max_tokens},
-    }).encode("utf-8")
-    cloud_request = request.Request(
-        f"{_CLOUD_ENDPOINT}/api/chat", data=body, method="POST",
-        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-    )
-    try:
+    reasoning_effort = _cloud_reasoning_effort()
+    reasoning_disposition = reasoning_effort or "disabled_by_operator"
+
+    def post(effort: Optional[str]) -> Dict[str, Any]:
+        payload: Dict[str, Any] = {
+            "model": selected_model,
+            "stream": False,
+            "format": "json",
+            "messages": [
+                {"role": "system", "content": _SYSTEM_PROMPT},
+                {"role": "user", "content": json.dumps(capsule, sort_keys=True, ensure_ascii=False)},
+            ],
+            "options": {"temperature": 0.1, "num_predict": max_tokens},
+        }
+        if effort:
+            payload["think"] = effort
+        cloud_request = request.Request(
+            f"{_CLOUD_ENDPOINT}/api/chat", data=json.dumps(payload).encode("utf-8"), method="POST",
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+        )
         with request.urlopen(cloud_request, timeout=timeout_seconds) as response:
-            envelope = json.loads(response.read())
-    except error.HTTPError as exc:
+            return json.loads(response.read())
+
+    try:
         try:
-            provider_error = str(json.loads(exc.read(4096)).get("error") or "")
-        except (json.JSONDecodeError, AttributeError, UnicodeDecodeError):
-            provider_error = ""
-        if "prompt is too long" in provider_error.lower():
+            envelope = post(reasoning_effort)
+        except error.HTTPError as exc:
+            # A model without a reasoning control rejects `think` outright. Reissue the
+            # identical capsule to the identical model without it; this is a transport
+            # capability negotiation, never a redisclosure to a different model.
+            if not (reasoning_effort and exc.code == 400):
+                raise
+            detail = _provider_error_text(exc)
+            if not _REASONING_UNSUPPORTED.search(detail):
+                raise
+            reasoning_effort = None
+            reasoning_disposition = "unsupported_by_model"
+            envelope = post(None)
+    except error.HTTPError as exc:
+        provider_error = _provider_error_text(exc).lower()
+        if "prompt is too long" in provider_error:
             reason = "request exceeded the model context window"
         elif exc.code in {401, 403}:
             reason = "credential was rejected"
-        elif "model" in provider_error.lower() and ("not found" in provider_error.lower() or
-                                                      "unknown" in provider_error.lower()):
+        elif "model" in provider_error and ("not found" in provider_error or
+                                            "unknown" in provider_error):
             reason = "configured model is unavailable"
         else:
             reason = "request was rejected"
@@ -772,6 +869,17 @@ def ask_ollama_cloud(capsule: Dict[str, Any], *, model: Optional[str] = None,
         raise RuntimeError("Ollama Cloud request failed") from exc
     except json.JSONDecodeError as exc:
         raise RuntimeError("Ollama Cloud request failed") from exc
-    content = str((envelope.get("message") or {}).get("content") or "").strip()
-    report = _parse_cloud_report(content)
-    return {"model": selected_model, "report": validate_cloud_report(report, capsule)}
+
+    message = envelope.get("message") or {}
+    content = str(message.get("content") or "").strip()
+    try:
+        report = _parse_cloud_report(content)
+    except OllamaCloudReportError:
+        # Only a run that actually hit the ceiling may be reported as truncated; an
+        # unparseable report that stopped normally keeps its original, honest reason.
+        if str(envelope.get("done_reason") or "").strip().lower() != "length":
+            raise
+        reasoning = str(message.get("thinking") or message.get("reasoning") or "")
+        raise OllamaCloudTruncatedReportError(max_tokens, len(reasoning)) from None
+    return {"model": selected_model, "reasoningEffort": reasoning_disposition,
+            "report": validate_cloud_report(report, capsule)}

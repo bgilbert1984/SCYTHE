@@ -115,6 +115,14 @@ No raw IQ or unbounded waterfall history enters model context. Configure the
 threshold, frequency deduplication bucket, cooldown, and store capacity with
 the `SDRPP_DETECTION_*` and `SDRPP_OBSERVATION_MAX` variables in `.env.example`.
 
+The status endpoint and System Evidence Ticker report bounded retained
+detection-event counts as `DIGITAL`, `ANALOGUE`, and `UNCLASSIFIED`. These are
+event counts, not unique-emitter estimates. A digital or analogue count is
+accepted only from a named classifier that declares `DERIVED_INFERENCE` and a
+bounded confidence. The present FFT peak detector and M1 sparse atoms do not by
+themselves establish modulation family, so their detections remain
+`UNCLASSIFIED` instead of being guessed from frequency or spectral appearance.
+
 Authenticated self-hosted AI clients can use these read-only MCP tools:
 
 - `rf_bridge_status`

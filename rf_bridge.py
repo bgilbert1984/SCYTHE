@@ -223,6 +223,9 @@ class RFObservationStore:
                 classification_authority=classification_authority,
                 classification_method=classification_method,
                 classification_confidence=classification_confidence,
+                # A frame submitted over the ingest API was not produced by this
+                # bridge and must not inherit the IQ exporter's source label.
+                source=str(frame.get("observation_origin") or "sdrpp_iq_exporter").lower(),
             )
             self._items.append(observation)
             subscribers = list(self._subscribers)

@@ -238,6 +238,48 @@
     .workbench__status { min-width:0; margin:0; padding:5px; color:#63ffd1; white-space:pre-wrap;
       border:1px solid rgba(99,255,209,.3); background:rgba(3,9,20,.75); }
     .workbench__status--error,.workbench__error { color:#ff7890; }
+    /* NESDR instrument surface */
+    .nesdr { display:flex; flex-direction:column; gap:4px; padding:5px; overflow:auto;
+      font:9px ui-monospace,monospace; color:#9fb4c2; }
+    .nesdr__headline { font-size:11px; letter-spacing:.08em; padding:3px 0; }
+    .nesdr__identity { display:grid; grid-template-columns:repeat(auto-fit,minmax(118px,1fr)); gap:3px; }
+    .nesdr__identity-cell { display:flex; flex-direction:column; padding:3px 4px;
+      border:1px solid #1e3b48; background:#07161e; }
+    .nesdr__identity-label { color:#5d7686; font-size:7px; letter-spacing:.1em; }
+    .nesdr__identity-value { color:#cfe6f2; font-size:9px; }
+    .nesdr__identity-authority { color:#4d6675; font-size:7px; }
+    .nesdr__regime { color:#7f9aab; padding:2px 0; }
+    .nesdr__columns { display:grid; grid-template-columns:minmax(0,3fr) minmax(150px,1fr); gap:5px; }
+    .nesdr__plot { display:flex; flex-direction:column; gap:3px; min-width:0; }
+    .nesdr__canvas { width:100%; image-rendering:pixelated; border:1px solid #1e3b48;
+      background:#04121a; display:block; }
+    .nesdr__canvas--trace { height:150px; cursor:crosshair; }
+    .nesdr__canvas--waterfall { height:180px; }
+    .nesdr__resolution,.nesdr__freshness,.nesdr__classification,.nesdr__anchor {
+      white-space:pre-wrap; color:#7f9aab; font-size:8px; line-height:1.45; }
+    .nesdr__anchor { border-top:1px solid #1e3b48; padding-top:3px; color:#5d7686; }
+    .nesdr__health { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:2px; }
+    .nesdr__health-row { display:flex; flex-wrap:wrap; gap:4px; align-items:baseline;
+      padding:2px 4px; border-left:2px solid #2b4757; background:#07161e; }
+    .nesdr__health-label { color:#5d7686; font-size:7px; letter-spacing:.09em; min-width:74px; }
+    .nesdr__health-value { font-size:9px; }
+    .nesdr__health-detail { color:#4d6675; font-size:7px; flex-basis:100%; }
+    .nesdr__sparse { display:flex; flex-direction:column; gap:3px; min-width:0; overflow:auto; }
+    .nesdr__sparse-header { font-size:9px; letter-spacing:.08em; padding:2px 0; }
+    .nesdr__sparse-outcome { margin:0; padding:3px 4px; border:1px solid #1e3b48;
+      background:#07161e; color:#6f8ea0; font-size:7px; white-space:pre-wrap; line-height:1.45; }
+    .nesdr__sparse-card { border:1px solid #3d4f2f; border-left:2px solid #ffb347;
+      background:#0b1710; padding:3px 4px; display:flex; flex-direction:column; gap:1px; }
+    .nesdr__sparse-frequency { color:#ffd79a; font-size:10px; }
+    .nesdr__sparse-family { color:#ffb347; font-size:7px; letter-spacing:.08em; }
+    .nesdr__sparse-row { display:flex; justify-content:space-between; gap:4px; }
+    .nesdr__sparse-label { color:#5d7686; font-size:7px; }
+    .nesdr__sparse-value { color:#cfe6f2; font-size:8px; }
+    /* Health levels: live / degraded / failed / undeclared-is-not-a-fault */
+    .nesdr__state--live { color:#5fd08a; border-left-color:#5fd08a; }
+    .nesdr__state--degraded { color:#ffb347; border-left-color:#ffb347; }
+    .nesdr__state--failed { color:#ff5f56; border-left-color:#ff5f56; }
+    .nesdr__state--undeclared { color:#8a97a3; border-left-color:#3b4c58; }
     .workbench__action,.workbench__entity { padding:4px 7px; color:#ccefff; background:#071422;
       border:1px solid #24506a; font:9px ui-monospace,monospace; cursor:pointer; }
     .workbench__action:hover,.workbench__entity:hover,.workbench__action:focus-visible,
@@ -473,6 +515,7 @@
     import { InfrastructureGlobeLayer } from "./infrastructureGlobeLayer.js";
     import { ContextualWorkbench } from "./contextualWorkbench.js";
     import { SystemEvidenceTicker } from "./systemEvidenceTicker.js";
+    import { NesdrSpectrumView } from "./nesdrSpectrumView.js";
 
     const viewerOptions = {
       animation: false,
@@ -684,7 +727,12 @@
     const viewportInfrastructure = document.getElementById("live-hypergraph-infrastructure-viewport");
     const workbenchRoots = Object.fromEntries(["autopilot", "semantic", "spectrum", "events"].map((name) =>
       [name, document.getElementById(`live-hypergraph-${name}-viewport`)]));
-    const contextualWorkbench = new ContextualWorkbench({roots: workbenchRoots});
+    // SPECTRUM is a NESDR instrument surface, not a generic record panel. The
+    // workbench keeps Autopilot, Semantic and Events; the receiver owns its tab.
+    const {spectrum: spectrumRoot, ...workbenchPanelRoots} = workbenchRoots;
+    const contextualWorkbench = new ContextualWorkbench({roots: workbenchPanelRoots});
+    const nesdrSpectrum = new NesdrSpectrumView({root: spectrumRoot}).start();
+    window.scytheNesdrSpectrum = nesdrSpectrum;
     window.scytheContextualWorkbench = contextualWorkbench;
     let graphExplorer = null;
     const locationView = new HypergraphLocationView({root: viewportLocation, controller: liveGraphController}).start();
@@ -1266,11 +1314,21 @@
           parameters: {limit: 100}, mode: "execute"}));
       } catch (error) { status.textContent = `CAUSAL WORLDS // REFUSED // ${error.message}`; }
     });
+    // The receiver's configured rate governs, never the SMArt v5 datasheet nominal
+    // of 2.4 MHz. If the broker has not reported one, refuse rather than assume.
+    function brokerSampleRateHz() {
+      const configured = Number(nesdrSpectrum?.state?.status?.bridge?.config?.sample_rate_hz);
+      if (!Number.isFinite(configured) || configured <= 0) {
+        throw new Error("broker has not reported a sample rate; synthetic ingest refused");
+      }
+      return configured;
+    }
     document.getElementById("ingest-rf").addEventListener("click", async () => {
       const frequency = Number(document.getElementById("rf-frequency").value) * 1e6;
       const payload = {sensor_id: document.getElementById("rf-sensor").value,
         sequence: Date.now(), timestamp: Date.now() / 1000, center_frequency_hz: frequency,
-        peak_frequency_hz: frequency, sample_rate_hz: 2_400_000,
+        peak_frequency_hz: frequency, sample_rate_hz: brokerSampleRateHz(),
+        observation_origin: "OPERATOR_SYNTHETIC",
         peak_dbfs: Number(document.getElementById("rf-peak").value),
         noise_floor_dbfs: Number(document.getElementById("rf-noise").value)};
       try {
@@ -1279,7 +1337,7 @@
         const result = await response.json();
         if (!response.ok) throw new Error(result.error ?? `HTTP ${response.status}`);
         document.getElementById("correlation-status").hidden = false;
-        document.getElementById("correlation-status").textContent = `MEASURED RF // ${result.status.toUpperCase()}\nAUTHORITY // ${result.authority}\nEVIDENCE // ${result.observation?.evidence_id ?? "FILTERED"}\nRAW IQ // REJECTED BY CONTRACT`;
+        document.getElementById("correlation-status").textContent = `OPERATOR SYNTHETIC RF // ${result.status.toUpperCase()}\nORIGIN // MANUALLY ENTERED, NOT A BRIDGE FRAME\nAUTHORITY // ${result.authority}\nSAMPLE RATE // ${(payload.sample_rate_hz / 1e6).toFixed(3)} MS/s BROKER-REPORTED\nEVIDENCE // ${result.observation?.evidence_id ?? "FILTERED"}\nRAW IQ // REJECTED BY CONTRACT`;
       } catch (error) { status.textContent = `RF INGEST // REJECTED // ${error.message}`; }
     });
   </script>
