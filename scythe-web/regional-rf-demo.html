@@ -280,6 +280,43 @@
     .nesdr__state--degraded { color:#ffb347; border-left-color:#ffb347; }
     .nesdr__state--failed { color:#ff5f56; border-left-color:#ff5f56; }
     .nesdr__state--undeclared { color:#8a97a3; border-left-color:#3b4c58; }
+    /* Tuning (proposal only), presets and survey coverage */
+    .nesdr__section-title { color:#7f9aab; font-size:8px; letter-spacing:.1em; padding:3px 0 1px; }
+    .nesdr__tuning,.nesdr__survey { border-top:1px solid #1e3b48; padding-top:3px;
+      display:flex; flex-direction:column; gap:3px; }
+    .nesdr__controls { display:flex; flex-wrap:wrap; gap:3px; align-items:center; }
+    .nesdr__control-label { color:#5d7686; font-size:7px; letter-spacing:.09em; }
+    .nesdr__control-note { color:#4d6675; font-size:7px; line-height:1.45; }
+    .nesdr__input { background:#04121a; color:#cfe6f2; border:1px solid #284655;
+      font:9px ui-monospace,monospace; padding:2px 4px; min-width:96px; }
+    .nesdr__step { background:#07161e; color:#9fb4c2; border:1px solid #284655;
+      font:8px ui-monospace,monospace; padding:2px 5px; cursor:pointer; }
+    .nesdr__step:hover { border-color:#38d6ff; color:#cfe6f2; }
+    .nesdr__step--primary { border-color:#ffb347; color:#ffd79a; }
+    .nesdr__step--nudge { min-width:52px; }
+    /* Antenna declaration. The receiver cannot sense the antenna; it can only
+       record what the operator declares and test whether the port is responsive. */
+    .nesdr__antenna { border-top:1px solid #1e3b48; padding-top:3px;
+      display:flex; flex-direction:column; gap:3px; }
+    .nesdr__autodetect { margin:0; padding:0 0 0 12px; color:#4d6675; font-size:7px;
+      line-height:1.5; list-style:square; }
+    .nesdr__select { background:#04121a; color:#cfe6f2; border:1px solid #284655;
+      font:8px ui-monospace,monospace; padding:2px 4px; min-width:120px; }
+    .nesdr__antenna-state { font-size:7px; line-height:1.45; letter-spacing:.05em;
+      border-left:2px solid #3b4c58; padding-left:4px; }
+    .nesdr__corroboration { font-size:7px; line-height:1.45; border-left:2px solid #3b4c58;
+      padding-left:4px; }
+    .nesdr__receipt { margin:0; padding:3px 4px; border:1px solid #1e3b48; background:#07161e;
+      font-size:7px; white-space:pre-wrap; line-height:1.45; }
+    .nesdr__survey-summary { margin:0; padding:3px 4px; border:1px solid #1e3b48;
+      background:#07161e; color:#7f9aab; font-size:7px; white-space:pre-wrap; line-height:1.45; }
+    /* Coverage ribbon: observed now / recent / stale / never observed */
+    .nesdr__ribbon { display:flex; gap:1px; height:9px; }
+    .nesdr__tile { flex:1 1 0; min-width:2px; background:#16242c; }
+    .nesdr__tile--live { background:#38d6ff; }
+    .nesdr__tile--recent { background:#2f7f8f; }
+    .nesdr__tile--stale { background:#6b4a2a; }
+    .nesdr__tile--never { background:#16242c; }
     .workbench__action,.workbench__entity { padding:4px 7px; color:#ccefff; background:#071422;
       border:1px solid #24506a; font:9px ui-monospace,monospace; cursor:pointer; }
     .workbench__action:hover,.workbench__entity:hover,.workbench__action:focus-visible,

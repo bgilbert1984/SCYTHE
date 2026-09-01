@@ -28,6 +28,10 @@ LOG = logging.getLogger(__name__)
 
 _SAMPLE_DTYPES = {
     "int8": np.dtype("i1"),
+    # RTL2832U delivers offset-binary uint8 natively, and rtl_tcp forwards it
+    # unchanged. Decoding that stream as int8 misreads every sample by 128,
+    # which lands as a phantom carrier at DC rather than as a decode error.
+    "uint8": np.dtype("u1"),
     "int16": np.dtype("<i2"),
     "int32": np.dtype("<i4"),
     "float32": np.dtype("<f4"),
@@ -35,9 +39,15 @@ _SAMPLE_DTYPES = {
 
 _FULL_SCALE = {
     "int8": 128.0,
+    "uint8": 127.5,
     "int16": 32768.0,
     "int32": 2147483648.0,
     "float32": 1.0,
+}
+
+# Offset-binary formats sit centred on a positive value, not on zero.
+_SAMPLE_OFFSET = {
+    "uint8": 127.5,
 }
 
 _RIGCTL_MODES = {"FM", "WFM", "AM", "DSB", "USB", "CW", "LSB", "RAW"}
@@ -304,6 +314,9 @@ class IQFFTProcessor:
             raw = bytes(self._byte_remainder[:usable])
             del self._byte_remainder[:usable]
             scalars = np.frombuffer(raw, dtype=self._dtype).astype(np.float32)
+            offset = _SAMPLE_OFFSET.get(self.config.sample_type)
+            if offset:
+                scalars -= offset
             scalars /= _FULL_SCALE[self.config.sample_type]
             iq = (scalars[0::2] + 1j * scalars[1::2]).astype(np.complex64)
             self._samples = np.concatenate((self._samples, iq))

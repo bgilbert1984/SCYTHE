@@ -2841,6 +2841,80 @@ def orchestrator_graphops_rf_observation_ingest():
         return jsonify({'status': 'rejected', 'error': str(exc), 'rawIqAccepted': False}), 400
 
 
+@app.route('/api/graphops/rf-tune/propose', methods=['POST'])
+def orchestrator_graphops_rf_tune_propose():
+    """Turn an operator tuning request into a guarded rf_tune proposal.
+
+    This endpoint proposes and returns a receipt. It never executes: the browser
+    cannot reach orchestrate/execute, and no Rigctl socket is opened here.
+    """
+    if not _graphops_directive_authorized():
+        return jsonify({'error': 'Authentication required'}), 401
+    from graphops_rf_tune import TuneProposalRefused, tune_receipt, validate_tune_request
+    try:
+        request_frame = validate_tune_request(request.get_json(silent=True))
+    except TuneProposalRefused as exc:
+        return jsonify({'status': 'refused', 'error': str(exc), 'proposed': False,
+                        'executed': False, 'rigctlContacted': False}), 400
+    port = _get_primary_instance_port()
+    if not port:
+        return jsonify({'status': 'unavailable', 'proposed': False, 'executed': False,
+                        'error': 'No active SCYTHE graph instance holds the MCP safety gate; '
+                                 'the request was not recorded as a proposal'}), 503
+    envelope = _proxy_post(port, '/mcp', {
+        'jsonrpc': '2.0', 'id': f'rf-tune-{uuid.uuid4().hex[:12]}',
+        'method': 'orchestrate/propose',
+        'params': {'tool_name': request_frame['tool_name'], 'params': request_frame['params'],
+                   'confidence': 0.75, 'agent_id': 'operator:spectrum-tab',
+                   'justification': request_frame['justification']
+                                    or 'Operator tuning request from the SPECTRUM instrument tab'},
+    }, timeout=10)
+    proposal = (envelope or {}).get('result') if isinstance(envelope, dict) else None
+    if not isinstance(proposal, dict) or not proposal.get('proposal_id'):
+        log.warning('RF tune proposal was not recorded by the MCP safety gate')
+        return jsonify({'status': 'unavailable', 'proposed': False, 'executed': False,
+                        'rigctlContacted': False,
+                        'error': ((envelope or {}).get('error') or {}).get('message')
+                                 if isinstance(envelope, dict) else
+                                 'MCP safety gate did not answer; no proposal was recorded'}), 502
+    receipt = tune_receipt(request_frame, proposal)
+    return jsonify({'status': 'proposed', 'proposed': True, 'executed': False,
+                    'rigctlContacted': False, 'tool': request_frame['tool_name'],
+                    'params': request_frame['params'], 'regime': request_frame['regime'],
+                    'receipt': receipt, 'boundary': request_frame['boundaries']}), 201
+
+
+@app.route('/api/graphops/rf-antenna', methods=['GET'])
+def orchestrator_graphops_rf_antenna():
+    """The declarable antenna catalogue and the current operator declaration.
+
+    There is no detection endpoint and there will not be one: the receiver has no
+    way to read what is screwed onto its SMA port.
+    """
+    if not _graphops_directive_authorized():
+        return jsonify({'error': 'Authentication required'}), 401
+    from graphops_rf_antenna import catalogue, get_antenna_store
+    store = get_antenna_store()
+    store.bootstrap_from_env()
+    return jsonify({'status': 'ok', 'catalogue': catalogue(), 'current': store.current()})
+
+
+@app.route('/api/graphops/rf-antenna/declare', methods=['POST'])
+def orchestrator_graphops_rf_antenna_declare():
+    """Record what the operator says is attached. Nothing here is measured."""
+    if not _graphops_directive_authorized():
+        return jsonify({'error': 'Authentication required'}), 401
+    from graphops_rf_antenna import AntennaDeclarationRefused, get_antenna_store
+    try:
+        record, receipt = get_antenna_store().declare(request.get_json(silent=True))
+    except AntennaDeclarationRefused as exc:
+        return jsonify({'status': 'refused', 'error': str(exc), 'declared': False,
+                        'autoDetected': False}), 400
+    return jsonify({'status': 'declared', 'declared': True, 'autoDetected': False,
+                    'antenna': record, 'receipt': receipt,
+                    'boundary': receipt['boundaries']}), 201
+
+
 @app.route('/api/graphops/rf-bridge/status', methods=['GET'])
 def orchestrator_graphops_rf_bridge_status():
     if not _graphops_directive_authorized():

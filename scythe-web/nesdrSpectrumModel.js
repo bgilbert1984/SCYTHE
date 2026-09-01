@@ -14,6 +14,8 @@
  * tell. The receiver never yields an emitter location; see sensorAnchorNotice().
  */
 
+import { antennaHealthRow } from "./rfAntennaDeclaration.js";
+
 export const HEALTH = Object.freeze({
   LIVE: "live",         // observed and fresh
   DEGRADED: "degraded", // connected but stale
@@ -135,7 +137,7 @@ export function deriveTuningRegime(status = {}) {
  * correction, direct-sampling state, antenna) are UNDECLARED rather than
  * invented, and an undeclared row is not a fault.
  */
-export function deriveHardwareHealth(status = {}, {now = Date.now() / 1000, sparse = null} = {}) {
+export function deriveHardwareHealth(status = {}, {now = Date.now() / 1000, sparse = null, antenna = null} = {}) {
   const bridge = status?.bridge ?? {};
   const config = bridge.config ?? {};
   const products = bridge.products ?? {};
@@ -178,8 +180,11 @@ export function deriveHardwareHealth(status = {}, {now = Date.now() / 1000, spar
     {label: "DIRECT SAMPLE", value: UNDECLARED, level: HEALTH.UNDECLARED, detail: "MODE NOT REPORTED BY BRIDGE"},
     {label: "BIAS TEE", value: NESDR_SMART_V5.biasTee, level: HEALTH.UNDECLARED,
      detail: "MODEL-DECLARED: NO BIAS TEE ON SMArt v5"},
-    {label: "ANTENNA", value: UNDECLARED, level: HEALTH.UNDECLARED,
-     detail: "OPERATOR HAS NOT DECLARED AN ANTENNA"},
+    // The antenna is not readable by any receiver measurement — see
+    // rfAntennaDeclaration.js. An undeclared antenna is an omission, and a
+    // declared one is the operator's word, never the instrument's.
+    {...antennaHealthRow(antenna),
+     level: antenna ? HEALTH.LIVE : HEALTH.UNDECLARED},
     {label: "SIGNAL CHAIN", value: String(sparse?.chain?.signal_chain_hash ?? sparse?.signal_chain_hash ?? UNDECLARED),
      level: sparse?.chain?.signal_chain_hash || sparse?.signal_chain_hash ? HEALTH.LIVE : HEALTH.UNDECLARED},
   ];

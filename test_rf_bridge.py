@@ -192,3 +192,35 @@ class RFBridgeTests(unittest.TestCase):
                 os.environ.pop("SCYTHE_PROCESS_ROLE", None)
             else:
                 os.environ["SCYTHE_PROCESS_ROLE"] = previous_role
+
+
+class Uint8IQDecodeTests(unittest.TestCase):
+    """rtl_tcp forwards the RTL2832U's native offset-binary uint8 stream."""
+
+    def _processor(self, sample_type):
+        from rf_bridge import IQFFTProcessor, RFBridgeConfig
+        config = RFBridgeConfig(sample_type=sample_type, fft_size=64, max_bins=32,
+                                sample_rate_hz=2_048_000, frames_per_second=60)
+        return IQFFTProcessor(config)
+
+    def test_a_centred_uint8_stream_decodes_to_near_zero_dc(self):
+        import numpy as np
+        # 127/128 straddle the offset-binary centre of 127.5: a signal with no
+        # DC component. Decoded correctly the mean is ~0.
+        payload = bytes([127, 128] * 32)   # under one 64-point FFT block, so nothing drains
+        processor = self._processor("uint8")
+        list(processor.feed(payload))
+        self.assertLess(abs(complex(np.mean(processor._samples))), 1e-2)
+
+    def test_the_same_bytes_read_as_int8_manufacture_a_dc_carrier(self):
+        import numpy as np
+        payload = bytes([127, 128] * 32)   # under one 64-point FFT block, so nothing drains
+        processor = self._processor("int8")
+        list(processor.feed(payload))
+        # 128 wraps to -128 under int8, so the identical bytes acquire a large
+        # offset. This is the failure uint8 support exists to prevent.
+        self.assertGreater(abs(complex(np.mean(processor._samples))), 0.4)
+
+    def test_uint8_is_an_accepted_configuration(self):
+        from rf_bridge import RFBridgeConfig
+        self.assertEqual(RFBridgeConfig(sample_type="uint8").validated().sample_type, "uint8")
