@@ -18,6 +18,12 @@ const CLASSIFIER = {
   digital_evidence_required: ["symbol_rate_hz", "detection_statistic"],
   analogue_detector: "NOT_IMPLEMENTED",
   analogue_detector_note: "ANALOGUE REQUIRES A POSITIVE DETECTOR.",
+  registered_methods: [{method_id: "squared-envelope-cyclic.v1",
+                        validation_status: "REGISTERED_NOT_VALIDATED"}],
+  validated_methods: [],
+  digital_reachable: false,
+  digital_reachable_note: "A DIGITAL VERDICT REQUIRES A REGISTERED METHOD THAT HAS "
+    + "PASSED PHASE 3 VALIDATION. NONE HAS.",
   claims_withheld: ["analogue_family", "constant_envelope_digital"],
   raw_iq_exposed: false,
 };
@@ -86,6 +92,42 @@ test("the missing analogue detector is stated every time analogue is counted", (
   assert.ok(analogue, "an ANALOGUE count of 0 must not stand without its detector state");
   assert.match(analogue, /NOT_IMPLEMENTED/);
   assert.match(analogue, /ANALOGUE REQUIRES A POSITIVE DETECTOR/);
+});
+
+test("a closed route to DIGITAL is stated, not left to look like a quiet band", () => {
+  const payload = status();
+  const state = deriveClassifierState(payload);
+  assert.equal(state.digitalReachable, false);
+  assert.deepEqual(state.validatedMethods, []);
+  const lines = classificationOutcomeLines(
+    deriveClassificationSummary(payload), state, []);
+  const digital = lines.find((line) => line.startsWith("DIGITAL VERDICT //"));
+  assert.ok(digital, "a DIGITAL count of 0 must say whether DIGITAL was reachable");
+  assert.match(digital, /UNREACHABLE/);
+  assert.match(digital, /PHASE 3 VALIDATION/);
+});
+
+test("a validated detector removes the unreachable notice", () => {
+  const payload = status({classifier: {...CLASSIFIER, state: "IMPLEMENTED",
+    validated_methods: ["squared-envelope-cyclic.v1"], digital_reachable: true,
+    digital_reachable_note: null}});
+  const state = deriveClassifierState(payload);
+  assert.equal(state.digitalReachable, true);
+  assert.equal(state.implemented, true);
+  const lines = classificationOutcomeLines(deriveClassificationSummary(payload), state, []);
+  assert.ok(!lines.some((line) => line.startsWith("DIGITAL VERDICT //")));
+  assert.ok(!lines.some((line) => line.startsWith("CLASSIFIER STATE //")));
+});
+
+test("refusal reason codes read as refusals, not as measurements", () => {
+  const rows = deriveOutcomeBreakdown(status({classification_reasons: {
+    METHOD_NOT_VALIDATED: 5, DECISION_RULE_NOT_MET: 2, METHOD_NOT_REGISTERED: 1}}));
+  assert.deepEqual(rows.map((row) => row.label), [
+    "CLAIM REFUSED · METHOD NOT VALIDATED",
+    "CLAIM REFUSED · DID NOT PASS ITS DECISION RULE",
+    "CLAIM REFUSED · METHOD NOT REGISTERED"]);
+  // The positive outcome states support, never proof.
+  assert.match(reasonLabel("SYMBOL_CLOCK_LIKE_FEATURE"), /DIGITAL STRUCTURE SUPPORTED/);
 });
 
 test("unavailable counts are reported as unavailable, not as zero", () => {

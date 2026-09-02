@@ -39,8 +39,11 @@ const REASON_LABELS = Object.freeze({
   NOISE_COMPATIBLE: "NOISE COMPATIBLE",
   STALE_WINDOW: "VERDICT WINDOW DID NOT COVER THE DETECTION",
   ANALOGUE_DETECTOR_NOT_IMPLEMENTED: "ANALOGUE CLAIM REFUSED · NO DETECTOR",
+  METHOD_NOT_REGISTERED: "CLAIM REFUSED · METHOD NOT REGISTERED",
+  METHOD_NOT_VALIDATED: "CLAIM REFUSED · METHOD NOT VALIDATED",
+  DECISION_RULE_NOT_MET: "CLAIM REFUSED · DID NOT PASS ITS DECISION RULE",
   UNQUALIFIED_CLAIM: "CLAIM REFUSED · EVIDENCE INCOMPLETE",
-  SYMBOL_CLOCK_DETECTED: "SYMBOL CLOCK DETECTED",
+  SYMBOL_CLOCK_LIKE_FEATURE: "SYMBOL-CLOCK-LIKE FEATURE · DIGITAL STRUCTURE SUPPORTED",
 });
 
 export function reasonLabel(code, serverText = null) {
@@ -59,6 +62,7 @@ export function deriveClassifierState(status = {}) {
   if (!block || typeof block !== "object") {
     return {declared: false, implemented: false, ...CLASSIFIER_UNDECLARED,
             analogueDetector: "UNDECLARED", analogueNote: null,
+            digitalReachable: false, digitalReachableNote: null, validatedMethods: [],
             claimsWithheld: [], claimableFamilies: [], reservedFamilies: []};
   }
   const state = String(block.state ?? "UNDECLARED").toUpperCase();
@@ -72,6 +76,14 @@ export function deriveClassifierState(status = {}) {
     note: String(block.state_note ?? ""),
     analogueDetector,
     analogueNote: block.analogue_detector_note ? String(block.analogue_detector_note) : null,
+    // A DIGITAL verdict needs a registered method that has passed Phase 3
+    // validation. Until one has, the panel says the route is closed rather than
+    // letting a zero imply the band was simply quiet.
+    digitalReachable: block.digital_reachable === true,
+    digitalReachableNote: block.digital_reachable_note
+      ? String(block.digital_reachable_note) : null,
+    validatedMethods: Array.isArray(block.validated_methods)
+      ? block.validated_methods.map(String) : [],
     claimsWithheld: Array.isArray(block.claims_withheld) ? block.claims_withheld.map(String) : [],
     claimableFamilies: Array.isArray(block.claimable_families)
       ? block.claimable_families.map(String) : [],
@@ -114,6 +126,10 @@ export function classificationOutcomeLines(summary, classifier, breakdown = []) 
     lines.push(classifier?.declared
       ? `${classifier.headline} · ${classifier.note}`
       : `${CLASSIFIER_UNDECLARED.headline} · ${CLASSIFIER_UNDECLARED.note}`);
+  }
+  if (classifier?.declared && !classifier.digitalReachable) {
+    lines.push(`DIGITAL VERDICT // UNREACHABLE · ${classifier.digitalReachableNote
+      ?? "NO REGISTERED METHOD HAS PASSED VALIDATION"}`);
   }
   if (classifier?.analogueDetector !== "IMPLEMENTED") {
     lines.push(`ANALOGUE DETECTOR // ${classifier?.analogueDetector ?? "UNDECLARED"}`

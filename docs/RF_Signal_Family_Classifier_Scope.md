@@ -123,7 +123,10 @@ NOISE_COMPATIBLE                   consistent with noise alone
 STALE_WINDOW                       the verdict window does not cover this detection
 ANALOGUE_DETECTOR_NOT_IMPLEMENTED  a well-formed ANALOGUE claim, refused
 UNQUALIFIED_CLAIM                  a family claim without the required evidence
-SYMBOL_CLOCK_DETECTED              the only route to DIGITAL
+METHOD_NOT_REGISTERED              the claimed method has no registered decision rule
+METHOD_NOT_VALIDATED               registered, but Phase 3 has not cleared it
+DECISION_RULE_NOT_MET              the statistic did not pass the registered rule
+SYMBOL_CLOCK_LIKE_FEATURE          the only route to DIGITAL — support, not proof
 ```
 
 `ANALOGUE` is reserved and unreachable in v1: `CLAIMABLE_FAMILIES == ("DIGITAL",)`,
@@ -133,8 +136,8 @@ reason code; it may **not** choose the reason for a DIGITAL verdict.
 
 ### 3.1 What a DIGITAL claim must carry
 
-The gate is the contract a Phase 2 detector has to satisfy. All seven or the
-claim is recorded as `UNQUALIFIED_CLAIM` with the specific refusals attached:
+**Structural evidence** — missing any of these is `UNQUALIFIED_CLAIM`, with the
+specific refusals attached:
 
 | Field | Refused because |
 |---|---|
@@ -142,11 +145,59 @@ claim is recorded as `UNQUALIFIED_CLAIM` with the specific refusals attached:
 | `method` | an unnamed method cannot be audited or repeated |
 | `confidence ∈ [0,1]` | the existing contract at `rf_bridge.py:181` already demands it |
 | `symbol_rate_hz > 0` | **DIGITAL is claimable only on a symbol clock, never on spectral shape** |
-| `detection_statistic` | significance must be a number that can be thresholded and refuted |
 | `window_start` / `window_end` | a classification covers an interval; a frame is an instant |
 
 A detection falling outside its own verdict window is refused as `STALE_WINDOW`,
 so a verdict cannot drift forward onto detections it never analysed.
+
+### 3.2 The decision rule — evidence-shaped fields are not evidence
+
+The first cut of this gate demanded that a `detection_statistic` *exist* and
+stopped there. An external review of 2026-09-01 showed the hole precisely:
+
+```json
+{"family": "DIGITAL", "method": "anything.v1",
+ "confidence": 0.99, "detection_statistic": -999}
+```
+
+passed as DIGITAL. The statistic was present, so the gate was satisfied — and
+the statistic being present is not the statistic being significant.
+
+The registry, not the submitter, now owns the decision rule. A method must be
+**registered**, must be **validated**, and the claim must **pass that method's
+own rule**:
+
+| Field | Checked against the registry |
+|---|---|
+| `method` | must be a registered method — an arbitrary string has no decision rule |
+| `method_revision` | must match the pinned revision; a silently changed detector may not reuse a registration |
+| `detection_statistic` + `decision_threshold` | must reach the registered minimum; **a submitter may not lower the bar** |
+| `statistic_direction` | must match the registered sense; a submitter may not reverse the test |
+| `estimated_false_alarm_probability` | must not exceed the registered maximum |
+| `null_model` | must match — a statistic is significant only relative to the null it was measured against |
+| `sample_count` | must reach the registered minimum window |
+| `source_window_hash` | a verdict must be traceable to the samples that produced it |
+| `calibration_revision` | must match; an uncalibrated confidence is decorative |
+
+**Consequence, and the point of it.** `squared-envelope-cyclic.v1` is registered
+so its rule is fixed before anyone writes code that would prefer a looser one —
+but it is `REGISTERED_NOT_VALIDATED`, because Phase 3 has not run. No method is
+validated, so **live DIGITAL is unreachable in this build by the gate itself**,
+not by convention. Review item 7 — *validate false-digital behaviour before
+enabling any live DIGITAL result* — is enforced rather than documented.
+
+The status payload publishes `digital_reachable: false` with its reason, and the
+panel renders `DIGITAL VERDICT // UNREACHABLE` so a zero in the DIGITAL column
+is never mistaken for a quiet band.
+
+### 3.3 Support, not proof
+
+A significant cyclostationary feature is strong positive evidence for digital
+structure. It is not certainty: periodic analogue processes, interference,
+receiver artifacts, subcarriers and channelizer leakage can all produce apparent
+cyclic features. The positive outcome is therefore named
+`SYMBOL_CLOCK_LIKE_FEATURE` and reads *"DIGITAL STRUCTURE SUPPORTED, NOT
+PROVEN"*. Phase 3's corpus is what would make it trustworthy, not its name.
 
 Status payload declares its own limits, matching `claims_withheld` convention:
 
@@ -169,12 +220,13 @@ Shipped before any DSP. No IQ, no retention, no DSP risk.
 
 | File | |
 |---|---|
-| `rf_signal_family.py` | vocabulary, admission gate, declared absences |
+| `rf_signal_family.py` | vocabulary, method registry, decision rule, declared absences |
 | `rf_bridge.py` | store delegates to the gate; `classification_reasons` + `classifier` in `stats()` |
 | `scythe-web/rfClassificationOutcomes.js` | reason labels, classifier state, panel lines |
 | `scythe-web/nesdrSpectrumView.js` | classification line renders the reason, carries `data-classifier-state` |
 | `scythe-web/systemEvidenceTicker.js` | `RF CLASSIFIER //` line |
-| `test_rf_signal_family.py` · `scythe-web/rfClassificationOutcomes.test.js` | 12 + 7 tests |
+| `test_rf_signal_family.py` · `scythe-web/rfClassificationOutcomes.test.js` | 18 + 10 tests |
+| `.github/workflows/repository-hygiene.yml` | RF test/compile steps globbed so a new module joins CI by existing |
 
 The ticker line that prompted this scope now reads:
 
@@ -223,7 +275,63 @@ analogue. Start only after Phase 3 gives a clean operating point.
 
 ---
 
-## 5. Open questions for the operator
+## 5. Carried forward from the 2026-09-01 review
+
+Addressed in this pass: CI coverage (globbed, so it cannot recur), the
+registered-method/threshold/calibration contract (§3.2), support-not-proof
+phrasing (§3.3), and the broken `sandbox:` references in `docs/SparseSCYTHE.md`.
+
+Still open, and deliberately not done unilaterally:
+
+### 5.1 The bounded IQ ring needs a lifecycle, not just a size *(Phase 1)*
+
+The review is right that a size limit is not a boundary. Samples from two
+incompatible signal-chain regimes must never enter one classification window.
+Proposed contract, for sign-off with Q1 below:
+
+```python
+class BoundedIQRing:
+    def clear(self, reason): ...
+    def append(self, block): ...
+    def snapshot_for_channelizer(self, window): ...
+```
+
+Mandatory clear reasons: `RETUNE`, `SAMPLE_RATE_CHANGE`, `GAIN_CHANGE`,
+`DISCONNECT`, `RECONNECT`, `CAPTURE_OWNER_CHANGE`, `ORCHESTRATOR_STOP`,
+`CLOCK_DISCONTINUITY`. Memory-only, fixed-size, continuously overwritten, never
+serialized, never logged, never returned by a status API, excluded from crash
+dumps where practical. This aligns with `signal_chain_hash`: a ring that spans a
+retune is the same error as comparing products across antennas.
+
+### 5.2 DIGITAL/ANALOGUE is one axis doing four jobs *(before Phase 4)*
+
+"Digital" and "analogue" can each refer to the RF waveform, the information
+encoding, the baseband content, or the service. FM broadcast carries analogue
+audio *and* a digital RDS subcarrier; CPFSK is an FM-like waveform carrying
+digital symbols. Proposed internal model, with the three counters retained for
+compatibility:
+
+```
+MODULATION            AM_LIKE · FM_LIKE · FSK_LIKE · PSK_LIKE · QAM_LIKE
+                      · MULTICARRIER_LIKE · UNKNOWN
+INFORMATION STRUCTURE SYMBOL_CLOCK_DETECTED · NO_SYMBOL_CLOCK_DETECTED
+                      · CONSTANT_ENVELOPE_BLIND_SPOT · NOT_ATTEMPTED
+                      · INSUFFICIENT_EVIDENCE
+PROTOCOL              UNRESOLVED · CANDIDATE · CONFIRMED_BY_DECODER
+```
+
+This is a contract change to something shipped one commit ago and it interacts
+with Q1 and Q2, so it is proposed rather than applied.
+
+### 5.3 `docs/SparseSCYTHE.md` should become an ADR
+
+Links fixed and a references section added; the conversational structure is
+unchanged. Reducing 1,674 lines of design thinking to an ADR discards material,
+which is the author's call and not mine.
+
+---
+
+## 6. Open questions for the operator
 
 1. **Approve the bounded IQ ring** (§2.2)? First retention of raw IQ beyond one block.
 2. **256 ms default window** — accept 4.19 MB and 3.9 Hz α resolution?

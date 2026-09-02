@@ -164,12 +164,16 @@ class RFObservationStore:
     """Thread-safe, bounded store for significant spectral observations."""
 
     def __init__(self, maxlen: int = 2048, min_snr_db: float = 12.0,
-                 cooldown_s: float = 1.0, bucket_hz: float = 5_000.0):
+                 cooldown_s: float = 1.0, bucket_hz: float = 5_000.0,
+                 method_registry=None):
         self._items: Deque[RFObservation] = deque(maxlen=max(16, int(maxlen)))
         self._min_snr_db = float(min_snr_db)
         self._cooldown_s = max(0.0, float(cooldown_s))
         self._bucket_hz = max(1.0, float(bucket_hz))
         self._last_seen: Dict[tuple[str, int], float] = {}
+        # Which detectors this store will hear a family claim from. None means
+        # the shipped registry, in which no method has passed Phase 3.
+        self._method_registry = method_registry
         self._subscribers: list[Callable[[Dict[str, Any]], None]] = []
         self._lock = threading.RLock()
 
@@ -201,7 +205,8 @@ class RFObservationStore:
         # The admission gate lives in rf_signal_family so there is one contract
         # rather than one per caller. A refused claim keeps its reason.
         verdict = normalize_classification(
-            frame.get("signal_classification"), observed_at=observed_at)
+            frame.get("signal_classification"), observed_at=observed_at,
+            registry=self._method_registry)
         with self._lock:
             if observed_at - self._last_seen.get(key, float("-inf")) < self._cooldown_s:
                 return None
@@ -288,7 +293,7 @@ class RFObservationStore:
             # Why each unclassified detection is unclassified. A bare zero cannot
             # distinguish "nothing was there" from "nothing looked".
             "classification_reasons": {code: count for code, count in reasons.items() if count},
-            "classifier": classifier_status(),
+            "classifier": classifier_status(self._method_registry),
             "classification_scope": "bounded_retained_detection_events",
             "evidence_class": "OBSERVED",
             "raw_iq_exposed": False,

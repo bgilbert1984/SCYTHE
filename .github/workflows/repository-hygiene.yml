@@ -23,8 +23,11 @@ jobs:
           python-version: "3.12"
       - name: Install RF test dependencies
         run: python -m pip install numpy flask Flask-Cors PyJWT requests
-      - name: Run RF estimator and bridge tests
-        run: python -m unittest -v test_rf_sparse_analyzer.py test_rf_bridge.py test_rf_products.py test_rf_mcp.py test_graphops_rf_ingest.py
+      # Globbed on purpose. A hand-maintained list is how test_rf_signal_family,
+      # test_graphops_rf_antenna and test_graphops_rf_tune all shipped without CI
+      # coverage; a new test module now joins the run by existing.
+      - name: Run RF estimator, bridge and classifier tests
+        run: python -m unittest -v test_rf_*.py test_graphops_rf_*.py
 
   python-graphops:
     runs-on: ubuntu-latest
@@ -36,7 +39,7 @@ jobs:
       - name: Install GraphOps test dependencies
         run: python -m pip install numpy flask Flask-Cors PyJWT requests
       - name: Compile GraphOps Python modules
-        run: python -m compileall rf_sparse_analyzer.py rf_bridge.py rf_products.py rf_spectrum_contract.py rf_mcp.py graphops_rf_ingest.py graphops_full_fidelity.py scythe_orchestrator.py
+        run: python -m compileall -q rf_*.py graphops_rf_*.py rf_spectrum_contract.py graphops_full_fidelity.py scythe_orchestrator.py
       - name: Run GraphOps workbench tests
         run: python -m unittest -v test_graphops_workbench.py test_graphops_rf_ingest.py test_graphops_full_fidelity.py
 

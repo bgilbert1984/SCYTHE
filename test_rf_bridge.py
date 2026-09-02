@@ -6,10 +6,42 @@ import unittest
 
 import numpy as np
 
+from dataclasses import replace
+
 from rf_bridge import (
     IQFFTProcessor, RFBridgeConfig, RFObservationStore, RigctlClient,
     SDRPlusPlusBridge,
 )
+from rf_signal_family import METHOD_REGISTRY, POSITIVE_REASON_CODE
+
+# No shipped method is validated, so the admit path is only reachable through an
+# injected registry. Keeping it here rather than in rf_signal_family means the
+# production build has no validated entry to accidentally inherit.
+_VALIDATED = replace(
+    METHOD_REGISTRY["squared-envelope-cyclic.v1"],
+    method_revision="sha256:" + "a" * 64,
+    validation_status="VALIDATED",
+    validation_note="VALIDATED BY THE TEST CORPUS",
+    calibration_revision="rf-family-calibration-test",
+)
+VALIDATED_REGISTRY = {_VALIDATED.method_id: _VALIDATED}
+
+DIGITAL_CLAIM = {
+    "family": "DIGITAL",
+    "authority": "DERIVED_INFERENCE",
+    "method": _VALIDATED.method_id,
+    "method_revision": _VALIDATED.method_revision,
+    "confidence": 0.82,
+    "symbol_rate_hz": 9600.0,
+    "detection_statistic": 12.6,
+    "decision_threshold": 8.4,
+    "statistic_direction": "GREATER_IS_STRONGER",
+    "estimated_false_alarm_probability": 0.0004,
+    "null_model": "CHANNELIZED_NOISE_PLUS_NONCYCLIC_SIGNAL",
+    "sample_count": 524_288,
+    "source_window_hash": "sha256:" + "b" * 64,
+    "calibration_revision": "rf-family-calibration-test",
+}
 
 
 def _tone_bytes(config: RFBridgeConfig, offset_hz: float, amplitude: float = 0.7) -> bytes:
@@ -76,26 +108,44 @@ class RFBridgeTests(unittest.TestCase):
         self.assertEqual(len(store.query(frequency_hz=433_920_000, tolerance_hz=2_000)), 1)
         self.assertEqual(store.query(frequency_hz=100_000_000, tolerance_hz=2_000), [])
 
+        # The shipped registry validates no method, so the store cannot record a
+        # DIGITAL verdict however well evidenced the claim is. Injecting a
+        # validated registry exercises the admit path without shipping one.
+        store = RFObservationStore(maxlen=16, min_snr_db=10, cooldown_s=1, bucket_hz=1000,
+                                   method_registry=VALIDATED_REGISTRY)
+        store.ingest_frame(frame)
         classified = store.ingest_frame({**frame, "timestamp": 102.0, "sequence": 9,
-            "peak_frequency_hz": 433_925_000, "signal_classification": {
-                "family": "DIGITAL", "authority": "DERIVED_INFERENCE",
-                "method": "validated-test-classifier.v1", "confidence": 0.82,
-                "symbol_rate_hz": 9600.0, "detection_statistic": 11.4,
-                "window_start": 101.9, "window_end": 102.2}})
+            "peak_frequency_hz": 433_925_000,
+            "signal_classification": {**DIGITAL_CLAIM,
+                                      "window_start": 101.9, "window_end": 102.2}})
         self.assertEqual(classified["signal_family"], "DIGITAL")
         self.assertEqual(classified["classification_authority"], "DERIVED_INFERENCE")
-        self.assertEqual(classified["classification_reason_code"], "SYMBOL_CLOCK_DETECTED")
+        self.assertEqual(classified["classification_reason_code"], POSITIVE_REASON_CODE)
         self.assertEqual(classified["classification_symbol_rate_hz"], 9600.0)
         counts = store.stats()["signal_classifications"]
         self.assertEqual(counts, {"digital": 1, "analogue": 0, "unclassified": 1, "total": 2})
+
+    def test_the_shipped_store_cannot_record_a_digital_verdict(self):
+        """No method has passed Phase 3, so live DIGITAL is unreachable."""
+        store = RFObservationStore(min_snr_db=10, cooldown_s=0)
+        item = store.ingest_frame({
+            "timestamp": 100.0, "sequence": 1, "sensor_id": "edge-a",
+            "center_frequency_hz": 100_000_000, "peak_frequency_hz": 100_010_000,
+            "sample_rate_hz": 1_000_000, "peak_dbfs": -30, "noise_floor_dbfs": -55,
+            "signal_classification": {**DIGITAL_CLAIM, "window_start": 99.9,
+                                      "window_end": 100.2}})
+        self.assertEqual(item["signal_family"], "UNCLASSIFIED")
+        self.assertEqual(item["classification_reason_code"], "METHOD_NOT_VALIDATED")
+        classifier = store.stats()["classifier"]
+        self.assertFalse(classifier["digital_reachable"])
+        self.assertEqual(classifier["validated_methods"], [])
 
     def test_observation_store_refuses_unqualified_signal_family_claims(self):
         store = RFObservationStore(min_snr_db=10, cooldown_s=0)
         base = {"timestamp": 100.0, "sequence": 1, "sensor_id": "edge-a",
                 "center_frequency_hz": 100_000_000, "peak_frequency_hz": 100_010_000,
                 "sample_rate_hz": 1_000_000, "peak_dbfs": -30, "noise_floor_dbfs": -55}
-        qualified = {"authority": "DERIVED_INFERENCE", "method": "cyclo.v1", "confidence": 0.9,
-                     "symbol_rate_hz": 4800.0, "detection_statistic": 9.1}
+        qualified = {k: v for k, v in DIGITAL_CLAIM.items() if k != "family"}
         for index, classification in enumerate((
                 {"family": "DIGITAL", "authority": "OBSERVED", "method": "guess", "confidence": .9},
                 {"family": "DIGITAL", "authority": "DERIVED_INFERENCE", "method": "", "confidence": .9},
@@ -116,7 +166,7 @@ class RFBridgeTests(unittest.TestCase):
         reasons = stats["classification_reasons"]
         self.assertEqual(reasons.get("ANALOGUE_DETECTOR_NOT_IMPLEMENTED"), 1)
         self.assertEqual(reasons.get("UNQUALIFIED_CLAIM"), 4)
-        self.assertNotIn("SYMBOL_CLOCK_DETECTED", reasons)
+        self.assertNotIn(POSITIVE_REASON_CODE, reasons)
 
     def test_observation_stats_declare_the_absent_classifier(self):
         store = RFObservationStore(min_snr_db=10, cooldown_s=0)

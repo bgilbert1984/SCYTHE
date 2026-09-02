@@ -1,6 +1,8 @@
 The paper helps SCYTHE most as a methodology for evidence-qualified sparse recovery—not as permission to claim the NESDR has become a drone radar.
 
-The attached paper, [Multi-Target Micro-Motion Parameter Estimation using MIMO-FMCW Radar with Limited Measurements](sandbox:/workspace/scratch/1d0c0edc8832/upload/2608.05216v1.pdf), uses:
+The source paper — Rai, Alex and Chattopadhyay, [*Multi-Target Micro-Motion Parameter
+Estimation using MIMO-FMCW Radar with Limited Measurements*](https://arxiv.org/abs/2608.05216),
+arXiv:2608.05216 (5 August 2026) — uses:
 
 1. random measurement selection;
 2. bulk-component estimation and subtraction;
@@ -770,7 +772,9 @@ The central SPIFFI insight is:
 
 That produces a single-shot super-resolved frame while preserving fast biological motion that would otherwise blur across many exposures.
 
-The attached paper is [SPIFFI enables single-shot super-resolution and multidimensional imaging](sandbox:/workspace/scratch/1d0c0edc8832/upload/s41592-026-03196-6.pdf).
+The source paper is [*SPIFFI enables single-shot super-resolution and multidimensional
+imaging*](https://doi.org/10.1038/s41592-026-03196-6), Nature Methods,
+doi:10.1038/s41592-026-03196-6.
 
 ## What SPIFFI actually does
 
@@ -1672,3 +1676,21 @@ but its physical transmitter identity and location remain provisional.
 ```
 
 That is the bridge from spectrum display to genuine transmitter intelligence.
+
+---
+
+## References
+
+1. Rai, C., Alex, S. J., and Chattopadhyay, A. "Multi-Target Micro-Motion Parameter
+   Estimation using MIMO-FMCW Radar with Limited Measurements." arXiv:2608.05216
+   (5 August 2026). <https://arxiv.org/abs/2608.05216>
+2. "SPIFFI enables single-shot super-resolution and multidimensional imaging."
+   Nature Methods. <https://doi.org/10.1038/s41592-026-03196-6>
+
+> **Document status.** This file is conversation-derived design thinking, not an
+> engineering decision record. It is retained for its reasoning, but an external
+> review of 2026-09-01 correctly notes that its length and repetition make it weak
+> as repository documentation, and recommends reducing it to an ADR: *context ·
+> transferable method · non-transferable radar claims · estimator contract ·
+> validation matrix · promotion gates · open decisions · references.* That
+> restructure is not yet done.
