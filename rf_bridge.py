@@ -23,6 +23,10 @@ from typing import Any, Callable, Deque, Dict, Iterable, Optional
 
 import numpy as np
 
+from rf_signal_family import (
+    classifier_status, empty_reason_counts, normalize_classification,
+)
+
 
 LOG = logging.getLogger(__name__)
 
@@ -140,9 +144,15 @@ class RFObservation:
     noise_floor_dbfs: float
     snr_db: float
     signal_family: str = "UNCLASSIFIED"
+    # An unclassified detection says which nothing was found. NOT_ATTEMPTED and
+    # NO_SYMBOL_CLOCK are different claims about the same zero.
+    classification_reason_code: str = "NOT_ATTEMPTED"
     classification_authority: str = "UNCLASSIFIED"
     classification_method: Optional[str] = None
     classification_confidence: Optional[float] = None
+    classification_symbol_rate_hz: Optional[float] = None
+    classification_window_start: Optional[float] = None
+    classification_window_end: Optional[float] = None
     evidence_class: str = "OBSERVED"
     source: str = "sdrpp_iq_exporter"
 
@@ -188,27 +198,10 @@ class RFObservationStore:
         sensor_id = str(frame.get("sensor_id", "unknown"))
         bucket = int(round(frequency / self._bucket_hz))
         key = (sensor_id, bucket)
-        classification = frame.get("signal_classification")
-        signal_family = "UNCLASSIFIED"
-        classification_authority = "UNCLASSIFIED"
-        classification_method = None
-        classification_confidence = None
-        if isinstance(classification, dict):
-            candidate = str(classification.get("family") or "").strip().upper()
-            if candidate == "ANALOG":
-                candidate = "ANALOGUE"
-            authority = str(classification.get("authority") or "").strip().upper()
-            try:
-                confidence = float(classification.get("confidence"))
-            except (TypeError, ValueError):
-                confidence = float("nan")
-            method = str(classification.get("method") or "").strip()
-            if (candidate in {"DIGITAL", "ANALOGUE"} and authority == "DERIVED_INFERENCE"
-                    and math.isfinite(confidence) and 0.0 <= confidence <= 1.0 and method):
-                signal_family = candidate
-                classification_authority = authority
-                classification_method = method[:96]
-                classification_confidence = round(confidence, 4)
+        # The admission gate lives in rf_signal_family so there is one contract
+        # rather than one per caller. A refused claim keeps its reason.
+        verdict = normalize_classification(
+            frame.get("signal_classification"), observed_at=observed_at)
         with self._lock:
             if observed_at - self._last_seen.get(key, float("-inf")) < self._cooldown_s:
                 return None
@@ -229,10 +222,14 @@ class RFObservationStore:
                 peak_dbfs=peak,
                 noise_floor_dbfs=floor,
                 snr_db=snr,
-                signal_family=signal_family,
-                classification_authority=classification_authority,
-                classification_method=classification_method,
-                classification_confidence=classification_confidence,
+                signal_family=verdict.family,
+                classification_reason_code=verdict.reason_code,
+                classification_authority=verdict.authority,
+                classification_method=verdict.method,
+                classification_confidence=verdict.confidence,
+                classification_symbol_rate_hz=verdict.symbol_rate_hz,
+                classification_window_start=verdict.window_start,
+                classification_window_end=verdict.window_end,
                 # A frame submitted over the ingest API was not produced by this
                 # bridge and must not inherit the IQ exporter's source label.
                 source=str(frame.get("observation_origin") or "sdrpp_iq_exporter").lower(),
@@ -276,15 +273,22 @@ class RFObservationStore:
         with self._lock:
             items = list(self._items)
         classifications = {"digital": 0, "analogue": 0, "unclassified": 0}
+        reasons = empty_reason_counts()
         for item in items:
             key = item.signal_family.lower()
             classifications[key if key in classifications else "unclassified"] += 1
+            code = item.classification_reason_code
+            reasons[code if code in reasons else "UNQUALIFIED_CLAIM"] += 1
         return {
             "count": len(items),
             "capacity": self._items.maxlen,
             "min_snr_db": self._min_snr_db,
             "latest_observed_at": items[-1].observed_at if items else None,
             "signal_classifications": {**classifications, "total": len(items)},
+            # Why each unclassified detection is unclassified. A bare zero cannot
+            # distinguish "nothing was there" from "nothing looked".
+            "classification_reasons": {code: count for code, count in reasons.items() if count},
+            "classifier": classifier_status(),
             "classification_scope": "bounded_retained_detection_events",
             "evidence_class": "OBSERVED",
             "raw_iq_exposed": False,

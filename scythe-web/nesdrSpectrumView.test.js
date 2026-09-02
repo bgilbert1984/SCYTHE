@@ -90,6 +90,37 @@ test("the panel offers no gain control and says why", () => {
   assert.ok(!labels.some((label) => /gain/i.test(label)), "no gain control may exist");
 });
 
+test("a zero detection count is never shown without the reason it is zero", () => {
+  const {view} = makeView();
+  view.state.status = {observations: {
+    signal_classifications: {digital: 0, analogue: 0, unclassified: 4, total: 4},
+    classification_reasons: {NOT_ATTEMPTED: 4},
+    classifier: {state: "NOT_IMPLEMENTED", contract_phase: "0",
+                 state_note: "PHASE 0 SHIPS THE EVIDENCE CONTRACT ONLY.",
+                 analogue_detector: "NOT_IMPLEMENTED",
+                 analogue_detector_note: "ANALOGUE REQUIRES A POSITIVE DETECTOR.",
+                 reason_codes: {}, claims_withheld: ["analogue_family"]},
+  }};
+  view.render();
+  const text = view.classificationLine.textContent;
+  assert.match(text, /DIGITAL 0 · ANALOGUE 0 · UNCLASSIFIED 4/);
+  assert.match(text, /CLASSIFIER STATE \/\/ NOT_IMPLEMENTED/);
+  assert.match(text, /ANALOGUE DETECTOR \/\/ NOT_IMPLEMENTED/);
+  assert.match(text, /UNCLASSIFIED BECAUSE \/\/ NO CLASSIFIER RAN 4/);
+  assert.equal(view.classificationLine.attributes.get("data-classifier-state"), "NOT_IMPLEMENTED");
+});
+
+test("an undeclared classifier is stated, never rendered as a working one", () => {
+  const {view} = makeView();
+  view.state.status = {observations: {
+    signal_classifications: {digital: 0, analogue: 0, unclassified: 0, total: 0}}};
+  view.render();
+  const text = view.classificationLine.textContent;
+  assert.match(text, /CLASSIFIER STATE \/\/ UNDECLARED/);
+  assert.match(text, /MISSING FIELD, NOT A CLASSIFIER THAT RAN/);
+  assert.equal(view.classificationLine.attributes.get("data-classifier-state"), "UNDECLARED");
+});
+
 test("a tune click posts a proposal and never an execution", async () => {
   const seen = [];
   const {root, view} = makeView({tuneResponse: PROPOSED, onTuneRequest: (call) => seen.push(call)});

@@ -13,6 +13,9 @@
  */
 
 import {
+  classificationOutcomeLines, deriveClassifierState, deriveOutcomeBreakdown,
+} from "./rfClassificationOutcomes.js";
+import {
   HEALTH, deriveClassificationSummary, deriveHardwareHealth, deriveIdentity,
   deriveSparseRail, deriveSpectrumFrame, deriveTuningRegime, formatHz, sensorAnchorNotice,
 } from "./nesdrSpectrumModel.js";
@@ -685,12 +688,14 @@ export class NesdrSpectrumView {
   }
 
   #renderClassification(status) {
+    // The zeros carry their own reason. An unclassified detection is only
+    // informative once the panel says whether anything looked at it.
     const summary = deriveClassificationSummary(status);
-    this.classificationLine.textContent = summary.available
-      ? `RF DETECTIONS // DIGITAL ${summary.digital} · ANALOGUE ${summary.analogue} · `
-        + `UNCLASSIFIED ${summary.unclassified} · RETAINED EVENTS ${summary.total}\n`
-        + `${summary.note} · A FAMILY INFERENCE DOES NOT REPLACE AN ESTIMATOR OUTCOME`
-      : `RF DETECTIONS // ${summary.note}`;
+    const classifier = deriveClassifierState(status);
+    const breakdown = deriveOutcomeBreakdown(status);
+    this.classificationLine.setAttribute("data-classifier-state", classifier.state);
+    this.classificationLine.textContent =
+      classificationOutcomeLines(summary, classifier, breakdown).join("\n");
   }
 
   #renderAnchor() {

@@ -1,3 +1,4 @@
+import { deriveClassifierState, deriveOutcomeBreakdown } from "./rfClassificationOutcomes.js";
 export const sanitizeTickerText = (value, fallback = "UNKNOWN", limit = 120) => {
   const result = String(value ?? "").replace(/[\u0000-\u001f\u007f]+/g, " ").replace(/\s+/g, " ").trim();
   return (result || fallback).slice(0, limit);
@@ -46,10 +47,17 @@ export function tickerItemsFromRfStatus(payload, {statusObservedAt = null} = {})
   const sparseState = sanitizeTickerText(products.sparse_supports?.state, "UNAVAILABLE", 20).toUpperCase();
   const classifications = payload?.observations?.signal_classifications;
   const count = (name) => Math.max(0, Number(classifications?.[name]) || 0);
+  // A detection count means nothing until the reader knows whether a classifier
+  // ran. Phase 0 ships the contract, not the detector, and says so.
+  const classifier = deriveClassifierState(payload);
+  const breakdown = deriveOutcomeBreakdown(payload)
+    .map((row) => `${row.label} ${row.count}`).join(" · ");
   return [
     `RF RECEIVER // ${sanitizeTickerText(config.sensor_id, "UNNAMED SENSOR", 80)} · ${sanitizeTickerText(bridge.bridge_state).toUpperCase()} · IQ ${bridge.iq_connected ? "CONNECTED" : "DISCONNECTED"}`,
     `RF PRODUCTS // FFT ${fftState} · SPARSE EVENTS ${sparseState} · RAW IQ LOCAL ONLY`,
     classifications ? `RF DETECTIONS // DIGITAL ${count("digital")} · ANALOGUE ${count("analogue")} · UNCLASSIFIED ${count("unclassified")} · RETAINED EVENTS ${count("total")}` : "RF DETECTIONS // COUNTS UNAVAILABLE",
+    `RF CLASSIFIER // ${classifier.state} · ANALOGUE DETECTOR ${classifier.analogueDetector}`
+      + (breakdown ? ` · UNCLASSIFIED BECAUSE ${breakdown}` : ""),
     `RF TUNING // ${Number.isFinite(frequency) ? `${(frequency / 1e6).toFixed(3)} MHz` : "UNAVAILABLE"} · ${Number.isFinite(sampleRate) ? `${(sampleRate / 1e6).toFixed(3)} MS/s` : "RATE UNAVAILABLE"}`,
     `RF FRESHNESS // STATUS POLLED ${statusObservedAt ? new Date(statusObservedAt).toISOString() : "UNAVAILABLE"} · LAST FFT FRAME ${sanitizeTickerText(bridge.latest_frame_at, "UNAVAILABLE", 40)}`,
   ];

@@ -79,9 +79,13 @@ class RFBridgeTests(unittest.TestCase):
         classified = store.ingest_frame({**frame, "timestamp": 102.0, "sequence": 9,
             "peak_frequency_hz": 433_925_000, "signal_classification": {
                 "family": "DIGITAL", "authority": "DERIVED_INFERENCE",
-                "method": "validated-test-classifier.v1", "confidence": 0.82}})
+                "method": "validated-test-classifier.v1", "confidence": 0.82,
+                "symbol_rate_hz": 9600.0, "detection_statistic": 11.4,
+                "window_start": 101.9, "window_end": 102.2}})
         self.assertEqual(classified["signal_family"], "DIGITAL")
         self.assertEqual(classified["classification_authority"], "DERIVED_INFERENCE")
+        self.assertEqual(classified["classification_reason_code"], "SYMBOL_CLOCK_DETECTED")
+        self.assertEqual(classified["classification_symbol_rate_hz"], 9600.0)
         counts = store.stats()["signal_classifications"]
         self.assertEqual(counts, {"digital": 1, "analogue": 0, "unclassified": 1, "total": 2})
 
@@ -90,15 +94,51 @@ class RFBridgeTests(unittest.TestCase):
         base = {"timestamp": 100.0, "sequence": 1, "sensor_id": "edge-a",
                 "center_frequency_hz": 100_000_000, "peak_frequency_hz": 100_010_000,
                 "sample_rate_hz": 1_000_000, "peak_dbfs": -30, "noise_floor_dbfs": -55}
+        qualified = {"authority": "DERIVED_INFERENCE", "method": "cyclo.v1", "confidence": 0.9,
+                     "symbol_rate_hz": 4800.0, "detection_statistic": 9.1}
         for index, classification in enumerate((
                 {"family": "DIGITAL", "authority": "OBSERVED", "method": "guess", "confidence": .9},
-                {"family": "ANALOGUE", "authority": "DERIVED_INFERENCE", "method": "", "confidence": .9},
-                {"family": "ALIEN", "authority": "DERIVED_INFERENCE", "method": "x", "confidence": .9})):
+                {"family": "DIGITAL", "authority": "DERIVED_INFERENCE", "method": "", "confidence": .9},
+                {"family": "ALIEN", "authority": "DERIVED_INFERENCE", "method": "x", "confidence": .9},
+                # A well-formed ANALOGUE claim is still refused: no positive
+                # analogue detector exists, so the family is unreachable.
+                {**qualified, "family": "ANALOGUE", "window_start": 102.5, "window_end": 103.5},
+                # Spectral shape is not a symbol clock.
+                {**{k: v for k, v in qualified.items() if k != "symbol_rate_hz"},
+                 "family": "DIGITAL", "method": "spectral-flatness",
+                 "window_start": 103.5, "window_end": 104.5})):
             item = store.ingest_frame({**base, "timestamp": 100 + index,
                 "sequence": index + 1, "peak_frequency_hz": 100_010_000 + index * 5_000,
                 "signal_classification": classification})
             self.assertEqual(item["signal_family"], "UNCLASSIFIED")
-        self.assertEqual(store.stats()["signal_classifications"]["unclassified"], 3)
+        stats = store.stats()
+        self.assertEqual(stats["signal_classifications"]["unclassified"], 5)
+        reasons = stats["classification_reasons"]
+        self.assertEqual(reasons.get("ANALOGUE_DETECTOR_NOT_IMPLEMENTED"), 1)
+        self.assertEqual(reasons.get("UNQUALIFIED_CLAIM"), 4)
+        self.assertNotIn("SYMBOL_CLOCK_DETECTED", reasons)
+
+    def test_observation_stats_declare_the_absent_classifier(self):
+        store = RFObservationStore(min_snr_db=10, cooldown_s=0)
+        classifier = store.stats()["classifier"]
+        self.assertEqual(classifier["state"], "NOT_IMPLEMENTED")
+        self.assertEqual(classifier["analogue_detector"], "NOT_IMPLEMENTED")
+        self.assertEqual(classifier["claimable_families"], ["DIGITAL"])
+        self.assertEqual(classifier["reserved_families"], ["ANALOGUE"])
+        self.assertIn("analogue_family", classifier["claims_withheld"])
+        self.assertFalse(classifier["raw_iq_exposed"])
+        self.assertEqual(store.stats()["classification_reasons"], {})
+
+    def test_detector_may_report_which_nothing_it_found(self):
+        store = RFObservationStore(min_snr_db=10, cooldown_s=0)
+        item = store.ingest_frame({
+            "timestamp": 100.0, "sequence": 1, "sensor_id": "edge-a",
+            "center_frequency_hz": 100_000_000, "peak_frequency_hz": 100_010_000,
+            "sample_rate_hz": 1_000_000, "peak_dbfs": -30, "noise_floor_dbfs": -55,
+            "signal_classification": {"reason_code": "CONSTANT_ENVELOPE"}})
+        self.assertEqual(item["signal_family"], "UNCLASSIFIED")
+        self.assertEqual(item["classification_reason_code"], "CONSTANT_ENVELOPE")
+        self.assertEqual(store.stats()["classification_reasons"], {"CONSTANT_ENVELOPE": 1})
 
     def test_fft_processor_preserves_alignment_and_locates_peak(self):
         config = RFBridgeConfig(

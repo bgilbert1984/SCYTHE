@@ -1,6 +1,6 @@
 # RF Signal Family Classifier — Scope
 
-**Status:** proposed, not implemented
+**Status:** Phase 0 implemented 2026-09-01 · Phases 1–4 proposed, not implemented
 **Consumes:** `signal_classification` at `rf_bridge.py:181` (gate already exists and is strict)
 **Governs:** `RF DETECTIONS // DIGITAL n · ANALOGUE n · UNCLASSIFIED n`
 
@@ -98,23 +98,55 @@ occupied bandwidth around the peak, digitally downconvert, low-pass, decimate.
 
 ---
 
-## 3. Outcome vocabulary
+## 3. Outcome vocabulary — **shipped**, `rf_signal_family.py`
 
 Mirrors the sparse analyzer's `NULL_OUTCOMES` precedent — a null result is
-rendered, never blanked.
+rendered, never blanked — but restructured as **a small stable family plus a
+reason code**, which is the shape `docs/SparseSCYTHE.md` argues for over an
+ever-growing flat enumeration. The three counters stay compatible; the reason
+carries the detail.
 
 ```
-NOT_ATTEMPTED           classifier disabled or never ran
-INSUFFICIENT_WINDOW     fewer samples than the configured window
-CHANNELIZATION_FAILED   occupied bandwidth not estimable at this SNR
-NO_SYMBOL_CLOCK         ran, found no significant cyclic feature
-CONSTANT_ENVELOPE       envelope variation below the test's floor — the known
-                        blind spot; DIGITAL and ANALOGUE both remain possible
-NOISE_COMPATIBLE        consistent with noise alone
-DIGITAL                 significant cyclic feature + symbol-rate estimate
+family       DIGITAL | ANALOGUE | UNCLASSIFIED     ← the three counters
+reason_code  why this detection landed where it did
 ```
 
-`ANALOGUE` is reserved and unreachable in v1.
+```
+NOT_ATTEMPTED                      no classifier ran over this detection
+INSUFFICIENT_WINDOW                fewer samples than the configured window
+CHANNELIZATION_FAILED              occupied bandwidth not estimable at this SNR
+NO_SYMBOL_CLOCK                    ran, found no significant cyclic feature
+CONSTANT_ENVELOPE                  envelope variation below the test's floor —
+                                   the known blind spot; DIGITAL and ANALOGUE
+                                   both remain possible
+NOISE_COMPATIBLE                   consistent with noise alone
+STALE_WINDOW                       the verdict window does not cover this detection
+ANALOGUE_DETECTOR_NOT_IMPLEMENTED  a well-formed ANALOGUE claim, refused
+UNQUALIFIED_CLAIM                  a family claim without the required evidence
+SYMBOL_CLOCK_DETECTED              the only route to DIGITAL
+```
+
+`ANALOGUE` is reserved and unreachable in v1: `CLAIMABLE_FAMILIES == ("DIGITAL",)`,
+and a fully evidenced ANALOGUE claim is refused on the family alone, before any
+other check. A detector that ran and concluded nothing may submit its own null
+reason code; it may **not** choose the reason for a DIGITAL verdict.
+
+### 3.1 What a DIGITAL claim must carry
+
+The gate is the contract a Phase 2 detector has to satisfy. All seven or the
+claim is recorded as `UNQUALIFIED_CLAIM` with the specific refusals attached:
+
+| Field | Refused because |
+|---|---|
+| `authority == DERIVED_INFERENCE` | a family is reasoned to, never observed |
+| `method` | an unnamed method cannot be audited or repeated |
+| `confidence ∈ [0,1]` | the existing contract at `rf_bridge.py:181` already demands it |
+| `symbol_rate_hz > 0` | **DIGITAL is claimable only on a symbol clock, never on spectral shape** |
+| `detection_statistic` | significance must be a number that can be thresholded and refuted |
+| `window_start` / `window_end` | a classification covers an interval; a frame is an instant |
+
+A detection falling outside its own verdict window is refused as `STALE_WINDOW`,
+so a verdict cannot drift forward onto detections it never analysed.
 
 Status payload declares its own limits, matching `claims_withheld` convention:
 
@@ -131,10 +163,32 @@ Status payload declares its own limits, matching `claims_withheld` convention:
 
 ## 4. Phases
 
-### Phase 0 — Evidence contract and null outcomes *(~0.5 day)*
-Outcome vocabulary, status payload, ticker copy. **Ships before any DSP** and
-immediately upgrades the ticker from a bare `0` to a stated reason. No IQ, no
-retention, no risk.
+### Phase 0 — Evidence contract and null outcomes — **DONE**
+Outcome vocabulary, admission gate, status payload, panel and ticker copy.
+Shipped before any DSP. No IQ, no retention, no DSP risk.
+
+| File | |
+|---|---|
+| `rf_signal_family.py` | vocabulary, admission gate, declared absences |
+| `rf_bridge.py` | store delegates to the gate; `classification_reasons` + `classifier` in `stats()` |
+| `scythe-web/rfClassificationOutcomes.js` | reason labels, classifier state, panel lines |
+| `scythe-web/nesdrSpectrumView.js` | classification line renders the reason, carries `data-classifier-state` |
+| `scythe-web/systemEvidenceTicker.js` | `RF CLASSIFIER //` line |
+| `test_rf_signal_family.py` · `scythe-web/rfClassificationOutcomes.test.js` | 12 + 7 tests |
+
+The ticker line that prompted this scope now reads:
+
+```
+RF DETECTIONS // DIGITAL 0 · ANALOGUE 0 · UNCLASSIFIED 0 · RETAINED EVENTS 0
+CLASSIFIER STATE // NOT_IMPLEMENTED · PHASE 0 SHIPS THE EVIDENCE CONTRACT ONLY.
+  NO CHANNELIZER AND NO SYMBOL-CLOCK DETECTOR ARE RUNNING, SO EVERY RETAINED
+  DETECTION IS UNCLASSIFIED BY CONSTRUCTION AND NOT BY MEASUREMENT.
+ANALOGUE DETECTOR // NOT_IMPLEMENTED · ANALOGUE REQUIRES A POSITIVE DETECTOR...
+```
+
+An undeclared classifier block renders as `UNDECLARED`, never as a working one:
+a build that forgets to declare its classifier must not read as a build that has
+one.
 
 ### Phase 1 — Channelizer *(~1–2 days)*
 Occupied-bandwidth estimate (99% power or −20 dB) around a detection peak; DDC,
@@ -173,5 +227,5 @@ analogue. Start only after Phase 3 gives a clean operating point.
 
 1. **Approve the bounded IQ ring** (§2.2)? First retention of raw IQ beyond one block.
 2. **256 ms default window** — accept 4.19 MB and 3.9 Hz α resolution?
-3. **Ship Phase 0 alone first?** It makes the zeros self-explanatory with no DSP risk.
+3. ~~**Ship Phase 0 alone first?**~~ **Done 2026-09-01.**
 4. **False-DIGITAL gate at <0.1% on noise** — right threshold, or stricter?

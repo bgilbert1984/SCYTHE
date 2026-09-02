@@ -258,6 +258,11 @@
     .nesdr__resolution,.nesdr__freshness,.nesdr__classification,.nesdr__anchor {
       white-space:pre-wrap; color:#7f9aab; font-size:8px; line-height:1.45; }
     .nesdr__anchor { border-top:1px solid #1e3b48; padding-top:3px; color:#5d7686; }
+    /* A classifier that is not running is a declared absence, not a quiet band.
+       Mark it so the zeros beside it are read as unexamined, not as empty. */
+    .nesdr__classification[data-classifier-state="NOT_IMPLEMENTED"],
+    .nesdr__classification[data-classifier-state="UNDECLARED"] {
+      border-left:2px solid #6b5a2b; padding-left:5px; color:#93866a; }
     .nesdr__health { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:2px; }
     .nesdr__health-row { display:flex; flex-wrap:wrap; gap:4px; align-items:baseline;
       padding:2px 4px; border-left:2px solid #2b4757; background:#07161e; }
