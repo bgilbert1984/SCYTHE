@@ -1688,9 +1688,22 @@ That is the bridge from spectrum display to genuine transmitter intelligence.
    Nature Methods. <https://doi.org/10.1038/s41592-026-03196-6>
 
 > **Document status.** This file is conversation-derived design thinking, not an
-> engineering decision record. It is retained for its reasoning, but an external
-> review of 2026-09-01 correctly notes that its length and repetition make it weak
-> as repository documentation, and recommends reducing it to an ADR: *context ·
-> transferable method · non-transferable radar claims · estimator contract ·
-> validation matrix · promotion gates · open decisions · references.* That
-> restructure is not yet done.
+> engineering decision record. It braids three separate decisions together — RF
+> sparse estimation, polarimetric imaging, and RF emission tracking — and its
+> length and repetition make it weak as repository documentation.
+>
+> It has been condensed into [`docs/adr/`](adr/README.md) as three ADRs, split
+> along its own seams:
+>
+> - [ADR 0001](adr/0001-sparse-recovery-validation.md) — sparse recovery is
+>   validated before it is believed
+> - [ADR 0002](adr/0002-polarimetric-channel-diversity.md) — channel diversity is
+>   physical, never synthetic
+> - [ADR 0003](adr/0003-rf-emission-tracking-hierarchy.md) — detection, track,
+>   transmitter and location are four layers
+>
+> **This file is retained, not superseded.** Compression loses nuance; where an
+> ADR and this document disagree in detail, this document is the record of what
+> was actually reasoned. Read an ADR for the decision, and read here for the
+> argument, the worked examples, the layouts and the material the summary
+> dropped.

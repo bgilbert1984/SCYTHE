@@ -39,6 +39,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import math
+import re
 from typing import Any, Dict, Mapping, Optional, Tuple
 
 
@@ -75,6 +76,26 @@ MAX_METHOD_LENGTH = 96
 
 VALIDATION_STATUSES: Tuple[str, ...] = ("VALIDATED", "REGISTERED_NOT_VALIDATED")
 STATISTIC_DIRECTIONS: Tuple[str, ...] = ("GREATER_IS_STRONGER", "LESS_IS_STRONGER")
+
+# A window hash must be an algorithm-qualified digest of the declared length. A
+# bare non-empty string is not a hash: it cannot be recomputed, so it cannot tie
+# a verdict to the samples that produced it.
+DIGEST_LENGTHS: Dict[str, int] = {"sha256": 64, "sha384": 96, "sha512": 128, "blake2s": 64}
+_DIGEST_PATTERN = re.compile(r"^([a-z0-9][a-z0-9_-]{1,15}):([0-9a-f]+)$")
+
+# Where a family claim may come from. Classifications are computed inside the
+# bridge process beside the IQ; they are not ingestible over HTTP, and
+# graphops_rf_ingest.ALLOWED_FIELDS deliberately excludes the field. A statistic
+# and its false-alarm probability must be produced by the registered detector,
+# never accepted from a caller that merely asserts them.
+CLASSIFICATION_TRUST = "BRIDGE_LOCAL_DETECTOR_ONLY"
+CLASSIFICATION_TRUST_NOTE = (
+    "A FAMILY CLAIM IS COMPUTED IN THE BRIDGE PROCESS BESIDE THE IQ. IT IS NOT "
+    "ACCEPTED OVER THE OBSERVATION INGEST API, WHERE signal_classification IS AN "
+    "UNKNOWN FIELD AND THE FRAME IS REJECTED. A DETECTION STATISTIC AND ITS "
+    "FALSE-ALARM PROBABILITY MUST BE MEASURED BY THE REGISTERED DETECTOR, NEVER "
+    "ASSERTED BY A CALLER."
+)
 
 
 @dataclass(frozen=True)
@@ -329,12 +350,35 @@ def _check_decision_rule(claim: Mapping[str, Any], entry: RegisteredMethod) -> l
         failures.append(
             f"CALIBRATION REVISION MUST BE {entry.calibration_revision}")
 
-    if not _text(claim.get("source_window_hash")):
-        failures.append(
-            "SOURCE WINDOW HASH IS REQUIRED — A VERDICT MUST BE TRACEABLE TO THE "
-            "SAMPLES THAT PRODUCED IT")
+    failures.extend(_check_window_hash(claim.get("source_window_hash")))
 
     return failures
+
+
+def _check_window_hash(value: Any) -> list[str]:
+    """A verdict must be traceable to the samples that produced it.
+
+    Shape only, at this phase. There is no window record to bind against until
+    Phase 1 owns an IQ ring; when there is, this should also confirm the digest
+    matches a window the bridge actually retained.
+    """
+    text = _text(value)
+    if not text:
+        return ["SOURCE WINDOW HASH IS REQUIRED — A VERDICT MUST BE TRACEABLE TO THE "
+                "SAMPLES THAT PRODUCED IT"]
+    match = _DIGEST_PATTERN.match(text)
+    if match is None:
+        return ["SOURCE WINDOW HASH MUST BE AN ALGORITHM-QUALIFIED LOWERCASE HEX "
+                "DIGEST, AS IN sha256:<hex> — A BARE STRING CANNOT BE RECOMPUTED"]
+    algorithm, digest = match.group(1), match.group(2)
+    expected = DIGEST_LENGTHS.get(algorithm)
+    if expected is None:
+        return [f"SOURCE WINDOW HASH ALGORITHM {algorithm} IS NOT RECOGNISED — "
+                f"EXPECTED ONE OF {sorted(DIGEST_LENGTHS)}"]
+    if len(digest) != expected:
+        return [f"SOURCE WINDOW HASH FOR {algorithm} MUST BE {expected} HEX "
+                f"CHARACTERS, RECEIVED {len(digest)}"]
+    return []
 
 
 def normalize_classification(claim: Any, *, observed_at: Optional[float] = None,
@@ -476,6 +520,9 @@ def classifier_status(registry: Optional[Mapping[str, RegisteredMethod]] = None)
             "A DIGITAL VERDICT REQUIRES A REGISTERED METHOD THAT HAS PASSED PHASE 3 "
             "VALIDATION. NONE HAS. LIVE DIGITAL IS UNREACHABLE IN THIS BUILD."
         ) if not validated else None,
+        "classification_trust": CLASSIFICATION_TRUST,
+        "classification_trust_note": CLASSIFICATION_TRUST_NOTE,
+        "window_hash_algorithms": sorted(DIGEST_LENGTHS),
         "analogue_detector": ANALOGUE_DETECTOR,
         "analogue_detector_note": ANALOGUE_DETECTOR_NOTE,
         "claims_withheld": list(CLAIMS_WITHHELD),

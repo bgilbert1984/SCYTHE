@@ -42,6 +42,31 @@ class ObservationOriginTests(unittest.TestCase):
         self.assertEqual(observation["source"], "operator_synthetic")
         self.assertNotEqual(observation["source"], "sdrpp_iq_exporter")
 
+    def test_a_family_claim_is_not_ingestible_over_the_observation_api(self):
+        """A classification is computed beside the IQ, never asserted by a caller.
+
+        A remote caller that could attach signal_classification would be
+        supplying its own detection statistic and false-alarm probability, which
+        is exactly the evidence the registry exists to own.
+        """
+        from graphops_rf_ingest import ALLOWED_FIELDS
+        from rf_signal_family import CLASSIFICATION_TRUST
+        self.assertNotIn("signal_classification", ALLOWED_FIELDS)
+        for smuggled in ("signal_classification", "detection_statistic",
+                         "estimated_false_alarm_probability", "symbol_rate_hz",
+                         "source_window_hash", "signal_family"):
+            with self.assertRaises(ValueError) as caught:
+                validate_measured_rf_frame({**_frame(), smuggled: {"family": "DIGITAL"}})
+            self.assertIn(smuggled, str(caught.exception))
+        self.assertEqual(CLASSIFICATION_TRUST, "BRIDGE_LOCAL_DETECTOR_ONLY")
+
+    def test_an_ingested_frame_is_recorded_as_never_classified(self):
+        store = RFObservationStore(min_snr_db=1.0, cooldown_s=0.0)
+        item = ingest_measured_rf(store, validate_measured_rf_frame(_frame()))
+        observation = item.get("observation") or item
+        self.assertEqual(observation["signal_family"], "UNCLASSIFIED")
+        self.assertEqual(observation["classification_reason_code"], "NOT_ATTEMPTED")
+
     def test_an_unrecognised_origin_is_refused_rather_than_coerced(self):
         with self.assertRaisesRegex(ValueError, "observation_origin must be one of"):
             validate_measured_rf_frame({**_frame(), "observation_origin": "MEASURED_BY_HARDWARE"})

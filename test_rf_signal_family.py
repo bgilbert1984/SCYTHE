@@ -144,6 +144,27 @@ class SignalFamilyContractTests(unittest.TestCase):
             self.assertEqual(verdict.reason_code, "DECISION_RULE_NOT_MET", name)
             self.assertTrue(any(fragment in reason for reason in verdict.refusals), name)
 
+    def test_a_window_hash_must_be_a_recomputable_digest_not_a_bare_string(self):
+        """A verdict must be traceable to the samples that produced it."""
+        for bad in ("yes", "deadbeef", "sha256:" + "b" * 63, "sha256:" + "B" * 64,
+                    "md5:" + "a" * 32, "sha256:", "  "):
+            verdict = admit(source_window_hash=bad)
+            self.assertEqual(verdict.reason_code, "DECISION_RULE_NOT_MET", bad)
+            self.assertTrue(any("SOURCE WINDOW HASH" in r for r in verdict.refusals), bad)
+        for good in ("sha256:" + "b" * 64, "sha512:" + "c" * 128, "blake2s:" + "d" * 64):
+            self.assertEqual(admit(source_window_hash=good).family, "DIGITAL", good)
+
+    def test_a_family_claim_is_bridge_local_and_not_ingestible(self):
+        """The statistic must be measured by the detector, not asserted by a caller."""
+        from graphops_rf_ingest import ALLOWED_FIELDS
+        status = classifier_status()
+        self.assertEqual(status["classification_trust"], "BRIDGE_LOCAL_DETECTOR_ONLY")
+        self.assertIn("NOT ACCEPTED OVER THE OBSERVATION INGEST API",
+                      status["classification_trust_note"])
+        self.assertNotIn("signal_classification", ALLOWED_FIELDS)
+        self.assertEqual(status["window_hash_algorithms"],
+                         ["blake2s", "sha256", "sha384", "sha512"])
+
     def test_an_uncalibrated_confidence_is_refused_as_decorative(self):
         uncalibrated = {VALIDATED.method_id: replace(VALIDATED, calibration_revision=None)}
         verdict = normalize_classification(QUALIFIED, registry=uncalibrated)

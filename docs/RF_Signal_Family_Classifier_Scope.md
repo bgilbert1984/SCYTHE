@@ -176,7 +176,7 @@ own rule**:
 | `estimated_false_alarm_probability` | must not exceed the registered maximum |
 | `null_model` | must match — a statistic is significant only relative to the null it was measured against |
 | `sample_count` | must reach the registered minimum window |
-| `source_window_hash` | a verdict must be traceable to the samples that produced it |
+| `source_window_hash` | must be an algorithm-qualified lowercase hex digest (`sha256:<64 hex>`); a bare string cannot be recomputed |
 | `calibration_revision` | must match; an uncalibrated confidence is decorative |
 
 **Consequence, and the point of it.** `squared-envelope-cyclic.v1` is registered
@@ -190,7 +190,26 @@ The status payload publishes `digital_reachable: false` with its reason, and the
 panel renders `DIGITAL VERDICT // UNREACHABLE` so a zero in the DIGITAL column
 is never mistaken for a quiet band.
 
-### 3.3 Support, not proof
+### 3.3 Where a claim may come from
+
+A second review pass asked that `estimated_false_alarm_probability` be computed
+by the registered detector rather than accepted from an arbitrary caller. That
+boundary already holds and is now test-locked: `signal_classification` is not in
+`graphops_rf_ingest.ALLOWED_FIELDS`, and the validator rejects unknown fields, so
+an HTTP caller cannot attach a family claim, a statistic, a false-alarm
+probability or a window hash to an ingested frame. Such frames are retained as
+`UNCLASSIFIED / NOT_ATTEMPTED`.
+
+The status payload declares this as `classification_trust:
+BRIDGE_LOCAL_DETECTOR_ONLY`. Classifications are computed in the bridge process
+beside the IQ; nothing else may assert one.
+
+`source_window_hash` is checked for **shape** only at this phase — there is no
+window record to bind against until Phase 1 owns an IQ ring. When there is, this
+check should additionally confirm the digest names a window the bridge actually
+retained.
+
+### 3.4 Support, not proof
 
 A significant cyclostationary feature is strong positive evidence for digital
 structure. It is not certainty: periodic analogue processes, interference,
@@ -225,7 +244,7 @@ Shipped before any DSP. No IQ, no retention, no DSP risk.
 | `scythe-web/rfClassificationOutcomes.js` | reason labels, classifier state, panel lines |
 | `scythe-web/nesdrSpectrumView.js` | classification line renders the reason, carries `data-classifier-state` |
 | `scythe-web/systemEvidenceTicker.js` | `RF CLASSIFIER //` line |
-| `test_rf_signal_family.py` · `scythe-web/rfClassificationOutcomes.test.js` | 18 + 10 tests |
+| `test_rf_signal_family.py` · `scythe-web/rfClassificationOutcomes.test.js` | 20 + 10 tests |
 | `.github/workflows/repository-hygiene.yml` | RF test/compile steps globbed so a new module joins CI by existing |
 
 The ticker line that prompted this scope now reads:
