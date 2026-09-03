@@ -314,10 +314,23 @@ An undeclared classifier block renders as `UNDECLARED`, never as a working one:
 a build that forgets to declare its classifier must not read as a build that has
 one.
 
-### Phase 1 — Channelizer *(~1–2 days)*
+### Phase 1a — Bounded IQ ring — **DONE** *(`rf_iq_ring.py`)*
+The first raw-IQ retention beyond one FFT block, shipped alone: no channelizer,
+no DSP. `BoundedIQRing` + `IQWindow`, 39 tests covering all ten acceptance-gate
+conditions in §5.5. Fixed 524,288-sample `complex64` allocation, made once;
+`invalidate` zeroes and advances `configuration_epoch`; `append` invalidates on
+its own when `signal_chain_hash` or `sample_rate_hz` changes, so the invariant
+does not depend on every call site remembering it. Windows carry a
+bridge-issued id and a bridge-computed digest; `verify_window` distinguishes
+`WINDOW_NOT_ISSUED`, `DIGEST_MISMATCH`, `EPOCH_CHANGED` and `WINDOW_EVICTED`.
+Neither the ring nor a window can be pickled, `repr`d into a log, or serialized
+with its samples, and a process whose `SCYTHE_PROCESS_ROLE` is anything other
+than `orchestrator` is refused **before** the allocation is made.
+
+### Phase 1b — Channelizer *(~1–2 days, not started)*
 Occupied-bandwidth estimate (99% power or −20 dB) around a detection peak; DDC,
-low-pass, decimate to that bandwidth. Bounded IQ ring. Testable standalone
-against synthetic signals at known centre/bandwidth.
+low-pass, decimate to that bandwidth, reading windows from the Phase 1a ring.
+Testable standalone against synthetic signals at known centre/bandwidth.
 
 ### Phase 2 — Symbol-clock detector *(~2–3 days)*
 Squared-envelope cyclic spectrum on the isolated channel. Significance test
@@ -421,9 +434,16 @@ the window identifier and compute the digest itself, and admission must verify:
 - the registered detector consumed *that* window, not a re-derived one;
 - the record has not expired and does not straddle a ring `clear()` boundary.
 
-Until every one of those holds, a window hash is a label, not a binding. The
-`BoundedIQRing` change is what makes the check possible, which is another reason
-it lands before the detector rather than beside it.
+Until every one of those holds, a window hash is a label, not a binding.
+
+**Status after Phase 1a.** The ring now issues window identities and computes
+digests itself, and `verify_window` answers "was this issued here, does the
+digest match, is it the same epoch, and do the samples still exist". Six of the
+seven checks above are therefore available; the seventh — that the registered
+detector consumed *that* window — needs a detector to exist. What has **not**
+happened is the wiring: `rf_signal_family._check_window_hash` still validates
+shape only, because binding it to the ring is a policy change to the admission
+gate and deserves its own review rather than riding along with the mechanism.
 
 ### 5.5 The granted raw-IQ authority *(operator approval, 2026-09-02)*
 
