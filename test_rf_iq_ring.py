@@ -41,7 +41,9 @@ class ApprovedConfigurationTests(unittest.TestCase):
         self.assertEqual(DEFAULT_CAPACITY_SAMPLES * BYTES_PER_SAMPLE, 4_194_304)
         status = ring.status()
         self.assertEqual(status["storage_dtype"], "complex64")
-        self.assertAlmostEqual(status["retention_ms"], DEFAULT_WINDOW_MS, places=6)
+        self.assertAlmostEqual(status["effective_retention_ms"], DEFAULT_WINDOW_MS,
+                               places=6)
+        self.assertNotIn("retention_ms", status)
         self.assertAlmostEqual(status["cycle_resolution_hz"],
                                NOMINAL_CYCLE_RESOLUTION_HZ, places=6)
         self.assertAlmostEqual(DEFAULT_SAMPLE_RATE_HZ * 0.256, 524_288.0)

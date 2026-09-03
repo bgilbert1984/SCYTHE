@@ -70,10 +70,12 @@ class RetentionActivationTests(EnvironmentIsolatedTest):
         self.assertEqual(status["iq_retention"], RETENTION_RING)
         self.assertTrue(status["iq_retention_active"])
         self.assertIsNone(status["inactive_reason"])
-        self.assertEqual(status["retention_ms"], 256.0)
+        self.assertEqual(status["configured_retention_ms"], 256.0)
+        self.assertEqual(status["effective_retention_ms"], 256.0)
+        self.assertFalse(status["capacity_limited"])
         self.assertEqual(status["capacity_samples"], 524_288)
         self.assertFalse(status["raw_iq_exposed"])
-        self.assertEqual(status["channelizer_state"], "NOT_IMPLEMENTED")
+        self.assertEqual(status["channelizer_state"], "AVAILABLE_NOT_INTEGRATED")
         self.assertEqual(status["ring"]["held_samples"], 4096)
 
     def test_the_operator_specified_transition_payload_is_exactly_published(self):
@@ -82,15 +84,52 @@ class RetentionActivationTests(EnvironmentIsolatedTest):
         status = owner.status()
         self.assertEqual(
             {key: status[key] for key in ("iq_retention", "iq_retention_active",
-                                          "retention_ms", "capacity_samples",
+                                          "effective_retention_ms", "capacity_samples",
                                           "raw_iq_exposed", "channelizer_state")},
             {"iq_retention": "PROCESS_LOCAL_BOUNDED_RING", "iq_retention_active": True,
-             "retention_ms": 256.0, "capacity_samples": 524288,
-             "raw_iq_exposed": False, "channelizer_state": "NOT_IMPLEMENTED"})
+             "effective_retention_ms": 256.0, "capacity_samples": 524288,
+             "raw_iq_exposed": False, "channelizer_state": "AVAILABLE_NOT_INTEGRATED"})
 
-    def test_the_channelizer_is_declared_present_but_unwired(self):
-        """"NOT_IMPLEMENTED" alone would misdescribe a module that exists."""
+    def test_no_status_key_reports_a_bare_unqualified_retention_duration(self):
+        """A single "retention_ms" cannot be both the request and the reality."""
+        self.assertNotIn("retention_ms", _owner().status())
+
+    def test_a_rate_above_the_allocation_reports_the_duration_it_actually_holds(self):
+        """The exact case: 524,288 samples at 2.4 MS/s is 218.453 ms, not 256."""
+        owner = _owner(sample_rate_hz=2_400_000.0)
+        status = owner.status()
+        self.assertEqual(status["capacity_samples"], 524_288)
+        self.assertTrue(status["capacity_limited"])
+        self.assertEqual(status["configured_retention_ms"], 256.0)
+        self.assertAlmostEqual(status["effective_retention_ms"], 218.453, places=3)
+
+    def test_a_rate_below_the_ceiling_is_not_capacity_limited(self):
+        """Under the ceiling the window bounds the ring, and the two agree."""
+        owner = _owner(sample_rate_hz=1_000_000.0)
+        status = owner.status()
+        self.assertEqual(status["capacity_samples"], 256_000)
+        self.assertFalse(status["capacity_limited"])
+        self.assertEqual(status["effective_retention_ms"], 256.0)
+        self.assertEqual(status["configured_retention_ms"], 256.0)
+
+    def test_the_effective_duration_matches_the_ring_that_is_actually_allocated(self):
+        """The reported duration is not allowed to be a second, separate claim."""
+        owner = _owner(sample_rate_hz=2_400_000.0)
+        owner.append(_samples(), 1000.0)
+        status = owner.status()
+        self.assertEqual(status["ring"]["capacity_samples"], status["capacity_samples"])
+        self.assertAlmostEqual(
+            status["effective_retention_ms"],
+            status["ring"]["capacity_samples"] / 2_400_000.0 * 1000.0, places=3)
+
+    def test_the_channelizer_is_declared_available_but_not_integrated(self):
+        """The code exists and is tested; the capture binding does not.
+
+        "NOT_IMPLEMENTED" understates that as badly as "ACTIVE" would overstate
+        it, so the state names the missing half rather than the whole thing.
+        """
         status = _owner().status()
+        self.assertEqual(status["channelizer_state"], "AVAILABLE_NOT_INTEGRATED")
         self.assertEqual(status["channelizer_state"], CHANNELIZER_STATE)
         self.assertIn("IS IMPLEMENTED AND TESTED BUT IS NOT WIRED",
                       status["channelizer_note"])

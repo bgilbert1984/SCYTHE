@@ -50,20 +50,36 @@ test("ticker declares RF products independently from connection state", () => {
 test("live raw-IQ retention is stated as plainly as its absence", () => {
   const items = tickerItemsFromRfStatus({bridge:{bridge_state:"streaming",config:{},
     iq_retention:{iq_retention:"PROCESS_LOCAL_BOUNDED_RING",iq_retention_active:true,
-      retention_ms:256,capacity_samples:524288,raw_iq_exposed:false,
-      channelizer_state:"NOT_IMPLEMENTED",ring:{state:"READY"}}}});
+      configured_retention_ms:256,effective_retention_ms:256,capacity_limited:false,
+      capacity_samples:524288,raw_iq_exposed:false,
+      channelizer_state:"AVAILABLE_NOT_INTEGRATED",ring:{state:"READY"}}}});
   assert.equal(items[6],"RF IQ RETENTION // PROCESS_LOCAL_BOUNDED_RING · ACTIVE"
     + " · 256 ms · 524288 SAMPLES · RING READY · RAW IQ NOT EXPOSED"
-    + " · CHANNELIZER NOT_IMPLEMENTED");
+    + " · CHANNELIZER AVAILABLE_NOT_INTEGRATED");
+});
+
+test("a capacity-limited ring reports what it holds, not what was configured", () => {
+  // 524,288 samples at 2.4 MS/s. Printing "256 ms" here would be a precise
+  // number for a duration the ring does not have.
+  const items = tickerItemsFromRfStatus({bridge:{bridge_state:"streaming",config:{},
+    iq_retention:{iq_retention:"PROCESS_LOCAL_BOUNDED_RING",iq_retention_active:true,
+      configured_retention_ms:256,effective_retention_ms:218.453,capacity_limited:true,
+      capacity_samples:524288,raw_iq_exposed:false,
+      channelizer_state:"AVAILABLE_NOT_INTEGRATED",ring:{state:"READY"}}}});
+  assert.equal(items[6],"RF IQ RETENTION // PROCESS_LOCAL_BOUNDED_RING · ACTIVE"
+    + " · 218.453 ms EFFECTIVE OF 256 ms CONFIGURED · CAPACITY LIMITED"
+    + " · 524288 SAMPLES · RING READY · RAW IQ NOT EXPOSED"
+    + " · CHANNELIZER AVAILABLE_NOT_INTEGRATED");
 });
 
 test("a permitted but unallocated ring is not reported as retention", () => {
   const items = tickerItemsFromRfStatus({bridge:{bridge_state:"streaming",config:{},
     iq_retention:{iq_retention:"NONE_BEYOND_ONE_FFT_BLOCK",iq_retention_active:false,
-      retention_ms:256,capacity_samples:524288,raw_iq_exposed:false,
-      inactive_reason:"NO_SAMPLES_YET",channelizer_state:"NOT_IMPLEMENTED",ring:null}}});
+      configured_retention_ms:256,effective_retention_ms:256,capacity_samples:524288,
+      raw_iq_exposed:false,inactive_reason:"NO_SAMPLES_YET",
+      channelizer_state:"AVAILABLE_NOT_INTEGRATED",ring:null}}});
   assert.equal(items[6],"RF IQ RETENTION // NONE_BEYOND_ONE_FFT_BLOCK · INACTIVE"
-    + " · NO_SAMPLES_YET · RAW IQ NOT EXPOSED · CHANNELIZER NOT_IMPLEMENTED");
+    + " · NO_SAMPLES_YET · RAW IQ NOT EXPOSED · CHANNELIZER AVAILABLE_NOT_INTEGRATED");
 });
 
 test("ticker states whether a classifier ran, not only what it counted", () => {

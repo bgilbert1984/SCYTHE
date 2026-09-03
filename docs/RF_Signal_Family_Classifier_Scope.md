@@ -564,10 +564,12 @@ samples, and it changes in the same commit that makes that true:
 {
   "iq_retention": "PROCESS_LOCAL_BOUNDED_RING",
   "iq_retention_active": true,
-  "retention_ms": 256,
+  "configured_retention_ms": 256,
+  "effective_retention_ms": 256,
+  "capacity_limited": false,
   "capacity_samples": 524288,
   "raw_iq_exposed": false,
-  "channelizer_state": "NOT_IMPLEMENTED"
+  "channelizer_state": "AVAILABLE_NOT_INTEGRATED"
 }
 ```
 
@@ -576,6 +578,19 @@ nothing else in the diff to obscure it: who owns the ring, when it is allocated
 and closed, which lifecycle events call `invalidate` and with which reason, how
 `SCYTHE_PROCESS_ROLE` is enforced at the allocation site, and the status
 transition above.
+
+**Configured is not effective.** The allocation is fixed at 524,288 samples and
+256 ms is a request against that ceiling; the two agree only at 2.048 MS/s. At
+the device's nominal 2.4 MS/s the same allocation holds 218.453 ms, so a single
+`retention_ms` would be a precise-looking number for a duration the ring does
+not have. Both are published, and `capacity_limited` says which bound applied.
+The nested ring block reports `effective_retention_ms` only, because a ring has
+no configured request to fall short of.
+
+**`AVAILABLE_NOT_INTEGRATED`, not `NOT_IMPLEMENTED`.** From Phase 1b the
+channelizer exists and is tested; only the capture binding is missing. The state
+names the missing half, because `NOT_IMPLEMENTED` understates it as badly as
+`ACTIVE` would overstate it.
 
 ### 5.7 Two channelizer traps that are worth remembering
 

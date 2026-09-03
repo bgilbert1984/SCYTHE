@@ -50,6 +50,15 @@ saying a reconnect caused a clear that a retune actually caused, so the owner
 keeps a bounded ``invalidation_history``.  Suppressing the later clears would be
 worse: they really did happen.
 
+Configured is not effective
+---------------------------
+The approval fixes the allocation at 524,288 samples, and 256 ms is a *request*
+against that ceiling.  The two agree only at the currently configured 2.048 MS/s.
+At the device's nominal 2.4 MS/s the same allocation holds 218.453 ms, so a
+status that kept saying ``256`` would be stating a duration the ring does not
+have -- a precise-looking number that is wrong, which is worse than a vague one.
+Both are published, along with ``capacity_limited`` saying which bound applied.
+
 ``GAIN_CHANGE``, ``DIRECT_SAMPLING_CHANGE`` and ``CLOCK_DISCONTINUITY`` remain in
 the ring's vocabulary with **no bridge event wired to them**, because this bridge
 has no gain control, no direct-sampling control and no clock-discontinuity
@@ -103,7 +112,7 @@ INACTIVE_REASONS: Dict[str, str] = {
 # The channelizer module exists and is tested; nothing in the capture path calls
 # it. Saying "NOT_IMPLEMENTED" without that distinction would be as misleading in
 # one direction as claiming it runs would be in the other.
-CHANNELIZER_STATE = "NOT_IMPLEMENTED"
+CHANNELIZER_STATE = "AVAILABLE_NOT_INTEGRATED"
 CHANNELIZER_NOTE = (
     "rf_channelizer IS IMPLEMENTED AND TESTED BUT IS NOT WIRED INTO THE CAPTURE "
     "PATH. NO WINDOW IS CHANNELIZED AND NO DERIVED PRODUCT IS PRODUCED"
@@ -177,10 +186,25 @@ class IQRetentionOwner:
 
     # -- policy -------------------------------------------------------------
 
+    def _requested_samples(self) -> int:
+        """What the configured window would need at the configured rate."""
+        return max(1, int(round(self._window_ms / 1000.0 * self._sample_rate_hz)))
+
     def _capacity(self) -> int:
-        """256 ms at the configured rate, never above the approved allocation."""
-        samples = int(round(self._window_ms / 1000.0 * self._sample_rate_hz))
-        return max(1, min(DEFAULT_CAPACITY_SAMPLES, samples))
+        """The request, never above the approved allocation."""
+        return min(DEFAULT_CAPACITY_SAMPLES, self._requested_samples())
+
+    def _effective_retention_ms(self) -> float:
+        """How much time the allocation actually holds at the configured rate.
+
+        Equal to the configured window only while the rate keeps the request
+        inside the ceiling.  Above that the ceiling wins and this is the honest
+        number; ``configured_retention_ms`` keeps the request visible so the
+        difference is a reported fact rather than a silent shortfall.
+        """
+        if self._sample_rate_hz <= 0:
+            return 0.0
+        return self._capacity() / self._sample_rate_hz * 1000.0
 
     def _inactive_reason_locked(self) -> Optional[str]:
         if not self._enabled:
@@ -325,8 +349,11 @@ class IQRetentionOwner:
                 "schema": SCHEMA,
                 "iq_retention": RETENTION_NONE if inactive else RETENTION_RING,
                 "iq_retention_active": inactive is None,
-                "retention_ms": round(self._window_ms, 3),
+                "configured_retention_ms": round(self._window_ms, 3),
+                "effective_retention_ms": round(self._effective_retention_ms(), 3),
+                "capacity_limited": self._requested_samples() > DEFAULT_CAPACITY_SAMPLES,
                 "capacity_samples": capacity,
+                "max_capacity_samples": DEFAULT_CAPACITY_SAMPLES,
                 "raw_iq_exposed": False,
                 "channelizer_state": CHANNELIZER_STATE,
                 "channelizer_note": CHANNELIZER_NOTE,

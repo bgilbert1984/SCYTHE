@@ -578,7 +578,9 @@ class BoundedIQRing:
             return {
                 "schema": SCHEMA,
                 "state": state,
-                "retention_ms": round(self.retention_ms, 3),
+                # Named "effective" because it is capacity over rate: what this
+                # allocation holds, never a configured request it fell short of.
+                "effective_retention_ms": round(self.retention_ms, 3),
                 "capacity_samples": self._capacity,
                 "held_samples": self._held,
                 "storage_dtype": STORAGE_DTYPE,

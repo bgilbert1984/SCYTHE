@@ -74,11 +74,20 @@ export function tickerItemsFromRfStatus(payload, {statusObservedAt = null} = {})
       ? `RF IQ RETENTION // ${sanitizeTickerText(retention.iq_retention, "UNDECLARED", 40).toUpperCase()}`
         + ` · ${retention.iq_retention_active === true ? "ACTIVE" : "INACTIVE"}`
         + (retention.iq_retention_active === true
-            ? ` · ${Math.max(0, Number(retention.retention_ms) || 0)} ms · ${Math.max(0, Number(retention.capacity_samples) || 0)} SAMPLES`
+            // Effective, not configured. At a rate where the fixed allocation
+            // holds less than the configured window, printing the request would
+            // overstate how much history the ring can be asked about.
+            ? ` · ${Math.max(0, Number(retention.effective_retention_ms) || 0)} ms`
+              + (retention.capacity_limited === true
+                  ? ` EFFECTIVE OF ${Math.max(0, Number(retention.configured_retention_ms) || 0)} ms CONFIGURED · CAPACITY LIMITED`
+                  : "")
+              + ` · ${Math.max(0, Number(retention.capacity_samples) || 0)} SAMPLES`
               + ` · RING ${sanitizeTickerText(retention.ring?.state, "UNDECLARED", 20).toUpperCase()}`
             : ` · ${sanitizeTickerText(retention.inactive_reason, "UNDECLARED", 40).toUpperCase()}`)
         + ` · RAW IQ ${retention.raw_iq_exposed === true ? "EXPOSED" : "NOT EXPOSED"}`
-        + ` · CHANNELIZER ${sanitizeTickerText(retention.channelizer_state, "UNDECLARED", 20).toUpperCase()}`
+        // 32, not 20: AVAILABLE_NOT_INTEGRATED is 24 characters and a state
+        // truncated to AVAILABLE_NOT_INTEGR reads as a different claim.
+        + ` · CHANNELIZER ${sanitizeTickerText(retention.channelizer_state, "UNDECLARED", 32).toUpperCase()}`
       : "RF IQ RETENTION // UNDECLARED · THE BRIDGE PUBLISHED NO RETENTION BLOCK",
     `RF FRESHNESS // STATUS POLLED ${statusObservedAt ? new Date(statusObservedAt).toISOString() : "UNAVAILABLE"} · LAST FFT FRAME ${sanitizeTickerText(bridge.latest_frame_at, "UNAVAILABLE", 40)}`,
   ];
