@@ -1702,8 +1702,9 @@ That is the bridge from spectrum display to genuine transmitter intelligence.
 > - [ADR 0003](adr/0003-rf-emission-tracking-hierarchy.md) — detection, track,
 >   transmitter and location are four layers
 >
-> **This file is retained, not superseded.** Compression loses nuance; where an
-> ADR and this document disagree in detail, this document is the record of what
-> was actually reasoned. Read an ADR for the decision, and read here for the
-> argument, the worked examples, the layouts and the material the summary
-> dropped.
+> **This file is retained, and it is non-normative.** Nothing here was deleted, but
+> the ADRs are the decision surface: where an ADR and this document disagree, the
+> ADR governs. This document records what was *reasoned* — including branches that
+> were argued and then not taken — which is exactly why it cannot also be the
+> specification. Read an ADR for the decision, and read here for the argument, the
+> worked examples, the layouts and the material the summary dropped.

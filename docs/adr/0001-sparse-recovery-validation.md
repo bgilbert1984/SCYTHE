@@ -1,6 +1,7 @@
 # ADR 0001 — Sparse recovery is validated before it is believed
 
-- **Status:** Proposed, except §5 (Accepted and implemented)
+- **Status:** Proposed, except §5 — see the three-part status in that section.
+  The contract *pattern* is accepted; only one of its two applications ships.
 - **Date:** 2026-09-01
 - **Supersedes nothing.** Condensed from `docs/SparseSCYTHE.md` §§1–8, which is
   retained in full as the source discussion.
@@ -98,16 +99,24 @@ sockets interrupt, the orchestrator restarts. Windows publish
 
 **Missing timestamps are never reconstructed as evenly spaced.**
 
-### 5. Ambiguity outcomes are reason codes under a stable vocabulary — *implemented*
+### 5. Ambiguity outcomes are reason codes under a stable vocabulary
 
 `NULL_OUTCOMES` extends with `MODEL_AMBIGUOUS`, `COLLISION_UNRESOLVED` and
 `TIMING_QUALITY_INSUFFICIENT`, expressed as `{outcome, reason_code}` rather than
 as an ever-growing flat enumeration.
 
-**This shape is Accepted and shipped** — in `rf_signal_family.py`, where the
-signal-family contract uses a three-value family plus a reason code. The sparse
-estimator's own `NULL_OUTCOMES` has *not* yet been restructured; it remains a
-published contract and its migration is a separate change.
+Status here is three separate things, and collapsing them into one word overstates
+what runs:
+
+```text
+§5 contract pattern:        ACCEPTED
+Signal-family application:  IMPLEMENTED   (rf_signal_family.py)
+Sparse-estimator migration: PROPOSED      (NULL_OUTCOMES unchanged)
+```
+
+`rf_signal_family.py` uses a three-value family plus a reason code, so the pattern
+has a shipped instance. The sparse estimator's own `NULL_OUTCOMES` remains a flat
+published contract; its migration is open decision 2 below, not work already done.
 
 ### 6. Collisions are declared, not resolved by force
 

@@ -342,11 +342,38 @@ PROTOCOL              UNRESOLVED · CANDIDATE · CONFIRMED_BY_DECODER
 This is a contract change to something shipped one commit ago and it interacts
 with Q1 and Q2, so it is proposed rather than applied.
 
-### 5.3 `docs/SparseSCYTHE.md` should become an ADR
+### 5.3 `docs/SparseSCYTHE.md` should become an ADR — **done**
 
-Links fixed and a references section added; the conversational structure is
-unchanged. Reducing 1,674 lines of design thinking to an ADR discards material,
-which is the author's call and not mine.
+Split into three ADRs along the document's own seams, because it braids three
+decisions and one ADR would have flattened two of them into an appendix of the
+first: [0001](adr/0001-sparse-recovery-validation.md) sparse-recovery validation,
+[0002](adr/0002-polarimetric-channel-diversity.md) physical channel diversity,
+[0003](adr/0003-rf-emission-tracking-hierarchy.md) the emission-tracking
+hierarchy. The source is retained unchanged and is non-normative: the ADRs are the
+decision surface, `SparseSCYTHE.md` is design history, code and tests are what
+runs.
+
+### 5.4 Hash shape is validated; hash *ownership* is not *(Phase 1)*
+
+Phase 0 validates that `source_window_hash` is an algorithm-qualified lowercase
+hex digest of a declared length. That is a syntax check. A correctly shaped but
+entirely invented digest still passes, so the field currently proves that a caller
+knows the format — not that the window exists.
+
+This is acceptable only while the sole claim path is bridge-local and no window
+record exists to check against. Once `BoundedIQRing` ships, the bridge must issue
+the window identifier and compute the digest itself, and admission must verify:
+
+- the digest names a window the live ring actually holds;
+- `window_start` / `window_end` match that record;
+- `sample_count` matches the samples in it;
+- `signal_chain_hash` matches the regime the window was captured under;
+- the registered detector consumed *that* window, not a re-derived one;
+- the record has not expired and does not straddle a ring `clear()` boundary.
+
+Until every one of those holds, a window hash is a label, not a binding. The
+`BoundedIQRing` change is what makes the check possible, which is another reason
+it lands before the detector rather than beside it.
 
 ---
 
@@ -356,3 +383,10 @@ which is the author's call and not mine.
 2. **256 ms default window** — accept 4.19 MB and 3.9 Hz α resolution?
 3. ~~**Ship Phase 0 alone first?**~~ **Done 2026-09-01.**
 4. **False-DIGITAL gate at <0.1% on noise** — right threshold, or stricter?
+5. **Split the DIGITAL/ANALOGUE axis** (§5.2) into modulation / information
+   structure / protocol before Phase 1, or carry the single axis to Phase 4?
+   Splitting later means migrating a published contract; splitting now costs a day
+   and touches nothing that ships yet.
+
+Q1 and Q2 gate Phase 1. Q4 gates Phase 3. Q5 is cheapest to answer before Phase 1
+and gets more expensive with every phase that ships against the current shape.
