@@ -101,40 +101,93 @@ occupied bandwidth around the peak, digitally downconvert, low-pass, decimate.
 ## 3. Outcome vocabulary — **shipped**, `rf_signal_family.py`
 
 Mirrors the sparse analyzer's `NULL_OUTCOMES` precedent — a null result is
-rendered, never blanked — but restructured as **a small stable family plus a
+rendered, never blanked — but restructured as **three independent axes plus a
 reason code**, which is the shape `docs/SparseSCYTHE.md` argues for over an
-ever-growing flat enumeration. The three counters stay compatible; the reason
-carries the detail.
+ever-growing flat enumeration.
 
 ```
-family       DIGITAL | ANALOGUE | UNCLASSIFIED     ← the three counters
-reason_code  why this detection landed where it did
+modulation             UNRESOLVED | AM_LIKE | FM_LIKE | FSK_LIKE | PSK_LIKE | QAM_LIKE
+information_structure  NOT_ATTEMPTED | NO_SYMBOL_CLOCK_DETECTED | SYMBOL_CLOCK_LIKE_FEATURE
+protocol               UNRESOLVED | CANDIDATE | CONFIRMED_BY_DECODER
+reason_code            why this detection landed where it did
 ```
 
+`DIGITAL` / `ANALOGUE` / `UNCLASSIFIED` survive as the three panel counters, but
+they are now a **derived compatibility summary** (`derive_family`, authority
+`DERIVED_SUMMARY`), never an observation and never submittable. See §3.5.
+
+Two of the three axes have no detector at all, and are pinned at their defaults:
+
+| Axis | Gate | State |
+|---|---|---|
+| `modulation` | needs a modulation classifier over an isolated channel | `NOT_IMPLEMENTED` |
+| `information_structure` | needs a registered, validated method | Phase 2 target |
+| `protocol` | `CANDIDATE` needs a hypothesis source; `CONFIRMED_BY_DECODER` needs decoder evidence | both `NOT_IMPLEMENTED` |
+
 ```
-NOT_ATTEMPTED                      no classifier ran over this detection
-INSUFFICIENT_WINDOW                fewer samples than the configured window
-CHANNELIZATION_FAILED              occupied bandwidth not estimable at this SNR
-NO_SYMBOL_CLOCK                    ran, found no significant cyclic feature
-CONSTANT_ENVELOPE                  envelope variation below the test's floor —
-                                   the known blind spot; DIGITAL and ANALOGUE
-                                   both remain possible
-NOISE_COMPATIBLE                   consistent with noise alone
-STALE_WINDOW                       the verdict window does not cover this detection
-ANALOGUE_DETECTOR_NOT_IMPLEMENTED  a well-formed ANALOGUE claim, refused
-UNQUALIFIED_CLAIM                  a family claim without the required evidence
-METHOD_NOT_REGISTERED              the claimed method has no registered decision rule
-METHOD_NOT_VALIDATED               registered, but Phase 3 has not cleared it
-DECISION_RULE_NOT_MET              the statistic did not pass the registered rule
-SYMBOL_CLOCK_LIKE_FEATURE          the only route to DIGITAL — support, not proof
+NOT_ATTEMPTED                        no classifier ran over this detection
+INSUFFICIENT_WINDOW                  fewer samples than the configured window
+CHANNELIZATION_FAILED                occupied bandwidth not estimable at this SNR
+NO_SYMBOL_CLOCK_DETECTED             ran, found no significant cyclic feature
+CONSTANT_ENVELOPE                    envelope variation below the test's floor —
+                                     the known blind spot; DIGITAL and ANALOGUE
+                                     both remain possible
+NOISE_COMPATIBLE                     consistent with noise alone
+STALE_WINDOW                         the verdict window does not cover this detection
+FAMILY_NOT_DIRECTLY_CLAIMABLE        a summary was submitted as an observation
+ANALOGUE_DETECTOR_NOT_IMPLEMENTED    a well-formed ANALOGUE claim, refused
+MODULATION_DETECTOR_NOT_IMPLEMENTED  a modulation claim with no classifier behind it
+PROTOCOL_HYPOTHESIS_NOT_IMPLEMENTED  a CANDIDATE with no hypothesis source
+DECODER_NOT_IMPLEMENTED              CONFIRMED_BY_DECODER without decoder evidence
+UNQUALIFIED_CLAIM                    an axis claim without the required evidence
+METHOD_NOT_REGISTERED                the claimed method has no registered decision rule
+METHOD_NOT_VALIDATED                 registered, but Phase 3 has not cleared it
+METHOD_WRONG_AXIS                    registered against a different axis
+DECISION_RULE_NOT_MET                the statistic did not pass the registered rule
+SYMBOL_CLOCK_LIKE_FEATURE            the only route to DIGITAL — support, not proof
 ```
 
-`ANALOGUE` is reserved and unreachable in v1: `CLAIMABLE_FAMILIES == ("DIGITAL",)`,
-and a fully evidenced ANALOGUE claim is refused on the family alone, before any
-other check. A detector that ran and concluded nothing may submit its own null
-reason code; it may **not** choose the reason for a DIGITAL verdict.
+A refusal about **capability** is checked before a refusal about **evidence**: a
+perfectly documented `PSK_LIKE` claim is still refused, and it is refused with
+`MODULATION_DETECTOR_NOT_IMPLEMENTED` rather than with a complaint about its
+evidence, because "your evidence was incomplete" would be a false explanation.
 
-### 3.1 What a DIGITAL claim must carry
+A detector that ran and concluded nothing may submit its own null reason code; it
+may **not** choose the reason for a positive verdict.
+
+### 3.5 The summary is derived, and ANALOGUE is not derivable
+
+`derive_family` has exactly one rule that fires:
+
+```python
+if information_structure == "SYMBOL_CLOCK_LIKE_FEATURE":
+    return "DIGITAL"
+return "UNCLASSIFIED"
+```
+
+The axis split makes a second rule extremely tempting, and it is wrong:
+
+```
+FM_LIKE + NO_SYMBOL_CLOCK_DETECTED  ->  ANALOGUE     # NO
+```
+
+P25 C4FM is `FM_LIKE` and carries a symbol clock a squared-envelope test cannot
+see, so it reports `NO_SYMBOL_CLOCK_DETECTED` for a reason that has nothing to do
+with being analogue. That rule labels encrypted public-safety digital voice as
+analogue voice. ANALOGUE stays unreachable until a positive analogue detector
+asserts it directly.
+
+The same reasoning governs `_structure_for_reason`: `CONSTANT_ENVELOPE` — where
+the detector ran and hit its known blind spot — leaves `information_structure` at
+`NOT_ATTEMPTED`, **not** at `NO_SYMBOL_CLOCK_DETECTED`. Recording a blind spot as
+a negative result is precisely how a constant-envelope digital signal would
+quietly accumulate evidence of being analogue.
+
+A method is registered against one axis. A symbol-clock detector has no standing
+to assert a modulation, and `METHOD_WRONG_AXIS` enforces that even for a method
+that has passed Phase 3 validation on its own axis.
+
+### 3.1 What a positive information-structure claim must carry
 
 **Structural evidence** — missing any of these is `UNQUALIFIED_CLAIM`, with the
 specific refusals attached:
@@ -322,25 +375,22 @@ serialized, never logged, never returned by a status API, excluded from crash
 dumps where practical. This aligns with `signal_chain_hash`: a ring that spans a
 retune is the same error as comparing products across antennas.
 
-### 5.2 DIGITAL/ANALOGUE is one axis doing four jobs *(before Phase 4)*
+### 5.2 DIGITAL/ANALOGUE was one axis doing four jobs — **done**
 
 "Digital" and "analogue" can each refer to the RF waveform, the information
 encoding, the baseband content, or the service. FM broadcast carries analogue
 audio *and* a digital RDS subcarrier; CPFSK is an FM-like waveform carrying
-digital symbols. Proposed internal model, with the three counters retained for
-compatibility:
+digital symbols. Split into the three axes in §3, with the counters retained as a
+derived summary.
 
-```
-MODULATION            AM_LIKE · FM_LIKE · FSK_LIKE · PSK_LIKE · QAM_LIKE
-                      · MULTICARRIER_LIKE · UNKNOWN
-INFORMATION STRUCTURE SYMBOL_CLOCK_DETECTED · NO_SYMBOL_CLOCK_DETECTED
-                      · CONSTANT_ENVELOPE_BLIND_SPOT · NOT_ATTEMPTED
-                      · INSUFFICIENT_EVIDENCE
-PROTOCOL              UNRESOLVED · CANDIDATE · CONFIRMED_BY_DECODER
-```
+The split was made **before** Phase 1 rather than after Phase 2, on the reasoning
+that it costs about a day now and touches nothing that has shipped a detector,
+whereas after Phase 2 it would be a migration of a contract with live producers.
 
-This is a contract change to something shipped one commit ago and it interacts
-with Q1 and Q2, so it is proposed rather than applied.
+It also removes a genuine hazard rather than only tidying a field. Under one
+label, P25 C4FM forces a wrong answer: the waveform is FM-like, the information
+is symbol-structured, and a single value cannot say both. Under two axes they are
+two rows and neither has to lie.
 
 ### 5.3 `docs/SparseSCYTHE.md` should become an ADR — **done**
 
@@ -375,6 +425,54 @@ Until every one of those holds, a window hash is a label, not a binding. The
 `BoundedIQRing` change is what makes the check possible, which is another reason
 it lands before the detector rather than beside it.
 
+### 5.5 The granted raw-IQ authority *(operator approval, 2026-09-02)*
+
+Q1 and Q2 were approved on narrow terms, recorded here because the scope of the
+permission is the load-bearing part:
+
+```
+PROCESS-LOCAL · VOLATILE · FIXED-CAPACITY
+NON-PERSISTENT · NON-TRANSPORTABLE · NON-MODEL-CONTEXT
+BRIDGE-OWNED · INVALIDATED ON SIGNAL-CHAIN CHANGE
+```
+
+> This is permission for a DSP working buffer, not permission for an IQ archive.
+
+Binding properties, none of which are defaults to be revisited casually:
+
+- fixed capacity allocated once, never grown; `complex64`, ~4.19 MB for 256 ms at
+  2.048 MS/s;
+- never serialized, pickled, JSON-encoded, logged or exposed — and never present
+  in exceptions, diagnostics, MCP responses or Ollama capsules;
+- cleared on retune, sample-rate change, gain-regime change, direct-sampling
+  change, disconnect, shutdown and `signal_chain_hash` change;
+- evicted regions overwritten, allocation best-effort zeroed on explicit clear;
+- only the orchestrator-owned bridge may instantiate it; child processes and the
+  Spectrum MCP receive derived products only;
+- consumers borrow immutable or copy-isolated windows, never the writable ring;
+- **no disk fallback, swap-oriented buffering or crash-dump facility** is
+  authorized under this approval.
+
+256 ms is a **registered detector configuration**, not a universal optimum:
+524,288 samples, 4,194,304 bytes, 1/0.256 = 3.90625 Hz nominal cycle-frequency
+resolution. Later validation may authorize longer or overlapping windows without
+silently changing `squared-envelope-cyclic.v1`. Windows are non-overlapping
+initially — overlap multiplies computation and correlates verdicts before there
+is evidence it buys detection performance.
+
+Phase 1 does not merge unless tests demonstrate all ten of:
+
+1. capacity never exceeds 524,288 complex samples;
+2. wraparound preserves chronological ordering;
+3. incomplete windows return `INSUFFICIENT_WINDOW`;
+4. every invalidation reason clears the ring;
+5. pre-retune and post-retune samples can never share a window;
+6. digests are bridge-generated and reproducible;
+7. forged or expired window IDs cannot validate;
+8. neither API serialization nor exception paths expose samples;
+9. child-process mode cannot instantiate the ring;
+10. sustained input maintains bounded memory.
+
 ---
 
 ## 6. Open questions for the operator
@@ -383,10 +481,8 @@ it lands before the detector rather than beside it.
 2. **256 ms default window** — accept 4.19 MB and 3.9 Hz α resolution?
 3. ~~**Ship Phase 0 alone first?**~~ **Done 2026-09-01.**
 4. **False-DIGITAL gate at <0.1% on noise** — right threshold, or stricter?
-5. **Split the DIGITAL/ANALOGUE axis** (§5.2) into modulation / information
-   structure / protocol before Phase 1, or carry the single axis to Phase 4?
-   Splitting later means migrating a published contract; splitting now costs a day
-   and touches nothing that ships yet.
+5. ~~**Split the DIGITAL/ANALOGUE axis** (§5.2)?~~ **Approved and done
+   2026-09-02**, before Phase 1.
 
-Q1 and Q2 gate Phase 1. Q4 gates Phase 3. Q5 is cheapest to answer before Phase 1
-and gets more expensive with every phase that ships against the current shape.
+Q4 gates Phase 3. Q1 and Q2 were approved 2026-09-02; see §5.5 for the terms of
+that approval, which are narrower than "raw IQ retention is now allowed".

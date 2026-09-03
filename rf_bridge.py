@@ -24,7 +24,8 @@ from typing import Any, Callable, Deque, Dict, Iterable, Optional
 import numpy as np
 
 from rf_signal_family import (
-    classifier_status, empty_reason_counts, normalize_classification,
+    AXES, classifier_status, empty_axis_counts, empty_reason_counts,
+    normalize_classification,
 )
 
 
@@ -143,9 +144,16 @@ class RFObservation:
     peak_dbfs: float
     noise_floor_dbfs: float
     snr_db: float
+    # The three independent axes. Each carries its own declared absence, so a
+    # detection can be symbol-structured with an unresolved modulation without
+    # either fact contaminating the other.
+    modulation: str = "UNRESOLVED"
+    information_structure: str = "NOT_ATTEMPTED"
+    protocol: str = "UNRESOLVED"
+    # A compatibility summary derived from the axes above, never an input.
     signal_family: str = "UNCLASSIFIED"
     # An unclassified detection says which nothing was found. NOT_ATTEMPTED and
-    # NO_SYMBOL_CLOCK are different claims about the same zero.
+    # NO_SYMBOL_CLOCK_DETECTED are different claims about the same zero.
     classification_reason_code: str = "NOT_ATTEMPTED"
     classification_authority: str = "UNCLASSIFIED"
     classification_method: Optional[str] = None
@@ -227,6 +235,9 @@ class RFObservationStore:
                 peak_dbfs=peak,
                 noise_floor_dbfs=floor,
                 snr_db=snr,
+                modulation=verdict.modulation,
+                information_structure=verdict.information_structure,
+                protocol=verdict.protocol,
                 signal_family=verdict.family,
                 classification_reason_code=verdict.reason_code,
                 classification_authority=verdict.authority,
@@ -279,16 +290,25 @@ class RFObservationStore:
             items = list(self._items)
         classifications = {"digital": 0, "analogue": 0, "unclassified": 0}
         reasons = empty_reason_counts()
+        axes = empty_axis_counts()
         for item in items:
             key = item.signal_family.lower()
             classifications[key if key in classifications else "unclassified"] += 1
             code = item.classification_reason_code
             reasons[code if code in reasons else "UNQUALIFIED_CLAIM"] += 1
+            for axis in AXES:
+                bucket = axes[axis]
+                value = getattr(item, axis)
+                if value in bucket:
+                    bucket[value] += 1
         return {
             "count": len(items),
             "capacity": self._items.maxlen,
             "min_snr_db": self._min_snr_db,
             "latest_observed_at": items[-1].observed_at if items else None,
+            # The axes are the observation; the family below is a summary of two
+            # of them. Both are published so a reader can check the derivation.
+            "signal_axes": axes,
             "signal_classifications": {**classifications, "total": len(items)},
             # Why each unclassified detection is unclassified. A bare zero cannot
             # distinguish "nothing was there" from "nothing looked".

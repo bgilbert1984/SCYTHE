@@ -26,8 +26,8 @@ _VALIDATED = replace(
 )
 VALIDATED_REGISTRY = {_VALIDATED.method_id: _VALIDATED}
 
-DIGITAL_CLAIM = {
-    "family": "DIGITAL",
+SYMBOL_CLOCK_CLAIM = {
+    "information_structure": "SYMBOL_CLOCK_LIKE_FEATURE",
     "authority": "DERIVED_INFERENCE",
     "method": _VALIDATED.method_id,
     "method_revision": _VALIDATED.method_revision,
@@ -116,23 +116,34 @@ class RFBridgeTests(unittest.TestCase):
         store.ingest_frame(frame)
         classified = store.ingest_frame({**frame, "timestamp": 102.0, "sequence": 9,
             "peak_frequency_hz": 433_925_000,
-            "signal_classification": {**DIGITAL_CLAIM,
+            "signal_classification": {**SYMBOL_CLOCK_CLAIM,
                                       "window_start": 101.9, "window_end": 102.2}})
+        self.assertEqual(classified["information_structure"], "SYMBOL_CLOCK_LIKE_FEATURE")
+        # The other two axes stay at their declared absences: a symbol clock says
+        # nothing about the carrier or the protocol.
+        self.assertEqual(classified["modulation"], "UNRESOLVED")
+        self.assertEqual(classified["protocol"], "UNRESOLVED")
         self.assertEqual(classified["signal_family"], "DIGITAL")
         self.assertEqual(classified["classification_authority"], "DERIVED_INFERENCE")
         self.assertEqual(classified["classification_reason_code"], POSITIVE_REASON_CODE)
         self.assertEqual(classified["classification_symbol_rate_hz"], 9600.0)
-        counts = store.stats()["signal_classifications"]
-        self.assertEqual(counts, {"digital": 1, "analogue": 0, "unclassified": 1, "total": 2})
+        stats = store.stats()
+        self.assertEqual(stats["signal_classifications"],
+                         {"digital": 1, "analogue": 0, "unclassified": 1, "total": 2})
+        self.assertEqual(stats["signal_axes"]["information_structure"],
+                         {"NOT_ATTEMPTED": 1, "NO_SYMBOL_CLOCK_DETECTED": 0,
+                          "SYMBOL_CLOCK_LIKE_FEATURE": 1})
+        self.assertEqual(stats["signal_axes"]["modulation"]["UNRESOLVED"], 2)
+        self.assertEqual(stats["signal_axes"]["protocol"]["CONFIRMED_BY_DECODER"], 0)
 
-    def test_the_shipped_store_cannot_record_a_digital_verdict(self):
+    def test_the_shipped_store_cannot_record_a_symbol_clock(self):
         """No method has passed Phase 3, so live DIGITAL is unreachable."""
         store = RFObservationStore(min_snr_db=10, cooldown_s=0)
         item = store.ingest_frame({
             "timestamp": 100.0, "sequence": 1, "sensor_id": "edge-a",
             "center_frequency_hz": 100_000_000, "peak_frequency_hz": 100_010_000,
             "sample_rate_hz": 1_000_000, "peak_dbfs": -30, "noise_floor_dbfs": -55,
-            "signal_classification": {**DIGITAL_CLAIM, "window_start": 99.9,
+            "signal_classification": {**SYMBOL_CLOCK_CLAIM, "window_start": 99.9,
                                       "window_end": 100.2}})
         self.assertEqual(item["signal_family"], "UNCLASSIFIED")
         self.assertEqual(item["classification_reason_code"], "METHOD_NOT_VALIDATED")
@@ -145,17 +156,19 @@ class RFBridgeTests(unittest.TestCase):
         base = {"timestamp": 100.0, "sequence": 1, "sensor_id": "edge-a",
                 "center_frequency_hz": 100_000_000, "peak_frequency_hz": 100_010_000,
                 "sample_rate_hz": 1_000_000, "peak_dbfs": -30, "noise_floor_dbfs": -55}
-        qualified = {k: v for k, v in DIGITAL_CLAIM.items() if k != "family"}
+        clock = {"information_structure": "SYMBOL_CLOCK_LIKE_FEATURE"}
         for index, classification in enumerate((
-                {"family": "DIGITAL", "authority": "OBSERVED", "method": "guess", "confidence": .9},
-                {"family": "DIGITAL", "authority": "DERIVED_INFERENCE", "method": "", "confidence": .9},
-                {"family": "ALIEN", "authority": "DERIVED_INFERENCE", "method": "x", "confidence": .9},
+                {**clock, "authority": "OBSERVED", "method": "guess", "confidence": .9},
+                {**clock, "authority": "DERIVED_INFERENCE", "method": "", "confidence": .9},
+                {"information_structure": "ALIEN", "authority": "DERIVED_INFERENCE",
+                 "method": "x", "confidence": .9},
                 # A well-formed ANALOGUE claim is still refused: no positive
-                # analogue detector exists, so the family is unreachable.
-                {**qualified, "family": "ANALOGUE", "window_start": 102.5, "window_end": 103.5},
+                # analogue detector exists, so the summary is unreachable.
+                {**SYMBOL_CLOCK_CLAIM, "family": "ANALOGUE",
+                 "window_start": 102.5, "window_end": 103.5},
                 # Spectral shape is not a symbol clock.
-                {**{k: v for k, v in qualified.items() if k != "symbol_rate_hz"},
-                 "family": "DIGITAL", "method": "spectral-flatness",
+                {**{k: v for k, v in SYMBOL_CLOCK_CLAIM.items() if k != "symbol_rate_hz"},
+                 "method": "spectral-flatness",
                  "window_start": 103.5, "window_end": 104.5})):
             item = store.ingest_frame({**base, "timestamp": 100 + index,
                 "sequence": index + 1, "peak_frequency_hz": 100_010_000 + index * 5_000,
@@ -173,8 +186,12 @@ class RFBridgeTests(unittest.TestCase):
         classifier = store.stats()["classifier"]
         self.assertEqual(classifier["state"], "NOT_IMPLEMENTED")
         self.assertEqual(classifier["analogue_detector"], "NOT_IMPLEMENTED")
-        self.assertEqual(classifier["claimable_families"], ["DIGITAL"])
+        # No summary is claimable at all: DIGITAL and ANALOGUE are derived.
+        self.assertEqual(classifier["claimable_families"], [])
         self.assertEqual(classifier["reserved_families"], ["ANALOGUE"])
+        self.assertEqual(classifier["family_summary"]["authority"], "DERIVED_SUMMARY")
+        self.assertEqual(classifier["axes"]["modulation"]["detector"], "NOT_IMPLEMENTED")
+        self.assertEqual(classifier["axes"]["protocol"]["decoder"], "NOT_IMPLEMENTED")
         self.assertIn("analogue_family", classifier["claims_withheld"])
         self.assertFalse(classifier["raw_iq_exposed"])
         self.assertEqual(store.stats()["classification_reasons"], {})
@@ -188,6 +205,9 @@ class RFBridgeTests(unittest.TestCase):
             "signal_classification": {"reason_code": "CONSTANT_ENVELOPE"}})
         self.assertEqual(item["signal_family"], "UNCLASSIFIED")
         self.assertEqual(item["classification_reason_code"], "CONSTANT_ENVELOPE")
+        # The blind spot is not a negative result: recording it as one is how a
+        # constant-envelope digital signal would acquire evidence of being analogue.
+        self.assertEqual(item["information_structure"], "NOT_ATTEMPTED")
         self.assertEqual(store.stats()["classification_reasons"], {"CONSTANT_ENVELOPE": 1})
 
     def test_fft_processor_preserves_alignment_and_locates_peak(self):

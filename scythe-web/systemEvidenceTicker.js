@@ -52,10 +52,17 @@ export function tickerItemsFromRfStatus(payload, {statusObservedAt = null} = {})
   const classifier = deriveClassifierState(payload);
   const breakdown = deriveOutcomeBreakdown(payload)
     .map((row) => `${row.label} ${row.count}`).join(" · ");
+  // UNDECLARED, not IMPLEMENTED, when the server says nothing: a missing field
+  // must never read as a working detector.
+  const axisState = (axis, key) => sanitizeTickerText(
+    payload?.observations?.classifier?.axes?.[axis]?.[key], "UNDECLARED", 20).toUpperCase();
   return [
     `RF RECEIVER // ${sanitizeTickerText(config.sensor_id, "UNNAMED SENSOR", 80)} · ${sanitizeTickerText(bridge.bridge_state).toUpperCase()} · IQ ${bridge.iq_connected ? "CONNECTED" : "DISCONNECTED"}`,
     `RF PRODUCTS // FFT ${fftState} · SPARSE EVENTS ${sparseState} · RAW IQ LOCAL ONLY`,
-    classifications ? `RF DETECTIONS // DIGITAL ${count("digital")} · ANALOGUE ${count("analogue")} · UNCLASSIFIED ${count("unclassified")} · RETAINED EVENTS ${count("total")}` : "RF DETECTIONS // COUNTS UNAVAILABLE",
+    classifications ? `RF DETECTIONS // DIGITAL ${count("digital")} · ANALOGUE ${count("analogue")} · UNCLASSIFIED ${count("unclassified")} · RETAINED EVENTS ${count("total")} · DERIVED SUMMARY` : "RF DETECTIONS // COUNTS UNAVAILABLE",
+    // Three axes, three separate absences. Collapsing them would put the ticker
+    // back to implying one classifier that either works or does not.
+    `RF AXES // MODULATION ${axisState("modulation", "detector")} · SYMBOL CLOCK ${classifier.state} · PROTOCOL DECODER ${axisState("protocol", "decoder")}`,
     `RF CLASSIFIER // ${classifier.state} · ANALOGUE DETECTOR ${classifier.analogueDetector}`
       + (breakdown ? ` · UNCLASSIFIED BECAUSE ${breakdown}` : ""),
     `RF TUNING // ${Number.isFinite(frequency) ? `${(frequency / 1e6).toFixed(3)} MHz` : "UNAVAILABLE"} · ${Number.isFinite(sampleRate) ? `${(sampleRate / 1e6).toFixed(3)} MS/s` : "RATE UNAVAILABLE"}`,

@@ -1,19 +1,32 @@
 /**
- * Phase 0 rendering contract for RF signal-family outcomes.
+ * Phase 0 rendering contract for RF signal characterisation outcomes.
  *
  * The panel used to show `DIGITAL 0 · ANALOGUE 0 · UNCLASSIFIED 0` and leave the
  * reader to guess which of two very different things it meant: that the band was
  * quiet, or that nothing had looked. This module makes the zeros state which.
  *
- * Two absences are rendered rather than hidden:
+ * The server now publishes three independent axes rather than one label:
+ *
+ *   MODULATION             what the carrier is doing — no detector runs
+ *   INFORMATION STRUCTURE  whether a symbol clock is present — the Phase 2 axis
+ *   PROTOCOL               which protocol, if any — no decoder runs
+ *
+ * DIGITAL and ANALOGUE survive only as derived summaries of the first two, and
+ * the panel labels them as derived so a reader does not mistake a summary for an
+ * observation. Rendering the axes matters: `UNCLASSIFIED 4` now has a legible
+ * decomposition instead of being a single opaque bucket.
+ *
+ * Three absences are rendered rather than hidden:
  *
  *   CLASSIFIER NOT IMPLEMENTED   no channelizer and no symbol-clock detector
  *                                are running, so every detection is unclassified
  *                                by construction and not by measurement.
- *   ANALOGUE DETECTOR MISSING    ANALOGUE is reserved, never inferred from the
- *                                absence of a symbol clock. Constant-envelope
- *                                digital modes look identical to FM voice under
- *                                an envelope-based test.
+ *   ANALOGUE DETECTOR MISSING    ANALOGUE is never inferred from the absence of
+ *                                a symbol clock. Constant-envelope digital modes
+ *                                look identical to FM voice under an
+ *                                envelope-based test.
+ *   MODULATION / PROTOCOL        two axes with no detector and no decoder, so
+ *                                both are pinned at UNRESOLVED.
  *
  * Copy here mirrors rf_signal_family.py. The server owns the vocabulary; this
  * module owns only how it reads.
@@ -34,16 +47,28 @@ const REASON_LABELS = Object.freeze({
   NOT_ATTEMPTED: "NO CLASSIFIER RAN",
   INSUFFICIENT_WINDOW: "WINDOW TOO SHORT",
   CHANNELIZATION_FAILED: "CHANNEL NOT ISOLATED",
-  NO_SYMBOL_CLOCK: "NO SYMBOL CLOCK FOUND",
+  NO_SYMBOL_CLOCK_DETECTED: "NO SYMBOL CLOCK FOUND",
   CONSTANT_ENVELOPE: "CONSTANT ENVELOPE · BLIND SPOT",
   NOISE_COMPATIBLE: "NOISE COMPATIBLE",
   STALE_WINDOW: "VERDICT WINDOW DID NOT COVER THE DETECTION",
+  FAMILY_NOT_DIRECTLY_CLAIMABLE: "SUMMARY SUBMITTED AS AN OBSERVATION · REFUSED",
   ANALOGUE_DETECTOR_NOT_IMPLEMENTED: "ANALOGUE CLAIM REFUSED · NO DETECTOR",
+  MODULATION_DETECTOR_NOT_IMPLEMENTED: "MODULATION CLAIM REFUSED · NO DETECTOR",
+  PROTOCOL_HYPOTHESIS_NOT_IMPLEMENTED: "PROTOCOL CANDIDATE REFUSED · NO HYPOTHESIS SOURCE",
+  DECODER_NOT_IMPLEMENTED: "PROTOCOL CONFIRMATION REFUSED · NO DECODER",
+  METHOD_WRONG_AXIS: "CLAIM REFUSED · METHOD REGISTERED FOR ANOTHER AXIS",
   METHOD_NOT_REGISTERED: "CLAIM REFUSED · METHOD NOT REGISTERED",
   METHOD_NOT_VALIDATED: "CLAIM REFUSED · METHOD NOT VALIDATED",
   DECISION_RULE_NOT_MET: "CLAIM REFUSED · DID NOT PASS ITS DECISION RULE",
   UNQUALIFIED_CLAIM: "CLAIM REFUSED · EVIDENCE INCOMPLETE",
   SYMBOL_CLOCK_LIKE_FEATURE: "SYMBOL-CLOCK-LIKE FEATURE · DIGITAL STRUCTURE SUPPORTED",
+});
+
+/** Axis display names, in the order the panel reads them. */
+export const AXIS_LABELS = Object.freeze({
+  modulation: "MODULATION",
+  information_structure: "INFORMATION STRUCTURE",
+  protocol: "PROTOCOL",
 });
 
 export function reasonLabel(code, serverText = null) {
@@ -110,18 +135,66 @@ export function deriveOutcomeBreakdown(status = {}) {
 }
 
 /**
+ * Per-axis counts for the retained detections, with the two undetectable axes
+ * marked as such.
+ *
+ * An axis whose detector does not exist is not reporting UNRESOLVED as a finding.
+ * It is reporting that nothing looked, and the row says so rather than letting a
+ * full UNRESOLVED count read as a measurement that came back inconclusive.
+ */
+export function deriveAxisBreakdown(status = {}) {
+  const counts = status?.observations?.signal_axes ?? null;
+  const declared = status?.observations?.classifier?.axes ?? {};
+  if (!counts || typeof counts !== "object") return [];
+  return Object.keys(AXIS_LABELS)
+    .filter((axis) => counts[axis] && typeof counts[axis] === "object")
+    .map((axis) => {
+      const block = declared?.[axis] ?? {};
+      const claimable = Array.isArray(block.claimable) ? block.claimable : [];
+      const values = Object.entries(counts[axis])
+        .map(([value, n]) => ({value: String(value), count: Math.max(0, finite(n) ?? 0)}))
+        .filter((row) => row.count > 0)
+        .sort((a, b) => b.count - a.count || a.value.localeCompare(b.value));
+      return {
+        axis,
+        label: AXIS_LABELS[axis],
+        values,
+        // False unless the server says otherwise: an axis with no declared
+        // detector must not read as one that ran and found nothing.
+        detectable: claimable.length > 0,
+        detectorNote: block.detector_note ?? block.decoder_note ?? block.hypothesis_note ?? null,
+      };
+    });
+}
+
+export function axisBreakdownLines(axisBreakdown = []) {
+  return axisBreakdown.map((row) => {
+    const counts = row.values.length
+      ? row.values.map((v) => `${v.value} ${v.count}`).join(" · ")
+      : "NO RETAINED DETECTIONS";
+    return `${row.label} // ${counts}`
+      + (row.detectable ? "" : " · NO DETECTOR RUNS FOR THIS AXIS");
+  });
+}
+
+/**
  * The line the panel and the ticker both render.
  *
  * When nothing has been classified and no classifier is running, the reason
  * replaces the counters rather than sitting beside them — a zero that explains
  * itself is evidence, and a bare zero is an ambiguity.
  */
-export function classificationOutcomeLines(summary, classifier, breakdown = []) {
+export function classificationOutcomeLines(summary, classifier, breakdown = [],
+                                           axisBreakdown = []) {
   if (!summary?.available) return [`RF DETECTIONS // ${summary?.note ?? "COUNTS UNAVAILABLE"}`];
   const lines = [
     `RF DETECTIONS // DIGITAL ${summary.digital} · ANALOGUE ${summary.analogue} · `
       + `UNCLASSIFIED ${summary.unclassified} · RETAINED EVENTS ${summary.total}`,
+    // The counters above are a summary of the axes below, and saying so stops a
+    // reader treating DIGITAL as something the receiver observed directly.
+    "FAMILY COUNTS // DERIVED SUMMARY OF THE AXES BELOW · NOT PRIMARY OBSERVATIONS",
   ];
+  lines.push(...axisBreakdownLines(axisBreakdown));
   if (!classifier?.implemented) {
     lines.push(classifier?.declared
       ? `${classifier.headline} · ${classifier.note}`

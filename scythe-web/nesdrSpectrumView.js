@@ -13,7 +13,8 @@
  */
 
 import {
-  classificationOutcomeLines, deriveClassifierState, deriveOutcomeBreakdown,
+  classificationOutcomeLines, deriveAxisBreakdown, deriveClassifierState,
+  deriveOutcomeBreakdown,
 } from "./rfClassificationOutcomes.js";
 import {
   HEALTH, deriveClassificationSummary, deriveHardwareHealth, deriveIdentity,
@@ -693,9 +694,11 @@ export class NesdrSpectrumView {
     const summary = deriveClassificationSummary(status);
     const classifier = deriveClassifierState(status);
     const breakdown = deriveOutcomeBreakdown(status);
+    const axisBreakdown = deriveAxisBreakdown(status);
     this.classificationLine.setAttribute("data-classifier-state", classifier.state);
     this.classificationLine.textContent =
-      classificationOutcomeLines(summary, classifier, breakdown).join("\n");
+      classificationOutcomeLines(summary, classifier, breakdown, axisBreakdown)
+        .join("\n");
   }
 
   #renderAnchor() {

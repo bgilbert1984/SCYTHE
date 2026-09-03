@@ -52,9 +52,12 @@ class ObservationOriginTests(unittest.TestCase):
         from graphops_rf_ingest import ALLOWED_FIELDS
         from rf_signal_family import CLASSIFICATION_TRUST
         self.assertNotIn("signal_classification", ALLOWED_FIELDS)
+        # The axis names are refused too: splitting the contract into three
+        # fields must not open three new doors into it.
         for smuggled in ("signal_classification", "detection_statistic",
                          "estimated_false_alarm_probability", "symbol_rate_hz",
-                         "source_window_hash", "signal_family"):
+                         "source_window_hash", "signal_family",
+                         "modulation", "information_structure", "protocol"):
             with self.assertRaises(ValueError) as caught:
                 validate_measured_rf_frame({**_frame(), smuggled: {"family": "DIGITAL"}})
             self.assertIn(smuggled, str(caught.exception))

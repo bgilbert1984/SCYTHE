@@ -40,9 +40,10 @@ test("ticker declares RF products independently from connection state", () => {
     config:{sensor_id:"NESDR-SMART",center_frequency_hz:100e6,sample_rate_hz:2.048e6}}});
   assert.match(items[0],/STREAMING · IQ CONNECTED/);
   assert.equal(items[1],"RF PRODUCTS // FFT STALE · SPARSE EVENTS LIVE · RAW IQ LOCAL ONLY");
-  assert.equal(items[2],"RF DETECTIONS // DIGITAL 3 · ANALOGUE 2 · UNCLASSIFIED 7 · RETAINED EVENTS 12");
-  assert.equal(items[3],"RF CLASSIFIER // UNDECLARED · ANALOGUE DETECTOR UNDECLARED");
-  assert.match(items[4],/100.000 MHz · 2.048 MS\/s/);
+  assert.equal(items[2],"RF DETECTIONS // DIGITAL 3 · ANALOGUE 2 · UNCLASSIFIED 7 · RETAINED EVENTS 12 · DERIVED SUMMARY");
+  assert.equal(items[3],"RF AXES // MODULATION UNDECLARED · SYMBOL CLOCK UNDECLARED · PROTOCOL DECODER UNDECLARED");
+  assert.equal(items[4],"RF CLASSIFIER // UNDECLARED · ANALOGUE DETECTOR UNDECLARED");
+  assert.match(items[5],/100.000 MHz · 2.048 MS\/s/);
 });
 
 test("ticker states whether a classifier ran, not only what it counted", () => {
@@ -50,8 +51,11 @@ test("ticker states whether a classifier ran, not only what it counted", () => {
     observations:{signal_classifications:{digital:0,analogue:0,unclassified:6,total:6},
       classification_reasons:{NOT_ATTEMPTED:6},
       classifier:{state:"NOT_IMPLEMENTED",analogue_detector:"NOT_IMPLEMENTED",
-        contract_phase:"0",reason_codes:{}}}});
-  assert.equal(items[3],"RF CLASSIFIER // NOT_IMPLEMENTED · ANALOGUE DETECTOR NOT_IMPLEMENTED"
+        contract_phase:"0",reason_codes:{},
+        axes:{modulation:{detector:"NOT_IMPLEMENTED"},protocol:{decoder:"NOT_IMPLEMENTED"}}}}});
+  assert.equal(items[3],"RF AXES // MODULATION NOT_IMPLEMENTED · SYMBOL CLOCK NOT_IMPLEMENTED"
+    + " · PROTOCOL DECODER NOT_IMPLEMENTED");
+  assert.equal(items[4],"RF CLASSIFIER // NOT_IMPLEMENTED · ANALOGUE DETECTOR NOT_IMPLEMENTED"
     + " · UNCLASSIFIED BECAUSE NO CLASSIFIER RAN 6");
 });
 
@@ -61,8 +65,10 @@ test("degraded and missing RF inputs remain explicit", () => {
   const missing = tickerItemsFromRfStatus({bridge:{bridge_state:"ok",config:{}}});
   assert.match(missing[0],/UNNAMED SENSOR/); assert.match(missing[1],/FFT UNAVAILABLE/);
   assert.equal(missing[2],"RF DETECTIONS // COUNTS UNAVAILABLE");
-  assert.equal(missing[3],"RF CLASSIFIER // UNDECLARED · ANALOGUE DETECTOR UNDECLARED");
-  assert.match(missing[4],/UNAVAILABLE · RATE UNAVAILABLE/);
+  // An absent axes block reads UNDECLARED, never as a detector that ran.
+  assert.equal(missing[3],"RF AXES // MODULATION UNDECLARED · SYMBOL CLOCK UNDECLARED · PROTOCOL DECODER UNDECLARED");
+  assert.equal(missing[4],"RF CLASSIFIER // UNDECLARED · ANALOGUE DETECTOR UNDECLARED");
+  assert.match(missing[5],/UNAVAILABLE · RATE UNAVAILABLE/);
 });
 
 test("ticker text removes control characters, collapses whitespace, and remains bounded", () => {
