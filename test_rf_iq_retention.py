@@ -75,7 +75,7 @@ class RetentionActivationTests(EnvironmentIsolatedTest):
         self.assertFalse(status["capacity_limited"])
         self.assertEqual(status["capacity_samples"], 524_288)
         self.assertFalse(status["raw_iq_exposed"])
-        self.assertEqual(status["channelizer_state"], "AVAILABLE_NOT_INTEGRATED")
+        self.assertEqual(status["channelizer_state"], "INTEGRATED_NO_CLASSIFICATION")
         self.assertEqual(status["ring"]["held_samples"], 4096)
 
     def test_the_operator_specified_transition_payload_is_exactly_published(self):
@@ -88,7 +88,7 @@ class RetentionActivationTests(EnvironmentIsolatedTest):
                                           "raw_iq_exposed", "channelizer_state")},
             {"iq_retention": "PROCESS_LOCAL_BOUNDED_RING", "iq_retention_active": True,
              "effective_retention_ms": 256.0, "capacity_samples": 524288,
-             "raw_iq_exposed": False, "channelizer_state": "AVAILABLE_NOT_INTEGRATED"})
+             "raw_iq_exposed": False, "channelizer_state": "INTEGRATED_NO_CLASSIFICATION"})
 
     def test_no_status_key_reports_a_bare_unqualified_retention_duration(self):
         """A single "retention_ms" cannot be both the request and the reality."""
@@ -122,19 +122,22 @@ class RetentionActivationTests(EnvironmentIsolatedTest):
             status["effective_retention_ms"],
             status["ring"]["capacity_samples"] / 2_400_000.0 * 1000.0, places=3)
 
-    def test_the_channelizer_is_declared_available_but_not_integrated(self):
-        """The code exists and is tested; the capture binding does not.
+    def test_the_channelizer_state_names_what_is_still_missing(self):
+        """Wired to capture, consumed by nothing.
 
-        "NOT_IMPLEMENTED" understates that as badly as "ACTIVE" would overstate
-        it, so the state names the missing half rather than the whole thing.
+        Each state this has held named the missing half rather than the whole
+        thing: NOT_IMPLEMENTED understated a tested module, AVAILABLE_NOT_
+        INTEGRATED understated a wired one, and INTEGRATED alone would overstate
+        products that nothing believes.
         """
         status = _owner().status()
-        self.assertEqual(status["channelizer_state"], "AVAILABLE_NOT_INTEGRATED")
+        self.assertEqual(status["channelizer_state"], "INTEGRATED_NO_CLASSIFICATION")
         self.assertEqual(status["channelizer_state"], CHANNELIZER_STATE)
-        self.assertIn("IS IMPLEMENTED AND TESTED BUT IS NOT WIRED",
-                      status["channelizer_note"])
+        self.assertIn("NO DETECTOR CONSUMES THEM", status["channelizer_note"])
         import rf_channelizer
         self.assertEqual(rf_channelizer.channelizer_status()["bridge_integration"],
+                         "INTEGRATED")
+        self.assertEqual(rf_channelizer.channelizer_status()["detector_integration"],
                          "NOT_IMPLEMENTED")
 
 

@@ -636,7 +636,10 @@ def channelizer_status() -> Dict[str, Any]:
         "occupancy_floor_db": OCCUPANCY_FLOOR_DB,
         "outcomes": dict(OUTCOMES),
         "refusal_outcomes": list(REFUSAL_OUTCOMES),
-        "bridge_integration": "NOT_IMPLEMENTED",
+        # Phase 1d: the bridge issues verified windows and records bounded
+        # products. Nothing yet consumes those products, which is a separate
+        # claim and is reported separately.
+        "bridge_integration": "INTEGRATED",
         "detector_integration": "NOT_IMPLEMENTED",
         "raw_iq_exposed": False,
         "baseband_transportable": False,

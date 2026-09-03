@@ -52,10 +52,10 @@ test("live raw-IQ retention is stated as plainly as its absence", () => {
     iq_retention:{iq_retention:"PROCESS_LOCAL_BOUNDED_RING",iq_retention_active:true,
       configured_retention_ms:256,effective_retention_ms:256,capacity_limited:false,
       capacity_samples:524288,raw_iq_exposed:false,
-      channelizer_state:"AVAILABLE_NOT_INTEGRATED",ring:{state:"READY"}}}});
+      channelizer_state:"INTEGRATED_NO_CLASSIFICATION",ring:{state:"READY"}}}});
   assert.equal(items[6],"RF IQ RETENTION // PROCESS_LOCAL_BOUNDED_RING · ACTIVE"
     + " · 256 ms · 524288 SAMPLES · RING READY · RAW IQ NOT EXPOSED"
-    + " · CHANNELIZER AVAILABLE_NOT_INTEGRATED");
+    + " · CHANNELIZER INTEGRATED_NO_CLASSIFICATION");
 });
 
 test("a capacity-limited ring reports what it holds, not what was configured", () => {
@@ -65,11 +65,22 @@ test("a capacity-limited ring reports what it holds, not what was configured", (
     iq_retention:{iq_retention:"PROCESS_LOCAL_BOUNDED_RING",iq_retention_active:true,
       configured_retention_ms:256,effective_retention_ms:218.453,capacity_limited:true,
       capacity_samples:524288,raw_iq_exposed:false,
-      channelizer_state:"AVAILABLE_NOT_INTEGRATED",ring:{state:"READY"}}}});
+      channelizer_state:"INTEGRATED_NO_CLASSIFICATION",ring:{state:"READY"}}}});
   assert.equal(items[6],"RF IQ RETENTION // PROCESS_LOCAL_BOUNDED_RING · ACTIVE"
     + " · 218.453 ms EFFECTIVE OF 256 ms CONFIGURED · CAPACITY LIMITED"
     + " · 524288 SAMPLES · RING READY · RAW IQ NOT EXPOSED"
-    + " · CHANNELIZER AVAILABLE_NOT_INTEGRATED");
+    + " · CHANNELIZER INTEGRATED_NO_CLASSIFICATION");
+});
+
+test("the ticker counts channelized products without implying they were classified", () => {
+  const items = tickerItemsFromRfStatus({bridge:{bridge_state:"streaming",config:{},
+    iq_retention:{iq_retention:"PROCESS_LOCAL_BOUNDED_RING",iq_retention_active:true,
+      configured_retention_ms:256,effective_retention_ms:256,capacity_limited:false,
+      capacity_samples:524288,raw_iq_exposed:false,
+      channelizer_state:"INTEGRATED_NO_CLASSIFICATION",ring:{state:"READY"},
+      channelizer:{products_total:7,classification:"NOT_DERIVED_FROM_PRODUCTS"}}}});
+  assert.match(items[6],/· 7 PRODUCTS · CLASSIFICATION NOT_DERIVED_FROM_PRODUCTS$/);
+  assert.doesNotMatch(items[6],/DIGITAL|ANALOGUE/);
 });
 
 test("a permitted but unallocated ring is not reported as retention", () => {
@@ -77,9 +88,9 @@ test("a permitted but unallocated ring is not reported as retention", () => {
     iq_retention:{iq_retention:"NONE_BEYOND_ONE_FFT_BLOCK",iq_retention_active:false,
       configured_retention_ms:256,effective_retention_ms:256,capacity_samples:524288,
       raw_iq_exposed:false,inactive_reason:"NO_SAMPLES_YET",
-      channelizer_state:"AVAILABLE_NOT_INTEGRATED",ring:null}}});
+      channelizer_state:"INTEGRATED_NO_CLASSIFICATION",ring:null}}});
   assert.equal(items[6],"RF IQ RETENTION // NONE_BEYOND_ONE_FFT_BLOCK · INACTIVE"
-    + " · NO_SAMPLES_YET · RAW IQ NOT EXPOSED · CHANNELIZER AVAILABLE_NOT_INTEGRATED");
+    + " · NO_SAMPLES_YET · RAW IQ NOT EXPOSED · CHANNELIZER INTEGRATED_NO_CLASSIFICATION");
 });
 
 test("ticker states whether a classifier ran, not only what it counted", () => {

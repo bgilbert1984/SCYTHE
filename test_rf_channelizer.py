@@ -57,8 +57,8 @@ def _windowed(samples, *, chain="chain-a", sample_rate=SAMPLE_RATE_HZ):
     return ring, ring.acquire_window(samples.size).window
 
 
-def _request(target_hz=100_200_000.0, **kwargs):
-    return ChannelRequest(capture_center_hz=CAPTURE_CENTER_HZ,
+def _request(target_hz=100_200_000.0, capture_center_hz=CAPTURE_CENTER_HZ, **kwargs):
+    return ChannelRequest(capture_center_hz=capture_center_hz,
                           target_frequency_hz=target_hz, **kwargs)
 
 
@@ -291,6 +291,47 @@ class ProductIdentityTests(unittest.TestCase):
         self.assertTrue(first.product_digest.startswith("blake2s:"))
         self.assertTrue(first.product_id.startswith("chp-"))
 
+    def test_every_channel_parameter_moves_the_derived_product_hash(self):
+        """A product hash that ignored a parameter would let two different cuts
+        of the spectrum claim the same identity."""
+        ring, window = _windowed(_signal())
+        baseline = channelize(window, _request(), ring=ring).product.product_digest
+
+        # Source identity: a different window, and a different signal chain.
+        other_ring, other_window = _windowed(_signal(seed=21))
+        self.assertNotEqual(
+            baseline,
+            channelize(other_window, _request(), ring=other_ring).product.product_digest,
+            "a different source window must not reuse the digest")
+        chain_ring, chain_window = _windowed(_signal(), chain="chain-b")
+        self.assertNotEqual(
+            baseline,
+            channelize(chain_window, _request(), ring=chain_ring).product.product_digest,
+            "products through different signal chains are not comparable")
+
+        # Request parameters.
+        self.assertNotEqual(
+            baseline,
+            channelize(window, _request(capture_center_hz=100_000_001.0),
+                       ring=ring).product.product_digest)
+
+        # Channel selection: a signal at a different frequency is a different
+        # channel centre, and a wider one is a different channel bandwidth.
+        moved_ring, moved_window = _windowed(_signal(offset_hz=260_000.0))
+        self.assertNotEqual(
+            baseline,
+            channelize(moved_window, _request(target_hz=100_260_000.0),
+                       ring=moved_ring).product.product_digest)
+        wide_ring, wide_window = _windowed(_signal(bandwidth_hz=90_000.0))
+        wide = channelize(wide_window, _request(), ring=wide_ring).product
+        self.assertNotEqual(baseline, wide.product_digest)
+
+        # Outcome: a refusal over the same window is its own identity.
+        self.assertNotEqual(
+            baseline,
+            channelize(window, _request(target_hz=1e9), ring=ring).product.product_digest,
+            "a refusal must not share a digest with a successful cut")
+
     def test_a_refusal_is_a_complete_product_rather_than_a_missing_one(self):
         ring, window = _windowed(_signal())
         product = channelize(window, _request(target_hz=1e9), ring=ring).product
@@ -346,7 +387,9 @@ class BasebandContainmentTests(unittest.TestCase):
     def test_the_status_declares_what_is_not_yet_wired(self):
         status = channelizer_status()
         self.assertEqual(status["state"], "IMPLEMENTED")
-        self.assertEqual(status["bridge_integration"], "NOT_IMPLEMENTED")
+        # Wired to capture in Phase 1d. Nothing consumes the products, and that
+        # is reported as its own claim rather than folded into the first.
+        self.assertEqual(status["bridge_integration"], "INTEGRATED")
         self.assertEqual(status["detector_integration"], "NOT_IMPLEMENTED")
         self.assertFalse(status["raw_iq_exposed"])
         self.assertFalse(status["baseband_transportable"])

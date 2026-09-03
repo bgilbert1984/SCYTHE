@@ -609,6 +609,25 @@ class SDRPlusPlusBridge:
             result["error"] = str(exc)
         return result
 
+    def _maybe_channelize(self, frame: Dict) -> None:
+        """Offer the newest complete window to the channelizer. Never raises.
+
+        Frame-driven because the frame carries the coarse peak that selects a
+        target; the window itself comes from the ring, complete and immutable,
+        so the channelizer never reads whatever samples happen to be newest.
+        The frame's peak is only a pointer -- the channelizer runs its own
+        occupancy estimate and records that candidate in its own fields.
+        """
+        try:
+            target = frame.get("peak_frequency_hz")
+            centre = frame.get("center_frequency_hz")
+            if target is None or centre is None:
+                return
+            self.retention.maybe_channelize(
+                capture_center_hz=float(centre), target_frequency_hz=float(target))
+        except Exception:
+            LOG.exception("channelization dispatch failed")
+
     def status(self, include_control: bool = False) -> Dict:
         with self._lock:
             thread_alive = bool(self._thread and self._thread.is_alive())
@@ -683,7 +702,11 @@ class SDRPlusPlusBridge:
                     with self._lock:
                         self._bytes_received += len(chunk)
                     for frame in processor.feed(chunk):
+                        # Publish first, unconditionally. Channelization is
+                        # analysis layered on top of the spectrum product; it
+                        # must never be able to delay or suppress one.
                         self._publish(frame)
+                        self._maybe_channelize(frame)
             except Exception as exc:
                 if not self._stop.is_set():
                     LOG.warning("SDR++ IQ connection failed: %s", exc)

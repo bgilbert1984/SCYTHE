@@ -327,7 +327,7 @@ Neither the ring nor a window can be pickled, `repr`d into a log, or serialized
 with its samples, and a process whose `SCYTHE_PROCESS_ROLE` is anything other
 than `orchestrator` is refused **before** the allocation is made.
 
-### Phase 1b — Channelizer — **DONE** *(`rf_channelizer.py`)*
+### Phase 1b — Channelizer *(standalone)* — **DONE** *(`rf_channelizer.py`)*
 A pure `IQWindow → ChannelizedProduct` transformation. It imports `rf_iq_ring`
 and nothing else from the capture path; `rf_bridge.py` is untouched by this
 change, which is the seam that lets DSP and lifecycle be reviewed separately.
@@ -389,9 +389,48 @@ ring remembers only the last, which would leave the audit blaming a reconnect fo
 a retune's clear, so the owner keeps a bounded `invalidation_history`.
 Suppressing the later clears would be worse: they really did happen.
 
+### Phase 1d — Channelizer wired to the capture path — **DONE**
+The owner issues windows; the channelizer never reaches into the ring. A
+channelizer that periodically read "whatever is newest" out of a mutable buffer
+would produce products whose contents depend on thread timing, and thread timing
+is not evidence.
+
+```text
+decoded IQ -> append -> complete window issued -> verify_window()
+           -> epoch and signal-chain check -> channelize -> bounded product
+```
+
+Frame-driven, because the FFT frame already carries the coarse peak that points
+at a target — but only as a pointer. The channelizer still runs its own
+occupancy estimate and records that candidate in its own fields, so the frame's
+peak never becomes the selection truth.
+
+**The lock is deliberately not held across the DSP.** Holding it would stall a
+retune arriving on the API thread for the length of the transform, and would
+make the retune-during-channelization race unobservable — the very race the
+verification exists to catch. The window is a copy, so a concurrent
+`invalidate()` cannot corrupt it; it can only make it stale, and staleness is
+precisely what `verify_window` reports.
+
+**One product per non-overlapping window.** `WINDOW_OVERLAP` is `NONE`, so a
+fresh capacity's worth of samples must arrive before another window is issued.
+Without that, a fast frame rate would emit near-identical products from
+overlapping spans and the product count would describe the polling rate rather
+than the signal.
+
+Publication happens first and unconditionally; channelization is layered on top
+and must never delay or suppress a spectrum product. A channelizer exception is
+counted in `channelizer_errors` and swallowed. A *refusal* is not an error: it is
+a verdict the channelizer reached, and it is recorded as a product.
+
+`channelizer_state` is `INTEGRATED_NO_CLASSIFICATION`. Each state this field has
+held named the missing half rather than the whole thing — `NOT_IMPLEMENTED`
+understated a tested module, `AVAILABLE_NOT_INTEGRATED` understated a wired one,
+and `INTEGRATED` alone would overstate products that nothing believes.
+
 ### Phase 2 — Symbol-clock detector *(not started)*
-Gated on Q4. The channelizer must be wired to the capture path first, and that
-is its own change again.
+Gated on Q4, which is now a validation manifest rather than a threshold — see
+§5.8. The capture wiring is done as of Phase 1d.
 
 ### Phase 2 — Symbol-clock detector *(~2–3 days)*
 Squared-envelope cyclic spectrum on the isolated channel. Significance test
@@ -611,6 +650,45 @@ power-weighted centroid over the occupied region rather than the peak bin,
 because the peak bin of a noise-like band is a property of that noise
 realisation, not of the emitter.
 
+### 5.8 Q4 resolved — the false-DIGITAL gate is a manifest, not a decimal
+
+**Approved 2026-09-02.** Maximum false-DIGITAL rate `0.001`, but the promotion
+rule is the *bound*, not the observation:
+
+```text
+one-sided 95% upper confidence bound  <=  0.001        PROMOTES
+observed false positives / trials     <=  0.001        DOES NOT
+```
+
+Zero false positives in 100 trials is not evidence of a sub-0.1% rate; by the
+rule of three, zero failures needs roughly 3,000 independent null trials just to
+place the 95% upper bound near 0.1%. A ratio of small integers is a hopeful
+decimal wearing the costume of a measurement.
+
+Target **≥ 10,000 null windows**, stratified, with a Wilson or exact
+Clopper–Pearson upper bound reported **per stratum**:
+
+```text
+thermal / no input            adjacent-channel interference
+stationary analogue FM        DC contamination
+AM                            gain steps
+constant-envelope digital     retune transients
+dropped frames, timing gaps   overloaded / clipped input
+receiver spurs                two-signal collisions
+```
+
+The aggregate must pass **and** no safety-critical stratum may hide behind a
+large pile of easy thermal-noise windows. Constant-envelope digital is the
+stratum that matters most here: it is the P25 C4FM trap in corpus form, and a
+detector that fails it while passing on thermal noise has learned to recognise
+quiet rather than to recognise structure.
+
+Consequence for the ring: a stratum like *retune transients* or *dropped frames*
+can only be constructed if the invalidation reasons that describe those events
+are actually wired. `GAIN_CHANGE`, `DIRECT_SAMPLING_CHANGE` and
+`CLOCK_DISCONTINUITY` are still declared-but-unwired, so the corresponding
+strata cannot yet be built honestly.
+
 ---
 
 ## 6. Open questions for the operator
@@ -618,9 +696,13 @@ realisation, not of the emitter.
 1. **Approve the bounded IQ ring** (§2.2)? First retention of raw IQ beyond one block.
 2. **256 ms default window** — accept 4.19 MB and 3.9 Hz α resolution?
 3. ~~**Ship Phase 0 alone first?**~~ **Done 2026-09-01.**
-4. **False-DIGITAL gate at <0.1% on noise** — right threshold, or stricter?
+4. ~~**False-DIGITAL gate at <0.1% on noise**~~ **Resolved 2026-09-02**: rate
+   `0.001` as a one-sided 95% upper confidence bound over ≥10,000 stratified
+   null windows, per-stratum. See §5.8.
 5. ~~**Split the DIGITAL/ANALOGUE axis** (§5.2)?~~ **Approved and done
    2026-09-02**, before Phase 1.
 
-Q4 gates Phase 3. Q1 and Q2 were approved 2026-09-02; see §5.5 for the terms of
-that approval, which are narrower than "raw IQ retention is now allowed".
+All five are now resolved. Q1 and Q2 were approved 2026-09-02; see §5.5 for the
+terms of that approval, which are narrower than "raw IQ retention is now
+allowed". Q4's resolution (§5.8) converts Phase 3's gate from a threshold into a
+validation corpus that has to be built before a detector can be promoted.

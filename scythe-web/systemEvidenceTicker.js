@@ -88,6 +88,12 @@ export function tickerItemsFromRfStatus(payload, {statusObservedAt = null} = {})
         // 32, not 20: AVAILABLE_NOT_INTEGRATED is 24 characters and a state
         // truncated to AVAILABLE_NOT_INTEGR reads as a different claim.
         + ` · CHANNELIZER ${sanitizeTickerText(retention.channelizer_state, "UNDECLARED", 32).toUpperCase()}`
+        // Products, not classifications. The count says how many spans were cut
+        // and measured; nothing has decided what any of them are.
+        + (retention.channelizer
+            ? ` · ${Math.max(0, Number(retention.channelizer.products_total) || 0)} PRODUCTS`
+              + ` · CLASSIFICATION ${sanitizeTickerText(retention.channelizer.classification, "UNDECLARED", 32).toUpperCase()}`
+            : "")
       : "RF IQ RETENTION // UNDECLARED · THE BRIDGE PUBLISHED NO RETENTION BLOCK",
     `RF FRESHNESS // STATUS POLLED ${statusObservedAt ? new Date(statusObservedAt).toISOString() : "UNAVAILABLE"} · LAST FFT FRAME ${sanitizeTickerText(bridge.latest_frame_at, "UNAVAILABLE", 40)}`,
   ];

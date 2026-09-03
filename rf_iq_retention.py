@@ -59,6 +59,34 @@ status that kept saying ``256`` would be stating a duration the ring does not
 have -- a precise-looking number that is wrong, which is worse than a vague one.
 Both are published, along with ``capacity_limited`` saying which bound applied.
 
+Phase 1d: the owner issues windows, the channelizer never reaches in
+--------------------------------------------------------------------
+The channelizer is not given the ring.  The owner issues a complete, immutable
+``IQWindow`` -- already copy-isolated from the buffer -- and the channelizer
+verifies it against the ring immediately before processing.  A channelizer that
+periodically read "whatever is newest" out of a mutable buffer would produce
+products whose contents depend on thread timing, which is not evidence.
+
+The sequence, and every step of it is load-bearing::
+
+    decoded IQ -> append -> complete window issued -> verify_window()
+               -> epoch and signal-chain check -> channelize -> bounded product
+
+The owner deliberately does **not** hold its lock across the DSP.  Holding it
+would block a retune arriving on the API thread for the length of the transform,
+and would make the retune-during-channelization case unobservable -- the very
+race the verification exists to catch.  The window is a copy, so a concurrent
+``invalidate()`` cannot corrupt it; it can only make it stale, and staleness is
+exactly what ``verify_window`` reports.
+
+One product per source window.  ``WINDOW_OVERLAP`` is ``NONE``, so a fresh
+capacity's worth of samples must arrive before another window is issued; without
+that a fast frame rate would emit near-identical products from overlapping spans
+and the product count would describe the polling rate rather than the signal.
+
+No classification happens here.  A product is measurements and verdict metadata;
+nothing consumes it and nothing derives a family from it.
+
 ``GAIN_CHANGE``, ``DIRECT_SAMPLING_CHANGE`` and ``CLOCK_DISCONTINUITY`` remain in
 the ring's vocabulary with **no bridge event wired to them**, because this bridge
 has no gain control, no direct-sampling control and no clock-discontinuity
@@ -78,9 +106,10 @@ from typing import Any, Dict, Optional
 
 import numpy as np
 
+from rf_channelizer import ChannelRequest, ChannelizedProduct, channelize
 from rf_iq_ring import (
     DEFAULT_CAPACITY_SAMPLES, DEFAULT_WINDOW_MS, INVALIDATION_REASONS,
-    BoundedIQRing, RawIQRetentionRefused,
+    BoundedIQRing, IQWindow, RawIQRetentionRefused, WindowAcquisition,
 )
 
 
@@ -109,14 +138,19 @@ INACTIVE_REASONS: Dict[str, str] = {
     ),
 }
 
-# The channelizer module exists and is tested; nothing in the capture path calls
-# it. Saying "NOT_IMPLEMENTED" without that distinction would be as misleading in
-# one direction as claiming it runs would be in the other.
-CHANNELIZER_STATE = "AVAILABLE_NOT_INTEGRATED"
+# Wired to the capture path as of Phase 1d. The state names what is still
+# missing rather than stopping at "integrated", because a product being produced
+# is not the same as a product being believed by anything.
+CHANNELIZER_STATE = "INTEGRATED_NO_CLASSIFICATION"
 CHANNELIZER_NOTE = (
-    "rf_channelizer IS IMPLEMENTED AND TESTED BUT IS NOT WIRED INTO THE CAPTURE "
-    "PATH. NO WINDOW IS CHANNELIZED AND NO DERIVED PRODUCT IS PRODUCED"
+    "COMPLETE WINDOWS ARE VERIFIED AND CHANNELIZED INTO BOUNDED PRODUCTS. NO "
+    "DETECTOR CONSUMES THEM, NO CLASSIFICATION IS DERIVED FROM THEM, AND NO "
+    "BASEBAND LEAVES THE PROCESS"
 )
+# Non-overlapping, matching the ring's declared WINDOW_OVERLAP. A product count
+# must describe captured spans, not how often the bridge was asked.
+WINDOW_POLICY = "ONE_PRODUCT_PER_NON_OVERLAPPING_WINDOW"
+MAX_TRACKED_PRODUCTS = 8
 
 # Reasons the ring declares that this bridge has no event for. Listed so the gap
 # is visible rather than looking like full coverage.
@@ -183,6 +217,14 @@ class IQRetentionOwner:
         # survives a reallocation and so a later clear cannot overwrite the cause
         # of an earlier one.
         self._history: deque = deque(maxlen=MAX_INVALIDATION_HISTORY)
+        # Channelization bookkeeping. Bounded and metadata-only: products carry
+        # measurements, never baseband, and the deque is capped.
+        self._samples_since_window = 0
+        self._windows_issued = 0
+        self._products_total = 0
+        self._products_by_outcome: Dict[str, int] = {}
+        self._channelizer_errors = 0
+        self._products: deque = deque(maxlen=MAX_TRACKED_PRODUCTS)
 
     # -- policy -------------------------------------------------------------
 
@@ -274,6 +316,9 @@ class IQRetentionOwner:
                 LOG.exception("bounded IQ ring append failed")
                 return 0
             self._appended_blocks += 1
+            # Counts every retained sample, not every block: the non-overlap
+            # policy is measured in samples because that is what a window is.
+            self._samples_since_window += kept
             return kept
 
     def invalidate(self, reason: str) -> Optional[int]:
@@ -288,6 +333,10 @@ class IQRetentionOwner:
                 return None
             LOG.info("bounded IQ ring invalidated: %s", code)
             epoch = self._ring.invalidate(code)
+            # A cleared ring holds nothing, so no window is pending. Leaving the
+            # counter high would let the first samples after a retune be issued
+            # as a "complete" window they do not fill.
+            self._samples_since_window = 0
             self._record_locked(code, epoch)
             return epoch
 
@@ -323,6 +372,7 @@ class IQRetentionOwner:
                          reason, self._signal_chain_hash)
                 self._ring.close()
                 self._ring = None
+                self._samples_since_window = 0
                 self._record_locked(reason, None)
             return self._signal_chain_hash
 
@@ -336,7 +386,112 @@ class IQRetentionOwner:
                 pass
             self._ring.close()
             self._ring = None
+            self._samples_since_window = 0
             self._record_locked(str(reason or "").strip().upper(), None)
+
+    # -- channelization (Phase 1d) ------------------------------------------
+
+    def window_ready(self) -> bool:
+        """Has a full, non-overlapping window's worth of samples arrived?"""
+        with self._lock:
+            return self._ring is not None and self._samples_since_window >= self._capacity()
+
+    def acquire_window(self) -> Optional[WindowAcquisition]:
+        """Issue one complete immutable window, or None when there is no ring.
+
+        The counter resets only on success, so a refused acquisition does not
+        silently consume the samples that would have formed the next window.
+        """
+        with self._lock:
+            if self._ring is None:
+                return None
+            acquisition = self._ring.acquire_window()
+            if acquisition:
+                self._samples_since_window = 0
+                self._windows_issued += 1
+            return acquisition
+
+    def channelize_window(self, window: IQWindow, *, capture_center_hz: float,
+                          target_frequency_hz: float) -> ChannelizedProduct:
+        """Verify and channelize one issued window into a bounded product.
+
+        Returns measurements and verdict metadata.  The ``Channelization`` that
+        carries the baseband is local to this method and is dropped before it
+        returns, so there is no reference through which complex samples could
+        reach a caller, a status payload or a log line.
+        """
+        with self._lock:
+            ring = self._ring
+            # Read under the lock, used outside it: this is the caller's belief
+            # about the current configuration, and the point is that it can be
+            # wrong by the time the channelizer checks it.
+            epoch = ring.configuration_epoch if ring is not None else None
+            expected_chain = self._signal_chain_hash
+        request = ChannelRequest(
+            capture_center_hz=float(capture_center_hz),
+            target_frequency_hz=float(target_frequency_hz),
+            expected_signal_chain_hash=expected_chain,
+            expected_configuration_epoch=epoch,
+        )
+        # Deliberately outside the lock. See the module docstring: holding it
+        # here would stall a retune for the length of the transform and would
+        # make the retune-during-channelization race untestable.
+        result = channelize(window, request, ring=ring)
+        product = result.product
+        self._record_product(product)
+        return product
+
+    def maybe_channelize(self, *, capture_center_hz: float,
+                         target_frequency_hz: float) -> Optional[ChannelizedProduct]:
+        """Channelize if a fresh complete window exists. Never raises.
+
+        Returns None when there is nothing to do -- no ring, a partial window,
+        or an acquisition the ring refused.  A None is not a refusal product:
+        no window was ever issued, so there is nothing to render a verdict on.
+        """
+        try:
+            if not self.window_ready():
+                return None
+            acquisition = self.acquire_window()
+            if acquisition is None or not acquisition:
+                return None
+            return self.channelize_window(
+                acquisition.window, capture_center_hz=capture_center_hz,
+                target_frequency_hz=target_frequency_hz)
+        except Exception:
+            # Channelization is analysis. It must never be able to stop the
+            # bridge publishing the spectrum products it published before it
+            # existed, so the failure is counted and reported, not raised.
+            LOG.exception("channelization failed")
+            with self._lock:
+                self._channelizer_errors += 1
+            return None
+
+    def _record_product(self, product: ChannelizedProduct) -> None:
+        with self._lock:
+            self._products_total += 1
+            self._products_by_outcome[product.outcome] = (
+                self._products_by_outcome.get(product.outcome, 0) + 1)
+            self._products.append(product.to_dict())
+
+    def channelizer_block(self) -> Dict[str, Any]:
+        """Bounded channelization metadata for the status payload."""
+        with self._lock:
+            capacity = self._capacity()
+            remaining = max(0, capacity - self._samples_since_window) if self._ring else capacity
+            return {
+                "state": CHANNELIZER_STATE,
+                "note": CHANNELIZER_NOTE,
+                "window_policy": WINDOW_POLICY,
+                "windows_issued": self._windows_issued,
+                "products_total": self._products_total,
+                "products_by_outcome": dict(self._products_by_outcome),
+                "channelizer_errors": self._channelizer_errors,
+                "samples_until_next_window": remaining,
+                "classification": "NOT_DERIVED_FROM_PRODUCTS",
+                "baseband_retained": False,
+                "last_product": self._products[-1] if self._products else None,
+            }
 
     # -- published metadata -------------------------------------------------
 
@@ -357,6 +512,7 @@ class IQRetentionOwner:
                 "raw_iq_exposed": False,
                 "channelizer_state": CHANNELIZER_STATE,
                 "channelizer_note": CHANNELIZER_NOTE,
+                "channelizer": self.channelizer_block(),
                 "signal_chain_hash": self._signal_chain_hash,
                 "antenna_id": antenna_id(),
                 "owner": "ORCHESTRATOR_BRIDGE",
