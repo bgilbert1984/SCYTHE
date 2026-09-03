@@ -327,10 +327,32 @@ Neither the ring nor a window can be pickled, `repr`d into a log, or serialized
 with its samples, and a process whose `SCYTHE_PROCESS_ROLE` is anything other
 than `orchestrator` is refused **before** the allocation is made.
 
-### Phase 1b — Channelizer *(~1–2 days, not started)*
-Occupied-bandwidth estimate (99% power or −20 dB) around a detection peak; DDC,
-low-pass, decimate to that bandwidth, reading windows from the Phase 1a ring.
-Testable standalone against synthetic signals at known centre/bandwidth.
+### Phase 1b — Channelizer — **DONE** *(`rf_channelizer.py`)*
+A pure `IQWindow → ChannelizedProduct` transformation. It imports `rf_iq_ring`
+and nothing else from the capture path; `rf_bridge.py` is untouched by this
+change, which is the seam that lets DSP and lifecycle be reviewed separately.
+
+Coarse occupancy (stage 1) → channel selection (stage 2) → DDC, Kaiser-windowed
+FIR, decimation. Eleven declared outcomes, ten of them refusals. 31 tests.
+
+Two implementation notes worth keeping:
+
+- **The occupancy walk runs over a Welch-averaged spectrum, not a periodogram.**
+  A single periodogram of noise-like modulation has ~5.6 dB of bin-to-bin
+  variation, so a −20 dB walk crosses the floor in the first spectral null and
+  reports a 40 kHz signal as 234 Hz wide. That was the first behaviour observed
+  and it is exactly the failure that would have produced confident, precise,
+  wrong bandwidths. Averaging plus a three-bin run-length before declaring an
+  edge fixes it.
+- **Decimation is bounded by two things.** Nyquist sets the largest ratio that
+  does not alias; the window length sets the largest ratio that still leaves a
+  usable number of output samples. Taking only the first turns a narrow candidate
+  into a 39-sample product and then reports the *window* as too short, blaming
+  the wrong thing.
+
+### Phase 1c — Bridge integration *(not started)*
+The small change where the bridge instantiates the ring, issues verified windows
+and publishes the retention transition in §5.6. No DSP in that diff.
 
 ### Phase 2 — Symbol-clock detector *(~2–3 days)*
 Squared-envelope cyclic spectrum on the isolated channel. Significance test
@@ -492,6 +514,48 @@ Phase 1 does not merge unless tests demonstrate all ten of:
 8. neither API serialization nor exception paths expose samples;
 9. child-process mode cannot instantiate the ring;
 10. sustained input maintains bounded memory.
+
+### 5.6 The integration gate — what changes when the ring goes live
+
+A class existing is not active retention. `iq_retention` stays
+`NONE_BEYOND_ONE_FFT_BLOCK` until an allocated ring is actually receiving
+samples, and it changes in the same commit that makes that true:
+
+```json
+{
+  "iq_retention": "PROCESS_LOCAL_BOUNDED_RING",
+  "iq_retention_active": true,
+  "retention_ms": 256,
+  "capacity_samples": 524288,
+  "raw_iq_exposed": false,
+  "channelizer_state": "NOT_IMPLEMENTED"
+}
+```
+
+That commit is Phase 1c and contains no DSP. What it must make reviewable, with
+nothing else in the diff to obscure it: who owns the ring, when it is allocated
+and closed, which lifecycle events call `invalidate` and with which reason, how
+`SCYTHE_PROCESS_ROLE` is enforced at the allocation site, and the status
+transition above.
+
+### 5.7 Two channelizer traps that are worth remembering
+
+**The channelizer must not grade its own selection.** An occupied-bandwidth
+estimate used to *choose* a channel cannot then be reported as evidence of how
+well the signal *fits* it. `candidate_center_hz` / `candidate_bandwidth_hz`
+record the coarse pass; `channel_center_hz` / `channel_bandwidth_hz` record what
+was cut; `occupied_bandwidth_basis` is `SAME_WINDOW_AS_SELECTION`, and a test
+asserts that the string `INDEPENDENT_WINDOW` appears nowhere in the module — no
+code path may promote its own estimate.
+
+**Tuning offset and carrier offset are different quantities.**
+`tuning_offset_hz` records where the DDC was pointed; `frequency_offset_hz` is
+where the carrier turned out to be within the resulting channel. Publishing only
+their sum would fold selection error into the measurement and make a mistuned
+channel look like a frequency-shifted emitter. The carrier estimate is a
+power-weighted centroid over the occupied region rather than the peak bin,
+because the peak bin of a noise-like band is a property of that noise
+realisation, not of the emitter.
 
 ---
 
