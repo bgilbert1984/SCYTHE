@@ -44,6 +44,26 @@ test("ticker declares RF products independently from connection state", () => {
   assert.equal(items[3],"RF AXES // MODULATION UNDECLARED · SYMBOL CLOCK UNDECLARED · PROTOCOL DECODER UNDECLARED");
   assert.equal(items[4],"RF CLASSIFIER // UNDECLARED · ANALOGUE DETECTOR UNDECLARED");
   assert.match(items[5],/100.000 MHz · 2.048 MS\/s/);
+  assert.equal(items[6],"RF IQ RETENTION // UNDECLARED · THE BRIDGE PUBLISHED NO RETENTION BLOCK");
+});
+
+test("live raw-IQ retention is stated as plainly as its absence", () => {
+  const items = tickerItemsFromRfStatus({bridge:{bridge_state:"streaming",config:{},
+    iq_retention:{iq_retention:"PROCESS_LOCAL_BOUNDED_RING",iq_retention_active:true,
+      retention_ms:256,capacity_samples:524288,raw_iq_exposed:false,
+      channelizer_state:"NOT_IMPLEMENTED",ring:{state:"READY"}}}});
+  assert.equal(items[6],"RF IQ RETENTION // PROCESS_LOCAL_BOUNDED_RING · ACTIVE"
+    + " · 256 ms · 524288 SAMPLES · RING READY · RAW IQ NOT EXPOSED"
+    + " · CHANNELIZER NOT_IMPLEMENTED");
+});
+
+test("a permitted but unallocated ring is not reported as retention", () => {
+  const items = tickerItemsFromRfStatus({bridge:{bridge_state:"streaming",config:{},
+    iq_retention:{iq_retention:"NONE_BEYOND_ONE_FFT_BLOCK",iq_retention_active:false,
+      retention_ms:256,capacity_samples:524288,raw_iq_exposed:false,
+      inactive_reason:"NO_SAMPLES_YET",channelizer_state:"NOT_IMPLEMENTED",ring:null}}});
+  assert.equal(items[6],"RF IQ RETENTION // NONE_BEYOND_ONE_FFT_BLOCK · INACTIVE"
+    + " · NO_SAMPLES_YET · RAW IQ NOT EXPOSED · CHANNELIZER NOT_IMPLEMENTED");
 });
 
 test("ticker states whether a classifier ran, not only what it counted", () => {

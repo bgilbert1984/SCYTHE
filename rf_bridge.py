@@ -23,6 +23,7 @@ from typing import Any, Callable, Deque, Dict, Iterable, Optional
 
 import numpy as np
 
+from rf_iq_retention import IQRetentionOwner
 from rf_signal_family import (
     AXES, classifier_status, empty_axis_counts, empty_reason_counts,
     normalize_classification,
@@ -323,8 +324,12 @@ class RFObservationStore:
 class IQFFTProcessor:
     """Incrementally converts unframed interleaved IQ bytes into FFT frames."""
 
-    def __init__(self, config: RFBridgeConfig):
+    def __init__(self, config: RFBridgeConfig, sample_sink=None):
         self.config = config.validated()
+        # Optional consumer of the decoded IQ, called with every sample rather
+        # than with the throttled FFT frames. None keeps the pre-Phase-1c
+        # behaviour exactly: decode, transform, discard.
+        self._sample_sink = sample_sink
         self._dtype = _SAMPLE_DTYPES[config.sample_type]
         self._scalar_bytes = self._dtype.itemsize
         self._window = np.hanning(config.fft_size).astype(np.float32)
@@ -348,6 +353,14 @@ class IQFFTProcessor:
                 scalars -= offset
             scalars /= _FULL_SCALE[self.config.sample_type]
             iq = (scalars[0::2] + 1j * scalars[1::2]).astype(np.complex64)
+            if self._sample_sink is not None:
+                # Every decoded sample, not one per frame: the FPS throttle below
+                # governs how often a spectrum is published, not what was captured.
+                # A sink failure must not interrupt frame production.
+                try:
+                    self._sample_sink(iq, now)
+                except Exception:
+                    LOG.exception("IQ sample sink failed")
             self._samples = np.concatenate((self._samples, iq))
 
         frames = []
@@ -465,6 +478,14 @@ class SDRPlusPlusBridge:
         self._bytes_received = 0
         self._callbacks: list[Callable[[Dict], None]] = []
         self.observations = RFObservationStore.from_env()
+        # The bounded IQ ring is owned here and nowhere else. The owner refuses
+        # by itself when this process may not hold raw IQ, so construction is
+        # safe in a child; nothing is allocated until samples actually arrive.
+        self.retention = IQRetentionOwner(
+            sensor_id=self.config.sensor_id,
+            sample_type=self.config.sample_type,
+            sample_rate_hz=self.config.sample_rate_hz,
+            owns_capture=self.config.owns_capture())
         try:
             from rf_sparse_analyzer import RFSparseAnalyzer
             self.sparse = RFSparseAnalyzer()
@@ -511,6 +532,7 @@ class SDRPlusPlusBridge:
         thread = self._thread
         if thread and thread is not threading.current_thread():
             thread.join(join_timeout_s)
+        self.retention.invalidate("ORCHESTRATOR_STOP")
         with self._lock:
             self._state = "stopped"
             self._socket = None
@@ -521,6 +543,10 @@ class SDRPlusPlusBridge:
         self.rigctl.set_frequency(frequency_hz)
         if mode:
             self.rigctl.set_mode(mode, bandwidth_hz)
+        # Samples either side of a retune came from different spectrum. Cleared
+        # before the reconfigure so the reason recorded is RETUNE and not the
+        # DISCONNECT that the restart would otherwise leave behind.
+        self.retention.invalidate("RETUNE")
         # Recreate the FFT processor so subsequent frame frequency axes reflect
         # the newly tuned center frequency immediately.
         self.configure_stream(center_frequency_hz=float(frequency_hz))
@@ -548,6 +574,22 @@ class SDRPlusPlusBridge:
             values.update(changes)
             new_config = RFBridgeConfig(**values).validated()
             was_running = bool(self._thread and self._thread.is_alive() and not self._stop.is_set())
+        # A rate or decode change alters both the required capacity and the
+        # meaning of every retained sample, so the allocation is discarded rather
+        # than resized; a centre-frequency change only clears it.
+        reallocating = (new_config.sample_rate_hz != self.config.sample_rate_hz
+                        or new_config.sample_type != self.config.sample_type)
+        if reallocating:
+            self.retention.reconfigure(
+                sample_type=new_config.sample_type,
+                sample_rate_hz=new_config.sample_rate_hz,
+                sensor_id=new_config.sensor_id,
+                owns_capture=new_config.owns_capture(),
+                reason=("SAMPLE_RATE_CHANGE"
+                        if new_config.sample_rate_hz != self.config.sample_rate_hz
+                        else "SIGNAL_CHAIN_CHANGE"))
+        elif new_config.center_frequency_hz != self.config.center_frequency_hz:
+            self.retention.invalidate("RETUNE")
         if was_running:
             self.stop()
         with self._lock:
@@ -586,6 +628,9 @@ class SDRPlusPlusBridge:
                 "owns_capture": self.config.owns_capture(),
                 "process_role": os.getenv("SCYTHE_PROCESS_ROLE") or "unspecified",
                 "sparse": None if self.sparse is None else self.sparse.stats(),
+                # Bounded, process-local, never serialized. The block reports
+                # metadata about the allocation and nothing derived from a sample.
+                "iq_retention": self.retention.status(),
             }
         if include_control:
             status["rigctl"] = self.control_status()
@@ -610,7 +655,7 @@ class SDRPlusPlusBridge:
     def _run(self) -> None:
         delay = 0.5
         while not self._stop.is_set():
-            processor = IQFFTProcessor(self.config)
+            processor = IQFFTProcessor(self.config, sample_sink=self.retention.append)
             try:
                 with self._lock:
                     self._state = "connecting"
@@ -624,6 +669,9 @@ class SDRPlusPlusBridge:
                     self._state = "streaming"
                     self._connected_at = time.time()
                     self._last_error = None
+                # A new socket is a new continuity claim. Whatever the ring held
+                # from before the gap is not contiguous with what follows.
+                self.retention.invalidate("RECONNECT")
                 delay = 0.5
                 while not self._stop.is_set():
                     try:
@@ -642,6 +690,7 @@ class SDRPlusPlusBridge:
                     with self._lock:
                         self._state = "reconnecting"
                         self._last_error = str(exc)
+                self.retention.invalidate("DISCONNECT")
             finally:
                 with self._lock:
                     sock = self._socket

@@ -56,6 +56,10 @@ export function tickerItemsFromRfStatus(payload, {statusObservedAt = null} = {})
   // must never read as a working detector.
   const axisState = (axis, key) => sanitizeTickerText(
     payload?.observations?.classifier?.axes?.[axis]?.[key], "UNDECLARED", 20).toUpperCase();
+  // Raw IQ is now retained in a bounded process-local ring. A live retention
+  // must be visible in the same place the declared absences are, or the panel
+  // only ever tells the reader about things the system is not doing.
+  const retention = bridge.iq_retention ?? null;
   return [
     `RF RECEIVER // ${sanitizeTickerText(config.sensor_id, "UNNAMED SENSOR", 80)} · ${sanitizeTickerText(bridge.bridge_state).toUpperCase()} · IQ ${bridge.iq_connected ? "CONNECTED" : "DISCONNECTED"}`,
     `RF PRODUCTS // FFT ${fftState} · SPARSE EVENTS ${sparseState} · RAW IQ LOCAL ONLY`,
@@ -66,6 +70,16 @@ export function tickerItemsFromRfStatus(payload, {statusObservedAt = null} = {})
     `RF CLASSIFIER // ${classifier.state} · ANALOGUE DETECTOR ${classifier.analogueDetector}`
       + (breakdown ? ` · UNCLASSIFIED BECAUSE ${breakdown}` : ""),
     `RF TUNING // ${Number.isFinite(frequency) ? `${(frequency / 1e6).toFixed(3)} MHz` : "UNAVAILABLE"} · ${Number.isFinite(sampleRate) ? `${(sampleRate / 1e6).toFixed(3)} MS/s` : "RATE UNAVAILABLE"}`,
+    retention
+      ? `RF IQ RETENTION // ${sanitizeTickerText(retention.iq_retention, "UNDECLARED", 40).toUpperCase()}`
+        + ` · ${retention.iq_retention_active === true ? "ACTIVE" : "INACTIVE"}`
+        + (retention.iq_retention_active === true
+            ? ` · ${Math.max(0, Number(retention.retention_ms) || 0)} ms · ${Math.max(0, Number(retention.capacity_samples) || 0)} SAMPLES`
+              + ` · RING ${sanitizeTickerText(retention.ring?.state, "UNDECLARED", 20).toUpperCase()}`
+            : ` · ${sanitizeTickerText(retention.inactive_reason, "UNDECLARED", 40).toUpperCase()}`)
+        + ` · RAW IQ ${retention.raw_iq_exposed === true ? "EXPOSED" : "NOT EXPOSED"}`
+        + ` · CHANNELIZER ${sanitizeTickerText(retention.channelizer_state, "UNDECLARED", 20).toUpperCase()}`
+      : "RF IQ RETENTION // UNDECLARED · THE BRIDGE PUBLISHED NO RETENTION BLOCK",
     `RF FRESHNESS // STATUS POLLED ${statusObservedAt ? new Date(statusObservedAt).toISOString() : "UNAVAILABLE"} · LAST FFT FRAME ${sanitizeTickerText(bridge.latest_frame_at, "UNAVAILABLE", 40)}`,
   ];
 }

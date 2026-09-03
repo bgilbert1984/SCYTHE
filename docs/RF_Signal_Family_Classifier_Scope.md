@@ -350,9 +350,48 @@ Two implementation notes worth keeping:
   into a 39-sample product and then reports the *window* as too short, blaming
   the wrong thing.
 
-### Phase 1c — Bridge integration *(not started)*
-The small change where the bridge instantiates the ring, issues verified windows
-and publishes the retention transition in §5.6. No DSP in that diff.
+### Phase 1c — Bridge integration — **DONE** *(`rf_iq_retention.py`)*
+`IQRetentionOwner` allocates, feeds, clears and publishes exactly one ring.
+`rf_bridge.py` gains 51 lines and no DSP. 35 tests.
+
+The ring is allocated **lazily, on the first block of samples**, which is what
+makes `iq_retention_active` mean what §5.6 requires: an allocation exists and
+samples are arriving. A build that imports `rf_iq_ring` and never captures
+reports `NONE_BEYOND_ONE_FFT_BLOCK` with `inactive_reason: NO_SAMPLES_YET`.
+
+Four reasons there may be no ring, each reported rather than blanked:
+`DISABLED_BY_CONFIGURATION` (`SCYTHE_RF_IQ_RETENTION`, a kill switch, default
+on), `NOT_CAPTURE_OWNER`, `PROCESS_ROLE_REFUSED`, `NO_SAMPLES_YET`.
+
+Lifecycle wiring:
+
+| Bridge event | Reason | Effect |
+|---|---|---|
+| `tune()` / centre-frequency change | `RETUNE` | clear |
+| sample-rate change | `SAMPLE_RATE_CHANGE` | **reallocate** |
+| sample-type change | `SIGNAL_CHAIN_CHANGE` | **reallocate** |
+| IQ socket established | `RECONNECT` | clear |
+| IQ socket lost | `DISCONNECT` | clear |
+| `stop()` | `ORCHESTRATOR_STOP` | clear |
+
+A rate or decode change alters both the required capacity and the meaning of
+every retained sample, so the allocation is discarded rather than resized.
+Within a configuration the ring is still allocated once and never grown.
+
+`GAIN_CHANGE`, `DIRECT_SAMPLING_CHANGE` and `CLOCK_DISCONTINUITY` are published
+as `unwired_invalidation_reasons`: this bridge has no gain control, no
+direct-sampling control and no clock-discontinuity detector, so nothing calls
+them. Declaring the gap beats letting the reason list imply full coverage.
+
+One bridge action produces several clears — a retune clears for `RETUNE`, then
+the stream restart clears for `ORCHESTRATOR_STOP` and again for `RECONNECT`. The
+ring remembers only the last, which would leave the audit blaming a reconnect for
+a retune's clear, so the owner keeps a bounded `invalidation_history`.
+Suppressing the later clears would be worse: they really did happen.
+
+### Phase 2 — Symbol-clock detector *(not started)*
+Gated on Q4. The channelizer must be wired to the capture path first, and that
+is its own change again.
 
 ### Phase 2 — Symbol-clock detector *(~2–3 days)*
 Squared-envelope cyclic spectrum on the isolated channel. Significance test
