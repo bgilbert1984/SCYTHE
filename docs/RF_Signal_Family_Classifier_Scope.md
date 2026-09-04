@@ -828,6 +828,100 @@ rate — **not** the feedline. Two metres of RG58 is a real insertion loss and
 arguably belongs in the chain identity; folding it in would change every existing
 hash, so it is recorded as an open question rather than done quietly.
 
+### 5.11 Phase 2 entry conditions — **met 2026-09-03**
+
+Six conditions, from the 2026-09-03 review.
+
+**1. Push the SNR fix.** `10f6c4b` on `main`.
+
+**2. Separate transformation from occupancy and SNR.** `to_dict()` now publishes
+three verdicts, each fact appearing once:
+
+```json
+{"transformation": {"outcome": "CHANNELIZED", "channelized": true},
+ "occupancy":      {"bandwidth_hz": null, "reason_code": "OCCUPANCY_EXCEEDS_FLAT_PASSBAND"},
+ "snr":            {"snr_db": null, "snr_reason_code": "INSUFFICIENT_CLEAN_REFERENCE_BINS"}}
+```
+
+`ChannelRequest.channel_bandwidth_hz` lets a channel be cut when the coarse
+occupancy walk finds no width, with `channel_selection_basis:
+OPERATOR_REQUESTED_WIDTH` recording that the width was asked for rather than
+measured. Without it the split would be cosmetic — below ~20 dB the walk fails
+and no channel exists to hand a detector.
+
+**A second instance of the same defect, found while doing this.** With a
+requested width, the occupancy walk at −10 dB reported **285 kHz occupied inside
+a 250 kHz channel**. The channel's own FIR skirt falls 20 dB before a weak signal
+does, so the walk closed on the transition band and published the channelizer's
+passband as the emitter's bandwidth. The same flat-passband boundary the noise
+reference uses now bounds the walk: an edge beyond `0.85 × channel_bandwidth / 2`
+yields `OCCUPANCY_EXCEEDS_FLAT_PASSBAND` and no width. `OCCUPANCY_REASON_CODES`
+is its own namespace — the similarly named `OUTCOMES` entry is a *selection*
+failure (no width to cut to, no channel), these are *measurement* failures on a
+channel that was cut correctly.
+
+| true SNR | transformation | occupancy | snr |
+|---:|---|---|---|
+| −10 dB | CHANNELIZED | null · EXCEEDS_FLAT_PASSBAND | null |
+| 0 dB | CHANNELIZED | null · EXCEEDS_FLAT_PASSBAND | null |
+| 10 dB | CHANNELIZED | null · EXCEEDS_FLAT_PASSBAND | null |
+| 20 dB | CHANNELIZED | 201000.0 Hz | 20.543 dB |
+| 30 dB | CHANNELIZED | 201000.0 Hz | 30.539 dB |
+
+**3. Signal-chain manifest v2.** `signal_chain_manifest()` builds
+`scythe.rf-signal-chain.v2`; `canonical_signal_chain_bytes()` serialises it with
+sorted keys and no incidental whitespace; the hash is over those bytes. The
+manifest is retained beside the hash and published as `signal_chain`, so a chain
+identity can be read rather than reverse-engineered from an argument order. It
+carries antenna, **feedline**, gain, direct sampling, `bias_tee: NOT_FITTED` and
+`clock_quality: MODEL_DECLARED_0_5_PPM_TCXO`, each with its authority. Declaring
+the feedline changes the hash — the system noticing the analogue instrument
+changed. `signal_chain_hash_revision: v2`, `prior_revision_comparable: false`; v1
+hashes are not reinterpreted. `SDRPP_FEEDLINE_ID` drives both the manifest and the
+antenna bootstrap, so one variable cannot leave the two disagreeing.
+
+**4. Channelizer wired to the bridge, baseband process-local.** Done in Phase 1d
+(`63af4de`), before this review. Verified again live: 84 products, 0 errors, no
+`ChannelizedProduct` field holds an array.
+
+**5. Detector input contract frozen.** `rf_detector_contract.py`, written before
+any detector exists so it constrains one rather than describing it. Admission is
+`transformation.outcome == CHANNELIZED` and reads nothing else; occupancy and SNR
+are covariates. `qualified_snr_db()` returns `None` rather than a default, and a
+reason code outranks a value. `snr_stratum()` makes `SNR_UNRESOLVED` its own
+stratum rather than a bucket edge, because in operation it is a large share of
+products. Seven named `PROHIBITED_INFERENCES` cover each way a null becomes a
+number — `SNR_AS_ZERO`, `SNR_AS_NEGATIVE_INFINITY`, `SNR_AS_WEAK`,
+`SNR_AS_ADMISSION`, `OCCUPANCY_AS_SYMBOL_RATE`, `TRANSFORMATION_AS_DETECTION`,
+`COVARIATE_AS_CONFIDENCE`.
+
+**6. Q4 executable.** `rf_validation_manifest.py`. The gate is the exact
+Clopper–Pearson one-sided 95% upper bound, with Wilson reported beside it and
+never instead:
+
+```text
+0 failures in    100 trials  ->  0.029513      30x the approved rate
+0 failures in  1 000 trials  ->  0.002991
+0 failures in  2 996 trials  ->  0.000999      the rule of three, exactly
+0 failures in 10 000 trials  ->  0.000300
+1 failure  in 10 000 trials  ->  0.000474
+```
+
+The binomial tail is summed in log space: at 10,000+ trials `comb(n, k) · p**k`
+overflows before its factors cancel, and a gate that breaks at the trial counts
+the rule of three demands is not a gate. All twelve approved strata are declared
+with their own minimums; both the aggregate bound **and** every stratum bound must
+pass, so a large pile of thermal noise cannot carry a failing safety-critical
+stratum — a test asserts exactly that. `GAIN_STEPS` and
+`DROPPED_FRAMES_TIMING_GAPS` report `NOT_BUILDABLE`, block promotion, and refuse
+to accumulate trials at all, because `GAIN_CHANGE` and `CLOCK_DISCONTINUITY` are
+declared invalidation reasons that nothing calls.
+
+**Not done, and deliberately.** `CHANNEL_MARGIN` stays at 1.25 for this revision.
+Widening it to manufacture reference room would change adjacent-signal exposure,
+filter design, DC behaviour and collision probability, and belongs in a new hashed
+configuration measured against the Phase 3 evidence rather than chosen now.
+
 ## 6. Open questions for the operator
 
 1. **Approve the bounded IQ ring** (§2.2)? First retention of raw IQ beyond one block.

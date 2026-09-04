@@ -156,6 +156,30 @@ SUPERSEDED_SNR_BASES: Dict[str, str] = {
     ),
 }
 
+# Occupancy has its own verdicts, with their own names. The transformation-level
+# OUTCOMES entry of a similar name is a *selection* failure -- no width could be
+# found to cut to, so no channel exists. These are *measurement* failures on a
+# channel that was cut perfectly well.
+#
+# The second one exists because the walk will happily close on the filter. Below
+# roughly 0 dB the channel's own FIR skirt falls 20 dB before anything else does,
+# so the walk returns the transition band and reports the channelizer's passband
+# as the signal's occupied bandwidth -- a measurement of the instrument, in the
+# same family as the stopband SNR error. Observed at -10 dB in a 250 kHz channel:
+# 285 kHz "occupied", wider than the channel it came out of.
+OCCUPANCY_REASON_CODES: Dict[str, str] = {
+    "WALK_REACHED_ANALYSIS_EDGE": (
+        "THE OCCUPANCY WALK REACHED THE EDGE OF THE ANALYSIS SPAN WITHOUT THE "
+        "SPECTRUM FALLING TO THE FLOOR. THE ANALYSIS SPAN IS A CEILING, NOT A "
+        "MEASUREMENT, AND IS NOT PUBLISHED AS ONE"
+    ),
+    "OCCUPANCY_EXCEEDS_FLAT_PASSBAND": (
+        "THE WALK CLOSED OUTSIDE THE REGION WHERE THIS CHANNEL'S FIR IS FLAT, SO "
+        "THE EDGE IT FOUND IS THE FILTER'S SKIRT RATHER THAN THE SIGNAL'S "
+        "SHOULDER. THE WIDTH WOULD DESCRIBE THE CHANNELIZER, NOT THE EMITTER"
+    ),
+}
+
 # Measurement failure is not transformation failure.  These are a separate
 # namespace from OUTCOMES on purpose: a channelization can be entirely valid
 # while its SNR is unresolved, and collapsing the two would throw away a good
@@ -282,6 +306,14 @@ class ChannelRequest:
     # An explicit ratio is honoured only if it does not alias. Left None, the
     # channelizer picks the largest ratio that keeps MIN_OVERSAMPLE.
     decimation: Optional[int] = None
+    # A caller-supplied channel width, used when the coarse occupancy walk cannot
+    # find one. Below roughly 20 dB in-channel SNR the walk never falls its 20 dB
+    # and the selection fails, which would deny a cyclostationary detector exactly
+    # the windows it exists to work in: those methods find structure beneath the
+    # level where spectral occupancy succeeds. A requested width lets the channel
+    # be cut anyway, and `channel_selection_basis` records that the width was
+    # asked for rather than measured.
+    channel_bandwidth_hz: Optional[float] = None
 
 
 @dataclass(frozen=True)
@@ -320,6 +352,13 @@ class ChannelizedProduct:
     # and `occupied_bandwidth_basis` says so.
     occupied_bandwidth_hz: Optional[float]
     occupied_bandwidth_basis: str
+    # None when the walk closed inside the channel; a reason when it did not.
+    # Separate from `outcome`, because a channel can be cut perfectly well and
+    # still not have a defensible width.
+    occupancy_reason_code: Optional[str]
+    # Whether the channel width was measured or asked for. A requested width is
+    # not evidence about the signal, and a product must not read as though it were.
+    channel_selection_basis: str
     # Where the DDC was tuned, and where the carrier actually turned out to be.
     # Two different quantities; conflating them hides tuning error as signal.
     tuning_offset_hz: Optional[float]
@@ -366,9 +405,38 @@ class ChannelizedProduct:
     def reason(self) -> str:
         return OUTCOMES.get(self.reason_code, self.reason_code)
 
+    # Three questions, three answers, published apart. "Was a valid channel
+    # produced", "could its width be resolved" and "could its SNR be resolved"
+    # are different facts, and a consumer that reads one for another will treat a
+    # missing measurement as a failed transformation -- or worse, as a zero.
+    _OCCUPANCY_FIELDS = ("occupied_bandwidth_hz", "occupied_bandwidth_basis",
+                         "occupancy_reason_code")
+    _SNR_FIELDS = ("snr_db", "snr_basis", "snr_authority", "snr_measurement_revision",
+                   "snr_reason_code", "snr_quality", "noise_estimator",
+                   "noise_reference_bin_count", "noise_reference_bandwidth_hz",
+                   "noise_reference_guard_bins", "noise_reference_sides",
+                   "noise_reference_left_bins", "noise_reference_right_bins",
+                   "noise_reference_side_disagreement_db")
+    _TRANSFORMATION_FIELDS = ("outcome", "reason_code")
+
     def to_dict(self) -> Dict[str, Any]:
-        payload = {field: getattr(self, field) for field in self.__dataclass_fields__}
-        payload["reason"] = self.reason
+        """The product as published. Grouped, and each fact appears once."""
+        grouped = set(self._OCCUPANCY_FIELDS + self._SNR_FIELDS
+                      + self._TRANSFORMATION_FIELDS)
+        payload = {field: getattr(self, field) for field in self.__dataclass_fields__
+                   if field not in grouped}
+        payload["transformation"] = {
+            **{field: getattr(self, field) for field in self._TRANSFORMATION_FIELDS},
+            "reason": self.reason,
+            # The one question a detector may ask before consuming samples.
+            "channelized": self.channelized,
+        }
+        payload["occupancy"] = {
+            "bandwidth_hz": self.occupied_bandwidth_hz,
+            "basis": self.occupied_bandwidth_basis,
+            "reason_code": self.occupancy_reason_code,
+        }
+        payload["snr"] = {field: getattr(self, field) for field in self._SNR_FIELDS}
         return payload
 
 
@@ -548,6 +616,8 @@ def _refuse(window: IQWindow, request: ChannelRequest, outcome: str, *,
         transient_samples_discarded=0,
         occupied_bandwidth_hz=None,
         occupied_bandwidth_basis="NOT_MEASURED",
+        occupancy_reason_code=None,
+        channel_selection_basis="NOT_SELECTED",
         tuning_offset_hz=None,
         frequency_offset_hz=None,
         # Not attempted rather than unresolved: there is no channel to measure.
@@ -609,12 +679,28 @@ def channelize(window: IQWindow, request: ChannelRequest, *,
     candidate = estimate_occupied_bandwidth(
         samples, rate, request.capture_center_hz, request.target_frequency_hz)
     candidate_center, candidate_bandwidth, _ = candidate
-    if candidate_center is None or not candidate_bandwidth or candidate_bandwidth <= 0:
+    resolved = (candidate_center is not None
+                and bool(candidate_bandwidth) and candidate_bandwidth > 0)
+    requested_bandwidth = request.channel_bandwidth_hz
+    if requested_bandwidth is not None and not requested_bandwidth > 0:
+        return _refuse(window, request, "ALIAS_RISK", candidate=candidate)
+    if not resolved and requested_bandwidth is None:
+        # No measured width and none asked for: there is nothing to cut to. This
+        # is a selection failure, not a measurement one, and stays an outcome.
         return _refuse(window, request, "OCCUPIED_BANDWIDTH_UNRESOLVED", candidate=candidate)
 
     # --- stage 2: selection derived from stage 1, then checked ---------------
-    channel_center = candidate_center
-    channel_bandwidth = candidate_bandwidth * CHANNEL_MARGIN
+    if requested_bandwidth is not None:
+        # The request wins even when the walk succeeded, so a caller sweeping a
+        # fixed width gets that width and not a per-window one. What the walk
+        # found is still recorded in the candidate fields either way.
+        channel_center = candidate_center if resolved else request.target_frequency_hz
+        channel_bandwidth = float(requested_bandwidth)
+        selection_basis = "OPERATOR_REQUESTED_WIDTH"
+    else:
+        channel_center = candidate_center
+        channel_bandwidth = candidate_bandwidth * CHANNEL_MARGIN
+        selection_basis = "DERIVED_FROM_COARSE_OCCUPANCY"
     edges = (channel_center - channel_bandwidth / 2.0, channel_center + channel_bandwidth / 2.0)
     if edges[0] < span_low or edges[1] > span_high:
         return _refuse(window, request, "CHANNEL_EDGE_TRUNCATED", candidate=candidate,
@@ -659,7 +745,7 @@ def channelize(window: IQWindow, request: ChannelRequest, *,
     decimated.setflags(write=False)
 
     # --- measurements on the product ----------------------------------------
-    occupied_hz, carrier_offset_hz, snr = _measure(
+    occupied_hz, carrier_offset_hz, snr, occupancy_reason = _measure(
         decimated, output_rate, channel_bandwidth_hz=channel_bandwidth,
         tuning_offset_hz=tuning_offset)
 
@@ -690,7 +776,10 @@ def channelize(window: IQWindow, request: ChannelRequest, *,
         occupied_bandwidth_hz=occupied_hz,
         # The selection came from this same window, so the fit is not independent
         # evidence of the selection being right.
-        occupied_bandwidth_basis="SAME_WINDOW_AS_SELECTION",
+        occupied_bandwidth_basis=("SAME_WINDOW_AS_SELECTION" if occupancy_reason is None
+                                  else "NOT_RESOLVED"),
+        occupancy_reason_code=occupancy_reason,
+        channel_selection_basis=selection_basis,
         tuning_offset_hz=tuning_offset,
         frequency_offset_hz=carrier_offset_hz,
         **snr,
@@ -820,7 +909,7 @@ def _estimate_snr(power: np.ndarray, freqs: np.ndarray, bin_hz: float,
 
 def _measure(channel: np.ndarray, output_rate_hz: float, *,
              channel_bandwidth_hz: float, tuning_offset_hz: float,
-             ) -> Tuple[Optional[float], Optional[float], Dict[str, Any]]:
+             ) -> Tuple[Optional[float], Optional[float], Dict[str, Any], Optional[str]]:
     """Occupied bandwidth, residual carrier offset and SNR of the channel.
 
     ``frequency_offset_hz`` is the carrier's position *within the channel*, which
@@ -832,7 +921,8 @@ def _measure(channel: np.ndarray, output_rate_hz: float, *,
     power_db, segment = welch_power_db(channel)
     if segment == 0:
         return None, None, _snr_fields(
-            reason_code="INSUFFICIENT_CLEAN_REFERENCE_BINS", sides="NONE")
+            reason_code="INSUFFICIENT_CLEAN_REFERENCE_BINS", sides="NONE"), \
+            "WALK_REACHED_ANALYSIS_EDGE"
     bin_hz = output_rate_hz / segment
     peak = int(np.argmax(power_db))
     power = np.power(10.0, power_db / 10.0)
@@ -840,12 +930,22 @@ def _measure(channel: np.ndarray, output_rate_hz: float, *,
 
     edges = _walk_occupancy(power_db, peak)
     if edges is None:
-        # The signal fills the channel. That is a measurement, not a failure, but
-        # the width is a lower bound and there is no region left to reference.
-        return (float(segment * bin_hz), float((peak - segment // 2) * bin_hz),
-                _snr_fields(reason_code="CHANNEL_EDGE_LIMITED", sides="NONE"))
+        # The signal fills the channel. Reporting the analysis span as the width
+        # would publish a ceiling as a measurement, so the width is unresolved and
+        # says so; the carrier position is still measurable and is still returned.
+        return (None, float((peak - segment // 2) * bin_hz),
+                _snr_fields(reason_code="CHANNEL_EDGE_LIMITED", sides="NONE"),
+                "WALK_REACHED_ANALYSIS_EDGE")
     left, right = edges
     occupied = float((right - left) * bin_hz)
+    # The same flat-passband boundary the noise reference uses, for the same
+    # reason: past it, what the walk found is the filter and not the signal.
+    flat_edge = PASSBAND_REFERENCE_FRACTION * channel_bandwidth_hz / 2.0
+    if max(abs(freqs[left]), abs(freqs[right])) > flat_edge:
+        return (None, float((peak - segment // 2) * bin_hz),
+                _snr_fields(reason_code="INSUFFICIENT_CLEAN_REFERENCE_BINS",
+                            sides="NONE"),
+                "OCCUPANCY_EXCEEDS_FLAT_PASSBAND")
 
     # Power-weighted centroid over the occupied region, not the peak bin. The
     # peak bin of a noise-like band is wherever that realisation happened to be
@@ -860,7 +960,7 @@ def _measure(channel: np.ndarray, output_rate_hz: float, *,
                         channel_bandwidth_hz=channel_bandwidth_hz,
                         dc_offset_hz=_dc_offset_in_channel(tuning_offset_hz,
                                                            output_rate_hz))
-    return occupied, offset, snr
+    return occupied, offset, snr, None
 
 
 def channelizer_status() -> Dict[str, Any]:
@@ -889,6 +989,7 @@ def channelizer_status() -> Dict[str, Any]:
         "noise_reference_min_total_bins": NOISE_REFERENCE_MIN_TOTAL,
         "noise_reference_min_per_side_bins": NOISE_REFERENCE_MIN_PER_SIDE,
         "noise_reference_passband_fraction": PASSBAND_REFERENCE_FRACTION,
+        "occupancy_reason_codes": dict(OCCUPANCY_REASON_CODES),
         "snr_reason_codes": dict(SNR_REASON_CODES),
         "snr_reason_codes_emitted": list(_EMITTED_SNR_REASON_CODES),
         "snr_reason_codes_reserved": [code for code in SNR_REASON_CODES

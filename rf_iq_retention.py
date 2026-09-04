@@ -98,6 +98,7 @@ from __future__ import annotations
 
 from collections import deque
 import hashlib
+import json
 import logging
 import os
 import threading
@@ -107,6 +108,8 @@ from typing import Any, Dict, Optional
 import numpy as np
 
 from rf_channelizer import ChannelRequest, ChannelizedProduct, channelize
+from rf_detector_contract import contract_status
+from rf_validation_manifest import manifest_status
 from rf_iq_ring import (
     DEFAULT_CAPACITY_SAMPLES, DEFAULT_WINDOW_MS, INVALIDATION_REASONS,
     BoundedIQRing, IQWindow, RawIQRetentionRefused, WindowAcquisition,
@@ -163,6 +166,16 @@ UNWIRED_NOTE = (
 )
 
 
+SIGNAL_CHAIN_SCHEMA = "scythe.rf-signal-chain.v2"
+SIGNAL_CHAIN_REVISION = "v2"
+# v1 was a positional hash over sensor, antenna, sample type and rate, with no
+# feedline. It is not rescalable into v2 and nothing attempts to reinterpret it.
+PRIOR_SIGNAL_CHAIN_REVISION_COMPARABLE = False
+# Vendor figure for the SMArt v5, carried as a declaration rather than a
+# measurement: nothing here has disciplined this oscillator against a reference.
+CLOCK_QUALITY = "MODEL_DECLARED_0_5_PPM_TCXO"
+
+
 def retention_enabled() -> bool:
     """Default on: the operator approved bounded retention. Off is a kill switch."""
     raw = os.getenv("SCYTHE_RF_IQ_RETENTION", "enabled").strip().lower()
@@ -174,17 +187,88 @@ def antenna_id() -> str:
     return (os.getenv("SDRPP_ANTENNA_ID", "") or "").strip() or "UNDECLARED"
 
 
+def feedline_id() -> str:
+    """UNDECLARED unless the operator said. A default cable is not a cable."""
+    return (os.getenv("SDRPP_FEEDLINE_ID", "") or "").strip() or "UNDECLARED"
+
+
+def _feedline_length_m(identifier: str) -> Optional[float]:
+    try:
+        from graphops_rf_antenna import FEEDLINES
+    except Exception:                                   # pragma: no cover
+        return None
+    entry = FEEDLINES.get(identifier)
+    return None if entry is None else entry.get("length_m")
+
+
+def signal_chain_manifest(*, sensor_id: str, sample_type: str, sample_rate_hz: float,
+                          antenna: Optional[str] = None,
+                          feedline: Optional[str] = None) -> Dict[str, Any]:
+    """Everything the physical and decode path is made of, declared or not.
+
+    A manifest rather than an argument list: the chain grew a feedline the moment
+    someone asked what the antenna was plugged into, and it will grow a gain and a
+    direct-sampling state when those are wired.  An expanding positional hash
+    input makes every such addition a silent rewrite of what a hash meant, whereas
+    a manifest is retained beside its hash and can simply be read.
+
+    Every absence is named.  ``UNDECLARED`` is a metadata omission and says so; it
+    is never ``UNKNOWN``, which would suggest the system looked and was puzzled.
+    """
+    antenna_identifier = antenna if antenna is not None else antenna_id()
+    feedline_identifier = feedline if feedline is not None else feedline_id()
+    declared_feedline = feedline_identifier not in ("UNDECLARED", "undeclared")
+    return {
+        "schema": SIGNAL_CHAIN_SCHEMA,
+        "sensor_id": sensor_id,
+        "sample_type": sample_type,
+        "sample_rate_hz": float(sample_rate_hz),
+        "antenna": {
+            "id": antenna_identifier if antenna_identifier != "UNDECLARED" else None,
+            "authority": ("OPERATOR_DECLARED" if antenna_identifier != "UNDECLARED"
+                          else "UNDECLARED"),
+        },
+        "feedline": {
+            "id": feedline_identifier if declared_feedline else None,
+            "length_m": _feedline_length_m(feedline_identifier) if declared_feedline else None,
+            "authority": "OPERATOR_DECLARED" if declared_feedline else "UNDECLARED",
+        },
+        # No gain control is wired here, so there is no value to declare and the
+        # authority says why rather than reporting a plausible default.
+        "gain": {"value_db": None, "authority": "UNDECLARED"},
+        "direct_sampling": "UNDECLARED",
+        # Not a control and not a measurement: this receiver has no bias tee, so
+        # there is nothing to switch and nothing to sense.
+        "bias_tee": "NOT_FITTED",
+        "clock_quality": CLOCK_QUALITY,
+    }
+
+
+def canonical_signal_chain_bytes(manifest: Dict[str, Any]) -> bytes:
+    """The bytes that are hashed. Sorted keys and no incidental whitespace, so a
+    reordered or reformatted manifest is the same chain and hashes the same."""
+    return json.dumps(manifest, sort_keys=True, separators=(",", ":"),
+                      ensure_ascii=False).encode("utf-8")
+
+
 def signal_chain_hash(*, sensor_id: str, sample_type: str, sample_rate_hz: float,
-                      antenna: Optional[str] = None) -> str:
+                      antenna: Optional[str] = None,
+                      feedline: Optional[str] = None) -> str:
     """Identity of the physical and decode path the samples came through.
 
     Deliberately excludes the centre frequency.  Retuning does not change the
     chain -- it is its own invalidation reason -- and folding it in here would
     make every retune look like a different antenna.
+
+    Revision v2 hashes the canonical manifest and includes the feedline, so
+    declaring a cable changes the hash.  That is the system noticing the analogue
+    instrument changed, not breakage.  v1 hashes are not comparable with these and
+    are not reinterpreted: ``prior_revision_comparable`` is false.
     """
-    parts = (sensor_id, antenna if antenna is not None else antenna_id(),
-             sample_type, f"{float(sample_rate_hz):.6f}")
-    digest = hashlib.blake2s("|".join(str(part) for part in parts).encode(),
+    manifest = signal_chain_manifest(sensor_id=sensor_id, sample_type=sample_type,
+                                     sample_rate_hz=sample_rate_hz, antenna=antenna,
+                                     feedline=feedline)
+    digest = hashlib.blake2s(canonical_signal_chain_bytes(manifest),
                              digest_size=16).hexdigest()
     return f"blake2s:{digest}"
 
@@ -209,6 +293,8 @@ class IQRetentionOwner:
         self._window_ms = float(window_ms)
         self._enabled = retention_enabled() if enabled is None else bool(enabled)
         self._ring: Optional[BoundedIQRing] = None
+        self._signal_chain_manifest = signal_chain_manifest(
+            sensor_id=sensor_id, sample_type=sample_type, sample_rate_hz=sample_rate_hz)
         self._signal_chain_hash = signal_chain_hash(
             sensor_id=sensor_id, sample_type=sample_type, sample_rate_hz=sample_rate_hz)
         self._refused_reason: Optional[str] = None
@@ -364,6 +450,9 @@ class IQRetentionOwner:
                 self._sensor_id = sensor_id
             if owns_capture is not None:
                 self._owns_capture = bool(owns_capture)
+            self._signal_chain_manifest = signal_chain_manifest(
+                sensor_id=self._sensor_id, sample_type=self._sample_type,
+                sample_rate_hz=self._sample_rate_hz)
             self._signal_chain_hash = signal_chain_hash(
                 sensor_id=self._sensor_id, sample_type=self._sample_type,
                 sample_rate_hz=self._sample_rate_hz)
@@ -491,6 +580,12 @@ class IQRetentionOwner:
                 "classification": "NOT_DERIVED_FROM_PRODUCTS",
                 "baseband_retained": False,
                 "last_product": self._products[-1] if self._products else None,
+                # Frozen before the detector exists, so it constrains the detector
+                # rather than describing one.
+                "detector_input_contract": contract_status(),
+                # The Q4 gate, executable and uncollected. Declared here so the
+                # promotion rule is readable beside the products it will judge.
+                "false_digital_gate": manifest_status(),
             }
 
     # -- published metadata -------------------------------------------------
@@ -514,7 +609,13 @@ class IQRetentionOwner:
                 "channelizer_note": CHANNELIZER_NOTE,
                 "channelizer": self.channelizer_block(),
                 "signal_chain_hash": self._signal_chain_hash,
+                # The manifest is retained beside the hash so a chain identity can
+                # be read rather than reverse-engineered from an argument order.
+                "signal_chain": dict(self._signal_chain_manifest),
+                "signal_chain_hash_revision": SIGNAL_CHAIN_REVISION,
+                "prior_revision_comparable": PRIOR_SIGNAL_CHAIN_REVISION_COMPARABLE,
                 "antenna_id": antenna_id(),
+                "feedline_id": feedline_id(),
                 "owner": "ORCHESTRATOR_BRIDGE",
                 "permitted": self._enabled and self._owns_capture and not self._refused_reason,
                 "appended_blocks": self._appended_blocks,

@@ -212,8 +212,16 @@ class AntennaDeclarationStore:
         with self._lock:
             if self._record is not None:
                 return self._record
-        return self.declare({"antenna_id": candidate,
-                             "note": "Adopted from SDRPP_ANTENNA_ID at startup"})[0]
+        # The cable is its own declaration and its own environment variable. An
+        # antenna being named says nothing about how it is connected, and the
+        # signal chain hashes the feedline, so guessing here would change an
+        # instrument identity on the strength of a default.
+        feedline = str(os.getenv("SDRPP_FEEDLINE_ID", "") or "").strip()
+        payload = {"antenna_id": candidate,
+                   "note": "Adopted from SDRPP_ANTENNA_ID at startup"}
+        if feedline in FEEDLINES:
+            payload["feedline_id"] = feedline
+        return self.declare(payload)[0]
 
     def declare(self, payload: Any) -> tuple:
         record = validate_declaration(payload)
