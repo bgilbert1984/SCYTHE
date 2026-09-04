@@ -40,6 +40,14 @@ test("a declaration is operator authority and never claims detection", () => {
 test("an unselected or unknown antenna refuses rather than defaulting", () => {
   assert.equal(declareAntenna({}).valid, false);
   assert.equal(declareAntenna({antennaId: "nesdr-smart-uhf", feedlineId: "fibre"}).valid, false);
+
+  // A default is configuration convenience, not physical evidence: nothing in a
+  // receive-only path can tell a direct connection from 2 m of RG58.
+  const undeclaredFeedline = declareAntenna({antennaId: "nesdr-smart-uhf"});
+  assert.equal(undeclaredFeedline.valid, true);
+  assert.equal(undeclaredFeedline.declaration.feedlineId, "undeclared");
+  assert.equal(undeclaredFeedline.declaration.feedlineLabel, "FEEDLINE UNDECLARED");
+  assert.equal(undeclaredFeedline.declaration.feedlineLengthM, null);
   assert.match(declareAntenna({}).reason, /DECLARATION REFUSED/);
 });
 

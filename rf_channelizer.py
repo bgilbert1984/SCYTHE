@@ -104,6 +104,106 @@ TIMING_TOLERANCE_RATIO = 0.02
 
 MIN_OUTPUT_SAMPLES = 64
 
+# --- SNR: excess occupied power over a locally measured, filter-valid floor ---
+#
+# The first implementation took the noise floor as the median of every bin
+# outside the occupied region.  Most of those bins lie outside the channelizer's
+# own passband, where this FIR has already crushed them by ~90 dB, so the median
+# landed in the stopband and the published SNR measured the filter's rejection
+# rather than the signal.  Measured against synthetic ground truth it read 108.7
+# dB for a true 20 dB channel: a fixed ~88 dB overstatement.  The median -- chosen
+# so a second emitter could not quietly raise the floor -- is precisely what
+# guaranteed the stopband won, because stopband bins outnumber real noise bins.
+#
+# The floor is therefore estimated only from bins the filter left alone, and the
+# in-band noise those bins imply is subtracted from the occupied power before the
+# ratio is taken.  At 20-40 dB the subtraction barely moves the number; near a
+# detection threshold it is the difference between measuring a signal and
+# counting noise energy as one.
+SNR_BASIS = "OCCUPIED_EXCESS_POWER_OVER_LOCAL_PASSBAND_NOISE_V1"
+SNR_AUTHORITY = "DERIVED_MEASUREMENT"
+SNR_NOISE_ESTIMATOR = "MEDIAN_LINEAR_POWER"
+# Advanced whenever the definition changes.  Products carrying different
+# revisions are not numerically comparable and this is part of the product
+# digest so that they cannot be silently pooled.
+SNR_MEASUREMENT_REVISION = "passband-local-excess-power.v1"
+
+# A reference bin must sit where the declared FIR is still flat.  Measured on the
+# shipped design (129 taps, Kaiser beta 8.6) the droop against the cutoff is
+# 0.00 dB at 0.80, 0.02 dB at 0.85, 0.37 dB at 0.90, 1.95 dB at 0.95 and 5.98 dB
+# at the cutoff itself.  Reference bins taken from the skirt are attenuated
+# noise, which biases the floor low and the SNR high -- a smaller version of the
+# error this replaces.
+PASSBAND_REFERENCE_FRACTION = 0.85
+# The occupancy walk declares an edge only after OCCUPANCY_RUN_BINS bins have
+# stayed below the floor, so those bins are the signal's own transition and are
+# not reference material.
+NOISE_REFERENCE_GUARD_BINS = OCCUPANCY_RUN_BINS
+NOISE_REFERENCE_MIN_TOTAL = 32
+NOISE_REFERENCE_MIN_PER_SIDE = 8
+
+# A prior definition measured the noise floor over every bin outside the occupied
+# region, most of which lie in this FIR's stopband. Products carrying that basis
+# overstate SNR by roughly the filter's rejection, and the error is not a constant:
+# it depends on filter rejection, spectrum geometry and occupancy, and only looked
+# fixed across one sweep. They are not correctable and must never be pooled with
+# products carrying the current basis.
+SUPERSEDED_SNR_BASES: Dict[str, str] = {
+    "OCCUPIED_POWER_OVER_ALL_OUT_OF_BAND_MEDIAN": (
+        "INVALID -- NOT COMPARABLE. THE NOISE REFERENCE INCLUDED BINS INSIDE THE "
+        "CHANNELIZER'S OWN FIR STOPBAND, SO THE PUBLISHED FIGURE MEASURED FILTER "
+        "REJECTION RATHER THAN THE SIGNAL. NO CORRECTION FACTOR EXISTS"
+    ),
+}
+
+# Measurement failure is not transformation failure.  These are a separate
+# namespace from OUTCOMES on purpose: a channelization can be entirely valid
+# while its SNR is unresolved, and collapsing the two would throw away a good
+# product because one number could not be defended.
+SNR_REASON_CODES: Dict[str, str] = {
+    "INSUFFICIENT_CLEAN_REFERENCE_BINS": (
+        "TOO FEW BINS LIE INSIDE THE FLAT PASSBAND AND OUTSIDE THE OCCUPIED "
+        "REGION TO ESTIMATE A NOISE FLOOR THAT IS NOT THE FILTER'S OWN SKIRT"
+    ),
+    "OCCUPIED_POWER_NOT_ABOVE_NOISE": (
+        "THE OCCUPIED BINS CARRY NO MORE POWER THAN THE REFERENCE FLOOR IMPLIES "
+        "FOR THAT MANY BINS, SO NO EXCESS POWER IS ATTRIBUTABLE TO A SIGNAL"
+    ),
+    "CHANNEL_EDGE_LIMITED": (
+        "THE OCCUPANCY WALK REACHED THE ANALYSIS EDGE, SO THERE IS NO REGION "
+        "OUTSIDE THE SIGNAL FROM WHICH TO TAKE A REFERENCE"
+    ),
+    # Reserved. The conditions below are real and worth naming before something
+    # needs them, but nothing here detects them yet and none of these is ever
+    # emitted. A reserved code is a name, not a claim that a test exists.
+    "REFERENCE_BINS_ASYMMETRIC": (
+        "RESERVED -- NOT EMITTED. THE TWO REFERENCE SIDES DISAGREE BY MORE THAN "
+        "A THRESHOLD THAT HAS NOT BEEN SET. THE DISAGREEMENT IS PUBLISHED AS A "
+        "MEASUREMENT SO A THRESHOLD CAN LATER BE CHOSEN FROM EVIDENCE"
+    ),
+    "REFERENCE_CONTAMINATED": (
+        "RESERVED -- NOT EMITTED. AN EMITTER OCCUPIES THE REFERENCE REGION. NO "
+        "DETECTOR FOR THIS EXISTS"
+    ),
+    "INPUT_CLIPPED": (
+        "RESERVED -- NOT EMITTED. THE CONVERTER SATURATED, SO THE MEASURED "
+        "SPECTRUM IS OF A CLIPPED SIGNAL. NO CLIPPING DETECTOR EXISTS"
+    ),
+    "DC_EXCLUSION_REMOVED_REFERENCE": (
+        "RESERVED -- NOT EMITTED. THE DC EXCLUSION REMOVED THE BINS THE "
+        "REFERENCE NEEDED. THIS IS REPORTED AS INSUFFICIENT CLEAN REFERENCE "
+        "BINS UNTIL THE DISTINCTION IS SHOWN TO MATTER"
+    ),
+}
+
+# Only these three are ever produced. The rest of SNR_REASON_CODES are names
+# reserved ahead of the detectors that would emit them.
+_EMITTED_SNR_REASON_CODES: Tuple[str, ...] = (
+    "INSUFFICIENT_CLEAN_REFERENCE_BINS",
+    "OCCUPIED_POWER_NOT_ABOVE_NOISE",
+    "CHANNEL_EDGE_LIMITED",
+)
+
 DIGEST_ALGORITHM = "blake2s"
 
 OUTCOMES: Dict[str, str] = {
@@ -224,7 +324,29 @@ class ChannelizedProduct:
     # Two different quantities; conflating them hides tuning error as signal.
     tuning_offset_hz: Optional[float]
     frequency_offset_hz: Optional[float]
+
+    # SNR and everything needed to know what it means. `snr_db` alone is not a
+    # measurement: without the basis, the estimator and the reference geometry it
+    # is a number whose definition has to be guessed from the source.
     snr_db: Optional[float]
+    snr_basis: str
+    snr_authority: str
+    snr_measurement_revision: str
+    # None when snr_db is a number; a SNR_REASON_CODES key when it is not.
+    snr_reason_code: Optional[str]
+    # DEGRADED_ONE_SIDED when the floor came from one side of the signal only.
+    snr_quality: Optional[str]
+    noise_estimator: str
+    noise_reference_bin_count: Optional[int]
+    noise_reference_bandwidth_hz: Optional[float]
+    noise_reference_guard_bins: int
+    noise_reference_sides: str
+    noise_reference_left_bins: Optional[int]
+    noise_reference_right_bins: Optional[int]
+    # Published, not gated. A large left/right disagreement can mean an adjacent
+    # emitter, a sloping frontend response or a wrongly bounded occupied region,
+    # but no threshold has been set from evidence, so nothing is refused on it.
+    noise_reference_side_disagreement_db: Optional[float]
 
     outcome: str
     reason_code: str
@@ -404,7 +526,7 @@ def _refuse(window: IQWindow, request: ChannelRequest, outcome: str, *,
     candidate_center, candidate_bandwidth, candidate_method = candidate
     digest = _digest(SCHEMA, window.window_id, window.digest, window.configuration_epoch,
                      request.capture_center_hz, request.target_frequency_hz,
-                     METHOD_REVISION, outcome)
+                     METHOD_REVISION, SNR_MEASUREMENT_REVISION, outcome)
     product = ChannelizedProduct(
         schema=SCHEMA,
         product_id=f"chp-{hashlib.blake2s(digest.encode(), digest_size=8).hexdigest()}",
@@ -428,7 +550,10 @@ def _refuse(window: IQWindow, request: ChannelRequest, outcome: str, *,
         occupied_bandwidth_basis="NOT_MEASURED",
         tuning_offset_hz=None,
         frequency_offset_hz=None,
-        snr_db=None,
+        # Not attempted rather than unresolved: there is no channel to measure.
+        # The transformation outcome above is the reason, and duplicating it into
+        # the measurement namespace would blur the distinction the two keep.
+        **_snr_fields(sides="NOT_ATTEMPTED", attempted=False),
         outcome=outcome,
         reason_code=outcome,
         method_revision=METHOD_REVISION,
@@ -534,13 +659,15 @@ def channelize(window: IQWindow, request: ChannelRequest, *,
     decimated.setflags(write=False)
 
     # --- measurements on the product ----------------------------------------
-    occupied_hz, carrier_offset_hz, snr_db = _measure(decimated, output_rate)
+    occupied_hz, carrier_offset_hz, snr = _measure(
+        decimated, output_rate, channel_bandwidth_hz=channel_bandwidth,
+        tuning_offset_hz=tuning_offset)
 
     digest = _digest(SCHEMA, window.window_id, window.digest, window.configuration_epoch,
                      window.signal_chain_hash, request.capture_center_hz,
                      request.target_frequency_hz, round(channel_center, 3),
                      round(channel_bandwidth, 3), decimation, FIR_DESIGN, FIR_TAPS,
-                     METHOD_REVISION, "CHANNELIZED")
+                     METHOD_REVISION, SNR_MEASUREMENT_REVISION, "CHANNELIZED")
     product = ChannelizedProduct(
         schema=SCHEMA,
         product_id=f"chp-{hashlib.blake2s(digest.encode(), digest_size=8).hexdigest()}",
@@ -566,7 +693,7 @@ def channelize(window: IQWindow, request: ChannelRequest, *,
         occupied_bandwidth_basis="SAME_WINDOW_AS_SELECTION",
         tuning_offset_hz=tuning_offset,
         frequency_offset_hz=carrier_offset_hz,
-        snr_db=snr_db,
+        **snr,
         outcome="CHANNELIZED",
         reason_code="CHANNELIZED",
         method_revision=METHOD_REVISION,
@@ -574,8 +701,126 @@ def channelize(window: IQWindow, request: ChannelRequest, *,
     return Channelization(product, decimated)
 
 
-def _measure(channel: np.ndarray, output_rate_hz: float,
-             ) -> Tuple[Optional[float], Optional[float], Optional[float]]:
+def _snr_fields(*, snr_db: Optional[float] = None, reason_code: Optional[str] = None,
+                quality: Optional[str] = None, bin_count: Optional[int] = None,
+                bandwidth_hz: Optional[float] = None, sides: str = "NONE",
+                left: Optional[int] = None, right: Optional[int] = None,
+                disagreement_db: Optional[float] = None,
+                attempted: bool = True) -> Dict[str, Any]:
+    """One SNR verdict with the geometry it was measured over.
+
+    ``attempted`` is False only where there is no channel to measure at all -- a
+    refused channelization -- so an unmeasurable SNR and an unattempted one do not
+    both appear as a bare null with the same basis.
+    """
+    return {
+        "snr_db": snr_db,
+        "snr_basis": SNR_BASIS if attempted else "NOT_MEASURED",
+        "snr_authority": SNR_AUTHORITY,
+        "snr_measurement_revision": SNR_MEASUREMENT_REVISION,
+        "snr_reason_code": reason_code,
+        "snr_quality": quality,
+        "noise_estimator": SNR_NOISE_ESTIMATOR if attempted else "NOT_MEASURED",
+        "noise_reference_bin_count": bin_count,
+        "noise_reference_bandwidth_hz": bandwidth_hz,
+        "noise_reference_guard_bins": NOISE_REFERENCE_GUARD_BINS,
+        "noise_reference_sides": sides,
+        "noise_reference_left_bins": left,
+        "noise_reference_right_bins": right,
+        "noise_reference_side_disagreement_db": disagreement_db,
+    }
+
+
+def _dc_offset_in_channel(tuning_offset_hz: float, output_rate_hz: float,
+                          ) -> Optional[float]:
+    """Where the capture centre's DC artefact lands in the decimated channel.
+
+    The DDC moves the capture centre to ``-tuning_offset``; decimation then folds
+    that into the new Nyquist span.  The FIR has already crushed it if it lies
+    outside the passband, but the exclusion is applied from geometry rather than
+    from an assumption about how well the filter worked.
+    """
+    if not output_rate_hz > 0:
+        return None
+    half = output_rate_hz / 2.0
+    return ((-tuning_offset_hz + half) % output_rate_hz) - half
+
+
+def _estimate_snr(power: np.ndarray, freqs: np.ndarray, bin_hz: float,
+                  left: int, right: int, *, channel_bandwidth_hz: float,
+                  dc_offset_hz: Optional[float]) -> Dict[str, Any]:
+    """Excess occupied power over a locally measured, filter-valid noise floor.
+
+        N0        = median of the linear power of the reference bins
+        P_noise   = N0 * |O|          expected noise inside the occupied region
+        P_signal  = max(sum(P_k for k in O) - P_noise, 0)
+        SNR_dB    = 10 log10(P_signal / P_noise)
+
+    Subtracting the expected in-band noise matters little at 20-40 dB and matters
+    a great deal near a detection threshold, where it is the difference between
+    measuring a signal and counting the noise sitting under it as one.
+
+    The median is taken in linear power, not in dB: the median of a set of dB
+    values is the dB of the median only because the transform is monotonic, but
+    every other quantity here is a power sum, and mixing the two domains is how a
+    factor arrives that nobody can later account for.
+    """
+    usable_edge = PASSBAND_REFERENCE_FRACTION * (channel_bandwidth_hz / 2.0)
+    guard_hz = NOISE_REFERENCE_GUARD_BINS * bin_hz
+    low_edge = freqs[left] - guard_hz
+    high_edge = freqs[right] + guard_hz
+
+    eligible = np.isfinite(power) & (power > 0.0)
+    eligible &= np.abs(freqs) <= usable_edge
+    eligible &= (freqs < low_edge) | (freqs > high_edge)
+    if dc_offset_hz is not None:
+        eligible &= np.abs(freqs - dc_offset_hz) > DC_GUARD_HZ
+
+    lower = eligible & (freqs < low_edge)
+    upper = eligible & (freqs > high_edge)
+    n_left, n_right = int(lower.sum()), int(upper.sum())
+
+    disagreement: Optional[float] = None
+    if n_left and n_right:
+        disagreement = round(abs(
+            10.0 * math.log10(max(float(np.median(power[lower])), 1e-20))
+            - 10.0 * math.log10(max(float(np.median(power[upper])), 1e-20))), 3)
+
+    if (n_left + n_right >= NOISE_REFERENCE_MIN_TOTAL
+            and n_left >= NOISE_REFERENCE_MIN_PER_SIDE
+            and n_right >= NOISE_REFERENCE_MIN_PER_SIDE):
+        mask, sides, quality = eligible, "BOTH", None
+    # One-sided is permitted but never silent: it is declared in
+    # `noise_reference_sides` and flagged in `snr_quality`, and it must clear the
+    # full two-sided bin budget on the single side it does have.
+    elif n_left >= NOISE_REFERENCE_MIN_TOTAL:
+        mask, sides, quality = lower, "LEFT_ONLY", "DEGRADED_ONE_SIDED"
+    elif n_right >= NOISE_REFERENCE_MIN_TOTAL:
+        mask, sides, quality = upper, "RIGHT_ONLY", "DEGRADED_ONE_SIDED"
+    else:
+        return _snr_fields(reason_code="INSUFFICIENT_CLEAN_REFERENCE_BINS",
+                           sides="NONE", left=n_left, right=n_right,
+                           disagreement_db=disagreement)
+
+    used = int(mask.sum())
+    noise_floor = float(np.median(power[mask]))
+    occupied_bins = right - left + 1
+    noise_in_band = noise_floor * occupied_bins
+    signal = float(power[left:right + 1].sum()) - noise_in_band
+    if not signal > 0.0 or not noise_in_band > 0.0:
+        return _snr_fields(reason_code="OCCUPIED_POWER_NOT_ABOVE_NOISE",
+                           sides=sides, quality=quality, bin_count=used,
+                           bandwidth_hz=round(used * bin_hz, 3),
+                           left=n_left, right=n_right, disagreement_db=disagreement)
+    return _snr_fields(snr_db=round(10.0 * math.log10(signal / noise_in_band), 3),
+                       quality=quality, bin_count=used,
+                       bandwidth_hz=round(used * bin_hz, 3), sides=sides,
+                       left=n_left, right=n_right, disagreement_db=disagreement)
+
+
+def _measure(channel: np.ndarray, output_rate_hz: float, *,
+             channel_bandwidth_hz: float, tuning_offset_hz: float,
+             ) -> Tuple[Optional[float], Optional[float], Dict[str, Any]]:
     """Occupied bandwidth, residual carrier offset and SNR of the channel.
 
     ``frequency_offset_hz`` is the carrier's position *within the channel*, which
@@ -586,17 +831,19 @@ def _measure(channel: np.ndarray, output_rate_hz: float,
     """
     power_db, segment = welch_power_db(channel)
     if segment == 0:
-        return None, None, None
+        return None, None, _snr_fields(
+            reason_code="INSUFFICIENT_CLEAN_REFERENCE_BINS", sides="NONE")
     bin_hz = output_rate_hz / segment
     peak = int(np.argmax(power_db))
     power = np.power(10.0, power_db / 10.0)
+    freqs = (np.arange(segment) - segment // 2) * bin_hz
 
     edges = _walk_occupancy(power_db, peak)
     if edges is None:
         # The signal fills the channel. That is a measurement, not a failure, but
-        # the width is a lower bound and the noise estimate has nothing to use.
-        return (float(segment * bin_hz),
-                float((peak - segment // 2) * bin_hz), None)
+        # the width is a lower bound and there is no region left to reference.
+        return (float(segment * bin_hz), float((peak - segment // 2) * bin_hz),
+                _snr_fields(reason_code="CHANNEL_EDGE_LIMITED", sides="NONE"))
     left, right = edges
     occupied = float((right - left) * bin_hz)
 
@@ -609,15 +856,11 @@ def _measure(channel: np.ndarray, output_rate_hz: float,
     centroid = float((indices * weights).sum() / max(weights.sum(), 1e-20))
     offset = float((centroid - segment // 2) * bin_hz)
 
-    in_band = float(power[left:right + 1].sum())
-    noise_bins = np.concatenate((power[:left], power[right + 1:]))
-    if noise_bins.size == 0:
-        return occupied, offset, None
-    # Median rather than mean: a second emitter inside the analysis span should
-    # not be averaged into the noise floor and quietly raise it.
-    noise = float(np.median(noise_bins)) * (right - left + 1)
-    snr = 10.0 * math.log10(max(in_band - noise, 1e-20) / max(noise, 1e-20))
-    return occupied, offset, round(snr, 3)
+    snr = _estimate_snr(power, freqs, bin_hz, left, right,
+                        channel_bandwidth_hz=channel_bandwidth_hz,
+                        dc_offset_hz=_dc_offset_in_channel(tuning_offset_hz,
+                                                           output_rate_hz))
+    return occupied, offset, snr
 
 
 def channelizer_status() -> Dict[str, Any]:
@@ -636,6 +879,21 @@ def channelizer_status() -> Dict[str, Any]:
         "occupancy_floor_db": OCCUPANCY_FLOOR_DB,
         "outcomes": dict(OUTCOMES),
         "refusal_outcomes": list(REFUSAL_OUTCOMES),
+        # SNR is declared beside the outcomes but is deliberately not one of
+        # them. An unresolved SNR does not refuse a channelization.
+        "snr_basis": SNR_BASIS,
+        "snr_authority": SNR_AUTHORITY,
+        "snr_measurement_revision": SNR_MEASUREMENT_REVISION,
+        "noise_estimator": SNR_NOISE_ESTIMATOR,
+        "noise_reference_guard_bins": NOISE_REFERENCE_GUARD_BINS,
+        "noise_reference_min_total_bins": NOISE_REFERENCE_MIN_TOTAL,
+        "noise_reference_min_per_side_bins": NOISE_REFERENCE_MIN_PER_SIDE,
+        "noise_reference_passband_fraction": PASSBAND_REFERENCE_FRACTION,
+        "snr_reason_codes": dict(SNR_REASON_CODES),
+        "snr_reason_codes_emitted": list(_EMITTED_SNR_REASON_CODES),
+        "snr_reason_codes_reserved": [code for code in SNR_REASON_CODES
+                                      if code not in _EMITTED_SNR_REASON_CODES],
+        "superseded_snr_bases": dict(SUPERSEDED_SNR_BASES),
         # Phase 1d: the bridge issues verified windows and records bounded
         # products. Nothing yet consumes those products, which is a separate
         # claim and is reported separately.

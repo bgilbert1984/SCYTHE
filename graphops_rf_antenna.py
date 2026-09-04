@@ -55,7 +55,13 @@ ANTENNAS: Dict[str, Dict[str, Any]] = {
     },
 }
 
+# "undeclared" is the default, and it is deliberately not "direct". A mast on 2 m
+# of RG58 is not the same signal chain as the same mast screwed onto the dongle,
+# and nothing in a receive-only path can tell the two apart. Defaulting to
+# "direct" would publish a cable path nobody attested to: configuration
+# convenience printed as physical evidence.
 FEEDLINES: Dict[str, Dict[str, Any]] = {
+    "undeclared": {"label": "FEEDLINE UNDECLARED", "length_m": None},
     "direct": {"label": "DIRECT TO SMA", "length_m": 0.0},
     "nesdr-magnetic-base-rg58-2m": {"label": "MAGNETIC BASE · 2 m RG58", "length_m": 2.0},
 }
@@ -98,7 +104,7 @@ def validate_declaration(payload: Any, *, declared_at: Optional[float] = None) -
         raise AntennaDeclarationRefused(
             f"antenna_id must be one of {sorted(ANTENNAS)}"
         )
-    feedline_id = str(payload.get("feedline_id") or "direct").strip()
+    feedline_id = str(payload.get("feedline_id") or "undeclared").strip()
     if feedline_id not in FEEDLINES:
         raise AntennaDeclarationRefused(f"feedline_id must be one of {sorted(FEEDLINES)}")
 
@@ -128,6 +134,8 @@ def validate_declaration(payload: Any, *, declared_at: Optional[float] = None) -
         "feedline_id": feedline_id,
         "feedline_label": FEEDLINES[feedline_id]["label"],
         "feedline_length_m": FEEDLINES[feedline_id]["length_m"],
+        "feedline_authority": ("UNDECLARED" if feedline_id == "undeclared"
+                               else DECLARATION_AUTHORITY),
         "extension_mm": extension_mm,
         "quarter_wave_hz": quarter_wave_hz,
         "quarter_wave_authority": "DERIVED_INFERENCE" if quarter_wave_hz else "UNDECLARED",

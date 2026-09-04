@@ -691,6 +691,143 @@ strata cannot yet be built honestly.
 
 ---
 
+### 5.9 SNR measured the filter, not the signal — **fixed 2026-09-03**
+
+Found the first time the channelizer ran on live hardware. A product on a
+broadcast FM station reported `snr_db: 106.505`. Against synthetic ground truth
+the estimator read **108.7 dB for a true 20 dB channel**: a ~88 dB overstatement
+whose slope was right and whose level was fiction.
+
+The cause was the noise reference. The estimator took the floor as the median of
+every bin outside the occupied region — but most of those bins lie outside the
+channelizer's *own* passband, where its 90 dB FIR has already crushed them.
+Instrumented on the filtered path (±256 kHz span, passband edge ±125.6 kHz,
+occupied ±101.0 kHz):
+
+```text
+median of ALL out-of-occupied bins   -68.91 dB   <- what was used
+  110-125 kHz ( 60 bins)              17.27 dB   <- the actual noise floor
+  125-180 kHz (220 bins)             -10.18 dB   <- FIR transition
+  180-256 kHz (304 bins)             -77.04 dB   <- FIR stopband
+```
+
+524 of 620 reference bins were in the transition or stopband, so the median
+landed in the stopband and the published figure measured filter rejection. The
+median — chosen so a second emitter could not quietly raise the floor — is
+precisely what guaranteed the stopband won, because stopband bins outnumber real
+noise bins. A defence against one contaminant admitted a larger one.
+
+**The definition now in force** (`snr_basis:
+OCCUPIED_EXCESS_POWER_OVER_LOCAL_PASSBAND_NOISE_V1`), over occupied bins `O` and
+clean reference bins `R`:
+
+```text
+N0        = median of the LINEAR power over R      (not the median of dB)
+P_noise   = N0 * |O|
+P_signal  = max( sum(P_k for k in O) - P_noise, 0 )
+SNR_dB    = 10 log10( P_signal / P_noise )
+```
+
+Subtracting the expected in-band noise barely moves a strong signal and is the
+whole answer near a threshold. Measured on the estimator in isolation:
+
+| true | excess-power | error | total-power | error |
+|-----:|-------------:|------:|------------:|------:|
+| −10.0 | −9.903 | +0.10 | 0.430 | **+10.43** |
+| −5.0 | −4.938 | +0.06 | 1.215 | +6.22 |
+| 0.0 | 0.044 | +0.04 | 3.040 | +3.04 |
+| 10.0 | 10.031 | +0.03 | 10.449 | +0.45 |
+| 20.0 | 20.027 | +0.03 | 20.077 | +0.08 |
+| 40.0 | 40.025 | +0.02 | 40.032 | +0.03 |
+
+Without the subtraction a −10 dB channel reads as +0.43 dB: noise counted as
+signal, exactly where a detector's PFA would be quoted.
+
+**A reference bin must be** inside the flat passband, outside the occupied
+region, outside a guard of `NOISE_REFERENCE_GUARD_BINS = 3` around its edges,
+outside the declared DC exclusion, finite and positive, and from the same Welch
+spectrum and source window. The flat edge is `PASSBAND_REFERENCE_FRACTION =
+0.85` of the cutoff, measured on the shipped 129-tap Kaiser β=8.6 design:
+
+```text
+0.80 x cutoff    0.00 dB      0.95 x cutoff   -1.95 dB
+0.85 x cutoff   -0.02 dB      1.00 x cutoff   -5.98 dB
+0.90 x cutoff   -0.37 dB      1.30 x cutoff  -94.00 dB
+```
+
+Budget: `>= 32` total, `>= 8` per side. One-sided estimation is permitted only
+when a single side clears the full 32, and is never silent —
+`noise_reference_sides: LEFT_ONLY | RIGHT_ONLY` with `snr_quality:
+DEGRADED_ONE_SIDED`. Left and right counts and their median-power disagreement
+are published on every product; no threshold is set on the disagreement, so
+`REFERENCE_BINS_ASYMMETRIC` stays reserved rather than emitted.
+
+**Measurement failure is not transformation failure.** An SNR that cannot be
+defended does not refuse the channelization:
+
+```text
+outcome          CHANNELIZED
+snr_db           null
+snr_reason_code  INSUFFICIENT_CLEAN_REFERENCE_BINS
+```
+
+`SNR_REASON_CODES` names seven conditions; `_EMITTED_SNR_REASON_CODES` names the
+three that are actually produced (`INSUFFICIENT_CLEAN_REFERENCE_BINS`,
+`OCCUPIED_POWER_NOT_ABOVE_NOISE`, `CHANNEL_EDGE_LIMITED`). The other four are
+reserved names, not claims that a detector exists, and the status payload splits
+`snr_reason_codes_emitted` from `snr_reason_codes_reserved` so the distinction is
+readable rather than remembered.
+
+**Historical boundary.** `SNR_MEASUREMENT_REVISION =
+passband-local-excess-power.v1` is part of the product digest, so a product under
+the old definition cannot share an identity with one under the new. The prior
+basis is declared in `SUPERSEDED_SNR_BASES` as `INVALID — NOT COMPARABLE ... NO
+CORRECTION FACTOR EXISTS`. **No −88 dB correction may be applied to a retained
+value**: the error depends on filter rejection, spectrum geometry and occupancy,
+and only looked constant because one sweep held those fixed. Nothing persisted
+the old figures — the ring and its products die with the process — so there is no
+stored telemetry to quarantine, only a definition that must never be re-derived.
+
+**A consequence for Phase 2.** The coarse selection walks 20 dB down from the
+peak, so it refuses below roughly 20 dB in-channel SNR
+(`OCCUPIED_BANDWIDTH_UNRESOLVED`) and the SNR estimator is never reached there.
+An end-to-end sweep therefore *cannot* characterise the estimator near a
+detection threshold; `test_rf_channelizer_snr.py` drives `_estimate_snr` directly
+for that reason. Whether a symbol-clock detector should ever see windows the
+channelizer will not measure is a Phase 2 question, not a fixed one.
+
+**The reference budget is geometry-dependent, and often fails.** With
+`CHANNEL_MARGIN = 1.25` the channel is only 25% wider than the occupied region,
+and 0.85 of that leaves roughly `0.03 x bandwidth` per side. Whether 32 bins fit
+depends on the Welch resolution, which depends on window length. At the
+production 524,288-sample window a 200 kHz signal yields 22 bins per side and
+resolves; the same signal in a 262,144-sample window yields 8 and does not. This
+is reported honestly rather than papered over, but it means **`snr_db: null` is a
+common and correct outcome, not a rare one**. Widening `CHANNEL_MARGIN` to buy
+reference room would change every product hash and the DC and edge refusal rates,
+so it is not done here.
+
+### 5.10 A default feedline was physical evidence nobody gave
+
+`SDRPP_ANTENNA_ID=nesdr-smart-uhf` was adopted at startup and the feedline
+defaulted to `direct` — `DIRECT TO SMA`. Nothing in a receive-only path can tell
+a mast screwed onto the SMA from the same mast on 2 m of RG58: no reflectometer,
+no bias tee to sense a load, no identity conductor. The default was therefore
+publishing a cable path as though it had been observed.
+
+`undeclared` is now the first entry in `FEEDLINES` and the default in both the
+Python catalogue and its `scythe-web/rfAntennaDeclaration.js` mirror, with
+`feedline_label: FEEDLINE UNDECLARED`, `feedline_length_m: null` and
+`feedline_authority: UNDECLARED`. A stated feedline still records as
+`OPERATOR_DECLARED`. The antenna and the cable are separate declarations because
+they are separate parts with separate losses, and one being known says nothing
+about the other.
+
+Note that `signal_chain_hash` covers sensor, antenna, sample type and sample
+rate — **not** the feedline. Two metres of RG58 is a real insertion loss and
+arguably belongs in the chain identity; folding it in would change every existing
+hash, so it is recorded as an open question rather than done quietly.
+
 ## 6. Open questions for the operator
 
 1. **Approve the bounded IQ ring** (§2.2)? First retention of raw IQ beyond one block.

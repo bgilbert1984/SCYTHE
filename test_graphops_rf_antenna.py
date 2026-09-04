@@ -28,6 +28,28 @@ class AntennaDeclarationTests(unittest.TestCase):
         self.assertEqual(record["auto_detection_note"], AUTODETECT_REASON)
         self.assertEqual(record["resonance_authority"], "VENDOR_DECLARED")
 
+    def test_an_undeclared_feedline_is_the_default_not_a_direct_connection(self):
+        """A default is configuration convenience, not physical evidence.
+
+        Nothing in a receive-only path can distinguish a mast screwed onto the
+        SMA from the same mast on 2 m of RG58, so defaulting to "direct" would
+        publish a cable path nobody attested to.
+        """
+        record = validate_declaration({"antenna_id": "nesdr-smart-uhf"})
+        self.assertEqual(record["feedline_id"], "undeclared")
+        self.assertEqual(record["feedline_label"], "FEEDLINE UNDECLARED")
+        self.assertIsNone(record["feedline_length_m"])
+        self.assertEqual(record["feedline_authority"], "UNDECLARED")
+        # The antenna itself is still a declaration; only the cable is unknown.
+        self.assertEqual(record["authority"], "OPERATOR_DECLARED")
+
+    def test_a_stated_feedline_is_recorded_as_operator_declared(self):
+        record = validate_declaration({"antenna_id": "nesdr-smart-uhf",
+                                       "feedline_id": "nesdr-magnetic-base-rg58-2m"})
+        self.assertEqual(record["feedline_label"], "MAGNETIC BASE \u00b7 2 m RG58")
+        self.assertEqual(record["feedline_length_m"], 2.0)
+        self.assertEqual(record["feedline_authority"], "OPERATOR_DECLARED")
+
     def test_unknown_antenna_or_feedline_is_refused(self):
         with self.assertRaises(AntennaDeclarationRefused):
             validate_declaration({"antenna_id": "discone"})

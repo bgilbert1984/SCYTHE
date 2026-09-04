@@ -121,6 +121,16 @@ export const BUNDLE_ANTENNAS = Object.freeze([
  */
 export const FEEDLINES = Object.freeze([
   Object.freeze({
+    // The default, and deliberately not "direct": nothing in a receive-only path
+    // can tell a direct connection from 2 m of RG58, so defaulting to "direct"
+    // would print configuration convenience as physical evidence.
+    id: "undeclared",
+    label: "FEEDLINE UNDECLARED",
+    vendorDescription: "The operator has not stated how the antenna is connected",
+    lengthM: null,
+    lossAuthority: AUTHORITY.UNDECLARED,
+  }),
+  Object.freeze({
     id: "direct",
     label: "DIRECT TO SMA",
     vendorDescription: "Mast connected directly to the receiver, no feedline",
@@ -151,7 +161,7 @@ export const feedlineById = (id) => FEEDLINES.find((entry) => entry.id === id) ?
  * Build a declaration. Every field is OPERATOR_DECLARED: the operator is the
  * only instrument that can see the connector.
  */
-export function declareAntenna({antennaId, feedlineId = "direct", extensionMm = null,
+export function declareAntenna({antennaId, feedlineId = "undeclared", extensionMm = null,
                                 note = "", declaredAt = Date.now() / 1000} = {}) {
   const antenna = antennaById(antennaId);
   if (!antenna) {

@@ -73,7 +73,14 @@ class ChannelIsolationTests(unittest.TestCase):
         self.assertAlmostEqual(product.candidate_bandwidth_hz, 40_000.0, delta=4_000.0)
         self.assertAlmostEqual(product.channel_bandwidth_hz,
                                product.candidate_bandwidth_hz * CHANNEL_MARGIN, places=3)
-        self.assertGreater(product.snr_db, 30.0)
+        # No SNR here, and that is the correct answer rather than a missing one:
+        # a 40 kHz signal in a 50 kHz channel leaves no room between the occupied
+        # region and the FIR skirt for a noise reference the filter has not
+        # touched. This assertion used to read `assertGreater(snr_db, 30.0)`,
+        # which passed easily because the figure was inflated by the stopband.
+        # See test_rf_channelizer_snr.py for the measurement itself.
+        self.assertIsNone(product.snr_db)
+        self.assertEqual(product.snr_reason_code, "INSUFFICIENT_CLEAN_REFERENCE_BINS")
 
     def test_tuning_offset_and_carrier_offset_are_two_different_quantities(self):
         """Reporting only their sum would hide selection error as signal."""
