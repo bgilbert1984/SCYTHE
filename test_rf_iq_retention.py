@@ -15,10 +15,12 @@ import numpy as np
 from rf_bridge import IQFFTProcessor, RFBridgeConfig, SDRPlusPlusBridge
 from rf_iq_ring import DEFAULT_CAPACITY_SAMPLES, INVALIDATION_REASONS
 from rf_iq_retention import (
-    CHANNELIZER_STATE, INACTIVE_REASONS, MAX_INVALIDATION_HISTORY, RETENTION_NONE,
-    RETENTION_RING, UNWIRED_REASONS, IQRetentionOwner, antenna_id,
+    CHANNELIZER_STATE, CLOCK_GAP_S, INACTIVE_REASONS, MAX_INVALIDATION_HISTORY,
+    RETENTION_NONE, RETENTION_RING, UNWIRED_REASONS, IQRetentionOwner, antenna_id,
     retention_enabled, signal_chain_hash,
 )
+
+RATE = 2_048_000.0
 
 
 def _owner(**kwargs):
@@ -302,12 +304,69 @@ class LifecycleTests(EnvironmentIsolatedTest):
                          "ORCHESTRATOR_STOP")
 
     def test_the_reasons_with_no_bridge_event_are_declared_rather_than_hidden(self):
+        """Only DIRECT_SAMPLING_CHANGE is unwired now; the other two have sources."""
         status = _owner().status()
         self.assertEqual(status["unwired_invalidation_reasons"], list(UNWIRED_REASONS))
-        self.assertIn("NO GAIN CONTROL", status["unwired_invalidation_note"])
+        self.assertEqual(list(UNWIRED_REASONS), ["DIRECT_SAMPLING_CHANGE"])
+        self.assertIn("NO DIRECT-SAMPLING CONTROL", status["unwired_invalidation_note"])
         for reason in UNWIRED_REASONS:
             self.assertIn(reason, INVALIDATION_REASONS,
                           "an unwired reason must still be a real one")
+        # A wired reason names what calls it, so "wired" is checkable rather than
+        # a claim that has to be taken on faith from a commit message.
+        sources = status["wired_invalidation_sources"]
+        self.assertIn("GAIN_CHANGE", sources)
+        self.assertIn("CLOCK_DISCONTINUITY", sources)
+        for reason in sources:
+            self.assertNotIn(reason, UNWIRED_REASONS)
+
+    def test_a_gain_change_clears_the_ring_and_moves_the_signal_chain(self):
+        owner = _owner()
+        owner.append(_samples(), 1.0)
+        before = owner.status()["signal_chain_hash"]
+        result = owner.set_gain_db(28.0)
+        self.assertTrue(result["changed"])
+        status = owner.status()
+        self.assertEqual(status["invalidation_history"][-1]["reason"], "GAIN_CHANGE")
+        self.assertNotEqual(status["signal_chain_hash"], before)
+        self.assertEqual(status["gain_db"], 28.0)
+        self.assertEqual(status["signal_chain"]["gain"],
+                         {"value_db": 28.0, "authority": "OPERATOR_DECLARED"})
+        # Setting the same gain again is not an event, so it must not clear.
+        history = len(status["invalidation_history"])
+        self.assertFalse(owner.set_gain_db(28.0)["changed"])
+        self.assertEqual(len(owner.status()["invalidation_history"]), history)
+
+    def test_an_undeclared_gain_reports_undeclared_rather_than_a_number(self):
+        status = _owner().status()
+        self.assertIsNone(status["gain_db"])
+        self.assertEqual(status["signal_chain"]["gain"],
+                         {"value_db": None, "authority": "UNDECLARED"})
+
+    def test_a_timing_break_clears_the_ring_under_clock_discontinuity(self):
+        """Samples either side of a gap are not contiguous, whatever the count says."""
+        owner = _owner()
+        owner.append(_samples(), 1.0)
+        self.assertEqual(owner.status()["clock_continuity"]["discontinuities"], 0)
+        # A gap far longer than a stream at this rate can be silent.
+        owner.append(_samples(), 1.0 + CLOCK_GAP_S + 5.0)
+        status = owner.status()
+        self.assertEqual(status["clock_continuity"]["discontinuities"], 1)
+        self.assertEqual(status["clock_continuity"]["last_discontinuity"]["kind"], "GAP")
+        self.assertEqual(status["invalidation_history"][-1]["reason"],
+                         "CLOCK_DISCONTINUITY")
+
+    def test_buffering_jitter_is_not_a_clock_discontinuity(self):
+        """Measured live: 2 s windows swing 4.3%, 20 s cumulative drift is 0.007%."""
+        owner = _owner()
+        block = _samples()
+        at = 1.0
+        per_block = block.size / RATE
+        for index in range(60):
+            # Alternating +/-4% arrival jitter, cumulatively near zero.
+            at += per_block * (1.04 if index % 2 else 0.96)
+            owner.append(block, at)
+        self.assertEqual(owner.status()["clock_continuity"]["discontinuities"], 0)
 
 
 class BridgeIntegrationTests(EnvironmentIsolatedTest):

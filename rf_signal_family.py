@@ -272,20 +272,42 @@ class RegisteredMethod:
 # Note the `axis` field: a method is registered against one axis. A symbol-clock
 # detector has no standing to assert a modulation, and the gate enforces that.
 METHOD_REGISTRY: Dict[str, RegisteredMethod] = {
+    # Pinned to the implementation in rf_symbol_clock, 2026-09-03. Both numbers
+    # below moved, because both were registered against no implementation and
+    # measurement contradicted them:
+    #
+    #   minimum_statistic     8.4 -> 2.5
+    #       On an unaveraged periodogram the null peak-to-median is ~18 for pure
+    #       noise, from extreme-value statistics over ~10^5 exponential bins, so
+    #       8.4 would have passed every noise window ever seen. The implemented
+    #       statistic is Welch-averaged, where 300 null windows gave mean 1.55 and
+    #       maximum 1.81. The two thresholds describe different quantities and are
+    #       not comparable.
+    #
+    #   minimum_sample_count  262144 -> 32768
+    #       Unreachable through this channelizer: a 524288-sample window decimated
+    #       to a real channel yields 16k-175k samples, so the detector would never
+    #       have run. The null is flat from 32768 upward; what a shorter window
+    #       costs is a higher lowest detectable symbol rate, published per verdict.
+    #
+    # 2.5 is calibration against a synthetic null, not validation. It stays
+    # REGISTERED_NOT_VALIDATED until the Q4 corpus passes.
     "squared-envelope-cyclic.v1": RegisteredMethod(
         method_id="squared-envelope-cyclic.v1",
-        method_revision="UNPINNED_PENDING_IMPLEMENTATION",
+        method_revision="squared-envelope-cyclic.v1",
         axis="information_structure",
         statistic_direction="GREATER_IS_STRONGER",
-        minimum_statistic=8.4,
+        minimum_statistic=2.5,
         maximum_false_alarm_probability=0.001,
         null_model="CHANNELIZED_NOISE_PLUS_NONCYCLIC_SIGNAL",
-        minimum_sample_count=262_144,
+        minimum_sample_count=32_768,
         validation_status="REGISTERED_NOT_VALIDATED",
         validation_note=(
             "PHASE 3 HAS NOT RUN. NO LABELLED CORPUS HAS MEASURED THIS METHOD'S "
             "FALSE-DIGITAL RATE ON NOISE OR ON ANALOGUE INPUTS, AND ITS CONFIDENCE "
-            "IS UNCALIBRATED. A POSITIVE VERDICT FROM IT IS REFUSED."
+            "IS UNCALIBRATED. A POSITIVE VERDICT FROM IT IS REFUSED. THE DETECTOR "
+            "RUNS IN SHADOW MODE AND ITS VERDICTS REACH NO AXIS, NO FAMILY "
+            "SUMMARY, NO API AND NO GRAPH."
         ),
         calibration_revision=None,
     ),

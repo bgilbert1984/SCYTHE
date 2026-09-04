@@ -334,6 +334,9 @@ class ChannelizedProduct:
 
     center_frequency_hz: float
     sample_rate_hz: float
+    # Part of the digest, so it has to be on the record: a digest that cannot be
+    # recomputed from the product it names cannot be checked by anyone holding it.
+    target_frequency_hz: float
 
     # Stage 1: the coarse candidate the selection was derived from.
     candidate_center_hz: Optional[float]
@@ -605,6 +608,7 @@ def _refuse(window: IQWindow, request: ChannelRequest, outcome: str, *,
         signal_chain_hash=window.signal_chain_hash,
         center_frequency_hz=request.capture_center_hz,
         sample_rate_hz=window.sample_rate_hz,
+        target_frequency_hz=request.target_frequency_hz,
         candidate_center_hz=candidate_center,
         candidate_bandwidth_hz=candidate_bandwidth,
         candidate_method=candidate_method,
@@ -764,6 +768,7 @@ def channelize(window: IQWindow, request: ChannelRequest, *,
         signal_chain_hash=window.signal_chain_hash,
         center_frequency_hz=request.capture_center_hz,
         sample_rate_hz=rate,
+        target_frequency_hz=request.target_frequency_hz,
         candidate_center_hz=candidate_center,
         candidate_bandwidth_hz=candidate_bandwidth,
         candidate_method=candidate[2],
@@ -961,6 +966,34 @@ def _measure(channel: np.ndarray, output_rate_hz: float, *,
                         dc_offset_hz=_dc_offset_in_channel(tuning_offset_hz,
                                                            output_rate_hz))
     return occupied, offset, snr, None
+
+
+def recompute_product_digest(product: ChannelizedProduct) -> str:
+    """Rebuild a product's digest from the product alone.
+
+    Every input is a field on the record, so a holder can check the binding
+    without the window, the ring or the request that produced it.
+    """
+    if product.outcome != "CHANNELIZED":
+        return _digest(SCHEMA, product.source_window_id, product.source_window_digest,
+                       product.configuration_epoch, product.center_frequency_hz,
+                       product.target_frequency_hz, product.method_revision,
+                       product.snr_measurement_revision, product.outcome)
+    return _digest(SCHEMA, product.source_window_id, product.source_window_digest,
+                   product.configuration_epoch, product.signal_chain_hash,
+                   product.center_frequency_hz, product.target_frequency_hz,
+                   round(product.channel_center_hz, 3),
+                   round(product.channel_bandwidth_hz, 3), product.decimation,
+                   product.fir_design, product.fir_taps, product.method_revision,
+                   product.snr_measurement_revision, "CHANNELIZED")
+
+
+def product_digest_valid(product: ChannelizedProduct) -> bool:
+    """True when the digest on the record matches what the record implies."""
+    try:
+        return recompute_product_digest(product) == product.product_digest
+    except Exception:
+        return False
 
 
 def channelizer_status() -> Dict[str, Any]:

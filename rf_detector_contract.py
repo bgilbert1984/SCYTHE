@@ -43,6 +43,7 @@ one into a status payload, an API response, a log line or GraphOps.
 
 from __future__ import annotations
 
+import math
 from typing import Any, Dict, Optional, Tuple
 
 
@@ -109,8 +110,69 @@ PROHIBITED_INFERENCES: Dict[str, str] = {
 }
 
 
+# Structural validation is a separate question from measurement-state eligibility,
+# and answering them with one check is how a dictionary becomes evidence. A JSON
+# body carrying {"outcome": "CHANNELIZED"} satisfies eligibility perfectly and has
+# no samples, no ring, no epoch and no provenance behind it.
+#
+#     Eligibility     transformation.outcome == CHANNELIZED, and nothing else
+#     Authenticity    the provenance contract below
+#     Covariates      never an admission gate, at either layer
+#
+# The provenance layer therefore refuses to look at a mapping at all. It requires
+# the typed, bridge-local objects, because those cannot be constructed by a
+# caller that did not go through the ring: `Channelization` refuses to serialize,
+# so one cannot arrive over a socket.
+PROVENANCE_REQUIREMENTS: Dict[str, str] = {
+    "TYPED_PRODUCT": (
+        "THE PRODUCT MUST BE A ChannelizedProduct BUILT IN THIS PROCESS, NOT A "
+        "MAPPING. A DECODED JSON BODY IS A CLAIM ABOUT A PRODUCT, NOT ONE"
+    ),
+    "PROCESS_LOCAL_SAMPLES": (
+        "THE BASEBAND MUST ARRIVE AS A Channelization HOLDING A COMPLEX ARRAY. "
+        "A DETECTOR THAT ACCEPTS A PRODUCT WITHOUT SAMPLES IS ANALYSING METADATA"
+    ),
+    "PRODUCT_DIGEST_VALID": (
+        "THE PRODUCT DIGEST MUST RECOMPUTE FROM THE PRODUCT'S OWN FIELDS"
+    ),
+    "RECOGNIZED_METHOD_REVISION": (
+        "THE CHANNELIZER AND SNR MEASUREMENT REVISIONS MUST BE ONES THIS BUILD "
+        "KNOWS. AN UNRECOGNISED REVISION IS A PRODUCT FROM A DIFFERENT INSTRUMENT"
+    ),
+    "SOURCE_WINDOW_IDENTIFIED": (
+        "THE SOURCE WINDOW ID AND DIGEST MUST BOTH BE PRESENT, SO THE CHANNEL CAN "
+        "BE TRACED TO THE SAMPLES IT CAME FROM"
+    ),
+    "EPOCH_MATCHES": (
+        "THE PRODUCT'S CONFIGURATION EPOCH MUST MATCH THE RING'S CURRENT EPOCH. A "
+        "RETUNE BETWEEN CHANNELIZATION AND DETECTION IS A DIFFERENT CAPTURE"
+    ),
+    "SIGNAL_CHAIN_MATCHES": (
+        "THE PRODUCT'S SIGNAL CHAIN HASH MUST MATCH THE ONE IN FORCE. PRODUCTS "
+        "THROUGH DIFFERENT ANTENNAS OR DECODES ARE NOT COMPARABLE"
+    ),
+    "FINITE_OUTPUT_RATE": (
+        "THE OUTPUT SAMPLE RATE MUST BE FINITE AND POSITIVE, OR NO CYCLIC "
+        "FREQUENCY COMPUTED FROM IT MEANS ANYTHING"
+    ),
+    "SUFFICIENT_USABLE_SAMPLES": (
+        "ENOUGH SAMPLES MUST REMAIN AFTER THE FIR TRANSIENT WAS DISCARDED, "
+        "COUNTED RATHER THAN ASSUMED FROM THE WINDOW LENGTH"
+    ),
+}
+
+# Below this a cyclic estimate has too few cycles to mean anything. Declared
+# here rather than inside a detector so the admission floor is reviewable
+# separately from whatever statistic later sits on top of it.
+MINIMUM_USABLE_SAMPLES = 4096
+
+
 class DetectorInputRefused(ValueError):
     """The product may not be handed to a detector; the reason names which rule."""
+
+    def __init__(self, message: str, requirement: Optional[str] = None) -> None:
+        super().__init__(message)
+        self.requirement = requirement
 
 
 def admits(product: Dict[str, Any]) -> bool:
@@ -178,6 +240,106 @@ def detector_input(product: Dict[str, Any]) -> Dict[str, Any]:
     return view
 
 
+def verify_provenance(channelization: Any, *, ring: Any = None,
+                      signal_chain_hash: Optional[str] = None) -> Dict[str, Any]:
+    """Structural validation, entirely separate from eligibility.
+
+    Looks at no covariate. Occupancy and SNR are not read here and could not
+    change the answer if they were: a channel is authentic or it is not, and how
+    strong the thing in it happens to be has no bearing on that.
+
+    Raises ``DetectorInputRefused`` naming the requirement that failed, rather
+    than returning a degraded verdict a caller might treat as a soft warning.
+    """
+    from rf_channelizer import (
+        METHOD_REVISION, SNR_MEASUREMENT_REVISION, Channelization,
+        ChannelizedProduct, product_digest_valid,
+    )
+
+    def refuse(requirement: str, detail: str) -> None:
+        raise DetectorInputRefused(
+            f"{requirement}: {detail} -- {PROVENANCE_REQUIREMENTS[requirement]}",
+            requirement)
+
+    if not isinstance(channelization, Channelization):
+        # The single most important line here. A mapping decoded from a request
+        # body can carry any outcome string it likes; it cannot be a
+        # Channelization, because that type refuses to serialize.
+        refuse("TYPED_PRODUCT", f"got {type(channelization).__name__}")
+    product = channelization.product
+    if not isinstance(product, ChannelizedProduct):
+        refuse("TYPED_PRODUCT", f"product is {type(product).__name__}")
+    samples = channelization.samples
+    if samples is None or not hasattr(samples, "dtype") or samples.dtype.kind != "c":
+        refuse("PROCESS_LOCAL_SAMPLES", "no complex baseband is attached")
+    if not product_digest_valid(product):
+        refuse("PRODUCT_DIGEST_VALID", "the digest does not match the record")
+    if product.method_revision != METHOD_REVISION:
+        refuse("RECOGNIZED_METHOD_REVISION",
+               f"channelizer revision {product.method_revision!r}")
+    if product.snr_measurement_revision != SNR_MEASUREMENT_REVISION:
+        refuse("RECOGNIZED_METHOD_REVISION",
+               f"snr revision {product.snr_measurement_revision!r}")
+    if not product.source_window_id or not product.source_window_digest:
+        refuse("SOURCE_WINDOW_IDENTIFIED", "window id or digest is missing")
+    if ring is not None:
+        epoch = getattr(ring, "configuration_epoch", None)
+        if epoch is None or epoch != product.configuration_epoch:
+            refuse("EPOCH_MATCHES",
+                   f"product epoch {product.configuration_epoch} vs ring {epoch}")
+        chain = getattr(ring, "signal_chain_hash", None)
+        if chain is not None and chain != product.signal_chain_hash:
+            refuse("SIGNAL_CHAIN_MATCHES", f"ring chain {chain!r}")
+    if signal_chain_hash is not None and signal_chain_hash != product.signal_chain_hash:
+        refuse("SIGNAL_CHAIN_MATCHES", f"expected {signal_chain_hash!r}")
+    rate = product.output_sample_rate_hz
+    if rate is None or not math.isfinite(rate) or rate <= 0.0:
+        refuse("FINITE_OUTPUT_RATE", f"output rate {rate!r}")
+    # Counted, not assumed: the transient the FIR discarded is already out of
+    # `sample_count`, and the array is the final authority on what survived.
+    usable = int(getattr(samples, "size", 0))
+    if usable != product.sample_count:
+        refuse("SUFFICIENT_USABLE_SAMPLES",
+               f"{usable} samples attached but the product claims {product.sample_count}")
+    if usable < MINIMUM_USABLE_SAMPLES:
+        refuse("SUFFICIENT_USABLE_SAMPLES",
+               f"{usable} usable samples is below the {MINIMUM_USABLE_SAMPLES} floor")
+    return {
+        "verified": True,
+        "requirements_checked": list(PROVENANCE_REQUIREMENTS),
+        "usable_samples": usable,
+        "output_sample_rate_hz": float(rate),
+        "configuration_epoch": product.configuration_epoch,
+        "signal_chain_hash": product.signal_chain_hash,
+        "source_window_id": product.source_window_id,
+    }
+
+
+def admit_for_detection(channelization: Any, *, ring: Any = None,
+                        signal_chain_hash: Optional[str] = None) -> Dict[str, Any]:
+    """Both layers, in order, for a detector about to run.
+
+    The type check comes first, ahead of both layers. A mapping has no eligibility
+    to evaluate -- reading `outcome` out of one and reporting that it was not
+    CHANNELIZED would answer a question about a decoded body as though it were a
+    question about a capture, and would say CHANNELIZED for a body that claimed it.
+
+    After that: eligibility, which reads only the transformation outcome, then
+    authenticity, which reads no covariate. The view returned carries measurements
+    and a process-local sample array that is never placed on the product.
+    """
+    from rf_channelizer import Channelization
+
+    if not isinstance(channelization, Channelization):
+        raise DetectorInputRefused(
+            f"got {type(channelization).__name__}: "
+            f"{PROVENANCE_REQUIREMENTS['TYPED_PRODUCT']}", "TYPED_PRODUCT")
+    view = detector_input(channelization.product.to_dict())     # eligibility
+    view["provenance"] = verify_provenance(                     # authenticity
+        channelization, ring=ring, signal_chain_hash=signal_chain_hash)
+    return view
+
+
 def contract_status() -> Dict[str, Any]:
     """The frozen contract, for the status payload and for review."""
     return {
@@ -191,6 +353,11 @@ def contract_status() -> Dict[str, Any]:
         "required_channel_fields": list(REQUIRED_CHANNEL_FIELDS),
         "covariate_blocks": list(COVARIATE_BLOCKS),
         "prohibited_inferences": dict(PROHIBITED_INFERENCES),
+        # Separate from admission, and separately declared, because collapsing
+        # the two is how a decoded JSON body becomes detector input.
+        "provenance_requirements": dict(PROVENANCE_REQUIREMENTS),
+        "provenance_reads_covariates": False,
+        "minimum_usable_samples": MINIMUM_USABLE_SAMPLES,
         "baseband_transportable": False,
         "detector_implemented": False,
     }

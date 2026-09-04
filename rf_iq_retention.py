@@ -109,6 +109,7 @@ import numpy as np
 
 from rf_channelizer import ChannelRequest, ChannelizedProduct, channelize
 from rf_detector_contract import contract_status
+from rf_symbol_clock import detector_status
 from rf_validation_manifest import manifest_status
 from rf_iq_ring import (
     DEFAULT_CAPACITY_SAMPLES, DEFAULT_WINDOW_MS, INVALIDATION_REASONS,
@@ -157,12 +158,20 @@ MAX_TRACKED_PRODUCTS = 8
 
 # Reasons the ring declares that this bridge has no event for. Listed so the gap
 # is visible rather than looking like full coverage.
-UNWIRED_REASONS = ("GAIN_CHANGE", "DIRECT_SAMPLING_CHANGE", "CLOCK_DISCONTINUITY")
+# GAIN_CHANGE and CLOCK_DISCONTINUITY are wired as of 2026-09-03, which is what
+# makes the GAIN_STEPS and DROPPED_FRAMES_TIMING_GAPS validation strata buildable:
+# a corpus can now produce a gain step and observe a timing break rather than
+# labelling windows from an assumption.
+UNWIRED_REASONS = ("DIRECT_SAMPLING_CHANGE",)
+WIRED_REASON_SOURCES = {
+    "GAIN_CHANGE": "IQRetentionOwner.set_gain_db, called by SDRPPBridge.set_gain",
+    "CLOCK_DISCONTINUITY": "ClockContinuityMonitor, on every append",
+}
 MAX_INVALIDATION_HISTORY = 16
 UNWIRED_NOTE = (
-    "THIS BRIDGE HAS NO GAIN CONTROL, NO DIRECT-SAMPLING CONTROL AND NO CLOCK-"
-    "DISCONTINUITY DETECTOR, SO NOTHING CALLS THESE. THEY MUST BE WIRED HERE "
-    "BEFORE ANY SUCH CONTROL IS EXPOSED"
+    "THIS BRIDGE HAS NO DIRECT-SAMPLING CONTROL, SO NOTHING CALLS "
+    "DIRECT_SAMPLING_CHANGE. IT MUST BE WIRED HERE BEFORE SUCH A CONTROL IS "
+    "EXPOSED"
 )
 
 
@@ -174,6 +183,111 @@ PRIOR_SIGNAL_CHAIN_REVISION_COMPARABLE = False
 # Vendor figure for the SMArt v5, carried as a declaration rather than a
 # measurement: nothing here has disciplined this oscillator against a reference.
 CLOCK_QUALITY = "MODEL_DECLARED_0_5_PPM_TCXO"
+
+
+# --- clock continuity ------------------------------------------------------
+#
+# Measured on the live NESDR stream before these were chosen. Over 2-second
+# windows the arrival rate swings by up to 4.3%, which is TCP and USB buffering
+# rather than the oscillator; over 20 seconds the cumulative drift was 0.007%.
+# So the honest signal is cumulative and the check interval has to be long enough
+# to average the buffering out. A 2% instantaneous tolerance would have fired
+# continuously on a perfectly healthy stream and invalidated the ring for it.
+CLOCK_CHECK_INTERVAL_S = 10.0
+# ~150x the observed cumulative drift, and far below a real discontinuity, which
+# is a whole dropped buffer rather than a slow slide.
+CLOCK_DRIFT_TOLERANCE = 0.01
+# Continuous data at 2 MS/s arrives many times a second. A second of silence
+# inside a streaming connection is a stall, not slow going.
+CLOCK_GAP_S = 1.0
+
+
+class ClockContinuityMonitor:
+    """Detects a break in the sample stream's timing, so it can be declared.
+
+    Two different faults, kept apart because they mean different things:
+
+    ``GAP``     nothing arrived for longer than a stream at this rate can be
+                silent, so samples are missing between two that look adjacent.
+    ``DRIFT``   samples arrived, but not as many as the elapsed time at the
+                declared rate implies, so the count and the clock disagree.
+
+    Both report ``CLOCK_DISCONTINUITY``. The distinction is kept in the detail
+    because a gap is a transport fault and a drift is a rate fault, and a corpus
+    labelling either as the other would be mislabelling its own strata.
+    """
+
+    def __init__(self, sample_rate_hz: float, *,
+                 check_interval_s: float = CLOCK_CHECK_INTERVAL_S,
+                 tolerance: float = CLOCK_DRIFT_TOLERANCE,
+                 gap_s: float = CLOCK_GAP_S) -> None:
+        self._rate = float(sample_rate_hz)
+        self._interval = float(check_interval_s)
+        self._tolerance = float(tolerance)
+        self._gap_s = float(gap_s)
+        self._reference_at: Optional[float] = None
+        self._last_at: Optional[float] = None
+        self._samples = 0
+        self._discontinuities = 0
+        self._last_detail: Optional[Dict[str, Any]] = None
+
+    def reset(self, now: Optional[float] = None) -> None:
+        """Start a new continuity claim. Called wherever the ring is cleared."""
+        self._reference_at = now
+        self._last_at = now
+        self._samples = 0
+
+    def observe(self, sample_count: int, now: float) -> Optional[Dict[str, Any]]:
+        """Record an arrival. Returns a detail dict when continuity broke."""
+        if sample_count <= 0:
+            return None
+        if self._reference_at is None:
+            self.reset(now)
+            self._last_at = now
+            self._samples = int(sample_count)
+            return None
+        gap = now - (self._last_at if self._last_at is not None else now)
+        self._last_at = now
+        if gap > self._gap_s:
+            return self._break("GAP", {"gap_s": round(gap, 4),
+                                       "gap_limit_s": self._gap_s}, now)
+        self._samples += int(sample_count)
+        elapsed = now - self._reference_at
+        if elapsed < self._interval:
+            return None
+        expected = self._rate * elapsed
+        drift = (self._samples - expected) / expected if expected > 0 else 0.0
+        detail = {"observed_samples": self._samples,
+                  "expected_samples": round(expected, 1),
+                  "drift": round(drift, 6), "elapsed_s": round(elapsed, 3),
+                  "tolerance": self._tolerance}
+        if abs(drift) > self._tolerance:
+            return self._break("DRIFT", detail, now)
+        # Healthy: start a fresh accumulation rather than integrating forever, so
+        # one bad interval cannot be diluted by an hour of good ones.
+        self.reset(now)
+        self._last_at = now
+        return None
+
+    def _break(self, kind: str, detail: Dict[str, Any],
+               now: float) -> Dict[str, Any]:
+        self._discontinuities += 1
+        record = {"kind": kind, "at": now, **detail}
+        self._last_detail = record
+        self.reset(now)
+        self._last_at = now
+        return record
+
+    def status(self) -> Dict[str, Any]:
+        return {
+            "detector": "SAMPLE_COUNT_AGAINST_ELAPSED_TIME",
+            "state": "WIRED",
+            "check_interval_s": self._interval,
+            "drift_tolerance": self._tolerance,
+            "gap_limit_s": self._gap_s,
+            "discontinuities": self._discontinuities,
+            "last_discontinuity": self._last_detail,
+        }
 
 
 def retention_enabled() -> bool:
@@ -203,7 +317,8 @@ def _feedline_length_m(identifier: str) -> Optional[float]:
 
 def signal_chain_manifest(*, sensor_id: str, sample_type: str, sample_rate_hz: float,
                           antenna: Optional[str] = None,
-                          feedline: Optional[str] = None) -> Dict[str, Any]:
+                          feedline: Optional[str] = None,
+                          gain_db: Optional[float] = None) -> Dict[str, Any]:
     """Everything the physical and decode path is made of, declared or not.
 
     A manifest rather than an argument list: the chain grew a feedline the moment
@@ -233,9 +348,12 @@ def signal_chain_manifest(*, sensor_id: str, sample_type: str, sample_rate_hz: f
             "length_m": _feedline_length_m(feedline_identifier) if declared_feedline else None,
             "authority": "OPERATOR_DECLARED" if declared_feedline else "UNDECLARED",
         },
-        # No gain control is wired here, so there is no value to declare and the
-        # authority says why rather than reporting a plausible default.
-        "gain": {"value_db": None, "authority": "UNDECLARED"},
+        # Declared only once something has actually set it. An automatic-gain
+        # receiver has a gain, but not one this process knows, and reporting a
+        # number for it would be inventing the instrument's own state.
+        "gain": ({"value_db": float(gain_db), "authority": "OPERATOR_DECLARED"}
+                 if gain_db is not None else
+                 {"value_db": None, "authority": "UNDECLARED"}),
         "direct_sampling": "UNDECLARED",
         # Not a control and not a measurement: this receiver has no bias tee, so
         # there is nothing to switch and nothing to sense.
@@ -253,7 +371,8 @@ def canonical_signal_chain_bytes(manifest: Dict[str, Any]) -> bytes:
 
 def signal_chain_hash(*, sensor_id: str, sample_type: str, sample_rate_hz: float,
                       antenna: Optional[str] = None,
-                      feedline: Optional[str] = None) -> str:
+                      feedline: Optional[str] = None,
+                      gain_db: Optional[float] = None) -> str:
     """Identity of the physical and decode path the samples came through.
 
     Deliberately excludes the centre frequency.  Retuning does not change the
@@ -267,7 +386,7 @@ def signal_chain_hash(*, sensor_id: str, sample_type: str, sample_rate_hz: float
     """
     manifest = signal_chain_manifest(sensor_id=sensor_id, sample_type=sample_type,
                                      sample_rate_hz=sample_rate_hz, antenna=antenna,
-                                     feedline=feedline)
+                                     feedline=feedline, gain_db=gain_db)
     digest = hashlib.blake2s(canonical_signal_chain_bytes(manifest),
                              digest_size=16).hexdigest()
     return f"blake2s:{digest}"
@@ -293,6 +412,8 @@ class IQRetentionOwner:
         self._window_ms = float(window_ms)
         self._enabled = retention_enabled() if enabled is None else bool(enabled)
         self._ring: Optional[BoundedIQRing] = None
+        self._gain_db: Optional[float] = None
+        self._clock = ClockContinuityMonitor(sample_rate_hz)
         self._signal_chain_manifest = signal_chain_manifest(
             sensor_id=sensor_id, sample_type=sample_type, sample_rate_hz=sample_rate_hz)
         self._signal_chain_hash = signal_chain_hash(
@@ -405,7 +526,43 @@ class IQRetentionOwner:
             # Counts every retained sample, not every block: the non-overlap
             # policy is measured in samples because that is what a window is.
             self._samples_since_window += kept
-            return kept
+            # Timing is checked on the decoded count, not the byte count, so a
+            # sample-type change cannot look like a clock fault.
+            break_detail = self._clock.observe(
+                kept, time.time() if timestamp is None else float(timestamp))
+        if break_detail is not None:
+            # Outside the lock: invalidate() takes it again, and a discontinuity
+            # is exactly the case where the ring must be cleared rather than
+            # silently spanning the gap.
+            LOG.warning("clock discontinuity (%s): %s", break_detail["kind"], break_detail)
+            self.invalidate("CLOCK_DISCONTINUITY")
+        return kept
+
+    def set_gain_db(self, gain_db: Optional[float]) -> Dict[str, Any]:
+        """Record a gain change and clear the ring for it.
+
+        Called by whatever actually moved the gain; this owns the consequence, not
+        the control.  A gain step changes the amplitude relationship between
+        samples either side of it, so a window spanning one would compare two
+        different instruments -- which is why ``GAIN_CHANGE`` exists and why it
+        clears rather than annotates.
+        """
+        with self._lock:
+            previous = self._gain_db
+            value = None if gain_db is None else float(gain_db)
+            if value == previous:
+                return {"changed": False, "gain_db": value,
+                        "signal_chain_hash": self._signal_chain_hash}
+            self._gain_db = value
+            self._signal_chain_manifest = signal_chain_manifest(
+                sensor_id=self._sensor_id, sample_type=self._sample_type,
+                sample_rate_hz=self._sample_rate_hz, gain_db=value)
+            self._signal_chain_hash = signal_chain_hash(
+                sensor_id=self._sensor_id, sample_type=self._sample_type,
+                sample_rate_hz=self._sample_rate_hz, gain_db=value)
+        self.invalidate("GAIN_CHANGE")
+        return {"changed": True, "previous_gain_db": previous, "gain_db": value,
+                "signal_chain_hash": self._signal_chain_hash}
 
     def invalidate(self, reason: str) -> Optional[int]:
         """Clear the ring for a named reason. A no-op when no ring is allocated."""
@@ -423,6 +580,10 @@ class IQRetentionOwner:
             # counter high would let the first samples after a retune be issued
             # as a "complete" window they do not fill.
             self._samples_since_window = 0
+            # A new continuity claim starts here too: samples either side of an
+            # invalidation are not contiguous, so counting across it would
+            # manufacture a drift that is really a deliberate discard.
+            self._clock.reset()
             self._record_locked(code, epoch)
             return epoch
 
@@ -452,10 +613,10 @@ class IQRetentionOwner:
                 self._owns_capture = bool(owns_capture)
             self._signal_chain_manifest = signal_chain_manifest(
                 sensor_id=self._sensor_id, sample_type=self._sample_type,
-                sample_rate_hz=self._sample_rate_hz)
+                sample_rate_hz=self._sample_rate_hz, gain_db=self._gain_db)
             self._signal_chain_hash = signal_chain_hash(
                 sensor_id=self._sensor_id, sample_type=self._sample_type,
-                sample_rate_hz=self._sample_rate_hz)
+                sample_rate_hz=self._sample_rate_hz, gain_db=self._gain_db)
             if self._ring is not None:
                 LOG.info("bounded IQ ring discarded for %s; new chain %s",
                          reason, self._signal_chain_hash)
@@ -583,6 +744,8 @@ class IQRetentionOwner:
                 # Frozen before the detector exists, so it constrains the detector
                 # rather than describing one.
                 "detector_input_contract": contract_status(),
+                # Shadow: implemented, running on nothing, promoting nothing.
+                "symbol_clock_detector": detector_status(),
                 # The Q4 gate, executable and uncollected. Declared here so the
                 # promotion rule is readable beside the products it will judge.
                 "false_digital_gate": manifest_status(),
@@ -622,6 +785,9 @@ class IQRetentionOwner:
                 "invalidation_reasons": list(INVALIDATION_REASONS),
                 "unwired_invalidation_reasons": list(UNWIRED_REASONS),
                 "unwired_invalidation_note": UNWIRED_NOTE,
+                "wired_invalidation_sources": dict(WIRED_REASON_SOURCES),
+                "gain_db": self._gain_db,
+                "clock_continuity": self._clock.status(),
                 "invalidation_history": list(self._history),
                 "inactive_reason": inactive,
                 "inactive_reason_note": INACTIVE_REASONS.get(inactive) if inactive else None,

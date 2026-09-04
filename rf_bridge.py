@@ -58,6 +58,42 @@ _SAMPLE_OFFSET = {
 
 _RIGCTL_MODES = {"FM", "WFM", "AM", "DSB", "USB", "CW", "LSB", "RAW"}
 
+# rtl_tcp sends a 12-byte dongle_info block before the first sample: the magic
+# "RTL0", then tuner type and tuner gain count as big-endian uint32.
+#
+# It was not being stripped. Those twelve bytes were decoded as six complex
+# samples at the head of every connection, and because tuner type and gain count
+# are small integers most of those bytes are 0x00 -- which in offset-binary uint8
+# is negative full scale. Every reconnect therefore began with a full-scale
+# transient that the FFT and the ring both saw as signal. Small, and wrong, and
+# the header is also the only place the device says what tuner it has.
+DONGLE_INFO_MAGIC = b"RTL0"
+DONGLE_INFO_BYTES = 12
+
+# librtlsdr tuner type codes.
+_TUNER_TYPES = {0: "UNKNOWN", 1: "E4000", 2: "FC0012", 3: "FC0013", 4: "FC2580",
+                5: "R820T", 6: "R828D"}
+
+# Tenths of a dB, as librtlsdr reports and rtl_tcp expects. Declared per tuner
+# and never interpolated: a gain "between" two of these is not a gain this device
+# can be set to, and asking for one would silently land somewhere else.
+#
+# Authority is DRIVER_DECLARED. The table is only used when the device's own
+# reported gain count matches its length, so a driver whose table has moved
+# refuses manual gain instead of quietly setting the wrong value.
+_TUNER_GAINS_TENTHS_DB = {
+    "R820T": (0, 9, 14, 27, 37, 77, 87, 125, 144, 157, 166, 197, 207, 229, 254,
+              280, 297, 328, 338, 364, 372, 386, 402, 421, 434, 439, 445, 480, 496),
+    "R828D": (0, 9, 14, 27, 37, 77, 87, 125, 144, 157, 166, 197, 207, 229, 254,
+              280, 297, 328, 338, 364, 372, 386, 402, 421, 434, 439, 445, 480, 496),
+}
+
+# rtl_tcp control opcodes, one command byte then a big-endian uint32.
+_RTL_TCP_SET_GAIN_MODE = 0x03
+_RTL_TCP_SET_GAIN = 0x04
+GAIN_MODE_MANUAL = 1
+GAIN_MODE_AUTOMATIC = 0
+
 
 def _env_bool(name: str, default: bool = False) -> bool:
     value = os.getenv(name)
@@ -336,12 +372,41 @@ class IQFFTProcessor:
         self._byte_remainder = bytearray()
         self._samples = np.empty(0, dtype=np.complex64)
         self._last_frame_at = 0.0
+        # One processor is built per connection, so this is per-connection state
+        # and the header is consumed exactly once where it actually appears.
+        self._dongle_info: Optional[Dict[str, Any]] = None
+        self._header_consumed = False
+
+    @property
+    def dongle_info(self) -> Optional[Dict[str, Any]]:
+        """What the device said about itself, or None if it said nothing."""
+        return None if self._dongle_info is None else dict(self._dongle_info)
 
     def feed(self, chunk: bytes, now: Optional[float] = None) -> Iterable[Dict]:
         if not chunk:
             return []
         now = time.time() if now is None else now
         self._byte_remainder.extend(chunk)
+        if not self._header_consumed:
+            if len(self._byte_remainder) < DONGLE_INFO_BYTES:
+                return []                      # wait; do not decode a partial header
+            if bytes(self._byte_remainder[:4]) == DONGLE_INFO_MAGIC:
+                header = bytes(self._byte_remainder[:DONGLE_INFO_BYTES])
+                del self._byte_remainder[:DONGLE_INFO_BYTES]
+                tuner_code = int.from_bytes(header[4:8], "big")
+                self._dongle_info = {
+                    "tuner_type": _TUNER_TYPES.get(tuner_code, f"UNRECOGNISED_{tuner_code}"),
+                    "tuner_type_code": tuner_code,
+                    "tuner_gain_count": int.from_bytes(header[8:12], "big"),
+                    # Named for what it describes. The gain *table* has a
+                    # different authority -- driver, not device -- and one key
+                    # meaning two things in one merged payload is how a claim
+                    # gets promoted by accident.
+                    "device_authority": "DEVICE_DECLARED",
+                }
+            # A stream without the magic is not an error: it may be any other IQ
+            # source. It simply declares no tuner, and manual gain stays refused.
+            self._header_consumed = True
         pair_bytes = self._scalar_bytes * 2
         usable = len(self._byte_remainder) - (len(self._byte_remainder) % pair_bytes)
         if usable:
@@ -470,6 +535,7 @@ class SDRPlusPlusBridge:
         self._stop = threading.Event()
         self._thread: Optional[threading.Thread] = None
         self._socket: Optional[socket.socket] = None
+        self._dongle_info: Optional[Dict[str, Any]] = None
         self._frames: Deque[Dict] = deque(maxlen=4)
         self._sequence = 0
         self._state = "stopped"
@@ -551,6 +617,69 @@ class SDRPlusPlusBridge:
         # the newly tuned center frequency immediately.
         self.configure_stream(center_frequency_hz=float(frequency_hz))
         return self.control_status()
+
+    def supported_gains_db(self) -> Dict[str, Any]:
+        """The gains this tuner actually has, or a declared refusal.
+
+        Never interpolated and never a range. The R820T's steps are irregular --
+        0.0, 0.9, 1.4, 2.7, 3.7, 7.7 ... -- so a "gain between" two of them is not
+        a setting this device has, and offering one would land somewhere else
+        without saying so.
+        """
+        with self._lock:
+            info = dict(self._dongle_info) if self._dongle_info else None
+        if info is None:
+            return {"available": False, "reason": "NO_DEVICE_HEADER_SEEN",
+                    "note": "THE STREAM DECLARED NO TUNER, SO NO GAIN TABLE APPLIES",
+                    "gains_db": [], "authority": "UNDECLARED"}
+        table = _TUNER_GAINS_TENTHS_DB.get(info["tuner_type"])
+        if table is None:
+            return {"available": False, "reason": "TUNER_NOT_IN_GAIN_CATALOGUE",
+                    "note": f"NO DECLARED GAIN TABLE FOR {info['tuner_type']}",
+                    "gains_db": [], "authority": "UNDECLARED", **info}
+        if info["tuner_gain_count"] != len(table):
+            # The device says how many gains it has. If that disagrees with the
+            # table, the table is from a different driver and setting from it
+            # would put the tuner somewhere other than where the caller asked.
+            return {"available": False, "reason": "GAIN_COUNT_DISAGREES_WITH_DEVICE",
+                    "note": (f"DEVICE REPORTS {info['tuner_gain_count']} GAINS, "
+                             f"CATALOGUE HAS {len(table)}"),
+                    "gains_db": [], "authority": "UNDECLARED", **info}
+        return {"available": True, "reason": None,
+                "gains_db": [value / 10.0 for value in table],
+                "authority": "DRIVER_DECLARED_CONFIRMED_BY_DEVICE_COUNT", **info}
+
+    def _send_rtl_command(self, opcode: int, value: int) -> None:
+        with self._lock:
+            sock = self._socket
+        if sock is None:
+            raise ConnectionError("no IQ socket is open; cannot send a control command")
+        sock.sendall(bytes([opcode]) + int(value).to_bytes(4, "big", signed=False))
+
+    def set_gain(self, gain_db: Optional[float]) -> Dict:
+        """Set manual gain to a supported value, or return to automatic on None.
+
+        The consequence -- clearing the ring under GAIN_CHANGE and moving the
+        signal chain hash -- belongs to the retention owner and is applied there.
+        This method owns only the control.
+        """
+        catalogue = self.supported_gains_db()
+        if gain_db is None:
+            self._send_rtl_command(_RTL_TCP_SET_GAIN_MODE, GAIN_MODE_AUTOMATIC)
+            result = self.retention.set_gain_db(None)
+            return {"mode": "AUTOMATIC", **result, "supported": catalogue}
+        if not catalogue["available"]:
+            raise ValueError(
+                f"manual gain unavailable: {catalogue['reason']} -- {catalogue['note']}")
+        requested = round(float(gain_db), 1)
+        if requested not in catalogue["gains_db"]:
+            raise ValueError(
+                f"{requested} dB is not a gain this tuner has; supported values are "
+                f"{catalogue['gains_db']}")
+        self._send_rtl_command(_RTL_TCP_SET_GAIN_MODE, GAIN_MODE_MANUAL)
+        self._send_rtl_command(_RTL_TCP_SET_GAIN, int(round(requested * 10.0)))
+        result = self.retention.set_gain_db(requested)
+        return {"mode": "MANUAL", **result, "supported": catalogue}
 
     def configure_stream(self, **changes) -> Dict:
         """Update FFT interpretation settings and restart ingestion if needed.
@@ -650,6 +779,10 @@ class SDRPlusPlusBridge:
                 # Bounded, process-local, never serialized. The block reports
                 # metadata about the allocation and nothing derived from a sample.
                 "iq_retention": self.retention.status(),
+                # Device-declared, read from rtl_tcp's own header rather than
+                # assumed from what is believed to be plugged in. Not a control,
+                # so it is published whether or not controls are included.
+                "device": self.supported_gains_db(),
             }
         if include_control:
             status["rigctl"] = self.control_status()
@@ -701,6 +834,13 @@ class SDRPlusPlusBridge:
                         raise ConnectionError("SDR++ IQ exporter closed the connection")
                     with self._lock:
                         self._bytes_received += len(chunk)
+                    if self._dongle_info is None:
+                        info = processor.dongle_info
+                        if info is not None:
+                            with self._lock:
+                                self._dongle_info = info
+                            LOG.info("rtl_tcp device: %s tuner, %d gains",
+                                     info["tuner_type"], info["tuner_gain_count"])
                     for frame in processor.feed(chunk):
                         # Publish first, unconditionally. Channelization is
                         # analysis layered on top of the spectrum product; it

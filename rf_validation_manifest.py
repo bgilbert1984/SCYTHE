@@ -34,7 +34,9 @@ stratum is in that state.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
 import math
+import time
 from typing import Any, Dict, List, Optional, Tuple
 
 
@@ -46,9 +48,92 @@ MAX_FALSE_DIGITAL_RATE = 0.001
 CONFIDENCE = 0.95
 TARGET_TOTAL_NULL_WINDOWS = 10_000
 
-# Rule of three: with zero observed failures the 95% upper bound is about 3/n, so
-# this many trials are needed before the bound can even reach the approved rate.
+# Simultaneous coverage, added 2026-09-03.
+#
+# Applying a 95% bound to each of thirteen quantities and requiring all thirteen
+# to pass does not give 95% coverage over the family: with independent tests the
+# chance that at least one bound is violated is 1 - 0.95**13, about 49%. The
+# error budget is therefore split across the bounds rather than spent thirteen
+# times over. Bonferroni is conservative and makes no independence assumption,
+# which is the right trade here because the strata are not independent -- a
+# detector that over-calls on FM will over-call on adjacent-channel FM too.
+#
+# The set of tested bounds is frozen: STRATA plus the aggregate. Adding a
+# stratum later changes every per-bound alpha and therefore every verdict, which
+# is exactly why it may not be done after a corpus is opened.
+FAMILY_ALPHA = 0.05
+SIMULTANEOUS_CONTROL = "BONFERRONI"
+TESTED_BOUND_COUNT = 13                       # twelve strata plus the aggregate
+PER_BOUND_ALPHA = FAMILY_ALPHA / TESTED_BOUND_COUNT
+PER_BOUND_CONFIDENCE = 1.0 - PER_BOUND_ALPHA
+
+# Rule of three: with zero observed failures the upper bound is about
+# -ln(alpha)/n, so this many trials are needed before a bound can even reach the
+# approved rate. At the family-corrected alpha it is markedly more than at 95%,
+# which is the cost of the correction and is stated rather than absorbed.
 MINIMUM_TRIALS_FOR_ZERO_FAILURES = math.ceil(3.0 / MAX_FALSE_DIGITAL_RATE)
+MINIMUM_TRIALS_FOR_ZERO_FAILURES_CORRECTED = math.ceil(
+    -math.log(PER_BOUND_ALPHA) / MAX_FALSE_DIGITAL_RATE)
+
+
+@dataclass(frozen=True)
+class PromotionCorpusLock:
+    """A promotion corpus, frozen against one detector configuration.
+
+    Thresholds and preprocessing may be developed freely against a training or
+    calibration corpus.  Once the *promotion* corpus is opened they are fixed: an
+    evaluation presented with a configuration that differs from the frozen one
+    does not promote, it reports why.  Without that, repeated tuning against the
+    same windows converts validation into training one small adjustment at a time,
+    and the measured false-DIGITAL rate becomes a description of how hard someone
+    looked rather than of how the detector behaves.
+
+    The strata set is part of the lock because the Bonferroni denominator depends
+    on it: adding a stratum after opening would change every per-bound alpha and
+    therefore every verdict already recorded.
+    """
+
+    corpus_id: str
+    opened_at: float
+    method_revision: str
+    decision_threshold: float
+    preprocessing_revision: str
+    strata_digest: str
+    configuration_digest: str
+    tested_bound_count: int
+    per_bound_alpha: float
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {field: getattr(self, field) for field in self.__dataclass_fields__}
+
+
+def _configuration_digest(method_revision: str, decision_threshold: float,
+                          preprocessing_revision: str) -> str:
+    payload = f"{method_revision}|{float(decision_threshold):.12g}|{preprocessing_revision}"
+    return f"blake2s:{hashlib.blake2s(payload.encode(), digest_size=16).hexdigest()}"
+
+
+def _strata_digest() -> str:
+    payload = "|".join(f"{s.key}:{s.minimum_windows}:{int(s.buildable)}" for s in STRATA)
+    return f"blake2s:{hashlib.blake2s(payload.encode(), digest_size=16).hexdigest()}"
+
+
+def freeze_promotion_corpus(*, corpus_id: str, method_revision: str,
+                            decision_threshold: float, preprocessing_revision: str,
+                            opened_at: Optional[float] = None) -> PromotionCorpusLock:
+    """Open a promotion corpus. What is frozen here cannot move without a new one."""
+    return PromotionCorpusLock(
+        corpus_id=corpus_id,
+        opened_at=time.time() if opened_at is None else float(opened_at),
+        method_revision=method_revision,
+        decision_threshold=float(decision_threshold),
+        preprocessing_revision=preprocessing_revision,
+        strata_digest=_strata_digest(),
+        configuration_digest=_configuration_digest(
+            method_revision, decision_threshold, preprocessing_revision),
+        tested_bound_count=TESTED_BOUND_COUNT,
+        per_bound_alpha=PER_BOUND_ALPHA,
+    )
 
 
 @dataclass(frozen=True)
@@ -82,18 +167,19 @@ STRATA: Tuple[Stratum, ...] = (
             1_000, safety_critical=True),
     Stratum("DC_CONTAMINATION", "Zero-IF DC artefact at or near the channel",
             750, safety_critical=False),
+    # Buildable as of 2026-09-03: SDRPPBridge.set_gain drives the tuner through
+    # rtl_tcp's control channel, restricted to the gains the device reports, and
+    # IQRetentionOwner.set_gain_db raises GAIN_CHANGE. A corpus can produce a gain
+    # step rather than assert one.
     Stratum("GAIN_STEPS", "A gain change part-way through the window",
-            750, safety_critical=True, buildable=False,
-            blocked_by="GAIN_CHANGE is a declared invalidation reason that nothing "
-                       "calls: this bridge has no gain control, so a gain step can "
-                       "be neither produced nor detected"),
+            750, safety_critical=True),
     Stratum("RETUNE_TRANSIENTS", "Samples spanning or adjacent to a retune",
             750, safety_critical=True),
+    # Buildable as of 2026-09-03: ClockContinuityMonitor compares the decoded
+    # sample count against elapsed time on every append and separates a transport
+    # GAP from a rate DRIFT, so a gap is observed rather than assumed.
     Stratum("DROPPED_FRAMES_TIMING_GAPS", "Lost samples and discontinuous timestamps",
-            750, safety_critical=True, buildable=False,
-            blocked_by="CLOCK_DISCONTINUITY is a declared invalidation reason that "
-                       "nothing calls: no discontinuity detector exists, so a gap "
-                       "cannot be labelled from evidence"),
+            750, safety_critical=True),
     Stratum("OVERLOADED_CLIPPED", "Converter saturation", 750, safety_critical=True),
     Stratum("RECEIVER_SPURS", "Internal spurious products and images", 500,
             safety_critical=False),
@@ -105,7 +191,7 @@ STRATUM_KEYS: Tuple[str, ...] = tuple(stratum.key for stratum in STRATA)
 
 
 def clopper_pearson_upper(failures: int, trials: int,
-                          confidence: float = CONFIDENCE) -> Optional[float]:
+                          confidence: float = PER_BOUND_CONFIDENCE) -> Optional[float]:
     """Exact one-sided upper bound on a binomial rate. ``None`` when trials is 0.
 
     Uses the Beta quantile identity ``U = BetaInv(confidence; k+1, n-k)`` and
@@ -155,11 +241,19 @@ def _binomial_at_most(failures: int, trials: int, probability: float) -> float:
 
 
 def wilson_upper(failures: int, trials: int,
-                 confidence: float = CONFIDENCE) -> Optional[float]:
+                 confidence: float = PER_BOUND_CONFIDENCE) -> Optional[float]:
     """Wilson score upper bound. Reported beside Clopper-Pearson, never instead.
 
-    Wilson is less conservative and is the more useful number for tracking a
-    corpus as it grows; the exact bound is what the gate is evaluated against.
+    The usual claim about Wilson -- that it is the less conservative of the two --
+    holds at 95% and stops holding at the family-corrected confidence. Measured
+    here at 99.6154%, Wilson is *above* the exact bound at every point in the
+    regime this gate operates in (0/10000: 0.000710 vs 0.000556; 1/10000: 0.000899
+    vs 0.000772; 50/10000: 0.007263 vs 0.007199), because its normal
+    approximation degrades in a far tail with a tiny observed rate.
+
+    That is not a reason to drop it -- being conservative costs nothing in a
+    number nobody gates on -- but it is the reason the gate is the exact bound and
+    not this one, and the reason the two must not be swapped for convenience.
     """
     if trials <= 0:
         return None
@@ -224,12 +318,44 @@ def evaluate_stratum(stratum: Stratum, trials: int, false_digital: int) -> Dict[
     }
 
 
-def evaluate(observations: Dict[str, Tuple[int, int]]) -> Dict[str, Any]:
+def _corpus_state(lock: Optional[PromotionCorpusLock],
+                  configuration: Optional[Dict[str, Any]]) -> Tuple[str, bool]:
+    """Whether this evaluation may promote at all, before any arithmetic."""
+    if lock is None:
+        # Perfectly legitimate, and explicitly not a promotion: this is how a
+        # detector is developed. It simply cannot also be how it is validated.
+        return "NO_LOCK_EXPLORATORY", False
+    if lock.strata_digest != _strata_digest():
+        return "STRATA_CHANGED_AFTER_FREEZE", False
+    if lock.tested_bound_count != TESTED_BOUND_COUNT:
+        return "BOUND_COUNT_CHANGED_AFTER_FREEZE", False
+    if configuration is None:
+        return "CONFIGURATION_NOT_PRESENTED", False
+    try:
+        presented = _configuration_digest(
+            configuration["method_revision"], configuration["decision_threshold"],
+            configuration["preprocessing_revision"])
+    except (KeyError, TypeError, ValueError):
+        return "CONFIGURATION_NOT_PRESENTED", False
+    if presented != lock.configuration_digest:
+        return "CONFIGURATION_CHANGED_AFTER_FREEZE", False
+    return "FROZEN", True
+
+
+def evaluate(observations: Dict[str, Tuple[int, int]], *,
+             lock: Optional[PromotionCorpusLock] = None,
+             configuration: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Evaluate the whole gate. ``observations`` maps stratum key -> (trials, false).
 
     Both the aggregate bound and every stratum bound must pass. The aggregate
     alone would let a large pile of thermal noise carry a stratum that fails, and
     a stratum alone would not notice a rate that is only visible in the total.
+
+    Every bound is computed at ``PER_BOUND_ALPHA``, not at 0.05: thirteen bounds
+    each held to 95% do not give the family 95%.
+
+    Promotion additionally requires a frozen corpus whose configuration matches
+    the one presented. Without ``lock`` the report is exploratory by construction.
     """
     unknown = sorted(set(observations) - set(STRATUM_KEYS))
     if unknown:
@@ -245,6 +371,7 @@ def evaluate(observations: Dict[str, Tuple[int, int]]) -> Dict[str, Any]:
             total_trials += int(trials)
             total_failures += int(failures)
 
+    corpus_state, corpus_permits_promotion = _corpus_state(lock, configuration)
     aggregate_bound = clopper_pearson_upper(total_failures, total_trials)
     aggregate_passes = (total_trials >= TARGET_TOTAL_NULL_WINDOWS
                         and aggregate_bound is not None
@@ -257,8 +384,18 @@ def evaluate(observations: Dict[str, Tuple[int, int]]) -> Dict[str, Any]:
         "rule": "ONE_SIDED_95_PERCENT_UPPER_CONFIDENCE_BOUND_AT_OR_BELOW_APPROVED_RATE",
         "max_false_digital_rate": MAX_FALSE_DIGITAL_RATE,
         "confidence": CONFIDENCE,
+        "confidence_method": "EXACT_CLOPPER_PEARSON",
+        "simultaneous_control": SIMULTANEOUS_CONTROL,
+        "family_alpha": FAMILY_ALPHA,
+        "tested_bound_count": TESTED_BOUND_COUNT,
+        "per_bound_alpha": PER_BOUND_ALPHA,
+        "per_bound_confidence": PER_BOUND_CONFIDENCE,
         "minimum_trials_for_zero_failures": MINIMUM_TRIALS_FOR_ZERO_FAILURES,
+        "minimum_trials_for_zero_failures_corrected":
+            MINIMUM_TRIALS_FOR_ZERO_FAILURES_CORRECTED,
         "target_total_null_windows": TARGET_TOTAL_NULL_WINDOWS,
+        "corpus_state": corpus_state,
+        "corpus_lock": lock.to_dict() if lock is not None else None,
         "aggregate": {
             "trials": total_trials,
             "false_digital": total_failures,
@@ -270,10 +407,12 @@ def evaluate(observations: Dict[str, Tuple[int, int]]) -> Dict[str, Any]:
         "strata": results,
         "not_buildable": not_buildable,
         "failing_strata": failing,
-        # Both, never either. A promotion needs the aggregate and every stratum.
-        "promotes": bool(aggregate_passes and not failing),
+        # All three, never any two. A promotion needs a frozen corpus, the
+        # aggregate bound and every stratum bound.
+        "promotes": bool(corpus_permits_promotion and aggregate_passes and not failing),
         "promotion_blocked_reason": (
-            None if (aggregate_passes and not failing)
+            None if (corpus_permits_promotion and aggregate_passes and not failing)
+            else corpus_state if not corpus_permits_promotion
             else "STRATA_NOT_BUILDABLE" if not_buildable
             else "AGGREGATE_OR_STRATUM_BOUND_NOT_MET"),
     }
@@ -288,9 +427,18 @@ def manifest_status() -> Dict[str, Any]:
         "rule": "ONE_SIDED_95_PERCENT_UPPER_CONFIDENCE_BOUND_AT_OR_BELOW_APPROVED_RATE",
         "max_false_digital_rate": MAX_FALSE_DIGITAL_RATE,
         "confidence": CONFIDENCE,
+        "confidence_method": "EXACT_CLOPPER_PEARSON",
+        "simultaneous_control": SIMULTANEOUS_CONTROL,
+        "family_alpha": FAMILY_ALPHA,
+        "tested_bound_count": TESTED_BOUND_COUNT,
+        "per_bound_alpha": PER_BOUND_ALPHA,
+        "per_bound_confidence": PER_BOUND_CONFIDENCE,
+        "promotion_corpus": "FROZEN_LOCK_REQUIRED_FOR_PROMOTION",
         "bound_estimators": ["CLOPPER_PEARSON_EXACT", "WILSON_SCORE"],
         "gate_estimator": "CLOPPER_PEARSON_EXACT",
         "minimum_trials_for_zero_failures": MINIMUM_TRIALS_FOR_ZERO_FAILURES,
+        "minimum_trials_for_zero_failures_corrected":
+            MINIMUM_TRIALS_FOR_ZERO_FAILURES_CORRECTED,
         "target_total_null_windows": TARGET_TOTAL_NULL_WINDOWS,
         "strata": [
             {"key": s.key, "description": s.description,

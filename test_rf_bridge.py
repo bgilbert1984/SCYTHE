@@ -334,3 +334,123 @@ class Uint8IQDecodeTests(unittest.TestCase):
     def test_uint8_is_an_accepted_configuration(self):
         from rf_bridge import RFBridgeConfig
         self.assertEqual(RFBridgeConfig(sample_type="uint8").validated().sample_type, "uint8")
+
+
+class DongleHeaderTests(unittest.TestCase):
+    """rtl_tcp's 12-byte dongle_info block is metadata, not samples."""
+
+    def _processor(self):
+        config = RFBridgeConfig(sample_type="uint8", fft_size=64, max_bins=32,
+                                sample_rate_hz=2_048_000, frames_per_second=60)
+        return IQFFTProcessor(config)
+
+    def _header(self, tuner_code=5, gain_count=29):
+        return (b"RTL0" + tuner_code.to_bytes(4, "big")
+                + gain_count.to_bytes(4, "big"))
+
+    def test_the_header_is_consumed_rather_than_decoded_as_samples(self):
+        """It was not stripped, and became six samples at every reconnect.
+
+        Tuner type and gain count are small integers, so most of those bytes are
+        0x00 -- which in offset-binary uint8 is negative full scale. Every
+        connection began with a full-scale transient the FFT and the ring both
+        saw as signal.
+        """
+        processor = self._processor()
+        # 127/128 straddle the offset-binary centre: no DC component.
+        list(processor.feed(self._header() + bytes([127, 128] * 32)))
+        self.assertLess(abs(complex(np.mean(processor._samples))), 1e-2)
+        self.assertEqual(processor._samples.size, 32)
+
+    def test_the_device_declaration_comes_from_the_device(self):
+        processor = self._processor()
+        list(processor.feed(self._header() + bytes([127, 128] * 32)))
+        info = processor.dongle_info
+        self.assertEqual(info["tuner_type"], "R820T")
+        self.assertEqual(info["tuner_gain_count"], 29)
+        self.assertEqual(info["device_authority"], "DEVICE_DECLARED")
+
+    def test_a_header_split_across_two_reads_is_not_half_decoded(self):
+        processor = self._processor()
+        header = self._header()
+        self.assertEqual(list(processor.feed(header[:5])), [])
+        list(processor.feed(header[5:] + bytes([127, 128] * 32)))
+        self.assertIsNotNone(processor.dongle_info)
+        self.assertEqual(processor._samples.size, 32)
+
+    def test_a_stream_without_the_magic_declares_no_tuner_and_keeps_its_bytes(self):
+        """Any other IQ source is not an error; it simply declares nothing."""
+        processor = self._processor()
+        list(processor.feed(bytes([127, 128] * 32)))
+        self.assertIsNone(processor.dongle_info)
+        self.assertEqual(processor._samples.size, 32)
+
+
+class GainControlTests(unittest.TestCase):
+    """Manual gain is restricted to the values the tuner actually reports."""
+
+    def _bridge(self, dongle_info):
+        bridge = SDRPlusPlusBridge(RFBridgeConfig(
+            sample_type="uint8", sample_rate_hz=2_048_000, frames_per_second=60))
+        bridge._dongle_info = dongle_info
+        bridge._sent = []
+        bridge._send_rtl_command = lambda opcode, value: bridge._sent.append((opcode, value))
+        return bridge
+
+    def _r820t(self):
+        return {"tuner_type": "R820T", "tuner_type_code": 5,
+                "tuner_gain_count": 29, "device_authority": "DEVICE_DECLARED"}
+
+    def test_the_catalogue_is_confirmed_by_the_devices_own_gain_count(self):
+        catalogue = self._bridge(self._r820t()).supported_gains_db()
+        self.assertTrue(catalogue["available"])
+        self.assertEqual(len(catalogue["gains_db"]), 29)
+        self.assertEqual(catalogue["gains_db"][0], 0.0)
+        self.assertEqual(catalogue["gains_db"][-1], 49.6)
+        self.assertEqual(catalogue["authority"],
+                         "DRIVER_DECLARED_CONFIRMED_BY_DEVICE_COUNT")
+
+    def test_a_gain_count_disagreeing_with_the_device_refuses_manual_gain(self):
+        """A driver table that has moved would set the wrong value silently."""
+        catalogue = self._bridge(dict(self._r820t(), tuner_gain_count=14)
+                                 ).supported_gains_db()
+        self.assertFalse(catalogue["available"])
+        self.assertEqual(catalogue["reason"], "GAIN_COUNT_DISAGREES_WITH_DEVICE")
+        self.assertEqual(catalogue["gains_db"], [])
+
+    def test_no_header_means_no_manual_gain(self):
+        catalogue = self._bridge(None).supported_gains_db()
+        self.assertFalse(catalogue["available"])
+        self.assertEqual(catalogue["reason"], "NO_DEVICE_HEADER_SEEN")
+
+    def test_a_gain_between_supported_values_is_refused_not_rounded(self):
+        """The R820T's steps are irregular, so "between" is not a setting."""
+        bridge = self._bridge(self._r820t())
+        with self.assertRaises(ValueError):
+            bridge.set_gain(30.0)          # sits between 29.7 and 32.8
+        self.assertEqual(bridge._sent, [], "nothing may be sent for a refused gain")
+
+    def test_a_supported_gain_is_sent_and_clears_the_ring(self):
+        bridge = self._bridge(self._r820t())
+        before = bridge.retention.status()["signal_chain_hash"]
+        result = bridge.set_gain(28.0)
+        self.assertEqual(result["mode"], "MANUAL")
+        self.assertTrue(result["changed"])
+        # Manual mode first, then the value in tenths of a dB.
+        self.assertEqual(bridge._sent, [(0x03, 1), (0x04, 280)])
+        status = bridge.retention.status()
+        self.assertEqual(status["gain_db"], 28.0)
+        self.assertNotEqual(status["signal_chain_hash"], before)
+
+    def test_returning_to_automatic_declares_the_gain_undeclared_again(self):
+        bridge = self._bridge(self._r820t())
+        bridge.set_gain(28.0)
+        bridge._sent.clear()
+        result = bridge.set_gain(None)
+        self.assertEqual(result["mode"], "AUTOMATIC")
+        self.assertEqual(bridge._sent, [(0x03, 0)])
+        status = bridge.retention.status()
+        self.assertIsNone(status["gain_db"])
+        # An automatic-gain receiver has a gain; this process does not know it.
+        self.assertEqual(status["signal_chain"]["gain"],
+                         {"value_db": None, "authority": "UNDECLARED"})

@@ -922,6 +922,146 @@ Widening it to manufacture reference room would change adjacent-signal exposure,
 filter design, DC behaviour and collision probability, and belongs in a new hashed
 configuration measured against the Phase 3 evidence rather than chosen now.
 
+### 5.12 Phase 2 — shadow detector, and what building it found
+
+**Cleared 2026-09-03.** `squared-envelope-cyclic.v1` is implemented in
+`rf_symbol_clock.py` and runs in shadow: `REGISTERED_NOT_VALIDATED`,
+`SHADOW_NO_PROMOTION`, `digital_reachable: false`. All eight required outcomes
+are declared, and `CONSTANT_ENVELOPE` maps to `NOT_ATTEMPTED` — never
+`NO_SYMBOL_CLOCK_DETECTED`, because a test that could not run has no negative to
+report. Exactly one outcome maps to a measured negative, and a test asserts that.
+
+**GAIN_CHANGE and CLOCK_DISCONTINUITY are wired**, so both blocked strata are
+buildable. `SDRPPBridge.set_gain` drives the tuner over rtl_tcp's control channel
+and `IQRetentionOwner.set_gain_db` raises `GAIN_CHANGE`;
+`ClockContinuityMonitor` compares decoded sample count against elapsed time on
+every append. Only `DIRECT_SAMPLING_CHANGE` remains unwired, and
+`wired_invalidation_sources` names what calls each of the other two so "wired" is
+checkable rather than asserted.
+
+The clock thresholds were measured before they were chosen. On the live NESDR
+stream, 2-second arrival windows swing by up to **4.3%** — TCP and USB buffering,
+not the oscillator — while cumulative drift over 20 seconds was **0.007%**. A 2%
+instantaneous tolerance would have fired continuously on a healthy stream and
+invalidated the ring for it. So the check is cumulative over 10 s at 1%, with a
+separate 1 s gap detector, and `GAP` (transport) is kept distinct from `DRIFT`
+(rate) because a corpus labelling one as the other would mislabel its own strata.
+Live: zero discontinuities.
+
+**Q4 gained simultaneous-confidence accounting.** Thirteen bounds each at 95% give
+the family about 51% coverage, so the budget is split: `family_alpha 0.05`,
+`tested_bound_count 13`, `per_bound_alpha 0.0038461538`, confidence 99.6154%,
+zero-failure *n* rising from 3,000 to **5,561**. The promotion corpus is frozen
+by `PromotionCorpusLock` over method revision, threshold, preprocessing and the
+strata set — the last because the Bonferroni denominator depends on it. Without a
+lock a report is `NO_LOCK_EXPLORATORY` and cannot promote; with one, a changed
+threshold or preprocessing yields `CONFIGURATION_CHANGED_AFTER_FREEZE`.
+
+One measured surprise: **Wilson is not a safe substitute at the corrected
+confidence.** The usual claim that it is the less conservative of the two holds at
+95% and reverses at 99.6154%, where it sits *above* the exact bound throughout
+this gate's regime (0/10000: 0.000710 vs 0.000556). Harmless in a number nobody
+gates on, and the reason the gate is exact.
+
+**Provenance is separate from eligibility.** `transformation.outcome ==
+CHANNELIZED` remains the only measurement-state admission condition and reads no
+covariate. Structural validation is a second layer that refuses to look at a
+mapping at all: it requires the typed `Channelization`, which cannot arrive over a
+socket because it refuses to serialize. A body carrying
+`{"outcome": "CHANNELIZED"}` is refused as `TYPED_PRODUCT`, not as an ineligible
+product — reading `outcome` out of a decoded body would answer a question about
+JSON as though it were a question about a capture. The product digest is now
+recomputable from the product alone (`target_frequency_hz` was in the digest and
+not on the record, so the digest was a label rather than a binding).
+
+---
+
+Building the detector surfaced four defects, three of them in things already
+declared. This is the part worth reading.
+
+**1. The registered threshold would have fired on every noise window.** 8.4 was
+registered against no implementation. On an unaveraged periodogram the null
+peak-to-median for pure noise is **~18**, from extreme-value statistics alone —
+the maximum of *N* exponential bins over their median is about `ln(N)/ln 2`, which
+for 129,500 bins is 17.0, measured 18.4. Welch averaging is not an optimisation
+here; it is the difference between a statistic and a draw from an extreme-value
+distribution. With 63 averages the null is mean 1.55, max 1.81 over 300 windows.
+The threshold is now **2.5**, declared `PROVISIONAL_FROM_NULL_CHARACTERISATION`
+with the characterisation attached: 300 windows can bound a rate near 1%, nowhere
+near 0.001, and that is what the frozen promotion corpus is for.
+
+**2. The registered minimum sample count was unreachable.** 262,144 samples,
+against a channelizer that yields 16k–175k from a 524,288-sample window depending
+on decimation. The detector would never have run on a real product. Measured, the
+null is flat from 32,768 upward because the Welch segment scales with the window
+and the average count stays at 63; what a short window costs is a higher *lowest
+detectable symbol rate*, so that is published per verdict as `search_floor_hz`
+rather than hidden behind one global minimum. A `NO_SYMBOL_CLOCK` from a short
+window is a weaker negative than one from a long window, and the verdict says so.
+
+**3. A global noise floor let a broad hump beat a line.** The squared envelope of
+a linearly modulated signal has a discrete line at the symbol rate *and* a broad
+continuous component from the random data, running from DC to roughly the symbol
+rate. Against a global median the hump wins: on a 4 kHz raised-cosine signal the
+six strongest bins were all within 1800–2400 Hz at near-equal power while the true
+line at 4000 Hz sat at half that, and the detector reported **2187.5 Hz with a
+statistic of 35** — a confident wrong symbol rate read off the signal's own data
+noise. The floor is now local, and the search starts where a segment holds 96
+symbol periods, which turns that wrong answer into no answer at a declared cost:
+a minimum detectable symbol rate. A miss is a limitation; 2187.5 Hz was a
+fabrication.
+
+**4. The channelizer destroys the feature it was meant to isolate.** This one is
+architectural. The squared-envelope timing line exists *only* because the pulse
+has excess bandwidth, and it lives in exactly the spectral shoulders that a
+channel cut at `CHANNEL_MARGIN = 1.25` times a **−20 dB** occupancy estimate puts
+into the FIR skirt. Measured end to end:
+
+| symbol rate | channel | decimation | samples | statistic before | after | verdict |
+|---:|---:|---:|---:|---:|---:|---|
+| 20 kBd | 30.6 kHz | 33 | 15,884 | 29.35 | — | INSUFFICIENT_WINDOW |
+| 50 kBd | 75.0 kHz | 13 | 40,320 | **56.07** | **1.38** | NO_SYMBOL_CLOCK |
+| 100 kBd | 153.8 kHz | 6 | 87,360 | 118.62 | 74.51 | SYMBOL_CLOCK_LIKE_FEATURE |
+| 200 kBd | 306.6 kHz | 3 | 174,720 | 232.98 | 228.69 | SYMBOL_CLOCK_LIKE_FEATURE |
+
+At 50 kBd a clean detection becomes no detection, with **nothing wrong at either
+end**: the channelizer cut a correct channel and the detector correctly found no
+feature in it. The feature is not in what the detector receives. This bears
+directly on holding `CHANNEL_MARGIN` at 1.25 — that decision was made on
+reference-bin grounds, before this evidence existed, and the measurement adds a
+second and independent reason to revisit it in a new hashed configuration. It is
+recorded in `KNOWN_FALSE_NEGATIVE_MODES` and asserted by a test, not fixed here.
+
+**Known weaknesses are declared rather than smoothed over.**
+`KNOWN_FALSE_POSITIVE_MODES` records that a slowly sloping cyclic spectrum beats
+the local median from the slope alone (measured 4.07 against a threshold of 2.5 on
+a random-walk envelope with no symbol structure), and that a periodic transport
+artefact is a genuine cyclic feature this statistic cannot separate from slow
+symbols. The mitigation for the first — taking the higher of the two side medians
+— costs a factor of four on real signals (26.8 → 6.4 at 16 kBd), so it is not
+applied. Shadow mode is what keeps both out of evidence, and the tests assert that
+rather than pretending the statistic is cleverer than it is.
+
+**The rtl_tcp header was never stripped.** Twelve bytes of `RTL0` + tuner type +
+gain count were decoded as six complex samples at the head of every connection.
+Tuner type and gain count are small integers, so most of those bytes are `0x00` —
+negative full scale in offset-binary uint8 — and every reconnect began with a
+full-scale transient that the FFT and the ring both saw as signal. It is now
+consumed, and it is also the only place the device says what it is: live it
+reports `R820T` with **29** gains, matching what `rtl_test` printed. The gain
+table is `DRIFT`-proofed by that count — a driver table whose length disagrees
+with the device refuses manual gain rather than setting the wrong value.
+
+**Four test layers, from the beginning.** Algebra, end-to-end through the real
+FIR and contract, metamorphic (amplitude scaling, phase rotation, time
+translation and frequency offset must not change the verdict), and adversarial
+(constant-envelope digital, DC spike, clipping harmonics, retune transient,
+analogue FM with periodic content, periodic buffer artefact, sloping spectrum).
+Defects 1, 3 and 4 above were found by layers 1 and 2; the stopband-SNR defect
+that preceded them would have been found by layer 4. That is the lesson being
+carried: the previous suite checked that `_measure` was called and that its
+outputs were plumbed, and never once asked whether the number was right.
+
 ## 6. Open questions for the operator
 
 1. **Approve the bounded IQ ring** (§2.2)? First retention of raw IQ beyond one block.
