@@ -100,6 +100,7 @@ from collections import deque
 import hashlib
 import json
 import logging
+import math
 import os
 import threading
 import time
@@ -168,6 +169,9 @@ UNWIRED_REASONS = ("DIRECT_SAMPLING_CHANGE",)
 WIRED_REASON_SOURCES = {
     "GAIN_CHANGE": "IQRetentionOwner.set_gain_db, called by SDRPPBridge.set_gain",
     "CLOCK_DISCONTINUITY": "ClockContinuityMonitor, on every append",
+    "SIGNAL_CHAIN_CHANGE": ("IQRetentionOwner.set_instrument, called by "
+                            "SDRPPBridge.apply_antenna_declaration on an accepted "
+                            "operator antenna declaration"),
 }
 # Direct sampling, declared as absent rather than made to look handled.
 #
@@ -222,9 +226,13 @@ UNWIRED_NOTE = (
 
 
 SIGNAL_CHAIN_SCHEMA = "scythe.rf-signal-chain.v2"
-SIGNAL_CHAIN_REVISION = "v2"
+SIGNAL_CHAIN_REVISION = "v3"
 # v1 was a positional hash over sensor, antenna, sample type and rate, with no
-# feedline. It is not rescalable into v2 and nothing attempts to reinterpret it.
+# feedline. v2 added the feedline. v3 adds the telescopic mast extension, which
+# was the last instrument-defining field the chain identity could not see: the
+# same mast at 730 mm and at 165 mm is a quarter wave at 102.7 MHz and at
+# 454.2 MHz, and until now both produced the same chain hash. No revision is
+# rescalable into another and nothing attempts to reinterpret one.
 PRIOR_SIGNAL_CHAIN_REVISION_COMPARABLE = False
 # Vendor figure for the SMArt v5, carried as a declaration rather than a
 # measurement: nothing here has disciplined this oscillator against a reference.
@@ -368,6 +376,33 @@ def feedline_id() -> str:
     return (os.getenv("SDRPP_FEEDLINE_ID", "") or "").strip() or "UNDECLARED"
 
 
+def antenna_extension_mm() -> Any:
+    """Declared mast extension, or a named absence.
+
+    Three outcomes, kept apart because they are three different states:
+    a number, ``UNDECLARED`` for nothing configured, and
+    ``REFUSED_UNUSABLE_VALUE`` for something configured that is not a usable
+    length. The third must not collapse into the second -- an operator who typed
+    metres into a millimetre field is not an operator who declined to say, and
+    folding them together would hide a misconfiguration inside a legitimate
+    omission.
+    """
+    raw = (os.getenv("SDRPP_ANTENNA_EXTENSION_MM", "") or "").strip()
+    if not raw:
+        return "UNDECLARED"
+    try:
+        from graphops_rf_antenna import MAX_EXTENSION_MM, MIN_EXTENSION_MM
+    except Exception:                                   # pragma: no cover
+        MIN_EXTENSION_MM, MAX_EXTENSION_MM = 10.0, 2000.0
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return "REFUSED_UNUSABLE_VALUE"
+    if not (math.isfinite(value) and MIN_EXTENSION_MM <= value <= MAX_EXTENSION_MM):
+        return "REFUSED_UNUSABLE_VALUE"
+    return value
+
+
 def _feedline_length_m(identifier: str) -> Optional[float]:
     try:
         from graphops_rf_antenna import FEEDLINES
@@ -380,6 +415,7 @@ def _feedline_length_m(identifier: str) -> Optional[float]:
 def signal_chain_manifest(*, sensor_id: str, sample_type: str, sample_rate_hz: float,
                           antenna: Optional[str] = None,
                           feedline: Optional[str] = None,
+                          extension_mm: Any = None,
                           gain_db: Optional[float] = None) -> Dict[str, Any]:
     """Everything the physical and decode path is made of, declared or not.
 
@@ -395,6 +431,8 @@ def signal_chain_manifest(*, sensor_id: str, sample_type: str, sample_rate_hz: f
     antenna_identifier = antenna if antenna is not None else antenna_id()
     feedline_identifier = feedline if feedline is not None else feedline_id()
     declared_feedline = feedline_identifier not in ("UNDECLARED", "undeclared")
+    extension = antenna_extension_mm() if extension_mm is None else extension_mm
+    declared_extension = isinstance(extension, (int, float))
     return {
         "schema": SIGNAL_CHAIN_SCHEMA,
         "sensor_id": sensor_id,
@@ -404,6 +442,12 @@ def signal_chain_manifest(*, sensor_id: str, sample_type: str, sample_rate_hz: f
             "id": antenna_identifier if antenna_identifier != "UNDECLARED" else None,
             "authority": ("OPERATOR_DECLARED" if antenna_identifier != "UNDECLARED"
                           else "UNDECLARED"),
+            # A telescopic mast is not one instrument. Its extension sets which
+            # frequencies it receives efficiently, so it belongs in the identity
+            # of the chain rather than only in the declaration receipt.
+            "extension_mm": float(extension) if declared_extension else None,
+            "extension_authority": ("OPERATOR_DECLARED" if declared_extension
+                                    else str(extension)),
         },
         "feedline": {
             "id": feedline_identifier if declared_feedline else None,
@@ -434,6 +478,7 @@ def canonical_signal_chain_bytes(manifest: Dict[str, Any]) -> bytes:
 def signal_chain_hash(*, sensor_id: str, sample_type: str, sample_rate_hz: float,
                       antenna: Optional[str] = None,
                       feedline: Optional[str] = None,
+                      extension_mm: Any = None,
                       gain_db: Optional[float] = None) -> str:
     """Identity of the physical and decode path the samples came through.
 
@@ -441,14 +486,18 @@ def signal_chain_hash(*, sensor_id: str, sample_type: str, sample_rate_hz: float
     chain -- it is its own invalidation reason -- and folding it in here would
     make every retune look like a different antenna.
 
-    Revision v2 hashes the canonical manifest and includes the feedline, so
-    declaring a cable changes the hash.  That is the system noticing the analogue
-    instrument changed, not breakage.  v1 hashes are not comparable with these and
-    are not reinterpreted: ``prior_revision_comparable`` is false.
+    Revision v3 hashes the canonical manifest and includes the feedline and the
+    telescopic mast extension, so declaring a cable or retracting a mast changes
+    the hash.  That is the system noticing the analogue instrument changed, not
+    breakage.  It deliberately excludes the declaration note: prose about an
+    instrument is not part of one, and a reworded comment must never invalidate a
+    product.  Earlier revisions are not comparable with these and are not
+    reinterpreted: ``prior_revision_comparable`` is false.
     """
     manifest = signal_chain_manifest(sensor_id=sensor_id, sample_type=sample_type,
                                      sample_rate_hz=sample_rate_hz, antenna=antenna,
-                                     feedline=feedline, gain_db=gain_db)
+                                     feedline=feedline, extension_mm=extension_mm,
+                                     gain_db=gain_db)
     digest = hashlib.blake2s(canonical_signal_chain_bytes(manifest),
                              digest_size=16).hexdigest()
     return f"blake2s:{digest}"
@@ -476,10 +525,16 @@ class IQRetentionOwner:
         self._ring: Optional[BoundedIQRing] = None
         self._gain_db: Optional[float] = None
         self._clock = ClockContinuityMonitor(sample_rate_hz)
-        self._signal_chain_manifest = signal_chain_manifest(
-            sensor_id=sensor_id, sample_type=sample_type, sample_rate_hz=sample_rate_hz)
-        self._signal_chain_hash = signal_chain_hash(
-            sensor_id=sensor_id, sample_type=sample_type, sample_rate_hz=sample_rate_hz)
+        # The instrument is held here, not re-read from the environment on every
+        # rebuild. The environment bootstraps it once; after that the operator can
+        # declare a different antenna without restarting, and a manifest that kept
+        # consulting os.environ would keep publishing the boot-time instrument
+        # while the declaration receipt said the instrument had changed. Two
+        # answers to one question is the defect this state exists to prevent.
+        self._antenna_id = antenna_id()
+        self._feedline_id = feedline_id()
+        self._extension_mm: Any = antenna_extension_mm()
+        self._rebuild_chain_locked()
         self._refused_reason: Optional[str] = None
         self._appended_blocks = 0
         # Bounded, metadata only. Kept on the owner rather than the ring so it
@@ -600,6 +655,77 @@ class IQRetentionOwner:
             self.invalidate("CLOCK_DISCONTINUITY")
         return kept
 
+    # --- active instrument state ------------------------------------------
+    #
+    # One copy of the antenna chain, owned by the capture owner and shared by the
+    # retention manifest, the sparse analyzer and every product that carries a
+    # signal chain hash. The environment supplies its initial value and nothing
+    # else; a declaration made at runtime replaces it here.
+
+    def _rebuild_chain_locked(self) -> None:
+        """Recompute the manifest and hash from the state this owner holds.
+
+        One place, so a field can never be threaded into one of the two and
+        forgotten in the other, and so no rebuild silently falls back to the
+        environment for an instrument that has since been re-declared.
+        """
+        fields = dict(sensor_id=self._sensor_id, sample_type=self._sample_type,
+                      sample_rate_hz=self._sample_rate_hz, antenna=self._antenna_id,
+                      feedline=self._feedline_id, extension_mm=self._extension_mm,
+                      gain_db=self._gain_db)
+        self._signal_chain_manifest = signal_chain_manifest(**fields)
+        self._signal_chain_hash = signal_chain_hash(**fields)
+
+    def instrument_state(self) -> Dict[str, Any]:
+        """The antenna chain products are currently being hashed against."""
+        with self._lock:
+            return {"antenna_id": self._antenna_id, "feedline_id": self._feedline_id,
+                    "extension_mm": self._extension_mm,
+                    "signal_chain_hash": self._signal_chain_hash,
+                    "signal_chain_revision": SIGNAL_CHAIN_REVISION,
+                    "configuration_epoch": (self._ring.configuration_epoch
+                                            if self._ring is not None else None)}
+
+    def set_instrument(self, *, antenna_id: str, feedline_id: str,
+                       extension_mm: Any) -> Dict[str, Any]:
+        """Adopt a newly declared antenna chain, atomically.
+
+        Held under one lock for the whole sequence: replace the state, rebuild the
+        manifest and hash, clear the ring and advance the configuration epoch.
+        Doing the clear outside the lock would leave a window in which a product
+        could be issued carrying the new chain hash under the old epoch -- a
+        product that looks attributable and is not.
+
+        ``SIGNAL_CHAIN_CHANGE`` rather than an annotation, for the same reason
+        ``GAIN_CHANGE`` clears: samples either side came through different
+        instruments and a window spanning the change would compare two of them.
+        """
+        extension = extension_mm if extension_mm is not None else "UNDECLARED"
+        with self._lock:
+            previous = {"antenna_id": self._antenna_id, "feedline_id": self._feedline_id,
+                        "extension_mm": self._extension_mm}
+            proposed = {"antenna_id": str(antenna_id), "feedline_id": str(feedline_id),
+                        "extension_mm": extension}
+            previous_hash = self._signal_chain_hash
+            if proposed == previous:
+                return {"changed": False, "previous": previous, "instrument": previous,
+                        "signal_chain_hash": previous_hash,
+                        "previous_signal_chain_hash": previous_hash,
+                        "configuration_epoch": (self._ring.configuration_epoch
+                                                if self._ring is not None else None),
+                        "invalidated": False}
+            self._antenna_id = proposed["antenna_id"]
+            self._feedline_id = proposed["feedline_id"]
+            self._extension_mm = proposed["extension_mm"]
+            self._rebuild_chain_locked()
+            epoch = self.invalidate("SIGNAL_CHAIN_CHANGE")
+            LOG.info("active instrument replaced: %s -> %s; chain %s -> %s",
+                     previous, proposed, previous_hash, self._signal_chain_hash)
+            return {"changed": True, "previous": previous, "instrument": proposed,
+                    "signal_chain_hash": self._signal_chain_hash,
+                    "previous_signal_chain_hash": previous_hash,
+                    "configuration_epoch": epoch, "invalidated": epoch is not None}
+
     def set_gain_db(self, gain_db: Optional[float]) -> Dict[str, Any]:
         """Record a gain change and clear the ring for it.
 
@@ -616,13 +742,8 @@ class IQRetentionOwner:
                 return {"changed": False, "gain_db": value,
                         "signal_chain_hash": self._signal_chain_hash}
             self._gain_db = value
-            self._signal_chain_manifest = signal_chain_manifest(
-                sensor_id=self._sensor_id, sample_type=self._sample_type,
-                sample_rate_hz=self._sample_rate_hz, gain_db=value)
-            self._signal_chain_hash = signal_chain_hash(
-                sensor_id=self._sensor_id, sample_type=self._sample_type,
-                sample_rate_hz=self._sample_rate_hz, gain_db=value)
-        self.invalidate("GAIN_CHANGE")
+            self._rebuild_chain_locked()
+            self.invalidate("GAIN_CHANGE")
         return {"changed": True, "previous_gain_db": previous, "gain_db": value,
                 "signal_chain_hash": self._signal_chain_hash}
 
@@ -673,12 +794,7 @@ class IQRetentionOwner:
                 self._sensor_id = sensor_id
             if owns_capture is not None:
                 self._owns_capture = bool(owns_capture)
-            self._signal_chain_manifest = signal_chain_manifest(
-                sensor_id=self._sensor_id, sample_type=self._sample_type,
-                sample_rate_hz=self._sample_rate_hz, gain_db=self._gain_db)
-            self._signal_chain_hash = signal_chain_hash(
-                sensor_id=self._sensor_id, sample_type=self._sample_type,
-                sample_rate_hz=self._sample_rate_hz, gain_db=self._gain_db)
+            self._rebuild_chain_locked()
             if self._ring is not None:
                 LOG.info("bounded IQ ring discarded for %s; new chain %s",
                          reason, self._signal_chain_hash)
@@ -856,8 +972,14 @@ class IQRetentionOwner:
                 "signal_chain": dict(self._signal_chain_manifest),
                 "signal_chain_hash_revision": SIGNAL_CHAIN_REVISION,
                 "prior_revision_comparable": PRIOR_SIGNAL_CHAIN_REVISION_COMPARABLE,
-                "antenna_id": antenna_id(),
-                "feedline_id": feedline_id(),
+                # The active instrument, not the boot environment. Reading
+                # os.environ here would publish the antenna this process started
+                # with beside a chain hash computed from the one it was told
+                # about since -- a status payload contradicting itself.
+                "antenna_id": self._antenna_id,
+                "feedline_id": self._feedline_id,
+                "antenna_extension_mm": self._extension_mm,
+                "instrument_state_authority": "CAPTURE_OWNER_ACTIVE_DECLARATION",
                 "owner": "ORCHESTRATOR_BRIDGE",
                 "permitted": self._enabled and self._owns_capture and not self._refused_reason,
                 "appended_blocks": self._appended_blocks,

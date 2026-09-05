@@ -266,3 +266,29 @@ test("corroboration reports a responsive port without identifying the antenna", 
   assert.match(view.corroborationLine.textContent, /DOES NOT IDENTIFY WHICH ANTENNA/);
   assert.match(view.corroborationLine.textContent, /NO REFLECTOMETER/);
 });
+
+test("a signal-chain change names the field that moved", async () => {
+  // "SIGNAL CHAIN CHANGED" on its own reads like a swapped antenna. Retracting a
+  // telescopic mast is the same part number and a different instrument, so the
+  // line has to say which field the operator actually touched.
+  const response = {
+    ok: true, status: 201,
+    payload: {status: "declared", declared: true, autoDetected: false,
+              antenna: {antenna_id: "nesdr-smart-telescopic", label: "TELESCOPIC MAST",
+                        feedline_id: "nesdr-magnetic-base-rg58-2m",
+                        feedline_label: "MAGNETIC BASE · 2 m RG58",
+                        extension_mm: 165, quarter_wave_hz: 454_231_000,
+                        quarter_wave_authority: "DERIVED_INFERENCE", resonance_hz: null,
+                        authority: "OPERATOR_DECLARED", note: "", declared_at: 1000},
+              receipt: {declarationHash: "e".repeat(64), retroactive: false,
+                        signalChainChanged: true, changedFields: ["extension_mm"],
+                        previousExtensionMm: 730}},
+  };
+  const {root, view} = makeView({antennaResponse: response, onAntennaRequest: () => {}});
+  view.antennaSelect.value = "nesdr-smart-telescopic";
+  view.extensionInput.value = "165";
+  await buttonNamed(root, "DECLARE ANTENNA").listeners.get("click")();
+  const line = view.antennaStateLine.textContent;
+  assert.match(line, /SIGNAL CHAIN CHANGED \(EXTENSION_MM\)/);
+  assert.match(line, /NOT DIRECTLY COMPARABLE/);
+});

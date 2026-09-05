@@ -424,7 +424,12 @@ export class NesdrSpectrumView {
         parts.push(`DECLARATION // ${String(receipt.declarationHash).slice(0, 16)}`);
       }
       if (receipt?.signalChainChanged) {
-        parts.push("SIGNAL CHAIN CHANGED · EARLIER PRODUCTS ARE NOT DIRECTLY COMPARABLE");
+        // Name the field. "SIGNAL CHAIN CHANGED" after retracting a mast reads
+        // like a swapped antenna unless the line says it was the extension.
+        const fields = Array.isArray(receipt.changedFields) ? receipt.changedFields : [];
+        const what = fields.length ? ` (${fields.join(", ").toUpperCase()})` : "";
+        parts.push(
+          `SIGNAL CHAIN CHANGED${what} · EARLIER PRODUCTS ARE NOT DIRECTLY COMPARABLE`);
       }
       this.antennaStateLine.textContent = parts.join(" · ");
       this.antennaStateLine.className = "nesdr__antenna-state nesdr__state--live";

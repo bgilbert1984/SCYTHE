@@ -823,10 +823,16 @@ Python catalogue and its `scythe-web/rfAntennaDeclaration.js` mirror, with
 they are separate parts with separate losses, and one being known says nothing
 about the other.
 
-Note that `signal_chain_hash` covers sensor, antenna, sample type and sample
-rate — **not** the feedline. Two metres of RG58 is a real insertion loss and
-arguably belongs in the chain identity; folding it in would change every existing
-hash, so it is recorded as an open question rather than done quietly.
+Note that `signal_chain_hash` at the time covered sensor, antenna, sample type
+and sample rate — **not** the feedline. Two metres of RG58 is a real insertion
+loss and arguably belongs in the chain identity; folding it in would change every
+existing hash, so it was recorded as an open question rather than done quietly.
+
+**Both halves of that open question have since been closed, and this paragraph is
+kept for the history rather than as current fact.** Revision `v2` folded the
+feedline into the chain identity; revision `v3` folded in the telescopic mast
+extension (§5.17). Each bump set `PRIOR_SIGNAL_CHAIN_REVISION_COMPARABLE = False`
+rather than reinterpreting older hashes.
 
 ### 5.11 Phase 2 entry conditions — **met 2026-09-03**
 
@@ -1476,6 +1482,211 @@ the operator most often wants. It is also a guess. The restart policy that
 governs recovery is a property of a systemd unit the bridge never read, so it
 is documented in `docs/RTL_TCP_BOOT_CAPTURE.md` rather than asserted by a
 process with no access to it.
+
+### 5.17 The same mast at two extensions is two instruments
+
+`declaration_receipt` raised its comparability boundary on `antenna_id` alone:
+
+```python
+changed = bool(previous) and previous.get("antenna_id") != record["antenna_id"]
+```
+
+A telescopic mast retracted from 730 mm to 165 mm keeps the id
+`nesdr-smart-telescopic` throughout. Its derived quarter wave moves from
+102.7 MHz to 454.2 MHz — from the FM broadcast span to the 433 MHz ISM band.
+That is not the same antenna with a different setting; it is a different
+frequency response, and every relative-power product taken either side of the
+change was taken through a different instrument.
+
+The declaration hash already knew this. It was computed over `antenna_id`,
+`feedline_id`, `extension_mm` and `note`, so the extension change moved the hash
+while the boundary stayed silent — the same shape as a sample rate that drifts
+away from the one the trace is labelled with. **A change that moves a hash and
+raises no boundary is a signal-chain change that produces no complaint.**
+
+The boundary now fires on `COMPARABILITY_FIELDS = ("antenna_id", "feedline_id",
+"extension_mm")`. `feedline_id` is included because §5.10 already established
+that a mast on 2 m of RG58 is not the same signal chain as the same mast on the
+SMA port; leaving it out would have re-created the defect one field over.
+
+#### One hash was answering two questions
+
+Excluding `note` from the boundary while leaving it in the hash only moves the
+contradiction. If prose is part of a hash that anything keys comparability from,
+then fixing a typo invalidates products — and a receipt that stays quiet while a
+downstream hash moves is not one system agreeing with itself. The hash is now
+two:
+
+| Hash | Covers | Answers |
+| --- | --- | --- |
+| `instrument_hash` | `antenna_id`, `feedline_id`, `extension_mm` | what did these products come through? |
+| `declaration_hash` | the instrument fields, `authority`, `extension_authority`, `note` | what did the operator assert about it? |
+
+`signalChainChanged` is true exactly when `instrument_hash` moved, and a test
+asserts that equivalence across every field rather than asserting the two
+symptoms separately. The receipt carries `instrumentHash`,
+`previousInstrumentHash`, `changedFields`, `previousFeedlineId` and
+`previousExtensionMm`.
+
+`declared_at` is deliberately **not** in either hash. Two identical declarations
+made a minute apart describe the same instrument and the same assertion, and a
+hash that changes on every re-declaration is an event id rather than an identity.
+
+#### What the product hashes could not see
+
+Auditing the downstream side found the premise half-right and the consequence
+worse than expected. `note` reaches neither `signal_chain_hash`: the retention
+manifest hashes sensor, sample type, rate, antenna, feedline and gain, and the
+sparse analyzer hashes tuner state plus `antenna_id`. Prose was never in a
+product hash, so the contradiction had no downstream victim.
+
+`extension_mm` was not in either one either. Products taken at 730 mm and at
+165 mm carried **identical chain identities** — the receipt would complain and
+the product hash would not, which is the same defect one layer down. Both now
+carry the extension:
+
+- `signal_chain_manifest` gains `antenna.extension_mm` and
+  `antenna.extension_authority`, bumping `SIGNAL_CHAIN_REVISION` from `v2` to
+  `v3` with `PRIOR_SIGNAL_CHAIN_REVISION_COMPARABLE = False`, as v1→v2 did for
+  the feedline.
+- `SparseAnalyzerConfig` gains `antenna_extension_mm`, carried into
+  `_signal_chain` beside `antenna_id`.
+
+The manifest takes the readable fields rather than embedding `instrument_hash` as
+an opaque digest. Its stated purpose is to be retained beside its hash and simply
+read; folding in a digest would satisfy the letter of "incorporate the instrument
+hash" while hiding exactly which field moved. The invariant is the same and is
+tested directly: the chain hash varies with every comparability field and is
+invariant to the note.
+
+A configured extension that does not validate hashes as
+`REFUSED_UNUSABLE_VALUE`, distinct from `UNDECLARED`. An operator who typed
+metres into a millimetre field is not an operator who declined to say, and
+collapsing the two would hide a misconfiguration inside a legitimate omission.
+
+#### A hash formula is not a live instrument
+
+Fixing the formula would have fixed nothing on a running receiver. Both product
+hashes sourced the antenna from `os.environ`: `IQRetentionOwner` built its
+manifest from `antenna_id()` at construction, `SparseAnalyzerConfig.from_env()`
+froze its copy at construction, and `IQRetentionOwner.status()` re-read the
+environment on every call. The declaration endpoint touched none of them.
+
+So an accepted declaration moved the receipt and nothing else. Every subsequent
+window carried the chain hash the process booted with, while the receipt
+announced that the instrument had changed — a contradiction the system published
+rather than merely failed to notice.
+
+The capture owner now holds one active instrument state, bootstrapped from the
+environment and thereafter replaced only by declaration:
+
+```
+validate declaration          AntennaDeclarationStore.declare
+  → replace active state      IQRetentionOwner.set_instrument   ─┐ one lock,
+  → rebuild manifest + hash   _rebuild_chain_locked              │ whole
+  → invalidate ring           SIGNAL_CHAIN_CHANGE                │ sequence
+  → advance epoch             BoundedIQRing.configuration_epoch ─┘
+  → follow in the analyzer    RFSparseAnalyzer.set_instrument
+  → acknowledge receipt       declaration_receipt + persistence
+```
+
+The clear is held under the same lock as the swap. Doing it afterwards leaves a
+window in which a product can be issued carrying the new chain hash under the old
+epoch — a product that looks attributable and is not.
+
+Three further leaks were found and closed while wiring this:
+
+- `set_gain_db` rebuilt the manifest with only `gain_db=`, letting antenna,
+  feedline and extension fall back to the environment. A gain change would have
+  silently reverted the instrument to the boot-time one. Both rebuild sites now
+  go through `_rebuild_chain_locked`, which reads only owner state.
+- `status()` published `antenna_id()` and `feedline_id()` from the environment
+  beside a chain hash computed from the declared instrument, so the payload could
+  contradict itself.
+- `AntennaDeclarationStore.declare` compared against nothing on a first runtime
+  declaration and reported `signalChainChanged: false`, while the capture owner —
+  which had bootstrapped from the environment — cleared its ring for the same
+  event. The store now adopts the boot environment first, so both components
+  answer one question the same way.
+
+`SIGNAL_CHAIN_CHANGE` was in `INVALIDATION_REASONS` but had no wired source. It
+now names one in `WIRED_REASON_SOURCES`, leaving `DIRECT_SAMPLING_CHANGE` as the
+only deliberately unwired reason.
+
+#### Active is not persisted
+
+The runtime store is process-local, so an operator who declares an antenna and
+then reboots loses it. Status distinguishes the two:
+
+```
+RUNTIME DECLARATION // ACTIVE
+BOOT DECLARATION    // PERSISTED | PENDING_PERSISTENCE
+```
+
+`PENDING_PERSISTENCE` says the declaration is genuinely in force for products
+being emitted now and that a restart would adopt a different instrument.
+Persisting it is a separate operation on the unit environment, deliberately not
+performed by the declaration endpoint: writing a systemd drop-in is not something
+an HTTP handler should do on the strength of a form post.
+
+#### The number is geometry, not resonance
+
+`quarter_wave_hz` now travels with `quarter_wave_model: IDEAL_FREE_SPACE` and
+`resonance_claim: NOT_MEASURED`. `c/4L` assumes free space and an infinite ground
+plane; the magnetic base, the surface it is stuck to, body and vehicle proximity
+and the stepped construction of a telescoping whip all move the real optimum, and
+a practical monopole rule lands roughly 4.6% shorter. The model has to be named
+or the figure reads as a property of this antenna.
+
+`extension_authority` separates a length read off a ruler
+(`OPERATOR_MEASURED`) from one arrived at by arithmetic (`OPERATOR_ESTIMATED`,
+the default). Nothing can distinguish them, so `MEASURED` must be claimed and is
+never assumed. It sits in `declaration_hash` and not in `instrument_hash`: a
+better claim about the same geometry is not a different instrument.
+
+Worth stating plainly, because the two get conflated: setting the mast to 173 mm
+for a 433.92 MHz survey derives 433.226 MHz, not 433.92 MHz. 433.92 MHz wants
+172.723 mm under this model, and a mast is set in whole millimetres. The derived
+figure describes the geometry that was declared, never the frequency that was
+intended.
+
+The receipt now carries `changedFields`, `previousFeedlineId` and
+`previousExtensionMm`, and names what moved:
+
+```
+MAST EXTENSION CHANGED 730 mm → 165 mm — DERIVED QUARTER WAVE 102.7 MHz → 454.2 MHz.
+THE MAST IS THE SAME PART; THE INSTRUMENT IS NOT
+```
+
+The instrument panel prints `SIGNAL CHAIN CHANGED (EXTENSION_MM)` rather than the
+bare phrase, because an unqualified "signal chain changed" reads as a swapped
+antenna.
+
+#### A millimetre field that accepted metres
+
+The bound was `0 < extension_mm <= 2000`. `0.73` — 730 mm written by someone
+thinking in metres — validated, and produced a quarter wave of 102.7 **GHz**,
+roughly fifty-eight times the R820T's ceiling, with no complaint. The floor is
+now `MIN_EXTENSION_MM = 10.0` in both the Python catalogue and its
+`rfAntennaDeclaration.js` mirror, refused with the unit error named. This is a
+unit guard, not a hardware claim: the module does not know the tuner's range and
+does not assert one.
+
+#### The declaration had no way to survive a restart
+
+`AntennaDeclarationStore` is process-local and volatile, so an antenna declared
+through the API lasts exactly as long as the orchestrator. On the observed
+workstation the store held `nesdr-smart-telescopic` with the magnetic base while
+the unit drop-in still said `SDRPP_ANTENNA_ID=nesdr-smart-uhf`; the next restart
+would have silently reverted the signal chain to a different mast.
+
+`bootstrap_from_env` now also reads `SDRPP_ANTENNA_EXTENSION_MM`, so the
+extension is durable alongside the antenna and the feedline. An unusable value
+refuses the **whole** bootstrap and leaves the antenna `UNDECLARED` rather than
+degrading into the same mast with no extension — a visible omission instead of an
+invisible substitution. The authority does not change: configuration is still the
+operator speaking, and `OPERATOR_DECLARED` is what it records. Nothing here is
+measured, and no amount of environment file makes it so.
 
 ## 6. Open questions for the operator
 

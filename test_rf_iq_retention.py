@@ -37,7 +37,8 @@ def _samples(count=4096, value=0.25):
 class EnvironmentIsolatedTest(unittest.TestCase):
     """Retention reads a few env vars; none of them may leak between tests."""
 
-    NAMES = ("SCYTHE_PROCESS_ROLE", "SCYTHE_RF_IQ_RETENTION", "SDRPP_ANTENNA_ID")
+    NAMES = ("SCYTHE_PROCESS_ROLE", "SCYTHE_RF_IQ_RETENTION", "SDRPP_ANTENNA_ID",
+             "SDRPP_FEEDLINE_ID", "SDRPP_ANTENNA_EXTENSION_MM")
 
     def setUp(self):
         self._saved = {name: os.environ.get(name) for name in self.NAMES}
@@ -559,6 +560,139 @@ class DirectSamplingDeclarationTests(EnvironmentIsolatedTest):
                         steps.index("ADVANCE_SIGNAL_CHAIN_MANIFEST_AND_HASH"))
         self.assertEqual(steps[-1],
                          "REFUSE_COMPARISON_WITH_TUNER_QUADRATURE_PRODUCTS")
+
+
+class DeclarationReachesProductsWithoutRestartTests(EnvironmentIsolatedTest):
+    """The environment bootstraps the instrument. It must not remain the authority.
+
+    Both product hashes previously sourced the antenna from ``os.environ``, so a
+    declaration accepted at runtime moved the receipt and nothing else: the
+    receipt announced a new instrument while every subsequent window carried the
+    chain hash the process booted with. That is worse than not noticing at all,
+    because the contradiction is published.
+
+    The sequence asserted here is the whole contract, in order:
+    capture, declare, no restart, ring invalidated, epoch advanced, next window
+    on the new chain, both hashes moved, both agreeing with one declaration.
+    """
+
+    def setUp(self):
+        super().setUp()
+        from graphops_rf_antenna import AntennaDeclarationStore
+        os.environ["SDRPP_ANTENNA_ID"] = "nesdr-smart-telescopic"
+        os.environ["SDRPP_FEEDLINE_ID"] = "nesdr-magnetic-base-rg58-2m"
+        os.environ["SDRPP_ANTENNA_EXTENSION_MM"] = "730"
+        self.bridge = SDRPlusPlusBridge()
+        self.store = AntennaDeclarationStore()
+
+    def tearDown(self):
+        self.bridge.retention.invalidate("ORCHESTRATOR_STOP")
+        super().tearDown()
+
+    def _fill_one_window(self):
+        """Push samples until a complete window can be issued, and issue it."""
+        owner = self.bridge.retention
+        for _ in range(64):
+            owner.append(_samples(65_536))
+            if owner.window_ready():
+                break
+        acquisition = owner.acquire_window()
+        self.assertIsNotNone(acquisition, "a window should have been issued")
+        self.assertTrue(acquisition, acquisition.reason)
+        return acquisition.window
+
+    def test_a_runtime_declaration_reaches_both_product_hashes(self):
+        # 1. A product captured under the boot-time instrument.
+        first = self._fill_one_window()
+        boot_chain = first.signal_chain_hash
+        boot_epoch = first.configuration_epoch
+        boot_sparse = self.bridge.sparse.signal_chain()["signal_chain_hash"]
+        self.assertEqual(self.bridge.retention.instrument_state()["extension_mm"], 730.0)
+
+        # 2. Declare a different extension. Same mast, same cable, new instrument.
+        record, receipt = self.store.declare({
+            "antenna_id": "nesdr-smart-telescopic",
+            "feedline_id": "nesdr-magnetic-base-rg58-2m",
+            "extension_mm": 173,
+            "extension_authority": "OPERATOR_MEASURED"})
+        self.assertEqual(record["quarter_wave_hz"], 433_226_095)
+
+        # 3. No restart: the same bridge, retention owner and analyzer objects.
+        applied = self.bridge.apply_antenna_declaration(record)
+        self.assertTrue(applied["applied"])
+        self.assertTrue(applied["changed"])
+        self.assertEqual(applied["runtime_declaration"], "ACTIVE")
+
+        # 4. The ring was cleared and the configuration epoch advanced.
+        self.assertTrue(applied["retention"]["invalidated"])
+        self.assertGreater(applied["retention"]["configuration_epoch"], boot_epoch)
+        self.assertEqual(self.bridge.retention.status()["invalidation_history"][-1]["reason"],
+                         "SIGNAL_CHAIN_CHANGE")
+
+        # 5. The next retained window is issued under the new extension.
+        second = self._fill_one_window()
+        self.assertGreater(second.configuration_epoch, boot_epoch)
+        self.assertEqual(self.bridge.retention.instrument_state()["extension_mm"], 173.0)
+
+        # 6. Both product hashes moved.
+        self.assertNotEqual(second.signal_chain_hash, boot_chain)
+        self.assertNotEqual(self.bridge.sparse.signal_chain()["signal_chain_hash"],
+                            boot_sparse)
+
+        # 7. Both describe the one active declaration, not two different states.
+        manifest = self.bridge.retention.status()["signal_chain"]
+        sparse_chain = self.bridge.sparse.signal_chain()
+        self.assertEqual(manifest["antenna"]["extension_mm"], record["extension_mm"])
+        self.assertEqual(manifest["antenna"]["id"], record["antenna_id"])
+        self.assertEqual(manifest["feedline"]["id"], record["feedline_id"])
+        self.assertEqual(sparse_chain["antenna_extension_mm"], record["extension_mm"])
+        self.assertEqual(sparse_chain["antenna_id"], record["antenna_id"])
+        self.assertEqual(sparse_chain["feedline_id"], record["feedline_id"])
+        self.assertTrue(receipt["signalChainChanged"])
+        self.assertEqual(receipt["changedFields"], ["extension_mm"])
+
+    def test_the_environment_no_longer_overrides_the_active_instrument(self):
+        """A rebuild for an unrelated reason must not resurrect the boot state."""
+        record, _ = self.store.declare({"antenna_id": "nesdr-smart-telescopic",
+                                        "feedline_id": "nesdr-magnetic-base-rg58-2m",
+                                        "extension_mm": 173})
+        self.bridge.apply_antenna_declaration(record)
+        declared = self.bridge.retention.instrument_state()["signal_chain_hash"]
+        # A gain change rebuilds the manifest. It must rebuild it from the
+        # declared instrument, not from SDRPP_ANTENNA_EXTENSION_MM=730.
+        self.bridge.retention.set_gain_db(28.0)
+        state = self.bridge.retention.instrument_state()
+        self.assertEqual(state["extension_mm"], 173.0)
+        self.assertNotEqual(state["signal_chain_hash"], declared,
+                            "the gain is in the chain, so the hash must still move")
+        self.assertEqual(
+            self.bridge.retention.status()["signal_chain"]["antenna"]["extension_mm"], 173.0)
+
+    def test_redeclaring_the_same_instrument_invalidates_nothing(self):
+        """Re-declaring is not a change, and must not discard a filling ring."""
+        self._fill_one_window()
+        record, _ = self.store.declare({"antenna_id": "nesdr-smart-telescopic",
+                                        "feedline_id": "nesdr-magnetic-base-rg58-2m",
+                                        "extension_mm": 730, "note": "same instrument"})
+        before = self.bridge.retention.instrument_state()
+        applied = self.bridge.apply_antenna_declaration(record)
+        self.assertFalse(applied["changed"])
+        self.assertFalse(applied["retention"]["invalidated"])
+        self.assertEqual(self.bridge.retention.instrument_state()["configuration_epoch"],
+                         before["configuration_epoch"])
+
+    def test_status_separates_the_active_declaration_from_the_persisted_one(self):
+        from graphops_rf_antenna import declaration_persistence
+        record, _ = self.store.declare({"antenna_id": "nesdr-smart-telescopic",
+                                        "feedline_id": "nesdr-magnetic-base-rg58-2m",
+                                        "extension_mm": 173})
+        pending = declaration_persistence(record)
+        self.assertEqual(pending["runtime_declaration"], "ACTIVE")
+        self.assertEqual(pending["boot_declaration"], "PENDING_PERSISTENCE")
+        self.assertIn("A RESTART WOULD ADOPT IT", pending["detail"])
+        # Persisting the same geometry to the environment settles it.
+        os.environ["SDRPP_ANTENNA_EXTENSION_MM"] = "173"
+        self.assertEqual(declaration_persistence(record)["boot_declaration"], "PERSISTED")
 
 
 if __name__ == "__main__":

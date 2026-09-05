@@ -2904,14 +2904,29 @@ def orchestrator_graphops_rf_antenna_declare():
     """Record what the operator says is attached. Nothing here is measured."""
     if not _graphops_directive_authorized():
         return jsonify({'error': 'Authentication required'}), 401
-    from graphops_rf_antenna import AntennaDeclarationRefused, get_antenna_store
+    from graphops_rf_antenna import (AntennaDeclarationRefused, declaration_persistence,
+                                     get_antenna_store)
     try:
         record, receipt = get_antenna_store().declare(request.get_json(silent=True))
     except AntennaDeclarationRefused as exc:
         return jsonify({'status': 'refused', 'error': str(exc), 'declared': False,
                         'autoDetected': False}), 400
+    # An accepted declaration has to reach the capture owner, or the receipt
+    # announces a new instrument while products keep carrying the chain hash this
+    # process booted with. A bridge that is unavailable is reported as such rather
+    # than letting the declaration look fully applied.
+    try:
+        from rf_bridge import get_rf_bridge
+        applied = get_rf_bridge().apply_antenna_declaration(record)
+    except Exception as exc:                                # pragma: no cover
+        log.warning('antenna declaration not applied to the capture owner: %s', exc)
+        applied = {'applied': False, 'changed': False, 'runtime_declaration': 'NOT_APPLIED',
+                   'error': 'THE CAPTURE OWNER DID NOT ADOPT THIS DECLARATION; PRODUCTS '
+                            'CONTINUE UNDER THE PREVIOUS SIGNAL CHAIN'}
     return jsonify({'status': 'declared', 'declared': True, 'autoDetected': False,
                     'antenna': record, 'receipt': receipt,
+                    'applied': applied,
+                    'persistence': declaration_persistence(record),
                     'boundary': receipt['boundaries']}), 201
 
 

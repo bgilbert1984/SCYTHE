@@ -16,7 +16,7 @@ Raw IQ and full waterfalls never leave the edge.
 from __future__ import annotations
 
 from collections import deque
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace as dataclass_replace
 import hashlib
 import json
 import math
@@ -24,6 +24,10 @@ import os
 import threading
 import time
 from typing import Any, Callable, Deque, Dict, Iterable, List, Optional, Sequence, Tuple
+
+# One reader for the declared mast extension, shared with the retention chain so
+# the two identities cannot disagree about what was declared.
+from rf_iq_retention import antenna_extension_mm, feedline_id as _feedline_id_from_env
 
 import numpy as np
 
@@ -82,6 +86,13 @@ class SparseAnalyzerConfig:
     tuner_ppm: float = 0.0
     gain_db: float = float("nan")
     antenna_id: str = "unspecified"
+    # The extension is part of the antenna, not an annotation on it: the same
+    # telescopic mast at two lengths receives two different bands. Carried as
+    # the declared value or a named absence, never silently as "no extension".
+    antenna_extension_mm: Any = "UNDECLARED"
+    # The cable is part of the chain for the same reason the mast is. Its
+    # absence here meant two products differing only by feedline hashed alike.
+    feedline_id: str = "UNDECLARED"
     clock_quality: str = "unknown"
 
     @classmethod
@@ -103,6 +114,8 @@ class SparseAnalyzerConfig:
             tuner_ppm=float(os.getenv("SDRPP_TUNER_PPM", "0")),
             gain_db=float(os.getenv("SDRPP_GAIN_DB", "nan")),
             antenna_id=os.getenv("SDRPP_ANTENNA_ID", "unspecified"),
+            antenna_extension_mm=antenna_extension_mm(),
+            feedline_id=_feedline_id_from_env(),
             clock_quality=os.getenv("SDRPP_CLOCK_QUALITY", "unknown"),
         ).validated()
 
@@ -317,13 +330,16 @@ def _bin_widths(sample_rate_hz: float, fft_size: int, bin_count: int) -> Dict[st
 
 def _signal_chain(*, sample_rate_hz: float, fft_size: int, bin_count: int,
                   center_frequency_hz: float, tuner_ppm: float, gain_db: float,
-                  antenna_id: str, clock_quality: str, dropped_frames: int) -> Dict[str, Any]:
+                  antenna_id: str, antenna_extension_mm: Any, feedline_id: str,
+                  clock_quality: str, dropped_frames: int) -> Dict[str, Any]:
     widths = _bin_widths(sample_rate_hz, fft_size, bin_count)
     payload = {
         "tuner_frequency_hz": round(float(center_frequency_hz), 3),
         "tuner_ppm": round(float(tuner_ppm), 4),
         "gain_db": None if not math.isfinite(gain_db) else round(float(gain_db), 2),
         "antenna_id": antenna_id,
+        "antenna_extension_mm": antenna_extension_mm,
+        "feedline_id": feedline_id,
         "clock_quality": clock_quality,
         "dropped_usb_sample_count": None,
         "dropped_frames": int(dropped_frames),
@@ -378,6 +394,8 @@ def recover_support(
     tuner_ppm: float = 0.0,
     gain_db: float = float("nan"),
     antenna_id: str = "unspecified",
+    antenna_extension_mm: Any = "UNDECLARED",
+    feedline_id: str = "UNDECLARED",
     clock_quality: str = "unknown",
     min_frames: int = 8,
 ) -> Tuple[ResidualWindow, List[SparseSupport]]:
@@ -398,7 +416,8 @@ def recover_support(
     chain = _signal_chain(
         sample_rate_hz=sample_rate_hz, fft_size=fft_size, bin_count=bin_count,
         center_frequency_hz=center_frequency_hz, tuner_ppm=tuner_ppm, gain_db=gain_db,
-        antenna_id=antenna_id, clock_quality=clock_quality, dropped_frames=dropped_frames,
+        antenna_id=antenna_id, antenna_extension_mm=antenna_extension_mm,
+        feedline_id=feedline_id, clock_quality=clock_quality, dropped_frames=dropped_frames,
     )
     measurement = {
         "available_frames": available_frames,
@@ -575,6 +594,47 @@ class RFSparseAnalyzer:
             if callback not in self._subscribers:
                 self._subscribers.append(callback)
 
+    def signal_chain(self, *, center_frequency_hz: float = 0.0, fft_size: int = 4096,
+                     bin_count: int = 512, sample_rate_hz: float = 0.0) -> Dict[str, Any]:
+        """The chain descriptor products emitted right now would carry.
+
+        Readable beside its hash, and readable without waiting for a window to
+        close -- which is what lets a caller check that the analyzer actually
+        adopted a declaration rather than inferring it from a later product.
+        """
+        with self._lock:
+            config = self.config
+        return _signal_chain(
+            sample_rate_hz=sample_rate_hz or 1.0, fft_size=fft_size, bin_count=bin_count,
+            center_frequency_hz=center_frequency_hz, tuner_ppm=config.tuner_ppm,
+            gain_db=config.gain_db, antenna_id=config.antenna_id,
+            antenna_extension_mm=config.antenna_extension_mm,
+            feedline_id=config.feedline_id, clock_quality=config.clock_quality,
+            dropped_frames=0)
+
+    def set_instrument(self, *, antenna_id: str, feedline_id: str,
+                       extension_mm: Any) -> Dict[str, Any]:
+        """Follow a runtime antenna declaration.
+
+        The config is frozen because products are hashed against it, so this
+        replaces it rather than mutating it, and discards the accumulated frames.
+        Keeping them would let one estimate window span two instruments and be
+        published under whichever chain hash happened to be current when it
+        closed.
+        """
+        extension = extension_mm if extension_mm is not None else "UNDECLARED"
+        with self._lock:
+            if (self.config.antenna_id == antenna_id
+                    and self.config.feedline_id == feedline_id
+                    and self.config.antenna_extension_mm == extension):
+                return {"changed": False, "antenna_id": antenna_id}
+            self.config = dataclass_replace(
+                self.config, antenna_id=antenna_id, feedline_id=feedline_id,
+                antenna_extension_mm=extension)
+        self.reset()
+        return {"changed": True, "antenna_id": antenna_id, "feedline_id": feedline_id,
+                "extension_mm": extension}
+
     def reset(self) -> None:
         with self._lock:
             self._frames.clear()
@@ -654,6 +714,8 @@ class RFSparseAnalyzer:
                 tuner_ppm=self.config.tuner_ppm,
                 gain_db=self.config.gain_db,
                 antenna_id=self.config.antenna_id,
+                antenna_extension_mm=self.config.antenna_extension_mm,
+                feedline_id=self.config.feedline_id,
                 clock_quality=self.config.clock_quality,
                 min_frames=self.config.min_frames,
             )

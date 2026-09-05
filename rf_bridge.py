@@ -706,6 +706,39 @@ class SDRPlusPlusBridge:
         result = self.retention.set_gain_db(requested)
         return {"mode": "MANUAL", **result, "supported": catalogue}
 
+    def apply_antenna_declaration(self, record: Dict) -> Dict:
+        """Make an accepted antenna declaration the instrument products use.
+
+        The capture owner holds the active antenna chain; the declaration store
+        holds what the operator said. Without this they drift, and the drift is
+        silent in the worst direction: the receipt announces that the instrument
+        changed while every subsequent product keeps carrying the chain hash the
+        process booted with.
+
+        The declaration has already been validated by the store, so this owns
+        only the consequence. Retention first, because it is the one that clears
+        the ring and advances the configuration epoch; the analyzer follows so it
+        cannot publish an estimate window spanning both instruments.
+        """
+        instrument = {
+            "antenna_id": str(record.get("antenna_id") or "UNDECLARED"),
+            "feedline_id": str(record.get("feedline_id") or "undeclared"),
+            "extension_mm": record.get("extension_mm"),
+        }
+        retention = self.retention.set_instrument(**instrument)
+        analyzer = (None if self.sparse is None
+                    else self.sparse.set_instrument(**instrument))
+        return {
+            "applied": True,
+            "instrument": instrument,
+            "retention": retention,
+            "sparse": analyzer,
+            "sparse_available": analyzer is not None,
+            "changed": bool(retention.get("changed")),
+            # Named so the caller cannot mistake a live swap for a persisted one.
+            "runtime_declaration": "ACTIVE",
+        }
+
     def configure_stream(self, **changes) -> Dict:
         """Update FFT interpretation settings and restart ingestion if needed.
 
