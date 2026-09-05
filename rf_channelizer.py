@@ -81,6 +81,144 @@ MIN_OVERSAMPLE = 2.0
 # filter edges do not clip the shoulders the estimate found.
 CHANNEL_MARGIN = 1.25
 
+# --- two channel purposes, deliberately two lineages ------------------------
+#
+# A 1.25x margin fits the channel to the occupied bandwidth, which is right for
+# measuring occupancy, centroid and local SNR: a wider channel admits neighbours
+# that contaminate the noise reference.  It is wrong for cyclostationary
+# analysis.  A symbol-clock line lives in the *excess* bandwidth beyond the
+# symbol rate, which is exactly the shoulder a snug filter removes.  Measured on
+# a 50 kBd raised-cosine signal the squared-envelope cyclic statistic fell from
+# 56.07 unchannelized to 1.38 through the 1.25x channel -- below the detector's
+# own threshold.  That is not attenuation; the channelizer had deleted the
+# feature the detector exists to find.
+#
+# The response is not to move CHANNEL_MARGIN.  Products already published under
+# the measurement lineage stay comparable with each other, and a margin chosen
+# to help a detector would silently change what every occupancy figure means.
+# The structure channel is a separate purpose with its own policy, its own
+# configuration revision and its own digest lineage, and the two do not pool.
+DEFAULT_CHANNEL_PURPOSE = "MEASUREMENT_CHANNEL"
+
+# Selected 2026-09-04 by tools/rf_structure_channel_sweep.py against criteria
+# declared before the run, and frozen. It arrives at the same number it started
+# at, which is worth being suspicious of, so the reasoning is recorded in full.
+#
+# The sweep ran 6,480 cells -- margin x symbol rate x roll-off x SNR x offset x
+# neighbours -- through the production channelize() on real ring windows, with
+# each margin multiplying the MEASURED occupancy exactly as production does. Only
+# the 799 cells where a wide reference actually found the true symbol clock were
+# scored: retention is undefined where there was nothing to retain, and an
+# earlier pass that averaged in beta=0 sincs and -10 dB noise cells concluded
+# margin does not matter.
+#
+#   margin  p5 coverage  median retention  p5 retention  frac < 0.75  contam dB
+#     1.25         0.93             1.695         0.485        0.072       0.00
+#     1.50         1.11             1.450         0.358        0.078       0.00
+#     2.00         1.47             1.262         0.897        0.034       0.01
+#     2.50         1.72             1.200         0.861        0.018       0.07
+#     3.00         2.07             1.066         0.845        0.020       0.23
+#     4.00         2.78             1.030         0.208        0.164       0.50
+#
+# 1.25 and 1.5 fail the coverage gate's lower tail and the retention tail; 4.0
+# collapses. 2.0 is the NARROWEST margin passing all three declared criteria, and
+# among those that pass it costs the least: 0.01 dB of adjacent-channel
+# contamination against 0.23 dB at 3.0, and 177 DC_CONTAMINATION refusals in
+# 1,080 captures against 303. Wider was not automatically better.
+STRUCTURE_CHANNEL_MARGIN = 2.0
+STRUCTURE_CHANNEL_MARGIN_STATUS = "SELECTED_FROM_SWEEP_FROZEN"
+STRUCTURE_CHANNEL_MARGIN_SELECTED_AT = "2026-09-04"
+
+# What the number does not cover, recorded beside it rather than in a commit
+# message. A frozen constant with no declared weaknesses is a constant nobody
+# has looked at hard enough.
+STRUCTURE_CHANNEL_MARGIN_CAVEATS: Dict[str, str] = {
+    "P5_RETENTION_SITS_ON_A_CLIFF": (
+        "AT MARGIN 2.0 THE FOUR LOWEST RETENTIONS ARE 0.265, 0.286, 0.323 AND "
+        "0.333 AND THE FIFTH IS 0.748. THE PUBLISHED p5 OF 0.897 IS DECIDED BY "
+        "WHERE THE PERCENTILE INDEX LANDS RELATIVE TO THAT GAP, NOT BY A MARGIN "
+        "OF SAFETY. THE ROBUST FORM -- THE FRACTION OF CELLS BELOW 0.75 -- IS "
+        "0.034 AGAINST 0.072 AT 1.25, WHICH SUPPORTS THE SAME CHOICE FOR A "
+        "BETTER REASON"
+    ),
+    "THE_RESIDUAL_TAIL_IS_NOT_A_COVERAGE_FAILURE": (
+        "THREE OF THOSE FOUR CELLS ARE 20 kBd AT 20 dB ACROSS ALL THREE OFFSETS, "
+        "WITH FLAT COVERAGE 1.57 -- WELL CLEAR OF THE GATE. THE CAUSE IS "
+        "DECIMATION AND WINDOW LENGTH AT LOW SYMBOL RATE, ALREADY DECLARED AS "
+        "DECIMATION_LEAVES_TOO_FEW_SAMPLES. WIDENING THE CHANNEL DOES NOT FIX IT "
+        "AND MUST NOT BE CREDITED WITH DOING SO"
+    ),
+    "A_DIFFERENT_STATISTIC_WOULD_HAVE_CHOSEN_2.5": (
+        "ON FRACTION-BELOW-0.75 ALONE, 2.5 SCORES 0.018 AGAINST 2.0's 0.034. THE "
+        "DECLARED CRITERION WAS THE FIFTH PERCENTILE, DECLARED BEFORE THE RUN, "
+        "AND SWITCHING STATISTICS AFTER SEEING WHICH ONE CHANGES THE WINNER IS "
+        "THE EXACT FAILURE THIS PROJECT'S VALIDATION RULES EXIST TO PREVENT"
+    ),
+    "SYNTHETIC_ONLY": (
+        "EVERY CELL IS SYNTHETIC RAISED-COSINE QPSK IN AWGN. NO REAL EMITTER, NO "
+        "REAL MULTIPATH AND NO REAL ADJACENT-CHANNEL POPULATION WAS INVOLVED"
+    ),
+}
+
+# The other half of the murder.  A wide input filter followed by aggressive
+# decimation destroys the cyclic feature just as thoroughly as a narrow filter,
+# and leaves cleaner paperwork behind: the channel width in the product looks
+# generous while the output rate cannot represent the cycle frequency at all.
+# The squared-envelope cyclic spectrum of a symbol-rate line sits at alpha = R,
+# so the output rate must clear 2R to represent it and is required to clear 4R
+# so the peak is not sitting on the Nyquist edge of its own search.
+STRUCTURE_SAMPLES_PER_CANDIDATE_SYMBOL = 4.0
+
+
+@dataclass(frozen=True)
+class ChannelPolicy:
+    """A named width and rate policy. Part of the product's identity."""
+
+    channel_purpose: str
+    bandwidth_policy: str
+    channel_margin: float
+    configuration_revision: str
+    # None for a purpose that makes no claim about cycle frequencies.
+    output_samples_per_candidate_symbol: Optional[float] = None
+    margin_status: str = "FROZEN"
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "channel_purpose": self.channel_purpose,
+            "bandwidth_policy": self.bandwidth_policy,
+            "channel_margin": self.channel_margin,
+            "output_samples_per_candidate_symbol": self.output_samples_per_candidate_symbol,
+            "configuration_revision": self.configuration_revision,
+            "margin_status": self.margin_status,
+        }
+
+
+CHANNEL_POLICIES: Dict[str, ChannelPolicy] = {
+    "MEASUREMENT_CHANNEL": ChannelPolicy(
+        channel_purpose="MEASUREMENT_CHANNEL",
+        bandwidth_policy="OCCUPANCY_FITTED_V1",
+        channel_margin=CHANNEL_MARGIN,
+        configuration_revision="measurement-channel.v1",
+        output_samples_per_candidate_symbol=None,
+        margin_status="FROZEN",
+    ),
+    "STRUCTURE_CHANNEL": ChannelPolicy(
+        channel_purpose="STRUCTURE_CHANNEL",
+        bandwidth_policy="CYCLIC_STRUCTURE_PRESERVING_V1",
+        channel_margin=STRUCTURE_CHANNEL_MARGIN,
+        configuration_revision="structure-channel.v1",
+        output_samples_per_candidate_symbol=STRUCTURE_SAMPLES_PER_CANDIDATE_SYMBOL,
+        margin_status=STRUCTURE_CHANNEL_MARGIN_STATUS,
+    ),
+}
+
+# The measurement lineage's digest formula is frozen: its products must stay
+# byte-comparable with those already published under it, so its digest inputs end
+# where they ended.  Any other purpose appends its policy, which both separates
+# the lineages and stops a structure-channel product pooling with a measurement
+# one by accident.
+_DIGEST_FROZEN_PURPOSE = DEFAULT_CHANNEL_PURPOSE
+
 # Coarse occupancy: walk out from the peak until the spectrum falls this far.
 #
 # The walk runs over a Welch-averaged spectrum, not a single periodogram. A raw
@@ -270,6 +408,17 @@ OUTCOMES: Dict[str, str] = {
         "THE SOURCE WINDOW WAS NEVER ISSUED BY THIS RING, OR ITS DIGEST DOES NOT "
         "MATCH THE ONE ISSUED. THIS IS A FORGERY, NOT AN EXPIRY"
     ),
+    "UNKNOWN_CHANNEL_PURPOSE": (
+        "THE REQUEST NAMED A CHANNEL PURPOSE THIS CHANNELIZER DOES NOT DEFINE. "
+        "A PURPOSE SELECTS A WIDTH AND RATE POLICY AND IS PART OF THE PRODUCT'S "
+        "IDENTITY, SO AN UNRECOGNISED ONE IS REFUSED RATHER THAN DEFAULTED"
+    ),
+    "STRUCTURE_RATE_UNSATISFIABLE": (
+        "THE STRUCTURE CHANNEL'S OUTPUT RATE COULD NOT CARRY THE REQUIRED "
+        "SAMPLES PER CANDIDATE SYMBOL. A WIDE INPUT FILTER FOLLOWED BY AGGRESSIVE "
+        "DECIMATION DESTROYS THE CYCLIC FEATURE AS THOROUGHLY AS A NARROW FILTER "
+        "DOES, AND LEAVES A PRODUCT THAT LOOKS GENEROUS WHILE REPRESENTING NOTHING"
+    ),
     "SIGNAL_CHAIN_CHANGED": (
         "THE WINDOW WAS CAPTURED UNDER A DIFFERENT SIGNAL CHAIN THAN THE ONE "
         "REQUESTED. PRODUCTS THROUGH DIFFERENT ANTENNAS ARE NOT COMPARABLE"
@@ -314,6 +463,9 @@ class ChannelRequest:
     # be cut anyway, and `channel_selection_basis` records that the width was
     # asked for rather than measured.
     channel_bandwidth_hz: Optional[float] = None
+    # Which lineage this belongs to. The default preserves the measurement
+    # channel exactly, so an existing caller gets the product it already got.
+    channel_purpose: str = DEFAULT_CHANNEL_PURPOSE
 
 
 @dataclass(frozen=True)
@@ -362,6 +514,20 @@ class ChannelizedProduct:
     # Whether the channel width was measured or asked for. A requested width is
     # not evidence about the signal, and a product must not read as though it were.
     channel_selection_basis: str
+
+    # Which lineage produced this, and under what width and rate policy. Two
+    # products with different purposes are not comparable even when every other
+    # field matches, because they were cut to answer different questions.
+    channel_purpose: str
+    bandwidth_policy: str
+    channel_margin: Optional[float]
+    output_samples_per_candidate_symbol: Optional[float]
+    configuration_revision: str
+    # The fastest symbol rate the coarse estimate leaves room for: a signal
+    # occupying B Hz with roll-off beta has R = B/(1+beta) <= B. The rate floor is
+    # derived from this, so it is published rather than left implicit.
+    candidate_symbol_rate_upper_hz: Optional[float]
+    output_samples_per_symbol_achieved: Optional[float]
     # Where the DDC was tuned, and where the carrier actually turned out to be.
     # Two different quantities; conflating them hides tuning error as signal.
     tuning_offset_hz: Optional[float]
@@ -421,11 +587,15 @@ class ChannelizedProduct:
                    "noise_reference_left_bins", "noise_reference_right_bins",
                    "noise_reference_side_disagreement_db")
     _TRANSFORMATION_FIELDS = ("outcome", "reason_code")
+    _POLICY_FIELDS = ("channel_purpose", "bandwidth_policy", "channel_margin",
+                      "output_samples_per_candidate_symbol", "configuration_revision",
+                      "candidate_symbol_rate_upper_hz",
+                      "output_samples_per_symbol_achieved")
 
     def to_dict(self) -> Dict[str, Any]:
         """The product as published. Grouped, and each fact appears once."""
         grouped = set(self._OCCUPANCY_FIELDS + self._SNR_FIELDS
-                      + self._TRANSFORMATION_FIELDS)
+                      + self._TRANSFORMATION_FIELDS + self._POLICY_FIELDS)
         payload = {field: getattr(self, field) for field in self.__dataclass_fields__
                    if field not in grouped}
         payload["transformation"] = {
@@ -434,6 +604,8 @@ class ChannelizedProduct:
             # The one question a detector may ask before consuming samples.
             "channelized": self.channelized,
         }
+        payload["channel_configuration"] = {
+            field: getattr(self, field) for field in self._POLICY_FIELDS}
         payload["occupancy"] = {
             "bandwidth_hz": self.occupied_bandwidth_hz,
             "basis": self.occupied_bandwidth_basis,
@@ -589,15 +761,32 @@ def estimate_occupied_bandwidth(samples: np.ndarray, sample_rate_hz: float,
     return centre, bandwidth, method
 
 
+def _digest_policy_suffix(policy: Optional[ChannelPolicy]) -> Tuple[Any, ...]:
+    """Digest inputs contributed by a non-default channel purpose.
+
+    Empty for the measurement channel, whose digest formula is frozen so that
+    products already published under it stay comparable. Any other purpose adds
+    its policy, which is what keeps the two lineages from pooling.
+    """
+    if policy is None or policy.channel_purpose == _DIGEST_FROZEN_PURPOSE:
+        return ()
+    return (policy.channel_purpose, policy.bandwidth_policy,
+            policy.configuration_revision, round(policy.channel_margin, 6),
+            policy.output_samples_per_candidate_symbol)
+
+
 def _refuse(window: IQWindow, request: ChannelRequest, outcome: str, *,
             candidate: Tuple[Optional[float], Optional[float], str] = (None, None, "NOT_ATTEMPTED"),
             channel_center: Optional[float] = None,
-            channel_bandwidth: Optional[float] = None) -> Channelization:
+            channel_bandwidth: Optional[float] = None,
+            policy: Optional[ChannelPolicy] = None,
+            symbol_rate_upper: Optional[float] = None) -> Channelization:
     """A refusal is a complete product, not a missing one."""
     candidate_center, candidate_bandwidth, candidate_method = candidate
     digest = _digest(SCHEMA, window.window_id, window.digest, window.configuration_epoch,
                      request.capture_center_hz, request.target_frequency_hz,
-                     METHOD_REVISION, SNR_MEASUREMENT_REVISION, outcome)
+                     METHOD_REVISION, SNR_MEASUREMENT_REVISION, outcome,
+                     *_digest_policy_suffix(policy))
     product = ChannelizedProduct(
         schema=SCHEMA,
         product_id=f"chp-{hashlib.blake2s(digest.encode(), digest_size=8).hexdigest()}",
@@ -622,6 +811,16 @@ def _refuse(window: IQWindow, request: ChannelRequest, outcome: str, *,
         occupied_bandwidth_basis="NOT_MEASURED",
         occupancy_reason_code=None,
         channel_selection_basis="NOT_SELECTED",
+        # A refusal still says which lineage was asked for: a structure-channel
+        # refusal is evidence about the structure channel, not a nameless one.
+        channel_purpose=(policy.channel_purpose if policy else request.channel_purpose),
+        bandwidth_policy=(policy.bandwidth_policy if policy else "NOT_SELECTED"),
+        channel_margin=(policy.channel_margin if policy else None),
+        output_samples_per_candidate_symbol=(
+            policy.output_samples_per_candidate_symbol if policy else None),
+        configuration_revision=(policy.configuration_revision if policy else "NOT_SELECTED"),
+        candidate_symbol_rate_upper_hz=symbol_rate_upper,
+        output_samples_per_symbol_achieved=None,
         tuning_offset_hz=None,
         frequency_offset_hz=None,
         # Not attempted rather than unresolved: there is no channel to measure.
@@ -643,41 +842,47 @@ def channelize(window: IQWindow, request: ChannelRequest, *,
     epoch moved between acquisition and use is refused even though the caller
     still holds a structurally valid object with a matching digest.
     """
+    # --- the purpose selects the policy, before anything uses a width --------
+    policy = CHANNEL_POLICIES.get(request.channel_purpose)
+    if policy is None:
+        return _refuse(window, request, "UNKNOWN_CHANNEL_PURPOSE")
+
     # --- provenance, before any arithmetic -----------------------------------
     if ring is not None:
         verification = ring.verify_window(window.window_id, window.digest)
         if not verification:
             return _refuse(window, request,
                            _VERIFICATION_OUTCOMES.get(verification.reason_code,
-                                                      "SOURCE_WINDOW_UNVERIFIED"))
+                                                      "SOURCE_WINDOW_UNVERIFIED"),
+                           policy=policy)
     expected_epoch = request.expected_configuration_epoch
     if expected_epoch is not None and expected_epoch != window.configuration_epoch:
         # Checked separately from the digest: a window can be byte-identical to
         # what was issued and still belong to a configuration that has gone.
-        return _refuse(window, request, "SOURCE_WINDOW_EXPIRED")
+        return _refuse(window, request, "SOURCE_WINDOW_EXPIRED", policy=policy)
     expected_chain = request.expected_signal_chain_hash
     if expected_chain is not None and expected_chain != window.signal_chain_hash:
-        return _refuse(window, request, "SIGNAL_CHAIN_CHANGED")
+        return _refuse(window, request, "SIGNAL_CHAIN_CHANGED", policy=policy)
 
     # --- the window must describe itself consistently ------------------------
     rate = float(window.sample_rate_hz)          # measured, never from the request
     if not rate > 0 or window.sample_count <= 0:
-        return _refuse(window, request, "TIMING_QUALITY_INSUFFICIENT")
+        return _refuse(window, request, "TIMING_QUALITY_INSUFFICIENT", policy=policy)
     implied = window.sample_count / rate
     if window.duration_s <= 0 or abs(window.duration_s - implied) > implied * TIMING_TOLERANCE_RATIO:
-        return _refuse(window, request, "TIMING_QUALITY_INSUFFICIENT")
+        return _refuse(window, request, "TIMING_QUALITY_INSUFFICIENT", policy=policy)
 
     samples = np.asarray(window.samples, dtype=np.complex64)
     # Long enough to survive the filter *and* long enough to characterise. A
     # window too short for the coarse estimate is an insufficient window, not an
     # unresolvable signal, and saying the latter would blame the emitter.
     if samples.size < max(FIR_TAPS + MIN_OUTPUT_SAMPLES, COARSE_FFT_MIN):
-        return _refuse(window, request, "INSUFFICIENT_WINDOW")
+        return _refuse(window, request, "INSUFFICIENT_WINDOW", policy=policy)
 
     span_low = request.capture_center_hz - rate / 2.0
     span_high = request.capture_center_hz + rate / 2.0
     if not span_low <= request.target_frequency_hz <= span_high:
-        return _refuse(window, request, "TARGET_OUTSIDE_CAPTURE_SPAN")
+        return _refuse(window, request, "TARGET_OUTSIDE_CAPTURE_SPAN", policy=policy)
 
     # --- stage 1: coarse candidate, recorded in its own fields ---------------
     candidate = estimate_occupied_bandwidth(
@@ -687,11 +892,12 @@ def channelize(window: IQWindow, request: ChannelRequest, *,
                 and bool(candidate_bandwidth) and candidate_bandwidth > 0)
     requested_bandwidth = request.channel_bandwidth_hz
     if requested_bandwidth is not None and not requested_bandwidth > 0:
-        return _refuse(window, request, "ALIAS_RISK", candidate=candidate)
+        return _refuse(window, request, "ALIAS_RISK", candidate=candidate, policy=policy)
     if not resolved and requested_bandwidth is None:
         # No measured width and none asked for: there is nothing to cut to. This
         # is a selection failure, not a measurement one, and stays an outcome.
-        return _refuse(window, request, "OCCUPIED_BANDWIDTH_UNRESOLVED", candidate=candidate)
+        return _refuse(window, request, "OCCUPIED_BANDWIDTH_UNRESOLVED",
+                       candidate=candidate, policy=policy)
 
     # --- stage 2: selection derived from stage 1, then checked ---------------
     if requested_bandwidth is not None:
@@ -703,34 +909,73 @@ def channelize(window: IQWindow, request: ChannelRequest, *,
         selection_basis = "OPERATOR_REQUESTED_WIDTH"
     else:
         channel_center = candidate_center
-        channel_bandwidth = candidate_bandwidth * CHANNEL_MARGIN
+        channel_bandwidth = candidate_bandwidth * policy.channel_margin
         selection_basis = "DERIVED_FROM_COARSE_OCCUPANCY"
+    # The fastest symbol rate this width leaves room for. Derived from the
+    # measured occupancy when there is one, and from the requested width divided
+    # by the policy's own margin when the width was asked for -- so a caller
+    # sweeping a fixed width does not get a rate floor derived from a number the
+    # signal never justified.
+    if resolved:
+        symbol_rate_upper: Optional[float] = float(candidate_bandwidth)
+    elif policy.channel_margin > 0:
+        symbol_rate_upper = float(channel_bandwidth) / policy.channel_margin
+    else:
+        symbol_rate_upper = None
+
+    def refuse(outcome: str) -> Channelization:
+        """Every refusal from here on carries the same context. Bound once."""
+        return _refuse(window, request, outcome, candidate=candidate, policy=policy,
+                       symbol_rate_upper=symbol_rate_upper,
+                       channel_center=channel_center,
+                       channel_bandwidth=channel_bandwidth)
+
     edges = (channel_center - channel_bandwidth / 2.0, channel_center + channel_bandwidth / 2.0)
     if edges[0] < span_low or edges[1] > span_high:
-        return _refuse(window, request, "CHANNEL_EDGE_TRUNCATED", candidate=candidate,
-                       channel_center=channel_center, channel_bandwidth=channel_bandwidth)
+        return refuse("CHANNEL_EDGE_TRUNCATED")
     if (edges[0] - DC_GUARD_HZ) <= request.capture_center_hz <= (edges[1] + DC_GUARD_HZ):
-        return _refuse(window, request, "DC_CONTAMINATION", candidate=candidate,
-                       channel_center=channel_center, channel_bandwidth=channel_bandwidth)
+        return refuse("DC_CONTAMINATION")
 
     if channel_bandwidth * MIN_OVERSAMPLE > rate:
-        return _refuse(window, request, "ALIAS_RISK", candidate=candidate,
-                       channel_center=channel_center, channel_bandwidth=channel_bandwidth)
+        return refuse("ALIAS_RISK")
+
+    # The rate floor, before decimation is chosen rather than after. A policy
+    # that names samples-per-candidate-symbol is making a claim about what the
+    # output can represent, and a claim checked after the fact is an excuse.
+    required_rate = None
+    if policy.output_samples_per_candidate_symbol is not None:
+        if symbol_rate_upper is None or not symbol_rate_upper > 0:
+            return refuse("STRUCTURE_RATE_UNSATISFIABLE")
+        required_rate = policy.output_samples_per_candidate_symbol * symbol_rate_upper
+        if required_rate > rate:
+            # The capture itself cannot carry it. Nothing downstream can fix this.
+            return refuse("STRUCTURE_RATE_UNSATISFIABLE")
+
     if request.decimation is not None:
         decimation = int(request.decimation)
         if decimation < 1 or rate / decimation < channel_bandwidth * MIN_OVERSAMPLE:
-            return _refuse(window, request, "ALIAS_RISK", candidate=candidate,
-                           channel_center=channel_center, channel_bandwidth=channel_bandwidth)
+            return refuse("ALIAS_RISK")
+        if required_rate is not None and rate / decimation < required_rate:
+            # An explicit ratio is honoured only where it does not violate the
+            # policy the purpose selected. Honouring it here would produce a
+            # product that says STRUCTURE_CHANNEL and cannot hold a symbol clock.
+            return refuse("STRUCTURE_RATE_UNSATISFIABLE")
     else:
-        # Bounded by two things, not one. Nyquist sets the largest ratio that
+        # Bounded by three things, not one. Nyquist sets the largest ratio that
         # does not alias; the window length sets the largest ratio that still
-        # leaves a usable number of output samples. Taking only the first turns a
-        # narrow candidate into a 39-sample product and then reports the window
-        # as too short, which blames the wrong thing.
+        # leaves a usable number of output samples; and a purpose that names a
+        # cycle frequency sets the largest ratio that can still represent it.
+        # Taking only the first turns a narrow candidate into a 39-sample product
+        # and then reports the window as too short, which blames the wrong thing.
         by_nyquist = max(1, int(math.floor(rate / (channel_bandwidth * MIN_OVERSAMPLE))))
         by_length = max(1, (samples.size - FIR_TAPS + 1) // MIN_OUTPUT_SAMPLES)
-        decimation = min(by_nyquist, by_length)
+        # A third bound, for a purpose that has to represent a cycle frequency.
+        by_cycle = (max(1, int(math.floor(rate / required_rate)))
+                    if required_rate is not None else by_nyquist)
+        decimation = min(by_nyquist, by_length, by_cycle)
     output_rate = rate / decimation
+    achieved_sps = (output_rate / symbol_rate_upper
+                    if symbol_rate_upper and symbol_rate_upper > 0 else None)
 
     # --- DDC, filter, decimate ----------------------------------------------
     tuning_offset = channel_center - request.capture_center_hz
@@ -744,8 +989,7 @@ def channelize(window: IQWindow, request: ChannelRequest, *,
     transient_discarded = samples.size - filtered.size
     decimated = np.ascontiguousarray(filtered[::decimation], dtype=np.complex64)
     if decimated.size < MIN_OUTPUT_SAMPLES:
-        return _refuse(window, request, "INSUFFICIENT_WINDOW", candidate=candidate,
-                       channel_center=channel_center, channel_bandwidth=channel_bandwidth)
+        return refuse("INSUFFICIENT_WINDOW")
     decimated.setflags(write=False)
 
     # --- measurements on the product ----------------------------------------
@@ -757,7 +1001,8 @@ def channelize(window: IQWindow, request: ChannelRequest, *,
                      window.signal_chain_hash, request.capture_center_hz,
                      request.target_frequency_hz, round(channel_center, 3),
                      round(channel_bandwidth, 3), decimation, FIR_DESIGN, FIR_TAPS,
-                     METHOD_REVISION, SNR_MEASUREMENT_REVISION, "CHANNELIZED")
+                     METHOD_REVISION, SNR_MEASUREMENT_REVISION, "CHANNELIZED",
+                     *_digest_policy_suffix(policy))
     product = ChannelizedProduct(
         schema=SCHEMA,
         product_id=f"chp-{hashlib.blake2s(digest.encode(), digest_size=8).hexdigest()}",
@@ -785,6 +1030,14 @@ def channelize(window: IQWindow, request: ChannelRequest, *,
                                   else "NOT_RESOLVED"),
         occupancy_reason_code=occupancy_reason,
         channel_selection_basis=selection_basis,
+        channel_purpose=policy.channel_purpose,
+        bandwidth_policy=policy.bandwidth_policy,
+        channel_margin=policy.channel_margin,
+        output_samples_per_candidate_symbol=policy.output_samples_per_candidate_symbol,
+        configuration_revision=policy.configuration_revision,
+        candidate_symbol_rate_upper_hz=symbol_rate_upper,
+        output_samples_per_symbol_achieved=(round(achieved_sps, 4)
+                                            if achieved_sps is not None else None),
         tuning_offset_hz=tuning_offset,
         frequency_offset_hz=carrier_offset_hz,
         **snr,
@@ -974,18 +1227,29 @@ def recompute_product_digest(product: ChannelizedProduct) -> str:
     Every input is a field on the record, so a holder can check the binding
     without the window, the ring or the request that produced it.
     """
+    # The policy suffix has to be rebuilt here too, from the product's own
+    # fields rather than from the registry: a product cut under a policy this
+    # build no longer defines must still be able to prove its own digest.
+    suffix = _digest_policy_suffix(ChannelPolicy(
+        channel_purpose=product.channel_purpose,
+        bandwidth_policy=product.bandwidth_policy,
+        channel_margin=(product.channel_margin if product.channel_margin is not None
+                        else 0.0),
+        configuration_revision=product.configuration_revision,
+        output_samples_per_candidate_symbol=product.output_samples_per_candidate_symbol,
+    )) if product.bandwidth_policy != "NOT_SELECTED" else ()
     if product.outcome != "CHANNELIZED":
         return _digest(SCHEMA, product.source_window_id, product.source_window_digest,
                        product.configuration_epoch, product.center_frequency_hz,
                        product.target_frequency_hz, product.method_revision,
-                       product.snr_measurement_revision, product.outcome)
+                       product.snr_measurement_revision, product.outcome, *suffix)
     return _digest(SCHEMA, product.source_window_id, product.source_window_digest,
                    product.configuration_epoch, product.signal_chain_hash,
                    product.center_frequency_hz, product.target_frequency_hz,
                    round(product.channel_center_hz, 3),
                    round(product.channel_bandwidth_hz, 3), product.decimation,
                    product.fir_design, product.fir_taps, product.method_revision,
-                   product.snr_measurement_revision, "CHANNELIZED")
+                   product.snr_measurement_revision, "CHANNELIZED", *suffix)
 
 
 def product_digest_valid(product: ChannelizedProduct) -> bool:
@@ -1009,6 +1273,27 @@ def channelizer_status() -> Dict[str, Any]:
         "amplitude_normalization": "NONE",
         "min_oversample": MIN_OVERSAMPLE,
         "channel_margin": CHANNEL_MARGIN,
+        "default_channel_purpose": DEFAULT_CHANNEL_PURPOSE,
+        "channel_policies": {name: policy.to_dict()
+                             for name, policy in CHANNEL_POLICIES.items()},
+        "channel_purpose_note": (
+            "THE MEASUREMENT CHANNEL'S 1.25x MARGIN IS FROZEN AND ITS DIGEST "
+            "FORMULA IS UNCHANGED, SO ITS PRODUCTS STAY COMPARABLE. THE STRUCTURE "
+            "CHANNEL IS A SEPARATE LINEAGE WITH ITS OWN CONFIGURATION REVISION "
+            "AND ITS OWN DIGEST INPUTS. THE TWO DO NOT POOL"
+        ),
+        "structure_channel_margin_status": STRUCTURE_CHANNEL_MARGIN_STATUS,
+        "structure_channel_margin_selected_at": STRUCTURE_CHANNEL_MARGIN_SELECTED_AT,
+        "structure_channel_margin_note": (
+            "SELECTED BY A 6,480-CELL SWEEP AGAINST CRITERIA DECLARED BEFORE THE "
+            "RUN, SCORED ONLY ON THE 799 CELLS WHERE A WIDE REFERENCE ACTUALLY "
+            "FOUND THE SYMBOL CLOCK. 2.0 IS THE NARROWEST MARGIN MEETING ALL "
+            "THREE, AND THE CHEAPEST OF THOSE THAT DO: 0.01 dB ADJACENT-CHANNEL "
+            "CONTAMINATION AGAINST 0.23 dB AT 3.0. SELECTION USED DEVELOPMENT "
+            "DATA ONLY AND THE PROMOTION CORPUS IS STILL UNOPENED, SO IT DOES NOT "
+            "ENLARGE THE VALIDATION FAMILY"
+        ),
+        "structure_channel_margin_caveats": dict(STRUCTURE_CHANNEL_MARGIN_CAVEATS),
         "occupancy_floor_db": OCCUPANCY_FLOOR_DB,
         "outcomes": dict(OUTCOMES),
         "refusal_outcomes": list(REFUSAL_OUTCOMES),

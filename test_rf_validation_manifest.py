@@ -1,13 +1,15 @@
 """Q4 is a bound, not a fraction, and this is what that costs in trials."""
 
 import unittest
+from dataclasses import replace
 
+import rf_symbol_clock
 from rf_validation_manifest import (
     CONFIDENCE, MAX_FALSE_DIGITAL_RATE, MINIMUM_TRIALS_FOR_ZERO_FAILURES,
     MINIMUM_TRIALS_FOR_ZERO_FAILURES_CORRECTED, PER_BOUND_ALPHA,
     PER_BOUND_CONFIDENCE, STRATA, STRATUM_KEYS, TARGET_TOTAL_NULL_WINDOWS,
-    TESTED_BOUND_COUNT, clopper_pearson_upper, evaluate, freeze_promotion_corpus,
-    manifest_status, wilson_upper,
+    TESTED_BOUND_COUNT, clopper_pearson_upper, evaluate, family_manifest,
+    freeze_promotion_corpus, manifest_status, wilson_upper,
 )
 
 
@@ -190,6 +192,95 @@ class DeclarationTests(unittest.TestCase):
 
     def test_the_rule_is_the_bound_and_says_so(self):
         self.assertIn("UPPER_CONFIDENCE_BOUND", manifest_status()["rule"])
+
+
+class FamilyManifestTests(unittest.TestCase):
+    """Membership is fixed before trials begin, and covers only what can promote."""
+
+    def test_the_family_has_thirteen_members(self):
+        manifest = family_manifest()
+        self.assertEqual(manifest["validation_family_revision"], "rf-digital-q4.v1")
+        self.assertEqual(manifest["member_count"], 13)
+        self.assertEqual(manifest["members"][0], "aggregate")
+        self.assertEqual(manifest["tested_bound_count"], 13)
+        self.assertAlmostEqual(manifest["per_bound_alpha"], 0.003846153846, places=10)
+        self.assertEqual(manifest["minimum_zero_failure_trials_per_bound"], 5561)
+
+    def test_membership_is_derived_from_the_strata_not_transcribed(self):
+        """A hand-written list would be a second source of truth for the one
+        thing that may not drift."""
+        self.assertEqual(family_manifest()["members"][1:], list(STRATUM_KEYS))
+
+    def test_only_the_structure_channel_may_produce_the_promoted_claim(self):
+        """Bonferroni covers eligible claims, not every provenance dimension."""
+        manifest = family_manifest()
+        self.assertEqual(manifest["channel_purpose_eligible_for_promotion"],
+                         "STRUCTURE_CHANNEL")
+        self.assertEqual(manifest["measurement_channel_verdict_production"],
+                         "PROHIBITED")
+        # And the prohibition is real, not just declared here.
+        self.assertEqual(rf_symbol_clock.ELIGIBLE_CHANNEL_PURPOSE, "STRUCTURE_CHANNEL")
+
+    def test_channel_purpose_aggregates_were_not_added(self):
+        """The count stays at 13 because only one lineage can emit the claim."""
+        self.assertEqual(TESTED_BOUND_COUNT, 13)
+        self.assertNotIn("MEASUREMENT_CHANNEL", family_manifest()["members"])
+
+    def test_the_review_vocabulary_maps_onto_the_corpus_keys(self):
+        aliases = family_manifest()["member_aliases"]
+        self.assertEqual(aliases["THERMAL_NOISE"], "THERMAL_NO_INPUT")
+        self.assertEqual(aliases["ANALOGUE_FM"], "STATIONARY_ANALOGUE_FM")
+        for corpus_key in aliases.values():
+            self.assertIn(corpus_key, STRATUM_KEYS)
+
+    def test_selection_before_the_corpus_does_not_enlarge_the_family(self):
+        rule = family_manifest()["selection_rule"]
+        self.assertIn("DOES NOT ENLARGE", rule["SELECTED_BEFORE_CORPUS_OPENED"])
+        self.assertIn("ENLARGES THE FAMILY",
+                      rule["SELECTED_AGAINST_THE_PROMOTION_CORPUS"])
+
+    def test_every_expansion_trigger_is_a_second_promotable_path(self):
+        triggers = family_manifest()["expansion_triggers"]
+        self.assertEqual(len(triggers), 6)
+        self.assertIn("MULTIPLE_STRUCTURE_CHANNEL_MARGINS_INDEPENDENTLY_PROMOTABLE",
+                      triggers)
+
+
+class FamilyLockTests(unittest.TestCase):
+    """The lock notices a family rewritten without changing size."""
+
+    def _lock(self, **overrides):
+        lock = freeze_promotion_corpus(
+            corpus_id="c-1", method_revision="squared-envelope-cyclic.v1",
+            decision_threshold=2.5, preprocessing_revision="rf-channelizer-fir.v1",
+            opened_at=1000.0)
+        return replace(lock, **overrides) if overrides else lock
+
+    def _configuration(self):
+        return {"method_revision": "squared-envelope-cyclic.v1",
+                "decision_threshold": 2.5,
+                "preprocessing_revision": "rf-channelizer-fir.v1"}
+
+    def test_a_matching_lock_is_frozen(self):
+        result = evaluate({key: (6_000, 0) for key in STRATUM_KEYS},
+                          lock=self._lock(), configuration=self._configuration())
+        self.assertEqual(result["corpus_state"], "FROZEN")
+
+    def test_a_family_rewritten_at_the_same_size_is_caught(self):
+        """Thirteen bounds over different members is a different family."""
+        result = evaluate({key: (6_000, 0) for key in STRATUM_KEYS},
+                          lock=self._lock(validation_family_revision="rf-digital-q4.v2"),
+                          configuration=self._configuration())
+        self.assertEqual(result["corpus_state"], "FAMILY_REVISION_CHANGED_AFTER_FREEZE")
+        self.assertFalse(result["promotes"])
+
+    def test_a_second_eligible_lineage_is_caught(self):
+        """Thirteen bounds do not cover fourteen chances at one threshold."""
+        result = evaluate({key: (6_000, 0) for key in STRATUM_KEYS},
+                          lock=self._lock(eligible_channel_purpose="MEASUREMENT_CHANNEL"),
+                          configuration=self._configuration())
+        self.assertEqual(result["corpus_state"], "ELIGIBLE_PURPOSE_CHANGED_AFTER_FREEZE")
+        self.assertFalse(result["promotes"])
 
 
 if __name__ == "__main__":

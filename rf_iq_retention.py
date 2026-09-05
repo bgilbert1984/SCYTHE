@@ -107,8 +107,10 @@ from typing import Any, Dict, Optional
 
 import numpy as np
 
-from rf_channelizer import ChannelRequest, ChannelizedProduct, channelize
+from rf_channelizer import (ChannelRequest, ChannelizedProduct, channelize,
+                            channelizer_status)
 from rf_detector_contract import contract_status
+from rf_receiver_state import receiver_state_status
 from rf_symbol_clock import detector_status
 from rf_validation_manifest import manifest_status
 from rf_iq_ring import (
@@ -167,6 +169,50 @@ WIRED_REASON_SOURCES = {
     "GAIN_CHANGE": "IQRetentionOwner.set_gain_db, called by SDRPPBridge.set_gain",
     "CLOCK_DISCONTINUITY": "ClockContinuityMonitor, on every append",
 }
+# Direct sampling, declared as absent rather than made to look handled.
+#
+# The invalidation reason exists and is deliberately left unwired: manufacturing
+# a control so the warning list comes out empty would be the wrong repair, and
+# the empty list would then be the lie. What is published instead is the shape
+# of the gap -- there is no control, the regime is assumed rather than attested,
+# and the wiring is a precondition for the control, not a follow-up to it.
+#
+# The regime's authority matters. SCYTHE does not start rtl_tcp and cannot see
+# its arguments, so `TUNER_QUADRATURE` is inferred from an R820T being present
+# and no direct-sampling control existing here. That is an assumption, and it is
+# labelled as one. It is therefore NOT promoted into the hashed signal-chain
+# manifest, which still carries `direct_sampling: UNDECLARED`; promoting an
+# assumption into the instrument's identity would advance the chain hash on the
+# strength of a guess.
+# The field order is the point. `ASSUMED_FROM_ABSENT_CONTROL` was honest, but
+# `TUNER_QUADRATURE` still read as the primary fact once a UI or a log collector
+# flattened the object. The state leads with UNDECLARED -- which is what is
+# actually known -- and the expectation is subordinate to it, in a field whose
+# name says it is an expectation.
+#
+# An installed R820T does not prove the active stream uses it. SCYTHE does not
+# start rtl_tcp and cannot see its arguments, so there is no runtime attestation
+# to have, and that absence is published rather than left to be noticed.
+DIRECT_SAMPLING_STATE = "UNDECLARED"
+DIRECT_SAMPLING_CONTROL = "NOT_IMPLEMENTED"
+EXPECTED_CAPTURE_REGIME = "TUNER_QUADRATURE"
+EXPECTED_REGIME_AUTHORITY = "INFERRED_FROM_CONFIGURATION"
+DIRECT_SAMPLING_RUNTIME_ATTESTATION = "UNAVAILABLE"
+DIRECT_SAMPLING_INVALIDATION_WIRING = "REQUIRED_BEFORE_CONTROL_ENABLEMENT"
+# The transaction a direct-sampling control would have to be, written down
+# before one exists so that it is a specification rather than a retrofit. The
+# order is the whole content: changing the regime while a ring holds samples
+# captured under the previous one produces a window that cannot be described.
+DIRECT_SAMPLING_TRANSACTION = (
+    "STOP_CAPTURE",
+    "INVALIDATE_AND_DISCARD_RING",
+    "CHANGE_REGIME",
+    "ADVANCE_SIGNAL_CHAIN_MANIFEST_AND_HASH",
+    "REBUILD_CHANNELIZER_CONFIGURATION",
+    "RECONNECT",
+    "REFUSE_COMPARISON_WITH_TUNER_QUADRATURE_PRODUCTS",
+)
+
 MAX_INVALIDATION_HISTORY = 16
 UNWIRED_NOTE = (
     "THIS BRIDGE HAS NO DIRECT-SAMPLING CONTROL, SO NOTHING CALLS "
@@ -285,7 +331,23 @@ class ClockContinuityMonitor:
             "check_interval_s": self._interval,
             "drift_tolerance": self._tolerance,
             "gap_limit_s": self._gap_s,
-            "discontinuities": self._discontinuities,
+            "detected_discontinuities": self._discontinuities,
+            # "ZERO_DETECTED_DISCONTINUITIES", never "zero discontinuities".
+            # This monitor compares a sample count against elapsed wall time over
+            # a 10 s interval. rtl_tcp hands over a byte stream with no per-sample
+            # attestation, so a loss small enough to stay inside the drift
+            # tolerance leaves no trace here at all. What is being reported is
+            # the detector's finding, and the detector's coverage is bounded.
+            "continuity_claim": ("ZERO_DETECTED_DISCONTINUITIES"
+                                 if self._discontinuities == 0
+                                 else "DISCONTINUITIES_DETECTED"),
+            "detection_coverage": "BOUNDED_BY_DRIFT_TOLERANCE_AND_CHECK_INTERVAL",
+            "coverage_note": (
+                "DETECTION COVERAGE IS NOT OMNISCIENCE. A SAMPLE LOSS SMALLER "
+                "THAN THE DRIFT TOLERANCE OVER ONE CHECK INTERVAL IS NOT "
+                "OBSERVABLE BY THIS DETECTOR, AND rtl_tcp PROVIDES NO PER-SAMPLE "
+                "ATTESTATION AGAINST WHICH ONE COULD BE"
+            ),
             "last_discontinuity": self._last_detail,
         }
 
@@ -729,6 +791,7 @@ class IQRetentionOwner:
         with self._lock:
             capacity = self._capacity()
             remaining = max(0, capacity - self._samples_since_window) if self._ring else capacity
+            channelizer = channelizer_status()
             return {
                 "state": CHANNELIZER_STATE,
                 "note": CHANNELIZER_NOTE,
@@ -739,6 +802,18 @@ class IQRetentionOwner:
                 "channelizer_errors": self._channelizer_errors,
                 "samples_until_next_window": remaining,
                 "classification": "NOT_DERIVED_FROM_PRODUCTS",
+                # The channel purposes and their width and rate policies. A
+                # declaration nobody can read is not a declaration, and until
+                # this was wired the whole measurement/structure split was
+                # invisible in the payload the operator actually looks at.
+                "channel_configuration": {
+                    # Every key the channelizer declares about channel
+                    # purpose, so a new declaration reaches the payload without
+                    # a second list here needing to be remembered.
+                    key: value for key, value in channelizer.items()
+                    if key.startswith(("channel_p", "structure_channel_",
+                                       "default_channel_"))
+                },
                 "baseband_retained": False,
                 "last_product": self._products[-1] if self._products else None,
                 # Frozen before the detector exists, so it constrains the detector
@@ -749,6 +824,10 @@ class IQRetentionOwner:
                 # The Q4 gate, executable and uncollected. Declared here so the
                 # promotion rule is readable beside the products it will judge.
                 "false_digital_gate": manifest_status(),
+                # Declared before anything collects one, for the same reason the
+                # detector contract was: a contract published after the thing it
+                # constrains is a description, not a constraint.
+                "receiver_state_contract": receiver_state_status(),
             }
 
     # -- published metadata -------------------------------------------------
@@ -783,6 +862,23 @@ class IQRetentionOwner:
                 "permitted": self._enabled and self._owns_capture and not self._refused_reason,
                 "appended_blocks": self._appended_blocks,
                 "invalidation_reasons": list(INVALIDATION_REASONS),
+                "direct_sampling": {
+                    # UNDECLARED first: it is the state, and everything below it
+                    # is subordinate to it by name as well as by position.
+                    "direct_sampling": DIRECT_SAMPLING_STATE,
+                    "expected_capture_regime": EXPECTED_CAPTURE_REGIME,
+                    "expected_regime_authority": EXPECTED_REGIME_AUTHORITY,
+                    "runtime_attestation": DIRECT_SAMPLING_RUNTIME_ATTESTATION,
+                    "control": DIRECT_SAMPLING_CONTROL,
+                    "invalidation_wiring": DIRECT_SAMPLING_INVALIDATION_WIRING,
+                    "attestation_note": (
+                        "AN INSTALLED R820T DOES NOT PROVE THE ACTIVE STREAM USES "
+                        "IT. SCYTHE DOES NOT START rtl_tcp AND CANNOT SEE ITS "
+                        "ARGUMENTS, SO THE EXPECTED REGIME IS INFERRED FROM "
+                        "CONFIGURATION AND IS NOT IN THE HASHED SIGNAL CHAIN"
+                    ),
+                    "control_transaction": list(DIRECT_SAMPLING_TRANSACTION),
+                },
                 "unwired_invalidation_reasons": list(UNWIRED_REASONS),
                 "unwired_invalidation_note": UNWIRED_NOTE,
                 "wired_invalidation_sources": dict(WIRED_REASON_SOURCES),

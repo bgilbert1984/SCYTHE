@@ -347,11 +347,11 @@ class LifecycleTests(EnvironmentIsolatedTest):
         """Samples either side of a gap are not contiguous, whatever the count says."""
         owner = _owner()
         owner.append(_samples(), 1.0)
-        self.assertEqual(owner.status()["clock_continuity"]["discontinuities"], 0)
+        self.assertEqual(owner.status()["clock_continuity"]["detected_discontinuities"], 0)
         # A gap far longer than a stream at this rate can be silent.
         owner.append(_samples(), 1.0 + CLOCK_GAP_S + 5.0)
         status = owner.status()
-        self.assertEqual(status["clock_continuity"]["discontinuities"], 1)
+        self.assertEqual(status["clock_continuity"]["detected_discontinuities"], 1)
         self.assertEqual(status["clock_continuity"]["last_discontinuity"]["kind"], "GAP")
         self.assertEqual(status["invalidation_history"][-1]["reason"],
                          "CLOCK_DISCONTINUITY")
@@ -366,7 +366,7 @@ class LifecycleTests(EnvironmentIsolatedTest):
             # Alternating +/-4% arrival jitter, cumulatively near zero.
             at += per_block * (1.04 if index % 2 else 0.96)
             owner.append(block, at)
-        self.assertEqual(owner.status()["clock_continuity"]["discontinuities"], 0)
+        self.assertEqual(owner.status()["clock_continuity"]["detected_discontinuities"], 0)
 
 
 class BridgeIntegrationTests(EnvironmentIsolatedTest):
@@ -476,6 +476,89 @@ class BridgeIntegrationTests(EnvironmentIsolatedTest):
         payload = json.dumps(bridge.status()["iq_retention"])
         self.assertNotIn("1234", payload)
         self.assertIn('"raw_iq_exposed": false', payload)
+
+
+class DetectionCoverageTests(EnvironmentIsolatedTest):
+    """What the monitor found, not what is true of the stream."""
+
+    def test_a_quiet_stream_reports_zero_detected_discontinuities(self):
+        """Not "zero discontinuities". The monitor is not the arbiter of truth."""
+        owner = _owner()
+        owner.append(_samples(), 1.0)
+        continuity = owner.status()["clock_continuity"]
+        self.assertEqual(continuity["continuity_claim"], "ZERO_DETECTED_DISCONTINUITIES")
+        self.assertEqual(continuity["detected_discontinuities"], 0)
+        self.assertEqual(continuity["detection_coverage"],
+                         "BOUNDED_BY_DRIFT_TOLERANCE_AND_CHECK_INTERVAL")
+        self.assertIn("NOT OMNISCIENCE", continuity["coverage_note"])
+
+    def test_the_claim_changes_when_something_is_detected(self):
+        owner = _owner()
+        owner.append(_samples(), 1.0)
+        owner.append(_samples(), 1.0 + CLOCK_GAP_S + 5.0)
+        self.assertEqual(owner.status()["clock_continuity"]["continuity_claim"],
+                         "DISCONTINUITIES_DETECTED")
+
+
+class DirectSamplingDeclarationTests(EnvironmentIsolatedTest):
+    """The gap is published rather than papered over."""
+
+    def _direct(self):
+        return _owner().status()["direct_sampling"]
+
+    def test_the_state_leads_and_the_expectation_is_subordinate(self):
+        """A flattened log must not be able to read the expectation as the fact.
+
+        The first version published `direct_sampling_regime: TUNER_QUADRATURE`
+        beside an authority field. Every word was true and the regime still read
+        as the primary claim once a UI dropped the qualifier.
+        """
+        direct = self._direct()
+        self.assertEqual(direct["direct_sampling"], "UNDECLARED")
+        self.assertEqual(direct["expected_capture_regime"], "TUNER_QUADRATURE")
+        self.assertEqual(direct["expected_regime_authority"],
+                         "INFERRED_FROM_CONFIGURATION")
+        # Naming, not position, is what actually defends this. The status route
+        # serialises with sorted keys, so the object arrives alphabetically and
+        # `attestation_note` leads on the wire whatever order it was built in.
+        # Every field that is not the state therefore has to say what it is in
+        # its own name -- "expected_", not "regime" -- because a reader that
+        # reaches for the first plausible key must land on a qualified one.
+        for key in direct:
+            if key in ("direct_sampling", "control", "control_transaction",
+                       "invalidation_wiring", "runtime_attestation",
+                       "attestation_note"):
+                continue
+            self.assertTrue(key.startswith("expected_"), key)
+
+    def test_no_runtime_attestation_is_claimed(self):
+        """An installed R820T does not prove the active stream uses it."""
+        self.assertEqual(self._direct()["runtime_attestation"], "UNAVAILABLE")
+
+    def test_the_absent_control_is_declared_absent(self):
+        direct = self._direct()
+        self.assertEqual(direct["control"], "NOT_IMPLEMENTED")
+        self.assertEqual(direct["invalidation_wiring"],
+                         "REQUIRED_BEFORE_CONTROL_ENABLEMENT")
+        self.assertIn("DIRECT_SAMPLING_CHANGE",
+                      _owner().status()["unwired_invalidation_reasons"])
+
+    def test_the_expectation_did_not_reach_the_hashed_manifest(self):
+        """Promoting an inference into the instrument's identity would move the hash."""
+        status = _owner().status()
+        self.assertEqual(status["signal_chain"]["direct_sampling"], "UNDECLARED")
+        self.assertEqual(status["direct_sampling"]["direct_sampling"], "UNDECLARED")
+
+    def test_the_control_transaction_is_specified_before_it_exists(self):
+        """The order is the content: the ring is discarded before the regime moves."""
+        steps = self._direct()["control_transaction"]
+        self.assertEqual(steps[0], "STOP_CAPTURE")
+        self.assertLess(steps.index("INVALIDATE_AND_DISCARD_RING"),
+                        steps.index("CHANGE_REGIME"))
+        self.assertLess(steps.index("CHANGE_REGIME"),
+                        steps.index("ADVANCE_SIGNAL_CHAIN_MANIFEST_AND_HASH"))
+        self.assertEqual(steps[-1],
+                         "REFUSE_COMPARISON_WITH_TUNER_QUADRATURE_PRODUCTS")
 
 
 if __name__ == "__main__":

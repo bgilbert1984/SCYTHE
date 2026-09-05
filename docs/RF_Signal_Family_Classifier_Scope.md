@@ -1057,10 +1057,359 @@ FIR and contract, metamorphic (amplitude scaling, phase rotation, time
 translation and frequency offset must not change the verdict), and adversarial
 (constant-envelope digital, DC spike, clipping harmonics, retune transient,
 analogue FM with periodic content, periodic buffer artefact, sloping spectrum).
-Defects 1, 3 and 4 above were found by layers 1 and 2; the stopband-SNR defect
-that preceded them would have been found by layer 4. That is the lesson being
-carried: the previous suite checked that `_measure` was called and that its
-outputs were plumbed, and never once asked whether the number was right.
+Defects 1, 3 and 4 above were found by layers 1 and 2. The stopband-SNR defect
+that preceded them would have been caught most directly by **layer 1** — a
+ground-truth oracle asking whether a synthetic 20 dB channel reads 20 dB — and
+would also have been caught by layer 4, since "filter skirts" is on the
+adversarial list. Layer 3 caught nothing, which is itself a result: metamorphic
+invariance says the statistic behaves consistently under transformation, and a
+number that is consistently wrong satisfies it perfectly.
+
+Worth noting separately: three of the four new defects were in *declared
+constants* — a threshold, a minimum sample count, a margin — not in logic. Every
+one of them was a number registered against no implementation, or measured once
+and generalised. That is why freezing the strata set alongside the threshold in
+`PromotionCorpusLock` matters more than it first appeared: the constants are
+where the unexamined claims live.
+
+That is the lesson being carried: the previous suite checked that `_measure` was
+called and that its outputs were plumbed, and never once asked whether the
+number was right.
+
+### 5.13 The channel that measures and the channel that analyses are not the same channel
+
+The 50 kBd measurement in §5.12 — cyclic statistic `56.07` unchannelized,
+`1.38` through the production channel — is not attenuation. The channelizer had
+removed the feature the detector exists to find. The squared-envelope timing
+line only exists because the pulse has **excess bandwidth**, and excess
+bandwidth is exactly the spectral shoulder that a channel cut snug to a −20 dB
+occupancy estimate puts into the FIR skirt.
+
+The wrong repair is to move `CHANNEL_MARGIN`. Products already published under
+the measurement lineage are comparable with each other; a margin chosen to help
+a detector would retroactively change what every occupancy and SNR figure meant,
+and it would do so silently, because the digest inputs would not have changed
+shape.
+
+**Two purposes, two lineages.**
+
+| Product | Purpose | Width policy | Margin |
+| --- | --- | --- | --- |
+| `MEASUREMENT_CHANNEL` | occupancy, centroid, local SNR | `OCCUPANCY_FITTED_V1` | 1.25, **frozen** |
+| `STRUCTURE_CHANNEL` | symbol-clock / cyclostationary analysis | `CYCLIC_STRUCTURE_PRESERVING_V1` | provisional, sweep-selected |
+
+`ChannelRequest.channel_purpose` defaults to `MEASUREMENT_CHANNEL`, so an
+existing caller gets the product it already got. The measurement lineage's
+**digest formula is frozen**: its digest inputs end exactly where they ended,
+verified by re-running the pre-change module against the post-change one on the
+same window and comparing byte for byte (`chp-bb3edd31e79682a9` both sides). Any
+other purpose appends its policy to the digest, which is what stops the two
+lineages pooling — same window, same width, different purpose, different digest.
+
+**The other half of the murder.** A wide input filter followed by aggressive
+decimation destroys the cyclic feature just as thoroughly as a narrow filter,
+and leaves cleaner paperwork: the channel width in the product looks generous
+while the output rate cannot represent the cycle frequency at all. The
+squared-envelope line sits at `α = R`, so the structure channel declares
+`output_samples_per_candidate_symbol = 4.0` and the rate floor is checked
+*before* decimation is chosen. A request that violates it is refused with
+`STRUCTURE_RATE_UNSATISFIABLE`, never quietly delivered.
+
+The floor is derived from the **measured** occupancy, not the requested width.
+Deriving it from the request would let a caller lower the floor by asking for a
+narrow channel — the requirement would then be a restatement of the request
+rather than a fact about what the signal needs.
+
+**The purpose reaches the verdict.** `NO_SYMBOL_CLOCK` from a measurement
+channel is close to uninformative; the same outcome from a structure channel is
+evidence. `rf_detector_contract.channel_purpose()` returns
+`CHANNEL_PURPOSE_UNDECLARED` for a product that predates the split rather than
+assuming the answer, and every `SymbolClockVerdict` carries it. Phase 3 must
+stratify on it, which changes the tested bound count — the arithmetic is
+computed in `PENDING_AMENDMENTS` and deliberately **not adopted**, because the
+family is not that module's to redefine and a bound count that drifts while
+nobody is looking is what `PromotionCorpusLock` exists to catch.
+
+**Selecting the width from evidence.** `tools/rf_structure_channel_sweep.py`
+runs the grid the review specified — margin × symbol rate × roll-off × SNR ×
+offset × neighbours, 6,480 cells — through the production `channelize` on a real
+`BoundedIQRing` window, with each candidate margin injected as a real
+`ChannelPolicy`. A sweep that reimplemented the filter would be measuring the
+sweep.
+
+Two things had to be fixed in the harness before it measured anything, and both
+are worth keeping:
+
+*The reference was committing the fault under test.* The first version mixed to
+baseband and decimated with **no** anti-alias filter, which folds the whole
+2.048 MHz of noise into the output band and drives the reference statistic down.
+Retention against that reference is not conservative, it is meaningless. The
+reference is now a *wide channel* — 6× occupancy, capped per cell by Nyquist, by
+the span edge and by the distance to DC, with the margin actually used published
+so a cell whose reference could not clear the widest margin under test is
+excluded rather than quietly averaged in.
+
+*The first run answered the wrong question.* It requested `theoretical occupancy
+× margin` and concluded that margin 1.25 **retains 166%** of the reference
+statistic — while the production path at the same margin had been measured at
+1.38 from 56.07. Both numbers were right. In production the margin multiplies
+the **measured** occupancy, and the −20 dB walk closes inside the brick wall:
+59.75 kHz measured against 69.1 kHz true for a 50 kBd β=0.35 signal, a ratio of
+0.865. Requesting the theoretical width had silently removed the underestimate
+that caused the problem. The margin is not the only term:
+
+```
+flat coverage = margin × (measured occupancy / true occupied) × 0.85
+```
+
+where 0.85 is `PASSBAND_REFERENCE_FRACTION`, the point at which the shipped FIR
+is still flat. For that 50 kBd signal, margin 1.25 gives 0.918 — the flat
+passband covers 92% of the signal and the shoulders carrying the timing line are
+in the skirt. Margin 2.0 gives 1.47. **It is flat coverage, not margin, that
+decides whether the feature survives**, and a margin chosen without the
+occupancy underestimate beside it is a number chosen against the wrong variable.
+
+*And the report was reading noise as evidence.* Retention is only defined where
+there was something to retain. A β = 0 sinc has no excess bandwidth and so no
+timing line; a −10 dB cell has a reference measuring noise. In both, the ratio of
+two noise statistics sits near 1.0, and the first pass over 6,480 cells duly
+concluded that the margin does not matter. The report now conditions on the
+reference having found the true symbol clock, and states that condition in its
+own output.
+
+**The family stays at thirteen.** Channel-purpose aggregates were considered
+and rejected on a structural argument, not an arithmetic one. The two lineages
+are not two populations from which SCYTHE independently makes DIGITAL claims: a
+measurement channel is cut for occupancy, centroid and SNR and cannot produce an
+information-structure verdict at all. Bonferroni must cover the inferential
+claims *eligible for promotion*, not every implementation dimension that appears
+in provenance.
+
+That argument holds only while exactly one lineage is eligible, so the
+prohibition is enforced rather than assumed. `rf_symbol_clock.detect()` refuses a
+verdict from any purpose other than `STRUCTURE_CHANNEL` — before any arithmetic —
+with the outcome `CHANNEL_PURPOSE_NOT_ELIGIBLE` and axis value `NOT_ATTEMPTED`.
+A measurement channel is still **admitted**: the contract's admission rule is
+unchanged and still reads only `transformation.outcome`. It is admitted and then
+refused a verdict, on the ground that it was never eligible for one. An
+undeclared purpose is refused for the same reason — eligibility is a declaration,
+not a default.
+
+```json
+{
+  "validation_family_revision": "rf-digital-q4.v1",
+  "simultaneous_control": "BONFERRONI",
+  "family_alpha": 0.05,
+  "tested_bound_count": 13,
+  "per_bound_alpha": 0.003846153846,
+  "minimum_zero_failure_trials_per_bound": 5561,
+  "channel_purpose_eligible_for_promotion": "STRUCTURE_CHANNEL",
+  "measurement_channel_verdict_production": "PROHIBITED"
+}
+```
+
+Membership is **derived from `STRATA`**, not transcribed beside it: a
+hand-written list would be a second source of truth for the one thing that may
+not drift. The review named its members in operator vocabulary and the corpus
+contract keys them differently in four places (`THERMAL_NOISE` →
+`THERMAL_NO_INPUT`, `ANALOGUE_FM` → `STATIONARY_ANALOGUE_FM`, `ANALOGUE_AM` →
+`AM`, `OVERLOADED_CLIPPED_INPUT` → `OVERLOADED_CLIPPED`); the corpus keys are
+canonical because those are what a labelled window carries, and the mapping is
+published so the correspondence can be audited rather than assumed.
+
+`PromotionCorpusLock` now freezes the family revision and the eligible purpose
+alongside the bound count, and `_corpus_state` reports
+`FAMILY_REVISION_CHANGED_AFTER_FREEZE` and `ELIGIBLE_PURPOSE_CHANGED_AFTER_FREEZE`.
+A bound count of 13 would not notice a family whose *membership* was rewritten at
+the same size, and thirteen bounds do not cover fourteen chances at one
+threshold.
+
+**Six triggers would enlarge the family**, each of them a second path allowed to
+emit the promoted claim: multiple structure-channel margins, multiple FIR
+revisions, multiple threshold variants, alternate preprocessing paths, separate
+detector decisions from measurement channels, or multiple methods each allowed to
+emit it. And the selection rule is recorded explicitly: freezing one structure
+configuration against development data and opening the corpus afterwards does not
+enlarge the family, because only one hypothesis ever meets the corpus. Running
+several configurations against the promotion corpus and keeping the best enlarges
+it by exactly the number run — calling them configuration experiments does not
+stop them being multiple hypothesis tests.
+
+**The sweep selected 2.0, and it is now frozen.** 6,480 cells, scored on the 799
+where a wide reference actually found the true symbol clock. Summary retained at
+`docs/evidence/structure_channel_margin_sweep.json`.
+
+| margin | p5 coverage | median retention | p5 retention | frac < 0.75 | contam dB | DC refusals |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1.25 | 0.93 | 1.695 | 0.485 | 0.072 | 0.00 | 87 |
+| 1.50 | 1.11 | 1.450 | 0.358 | 0.078 | 0.00 | 123 |
+| **2.00** | **1.47** | **1.262** | **0.897** | **0.034** | **0.01** | **177** |
+| 2.50 | 1.72 | 1.200 | 0.861 | 0.018 | 0.07 | 279 |
+| 3.00 | 2.07 | 1.066 | 0.845 | 0.020 | 0.23 | 303 |
+| 4.00 | 2.78 | 1.030 | 0.208 | 0.164 | 0.50 | 360 |
+
+1.25 and 1.5 fail the coverage gate's lower tail and the retention tail; 4.0
+collapses. 2.0 is the **narrowest** margin passing all three declared criteria and
+the cheapest of those that pass. Widening did **not** worsen adjacent-channel
+false positives — the wrong-symbol-rate rate falls from 0.110 at 1.25 to 0.045 at
+2.0 to 0.000 at 3.0, because the errors at narrow margins are half-rate reads off
+a mangled spectrum rather than neighbour contamination. What widening does cost
+is DC refusals, which double by 2.0 and treble by 3.0.
+
+The margin arrives at the number it started at, which is worth being suspicious
+of, so three caveats are published in `channelizer_status()` beside it:
+
+- **The p5 sits on a cliff.** At 2.0 the four lowest retentions are 0.265, 0.286,
+  0.323, 0.333 and the fifth is 0.748. The published 0.897 is decided by where
+  the percentile index lands relative to that gap, not by a margin of safety. The
+  robust form — fraction of cells below 0.75 — is 0.034 against 0.072 at 1.25,
+  supporting the same choice for a better reason.
+- **The residual tail is not a coverage failure.** Three of those four cells are
+  20 kBd at 20 dB across all three offsets, with flat coverage 1.57 — well clear
+  of the gate. The cause is decimation and window length at low symbol rate,
+  already declared as `DECIMATION_LEAVES_TOO_FEW_SAMPLES`. Widening does not fix
+  it and is not credited with doing so.
+- **A different statistic would have chosen 2.5.** On fraction-below-0.75 alone,
+  2.5 scores 0.018 against 2.0's 0.034. The declared criterion was the fifth
+  percentile, declared before the run, and switching statistics after seeing
+  which one changes the winner is the exact failure this project's validation
+  rules exist to prevent.
+
+Selection used development data only and the promotion corpus is unopened, so
+under the recorded selection rule it does not enlarge the validation family.
+
+### 5.14 Two declarations that are absences
+
+**The threshold.** `2.5` is a development heuristic, not a decision boundary.
+`threshold_declaration()` publishes it as `PROVISIONAL` under
+`SYNTHETIC_CALIBRATION` authority with `promotion_eligible: false` and
+`false_alarm_probability: null` — null and not a placeholder, because a number
+there would be the most quotable false claim in the module. A crossing is
+`THRESHOLD_EXCEEDED_IN_SHADOW_MODE` and nothing else; a test asserts that no
+string field of any verdict contains the word DIGITAL, which caught the outcome
+prose still reading "DIGITAL STRUCTURE IS SUPPORTED, NOT PROVEN". Every
+qualifier in that sentence was correct and it was still the sentence someone
+would quote with the qualifiers dropped.
+
+**Direct sampling.** `DIRECT_SAMPLING_CHANGE` stays visibly unwired. Building a
+control so the warning list comes out empty would make the empty list the lie.
+What is published instead is the shape of the gap:
+
+```json
+{
+  "direct_sampling": "UNDECLARED",
+  "expected_capture_regime": "TUNER_QUADRATURE",
+  "expected_regime_authority": "INFERRED_FROM_CONFIGURATION",
+  "runtime_attestation": "UNAVAILABLE",
+  "control": "NOT_IMPLEMENTED"
+}
+```
+
+**The naming is the point, and position is not available.** The first version
+led with `direct_sampling_regime: TUNER_QUADRATURE` beside an authority tag
+reading `ASSUMED_FROM_ABSENT_CONTROL`. Every word of that was true, and the
+regime still read as the primary fact the moment a UI or a log collector
+flattened the object.
+
+The obvious repair — put `UNDECLARED` first — turns out not to be a repair at
+all: the status route serialises with sorted keys, so the object arrives
+alphabetically and `attestation_note` leads on the wire regardless of build
+order. Position cannot be relied on. What can is that **every field which is not
+the state says so in its own name**: `expected_capture_regime`,
+`expected_regime_authority`. A reader reaching for the first plausible key lands
+on one that is self-qualifying. A test enforces that rule over the whole object
+rather than asserting an order that transport discards.
+
+An installed R820T does not prove the active stream uses it. SCYTHE does not
+start `rtl_tcp` and cannot see its arguments, so there is no runtime attestation
+to have, and that absence is published as `UNAVAILABLE` rather than left to be
+noticed. None of it reaches the hashed signal-chain manifest, which still carries
+`direct_sampling: UNDECLARED`: promoting an inference into the instrument's
+identity would advance the chain hash on the strength of a guess. The control transaction is specified before the
+control exists — stop, invalidate and discard the ring, change regime, advance
+the manifest and hash, rebuild the channelizer configuration, reconnect, refuse
+comparison with tuner-quadrature products — because the order is the whole
+content: changing the regime while a ring holds samples captured under the
+previous one produces a window that cannot be described.
+
+**Clock continuity.** The monitor now reports `ZERO_DETECTED_DISCONTINUITIES`,
+never "zero discontinuities", alongside
+`detection_coverage: BOUNDED_BY_DRIFT_TOLERANCE_AND_CHECK_INTERVAL`. It compares
+a sample count against elapsed wall time over a 10 s interval; a loss small
+enough to stay inside the drift tolerance leaves no trace, and `rtl_tcp` hands
+over a byte stream with no per-sample attestation against which one could be.
+Detection coverage is not omniscience.
+
+### 5.15 The receiver is a second instrument with a second chain
+
+`WALKING PASSIVE GEOLOCATION` needs to know where the receiver was. The phone
+supplying that is a **second sensor with its own failure modes**, and folding it
+into `signal_chain_hash` would make a GPS fix change the identity of the
+receiver and a gain step change the identity of a position. Neither is true.
+
+```
+signal_chain_hash           what instrument produced this measurement
+receiver_state_chain_hash   where, when and in what orientation that
+                            instrument was *believed* to be
+```
+
+`rf_receiver_state.py` implements build order item 1: the
+`scythe.rf-receiver-state.v1` contract, its chain hash, the pose budget, the
+four-state alignment gate and the `TIME_ALIGNED_WITH` join. Nothing collects a
+position yet and nothing estimates a location; `receiver_state_status()` declares
+`collection_implemented`, `posterior_implemented`, `planner_implemented` and
+`body_shadow_implemented` all false.
+
+**Course is not heading.** This is the most expensive available mistake here.
+Course describes the direction the receiver is *translating*; heading describes
+where the antenna is *pointing*. At 1.1 m/s they decouple completely and
+destabilise for entirely different reasons — course from GNSS noise divided by a
+small velocity, heading from magnetic disturbance and tilt. A body-shadow
+experiment needs heading and gets nothing from course. `heading_source` is
+`UNDECLARED` until something that actually measures orientation declares it, and
+the constructor **discards a heading value supplied without such a source**
+rather than carrying it. That refusal is at the constructor, not downstream,
+because downstream is where a number becomes a bearing.
+
+**Staleness is metres, not seconds.** The chain excludes the position itself,
+exactly as the signal chain excludes centre frequency — a chain identity that
+moved with every fix would make every state an incomparable island. What it does
+contain is the *apparatus*: device, position authority, course and heading
+sources, alignment method, mount. The gate is then a distance:
+
+```
+sigma_motion = v · sigma_t
+sigma_pose   = sqrt(sigma_GNSS² + (v · sigma_t)² + sigma_mount²)
+```
+
+At 1.1 m/s a 42 ms uncertainty contributes **4.6 cm** and vanishes beside a 4.8 m
+GNSS circle; at 20 m/s the same 42 ms contributes **0.84 m** and starts to
+matter. A state goes `STALE` when the receiver could have moved further than its
+own position circle inside the timing uncertainty — which arrives at 5 s on foot
+and 160 ms at 30 m/s. A seconds-based cutoff would have to pick one and be wrong
+for the other.
+
+The mount term is 2.0 m and is a **declared unknown**, not a measured offset: the
+antenna is on a two-metre magnetic base and its relationship to the operator is
+`UNDECLARED`. It is in the budget so that it cannot be quietly forgotten, which
+is why a nominally 4.8 m fix yields a 5.20 m pose.
+
+**Breadcrumbs are never gated.** Every alignment state permits them, because
+rendering where the operator walked is a record of the survey rather than an
+inference about an emitter. Only `VERIFIED` and `BOUNDED` may update a surface,
+and `BOUNDED` marks bearing-like evidence `CONDITIONAL` — time alignment does not
+supply a verified heading source and so cannot on its own authorise directional
+evidence.
+
+Still to build, in order: phone collection with explicit source authorities;
+bounded device-to-orchestrator clock exchange; the graph edges; an RF likelihood
+adapter over `h3_heatmap.py` — reusing the H3 posterior substrate but **not** its
+search-and-rescue priors, independence assumptions or movement models, and
+selecting resolution from pose uncertainty because cells smaller than the GNSS
+circle are decorative precision; the Fisher-information geometry metrics; the
+planner on the same objective; the point-estimate gate; and the controlled
+body-shadow rotation mode. `doma_rf_motion_model.py` stays out — it predicts
+*emitter* trajectories and is the wrong tool for a receiver-motion posterior.
 
 ## 6. Open questions for the operator
 
