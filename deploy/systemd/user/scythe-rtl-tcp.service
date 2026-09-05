@@ -1,0 +1,35 @@
+[Unit]
+Description=SCYTHE RTL-SDR IQ source (rtl_tcp, NESDR SMArt v5 14530058)
+
+# Deliberately NOT ordered against scythe-orchestrator.service. rf_bridge
+# reconnects on its own with exponential backoff (capped at
+# SDRPP_RECONNECT_MAX_S, default 10s) and invalidates the IQ ring with
+# "DISCONNECT" each time, so either process may start first and the survivor
+# waits. Coupling them with After=/Requires= would buy nothing and would make
+# an rtl_tcp failure take the orchestrator down with it.
+
+# Under WSL2 the USB device does not exist until it is attached from Windows
+# with `usbipd attach --wsl --busid 2-1`, which systemd inside WSL cannot
+# trigger. rtl_tcp exits 1 when the device is absent, so without disabling the
+# start rate limit this unit would burn its 5 permitted restarts within the
+# default 10s window, enter "failed", and then stay dead even once the device
+# appeared -- reproducing exactly the missing-frame symptom this unit exists to
+# prevent. 0 disables the limit: retry forever, come up within RestartSec of
+# the device arriving.
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+EnvironmentFile=%h/.config/scythe/rf-capture.env
+
+# No -g: gain is the bridge's to set at runtime over the rtl_tcp control
+# channel (SET_GAIN_MODE 0x03 / SET_GAIN 0x04), restricted to the tuner's
+# actually-supported values. Fixing a gain here would fight that.
+ExecStart=/usr/bin/rtl_tcp -d ${SCYTHE_RTL_DEVICE_SERIAL} -a ${SDRPP_IQ_HOST} -p ${SDRPP_IQ_PORT} -s ${SDRPP_SAMPLE_RATE_HZ} -f ${SDRPP_CENTER_FREQUENCY_HZ}
+
+Restart=always
+RestartSec=5
+TimeoutStopSec=10
+
+[Install]
+WantedBy=default.target
