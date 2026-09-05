@@ -1411,6 +1411,72 @@ planner on the same objective; the point-estimate gate; and the controlled
 body-shadow rotation mode. `doma_rf_motion_model.py` stays out — it predicts
 *emitter* trajectories and is the wrong tool for a receiver-motion posterior.
 
+### 5.16 The rate the trace is labelled with is a launch argument
+
+The bridge sends `rtl_tcp` two control opcodes: `SET_GAIN_MODE` (0x03) and
+`SET_GAIN` (0x04). There is no `SET_SAMPLE_RATE`. The rate is whatever
+`rtl_tcp` was started with via `-s`, and `rtl_tcp` never acknowledges what the
+tuner actually applied — the `RTL0` header carries a tuner type and a gain
+count, not a rate.
+
+That makes `SDRPP_SAMPLE_RATE_HZ` a **claim**, and the claim is load-bearing:
+`bin_width = sample_rate_hz / fft_size`, so it labels every frequency in the
+trace. A configured rate and a confirmed rate produce identical-looking
+spectra. Nothing in the pipeline would raise an error if they diverged; the
+axis would simply be wrong.
+
+Two separate defences, and they do different jobs.
+
+The first removes drift. `scythe-rtl-tcp.service` and the orchestrator now read
+the rate from one file, so the actual `-s` and the declared value cannot
+disagree. `EnvironmentFile=` carries no leading `-`, so a missing file stops
+the orchestrator rather than letting it fall back to the 1 MS/s default in
+`RFBridgeConfig` and silently mislabel the axis by a factor of two.
+
+The second is the one that matters for evidence. Single-sourcing removes
+*disagreement between two configurations*; it does not turn a configuration
+into a measurement. So the payload names its own authority:
+
+```json
+{
+  "sample_rate_hz": 2048000,
+  "sample_rate_authority": "SHARED_LAUNCH_CONFIGURATION",
+  "runtime_attestation": "UNAVAILABLE",
+  "native_bin_width_hz": 500.0
+}
+```
+
+`native_bin_width_hz` is correct *conditional on the configured rate having
+been applied*. This is the same shape as §5.14's direct-sampling block: a value
+that is real, useful, and not attested, published with the qualifier attached
+rather than left for a reader to infer.
+
+Reaching `LAUNCH_CONFIG_CORROBORATED` — still not `USB_MEASURED` — would need a
+capture handshake record: environment-file hash, the actual `rtl_tcp` command
+line, process start time and PID, connection epoch, requested rate, and any
+startup log line stating the applied rate. Estimating the rate from a known
+broadcast station is explicitly **not** that. It would replace configuration
+trust with transmitter trust and call the substitution a measurement.
+
+#### What the bridge refuses to say about its own absence
+
+A refused IQ connection is indistinguishable from a stopped `rtl_tcp`, a wrong
+endpoint, a busy receiver, or — under WSL — a USB device that Windows has not
+attached. The bridge therefore publishes reachability and declines the cause:
+
+```json
+{
+  "availability": "SOURCE_UNREACHABLE",
+  "unreachable_cause": "NOT_DETERMINABLE_FROM_THIS_PROCESS"
+}
+```
+
+`WAITING_FOR_USB` would have been the useful-sounding string, and it is the one
+the operator most often wants. It is also a guess. The restart policy that
+governs recovery is a property of a systemd unit the bridge never read, so it
+is documented in `docs/RTL_TCP_BOOT_CAPTURE.md` rather than asserted by a
+process with no access to it.
+
 ## 6. Open questions for the operator
 
 1. **Approve the bounded IQ ring** (§2.2)? First retention of raw IQ beyond one block.

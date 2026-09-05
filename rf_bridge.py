@@ -94,6 +94,31 @@ _RTL_TCP_SET_GAIN = 0x04
 GAIN_MODE_MANUAL = 1
 GAIN_MODE_AUTOMATIC = 0
 
+# There is no rtl_tcp SET_SAMPLE_RATE opcode above, and that absence is the
+# whole point. The client sends SET_GAIN_MODE and SET_GAIN and nothing else,
+# so the rate is whatever rtl_tcp was launched with via -s. rtl_tcp never
+# reports back what the tuner actually applied, and the RTL0 dongle_info
+# header carries a tuner type and gain count -- not a rate. The figure this
+# process publishes is therefore the rate BOTH processes were configured with
+# from one shared launch file, not a rate anybody observed the hardware adopt.
+#
+# The distinction is not pedantry. bin_width = sample_rate_hz / fft_size, so
+# the declared rate labels every frequency in the trace. A rate that is merely
+# configured and a rate that is confirmed produce identical-looking spectra.
+SAMPLE_RATE_AUTHORITY = "SHARED_LAUNCH_CONFIGURATION"
+SAMPLE_RATE_RUNTIME_ATTESTATION = "UNAVAILABLE"
+
+# What a refused IQ connection does and does not tell this process. Under WSL
+# the USB device is absent until it is attached from Windows, but a refused
+# socket looks exactly the same as a stopped rtl_tcp or a wrong port. Naming
+# the cause would be a guess wearing an operational-status uniform.
+SOURCE_UNREACHABLE_CAUSE = "NOT_DETERMINABLE_FROM_THIS_PROCESS"
+SOURCE_UNREACHABLE_NOTE = (
+    "A refused IQ connection cannot distinguish an absent USB device from a "
+    "stopped rtl_tcp, a wrong endpoint or a busy receiver. This process "
+    "reports reachability, not the reason for its absence."
+)
+
 
 def _env_bool(name: str, default: bool = False) -> bool:
     value = os.getenv(name)
@@ -757,6 +782,32 @@ class SDRPlusPlusBridge:
         except Exception:
             LOG.exception("channelization dispatch failed")
 
+    def capture_rate_declaration(self) -> Dict:
+        """What the rate figure is, and what authority stands behind it.
+
+        Published beside the rate itself so a reader cannot pick up the number
+        without the qualifier attached to it.
+        """
+        return {
+            "sample_rate_hz": self.config.sample_rate_hz,
+            "sample_rate_authority": SAMPLE_RATE_AUTHORITY,
+            "runtime_attestation": SAMPLE_RATE_RUNTIME_ATTESTATION,
+            "native_bin_width_hz": self.config.sample_rate_hz / self.config.fft_size,
+        }
+
+    def capture_source_declaration(self) -> Dict:
+        """Reachability of the IQ source, without inventing a cause."""
+        connected = self._state == "streaming"
+        declaration = {
+            "iq_endpoint": f"{self.config.iq_host}:{self.config.iq_port}",
+            "connection_state": self._state,
+            "availability": "SOURCE_CONNECTED" if connected else "SOURCE_UNREACHABLE",
+        }
+        if not connected:
+            declaration["unreachable_cause"] = SOURCE_UNREACHABLE_CAUSE
+            declaration["cause_note"] = SOURCE_UNREACHABLE_NOTE
+        return declaration
+
     def status(self, include_control: bool = False) -> Dict:
         with self._lock:
             thread_alive = bool(self._thread and self._thread.is_alive())
@@ -772,6 +823,10 @@ class SDRPlusPlusBridge:
                 "latest_sequence": self._sequence,
                 "latest_frame_at": latest.get("timestamp") if latest else None,
                 "config": asdict(self.config),
+                # The rate in "config" above is a launch parameter, not a
+                # measurement. This block travels with it saying so.
+                "capture_rate_declaration": self.capture_rate_declaration(),
+                "capture_source": self.capture_source_declaration(),
                 "capture_owner": self.config.capture_owner,
                 "owns_capture": self.config.owns_capture(),
                 "process_role": os.getenv("SCYTHE_PROCESS_ROLE") or "unspecified",
