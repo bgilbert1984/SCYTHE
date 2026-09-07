@@ -13,6 +13,7 @@ from rf_capture_recovery import (
     SUSTAINED_STARVATION_S, ProcessIdentity, RecoveryAttempt, RecoveryObservation,
     authorize, capture_process_identity, decide, kernel_boot_id, observe,
     policy_status, process_start_ticks, recovery_outcome, revalidate,
+    _listener_inode, _proc_hex_address,
 )
 
 
@@ -224,6 +225,57 @@ class ProcParsingTests(unittest.TestCase):
         boot = kernel_boot_id()
         self.assertIsNotNone(boot)
         self.assertEqual(len(boot), 36, "a boot id is a formatted uuid")
+
+
+class EndpointResolverTests(unittest.TestCase):
+    """Recovery authority is tied to the declared endpoint, not to a port."""
+
+    def _net_tcp(self, rows):
+        root = tempfile.mkdtemp()
+        os.makedirs(f"{root}/net", exist_ok=True)
+        header = ("  sl  local_address rem_address   st tx_queue rx_queue tr "
+                  "tm->when retrnsmt   uid  timeout inode\n")
+        with open(f"{root}/net/tcp", "w", encoding="utf-8") as handle:
+            handle.write(header + "".join(rows))
+        return root
+
+    def _row(self, local_hex, port_hex, state="0A", inode=4242):
+        return (f"   0: {local_hex}:{port_hex} 00000000:0000 {state} "
+                f"00000000:00000000 00:00000000 00000000  1000  0 {inode} 1\n")
+
+    def test_the_configured_loopback_address_is_matched(self):
+        root = self._net_tcp([self._row("0100007F", "04D2")])
+        self.assertEqual(_listener_inode("127.0.0.1", 1234, root), 4242)
+
+    def test_a_wildcard_listener_on_the_same_port_is_not_matched(self):
+        """It would serve the bridge, and it violates the loopback-only rule.
+
+        No identity means NO_ACTION, which is the safe direction: this module
+        will not name a policy-violating process as a restart target.
+        """
+        root = self._net_tcp([self._row("00000000", "04D2")])
+        self.assertIsNone(_listener_inode("127.0.0.1", 1234, root))
+
+    def test_another_host_holding_the_same_port_is_not_matched(self):
+        root = self._net_tcp([self._row("0102A8C0", "04D2")])   # 192.168.2.1
+        self.assertIsNone(_listener_inode("127.0.0.1", 1234, root))
+
+    def test_a_connected_socket_on_the_endpoint_is_not_a_listener(self):
+        root = self._net_tcp([self._row("0100007F", "04D2", state="01")])
+        self.assertIsNone(_listener_inode("127.0.0.1", 1234, root))
+
+    def test_a_different_port_on_the_right_host_is_not_matched(self):
+        root = self._net_tcp([self._row("0100007F", "04D3")])
+        self.assertIsNone(_listener_inode("127.0.0.1", 1234, root))
+
+    def test_an_unparseable_host_refuses_rather_than_widening(self):
+        self.assertIsNone(_proc_hex_address("not-an-ip"))
+        root = self._net_tcp([self._row("0100007F", "04D2")])
+        self.assertIsNone(_listener_inode("not-an-ip", 1234, root))
+
+    def test_the_address_encoding_is_little_endian_upper_hex(self):
+        self.assertEqual(_proc_hex_address("127.0.0.1"), "0100007F")
+        self.assertEqual(_proc_hex_address("0.0.0.0"), "00000000")
 
 
 class PurityAndScopeTests(unittest.TestCase):

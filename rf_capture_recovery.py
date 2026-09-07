@@ -30,6 +30,9 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, replace
 import os
+# Address parsing only. There is no socket call anywhere in this module -- it
+# reads /proc and decides; it never connects to, signals or starts anything.
+import socket
 import time
 from typing import Any, Dict, Optional
 
@@ -546,39 +549,73 @@ def process_start_ticks(pid: int, proc_root: str = "/proc") -> Optional[int]:
         return None
 
 
-def _listener_inode(port: int, proc_root: str = "/proc") -> Optional[int]:
-    """The inode of whatever is LISTENing on `port`, from /proc/net/tcp."""
-    for table in ("net/tcp", "net/tcp6"):
-        try:
-            with open(f"{proc_root}/{table}", "r", encoding="utf-8") as handle:
-                rows = handle.read().splitlines()[1:]
-        except OSError:
+def _proc_hex_address(host: str) -> Optional[str]:
+    """The /proc/net/tcp spelling of an IPv4 address: little-endian, upper hex.
+
+    127.0.0.1 becomes "0100007F". Returns None for anything that is not a plain
+    IPv4 literal, which makes the caller refuse rather than widen its match.
+    """
+    try:
+        packed = socket.inet_aton(host)
+    except OSError:
+        return None
+    return "".join(f"{byte:02X}" for byte in reversed(packed))
+
+
+def _listener_inode(host: str, port: int, proc_root: str = "/proc") -> Optional[int]:
+    """The inode LISTENing on exactly `host:port`.
+
+    The address is matched, not just the port. Matching a bare port would tie
+    recovery authority to "whoever holds 1234" rather than to SCYTHE's declared
+    capture endpoint, and the process this policy may restart must be the one
+    actually serving the connection the bridge is starved on.
+
+    Only /proc/net/tcp is consulted. An IPv6 listener is deliberately not
+    matched: the configured endpoint is an IPv4 literal, and a socket on a
+    different address family is a different endpoint.
+    """
+    wanted = _proc_hex_address(host)
+    if wanted is None:
+        return None
+    try:
+        with open(f"{proc_root}/net/tcp", "r", encoding="utf-8") as handle:
+            rows = handle.read().splitlines()[1:]
+    except OSError:
+        return None
+    for row in rows:
+        parts = row.split()
+        if len(parts) < 10 or parts[3] != "0A":           # 0A == TCP_LISTEN
             continue
-        for row in rows:
-            parts = row.split()
-            if len(parts) < 10 or parts[3] != "0A":       # 0A == TCP_LISTEN
+        try:
+            local_hex, local_port = parts[1].rsplit(":", 1)
+            if int(local_port, 16) != port or local_hex.upper() != wanted:
                 continue
-            try:
-                if int(parts[1].rsplit(":", 1)[1], 16) != port:
-                    continue
-                return int(parts[9])
-            except (ValueError, IndexError):
-                continue
+            return int(parts[9])
+        except (ValueError, IndexError):
+            continue
     return None
 
 
-def pid_holding_listener(port: int, proc_root: str = "/proc") -> Optional[int]:
-    """Which process holds the capture port, read from /proc and nothing else.
+def pid_holding_listener(host: str, port: int,
+                         proc_root: str = "/proc") -> Optional[int]:
+    """Which process holds the declared capture endpoint, from /proc alone.
 
     The bridge owns a socket, not a child: it never starts rtl_tcp and has no
-    handle on it. The port is the only thing the two demonstrably share, so the
-    holder of the listening socket is the process this policy is about -- a
-    stronger answer than a unit's MainPID, which is what systemd believes rather
-    than what is actually serving the connection we are starved on.
+    handle on it. The endpoint is the only thing the two demonstrably share, so
+    the holder of that listening socket is the process this policy is about --
+    a stronger answer than a unit's MainPID, which is what systemd believes
+    rather than what is serving the connection we are starved on.
+
+    A wildcard-bound listener (0.0.0.0:1234) would serve the bridge's connection
+    and is deliberately NOT matched. rtl_tcp is required to bind loopback only,
+    and a process violating that is not one this module will identify as a
+    restart target. The result is no identity, and therefore NO_ACTION -- the
+    safe direction, and consistent with the bind address being a security
+    control rather than a preference.
 
     Reads only. Nothing here can signal, start or stop anything.
     """
-    inode = _listener_inode(port, proc_root)
+    inode = _listener_inode(host, port, proc_root)
     if inode is None:
         return None
     target = f"socket:[{inode}]"

@@ -1004,7 +1004,7 @@ class SDRPlusPlusBridge:
         self._recovery_checked_at = now
         try:
             source = self.capture_source_declaration()
-            pid = pid_holding_listener(self.config.iq_port)
+            pid = pid_holding_listener(self.config.iq_host, self.config.iq_port)
             identity = capture_process_identity(pid)
             with self._lock:
                 sequence = self._sequence
