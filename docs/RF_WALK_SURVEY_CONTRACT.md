@@ -1,8 +1,9 @@
 # RF Walking-Survey Contract
 
 ```text
-Status:                 PROPOSED
-Authority:              NORMATIVE WHEN ACCEPTED
+Status:                 ACCEPTED
+Accepted:               2026-09-07, after review correction 1df55c5
+Authority:              NORMATIVE
 Implemented foundation: rf_receiver_state.py
 Survey ingestion:       NOT_IMPLEMENTED
 Surface update:         NOT_IMPLEMENTED
@@ -151,27 +152,105 @@ cell manufactures a boundary artefact and calls it a hotspot.
 
 ---
 
-## 4. Admission outcomes
+## 4. Admission verdicts
 
-Every frame receives exactly one outcome. Outcomes are a closed vocabulary.
+Every frame receives **exactly one disposition** and **zero or more reason
+codes**. Two levels, not one.
 
-| Outcome | Breadcrumb | Surface | Meaning |
+```text
+disposition — exactly one:
+  SURFACE_ELIGIBLE
+  BREADCRUMB_ONLY
+  FRAME_REFUSED
+
+reason_codes — zero or more, closed vocabulary:
+  TIME_ALIGNMENT_UNVERIFIED
+  RECEIVER_STATE_STALE
+  SIGNAL_CHAIN_UNBOUND
+  RECEIVER_STATE_UNBOUND
+  PRODUCT_LINEAGE_UNBOUND
+  POWER_UNIT_UNSUPPORTED
+  RAW_IQ_PRESENT
+```
+
+One level cannot carry both facts. An earlier draft of this section required
+exactly one outcome per frame while §10 required a frame failing two lineage
+groups to report both — a contradiction no test could resolve, and one an
+implementation could satisfy in either direction while claiming compliance:
+drop the second diagnostic, or emit two outcomes. Both would be wrong, and
+neither would look wrong.
+
+The two levels answer different questions. **The disposition says what happens
+to the frame**, and a frame has one fate. **The reason codes say why**, and
+there may be several reasons — a frame can be missing its signal chain *and* its
+sweep-plan revision, and an operator repairing only the first has not repaired
+the frame.
+
+### Rules
+
+| Disposition | Breadcrumb | Surface | Reason codes |
 |---|---|---|---|
-| `SURFACE_ELIGIBLE` | yes | yes | Every gate passed |
-| `BREADCRUMB_ONLY` | yes | no | Pose is sound; the RF may not contribute |
-| `TIME_ALIGNMENT_UNVERIFIED` | yes | no | Nothing joined the observation to a receiver state |
-| `RECEIVER_STATE_STALE` | yes | no | The state is too old for the observation at this speed |
-| `SIGNAL_CHAIN_UNBOUND` | yes | no | The frame does not say what the RF passed through |
-| `POWER_UNIT_UNSUPPORTED` | yes | no | `DBM` without a qualifying calibration, or an unknown unit |
-| `RAW_IQ_REFUSED` | **no** | no | The frame carried samples. The whole frame is rejected |
+| `SURFACE_ELIGIBLE` | yes | yes | **none** — a passing frame has no refusal reason |
+| `BREADCRUMB_ONLY` | yes | no | one or more; **every** applicable reason, not the first found |
+| `FRAME_REFUSED` | **no** | no | `RAW_IQ_PRESENT`, exclusively |
 
-`RAW_IQ_REFUSED` is the only outcome that discards the breadcrumb too. A frame
-that violated the sample boundary is not partially retained; retaining its pose
-would reward the violation with a record.
+`SURFACE_ELIGIBLE` carries no reason code. A verdict that passed and still names
+a refusal reason is two verdicts in a coat.
 
-Every other refusal keeps the breadcrumb, because the operator's track is
-independently sourced from the pose and does not depend on the RF being usable.
-**A refusal is a result, not a missing value**, and is recorded as one.
+`BREADCRUMB_ONLY` carries every applicable reason. Reporting only the first
+failed gate would make repair iterative for no reason: the operator fixes the
+signal chain, resubmits, and discovers the power unit was also wrong.
+
+`FRAME_REFUSED` is reached only by `RAW_IQ_PRESENT`, and carries no other reason
+code. A frame containing samples is not evaluated further — there is nothing to
+learn from gating a frame that will not be retained, and gating it anyway would
+mean parsing more of a payload that already violated the boundary.
+
+### Reason codes
+
+| Reason | Meaning |
+|---|---|
+| `TIME_ALIGNMENT_UNVERIFIED` | Nothing joined the observation to a receiver state |
+| `RECEIVER_STATE_STALE` | The state is too old for the observation at this speed |
+| `SIGNAL_CHAIN_UNBOUND` | The signal-chain hash or its required explanatory fields are missing |
+| `RECEIVER_STATE_UNBOUND` | The receiver-state chain hash or receiver-state identity is missing |
+| `PRODUCT_LINEAGE_UNBOUND` | The sweep-plan or processing revision is missing |
+| `POWER_UNIT_UNSUPPORTED` | `DBM` without a qualifying calibration, or an unknown unit |
+| `RAW_IQ_PRESENT` | The frame carried samples |
+
+**Three unbound reasons, not one.** §1 insists that receiver-state identity and
+signal-chain identity are separate and never merged; collapsing every missing §6
+field into a single reason would undo that insistence at the moment it matters
+most, leaving an operator told only that *something* about the frame's lineage
+was absent. The three answer different questions and are repaired by different
+people:
+
+| Reason | What is missing | Who repairs it |
+|---|---|---|
+| `SIGNAL_CHAIN_UNBOUND` | signal-chain hash, or antenna / feedline / extension / gain / sample rate | the RF apparatus declaration |
+| `RECEIVER_STATE_UNBOUND` | receiver-state chain hash, or the positioning identity behind it | the positioning apparatus declaration |
+| `PRODUCT_LINEAGE_UNBOUND` | `sweep_plan_revision` or `processing_revision` | the survey configuration |
+
+A frame missing fields from more than one group carries a reason code for each,
+so a single repair cannot appear to be the whole remedy. No group's absence may
+produce another group's reason code.
+
+### The raw-IQ refusal is scoped to the frame
+
+No breadcrumb is derived from the rejected survey frame. A receiver-state
+observation received independently through its own valid ingestion path is
+**neither deleted nor invalidated** by this refusal.
+
+Atomic rejection means the frame is rejected whole — not that a malformed RF
+frame can reach backwards into positioning evidence it did not produce. A frame
+that violated the sample boundary is not partially retained, and retaining its
+pose would reward the violation with a record; but a pose that arrived correctly
+by another route was never part of that frame.
+
+Every disposition other than `FRAME_REFUSED` keeps the breadcrumb, because the
+operator's track is independently sourced from the pose and does not depend on
+the RF being usable. **A refusal is a result, not a missing value**, and both
+levels of the verdict are recorded as one.
 
 ---
 
@@ -248,8 +327,12 @@ That is not one antenna with a setting; it is a different frequency response,
 and every relative-power product either side of the change was taken through a
 different instrument.
 
-Comparability failures are `SIGNAL_CHAIN_UNBOUND` at admission, or
-`SIGNAL_CHAIN_CHANGED` / `RECEIVER_STATE_CHAIN_CHANGED` at join.
+Comparability failures are routed by which identity is absent, per §4: the
+reason codes `SIGNAL_CHAIN_UNBOUND`, `RECEIVER_STATE_UNBOUND` or
+`PRODUCT_LINEAGE_UNBOUND` at admission, under a `BREADCRUMB_ONLY` disposition;
+`SIGNAL_CHAIN_CHANGED` or `RECEIVER_STATE_CHAIN_CHANGED` at join. A frame
+missing fields from more than one group carries a reason code for each, so a
+single repair cannot appear to be the whole remedy.
 
 ---
 
@@ -276,8 +359,26 @@ and may be written by an admitted, eligible frame. Promoting anything from it
 into GraphOps is a separate decision with a separate gate, made by something
 that has read the surface — not by the ingest path that fed it.
 
-`MEASUREMENT_CHANNEL` verdict production remains **prohibited**. Only
-`STRUCTURE_CHANNEL` is promotion-eligible.
+### Channel lineage and detector eligibility
+
+`MEASUREMENT_CHANNEL` products **may** supply survey power measurements. They
+are **not** eligible for information-structure detector verdicts. Only
+`STRUCTURE_CHANNEL` is eligible for that detector path. Surface eligibility does
+not constitute GraphOps or detector promotion.
+
+The distinction matters in both directions, and stating only the prohibition
+gets it wrong. A walking survey's power products ordinarily *come from* the
+measurement lineage — that is what a measurement channel is for. An implementer
+told only that measurement verdicts are prohibited could reasonably route survey
+power through `STRUCTURE_CHANNEL` to stay compliant, and would thereby
+contaminate a detector-oriented lineage with measurement traffic and subject
+survey power to detector-oriented filtering. Both channels would then be wrong
+about what they contain.
+
+What is prohibited is narrower and specific: using the measurement lineage to
+produce a digital-structure detector verdict. A power number is a measurement;
+a claim about information structure is a detector output; the channels exist so
+that a reader can tell which they are holding.
 
 ---
 
@@ -349,7 +450,9 @@ For walking survey specifically, all of the following are prohibited:
 - **a grounding-lane exception.** There is none. "On demand" is the request
   path, not an exemption from the boundary.
 
-A frame carrying samples is `RAW_IQ_REFUSED` in whole (§4).
+A frame carrying samples is `FRAME_REFUSED` with the single reason code
+`RAW_IQ_PRESENT`, in whole (§4). Receiver-state evidence ingested independently
+is untouched by that refusal.
 
 ---
 
@@ -374,13 +477,26 @@ authority in it.
 
 A replacement is admissible only when tests demonstrate **each** of:
 
-- every admission outcome in §4, including `RAW_IQ_REFUSED` discarding the whole
-  frame;
+- **exactly one disposition on every frame**, with `SURFACE_ELIGIBLE` carrying
+  no reason code and `FRAME_REFUSED` carrying only `RAW_IQ_PRESENT`;
+- every reason code in §4 reachable, and a `BREADCRUMB_ONLY` frame carrying
+  **every** applicable reason rather than the first one found;
+- `FRAME_REFUSED` discarding the whole frame, and that refusal leaving an
+  independently ingested receiver-state observation neither deleted nor
+  invalidated;
 - a `UNVERIFIED` and a `STALE` join producing breadcrumbs and **no** surface
   contribution;
 - a `BOUNDED` join propagating its uncertainty into the recorded pose
   uncertainty rather than discarding it;
-- a frame missing any §6 field being refused `SIGNAL_CHAIN_UNBOUND`;
+- each of the three unbound reasons reached by its own missing field group:
+  `SIGNAL_CHAIN_UNBOUND` for a missing chain hash or apparatus field,
+  `RECEIVER_STATE_UNBOUND` for a missing receiver-state identity, and
+  `PRODUCT_LINEAGE_UNBOUND` for a missing `sweep_plan_revision` or
+  `processing_revision` — with a frame failing two groups carrying both codes
+  under one disposition, and no field group able to produce another group's code;
+- a `MEASUREMENT_CHANNEL` product supplying a survey power measurement and being
+  refused an information-structure detector verdict, and survey power **not**
+  routed through `STRUCTURE_CHANNEL` to obtain one;
 - `DBM` refused without a qualifying calibration, and refused outside the
   calibration's frequency range, gain state and antenna configuration;
 - a generic per-observer offset having no path into a `DBM` product;
