@@ -231,6 +231,23 @@ class BoundsTests(unittest.TestCase):
         with self.assertRaises(FrameMetadataError):
             assess_frame({**_frame(), "extra": 1})
 
+    def test_the_assessability_note_maps_onto_the_contract_category(self):
+        """The contract names the category; the note maps the exception onto it."""
+        from rf_walk_survey_metadata import ASSESSABILITY_NOTE
+        self.assertIn("NOT A SURVEY FRAME", ASSESSABILITY_NOTE)
+        self.assertIn("THE VOCABULARY'S RANGE", ASSESSABILITY_NOTE)
+        self.assertIn("NOT REFUSED", ASSESSABILITY_NOTE)
+        self.assertIn("FrameMetadataError", ASSESSABILITY_NOTE)
+        self.assertIn("assessability_note", metadata_status())
+
+    def test_an_unassessable_input_produces_no_verdict_at_all(self):
+        """Outside the vocabulary's range means no disposition, not a refusal."""
+        with self.assertRaises(FrameMetadataError) as caught:
+            assess_frame(_frame(frame_id=None))
+        message = str(caught.exception)
+        for verdict_word in ("SURFACE_ELIGIBLE", "BREADCRUMB_ONLY", "FRAME_REFUSED"):
+            self.assertNotIn(verdict_word, message)
+
     def test_missing_identity_makes_the_frame_unassessable(self):
         for field in ("frame_id", "observer_id", "monotonic_source_id",
                       "acquisition_start_monotonic_ns",
