@@ -154,25 +154,90 @@ def _ordered(codes: Iterable[str]) -> Tuple[str, ...]:
 
 
 @dataclass(frozen=True)
-class AdmissionFacts:
-    """Facts already derived elsewhere. This module derives none of them.
+class MetadataAdmissionFacts:
+    """What structural validation of a frame's own metadata establishes.
 
-    Every field is a boolean answer to a question something else asked. The
-    alignment fields in particular come from ``rf_receiver_state.time_align``
-    and ``may_update_posterior``; nothing here re-decides them.
+    Every field is required. There is no default, because a default here would
+    be an unexamined field asserting that nothing is wrong with it.
     """
 
-    raw_iq_present: bool = False
-    time_alignment_unverified: bool = False
-    receiver_state_stale: bool = False
-    signal_chain_unbound: bool = False
-    receiver_state_unbound: bool = False
-    product_lineage_unbound: bool = False
-    power_unit_unsupported: bool = False
+    signal_chain_unbound: bool
+    receiver_state_unbound: bool
+    product_lineage_unbound: bool
+    power_unit_unsupported: bool
+
+
+@dataclass(frozen=True)
+class AlignmentAdmissionFacts:
+    """What joining the frame to a receiver state establishes.
+
+    Sourced from ``rf_receiver_state.time_align`` and ``may_update_posterior``.
+    Every field is required and there is deliberately no default constructor:
+    ``AlignmentAdmissionFacts()`` would mean "alignment ran and found nothing
+    wrong", which is precisely what an un-run alignment must not be able to say.
+    """
+
+    time_alignment_unverified: bool
+    receiver_state_stale: bool
+
+
+@dataclass(frozen=True)
+class AdmissionFacts:
+    """The complete fact set. Every field required, none defaulted.
+
+    Two authorities establish these, and neither may stand in for the other.
+    Metadata validation cannot know whether clocks aligned; alignment cannot
+    know whether a sweep-plan revision was declared. "Not yet determined" is a
+    state of the pipeline, not a value a fact may hold, so there is no ``None``,
+    no nullable boolean and no default: a fact set exists only once both stages
+    have run.
+
+    Build it with ``from_stages``. Constructing it directly requires naming all
+    seven, which is the same requirement stated less conveniently.
+    """
+
+    raw_iq_present: bool
+    time_alignment_unverified: bool
+    receiver_state_stale: bool
+    signal_chain_unbound: bool
+    receiver_state_unbound: bool
+    product_lineage_unbound: bool
+    power_unit_unsupported: bool
+
+    @classmethod
+    def from_stages(cls, metadata: MetadataAdmissionFacts,
+                    alignment: AlignmentAdmissionFacts) -> "AdmissionFacts":
+        """Both stages, both required, in either order but never one alone.
+
+        ``raw_iq_present`` is False by construction here. Raw IQ is a
+        discriminated early exit taken before metadata is assessed at all (see
+        ``rf_walk_survey_metadata.assess_frame``), so a frame that reaches this
+        point is one that carried no samples. A raw-IQ frame never produces a
+        fact set; it produces a finished verdict.
+        """
+        if not isinstance(metadata, MetadataAdmissionFacts):
+            raise TypeError("metadata must be MetadataAdmissionFacts")
+        if not isinstance(alignment, AlignmentAdmissionFacts):
+            raise TypeError("alignment must be AlignmentAdmissionFacts; an "
+                            "un-run alignment has no value to pass here")
+        return cls(
+            raw_iq_present=False,
+            time_alignment_unverified=alignment.time_alignment_unverified,
+            receiver_state_stale=alignment.receiver_state_stale,
+            signal_chain_unbound=metadata.signal_chain_unbound,
+            receiver_state_unbound=metadata.receiver_state_unbound,
+            product_lineage_unbound=metadata.product_lineage_unbound,
+            power_unit_unsupported=metadata.power_unit_unsupported,
+        )
 
     @classmethod
     def from_reason_codes(cls, codes: Iterable[str]) -> "AdmissionFacts":
-        """Build from a set of already-named reasons, refusing any unknown one."""
+        """Build from a set of already-named reasons, refusing any unknown one.
+
+        Complete by enumeration: a code absent from the set is asserted false,
+        not left undetermined. Callers holding a partial picture must use
+        ``from_stages`` instead.
+        """
         present = set(_ordered(codes))
         return cls(**{name: (code in present)
                       for name, code in _FACT_TO_REASON.items()})

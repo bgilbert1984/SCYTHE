@@ -14,7 +14,8 @@ import rf_walk_survey_admission as admission
 from rf_walk_survey_admission import (
     BREADCRUMB_ONLY, DISPOSITIONS, EXCLUSIVE_REASON, FRAME_REFUSED,
     ORDINARY_REASONS, REASON_CODES, REASON_NOTES, SURFACE_ELIGIBLE,
-    AdmissionFacts, AdmissionVerdict, UnknownDisposition, UnknownReasonCode,
+    AdmissionFacts, AdmissionVerdict, AlignmentAdmissionFacts,
+    MetadataAdmissionFacts, UnknownDisposition, UnknownReasonCode,
     VerdictInvariantError, admission_status, decide, decide_from_reason_codes,
 )
 
@@ -27,6 +28,15 @@ ORDINARY_FIELDS = ("time_alignment_unverified", "receiver_state_stale",
 def _facts(flags, raw_iq=False):
     return AdmissionFacts(raw_iq_present=raw_iq,
                           **dict(zip(ORDINARY_FIELDS, flags)))
+
+
+def _complete(**overrides):
+    """A complete fact set. Every field named, because none may be defaulted."""
+    fields = dict.fromkeys(("raw_iq_present",) + ORDINARY_FIELDS, False)
+    unknown = set(overrides) - set(fields)
+    assert not unknown, unknown
+    fields.update(overrides)
+    return AdmissionFacts(**fields)
 
 
 class CombinationSpaceTests(unittest.TestCase):
@@ -90,14 +100,14 @@ class CombinationSpaceTests(unittest.TestCase):
                    "receiver_state_unbound": "RECEIVER_STATE_UNBOUND",
                    "product_lineage_unbound": "PRODUCT_LINEAGE_UNBOUND"}
         for field, code in unbound.items():
-            verdict = decide(AdmissionFacts(**{field: True}))
+            verdict = decide(_complete(**{field: True}))
             self.assertEqual(verdict.reasons, (code,))
             for other in set(unbound.values()) - {code}:
                 self.assertNotIn(other, verdict.reasons)
 
     def test_a_two_group_failure_carries_both_codes_under_one_disposition(self):
-        verdict = decide(AdmissionFacts(signal_chain_unbound=True,
-                                        product_lineage_unbound=True))
+        verdict = decide(_complete(signal_chain_unbound=True,
+                                   product_lineage_unbound=True))
         self.assertEqual(verdict.disposition, BREADCRUMB_ONLY)
         self.assertEqual(verdict.reasons,
                          ("SIGNAL_CHAIN_UNBOUND", "PRODUCT_LINEAGE_UNBOUND"))
@@ -168,7 +178,7 @@ class InvariantTests(unittest.TestCase):
                 self.assertNotIn(banned, code)
 
     def test_the_verdict_is_immutable(self):
-        verdict = decide(AdmissionFacts(receiver_state_stale=True))
+        verdict = decide(_complete(receiver_state_stale=True))
         with self.assertRaises(Exception):
             verdict.disposition = FRAME_REFUSED
         with self.assertRaises(Exception):
@@ -191,9 +201,9 @@ class CapabilityTests(unittest.TestCase):
             FRAME_REFUSED: (False, False),
         }
         cases = {
-            SURFACE_ELIGIBLE: AdmissionFacts(),
-            BREADCRUMB_ONLY: AdmissionFacts(receiver_state_stale=True),
-            FRAME_REFUSED: AdmissionFacts(raw_iq_present=True),
+            SURFACE_ELIGIBLE: _complete(),
+            BREADCRUMB_ONLY: _complete(receiver_state_stale=True),
+            FRAME_REFUSED: _complete(raw_iq_present=True),
         }
         for disposition, facts in cases.items():
             verdict = decide(facts)
@@ -205,18 +215,18 @@ class CapabilityTests(unittest.TestCase):
     def test_only_a_refused_frame_loses_its_breadcrumb(self):
         for flags in itertools.product((False, True), repeat=6):
             self.assertTrue(decide(_facts(flags)).breadcrumb_retained)
-        self.assertFalse(decide(AdmissionFacts(raw_iq_present=True)).breadcrumb_retained)
+        self.assertFalse(decide(_complete(raw_iq_present=True)).breadcrumb_retained)
 
     def test_a_refusal_carries_its_scope_so_it_is_not_over_read(self):
-        payload = decide(AdmissionFacts(raw_iq_present=True)).as_dict()
+        payload = decide(_complete(raw_iq_present=True)).as_dict()
         self.assertIn("SCOPED TO THIS FRAME", payload["refusal_scope"])
         self.assertIn("NEITHER DELETED NOR INVALIDATED", payload["refusal_scope"])
-        self.assertNotIn("refusal_scope", decide(AdmissionFacts()).as_dict())
+        self.assertNotIn("refusal_scope", decide(_complete()).as_dict())
 
 
 class SerializationTests(unittest.TestCase):
     def test_the_payload_names_the_contract_it_implements(self):
-        payload = decide(AdmissionFacts(signal_chain_unbound=True)).as_dict()
+        payload = decide(_complete(signal_chain_unbound=True)).as_dict()
         self.assertEqual(payload["contract"], "docs/RF_WALK_SURVEY_CONTRACT.md")
         self.assertEqual(payload["contract_section"], "4")
         self.assertEqual(payload["reasons"], ["SIGNAL_CHAIN_UNBOUND"])
@@ -228,7 +238,7 @@ class SerializationTests(unittest.TestCase):
 
     def test_the_payload_is_json_serializable_and_carries_no_samples(self):
         import json
-        for facts in (AdmissionFacts(), AdmissionFacts(raw_iq_present=True),
+        for facts in (_complete(), _complete(raw_iq_present=True),
                       _facts((True,) * 6)):
             blob = json.dumps(decide(facts).as_dict())
             self.assertNotIn("iq", blob.lower().replace("raw_iq", ""))
@@ -285,13 +295,84 @@ class FactsTests(unittest.TestCase):
             self.assertEqual(AdmissionFacts.from_reason_codes(facts.reason_codes()),
                              facts)
 
-    def test_facts_default_to_nothing_wrong(self):
-        self.assertEqual(AdmissionFacts().reason_codes(), ())
-        self.assertEqual(decide(AdmissionFacts()).disposition, SURFACE_ELIGIBLE)
+    def test_a_complete_clean_fact_set_is_surface_eligible(self):
+        self.assertEqual(_complete().reason_codes(), ())
+        self.assertEqual(decide(_complete()).disposition, SURFACE_ELIGIBLE)
+
+    def test_facts_cannot_be_partial(self):
+        """Not-yet-determined is a pipeline state, never a fact's value."""
+        with self.assertRaises(TypeError):
+            AdmissionFacts()
+        with self.assertRaises(TypeError):
+            AdmissionFacts(raw_iq_present=True)
 
     def test_an_unknown_field_is_refused_by_construction(self):
         with self.assertRaises(TypeError):
             AdmissionFacts(unknown_problem=True)
+
+
+class StagedFactsTests(unittest.TestCase):
+    """Two authorities, neither able to stand in for the other."""
+
+    METADATA = MetadataAdmissionFacts(False, False, False, False)
+    ALIGNMENT = AlignmentAdmissionFacts(False, False)
+
+    def test_neither_stage_type_has_a_default(self):
+        """AlignmentAdmissionFacts() would mean 'alignment ran and found nothing'."""
+        with self.assertRaises(TypeError):
+            AlignmentAdmissionFacts()
+        with self.assertRaises(TypeError):
+            MetadataAdmissionFacts()
+        with self.assertRaises(TypeError):
+            AlignmentAdmissionFacts(True)
+
+    def test_from_stages_requires_both(self):
+        with self.assertRaises(TypeError):
+            AdmissionFacts.from_stages(self.METADATA)
+        with self.assertRaises(TypeError):
+            AdmissionFacts.from_stages(self.METADATA, None)
+        with self.assertRaises(TypeError):
+            AdmissionFacts.from_stages(None, self.ALIGNMENT)
+
+    def test_a_stage_cannot_be_passed_in_the_others_slot(self):
+        with self.assertRaises(TypeError):
+            AdmissionFacts.from_stages(self.ALIGNMENT, self.METADATA)
+
+    def test_stages_compose_into_a_complete_fact_set(self):
+        facts = AdmissionFacts.from_stages(
+            MetadataAdmissionFacts(signal_chain_unbound=True,
+                                   receiver_state_unbound=False,
+                                   product_lineage_unbound=True,
+                                   power_unit_unsupported=False),
+            AlignmentAdmissionFacts(time_alignment_unverified=True,
+                                    receiver_state_stale=False))
+        verdict = decide(facts)
+        self.assertEqual(verdict.disposition, BREADCRUMB_ONLY)
+        self.assertEqual(verdict.reasons, ("TIME_ALIGNMENT_UNVERIFIED",
+                                           "SIGNAL_CHAIN_UNBOUND",
+                                           "PRODUCT_LINEAGE_UNBOUND"))
+
+    def test_from_stages_never_asserts_raw_iq(self):
+        """A raw-IQ frame produces a verdict, never a fact set."""
+        for flags in itertools.product((False, True), repeat=4):
+            facts = AdmissionFacts.from_stages(
+                MetadataAdmissionFacts(*flags), AlignmentAdmissionFacts(True, True))
+            self.assertFalse(facts.raw_iq_present)
+            self.assertNotEqual(decide(facts).disposition, FRAME_REFUSED)
+
+    def test_the_two_stages_partition_the_six_ordinary_reasons(self):
+        import dataclasses
+        metadata = {f.name for f in dataclasses.fields(MetadataAdmissionFacts)}
+        alignment = {f.name for f in dataclasses.fields(AlignmentAdmissionFacts)}
+        self.assertEqual(metadata & alignment, set(), "no fact has two authorities")
+        self.assertEqual(metadata | alignment, set(ORDINARY_FIELDS))
+
+    def test_every_stage_combination_composes(self):
+        for meta in itertools.product((False, True), repeat=4):
+            for align in itertools.product((False, True), repeat=2):
+                facts = AdmissionFacts.from_stages(
+                    MetadataAdmissionFacts(*meta), AlignmentAdmissionFacts(*align))
+                self.assertEqual(len(decide(facts).reasons), sum(meta) + sum(align))
 
 
 if __name__ == "__main__":
