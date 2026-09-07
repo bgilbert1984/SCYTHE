@@ -60,8 +60,32 @@ export function tickerItemsFromRfStatus(payload, {statusObservedAt = null} = {})
   // must be visible in the same place the declared absences are, or the panel
   // only ever tells the reader about things the system is not doing.
   const retention = bridge.iq_retention ?? null;
+  // Read the claims rather than restate them. A hardcoded "NOT EXPOSED" would
+  // keep printing after the payload started saying otherwise, and an absent
+  // block is UNDECLARED -- no evidence is not evidence of no exposure.
+  const RAW_IQ_SINKS = [["API", "raw_iq_api_exposed"], ["BROWSER", "raw_iq_browser_exposed"],
+                        ["CLOUD", "raw_iq_cloud_exposed"], ["MODEL", "raw_iq_model_context_exposed"],
+                        ["DISK", "raw_iq_persisted"]];
+  const rawIqLine = (exposure) => {
+    if (!exposure || typeof exposure !== "object") {
+      return " · RAW IQ EXPOSURE UNDECLARED";
+    }
+    const exposed = RAW_IQ_SINKS.filter(([, key]) => exposure[key] === true).map(([name]) => name);
+    const undeclared = RAW_IQ_SINKS.filter(([, key]) => typeof exposure[key] !== "boolean");
+    const claim = exposed.length
+      ? `RAW IQ EXPOSED TO ${exposed.join(" + ")}`
+      : `RAW IQ NOT EXPOSED TO ${RAW_IQ_SINKS.map(([name]) => name).join(", ")}`;
+    return ` · ${claim}${undeclared.length ? ` · ${undeclared.length} SINK CLAIMS UNDECLARED` : ""}`
+      // The transport is published beside the claim, never instead of it. IQ
+      // really does cross a socket; loopback is the control, not the absence.
+      + ` · LOCAL TRANSPORT ${sanitizeTickerText(exposure.raw_iq_local_transport, "UNDECLARED", 24).toUpperCase()}`
+      + ` · ${sanitizeTickerText(exposure.raw_iq_listener, "UNDECLARED", 24).toUpperCase()}`;
+  };
   return [
-    `RF RECEIVER // ${sanitizeTickerText(config.sensor_id, "UNNAMED SENSOR", 80)} · ${sanitizeTickerText(bridge.bridge_state).toUpperCase()} · IQ ${bridge.iq_connected ? "CONNECTED" : "DISCONNECTED"}`,
+    `RF RECEIVER // ${sanitizeTickerText(config.sensor_id, "UNNAMED SENSOR", 80)} · ${sanitizeTickerText(bridge.bridge_state).toUpperCase()} · IQ ${sanitizeTickerText(
+      bridge.capture_source?.availability,
+      bridge.iq_connected ? "SOURCE_CONNECTED_FLOW_UNDECLARED" : "SOURCE_DISCONNECTED",
+      40).toUpperCase()}`,
     `RF PRODUCTS // FFT ${fftState} · SPARSE EVENTS ${sparseState} · RAW IQ LOCAL ONLY`,
     classifications ? `RF DETECTIONS // DIGITAL ${count("digital")} · ANALOGUE ${count("analogue")} · UNCLASSIFIED ${count("unclassified")} · RETAINED EVENTS ${count("total")} · DERIVED SUMMARY` : "RF DETECTIONS // COUNTS UNAVAILABLE",
     // Three axes, three separate absences. Collapsing them would put the ticker
@@ -84,7 +108,7 @@ export function tickerItemsFromRfStatus(payload, {statusObservedAt = null} = {})
               + ` · ${Math.max(0, Number(retention.capacity_samples) || 0)} SAMPLES`
               + ` · RING ${sanitizeTickerText(retention.ring?.state, "UNDECLARED", 20).toUpperCase()}`
             : ` · ${sanitizeTickerText(retention.inactive_reason, "UNDECLARED", 40).toUpperCase()}`)
-        + ` · RAW IQ ${retention.raw_iq_exposed === true ? "EXPOSED" : "NOT EXPOSED"}`
+        + rawIqLine(retention.raw_iq_exposure)
         // 32, not 20: AVAILABLE_NOT_INTEGRATED is 24 characters and a state
         // truncated to AVAILABLE_NOT_INTEGR reads as a different claim.
         + ` · CHANNELIZER ${sanitizeTickerText(retention.channelizer_state, "UNDECLARED", 32).toUpperCase()}`
@@ -138,7 +162,11 @@ export class SystemEvidenceTicker {
     const bridge = payload?.bridge ?? {};
     const products = bridge.products ?? {};
     const classifications = payload?.observations?.signal_classifications ?? {};
+    // Availability, not just connectedness: a source going STREAMING -> STARVED
+    // leaves bridge_state and iq_connected untouched, and a cache key blind to
+    // it would hold the old banner over the new fault.
     this.#render(`rf:${bridge.bridge_state ?? "unavailable"}:${Boolean(bridge.iq_connected)}:`
+      + `${bridge.capture_source?.availability ?? "unavailable"}:`
       + `${products.fft_frames?.state ?? "unavailable"}:${products.sparse_supports?.state ?? "unavailable"}:`
       + `${classifications.digital ?? "?"}:${classifications.analogue ?? "?"}:${classifications.unclassified ?? "?"}`);
   }

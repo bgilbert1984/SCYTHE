@@ -172,6 +172,8 @@ WIRED_REASON_SOURCES = {
     "SIGNAL_CHAIN_CHANGE": ("IQRetentionOwner.set_instrument, called by "
                             "SDRPPBridge.apply_antenna_declaration on an accepted "
                             "operator antenna declaration"),
+    "SOURCE_STARVED": ("SDRPlusPlusBridge._note_starvation, on the opening edge "
+                       "of a starvation incident only"),
 }
 # Direct sampling, declared as absent rather than made to look handled.
 #
@@ -218,6 +220,32 @@ DIRECT_SAMPLING_TRANSACTION = (
 )
 
 MAX_INVALIDATION_HISTORY = 16
+
+# Repeated clock detections are aggregated for reading, never for counting. On
+# 2026-09-06 a single post-reattach transient produced seven CLOCK_DISCONTINUITY
+# invalidations at the 10 s check interval -- one verdict per check window, not
+# seven independent clock steps. Every one of them was correct and every one
+# stays in the history; the incident is an operator-facing grouping laid over
+# them so a run of checks does not read as a run of faults.
+#
+# Recovery is counted in consecutive PASSING checks, not in quiet seconds. A
+# starved stream runs no checks at all, so silence is the absence of evidence
+# rather than evidence of health. At the 10 s interval this is 70 s of the
+# detector actively agreeing with the clock before an incident is called over.
+CLOCK_INCIDENT_RECOVERY_CHECKS = 7
+# What preceded the incident, and nothing stronger. A reconnect and a clock
+# complaint being adjacent is an observation; which caused which is not one.
+CLOCK_INCIDENT_RELATIONSHIP = "TEMPORALLY_CORRELATED"
+CLOCK_INCIDENT_CAUSE = "NOT_ESTABLISHED"
+
+# Where raw IQ goes and where it does not, as separate claims. See
+# IQRetentionOwner.raw_iq_exposure for why the single boolean was too broad.
+RAW_IQ_LOCAL_TRANSPORT = "LOOPBACK_TCP"
+RAW_IQ_TRANSPORT_NOTE = (
+    "RAW IQ CROSSES A LOCAL TCP SOCKET BETWEEN rtl_tcp AND THE BRIDGE. IT IS "
+    "NOT EXPOSED TO ANY API, BROWSER, MODEL CONTEXT OR DISK. THE BIND ADDRESS "
+    "IS THE CONTROL; A FIREWALL IS NOT A SUBSTITUTE FOR IT"
+)
 UNWIRED_NOTE = (
     "THIS BRIDGE HAS NO DIRECT-SAMPLING CONTROL, SO NOTHING CALLS "
     "DIRECT_SAMPLING_CHANGE. IT MUST BE WIRED HERE BEFORE SUCH A CONTROL IS "
@@ -284,6 +312,12 @@ class ClockContinuityMonitor:
         self._samples = 0
         self._discontinuities = 0
         self._last_detail: Optional[Dict[str, Any]] = None
+        # Checks that completed and agreed since the last detected break, and
+        # what that count stood at when the break fired. The second is what an
+        # aggregator needs: by the time a break is recorded the live counter has
+        # already been zeroed by the break itself.
+        self._consecutive_passes = 0
+        self._passes_before_last_break = 0
 
     def reset(self, now: Optional[float] = None) -> None:
         """Start a new continuity claim. Called wherever the ring is cleared."""
@@ -319,13 +353,26 @@ class ClockContinuityMonitor:
             return self._break("DRIFT", detail, now)
         # Healthy: start a fresh accumulation rather than integrating forever, so
         # one bad interval cannot be diluted by an hour of good ones.
+        self._consecutive_passes += 1
         self.reset(now)
         self._last_at = now
         return None
 
+    @property
+    def consecutive_passing_checks(self) -> int:
+        """Completed checks that agreed, since the last detected break."""
+        return self._consecutive_passes
+
+    @property
+    def passes_before_last_break(self) -> int:
+        """The above, frozen at the moment the last break fired."""
+        return self._passes_before_last_break
+
     def _break(self, kind: str, detail: Dict[str, Any],
                now: float) -> Dict[str, Any]:
         self._discontinuities += 1
+        self._passes_before_last_break = self._consecutive_passes
+        self._consecutive_passes = 0
         record = {"kind": kind, "at": now, **detail}
         self._last_detail = record
         self.reset(now)
@@ -350,6 +397,7 @@ class ClockContinuityMonitor:
                                  if self._discontinuities == 0
                                  else "DISCONTINUITIES_DETECTED"),
             "detection_coverage": "BOUNDED_BY_DRIFT_TOLERANCE_AND_CHECK_INTERVAL",
+            "consecutive_passing_checks": self._consecutive_passes,
             "coverage_note": (
                 "DETECTION COVERAGE IS NOT OMNISCIENCE. A SAMPLE LOSS SMALLER "
                 "THAN THE DRIFT TOLERANCE OVER ONE CHECK INTERVAL IS NOT "
@@ -514,8 +562,13 @@ class IQRetentionOwner:
 
     def __init__(self, *, sensor_id: str, sample_type: str, sample_rate_hz: float,
                  owns_capture: bool, window_ms: float = DEFAULT_WINDOW_MS,
-                 enabled: Optional[bool] = None) -> None:
+                 enabled: Optional[bool] = None,
+                 iq_source: Optional[str] = None) -> None:
         self._lock = threading.RLock()
+        # Where the samples came from, so the exposure block can name the
+        # transport instead of denying that one exists. None is published as
+        # UNDECLARED, never as "no transport".
+        self._iq_source = (iq_source or "").strip() or None
         self._sensor_id = sensor_id
         self._sample_type = sample_type
         self._sample_rate_hz = float(sample_rate_hz)
@@ -549,6 +602,12 @@ class IQRetentionOwner:
         self._products_by_outcome: Dict[str, int] = {}
         self._channelizer_errors = 0
         self._products: deque = deque(maxlen=MAX_TRACKED_PRODUCTS)
+        # Operator-facing aggregation over CLOCK_DISCONTINUITY invalidations.
+        # Bounded to the current incident: the individual clears are already
+        # kept in _history, and duplicating them here would be a second, weaker
+        # copy of the same record.
+        self._clock_incidents = 0
+        self._clock_incident: Optional[Dict[str, Any]] = None
 
     # -- policy -------------------------------------------------------------
 
@@ -771,7 +830,87 @@ class IQRetentionOwner:
             return epoch
 
     def _record_locked(self, reason: str, epoch: Optional[int]) -> None:
+        preceding = self._history[-1]["reason"] if self._history else None
         self._history.append({"reason": reason, "at": time.time(), "epoch": epoch})
+        if reason == "CLOCK_DISCONTINUITY":
+            self._note_clock_incident_locked(preceding)
+
+    def _note_clock_incident_locked(self, preceding: Optional[str]) -> None:
+        """Fold this detection into the open incident, or start a new one.
+
+        A detection continues the open incident unless the detector had already
+        recovered from it, which is what makes seven checks across one transient
+        read as one incident and a genuinely new fault read as a second.
+        """
+        now_ns = int(time.monotonic() * 1e9)
+        incident = self._clock_incident
+        recovered = (incident is not None
+                     and self._clock.passes_before_last_break
+                     >= CLOCK_INCIDENT_RECOVERY_CHECKS)
+        if incident is None or recovered:
+            self._clock_incidents += 1
+            self._clock_incident = {
+                "incident_id": f"clock-incident-{self._clock_incidents:04d}",
+                "first_detected_monotonic_ns": now_ns,
+                "last_detected_monotonic_ns": now_ns,
+                "failed_checks": 1,
+                "invalidation_count": 1,
+                # The invalidation immediately before this incident began. Not a
+                # cause, and not labelled as one.
+                "preceding_event": preceding,
+                "relationship": (CLOCK_INCIDENT_RELATIONSHIP if preceding
+                                 else "NO_PRECEDING_EVENT_RECORDED"),
+                "cause": CLOCK_INCIDENT_CAUSE,
+            }
+            return
+        incident["last_detected_monotonic_ns"] = now_ns
+        incident["failed_checks"] += 1
+        incident["invalidation_count"] += 1
+
+    def _clock_incident_locked(self) -> Optional[Dict[str, Any]]:
+        """The open incident with its liveness derived, not stored.
+
+        State is computed from the detector's current pass count at read time so
+        an incident cannot sit reading ACTIVE because nothing happened to close
+        it. Nothing here is stored back: the incident record holds what was
+        observed, and recovery is a judgement about the present.
+        """
+        incident = self._clock_incident
+        if incident is None:
+            return None
+        passes = self._clock.consecutive_passing_checks
+        recovered = passes >= CLOCK_INCIDENT_RECOVERY_CHECKS
+        return {
+            **incident,
+            "state": "RECOVERED" if recovered else "ACTIVE",
+            "passing_checks_since_last": passes,
+            "recovery_requires_checks": CLOCK_INCIDENT_RECOVERY_CHECKS,
+            "recovery_basis": (f"{CLOCK_INCIDENT_RECOVERY_CHECKS}_CONSECUTIVE_PASSING_CHECKS"
+                               if recovered else None),
+        }
+
+    def raw_iq_exposure(self) -> Dict[str, Any]:
+        """Where raw IQ goes, as separate claims rather than one boolean.
+
+        ``raw_iq_exposed: false`` was broader than the truth. No API, browser,
+        model context or disk path carries IQ, and that is the claim worth
+        making. But rtl_tcp and this process are two processes, and the samples
+        reach this ring over a real, unauthenticated TCP socket. Loopback is the
+        control that makes that acceptable, so the transport is published beside
+        the exposure claims instead of being folded into a denial that it
+        exists. A reader can then check the control rather than trust the word.
+        """
+        declared = self._iq_source is not None
+        return {
+            "raw_iq_api_exposed": False,
+            "raw_iq_browser_exposed": False,
+            "raw_iq_cloud_exposed": False,
+            "raw_iq_model_context_exposed": False,
+            "raw_iq_persisted": False,
+            "raw_iq_local_transport": RAW_IQ_LOCAL_TRANSPORT if declared else "UNDECLARED",
+            "raw_iq_listener": self._iq_source or "UNDECLARED",
+            "raw_iq_transport_note": RAW_IQ_TRANSPORT_NOTE,
+        }
 
     def reconfigure(self, *, sample_type: Optional[str] = None,
                     sample_rate_hz: Optional[float] = None,
@@ -962,7 +1101,10 @@ class IQRetentionOwner:
                 "capacity_limited": self._requested_samples() > DEFAULT_CAPACITY_SAMPLES,
                 "capacity_samples": capacity,
                 "max_capacity_samples": DEFAULT_CAPACITY_SAMPLES,
-                "raw_iq_exposed": False,
+                # Replaces an unqualified raw_iq_exposed. The single boolean
+                # denied a loopback socket that genuinely exists; these say what
+                # is true of each destination and name the transport.
+                "raw_iq_exposure": self.raw_iq_exposure(),
                 "channelizer_state": CHANNELIZER_STATE,
                 "channelizer_note": CHANNELIZER_NOTE,
                 "channelizer": self.channelizer_block(),
@@ -1006,6 +1148,11 @@ class IQRetentionOwner:
                 "wired_invalidation_sources": dict(WIRED_REASON_SOURCES),
                 "gain_db": self._gain_db,
                 "clock_continuity": self._clock.status(),
+                # A grouping over the CLOCK_DISCONTINUITY entries below, so a
+                # run of correct checks does not read as a run of faults. Every
+                # individual clear remains in the history unchanged.
+                "clock_incident": self._clock_incident_locked(),
+                "clock_incidents": self._clock_incidents,
                 "invalidation_history": list(self._history),
                 "inactive_reason": inactive,
                 "inactive_reason_note": INACTIVE_REASONS.get(inactive) if inactive else None,

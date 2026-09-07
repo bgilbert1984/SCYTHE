@@ -508,7 +508,9 @@ class CaptureRateAuthorityTests(unittest.TestCase):
     def test_an_unreachable_source_does_not_invent_a_cause(self):
         # Never started, so it cannot be streaming.
         source = self._bridge().capture_source_declaration()
-        self.assertEqual(source["availability"], "SOURCE_UNREACHABLE")
+        self.assertEqual(source["availability"], "SOURCE_DISCONNECTED")
+        self.assertEqual(source["transport_state"], "DISCONNECTED")
+        self.assertEqual(source["sample_flow_state"], "NONE")
         self.assertEqual(source["unreachable_cause"],
                          "NOT_DETERMINABLE_FROM_THIS_PROCESS")
         # The tempting-but-unfounded claim under WSL. A refused socket is not
@@ -521,7 +523,76 @@ class CaptureRateAuthorityTests(unittest.TestCase):
     def test_a_connected_source_carries_no_cause_fields_at_all(self):
         bridge = self._bridge()
         bridge._state = "streaming"
+        bridge._last_sample_monotonic = time.monotonic()
+        bridge._last_frame_monotonic = bridge._last_sample_monotonic
         source = bridge.capture_source_declaration()
-        self.assertEqual(source["availability"], "SOURCE_CONNECTED")
+        self.assertEqual(source["availability"], "SOURCE_STREAMING")
+        self.assertEqual(source["transport_state"], "CONNECTED")
+        self.assertEqual(source["sample_flow_state"], "ACTIVE")
         self.assertNotIn("unreachable_cause", source)
         self.assertNotIn("cause_note", source)
+        self.assertNotIn("starvation_note", source)
+
+    def test_an_established_socket_delivering_nothing_is_not_called_connected(self):
+        """The rtl_tcp-survives-USB-removal case, which is why the axes split."""
+        bridge = self._bridge()
+        bridge._state = "streaming"
+        # Older than the declared threshold, on the same clock the bridge reads.
+        stale = time.monotonic() - (bridge.config.starvation_threshold_ms / 1000.0) - 1.0
+        bridge._last_sample_monotonic = stale
+        bridge._last_frame_monotonic = stale
+        source = bridge.capture_source_declaration()
+        self.assertEqual(source["transport_state"], "CONNECTED",
+                         "the socket really is up; that is the whole problem")
+        self.assertEqual(source["sample_flow_state"], "STARVED")
+        self.assertEqual(source["availability"], "SOURCE_STARVED")
+        self.assertEqual(source["freshness_clock"], "MONOTONIC")
+        self.assertEqual(source["starvation_threshold_authority"], "CONFIGURED_POLICY")
+        # A starved source is still a source of unknown cause. Naming the USB
+        # device here would be the same guess the unreachable path refuses.
+        self.assertNotIn("USB", source["availability"].upper())
+
+    def test_bytes_without_frames_is_a_different_state_from_an_empty_socket(self):
+        bridge = self._bridge()
+        bridge._state = "streaming"
+        now = time.monotonic()
+        bridge._last_sample_monotonic = now
+        bridge._last_frame_monotonic = now - (bridge.config.starvation_threshold_ms / 1000.0) - 1.0
+        source = bridge.capture_source_declaration()
+        self.assertEqual(source["sample_flow_state"], "FRAME_ASSEMBLY_STARVED")
+        self.assertEqual(source["availability"], "FRAME_ASSEMBLY_STARVED")
+
+    def test_a_starvation_incident_clears_the_ring_once_not_once_per_check(self):
+        bridge = self._bridge()
+        bridge._state = "streaming"
+        bridge.retention.append(np.full(4096, 1.0, dtype=np.complex64), 1.0)
+        bridge._last_sample_monotonic = (
+            time.monotonic() - (bridge.config.starvation_threshold_ms / 1000.0) - 1.0)
+        for _ in range(5):
+            bridge._note_starvation()
+        starved = [entry for entry in bridge.retention.status()["invalidation_history"]
+                   if entry["reason"] == "SOURCE_STARVED"]
+        self.assertEqual(len(starved), 1,
+                         "five checks across one outage are one incident")
+        self.assertEqual(bridge._starvation_incidents, 1)
+
+    def test_a_header_only_reconnect_is_not_counted_as_sample_flow(self):
+        """rtl_tcp greets every reconnect with 12 bytes and then wedges.
+
+        A byte clock resets on that greeting and reports SOURCE_STREAMING for
+        the next threshold window, so a flapping wedge never settles on a fault.
+        """
+        config = RFBridgeConfig(sample_type="uint8", fft_size=1024, max_bins=64)
+        processor = IQFFTProcessor(config)
+        header = b"RTL0" + (1).to_bytes(4, "big") + (29).to_bytes(4, "big")
+        self.assertEqual(len(header), 12)
+        processor.feed(header, now=1.0)
+        self.assertIsNotNone(processor.dongle_info, "the header really was consumed")
+        self.assertEqual(processor.samples_decoded, 0,
+                         "a greeting decodes no samples and must not read as flow")
+        processor.feed(bytes(4096), now=1.1)
+        self.assertEqual(processor.samples_decoded, 2048)
+
+    def test_a_starvation_threshold_below_the_receive_wakeup_is_refused(self):
+        with self.assertRaises(ValueError):
+            RFBridgeConfig(starvation_threshold_ms=250.0).validated()

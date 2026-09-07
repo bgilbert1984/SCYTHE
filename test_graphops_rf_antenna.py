@@ -420,3 +420,36 @@ class ComparabilityReachesTheProductHashTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class GeometryIsNotResponseTests(unittest.TestCase):
+    """A derived reference must not be readable as a verdict on suitability."""
+
+    def _record(self):
+        return validate_declaration({"antenna_id": "nesdr-smart-telescopic",
+                                     "feedline_id": "nesdr-magnetic-base-rg58-2m",
+                                     "extension_mm": 368})
+
+    def test_the_three_claims_are_carried_separately(self):
+        record = self._record()
+        self.assertEqual(record["extension_authority"], "OPERATOR_ESTIMATED")
+        self.assertEqual(record["quarter_wave_authority"], "DERIVED_INFERENCE")
+        self.assertEqual(record["quarter_wave_model"], "IDEAL_FREE_SPACE")
+        self.assertEqual(record["response_at_tune"], "NOT_CALIBRATED")
+
+    def test_the_reference_is_never_promoted_to_a_measured_resonance(self):
+        record = self._record()
+        self.assertEqual(record["resonance_claim"], "NOT_MEASURED")
+        # 368 mm derives ~203.663 MHz. The telescopic mast has no vendor centre,
+        # so nothing may fill that field in from the geometry.
+        self.assertEqual(record["quarter_wave_hz"], 203_663_355)
+        self.assertIsNone(record["resonance_hz"])
+        self.assertEqual(record["resonance_authority"], "UNDECLARED")
+
+    def test_a_declared_extension_defaults_to_estimated_not_measured(self):
+        """A length typed as a target is not a length read off a ruler."""
+        self.assertEqual(self._record()["extension_authority"], "OPERATOR_ESTIMATED")
+        measured = validate_declaration({"antenna_id": "nesdr-smart-telescopic",
+                                         "extension_mm": 368,
+                                         "extension_authority": "OPERATOR_MEASURED"})
+        self.assertEqual(measured["extension_authority"], "OPERATOR_MEASURED")

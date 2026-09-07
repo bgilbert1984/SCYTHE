@@ -38,7 +38,9 @@ test("ticker declares RF products independently from connection state", () => {
       digital:3,analogue:2,unclassified:7,total:12}},bridge:{bridge_state:"streaming",iq_connected:true,
     products:{fft_frames:{state:"stale"},sparse_supports:{state:"live"}},
     config:{sensor_id:"NESDR-SMART",center_frequency_hz:100e6,sample_rate_hz:2.048e6}}});
-  assert.match(items[0],/STREAMING · IQ CONNECTED/);
+  // Availability, not connectedness: with no capture_source block the ticker
+  // must not claim a flow state it was never told.
+  assert.match(items[0],/STREAMING · IQ SOURCE_CONNECTED_FLOW_UNDECLARED/);
   assert.equal(items[1],"RF PRODUCTS // FFT STALE · SPARSE EVENTS LIVE · RAW IQ LOCAL ONLY");
   assert.equal(items[2],"RF DETECTIONS // DIGITAL 3 · ANALOGUE 2 · UNCLASSIFIED 7 · RETAINED EVENTS 12 · DERIVED SUMMARY");
   assert.equal(items[3],"RF AXES // MODULATION UNDECLARED · SYMBOL CLOCK UNDECLARED · PROTOCOL DECODER UNDECLARED");
@@ -51,10 +53,13 @@ test("live raw-IQ retention is stated as plainly as its absence", () => {
   const items = tickerItemsFromRfStatus({bridge:{bridge_state:"streaming",config:{},
     iq_retention:{iq_retention:"PROCESS_LOCAL_BOUNDED_RING",iq_retention_active:true,
       configured_retention_ms:256,effective_retention_ms:256,capacity_limited:false,
-      capacity_samples:524288,raw_iq_exposed:false,
+      capacity_samples:524288,raw_iq_exposure:{raw_iq_api_exposed:false,raw_iq_browser_exposed:false,
+        raw_iq_cloud_exposed:false,raw_iq_model_context_exposed:false,
+        raw_iq_persisted:false,raw_iq_local_transport:"LOOPBACK_TCP",
+        raw_iq_listener:"127.0.0.1:1234"},
       channelizer_state:"INTEGRATED_NO_CLASSIFICATION",ring:{state:"READY"}}}});
   assert.equal(items[6],"RF IQ RETENTION // PROCESS_LOCAL_BOUNDED_RING · ACTIVE"
-    + " · 256 ms · 524288 SAMPLES · RING READY · RAW IQ NOT EXPOSED"
+    + " · 256 ms · 524288 SAMPLES · RING READY · RAW IQ NOT EXPOSED TO API, BROWSER, CLOUD, MODEL, DISK · LOCAL TRANSPORT LOOPBACK_TCP · 127.0.0.1:1234"
     + " · CHANNELIZER INTEGRATED_NO_CLASSIFICATION");
 });
 
@@ -64,11 +69,14 @@ test("a capacity-limited ring reports what it holds, not what was configured", (
   const items = tickerItemsFromRfStatus({bridge:{bridge_state:"streaming",config:{},
     iq_retention:{iq_retention:"PROCESS_LOCAL_BOUNDED_RING",iq_retention_active:true,
       configured_retention_ms:256,effective_retention_ms:218.453,capacity_limited:true,
-      capacity_samples:524288,raw_iq_exposed:false,
+      capacity_samples:524288,raw_iq_exposure:{raw_iq_api_exposed:false,raw_iq_browser_exposed:false,
+        raw_iq_cloud_exposed:false,raw_iq_model_context_exposed:false,
+        raw_iq_persisted:false,raw_iq_local_transport:"LOOPBACK_TCP",
+        raw_iq_listener:"127.0.0.1:1234"},
       channelizer_state:"INTEGRATED_NO_CLASSIFICATION",ring:{state:"READY"}}}});
   assert.equal(items[6],"RF IQ RETENTION // PROCESS_LOCAL_BOUNDED_RING · ACTIVE"
     + " · 218.453 ms EFFECTIVE OF 256 ms CONFIGURED · CAPACITY LIMITED"
-    + " · 524288 SAMPLES · RING READY · RAW IQ NOT EXPOSED"
+    + " · 524288 SAMPLES · RING READY · RAW IQ NOT EXPOSED TO API, BROWSER, CLOUD, MODEL, DISK · LOCAL TRANSPORT LOOPBACK_TCP · 127.0.0.1:1234"
     + " · CHANNELIZER INTEGRATED_NO_CLASSIFICATION");
 });
 
@@ -76,7 +84,10 @@ test("the ticker counts channelized products without implying they were classifi
   const items = tickerItemsFromRfStatus({bridge:{bridge_state:"streaming",config:{},
     iq_retention:{iq_retention:"PROCESS_LOCAL_BOUNDED_RING",iq_retention_active:true,
       configured_retention_ms:256,effective_retention_ms:256,capacity_limited:false,
-      capacity_samples:524288,raw_iq_exposed:false,
+      capacity_samples:524288,raw_iq_exposure:{raw_iq_api_exposed:false,raw_iq_browser_exposed:false,
+        raw_iq_cloud_exposed:false,raw_iq_model_context_exposed:false,
+        raw_iq_persisted:false,raw_iq_local_transport:"LOOPBACK_TCP",
+        raw_iq_listener:"127.0.0.1:1234"},
       channelizer_state:"INTEGRATED_NO_CLASSIFICATION",ring:{state:"READY"},
       channelizer:{products_total:7,classification:"NOT_DERIVED_FROM_PRODUCTS"}}}});
   assert.match(items[6],/· 7 PRODUCTS · CLASSIFICATION NOT_DERIVED_FROM_PRODUCTS$/);
@@ -87,10 +98,13 @@ test("a permitted but unallocated ring is not reported as retention", () => {
   const items = tickerItemsFromRfStatus({bridge:{bridge_state:"streaming",config:{},
     iq_retention:{iq_retention:"NONE_BEYOND_ONE_FFT_BLOCK",iq_retention_active:false,
       configured_retention_ms:256,effective_retention_ms:256,capacity_samples:524288,
-      raw_iq_exposed:false,inactive_reason:"NO_SAMPLES_YET",
+      raw_iq_exposure:{raw_iq_api_exposed:false,raw_iq_browser_exposed:false,
+        raw_iq_cloud_exposed:false,raw_iq_model_context_exposed:false,
+        raw_iq_persisted:false,raw_iq_local_transport:"LOOPBACK_TCP",
+        raw_iq_listener:"127.0.0.1:1234"},inactive_reason:"NO_SAMPLES_YET",
       channelizer_state:"INTEGRATED_NO_CLASSIFICATION",ring:null}}});
   assert.equal(items[6],"RF IQ RETENTION // NONE_BEYOND_ONE_FFT_BLOCK · INACTIVE"
-    + " · NO_SAMPLES_YET · RAW IQ NOT EXPOSED · CHANNELIZER INTEGRATED_NO_CLASSIFICATION");
+    + " · NO_SAMPLES_YET · RAW IQ NOT EXPOSED TO API, BROWSER, CLOUD, MODEL, DISK · LOCAL TRANSPORT LOOPBACK_TCP · 127.0.0.1:1234 · CHANNELIZER INTEGRATED_NO_CLASSIFICATION");
 });
 
 test("ticker states whether a classifier ran, not only what it counted", () => {

@@ -91,6 +91,14 @@ DECLARATION_AUTHORITY = "OPERATOR_DECLARED"
 # as a measurement of this antenna.
 QUARTER_WAVE_MODEL = "IDEAL_FREE_SPACE"
 RESONANCE_CLAIM = "NOT_MEASURED"
+# The third claim, kept apart from the other two. Geometry is declared, the
+# quarter wave is arithmetic on it, and how the antenna actually responds at the
+# frequency being received is neither. Without this field a reader holding a
+# 368 mm mast and a 203.663 MHz reference can conclude the antenna is wrong at
+# 100 MHz -- a conclusion this system has no basis for in either direction. A
+# receive-only path has no reflectometer, so NOT_CALIBRATED is permanent here
+# rather than pending.
+RESPONSE_AT_TUNE = "NOT_CALIBRATED"
 
 AUTODETECT_REASON = (
     "ANTENNA AUTO-DETECTION IS NOT PHYSICALLY AVAILABLE: SMA CARRIES NO IDENTITY "
@@ -183,6 +191,7 @@ def validate_declaration(payload: Any, *, declared_at: Optional[float] = None) -
         # The geometry implies a frequency. It does not establish that the antenna
         # is resonant there, and no receive-only path can establish it.
         "resonance_claim": RESONANCE_CLAIM,
+        "response_at_tune": RESPONSE_AT_TUNE,
         "resonance_hz": antenna["resonance_hz"],
         "resonance_authority": "VENDOR_DECLARED" if antenna["resonance_hz"] else "UNDECLARED",
         "note": str(payload.get("note") or "").strip()[:256],

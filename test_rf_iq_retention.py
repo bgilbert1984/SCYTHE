@@ -15,7 +15,8 @@ import numpy as np
 from rf_bridge import IQFFTProcessor, RFBridgeConfig, SDRPlusPlusBridge
 from rf_iq_ring import DEFAULT_CAPACITY_SAMPLES, INVALIDATION_REASONS
 from rf_iq_retention import (
-    CHANNELIZER_STATE, CLOCK_GAP_S, INACTIVE_REASONS, MAX_INVALIDATION_HISTORY,
+    CHANNELIZER_STATE, CLOCK_CHECK_INTERVAL_S, CLOCK_GAP_S,
+    CLOCK_INCIDENT_RECOVERY_CHECKS, INACTIVE_REASONS, MAX_INVALIDATION_HISTORY,
     RETENTION_NONE, RETENTION_RING, UNWIRED_REASONS, IQRetentionOwner, antenna_id,
     retention_enabled, signal_chain_hash,
 )
@@ -77,7 +78,11 @@ class RetentionActivationTests(EnvironmentIsolatedTest):
         self.assertEqual(status["effective_retention_ms"], 256.0)
         self.assertFalse(status["capacity_limited"])
         self.assertEqual(status["capacity_samples"], 524_288)
-        self.assertFalse(status["raw_iq_exposed"])
+        # Five destination claims, not one boolean. See raw_iq_exposure.
+        exposure = status["raw_iq_exposure"]
+        self.assertFalse(any(exposure[key] for key in (
+            "raw_iq_api_exposed", "raw_iq_browser_exposed", "raw_iq_cloud_exposed",
+            "raw_iq_model_context_exposed", "raw_iq_persisted")))
         self.assertEqual(status["channelizer_state"], "INTEGRATED_NO_CLASSIFICATION")
         self.assertEqual(status["ring"]["held_samples"], 4096)
 
@@ -88,10 +93,10 @@ class RetentionActivationTests(EnvironmentIsolatedTest):
         self.assertEqual(
             {key: status[key] for key in ("iq_retention", "iq_retention_active",
                                           "effective_retention_ms", "capacity_samples",
-                                          "raw_iq_exposed", "channelizer_state")},
+                                          "channelizer_state")},
             {"iq_retention": "PROCESS_LOCAL_BOUNDED_RING", "iq_retention_active": True,
              "effective_retention_ms": 256.0, "capacity_samples": 524288,
-             "raw_iq_exposed": False, "channelizer_state": "INTEGRATED_NO_CLASSIFICATION"})
+             "channelizer_state": "INTEGRATED_NO_CLASSIFICATION"})
 
     def test_no_status_key_reports_a_bare_unqualified_retention_duration(self):
         """A single "retention_ms" cannot be both the request and the reality."""
@@ -473,10 +478,15 @@ class BridgeIntegrationTests(EnvironmentIsolatedTest):
 
     def test_the_retention_status_carries_no_samples_and_serializes(self):
         bridge = self._bridge()
-        bridge.retention.append(np.full(2048, 1234.5, dtype=np.complex64), 1.0)
+        # A magnitude that cannot collide with a port number, a capacity or a
+        # threshold, so "absent" means absent rather than merely unmatched.
+        bridge.retention.append(np.full(2048, 98765.5, dtype=np.complex64), 1.0)
         payload = json.dumps(bridge.status()["iq_retention"])
-        self.assertNotIn("1234", payload)
-        self.assertIn('"raw_iq_exposed": false', payload)
+        self.assertNotIn("98765", payload)
+        self.assertIn('"raw_iq_api_exposed": false', payload)
+        self.assertIn('"raw_iq_persisted": false', payload)
+        # The transport is named rather than denied.
+        self.assertIn('"raw_iq_local_transport": "LOOPBACK_TCP"', payload)
 
 
 class DetectionCoverageTests(EnvironmentIsolatedTest):
@@ -499,6 +509,148 @@ class DetectionCoverageTests(EnvironmentIsolatedTest):
         owner.append(_samples(), 1.0 + CLOCK_GAP_S + 5.0)
         self.assertEqual(owner.status()["clock_continuity"]["continuity_claim"],
                          "DISCONTINUITIES_DETECTED")
+
+
+class ClockIncidentAggregationTests(EnvironmentIsolatedTest):
+    """A run of correct checks must not read as a run of faults."""
+
+    # A modest rate keeps 70 s of clean feed cheap. The monitor compares a
+    # sample count against elapsed time, so its behaviour is rate-independent;
+    # only the volume of the test changes.
+    RATE = 48_000.0
+
+    def _owner(self):
+        return _owner(sample_rate_hz=self.RATE)
+
+    def _detections(self, owner):
+        return [e for e in owner.status()["invalidation_history"]
+                if e["reason"] == "CLOCK_DISCONTINUITY"]
+
+    def _storm(self, owner, breaks=7, start=1.0):
+        """Force exactly `breaks` gap detections.
+
+        Counted rather than stepped: an invalidation resets the monitor to an
+        unarmed state, so the append after a break re-arms silently and only
+        the one after that can detect again. Stepping a fixed number of times
+        would silently produce half the intended detections.
+        """
+        at = start
+        owner.append(_samples(), at)
+        while len(self._detections(owner)) < breaks:
+            at += CLOCK_GAP_S + 5.0
+            owner.append(_samples(), at)
+        return at
+
+    def _feed_clean(self, owner, at, seconds, step=0.05):
+        """Arrivals closer together than the gap limit, at the declared rate.
+
+        The step is deliberately small. A check interval is measured from the
+        first arrival after a re-arm, so one extra block is always counted
+        inside it; with half-second blocks that bias is 5% and trips the 1%
+        drift tolerance on its own. Real chunks are a few milliseconds, and the
+        step here is chosen to match that regime rather than to flatter it.
+        """
+        block = np.zeros(int(self.RATE * step), dtype=np.complex64)
+        end = at + seconds
+        while at < end - 1e-9:
+            at += step
+            owner.append(block, at)
+        return at
+
+    def test_seven_checks_across_one_transient_are_one_incident(self):
+        owner = self._owner()
+        self._storm(owner, breaks=7)
+        status = owner.status()
+        cleared = [e for e in status["invalidation_history"]
+                   if e["reason"] == "CLOCK_DISCONTINUITY"]
+        self.assertEqual(len(cleared), 7, "every individual clear is still recorded")
+        self.assertEqual([e["epoch"] for e in cleared], list(range(1, 8)),
+                         "each clear carries the epoch it ended")
+        self.assertEqual(status["clock_incidents"], 1)
+        incident = status["clock_incident"]
+        self.assertEqual(incident["failed_checks"], 7)
+        self.assertEqual(incident["invalidation_count"], 7)
+        self.assertEqual(incident["state"], "ACTIVE")
+        self.assertIsNone(incident["recovery_basis"])
+
+    def test_an_incident_names_what_preceded_it_without_claiming_a_cause(self):
+        owner = self._owner()
+        owner.append(_samples(), 1.0)
+        owner.invalidate("RECONNECT")
+        self._storm(owner, breaks=3, start=100.0)
+        incident = owner.status()["clock_incident"]
+        self.assertEqual(incident["preceding_event"], "RECONNECT")
+        self.assertEqual(incident["relationship"], "TEMPORALLY_CORRELATED")
+        self.assertEqual(incident["cause"], "NOT_ESTABLISHED")
+        for value in incident.values():
+            if isinstance(value, str):
+                self.assertNotIn("SETTLING", value.upper())
+                self.assertNotIn("CAUSED", value.upper())
+
+    def test_recovery_is_counted_in_passing_checks_not_in_quiet_seconds(self):
+        """A starved stream runs no checks, so silence must not close an incident."""
+        owner = self._owner()
+        self._storm(owner, breaks=2)
+        self.assertEqual(owner.status()["clock_incident"]["state"], "ACTIVE")
+        # A long wall-clock silence and nothing else: no append, so no check.
+        self.assertEqual(owner.status()["clock_incident"]["state"], "ACTIVE")
+        # Now feed clean intervals at the declared rate. The first arrival after
+        # a clear only re-arms the monitor, so N intervals of feed yield N-1
+        # completed checks -- one short of the bar, which is the case worth
+        # asserting: recovery is not declared until the count is actually met.
+        at = self._feed_clean(
+            owner, 1000.0, CLOCK_CHECK_INTERVAL_S * CLOCK_INCIDENT_RECOVERY_CHECKS)
+        status = owner.status()
+        self.assertEqual(status["clock_continuity"]["consecutive_passing_checks"],
+                         CLOCK_INCIDENT_RECOVERY_CHECKS - 1)
+        self.assertEqual(status["clock_incident"]["state"], "ACTIVE")
+        at = self._feed_clean(owner, at, CLOCK_CHECK_INTERVAL_S)
+        incident = owner.status()["clock_incident"]
+        self.assertEqual(incident["state"], "RECOVERED")
+        self.assertEqual(incident["recovery_basis"],
+                         f"{CLOCK_INCIDENT_RECOVERY_CHECKS}_CONSECUTIVE_PASSING_CHECKS")
+
+    def test_a_fault_after_recovery_opens_a_second_incident(self):
+        owner = self._owner()
+        self._storm(owner, breaks=2)
+        at = self._feed_clean(
+            owner, 1000.0, CLOCK_CHECK_INTERVAL_S * (CLOCK_INCIDENT_RECOVERY_CHECKS + 1))
+        self.assertEqual(owner.status()["clock_incident"]["state"], "RECOVERED")
+        self.assertEqual(owner.status()["clock_incidents"], 1)
+        owner.append(_samples(), at + CLOCK_GAP_S + 5.0)
+        status = owner.status()
+        self.assertEqual(status["clock_incidents"], 2)
+        self.assertEqual(status["clock_incident"]["incident_id"], "clock-incident-0002")
+        self.assertEqual(status["clock_incident"]["failed_checks"], 1)
+
+
+class RawIQExposureTests(EnvironmentIsolatedTest):
+    """The security claim, sized to what is actually being claimed."""
+
+    def test_every_destination_is_denied_separately(self):
+        exposure = _owner().raw_iq_exposure()
+        for key in ("raw_iq_api_exposed", "raw_iq_browser_exposed",
+                    "raw_iq_cloud_exposed", "raw_iq_model_context_exposed",
+                    "raw_iq_persisted"):
+            self.assertFalse(exposure[key], key)
+
+    def test_an_undeclared_source_does_not_get_a_transport_it_never_had(self):
+        exposure = _owner().raw_iq_exposure()
+        self.assertEqual(exposure["raw_iq_local_transport"], "UNDECLARED")
+        self.assertEqual(exposure["raw_iq_listener"], "UNDECLARED")
+
+    def test_a_declared_source_names_the_socket_rather_than_denying_it(self):
+        owner = IQRetentionOwner(sensor_id="T", sample_type="int16", sample_rate_hz=RATE,
+                                 owns_capture=True, iq_source="127.0.0.1:1234")
+        exposure = owner.raw_iq_exposure()
+        self.assertEqual(exposure["raw_iq_local_transport"], "LOOPBACK_TCP")
+        self.assertEqual(exposure["raw_iq_listener"], "127.0.0.1:1234")
+        self.assertIn("BIND ADDRESS IS THE CONTROL",
+                      exposure["raw_iq_transport_note"])
+
+    def test_the_single_boolean_is_gone_rather_than_kept_beside_the_block(self):
+        """Two names for one claim is how they drift apart."""
+        self.assertNotIn("raw_iq_exposed", _owner().status())
 
 
 class DirectSamplingDeclarationTests(EnvironmentIsolatedTest):

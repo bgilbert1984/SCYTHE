@@ -2957,9 +2957,12 @@ def orchestrator_graphops_rf_spectrum_latest():
     if not _graphops_directive_authorized():
         return jsonify({'error': 'Authentication required'}), 401
     from rf_bridge import get_rf_bridge
-    frame = get_rf_bridge().latest_frame()
+    bridge = get_rf_bridge()
+    source = bridge.capture_source_declaration()
+    frame = bridge.latest_frame()
     if frame is None:
-        return jsonify({'available': False, 'raw_iq_exposed': False, 'capture_owner': 'orchestrator'})
+        return jsonify({'available': False, 'raw_iq_exposed': False,
+                        'capture_owner': 'orchestrator', 'capture_source': source})
     bounded = dict(frame)
     include_bins = str(request.args.get('include_bins', '')).lower() in {'1', 'true', 'yes'}
     if not include_bins:
@@ -2974,7 +2977,20 @@ def orchestrator_graphops_rf_spectrum_latest():
             bounded['bins_dbfs'] = bounded['bins_dbfs'][:ceiling]
             bounded['bins_truncated'] = True
             bounded['bins_truncated_span'] = 'FREQUENCY_AXIS_NO_LONGER_SPANS_SAMPLE_RATE'
-    return jsonify({'available': True, 'spectrum': bounded, 'raw_iq_exposed': False})
+    # A held frame is still the last real measurement, and it is still true of
+    # the moment it was taken. What it stops being, the instant the source stops
+    # delivering, is current. Serving it unlabelled would let a frozen trace read
+    # as a live one, so staleness travels with it rather than being left for a
+    # reader to infer from a timestamp.
+    streaming = source.get('availability') == 'SOURCE_STREAMING'
+    payload = {'available': True, 'spectrum': bounded, 'raw_iq_exposed': False,
+               'capture_source': source, 'stale': not streaming}
+    if not streaming:
+        payload['stale_reason'] = source.get('availability')
+        payload['stale_note'] = ('THIS FRAME WAS MEASURED. IT IS NOT CURRENT: THE '
+                                 'SOURCE HAS STOPPED DELIVERING SAMPLES SINCE IT '
+                                 'WAS TAKEN')
+    return jsonify(payload)
 
 
 @app.route('/api/graphops/rf-observations/query', methods=['GET'])

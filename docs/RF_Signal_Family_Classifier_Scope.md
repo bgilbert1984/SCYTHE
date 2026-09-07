@@ -1472,10 +1472,21 @@ attached. The bridge therefore publishes reachability and declines the cause:
 
 ```json
 {
-  "availability": "SOURCE_UNREACHABLE",
+  "transport_state": "DISCONNECTED",
+  "sample_flow_state": "NONE",
+  "availability": "SOURCE_DISCONNECTED",
   "unreachable_cause": "NOT_DETERMINABLE_FROM_THIS_PROCESS"
 }
 ```
+
+The single field became two axes on 2026-09-06, after `rtl_tcp` was observed to
+survive USB removal: the process stays healthy, the socket stays established,
+and nothing arrives on it. Reachability alone called that state connected. It
+now reads `transport_state: CONNECTED` with `sample_flow_state: STARVED`, and
+the derived `availability` is `SOURCE_STARVED`. The refusal to name a cause is
+unchanged and now applies to both axes — a removed USB device, a wedged
+`rtl_tcp` and a suspended host are indistinguishable from this side of the
+socket. See §3-4 of `docs/RTL_TCP_BOOT_CAPTURE.md`.
 
 `WAITING_FOR_USB` would have been the useful-sounding string, and it is the one
 the operator most often wants. It is also a guess. The restart policy that

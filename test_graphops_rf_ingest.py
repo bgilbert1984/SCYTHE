@@ -90,16 +90,35 @@ class SpectrumEndpointTests(unittest.TestCase):
                 "min_frequency_hz": 99e6, "max_frequency_hz": 101e6,
                 "peak_dbfs": -30.0, "noise_floor_dbfs": -90.0, "bins_dbfs": bins}
 
-    def _get(self, bins, max_bins=512):
+    def _get(self, bins, max_bins=512, availability="SOURCE_STREAMING"):
         from scythe_orchestrator import app
         bridge = unittest.mock.MagicMock()
         bridge.latest_frame.return_value = self._frame(bins)
         bridge.config.max_bins = max_bins
+        bridge.capture_source_declaration.return_value = {
+            "availability": availability, "transport_state": "CONNECTED",
+            "sample_flow_state": ("ACTIVE" if availability == "SOURCE_STREAMING"
+                                  else "STARVED")}
         with patch('scythe_orchestrator._graphops_directive_authorized', return_value=True), \
              patch('rf_bridge.get_rf_bridge', return_value=bridge):
             response = app.test_client().get(
                 '/api/graphops/rf-spectrum/latest?include_bins=1')
         return response.get_json()
+
+    def test_a_frame_served_while_the_source_is_starved_is_marked_stale(self):
+        """A held frame is a real measurement that has stopped being current."""
+        payload = self._get([-90.0] * 512, availability="SOURCE_STARVED")
+        self.assertTrue(payload['stale'])
+        self.assertEqual(payload['stale_reason'], 'SOURCE_STARVED')
+        self.assertEqual(payload['capture_source']['sample_flow_state'], 'STARVED')
+        # Still served, and still bounded. Withholding it would replace a stale
+        # measurement with no measurement, which is not an improvement.
+        self.assertEqual(len(payload['spectrum']['bins_dbfs']), 512)
+
+    def test_a_streaming_source_serves_a_frame_that_is_not_marked_stale(self):
+        payload = self._get([-90.0] * 512)
+        self.assertFalse(payload['stale'])
+        self.assertNotIn('stale_reason', payload)
 
     def test_the_whole_published_512_bin_product_is_served(self):
         payload = self._get([-90.0] * 512)
@@ -113,6 +132,8 @@ class SpectrumEndpointTests(unittest.TestCase):
         bridge = unittest.mock.MagicMock()
         bridge.latest_frame.return_value = self._frame([-90.0] * 512)
         bridge.config.max_bins = 512
+        bridge.capture_source_declaration.return_value = {
+            "availability": "SOURCE_STREAMING"}
         with patch('scythe_orchestrator._graphops_directive_authorized', return_value=True), \
              patch('rf_bridge.get_rf_bridge', return_value=bridge):
             payload = app.test_client().get('/api/graphops/rf-spectrum/latest').get_json()
