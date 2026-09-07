@@ -74,7 +74,11 @@ this contract produces one. See §8.
 
 ## 2. Frame identity and timing
 
-Every survey frame carries, and is refused without:
+Every survey frame carries all of the following. An input that lacks any of
+them, or carries any of them in a structurally invalid form, **is not a survey
+frame for the purposes of this contract** — it is not refused, because refusal
+is a verdict and §4's verdicts are about frames. See §4, *The vocabulary's
+range*.
 
 | Field | Meaning |
 |---|---|
@@ -185,6 +189,34 @@ to the frame**, and a frame has one fate. **The reason codes say why**, and
 there may be several reasons — a frame can be missing its signal chain *and* its
 sweep-plan revision, and an operator repairing only the first has not repaired
 the frame.
+
+### The vocabulary's range
+
+This vocabulary applies to inputs that satisfy §2. An input that does not — one
+lacking a §2 field, or carrying one in a structurally invalid form — is **not a
+survey frame for the purposes of this contract**, and is outside the range of
+every disposition and every reason code above.
+
+This is a statement of what the vocabulary was always about, not a code added to
+mean "no code applies". The set stays closed: nothing here admits a fallback,
+and *not a survey frame* is a class of **input**, never a verdict. It has no
+disposition, no reason code, and never appears in one.
+
+**A refusal is a verdict reached about something understood.** A structurally
+defective input never entered the domain where verdicts exist. Collapsing the
+two would let producer bugs contaminate refusal counts — and those counts are
+exactly the measurement that must stay clean once a store persists facts keyed
+by reason, because "how often are frames arriving unaligned" and "how often is
+the producer emitting malformed payloads" are different questions with different
+owners and different repairs.
+
+Absence and structural invalidity are treated identically, deliberately.
+Inverted acquisition bounds and missing acquisition bounds raise the same
+question, and a contract answering only the first would need amending again the
+first time a producer sent a negative epoch.
+
+How an implementation signals this class is an implementation concern. The
+contract names the category and stops there.
 
 ### Rules
 
