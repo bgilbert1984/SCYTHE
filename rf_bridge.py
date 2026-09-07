@@ -23,6 +23,8 @@ from typing import Any, Callable, Deque, Dict, Iterable, Optional
 
 import numpy as np
 
+from rf_capture_recovery import (
+    capture_process_identity, observe, pid_holding_listener)
 from rf_iq_retention import IQRetentionOwner
 from rf_signal_family import (
     AXES, classifier_status, empty_axis_counts, empty_reason_counts,
@@ -153,6 +155,10 @@ AVAILABILITY_BY_STATE = {
 # the bridge stops calling itself a source of samples, and it is published with
 # its authority attached so nobody reads it as a measured capability.
 DEFAULT_STARVATION_THRESHOLD_MS = 2500.0
+# How often the recovery policy is stepped while the source is silent. Its
+# inputs move on the scale of seconds, and an audit history written once a
+# second would hold ninety seconds of history.
+RECOVERY_CHECK_INTERVAL_S = 5.0
 STARVATION_THRESHOLD_AUTHORITY = "CONFIGURED_POLICY"
 STARVATION_NOTE = (
     "A STARVED SOURCE IS AN ESTABLISHED CONNECTION DELIVERING NOTHING. THIS "
@@ -655,8 +661,26 @@ class SDRPlusPlusBridge:
         # rebuilt twelve times in that minute", and bytes_received cannot: a
         # wedged rtl_tcp makes both look like a slowly rising byte count.
         self._reconnects = 0
+        self._recovery_checked_at = 0.0
         self._callbacks: list[Callable[[Dict], None]] = []
         self.observations = RFObservationStore.from_env()
+        # The recovery audit is built here, on the capture owner, and never on
+        # the ring. It must record a pre-first-sample failure, which is exactly
+        # the case where no ring exists to have a history.
+        from rf_capture_audit import CaptureRecoveryAudit
+        from rf_capture_recovery import DEFAULT_RECOVERY_MODE, RECOVERY_MODES
+        from rf_capture_restart import RecoveryCoordinator
+        self.recovery_audit = CaptureRecoveryAudit()
+        mode = (os.getenv("SCYTHE_RF_CAPTURE_RECOVERY_MODE", "")
+                or DEFAULT_RECOVERY_MODE).strip().upper()
+        if mode not in RECOVERY_MODES:
+            # Refused, not coerced. A typo silently becoming ARMED is the one
+            # failure mode a recovery switch must not have; refusing to start is
+            # louder and safer than guessing which of three states was meant.
+            raise ValueError(
+                f"SCYTHE_RF_CAPTURE_RECOVERY_MODE must be one of "
+                f"{', '.join(RECOVERY_MODES)}; got {mode[:32]!r}")
+        self.recovery = RecoveryCoordinator(self.recovery_audit, mode=mode)
         # The bounded IQ ring is owned here and nowhere else. The owner refuses
         # by itself when this process may not hold raw IQ, so construction is
         # safe in a child; nothing is allocated until samples actually arrive.
@@ -961,6 +985,44 @@ class SDRPlusPlusBridge:
             # Outside the lock, matching every other invalidation call site.
             self.retention.invalidate("SOURCE_STARVED")
 
+    def _evaluate_recovery(self) -> None:
+        """Step the recovery policy. Throttled, and never allowed to raise.
+
+        Called from the receive-timeout path, so it runs about once a second
+        while the source is silent. Throttled to the check interval because the
+        policy's inputs move on the scale of seconds, and because an audit
+        history written once a second would hold ninety seconds of history.
+
+        Wrapped whole: a recovery policy that can crash the capture loop is a
+        worse fault than the one it exists to repair.
+        """
+        if self.recovery.mode == "DISABLED":
+            return
+        now = time.monotonic()
+        if now - self._recovery_checked_at < RECOVERY_CHECK_INTERVAL_S:
+            return
+        self._recovery_checked_at = now
+        try:
+            source = self.capture_source_declaration()
+            pid = pid_holding_listener(self.config.iq_port)
+            identity = capture_process_identity(pid)
+            with self._lock:
+                sequence = self._sequence
+            observation = observe(
+                source, capture_pid=pid,
+                # The incident's target is the process holding the port now. The
+                # bridge does not start rtl_tcp and has no earlier identity to
+                # compare against; revalidation is what catches a substitution
+                # between authorization and action.
+                incident_capture_process=identity,
+                recovery_attempts=self.recovery.attempts,
+                latest_sequence=sequence,
+                reconnect_count=source.get("reconnect_count", 0),
+                observed_monotonic_ns=time.monotonic_ns())
+            self.recovery.evaluate(observation)
+        except Exception:
+            LOG.exception("recovery evaluation failed")
+
     def capture_source_declaration(self) -> Dict:
         """Transport and sample flow as two axes, without inventing a cause.
 
@@ -1046,6 +1108,10 @@ class SDRPlusPlusBridge:
                 # assumed from what is believed to be plugged in. Not a control,
                 # so it is published whether or not controls are included.
                 "device": self.supported_gains_db(),
+                # What the recovery policy is allowed to do, and everything it
+                # has decided. Published beside the state it judges.
+                "recovery": self.recovery.status(),
+                "recovery_audit": self.recovery_audit.status(),
             }
         if include_control:
             status["rigctl"] = self.control_status()
@@ -1102,6 +1168,13 @@ class SDRPlusPlusBridge:
                 self.retention.invalidate("RECONNECT")
                 delay = 0.5
                 while not self._stop.is_set():
+                    # Once per iteration, not only on the timeout path. Stepping
+                    # the policy only while the socket is silent means the one
+                    # thing it can never observe is samples returning -- a
+                    # restart that works stops the timeouts, and the success
+                    # event is never written. Throttled internally, so running
+                    # it on every chunk costs a compare.
+                    self._evaluate_recovery()
                     try:
                         chunk = sock.recv(65536)
                     except socket.timeout:

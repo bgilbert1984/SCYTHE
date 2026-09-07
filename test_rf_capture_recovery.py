@@ -5,10 +5,14 @@ import tempfile
 import unittest
 
 from rf_capture_recovery import (
-    NO_ACTION, RECOVERY_ATTEMPT_LIMIT, RECOVERY_COOLDOWN_S, RECOVERY_SUPPRESSED,
-    REQUEST_RESTART, SUSTAINED_STARVATION_S, ProcessIdentity, RecoveryObservation,
-    capture_process_identity, decide, kernel_boot_id, observe, policy_status,
-    process_start_ticks,
+    ATTEMPT_WINDOW_S, AUTHORIZATION_EXPIRED, AUTHORIZATION_INVALIDATED,
+    AUTHORIZATION_VALID, MAX_ATTEMPTS_PER_PROCESS, NO_ACTION,
+    OBSERVATION_DEADLINE_S, PROCESS_RESTARTED_STILL_STARVED,
+    RECOVERY_ATTEMPT_LIMIT, RECOVERY_COOLDOWN_S, RECOVERY_OUTCOME_PENDING,
+    RECOVERY_SUPPRESSED, REQUEST_RESTART, SAMPLE_FLOW_RESTORED,
+    SUSTAINED_STARVATION_S, ProcessIdentity, RecoveryAttempt, RecoveryObservation,
+    authorize, capture_process_identity, decide, kernel_boot_id, observe,
+    policy_status, process_start_ticks, recovery_outcome, revalidate,
 )
 
 
@@ -21,8 +25,16 @@ def _identity(pid=168025, ticks=98765, boot=BOOT):
     return ProcessIdentity(boot_id=boot, pid=pid, start_ticks=ticks)
 
 
-def _starved(*, seconds=60.0, attempts=0, last_attempt_s=None,
-             process=None, incident_process=None, **overrides):
+def _attempt(at_s, *, incident="starve-incident-0001", pid=168025, ticks=98765,
+             boot=BOOT, now=10_000 * SECOND):
+    """An attempt made `at_s` seconds before the canonical observation instant."""
+    return RecoveryAttempt(incident_id=incident, kernel_boot_id=boot, target_pid=pid,
+                           target_start_ticks=ticks,
+                           attempted_monotonic_ns=int(now - at_s * SECOND))
+
+
+def _starved(*, seconds=60.0, attempts=(), process=None,
+             incident_process=None, **overrides):
     """A source that has been starved for `seconds`, with everything else clean."""
     now = 10_000 * SECOND
     # The incident's identity defaults to the canonical process, not to whatever
@@ -41,9 +53,8 @@ def _starved(*, seconds=60.0, attempts=0, last_attempt_s=None,
         incident_opened_monotonic_ns=int(now - seconds * SECOND),
         capture_process=process,
         incident_capture_process=incident_process,
-        recovery_attempt_count=attempts,
-        last_recovery_attempt_monotonic_ns=(
-            None if last_attempt_s is None else int(now - last_attempt_s * SECOND)),
+        recovery_attempts=tuple(attempts),
+        latest_sequence=overrides.pop("latest_sequence", 0),
     )
     fields.update(overrides)
     return RecoveryObservation(**fields)
@@ -81,21 +92,45 @@ class DecisionBoundaryTests(unittest.TestCase):
         self.assertEqual(decision.reason, "CAPTURE_PROCESS_CHANGED")
 
     def test_a_cooling_request_is_given_time_to_fail(self):
-        decision = decide(_starved(last_attempt_s=RECOVERY_COOLDOWN_S - 1))
+        decision = decide(_starved(attempts=(_attempt(RECOVERY_COOLDOWN_S - 1,
+                                                      pid=1, ticks=1),)))
         self.assertEqual(decision.reason, "COOLDOWN_ACTIVE")
-        self.assertEqual(decide(_starved(last_attempt_s=RECOVERY_COOLDOWN_S)).decision,
-                         REQUEST_RESTART)
+        self.assertEqual(
+            decide(_starved(attempts=(_attempt(RECOVERY_COOLDOWN_S, pid=1, ticks=1),))).decision,
+            REQUEST_RESTART)
 
-    def test_the_attempt_limit_suppresses_rather_than_repeating(self):
-        decision = decide(_starved(attempts=RECOVERY_ATTEMPT_LIMIT,
-                                   last_attempt_s=RECOVERY_COOLDOWN_S * 2))
+    def test_one_attempt_per_process_identity_and_no_more(self):
+        decision = decide(_starved(attempts=(_attempt(RECOVERY_COOLDOWN_S * 2),)))
         self.assertEqual(decision.decision, RECOVERY_SUPPRESSED)
-        self.assertEqual(decision.reason, "ATTEMPT_LIMIT_REACHED")
+        self.assertEqual(decision.reason, "PROCESS_ALREADY_ATTEMPTED")
+        self.assertEqual(MAX_ATTEMPTS_PER_PROCESS, 1)
+
+    def test_the_rolling_window_spans_incidents(self):
+        """A new PID and a new incident must not refill the budget.
+
+        This is the escape the per-incident count of Phase 1 left open: a
+        restarted-but-still-broken rtl_tcp arrives with a fresh identity and a
+        fresh incident, and a per-incident budget hands it three more attempts.
+        """
+        # Spaced beyond the cooldown, so the window is what refuses them and
+        # not the gap since the last one.
+        others = tuple(_attempt(130.0 * n, incident=f"starve-incident-{n:04d}",
+                                pid=1000 + n, ticks=n)
+                       for n in range(1, RECOVERY_ATTEMPT_LIMIT + 1))
+        decision = decide(_starved(attempts=others))
+        self.assertEqual(decision.decision, RECOVERY_SUPPRESSED)
+        self.assertEqual(decision.reason, "ATTEMPT_WINDOW_EXHAUSTED")
+
+    def test_attempts_older_than_the_window_do_not_count(self):
+        stale = tuple(_attempt(ATTEMPT_WINDOW_S + 60.0 * n,
+                               incident=f"old-{n}", pid=2000 + n, ticks=n)
+                      for n in range(1, RECOVERY_ATTEMPT_LIMIT + 2))
+        self.assertEqual(decide(_starved(attempts=stale)).decision, REQUEST_RESTART)
 
     def test_suppression_cannot_leak_onto_a_healthy_source(self):
         """A spent incident must not leave a working receiver reading SUPPRESSED."""
         decision = decide(_starved(availability="SOURCE_STREAMING", flow_state="ACTIVE",
-                                   attempts=99))
+                                   attempts=(_attempt(1.0),)))
         self.assertEqual(decision.decision, NO_ACTION)
         self.assertEqual(decision.reason, "NOT_STARVED")
 
@@ -117,7 +152,7 @@ class DecisionBoundaryTests(unittest.TestCase):
         problem that is not one wastes the only signal they were given.
         """
         decision = decide(_starved(process=_identity(pid=1727),
-                                   attempts=RECOVERY_ATTEMPT_LIMIT))
+                                   attempts=(_attempt(300.0, pid=1727, ticks=98765),)))
         self.assertEqual(decision.reason, "CAPTURE_PROCESS_CHANGED")
 
 
@@ -203,7 +238,7 @@ class PurityAndScopeTests(unittest.TestCase):
 
     def test_no_decision_claims_a_cause(self):
         for observation in (_starved(), _starved(seconds=1.0),
-                            _starved(attempts=RECOVERY_ATTEMPT_LIMIT)):
+                            _starved(attempts=(_attempt(300.0),))):
             payload = decide(observation).as_dict()
             self.assertEqual(payload["cause"], "NOT_DETERMINABLE_FROM_THIS_PROCESS")
             blob = repr(payload).upper()
@@ -230,15 +265,15 @@ class PurityAndScopeTests(unittest.TestCase):
             self.assertNotIn(forbidden, source,
                              f"phase 1 must not be able to act: {forbidden}")
 
-    def test_the_attempt_window_does_not_claim_to_be_a_wall_clock_limit(self):
-        """The declared observation set carries a count, not attempt timestamps."""
+    def test_the_attempt_window_is_now_a_real_wall_clock_window(self):
         self.assertEqual(policy_status()["attempt_window_authority"],
-                         "PER_INCIDENT_COUNT_NOT_WALL_CLOCK_WINDOW")
+                         "ROLLING_MONOTONIC_WINDOW_ACROSS_INCIDENTS")
+        self.assertEqual(policy_status()["attempt_window_s"], ATTEMPT_WINDOW_S)
 
-    def test_the_audit_gap_is_declared_rather_than_left_to_be_discovered(self):
+    def test_the_audit_store_is_declared_independent_of_ring_allocation(self):
         note = policy_status()["audit_note"]
-        self.assertIn("CANNOT BE THE SAME MECHANISM", note)
-        self.assertIn("NOT IMPLEMENTED IN THIS PHASE", note)
+        self.assertIn("INDEPENDENT OF RING ALLOCATION", note)
+        self.assertIn("NO RING HAD BEEN", note)
 
 
 class CollectionTests(unittest.TestCase):
@@ -259,7 +294,7 @@ class CollectionTests(unittest.TestCase):
 
     def test_an_observation_is_assembled_from_the_bridge_block(self):
         observation = observe(self._source(), capture_pid=None, reconnect_count=12,
-                              observed_monotonic_ns=10_000 * SECOND)
+                              latest_sequence=0, observed_monotonic_ns=10_000 * SECOND)
         self.assertEqual(observation.availability, "SOURCE_STARVED")
         self.assertEqual(observation.incident_id, "starve-incident-0001")
         self.assertEqual(observation.reconnect_count, 12)
@@ -277,6 +312,126 @@ class CollectionTests(unittest.TestCase):
         self.assertEqual(observation.availability, "UNDECLARED")
         self.assertEqual(observation.transport_state, "UNDECLARED")
         self.assertEqual(decide(observation).reason, "TRANSPORT_NOT_CONNECTED")
+
+
+class AuthorizationTests(unittest.TestCase):
+    """A latch that a socket flap cannot cancel, and evidence cannot outlive."""
+
+    def _auth(self, observation=None):
+        observation = observation or _starved(latest_sequence=0)
+        return authorize(decide(observation), authorization_id="auth-0001")
+
+    def test_only_a_request_restart_authorizes(self):
+        self.assertIsNone(authorize(decide(_starved(seconds=1.0)),
+                                    authorization_id="auth-0001"))
+        self.assertIsNotNone(self._auth())
+
+    def test_an_authorization_latches_the_incident_and_the_target(self):
+        auth = self._auth()
+        self.assertEqual(auth.incident_id, "starve-incident-0001")
+        self.assertEqual(auth.target, _identity())
+        self.assertEqual(auth.sequence_at_authorization, 0)
+
+    def test_a_transient_connecting_snapshot_does_not_revoke_it(self):
+        """The whole reason the latch exists. Socket flapping is not recovery."""
+        auth = self._auth()
+        flapped = _starved(transport_state="CONNECTING", availability="SOURCE_CONNECTING")
+        check = revalidate(auth, flapped)
+        self.assertTrue(check.valid)
+        self.assertEqual(check.outcome, AUTHORIZATION_VALID)
+
+    def test_transport_is_absent_from_revalidation_by_design(self):
+        import inspect
+        import rf_capture_recovery as module
+        source = inspect.getsource(module.revalidate)
+        self.assertNotIn("transport_state", source)
+
+    def test_it_expires_rather_than_outliving_its_evidence(self):
+        auth = self._auth()
+        late = _starved(observed_monotonic_ns=auth.expires_monotonic_ns())
+        check = revalidate(auth, late)
+        self.assertEqual(check.outcome, AUTHORIZATION_EXPIRED)
+        self.assertEqual(check.reason, "TTL_ELAPSED")
+
+    def test_a_changed_target_invalidates_rather_than_retargets(self):
+        """Acting now would kill something that was never judged."""
+        auth = self._auth()
+        check = revalidate(auth, _starved(process=_identity(pid=1727, ticks=1)))
+        self.assertEqual(check.outcome, AUTHORIZATION_INVALIDATED)
+        self.assertEqual(check.reason, "TARGET_IDENTITY_CHANGED")
+
+    def test_a_different_or_closed_incident_invalidates(self):
+        auth = self._auth()
+        self.assertEqual(revalidate(auth, _starved(incident_id="starve-incident-0002")).reason,
+                         "INCIDENT_CHANGED")
+        self.assertEqual(revalidate(auth, _starved(incident_id=None)).reason,
+                         "INCIDENT_CLOSED")
+
+    def test_samples_arriving_after_authorization_cancel_it(self):
+        """The fault fixed itself. There is nothing left to restart."""
+        auth = self._auth()
+        # Five seconds later, with a sample 10 ms old: it arrived after the
+        # authorization instant, which is the whole test.
+        healed = _starved(observed_monotonic_ns=auth.authorized_monotonic_ns + 5 * SECOND,
+                          last_sample_age_ms=10.0)
+        check = revalidate(auth, healed)
+        self.assertEqual(check.outcome, AUTHORIZATION_INVALIDATED)
+        self.assertEqual(check.reason, "SAMPLES_ARRIVED_SINCE_AUTHORIZATION")
+
+
+class RecoveryOutcomeTests(unittest.TestCase):
+    """Success is decoded samples plus a sequence that moved. Both."""
+
+    def _auth(self, sequence=0):
+        return authorize(decide(_starved(latest_sequence=sequence)),
+                         authorization_id="auth-0001")
+
+    def _after(self, auth, *, seconds, sequence, sample_age_ms):
+        return _starved(
+            observed_monotonic_ns=auth.authorized_monotonic_ns + int(seconds * SECOND),
+            latest_sequence=sequence, last_sample_age_ms=sample_age_ms)
+
+    def test_samples_and_a_sequence_advance_are_success(self):
+        auth = self._auth()
+        after = self._after(auth, seconds=5.0, sequence=7, sample_age_ms=20.0)
+        self.assertEqual(recovery_outcome(auth, after), SAMPLE_FLOW_RESTORED)
+
+    def test_a_sequence_above_zero_is_not_enough_on_its_own(self):
+        """A late incident begins after thousands of good frames.
+
+        'sequence > 0' would then be satisfied by history rather than by this
+        capture chain producing anything now.
+        """
+        auth = self._auth(sequence=5000)
+        stale = self._after(auth, seconds=5.0, sequence=5000, sample_age_ms=999_000.0)
+        self.assertNotEqual(recovery_outcome(auth, stale), SAMPLE_FLOW_RESTORED)
+        self.assertGreater(stale.latest_sequence, 0)
+
+    def test_samples_without_a_sequence_advance_are_not_success(self):
+        auth = self._auth()
+        self.assertNotEqual(
+            recovery_outcome(auth, self._after(auth, seconds=5.0, sequence=0,
+                                               sample_age_ms=20.0)),
+            SAMPLE_FLOW_RESTORED)
+
+    def test_before_the_deadline_the_answer_is_pending_not_failed(self):
+        auth = self._auth()
+        waiting = self._after(auth, seconds=OBSERVATION_DEADLINE_S - 1,
+                              sequence=0, sample_age_ms=30_000.0)
+        self.assertEqual(recovery_outcome(auth, waiting), RECOVERY_OUTCOME_PENDING)
+
+    def test_past_the_deadline_it_is_still_starved(self):
+        auth = self._auth()
+        expired = self._after(auth, seconds=OBSERVATION_DEADLINE_S,
+                              sequence=0, sample_age_ms=60_000.0)
+        self.assertEqual(recovery_outcome(auth, expired), PROCESS_RESTARTED_STILL_STARVED)
+
+    def test_a_greeting_sized_byte_count_cannot_appear_in_the_verdict(self):
+        import inspect
+        import rf_capture_recovery as module
+        source = inspect.getsource(module.recovery_outcome)
+        for forbidden in ("bytes", "reconnect", "pid", "socket", "RTL0"):
+            self.assertNotIn(forbidden, source.replace("# ", "").split('"""')[-1])
 
 
 if __name__ == "__main__":
