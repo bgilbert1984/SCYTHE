@@ -1,0 +1,299 @@
+{
+ "grid": {
+  "symbol_rates_hz": [
+   20000.0,
+   50000.0,
+   100000.0,
+   200000.0
+  ],
+  "roll_offs": [
+   0.0,
+   0.2,
+   0.35,
+   0.5,
+   1.0
+  ],
+  "snrs_db": [
+   -10.0,
+   -5.0,
+   0.0,
+   5.0,
+   10.0,
+   20.0
+  ],
+  "offsets": [
+   "center",
+   "quarter",
+   "near_edge"
+  ],
+  "neighbours": [
+   "none",
+   "weak_adjacent",
+   "strong_adjacent"
+  ]
+ },
+ "promotion_requirement": {
+  "selection_basis": "MARGIN_TIMES_MEASURED_OCCUPANCY_AS_IN_PRODUCTION",
+  "median_retention_min": 0.9,
+  "p5_retention_min": 0.75,
+  "false_clock_rate_max": 0.0,
+  "note": "A WIDER CHANNEL PRESERVES STRUCTURE AND ADMITS MORE NEIGHBOURS. BOTH ARE REPORTED. NEITHER IS COMPRESSED INTO A SINGLE BETTER-MARGIN CLAIM, AND NO MARGIN IS PROMOTED BY THIS SCRIPT",
+  "p5_flat_coverage_min": 1.0,
+  "adjacent_channel_condition": "ACHIEVING COVERAGE MUST NOT MATERIALLY WORSEN ADJACENT-CHANNEL FALSE POSITIVES. THE CONTAMINATION AND NEIGHBOUR COLUMNS ARE REPORTED BESIDE RETENTION SO THE TRADE IS VISIBLE RATHER THAN NETTED OUT"
+ },
+ "requirement_keys_supplemented_from_current": [
+  "p5_flat_coverage_min",
+  "adjacent_channel_condition"
+ ],
+ "scoring_condition": "REFERENCE_DETECTED_THE_TRUE_SYMBOL_CLOCK. RETENTION IS UNDEFINED WHERE THERE WAS NOTHING TO RETAIN",
+ "unscorable_cells": 5681,
+ "per_margin": {
+  "1.25": {
+   "cells": 1080,
+   "channelized": 993,
+   "refusals": {
+    "DC_CONTAMINATION": 87
+   },
+   "scorable_cells": 194,
+   "median_retention": 1.6953,
+   "p5_retention": 0.4846,
+   "mean_retention": 1.9428,
+   "retention_ge_0_9": 0.9227,
+   "median_symbol_rate_error": 0.00098,
+   "symbol_rate_within_5pct": 0.9124,
+   "median_contamination_db": 0.004,
+   "max_contamination_db": 10.186,
+   "median_usable_samples": 104832,
+   "median_sps_achieved": 4.25,
+   "median_runtime_s": 0.107,
+   "median_flat_coverage": 1.0625,
+   "p5_flat_coverage": 0.9253,
+   "detected_by_channel": 0.9742,
+   "meets_p5_flat_coverage": false,
+   "meets_retention_requirement": false
+  },
+  "1.5": {
+   "cells": 1080,
+   "channelized": 957,
+   "refusals": {
+    "DC_CONTAMINATION": 123
+   },
+   "scorable_cells": 179,
+   "median_retention": 1.4502,
+   "p5_retention": 0.3577,
+   "mean_retention": 1.6037,
+   "retention_ge_0_9": 0.9218,
+   "median_symbol_rate_error": 0.00098,
+   "symbol_rate_within_5pct": 0.905,
+   "median_contamination_db": 0.004,
+   "max_contamination_db": 10.154,
+   "median_usable_samples": 87360,
+   "median_sps_achieved": 4.25,
+   "median_runtime_s": 0.1033,
+   "median_flat_coverage": 1.275,
+   "p5_flat_coverage": 1.1097,
+   "detected_by_channel": 0.9609,
+   "meets_p5_flat_coverage": true,
+   "meets_retention_requirement": false
+  },
+  "2.0": {
+   "cells": 1080,
+   "channelized": 903,
+   "refusals": {
+    "DC_CONTAMINATION": 177
+   },
+   "scorable_cells": 149,
+   "median_retention": 1.2615,
+   "p5_retention": 0.8966,
+   "mean_retention": 1.3678,
+   "retention_ge_0_9": 0.9463,
+   "median_symbol_rate_error": 0.00098,
+   "symbol_rate_within_5pct": 0.953,
+   "median_contamination_db": 0.009,
+   "max_contamination_db": 10.085,
+   "median_usable_samples": 87360,
+   "median_sps_achieved": 4.197,
+   "median_runtime_s": 0.1016,
+   "median_flat_coverage": 1.7,
+   "p5_flat_coverage": 1.4651,
+   "detected_by_channel": 0.9933,
+   "meets_p5_flat_coverage": true,
+   "meets_retention_requirement": true
+  },
+  "2.5": {
+   "cells": 1080,
+   "channelized": 798,
+   "refusals": {
+    "DC_CONTAMINATION": 279,
+    "CHANNEL_EDGE_TRUNCATED": 3
+   },
+   "scorable_cells": 110,
+   "median_retention": 1.1999,
+   "p5_retention": 0.8613,
+   "mean_retention": 1.4221,
+   "retention_ge_0_9": 0.9273,
+   "median_symbol_rate_error": 0.00098,
+   "symbol_rate_within_5pct": 0.9545,
+   "median_contamination_db": 0.065,
+   "max_contamination_db": 10.022,
+   "median_usable_samples": 87360,
+   "median_sps_achieved": 5.125,
+   "median_runtime_s": 0.0993,
+   "median_flat_coverage": 2.125,
+   "p5_flat_coverage": 1.7229,
+   "detected_by_channel": 1.0,
+   "meets_p5_flat_coverage": true,
+   "meets_retention_requirement": true
+  },
+  "3.0": {
+   "cells": 1080,
+   "channelized": 759,
+   "refusals": {
+    "DC_CONTAMINATION": 303,
+    "CHANNEL_EDGE_TRUNCATED": 18
+   },
+   "scorable_cells": 100,
+   "median_retention": 1.0657,
+   "p5_retention": 0.8452,
+   "mean_retention": 1.2618,
+   "retention_ge_0_9": 0.91,
+   "median_symbol_rate_error": 0.00098,
+   "symbol_rate_within_5pct": 1.0,
+   "median_contamination_db": 0.226,
+   "max_contamination_db": 9.981,
+   "median_usable_samples": 104832,
+   "median_sps_achieved": 6.667,
+   "median_runtime_s": 0.0988,
+   "median_flat_coverage": 2.55,
+   "p5_flat_coverage": 2.0675,
+   "detected_by_channel": 0.99,
+   "meets_p5_flat_coverage": true,
+   "meets_retention_requirement": true
+  },
+  "4.0": {
+   "cells": 1080,
+   "channelized": 666,
+   "refusals": {
+    "DC_CONTAMINATION": 360,
+    "CHANNEL_EDGE_TRUNCATED": 54
+   },
+   "scorable_cells": 67,
+   "median_retention": 1.0296,
+   "p5_retention": 0.2085,
+   "mean_retention": 1.0154,
+   "retention_ge_0_9": 0.8209,
+   "median_symbol_rate_error": 0.00098,
+   "symbol_rate_within_5pct": 0.8657,
+   "median_contamination_db": 0.504,
+   "max_contamination_db": 10.255,
+   "median_usable_samples": 131040,
+   "median_sps_achieved": 8.5,
+   "median_runtime_s": 0.095,
+   "median_flat_coverage": 3.1359,
+   "p5_flat_coverage": 2.7822,
+   "detected_by_channel": 0.8657,
+   "meets_p5_flat_coverage": true,
+   "meets_retention_requirement": false
+  }
+ },
+ "alias_rejection": [
+  {
+   "margin": 1.25,
+   "tone_offset_from_channel_edge_hz": 210731.7073170732,
+   "alias_rejection_db": 83.62,
+   "at_measurement_floor": false,
+   "power_clean": 0.02330109290778637,
+   "power_with_tone": 0.023301132023334503
+  },
+  {
+   "margin": 1.5,
+   "tone_offset_from_channel_edge_hz": 252878.0487804878,
+   "alias_rejection_db": 95.67,
+   "at_measurement_floor": true,
+   "power_clean": 0.024368446320295334,
+   "power_with_tone": 0.024368446320295334
+  },
+  {
+   "margin": 2.0,
+   "tone_offset_from_channel_edge_hz": 337170.7317073171,
+   "alias_rejection_db": 95.6,
+   "at_measurement_floor": true,
+   "power_clean": 0.024772727862000465,
+   "power_with_tone": 0.024772727862000465
+  },
+  {
+   "margin": 2.5,
+   "tone_offset_from_channel_edge_hz": 421463.4146341464,
+   "alias_rejection_db": 95.58,
+   "at_measurement_floor": true,
+   "power_clean": 0.02489861287176609,
+   "power_with_tone": 0.02489861287176609
+  },
+  {
+   "margin": 3.0,
+   "tone_offset_from_channel_edge_hz": 505756.0975609756,
+   "alias_rejection_db": 95.56,
+   "at_measurement_floor": true,
+   "power_clean": 0.025020403787493706,
+   "power_with_tone": 0.025020403787493706
+  },
+  {
+   "margin": 4.0,
+   "tone_offset_from_channel_edge_hz": 674341.4634146342,
+   "alias_rejection_db": 95.52,
+   "at_measurement_floor": true,
+   "power_clean": 0.025262197479605675,
+   "power_with_tone": 0.025262199342250824
+  }
+ ],
+ "false_clock": [
+  {
+   "margin": 1.25,
+   "trials": 24,
+   "threshold_crossings": 0,
+   "rate": 0.0,
+   "note": "NOT A VALIDATED FALSE-ALARM PROBABILITY"
+  },
+  {
+   "margin": 1.5,
+   "trials": 24,
+   "threshold_crossings": 0,
+   "rate": 0.0,
+   "note": "NOT A VALIDATED FALSE-ALARM PROBABILITY"
+  },
+  {
+   "margin": 2.0,
+   "trials": 24,
+   "threshold_crossings": 0,
+   "rate": 0.0,
+   "note": "NOT A VALIDATED FALSE-ALARM PROBABILITY"
+  },
+  {
+   "margin": 2.5,
+   "trials": 24,
+   "threshold_crossings": 0,
+   "rate": 0.0,
+   "note": "NOT A VALIDATED FALSE-ALARM PROBABILITY"
+  },
+  {
+   "margin": 3.0,
+   "trials": 24,
+   "threshold_crossings": 0,
+   "rate": 0.0,
+   "note": "NOT A VALIDATED FALSE-ALARM PROBABILITY"
+  },
+  {
+   "margin": 4.0,
+   "trials": 24,
+   "threshold_crossings": 0,
+   "rate": 0.0,
+   "note": "NOT A VALIDATED FALSE-ALARM PROBABILITY"
+  }
+ ],
+ "sweep_cells_total": 6480,
+ "window_samples": 524288,
+ "capture_rate_hz": 2048000.0,
+ "elapsed_s": 1538.5,
+ "selected_margin": 2.0,
+ "selected_at": "2026-09-04"
+}

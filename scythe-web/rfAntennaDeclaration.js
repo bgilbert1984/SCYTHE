@@ -172,8 +172,11 @@ export function declareAntenna({antennaId, feedlineId = "undeclared", extensionM
     return {valid: false, reason: "UNKNOWN FEEDLINE — DECLARATION REFUSED", declaration: null};
   }
   const extension = finite(extensionMm);
-  if (extension !== null && (extension <= 0 || extension > 2000)) {
-    return {valid: false, reason: "EXTENSION MUST BE BETWEEN 0 AND 2000 mm", declaration: null};
+  // The floor is a unit guard. "0.73" is what a metre-thinking operator types
+  // into a millimetre field, and it derives a 102.7 GHz quarter wave in silence.
+  if (extension !== null && (extension < 10 || extension > 2000)) {
+    return {valid: false, reason: "EXTENSION MUST BE BETWEEN 10 AND 2000 mm — A VALUE " +
+              "BELOW 10 IS USUALLY METRES TYPED INTO A MILLIMETRE FIELD", declaration: null};
   }
   // A telescopic mast's resonance follows its extension, and only the operator
   // can see how far it is pulled out. An unextended declaration stays undeclared
@@ -193,8 +196,16 @@ export function declareAntenna({antennaId, feedlineId = "undeclared", extensionM
       feedlineLabel: feedline.label,
       feedlineLengthM: feedline.lengthM,
       extensionMm: extension,
+      // How the operator got the number. ESTIMATED is the only honest default:
+      // a length typed as a target is not a length read off a ruler, and nothing
+      // here can tell them apart. The server owns the same default.
+      extensionAuthority: extension === null ? AUTHORITY.UNDECLARED : "OPERATOR_ESTIMATED",
       quarterWaveHz,
       quarterWaveAuthority: quarterWaveHz === null ? AUTHORITY.UNDECLARED : "DERIVED_INFERENCE",
+      quarterWaveModel: quarterWaveHz === null ? AUTHORITY.UNDECLARED : "IDEAL_FREE_SPACE",
+      // Geometry implies a frequency. It does not establish resonance there, and
+      // a receive-only path can never establish it.
+      resonanceClaim: "NOT_MEASURED",
       quarterWaveNote: quarterWaveHz === null
         ? "NO EXTENSION DECLARED — NO RESONANCE DERIVED"
         : "IDEAL FREE-SPACE QUARTER WAVE FROM THE DECLARED LENGTH. IGNORES GROUND PLANE, " +

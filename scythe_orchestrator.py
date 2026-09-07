@@ -2904,14 +2904,29 @@ def orchestrator_graphops_rf_antenna_declare():
     """Record what the operator says is attached. Nothing here is measured."""
     if not _graphops_directive_authorized():
         return jsonify({'error': 'Authentication required'}), 401
-    from graphops_rf_antenna import AntennaDeclarationRefused, get_antenna_store
+    from graphops_rf_antenna import (AntennaDeclarationRefused, declaration_persistence,
+                                     get_antenna_store)
     try:
         record, receipt = get_antenna_store().declare(request.get_json(silent=True))
     except AntennaDeclarationRefused as exc:
         return jsonify({'status': 'refused', 'error': str(exc), 'declared': False,
                         'autoDetected': False}), 400
+    # An accepted declaration has to reach the capture owner, or the receipt
+    # announces a new instrument while products keep carrying the chain hash this
+    # process booted with. A bridge that is unavailable is reported as such rather
+    # than letting the declaration look fully applied.
+    try:
+        from rf_bridge import get_rf_bridge
+        applied = get_rf_bridge().apply_antenna_declaration(record)
+    except Exception as exc:                                # pragma: no cover
+        log.warning('antenna declaration not applied to the capture owner: %s', exc)
+        applied = {'applied': False, 'changed': False, 'runtime_declaration': 'NOT_APPLIED',
+                   'error': 'THE CAPTURE OWNER DID NOT ADOPT THIS DECLARATION; PRODUCTS '
+                            'CONTINUE UNDER THE PREVIOUS SIGNAL CHAIN'}
     return jsonify({'status': 'declared', 'declared': True, 'autoDetected': False,
                     'antenna': record, 'receipt': receipt,
+                    'applied': applied,
+                    'persistence': declaration_persistence(record),
                     'boundary': receipt['boundaries']}), 201
 
 
@@ -2942,9 +2957,12 @@ def orchestrator_graphops_rf_spectrum_latest():
     if not _graphops_directive_authorized():
         return jsonify({'error': 'Authentication required'}), 401
     from rf_bridge import get_rf_bridge
-    frame = get_rf_bridge().latest_frame()
+    bridge = get_rf_bridge()
+    source = bridge.capture_source_declaration()
+    frame = bridge.latest_frame()
     if frame is None:
-        return jsonify({'available': False, 'raw_iq_exposed': False, 'capture_owner': 'orchestrator'})
+        return jsonify({'available': False, 'raw_iq_exposed': False,
+                        'capture_owner': 'orchestrator', 'capture_source': source})
     bounded = dict(frame)
     include_bins = str(request.args.get('include_bins', '')).lower() in {'1', 'true', 'yes'}
     if not include_bins:
@@ -2959,7 +2977,20 @@ def orchestrator_graphops_rf_spectrum_latest():
             bounded['bins_dbfs'] = bounded['bins_dbfs'][:ceiling]
             bounded['bins_truncated'] = True
             bounded['bins_truncated_span'] = 'FREQUENCY_AXIS_NO_LONGER_SPANS_SAMPLE_RATE'
-    return jsonify({'available': True, 'spectrum': bounded, 'raw_iq_exposed': False})
+    # A held frame is still the last real measurement, and it is still true of
+    # the moment it was taken. What it stops being, the instant the source stops
+    # delivering, is current. Serving it unlabelled would let a frozen trace read
+    # as a live one, so staleness travels with it rather than being left for a
+    # reader to infer from a timestamp.
+    streaming = source.get('availability') == 'SOURCE_STREAMING'
+    payload = {'available': True, 'spectrum': bounded, 'raw_iq_exposed': False,
+               'capture_source': source, 'stale': not streaming}
+    if not streaming:
+        payload['stale_reason'] = source.get('availability')
+        payload['stale_note'] = ('THIS FRAME WAS MEASURED. IT IS NOT CURRENT: THE '
+                                 'SOURCE HAS STOPPED DELIVERING SAMPLES SINCE IT '
+                                 'WAS TAKEN')
+    return jsonify(payload)
 
 
 @app.route('/api/graphops/rf-observations/query', methods=['GET'])

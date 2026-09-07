@@ -110,3 +110,37 @@ test("the health row states the omission is not a failed inspection", () => {
   assert.match(row.value, /433 MHz ISM MAST · MAGNETIC BASE/);
   assert.match(row.detail, /NOT MEASURED BY THE RECEIVER/);
 });
+
+test("a millimetre field refuses a metre-shaped extension", () => {
+  // 0.73 is 730 mm expressed in metres. Accepting it derives a 102.7 GHz
+  // quarter wave -- past the tuner's ceiling, and silently.
+  const refused = declareAntenna({antennaId: "nesdr-smart-telescopic", extensionMm: 0.73});
+  assert.equal(refused.valid, false);
+  assert.match(refused.reason, /METRES TYPED INTO A MILLIMETRE FIELD/);
+  const accepted = declareAntenna({antennaId: "nesdr-smart-telescopic", extensionMm: 730});
+  assert.equal(accepted.valid, true);
+  assert.equal(accepted.declaration.quarterWaveHz, 102_668_650);
+});
+
+test("extension drives the derived quarter wave, and it stays an estimate", () => {
+  const fm = declareAntenna({antennaId: "nesdr-smart-telescopic", extensionMm: 730}).declaration;
+  const ism = declareAntenna({antennaId: "nesdr-smart-telescopic", extensionMm: 165}).declaration;
+  // The same part number, two instruments: 102.7 MHz against 454.2 MHz.
+  assert.equal(fm.antennaId, ism.antennaId);
+  assert.ok(ism.quarterWaveHz > 4 * fm.quarterWaveHz);
+  assert.equal(fm.quarterWaveAuthority, "DERIVED_INFERENCE");
+  assert.match(fm.quarterWaveNote, /IGNORES GROUND PLANE/);
+  assert.ok(!/MEASURED/.test(fm.quarterWaveAuthority));
+});
+
+test("the derived quarter wave names its model and claims no resonance", () => {
+  const {declaration} = declareAntenna({antennaId: "nesdr-smart-telescopic", extensionMm: 173});
+  assert.equal(declaration.quarterWaveHz, 433_226_095);
+  assert.equal(declaration.quarterWaveModel, "IDEAL_FREE_SPACE");
+  assert.equal(declaration.resonanceClaim, "NOT_MEASURED");
+  // A measurement claim is never the default.
+  assert.equal(declaration.extensionAuthority, "OPERATOR_ESTIMATED");
+  const bare = declareAntenna({antennaId: "nesdr-smart-uhf"}).declaration;
+  assert.equal(bare.extensionAuthority, AUTHORITY.UNDECLARED);
+  assert.equal(bare.quarterWaveModel, AUTHORITY.UNDECLARED);
+});

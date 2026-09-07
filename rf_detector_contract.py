@@ -75,7 +75,29 @@ REQUIRED_CHANNEL_FIELDS: Tuple[str, ...] = (
 # Covariates. Present always, resolved sometimes. A detector must read the reason
 # code rather than the bare null, because "no room to measure" and "the walk hit
 # the filter" are different facts about the channel it is about to analyse.
-COVARIATE_BLOCKS: Tuple[str, ...] = ("occupancy", "snr")
+COVARIATE_BLOCKS: Tuple[str, ...] = ("occupancy", "snr", "channel_configuration")
+
+# Which lineage the channel came from. This is not an eligibility condition --
+# a measurement-channel product is admitted exactly as before -- but it is
+# decisive for what a *negative* verdict means. A 1.25x channel was measured to
+# cut a 50 kBd cyclic statistic from 56.07 to 1.38, so NO_SYMBOL_CLOCK from one
+# is close to uninformative, while the same outcome from a structure channel is
+# evidence. Phase 3 stratifies on it for that reason.
+CHANNEL_PURPOSE_STRATA: Dict[str, str] = {
+    "STRUCTURE_CHANNEL": (
+        "CUT BY A POLICY THAT PRESERVES EXCESS BANDWIDTH AND GUARANTEES SAMPLES "
+        "PER CANDIDATE SYMBOL. A NEGATIVE HERE IS EVIDENCE ABOUT THE SIGNAL"
+    ),
+    "MEASUREMENT_CHANNEL": (
+        "CUT SNUG TO THE OCCUPIED BANDWIDTH FOR OCCUPANCY AND SNR. THE FILTER "
+        "REMOVES MUCH OF THE EXCESS BANDWIDTH A TIMING LINE LIVES IN, SO A "
+        "NEGATIVE HERE IS EVIDENCE ABOUT THE CHANNEL AS MUCH AS THE SIGNAL"
+    ),
+    "CHANNEL_PURPOSE_UNDECLARED": (
+        "THE PRODUCT PREDATES THE PURPOSE SPLIT OR DID NOT DECLARE ONE. ITS "
+        "VERDICTS ARE NOT POOLED WITH EITHER LINEAGE"
+    ),
+}
 
 # Stated as prohibitions because each is a specific way a null becomes a number.
 PROHIBITED_INFERENCES: Dict[str, str] = {
@@ -213,6 +235,21 @@ def snr_stratum(product: Dict[str, Any]) -> str:
     return "SNR_ABOVE_30_DB"
 
 
+def channel_purpose(product: Dict[str, Any]) -> str:
+    """Which lineage cut this channel. UNDECLARED rather than assumed.
+
+    A product from before the purpose split has no purpose, and guessing that it
+    was a measurement channel -- true though it would be today -- would put an
+    inference where a declaration belongs.
+    """
+    configuration = product.get("channel_configuration")
+    if isinstance(configuration, dict):
+        purpose = configuration.get("channel_purpose")
+        if isinstance(purpose, str) and purpose in CHANNEL_PURPOSE_STRATA:
+            return purpose
+    return "CHANNEL_PURPOSE_UNDECLARED"
+
+
 def detector_input(product: Dict[str, Any]) -> Dict[str, Any]:
     """The bounded view of a product that a detector may hold.
 
@@ -236,6 +273,7 @@ def detector_input(product: Dict[str, Any]) -> Dict[str, Any]:
         view[block] = dict(product.get(block) or {})
     view["snr_stratum"] = snr_stratum(product)
     view["qualified_snr_db"] = qualified_snr_db(product)
+    view["channel_purpose"] = channel_purpose(product)
     view["raw_iq_exposed"] = False
     return view
 
@@ -352,6 +390,12 @@ def contract_status() -> Dict[str, Any]:
         "decides": "REGISTERED_METHOD_STATISTIC_AGAINST_CALIBRATED_PFA",
         "required_channel_fields": list(REQUIRED_CHANNEL_FIELDS),
         "covariate_blocks": list(COVARIATE_BLOCKS),
+        # A covariate for what a verdict *means*, never for whether one is
+        # allowed. An unrecognised purpose resolves to UNDECLARED rather than to
+        # the default, so a product cut under a policy this build does not know
+        # is not pooled with either lineage.
+        "channel_purpose_strata": dict(CHANNEL_PURPOSE_STRATA),
+        "channel_purpose_role": "VALIDATION_COVARIATE_NOT_ADMISSION_AUTHORITY",
         "prohibited_inferences": dict(PROHIBITED_INFERENCES),
         # Separate from admission, and separately declared, because collapsing
         # the two is how a decoded JSON body becomes detector input.

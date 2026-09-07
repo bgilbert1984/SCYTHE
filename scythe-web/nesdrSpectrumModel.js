@@ -57,6 +57,24 @@ const epochSeconds = (value) => {
   return Number.isFinite(parsed) ? parsed / 1000 : null;
 };
 
+/**
+ * A derived geometric reference, rounded to the kHz it is actually good for.
+ *
+ * formatHz prints six decimals because a tuned frequency is commanded to that
+ * precision. A quarter wave computed from a mast extension is not: the input is
+ * a ruler reading, and 203.663355 MHz claims sub-hertz knowledge of a number
+ * that moves ~550 kHz per millimetre of mast.
+ */
+export const formatReferenceHz = (value) => {
+  const hz = finite(value);
+  if (hz === null) return UNDECLARED;
+  const abs = Math.abs(hz);
+  if (abs >= 1e9) return `${(hz / 1e9).toFixed(3)} GHz`;
+  if (abs >= 1e6) return `${(hz / 1e6).toFixed(3)} MHz`;
+  if (abs >= 1e3) return `${(hz / 1e3).toFixed(1)} kHz`;
+  return `${hz.toFixed(0)} Hz`;
+};
+
 export const formatHz = (value) => {
   const hz = finite(value);
   if (hz === null) return UNDECLARED;
@@ -193,9 +211,20 @@ export function deriveHardwareHealth(status = {}, {now = Date.now() / 1000, spar
 
 /** Normalize one bounded spectrum frame into a plot-ready trace. Never interpolated. */
 export function deriveSpectrumFrame(payload = {}, {config = {}, now = Date.now() / 1000} = {}) {
+  const source = payload?.capture_source ?? {};
+  // Two axes, never collapsed: an established socket is not a moving stream,
+  // and rtl_tcp surviving USB removal is the case where they disagree.
+  const flow = {
+    transportState: String(source.transport_state ?? UNDECLARED),
+    sampleFlowState: String(source.sample_flow_state ?? UNDECLARED),
+    sourceAvailability: String(source.availability ?? UNDECLARED),
+    lastSampleAgeMs: finite(source.last_sample_age_ms),
+    lastFrameAgeMs: finite(source.last_frame_age_ms),
+    starvationThresholdMs: finite(source.starvation_threshold_ms),
+  };
   if (!payload?.available || !payload?.spectrum) {
     return {available: false, reason: "NO FRAME RETAINED BY THE BRIDGE", bins: [],
-            widths: deriveBinWidths(config, null)};
+            widths: deriveBinWidths(config, null), stale: false, staleReason: null, ...flow};
   }
   const frame = payload.spectrum;
   const bins = Array.isArray(frame.bins_dbfs)
@@ -218,6 +247,11 @@ export function deriveSpectrumFrame(payload = {}, {config = {}, now = Date.now()
     truncated: Boolean(frame.bins_truncated),
     widths: deriveBinWidths(config, frame),
     rawIqExposed: Boolean(payload.raw_iq_exposed),
+    // The server's own judgement that this frame is no longer current. It was
+    // measured, so it is not wrong; it has simply stopped describing now.
+    stale: Boolean(payload.stale),
+    staleReason: payload.stale ? String(payload.stale_reason ?? "SOURCE_NOT_STREAMING") : null,
+    ...flow,
     evidenceClass: "MEASURED_SPECTRAL_SUMMARY",
   };
 }

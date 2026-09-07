@@ -70,6 +70,44 @@ AXIS = "information_structure"
 # the Phase 3 promotion corpus is for, and it is frozen separately.
 DECISION_THRESHOLD = 2.5
 THRESHOLD_BASIS = "PROVISIONAL_FROM_NULL_CHARACTERISATION"
+# The threshold's own status, published as its own object rather than left to be
+# inferred from a number sitting next to a verdict. A threshold with no measured
+# false-alarm probability is a development heuristic; saying so in the payload is
+# what stops a downstream reader treating a crossing as a decision.
+THRESHOLD_STATUS = "PROVISIONAL"
+THRESHOLD_AUTHORITY = "SYNTHETIC_CALIBRATION"
+THRESHOLD_PROMOTION_ELIGIBLE = False
+# Deliberately None. There is no measured PFA, and a placeholder number here
+# would be the single most quotable false claim in the whole module.
+FALSE_ALARM_PROBABILITY = None
+
+# What a crossing may be called. A statistic at or above 2.5 is an event in the
+# shadow telemetry and nothing more -- not DIGITAL, not a detection, not a
+# family summary. The wording is fixed here so that no caller has to invent one.
+THRESHOLD_EXCEEDED = "THRESHOLD_EXCEEDED_IN_SHADOW_MODE"
+THRESHOLD_NOT_EXCEEDED = "BELOW_THRESHOLD_IN_SHADOW_MODE"
+THRESHOLD_NOT_COMPARED = "NOT_COMPARED"
+
+
+def threshold_declaration() -> Dict[str, Any]:
+    """The threshold and everything that qualifies it, in one object."""
+    return {
+        "threshold": DECISION_THRESHOLD,
+        "threshold_status": THRESHOLD_STATUS,
+        "threshold_authority": THRESHOLD_AUTHORITY,
+        "promotion_eligible": THRESHOLD_PROMOTION_ELIGIBLE,
+        "false_alarm_probability": FALSE_ALARM_PROBABILITY,
+        "false_alarm_probability_note": (
+            "NULL. NO MEASURED PFA EXISTS FOR THIS THRESHOLD. THE 300-WINDOW "
+            "CALIBRATION BOUNDS A RATE NEAR 0.01, NOT THE APPROVED 0.001, AND "
+            "A CALIBRATION CORPUS IS NOT A VALIDATION CORPUS"
+        ),
+        "crossing_vocabulary": {
+            "exceeded": THRESHOLD_EXCEEDED,
+            "not_exceeded": THRESHOLD_NOT_EXCEEDED,
+            "not_compared": THRESHOLD_NOT_COMPARED,
+        },
+    }
 NULL_CHARACTERISATION = {
     "windows": 300,
     "source": "COMPLEX_GAUSSIAN_NOISE_SYNTHETIC",
@@ -108,6 +146,21 @@ VALIDATION_STATUS = "REGISTERED_NOT_VALIDATED"
 # The whole operating state of this module.
 SHADOW_MODE = True
 PROMOTION_STATE = "SHADOW_NO_PROMOTION"
+
+# Only one lineage may produce an information-structure verdict.
+#
+# This is not a statement about signal quality. A measurement channel is cut for
+# occupancy, centroid and local SNR and cannot produce an information-structure
+# verdict at all; letting it try would make it a second opportunity to cross the
+# same threshold, which is a multiple-comparison problem wearing a provenance
+# field. The Bonferroni family covers the inferential claims eligible for
+# promotion, not every implementation dimension that appears in provenance --
+# and it can only stay at thirteen bounds if exactly one lineage is eligible.
+#
+# A measurement channel may still supply auxiliary measurements. It may not
+# supply a verdict.
+ELIGIBLE_CHANNEL_PURPOSE = "STRUCTURE_CHANNEL"
+MEASUREMENT_CHANNEL_VERDICT_PRODUCTION = "PROHIBITED"
 
 # Envelope variation below this is not a signal this test can speak about. The
 # coefficient of variation of |x|^2 for complex Gaussian noise is 1.0; a pure
@@ -185,7 +238,11 @@ KNOWN_FALSE_NEGATIVE_MODES: Dict[str, str] = {
         "CUT AT CHANNEL_MARGIN x A -20 dB OCCUPANCY ESTIMATE PUTS INTO THE FIR "
         "SKIRT. MEASURED AT 50 kBAUD: STATISTIC 56.07 ON THE BASEBAND, 1.38 "
         "AFTER CHANNELIZATION. THE CHANNELIZER IS CORRECT AND THE DETECTOR IS "
-        "CORRECT; THE FEATURE IS SIMPLY NOT IN WHAT THE DETECTOR RECEIVES"
+        "CORRECT; THE FEATURE IS SIMPLY NOT IN WHAT THE DETECTOR RECEIVES. "
+        "MITIGATED, NOT REMOVED, BY THE STRUCTURE CHANNEL: A PRODUCT WHOSE "
+        "channel_purpose IS MEASUREMENT_CHANNEL IS STILL SUBJECT TO THIS, WHICH "
+        "IS WHY THE PURPOSE IS CARRIED ON EVERY VERDICT AND WHY A NEGATIVE FROM "
+        "A MEASUREMENT CHANNEL IS NOT POOLED WITH ONE FROM A STRUCTURE CHANNEL"
     ),
     "DECIMATION_LEAVES_TOO_FEW_SAMPLES": (
         "A NARROW CHANNEL DECIMATES HARD. AT 20 kBAUD A 524288-SAMPLE WINDOW "
@@ -196,8 +253,14 @@ KNOWN_FALSE_NEGATIVE_MODES: Dict[str, str] = {
 
 OUTCOMES: Dict[str, str] = {
     "SYMBOL_CLOCK_LIKE_FEATURE": (
-        "A CYCLIC FEATURE IN THE SQUARED ENVELOPE PASSED THE REGISTERED DECISION "
-        "RULE. DIGITAL STRUCTURE IS SUPPORTED, NOT PROVEN, AND NOT PROMOTED"
+        # The earlier wording read "DIGITAL STRUCTURE IS SUPPORTED, NOT PROVEN".
+        # Every qualifier there was correct and the sentence was still the one a
+        # reader would quote with the qualifiers dropped. A provisional threshold
+        # with no measured false-alarm probability cannot support a family claim
+        # in either direction, so the outcome describes the event and stops.
+        "A CYCLIC FEATURE IN THE SQUARED ENVELOPE CROSSED A PROVISIONAL "
+        "THRESHOLD IN SHADOW MODE. THIS IS AN OBSERVATION ABOUT THE STATISTIC, "
+        "NOT A CLASSIFICATION OF THE EMITTER, AND IT IS NOT PROMOTED"
     ),
     "NO_SYMBOL_CLOCK": (
         "THE TEST RAN OVER AN ENVELOPE WITH ENOUGH VARIATION TO CARRY A SYMBOL "
@@ -224,6 +287,13 @@ OUTCOMES: Dict[str, str] = {
         "THE METHOD IS REGISTERED BUT HAS NOT PASSED PHASE 3 VALIDATION. ITS "
         "FALSE-DIGITAL RATE IS UNMEASURED, SO NO POSITIVE VERDICT MAY PROMOTE"
     ),
+    "CHANNEL_PURPOSE_NOT_ELIGIBLE": (
+        "THE SOURCE CHANNEL WAS NOT CUT BY THE ONE LINEAGE ELIGIBLE TO PRODUCE "
+        "AN INFORMATION-STRUCTURE VERDICT. A MEASUREMENT CHANNEL MAY SUPPLY "
+        "AUXILIARY MEASUREMENTS AND MAY NOT SUPPLY A VERDICT; AN UNDECLARED "
+        "PURPOSE IS REFUSED FOR THE SAME REASON, BECAUSE ELIGIBILITY IS A "
+        "DECLARATION AND NOT A DEFAULT"
+    ),
     "DETECTOR_ERROR": (
         "THE DETECTOR RAISED. NO VERDICT IS INFERRED FROM A FAILURE TO PRODUCE ONE"
     ),
@@ -241,6 +311,10 @@ AXIS_VALUES: Dict[str, str] = {
     "SOURCE_PRODUCT_UNVERIFIED": "NOT_ATTEMPTED",
     "METHOD_NOT_VALIDATED": "NOT_ATTEMPTED",
     "DETECTOR_ERROR": "NOT_ATTEMPTED",
+    # Not a negative and not a failure: the channel was never eligible to be
+    # asked. Reporting NO_SYMBOL_CLOCK here would manufacture evidence out of a
+    # lineage that cannot carry it.
+    "CHANNEL_PURPOSE_NOT_ELIGIBLE": "NOT_ATTEMPTED",
 }
 
 
@@ -258,6 +332,11 @@ class SymbolClockVerdict:
 
     detection_statistic: Optional[float]
     decision_threshold: float
+    # What the comparison is allowed to be called. Never DIGITAL, never
+    # DETECTED: a crossing of a provisional threshold in shadow mode is an
+    # event in telemetry, and this field is the only word for it.
+    threshold_comparison: str
+    threshold_status: str
     statistic_direction: str
     null_model: str
     sample_count: int
@@ -277,6 +356,10 @@ class SymbolClockVerdict:
     snr_db: Optional[float]
     snr_reason_code: Optional[str]
     snr_stratum: str
+    # Which channel lineage produced the samples. A NO_SYMBOL_CLOCK from a
+    # measurement channel is a much weaker negative than one from a structure
+    # channel, and a verdict that did not say which would be pooled with it.
+    channel_purpose: str
 
     validation_status: str = VALIDATION_STATUS
     promotion_state: str = PROMOTION_STATE
@@ -313,6 +396,11 @@ def _verdict(outcome: str, view: Optional[Dict[str, Any]], *,
         schema=SCHEMA, method_id=METHOD_ID, method_revision=METHOD_REVISION, axis=AXIS,
         outcome=outcome, reason_code=outcome, axis_value=AXIS_VALUES[outcome],
         detection_statistic=statistic, decision_threshold=DECISION_THRESHOLD,
+        threshold_comparison=(
+            THRESHOLD_NOT_COMPARED if statistic is None
+            else (THRESHOLD_EXCEEDED if statistic >= DECISION_THRESHOLD
+                  else THRESHOLD_NOT_EXCEEDED)),
+        threshold_status=THRESHOLD_STATUS,
         statistic_direction=STATISTIC_DIRECTION, null_model=NULL_MODEL,
         sample_count=int(sample_count), symbol_rate_hz=symbol_rate_hz,
         cyclic_resolution_hz=resolution_hz, search_floor_hz=search_floor_hz,
@@ -324,6 +412,7 @@ def _verdict(outcome: str, view: Optional[Dict[str, Any]], *,
         signal_chain_hash=view.get("signal_chain_hash"),
         snr_db=snr.get("snr_db"), snr_reason_code=snr.get("snr_reason_code"),
         snr_stratum=view.get("snr_stratum", "SNR_UNRESOLVED"),
+        channel_purpose=view.get("channel_purpose", "CHANNEL_PURPOSE_UNDECLARED"),
     )
 
 
@@ -409,6 +498,14 @@ def detect(channelization: Any, *, ring: Any = None) -> SymbolClockVerdict:
         except DetectorInputRefused:
             return _verdict("SOURCE_PRODUCT_UNVERIFIED", None)
 
+        # Before any arithmetic. A measurement channel is admitted structurally
+        # -- the contract's admission rule is unchanged and still reads only
+        # transformation.outcome -- and then refused a verdict on the ground it
+        # was never eligible for one. An undeclared purpose is refused for the
+        # same reason: eligibility is a declaration, not a default.
+        if view.get("channel_purpose") != ELIGIBLE_CHANNEL_PURPOSE:
+            return _verdict("CHANNEL_PURPOSE_NOT_ELIGIBLE", view)
+
         samples = channelization.samples
         rate = view["output_sample_rate_hz"]
         if not isinstance(rate, (int, float)) or not math.isfinite(rate) or rate <= 0:
@@ -450,6 +547,13 @@ def detector_status() -> Dict[str, Any]:
         "state": "IMPLEMENTED_SHADOW_MODE",
         "shadow_mode": SHADOW_MODE,
         "promotion_state": PROMOTION_STATE,
+        "eligible_channel_purpose": ELIGIBLE_CHANNEL_PURPOSE,
+        "measurement_channel_verdict_production": MEASUREMENT_CHANNEL_VERDICT_PRODUCTION,
+        "eligibility_note": (
+            "A MEASUREMENT CHANNEL MAY SUPPLY AUXILIARY MEASUREMENTS. IT MAY NOT "
+            "SUPPLY A VERDICT. TWO ELIGIBLE LINEAGES WOULD BE TWO OPPORTUNITIES "
+            "TO CROSS ONE THRESHOLD, WHICH THE THIRTEEN-BOUND FAMILY DOES NOT COVER"
+        ),
         "validation_status": VALIDATION_STATUS,
         "validation_note": (
             "PHASE 3 HAS NOT RUN. NO LABELLED CORPUS HAS MEASURED THIS METHOD'S "
@@ -458,6 +562,7 @@ def detector_status() -> Dict[str, Any]:
         ),
         "decision_threshold": DECISION_THRESHOLD,
         "threshold_basis": THRESHOLD_BASIS,
+        "threshold_declaration": threshold_declaration(),
         "null_characterisation": dict(NULL_CHARACTERISATION),
         "cyclic_target_averages": CYCLIC_TARGET_AVERAGES,
         "minimum_symbol_periods_per_segment": MIN_SYMBOL_PERIODS_PER_SEGMENT,

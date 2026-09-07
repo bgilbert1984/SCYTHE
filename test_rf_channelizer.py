@@ -371,10 +371,18 @@ class BasebandContainmentTests(unittest.TestCase):
         self.assertNotIn("baseband", payload)
         self.assertFalse(payload["raw_iq_exposed"])
         json.dumps(payload)
+        sample_named = [name for name in ChannelizedProduct.__dataclass_fields__
+                        if "sample" in name and name != "sample_count"]
         self.assertEqual(
-            [name for name in ChannelizedProduct.__dataclass_fields__
-             if "sample" in name and name != "sample_count"],
-            ["sample_rate_hz", "output_sample_rate_hz", "transient_samples_discarded"])
+            sample_named,
+            ["sample_rate_hz", "output_sample_rate_hz", "transient_samples_discarded",
+             "output_samples_per_candidate_symbol", "output_samples_per_symbol_achieved"])
+        # The list above is a tripwire for a field being added; this is the
+        # actual claim. Every field whose name mentions samples must hold a
+        # number, so a baseband array cannot arrive under a plausible name.
+        for name in sample_named:
+            value = getattr(result.product, name)
+            self.assertIsInstance(value, (int, float, type(None)), name)
 
     def test_the_channelization_refuses_to_serialize(self):
         with self.assertRaises(RawIQNotTransportable):

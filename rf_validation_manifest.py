@@ -75,6 +75,97 @@ MINIMUM_TRIALS_FOR_ZERO_FAILURES = math.ceil(3.0 / MAX_FALSE_DIGITAL_RATE)
 MINIMUM_TRIALS_FOR_ZERO_FAILURES_CORRECTED = math.ceil(
     -math.log(PER_BOUND_ALPHA) / MAX_FALSE_DIGITAL_RATE)
 
+# --- the family, resolved 2026-09-04 and now immutable ----------------------
+#
+# Channel-purpose aggregates were considered and REJECTED, on a structural
+# argument rather than an arithmetic one. MEASUREMENT_CHANNEL and
+# STRUCTURE_CHANNEL are not two populations from which SCYTHE independently makes
+# DIGITAL claims: a measurement channel is cut for occupancy, centroid and SNR
+# and cannot produce an information-structure verdict at all. Bonferroni must
+# cover the inferential claims eligible for promotion, not every implementation
+# dimension that shows up in provenance. Adding a bound for a lineage that can
+# never emit the claim would spend error budget on a hypothesis nobody tests.
+#
+# That argument holds only while exactly one lineage is eligible, which is why
+# rf_symbol_clock refuses a verdict from any other -- see
+# ELIGIBLE_CHANNEL_PURPOSE and MEASUREMENT_CHANNEL_VERDICT_PRODUCTION there. The
+# prohibition is what keeps the count at thirteen.
+CHANNEL_PURPOSE_ELIGIBLE_FOR_PROMOTION = "STRUCTURE_CHANNEL"
+VALIDATION_FAMILY_REVISION = "rf-digital-q4.v1"
+
+# The review named its members in operator vocabulary; the corpus contract names
+# them in the vocabulary the strata are actually keyed by. Both are recorded, so
+# the correspondence can be audited rather than assumed, and the corpus keys are
+# canonical because those are what a labelled window will carry.
+FAMILY_MEMBER_ALIASES: Dict[str, str] = {
+    "THERMAL_NOISE": "THERMAL_NO_INPUT",
+    "ANALOGUE_AM": "AM",
+    "ANALOGUE_FM": "STATIONARY_ANALOGUE_FM",
+    "OVERLOADED_CLIPPED_INPUT": "OVERLOADED_CLIPPED",
+}
+
+# Conditions that would make the family larger. Each is a second path allowed to
+# emit the promoted claim, which is a second hypothesis test whatever it is
+# called internally.
+FAMILY_EXPANSION_TRIGGERS: Tuple[str, ...] = (
+    "MULTIPLE_STRUCTURE_CHANNEL_MARGINS_INDEPENDENTLY_PROMOTABLE",
+    "MULTIPLE_FIR_REVISIONS_INDEPENDENTLY_PROMOTABLE",
+    "MULTIPLE_THRESHOLD_VARIANTS_INDEPENDENTLY_PROMOTABLE",
+    "ALTERNATE_DETECTOR_PREPROCESSING_PATHS",
+    "SEPARATE_DETECTOR_DECISIONS_FROM_MEASUREMENT_CHANNELS",
+    "MULTIPLE_METHODS_EACH_ALLOWED_TO_EMIT_THE_PROMOTED_CLAIM",
+)
+
+# The rule that decides whether configuration selection enlarges the family.
+#
+# Selecting one frozen structure configuration against development data, and
+# opening the promotion corpus only afterwards, does not enlarge it: only one
+# hypothesis is ever tested against the corpus. Running several configurations
+# against the promotion corpus and keeping the best does enlarge it, by exactly
+# the number run. Calling them configuration experiments does not stop them being
+# multiple hypothesis tests.
+SELECTION_RULE: Dict[str, str] = {
+    "SELECTED_BEFORE_CORPUS_OPENED": (
+        "DOES NOT ENLARGE THE FAMILY. ONE CONFIGURATION IS FROZEN AGAINST "
+        "DEVELOPMENT DATA AND IS THE ONLY ONE THE CORPUS EVER SEES"
+    ),
+    "SELECTED_AGAINST_THE_PROMOTION_CORPUS": (
+        "ENLARGES THE FAMILY BY THE NUMBER OF CONFIGURATIONS RUN. CHOOSING THE "
+        "BEST OF SEVERAL IS A MULTIPLE COMPARISON WHATEVER IT IS CALLED, AND THE "
+        "BOUND COUNT MUST RISE TO MATCH BEFORE ANY VERDICT IS READ"
+    ),
+}
+
+
+def family_manifest() -> Dict[str, Any]:
+    """The immutable membership, fixed before any trial is run.
+
+    Built from STRATA rather than transcribed beside it: a hand-written list
+    would be a second source of truth for the one thing that may not drift.
+    """
+    members = ("aggregate",) + STRATUM_KEYS
+    return {
+        "validation_family_revision": VALIDATION_FAMILY_REVISION,
+        "simultaneous_control": SIMULTANEOUS_CONTROL,
+        "family_alpha": FAMILY_ALPHA,
+        "members": list(members),
+        "member_count": len(members),
+        "tested_bound_count": TESTED_BOUND_COUNT,
+        "per_bound_alpha": PER_BOUND_ALPHA,
+        "minimum_zero_failure_trials_per_bound":
+            MINIMUM_TRIALS_FOR_ZERO_FAILURES_CORRECTED,
+        "channel_purpose_eligible_for_promotion": CHANNEL_PURPOSE_ELIGIBLE_FOR_PROMOTION,
+        "measurement_channel_verdict_production": "PROHIBITED",
+        "member_aliases": dict(FAMILY_MEMBER_ALIASES),
+        "expansion_triggers": list(FAMILY_EXPANSION_TRIGGERS),
+        "selection_rule": dict(SELECTION_RULE),
+        "immutability": (
+            "MEMBERSHIP IS FIXED BEFORE TRIALS BEGIN. A CHANGE AFTERWARDS IS "
+            "STRATA_CHANGED_AFTER_FREEZE OR BOUND_COUNT_CHANGED_AFTER_FREEZE AND "
+            "INVALIDATES EVERY BOUND ALREADY READ"
+        ),
+    }
+
 
 @dataclass(frozen=True)
 class PromotionCorpusLock:
@@ -102,6 +193,14 @@ class PromotionCorpusLock:
     configuration_digest: str
     tested_bound_count: int
     per_bound_alpha: float
+    # The family this corpus was opened against, by revision. The bound count
+    # alone would not notice a family whose membership was rewritten while its
+    # size stayed the same.
+    validation_family_revision: str = VALIDATION_FAMILY_REVISION
+    # Which lineage was eligible to emit the promoted claim when the corpus
+    # opened. Allowing a second one afterwards is a second hypothesis test, and
+    # the thirteen-bound denominator would no longer cover it.
+    eligible_channel_purpose: str = CHANNEL_PURPOSE_ELIGIBLE_FOR_PROMOTION
 
     def to_dict(self) -> Dict[str, Any]:
         return {field: getattr(self, field) for field in self.__dataclass_fields__}
@@ -133,6 +232,8 @@ def freeze_promotion_corpus(*, corpus_id: str, method_revision: str,
             method_revision, decision_threshold, preprocessing_revision),
         tested_bound_count=TESTED_BOUND_COUNT,
         per_bound_alpha=PER_BOUND_ALPHA,
+        validation_family_revision=VALIDATION_FAMILY_REVISION,
+        eligible_channel_purpose=CHANNEL_PURPOSE_ELIGIBLE_FOR_PROMOTION,
     )
 
 
@@ -329,6 +430,14 @@ def _corpus_state(lock: Optional[PromotionCorpusLock],
         return "STRATA_CHANGED_AFTER_FREEZE", False
     if lock.tested_bound_count != TESTED_BOUND_COUNT:
         return "BOUND_COUNT_CHANGED_AFTER_FREEZE", False
+    if lock.validation_family_revision != VALIDATION_FAMILY_REVISION:
+        # A family can be rewritten without changing size, and a denominator that
+        # still reads 13 would hide it.
+        return "FAMILY_REVISION_CHANGED_AFTER_FREEZE", False
+    if lock.eligible_channel_purpose != CHANNEL_PURPOSE_ELIGIBLE_FOR_PROMOTION:
+        # A second eligible lineage is a second opportunity to cross the same
+        # threshold. Thirteen bounds do not cover fourteen chances.
+        return "ELIGIBLE_PURPOSE_CHANGED_AFTER_FREEZE", False
     if configuration is None:
         return "CONFIGURATION_NOT_PRESENTED", False
     try:
@@ -448,4 +557,5 @@ def manifest_status() -> Dict[str, Any]:
             for s in STRATA
         ],
         "not_buildable": [s.key for s in STRATA if not s.buildable],
+        "family_manifest": family_manifest(),
     }

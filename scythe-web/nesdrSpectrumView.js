@@ -18,7 +18,8 @@ import {
 } from "./rfClassificationOutcomes.js";
 import {
   HEALTH, deriveClassificationSummary, deriveHardwareHealth, deriveIdentity,
-  deriveSparseRail, deriveSpectrumFrame, deriveTuningRegime, formatHz, sensorAnchorNotice,
+  deriveSparseRail, deriveSpectrumFrame, deriveTuningRegime, formatHz, formatReferenceHz,
+  sensorAnchorNotice,
 } from "./nesdrSpectrumModel.js";
 import {
   BUNDLE_ANTENNAS, CORROBORATION, FEEDLINES, NO_AUTODETECT, antennaById,
@@ -414,7 +415,17 @@ export class NesdrSpectrumView {
       const parts = [`ANTENNA // ${this.antenna.label}`, `FEEDLINE // ${this.antenna.feedlineLabel}`,
                      `AUTHORITY // ${this.antenna.authority}`];
       if (this.antenna.quarterWaveHz !== null) {
-        parts.push(`DERIVED QUARTER WAVE // ${formatHz(this.antenna.quarterWaveHz)} (ESTIMATE)`);
+        // Three claims, deliberately not one. The geometry is what the operator
+        // declared; the quarter wave is arithmetic on it; the response at the
+        // frequency actually being received is unmeasured. Collapsing them into
+        // "DERIVED QUARTER WAVE // 203 MHz" invites the reading that a mast set
+        // for 203 MHz is therefore wrong at 100 MHz -- which this system has no
+        // way to know, in either direction.
+        parts.push(`ANTENNA GEOMETRY // ${this.antenna.extensionMm} mm`
+                   + ` · ${this.antenna.extensionAuthority}`);
+        parts.push(`IDEAL QUARTER-WAVE REFERENCE //`
+                   + ` ${formatReferenceHz(this.antenna.quarterWaveHz)} · DERIVED`);
+        parts.push("RESPONSE AT CURRENT TUNE // NOT CALIBRATED");
       }
       if (this.antenna.resonanceHz !== null) {
         parts.push(`VENDOR CENTRE // ${formatHz(this.antenna.resonanceHz)}`);
@@ -424,7 +435,12 @@ export class NesdrSpectrumView {
         parts.push(`DECLARATION // ${String(receipt.declarationHash).slice(0, 16)}`);
       }
       if (receipt?.signalChainChanged) {
-        parts.push("SIGNAL CHAIN CHANGED · EARLIER PRODUCTS ARE NOT DIRECTLY COMPARABLE");
+        // Name the field. "SIGNAL CHAIN CHANGED" after retracting a mast reads
+        // like a swapped antenna unless the line says it was the extension.
+        const fields = Array.isArray(receipt.changedFields) ? receipt.changedFields : [];
+        const what = fields.length ? ` (${fields.join(", ").toUpperCase()})` : "";
+        parts.push(
+          `SIGNAL CHAIN CHANGED${what} · EARLIER PRODUCTS ARE NOT DIRECTLY COMPARABLE`);
       }
       this.antennaStateLine.textContent = parts.join(" · ");
       this.antennaStateLine.className = "nesdr__antenna-state nesdr__state--live";
@@ -549,12 +565,22 @@ export class NesdrSpectrumView {
     const config = status?.bridge?.config ?? {};
     const now = this.now();
     const frame = deriveSpectrumFrame(spectrum ?? {}, {config, now});
-    const fftStale = String(status?.bridge?.products?.fft_frames?.state ?? "").toLowerCase() !== "live";
+    // Two independent claims of staleness. The bridge's FFT product state says
+    // whether frames are being produced; the served payload says whether the
+    // source is still delivering the samples they are produced from. Either is
+    // sufficient, and neither can clear the other.
+    const sourceStale = frame.stale === true;
+    const fftStale = String(status?.bridge?.products?.fft_frames?.state ?? "").toLowerCase() !== "live"
+      || sourceStale;
     frame.stale = fftStale;
     this.state.spectrumFrame = frame;
 
     const sensorId = config.sensor_id ?? "UNDECLARED";
-    const liveness = error ? "STATUS UNREACHABLE" : fftStale ? "STALE" : "LIVE";
+    // A starved source gets named, not just marked stale. "STALE" alone leaves
+    // an operator guessing between a slow renderer and a receiver that is gone.
+    const liveness = error ? "STATUS UNREACHABLE"
+      : sourceStale ? `STALE // ${frame.staleReason ?? "SOURCE_NOT_STREAMING"}`
+      : fftStale ? "STALE" : "LIVE";
     this.headline.textContent = `NOOELEC NESDR SMArt v5 // ${sensorId} // ${liveness}`;
     this.headline.className = `nesdr__headline ${error || fftStale
       ? "nesdr__state--degraded" : "nesdr__state--live"}`;
@@ -565,7 +591,7 @@ export class NesdrSpectrumView {
 
     // Only advance the waterfall on a genuinely new frame, so a stale product
     // does not paint repeated rows that look like continuing acquisition.
-    if (frame.available && frame.sequence !== this.lastSequence) {
+    if (frame.available && !frame.stale && frame.sequence !== this.lastSequence) {
       this.history.push(frame.bins);
       this.lastSequence = frame.sequence;
       this.#retainVisitedTile(frame, now);

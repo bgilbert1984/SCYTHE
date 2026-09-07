@@ -94,6 +94,84 @@ _RTL_TCP_SET_GAIN = 0x04
 GAIN_MODE_MANUAL = 1
 GAIN_MODE_AUTOMATIC = 0
 
+# There is no rtl_tcp SET_SAMPLE_RATE opcode above, and that absence is the
+# whole point. The client sends SET_GAIN_MODE and SET_GAIN and nothing else,
+# so the rate is whatever rtl_tcp was launched with via -s. rtl_tcp never
+# reports back what the tuner actually applied, and the RTL0 dongle_info
+# header carries a tuner type and gain count -- not a rate. The figure this
+# process publishes is therefore the rate BOTH processes were configured with
+# from one shared launch file, not a rate anybody observed the hardware adopt.
+#
+# The distinction is not pedantry. bin_width = sample_rate_hz / fft_size, so
+# the declared rate labels every frequency in the trace. A rate that is merely
+# configured and a rate that is confirmed produce identical-looking spectra.
+SAMPLE_RATE_AUTHORITY = "SHARED_LAUNCH_CONFIGURATION"
+SAMPLE_RATE_RUNTIME_ATTESTATION = "UNAVAILABLE"
+
+# What a refused IQ connection does and does not tell this process. Under WSL
+# the USB device is absent until it is attached from Windows, but a refused
+# socket looks exactly the same as a stopped rtl_tcp or a wrong port. Naming
+# the cause would be a guess wearing an operational-status uniform.
+SOURCE_UNREACHABLE_CAUSE = "NOT_DETERMINABLE_FROM_THIS_PROCESS"
+SOURCE_UNREACHABLE_NOTE = (
+    "A refused IQ connection cannot distinguish an absent USB device from a "
+    "stopped rtl_tcp, a wrong endpoint or a busy receiver. This process "
+    "reports reachability, not the reason for its absence."
+)
+
+# Transport liveness and sample flow are two questions, and a single
+# availability field answers only the first while looking like it answered
+# both. The failure that forced the split: rtl_tcp does not exit when its USB
+# device is removed. The process stays healthy, the listening socket stays
+# open, this bridge's connection stays established -- and nothing arrives on
+# it. Reading only the socket, the bridge called that CONNECTED and kept saying
+# so while the receiver was physically gone.
+TRANSPORT_STATES = ("DISCONNECTED", "CONNECTING", "CONNECTED")
+SAMPLE_FLOW_STATES = ("NONE", "ACTIVE", "STARVED", "FRAME_ASSEMBLY_STARVED")
+_TRANSPORT_BY_STATE = {
+    "streaming": "CONNECTED",
+    "connecting": "CONNECTING",
+    "reconnecting": "CONNECTING",
+    "stopped": "DISCONNECTED",
+    "delegated": "DISCONNECTED",
+}
+# The two axes, crossed. Named here rather than assembled from string pieces so
+# the vocabulary is enumerable and a reader can see every state that exists.
+AVAILABILITY_BY_STATE = {
+    ("DISCONNECTED", "NONE"): "SOURCE_DISCONNECTED",
+    ("CONNECTING", "NONE"): "SOURCE_CONNECTING",
+    ("CONNECTED", "ACTIVE"): "SOURCE_STREAMING",
+    ("CONNECTED", "STARVED"): "SOURCE_STARVED",
+    ("CONNECTED", "FRAME_ASSEMBLY_STARVED"): "FRAME_ASSEMBLY_STARVED",
+}
+
+# Declared policy, not a derivation. A threshold computed from the sample rate
+# alone would say a 2.048 MS/s stream must deliver bytes every few
+# milliseconds. That is true of the hardware and false of the host: scheduler
+# stalls, WSL suspension and the 1 s receive timeout all produce legitimate
+# silence. This is a tolerance for how long the pipeline may be quiet before
+# the bridge stops calling itself a source of samples, and it is published with
+# its authority attached so nobody reads it as a measured capability.
+DEFAULT_STARVATION_THRESHOLD_MS = 2500.0
+STARVATION_THRESHOLD_AUTHORITY = "CONFIGURED_POLICY"
+STARVATION_NOTE = (
+    "A STARVED SOURCE IS AN ESTABLISHED CONNECTION DELIVERING NOTHING. THIS "
+    "PROCESS CANNOT SAY WHY: A REMOVED USB DEVICE, A WEDGED rtl_tcp AND A "
+    "SUSPENDED HOST ALL LOOK IDENTICAL FROM THIS SIDE OF THE SOCKET"
+)
+# Where raw IQ goes and where it does not, as separate claims. An unqualified
+# raw_iq_exposed:false was broader than the truth -- rtl_tcp and this process
+# are two processes, and the samples cross a real, unauthenticated TCP socket
+# to get here. Loopback is the control that makes that acceptable, so the
+# transport is published beside the exposure claims rather than folded into a
+# single boolean that quietly denies it.
+RAW_IQ_LOCAL_TRANSPORT = "LOOPBACK_TCP"
+RAW_IQ_TRANSPORT_NOTE = (
+    "RAW IQ CROSSES A LOCAL TCP SOCKET BETWEEN rtl_tcp AND THIS BRIDGE. IT IS "
+    "NOT EXPOSED TO ANY API, BROWSER, MODEL CONTEXT OR DISK. THE BIND ADDRESS "
+    "IS THE CONTROL; A FIREWALL IS NOT A SUBSTITUTE FOR IT"
+)
+
 
 def _env_bool(name: str, default: bool = False) -> bool:
     value = os.getenv(name)
@@ -116,6 +194,7 @@ class RFBridgeConfig:
     frames_per_second: float = 10.0
     socket_timeout_s: float = 2.0
     reconnect_max_s: float = 10.0
+    starvation_threshold_ms: float = DEFAULT_STARVATION_THRESHOLD_MS
     auto_start: bool = False
     sensor_id: str = "SDRPP-EDGE-01"
     capture_owner: str = "orchestrator"
@@ -135,6 +214,8 @@ class RFBridgeConfig:
             frames_per_second=float(os.getenv("SDRPP_FPS", "10")),
             socket_timeout_s=float(os.getenv("SDRPP_SOCKET_TIMEOUT_S", "2")),
             reconnect_max_s=float(os.getenv("SDRPP_RECONNECT_MAX_S", "10")),
+            starvation_threshold_ms=float(os.getenv(
+                "SDRPP_STARVATION_THRESHOLD_MS", str(DEFAULT_STARVATION_THRESHOLD_MS))),
             auto_start=_env_bool("SDRPP_AUTO_START", False),
             sensor_id=os.getenv("SDRPP_SENSOR_ID", "SDRPP-EDGE-01"),
             capture_owner=os.getenv("SCYTHE_RF_CAPTURE_OWNER", "orchestrator").strip().lower(),
@@ -151,6 +232,13 @@ class RFBridgeConfig:
             raise ValueError("SDRPP_SAMPLE_RATE_HZ must be positive")
         if not 0.5 <= self.frames_per_second <= 60:
             raise ValueError("SDRPP_FPS must be between 0.5 and 60")
+        # The receive loop wakes on a 1 s socket timeout, so that is the finest
+        # granularity starvation can be observed at. A threshold below it would
+        # promise a resolution the detection path does not have.
+        if not 1000.0 <= self.starvation_threshold_ms <= 60_000.0:
+            raise ValueError(
+                "SDRPP_STARVATION_THRESHOLD_MS must be between 1000 and 60000; "
+                "the receive loop wakes once a second and cannot resolve less")
         for name, port in (("SDRPP_IQ_PORT", self.iq_port), ("SDRPP_RIGCTL_PORT", self.rigctl_port)):
             if not 1 <= port <= 65535:
                 raise ValueError(f"{name} must be between 1 and 65535")
@@ -376,6 +464,17 @@ class IQFFTProcessor:
         # and the header is consumed exactly once where it actually appears.
         self._dongle_info: Optional[Dict[str, Any]] = None
         self._header_consumed = False
+        # Samples decoded on this connection. The starvation clock reads this
+        # rather than the raw byte count: rtl_tcp answers a reconnect with a
+        # 12-byte RTL0 greeting and then delivers nothing, and a byte counter
+        # cannot tell that greeting apart from a stream. Twelve bytes of header
+        # is not sample flow, and a source that only ever sends it is starved.
+        self._samples_decoded = 0
+
+    @property
+    def samples_decoded(self) -> int:
+        """Complex samples decoded on this connection, header excluded."""
+        return self._samples_decoded
 
     @property
     def dongle_info(self) -> Optional[Dict[str, Any]]:
@@ -427,6 +526,7 @@ class IQFFTProcessor:
                 except Exception:
                     LOG.exception("IQ sample sink failed")
             self._samples = np.concatenate((self._samples, iq))
+            self._samples_decoded += int(iq.size)
 
         frames = []
         interval = 1.0 / self.config.frames_per_second
@@ -542,6 +642,14 @@ class SDRPlusPlusBridge:
         self._last_error: Optional[str] = None
         self._connected_at: Optional[float] = None
         self._bytes_received = 0
+        # Freshness is measured on the monotonic clock, never on wall time. A
+        # clock step -- and this host takes them -- would otherwise make a
+        # healthy stream look starved or a dead one look fresh. Wall time is
+        # published only as display metadata, in _connected_at above.
+        self._last_sample_monotonic: Optional[float] = None
+        self._last_frame_monotonic: Optional[float] = None
+        self._starvation: Optional[Dict[str, Any]] = None
+        self._starvation_incidents = 0
         self._callbacks: list[Callable[[Dict], None]] = []
         self.observations = RFObservationStore.from_env()
         # The bounded IQ ring is owned here and nowhere else. The owner refuses
@@ -551,7 +659,11 @@ class SDRPlusPlusBridge:
             sensor_id=self.config.sensor_id,
             sample_type=self.config.sample_type,
             sample_rate_hz=self.config.sample_rate_hz,
-            owns_capture=self.config.owns_capture())
+            owns_capture=self.config.owns_capture(),
+            # The ring holds the IQ; the bridge owns the socket it arrived on.
+            # Handing the endpoint over lets the exposure block name the
+            # transport rather than deny it.
+            iq_source=f"{self.config.iq_host}:{self.config.iq_port}")
         try:
             from rf_sparse_analyzer import RFSparseAnalyzer
             self.sparse = RFSparseAnalyzer()
@@ -681,6 +793,39 @@ class SDRPlusPlusBridge:
         result = self.retention.set_gain_db(requested)
         return {"mode": "MANUAL", **result, "supported": catalogue}
 
+    def apply_antenna_declaration(self, record: Dict) -> Dict:
+        """Make an accepted antenna declaration the instrument products use.
+
+        The capture owner holds the active antenna chain; the declaration store
+        holds what the operator said. Without this they drift, and the drift is
+        silent in the worst direction: the receipt announces that the instrument
+        changed while every subsequent product keeps carrying the chain hash the
+        process booted with.
+
+        The declaration has already been validated by the store, so this owns
+        only the consequence. Retention first, because it is the one that clears
+        the ring and advances the configuration epoch; the analyzer follows so it
+        cannot publish an estimate window spanning both instruments.
+        """
+        instrument = {
+            "antenna_id": str(record.get("antenna_id") or "UNDECLARED"),
+            "feedline_id": str(record.get("feedline_id") or "undeclared"),
+            "extension_mm": record.get("extension_mm"),
+        }
+        retention = self.retention.set_instrument(**instrument)
+        analyzer = (None if self.sparse is None
+                    else self.sparse.set_instrument(**instrument))
+        return {
+            "applied": True,
+            "instrument": instrument,
+            "retention": retention,
+            "sparse": analyzer,
+            "sparse_available": analyzer is not None,
+            "changed": bool(retention.get("changed")),
+            # Named so the caller cannot mistake a live swap for a persisted one.
+            "runtime_declaration": "ACTIVE",
+        }
+
     def configure_stream(self, **changes) -> Dict:
         """Update FFT interpretation settings and restart ingestion if needed.
 
@@ -757,6 +902,106 @@ class SDRPlusPlusBridge:
         except Exception:
             LOG.exception("channelization dispatch failed")
 
+    def capture_rate_declaration(self) -> Dict:
+        """What the rate figure is, and what authority stands behind it.
+
+        Published beside the rate itself so a reader cannot pick up the number
+        without the qualifier attached to it.
+        """
+        return {
+            "sample_rate_hz": self.config.sample_rate_hz,
+            "sample_rate_authority": SAMPLE_RATE_AUTHORITY,
+            "runtime_attestation": SAMPLE_RATE_RUNTIME_ATTESTATION,
+            "native_bin_width_hz": self.config.sample_rate_hz / self.config.fft_size,
+        }
+
+    def _note_starvation(self) -> None:
+        """Open a starvation incident once, not once per second of silence.
+
+        Called from the receive-timeout path, so it runs about once a second
+        while the socket is open and empty. The ring is cleared on the opening
+        edge only: samples either side of a starvation gap are not contiguous,
+        but a clear on every second of a long outage would push every other
+        cause out of a bounded invalidation history with one event.
+        """
+        threshold_s = self.config.starvation_threshold_ms / 1000.0
+        now = time.monotonic()
+        opened = False
+        with self._lock:
+            if self._state != "streaming" or self._last_sample_monotonic is None:
+                return
+            silent_s = now - self._last_sample_monotonic
+            if silent_s >= threshold_s and self._starvation is None:
+                self._starvation_incidents += 1
+                self._starvation = {
+                    "incident": self._starvation_incidents,
+                    "last_sample_monotonic_s": self._last_sample_monotonic,
+                    "detected_monotonic_s": now,
+                    "silent_s_at_detection": round(silent_s, 3),
+                    "threshold_ms": self.config.starvation_threshold_ms,
+                    "cause": "NOT_DETERMINABLE_FROM_THIS_PROCESS",
+                }
+                opened = True
+        if opened:
+            LOG.warning("IQ source starved: no samples for >= %.0f ms on %s:%s",
+                        self.config.starvation_threshold_ms,
+                        self.config.iq_host, self.config.iq_port)
+            # Outside the lock, matching every other invalidation call site.
+            self.retention.invalidate("SOURCE_STARVED")
+
+    def capture_source_declaration(self) -> Dict:
+        """Transport and sample flow as two axes, without inventing a cause.
+
+        An established socket says the transport is up. It says nothing about
+        whether samples are moving over it, and rtl_tcp surviving USB removal
+        is the case where those two answers differ. Both are published, and the
+        single ``availability`` word is derived from the pair rather than from
+        the socket alone.
+        """
+        now = time.monotonic()
+        threshold_s = self.config.starvation_threshold_ms / 1000.0
+        with self._lock:
+            state = self._state
+            sample_age = (None if self._last_sample_monotonic is None
+                        else now - self._last_sample_monotonic)
+            frame_age = (None if self._last_frame_monotonic is None
+                         else now - self._last_frame_monotonic)
+            incident = dict(self._starvation) if self._starvation else None
+            incidents = self._starvation_incidents
+        transport = _TRANSPORT_BY_STATE.get(state, "DISCONNECTED")
+        if transport != "CONNECTED":
+            flow = "NONE"
+        elif sample_age is None or sample_age >= threshold_s:
+            flow = "STARVED"
+        elif frame_age is None or frame_age >= threshold_s:
+            # Bytes are arriving and no complete FFT is coming out of them. A
+            # different fault from an empty socket, and named differently.
+            flow = "FRAME_ASSEMBLY_STARVED"
+        else:
+            flow = "ACTIVE"
+        declaration = {
+            "iq_endpoint": f"{self.config.iq_host}:{self.config.iq_port}",
+            "connection_state": state,
+            "transport_state": transport,
+            "sample_flow_state": flow,
+            "availability": AVAILABILITY_BY_STATE[(transport, flow)],
+            # Named for samples, not bytes, because that is what it measures. A
+            # byte clock reads rtl_tcp's 12-byte reconnect greeting as flow.
+            "last_sample_age_ms": None if sample_age is None else round(sample_age * 1000.0, 1),
+            "last_frame_age_ms": None if frame_age is None else round(frame_age * 1000.0, 1),
+            "starvation_threshold_ms": self.config.starvation_threshold_ms,
+            "starvation_threshold_authority": STARVATION_THRESHOLD_AUTHORITY,
+            "freshness_clock": "MONOTONIC",
+            "starvation_incidents": incidents,
+            "starvation_incident": incident,
+        }
+        if transport != "CONNECTED":
+            declaration["unreachable_cause"] = SOURCE_UNREACHABLE_CAUSE
+            declaration["cause_note"] = SOURCE_UNREACHABLE_NOTE
+        elif flow != "ACTIVE":
+            declaration["starvation_note"] = STARVATION_NOTE
+        return declaration
+
     def status(self, include_control: bool = False) -> Dict:
         with self._lock:
             thread_alive = bool(self._thread and self._thread.is_alive())
@@ -772,6 +1017,10 @@ class SDRPlusPlusBridge:
                 "latest_sequence": self._sequence,
                 "latest_frame_at": latest.get("timestamp") if latest else None,
                 "config": asdict(self.config),
+                # The rate in "config" above is a launch parameter, not a
+                # measurement. This block travels with it saying so.
+                "capture_rate_declaration": self.capture_rate_declaration(),
+                "capture_source": self.capture_source_declaration(),
                 "capture_owner": self.config.capture_owner,
                 "owns_capture": self.config.owns_capture(),
                 "process_role": os.getenv("SCYTHE_PROCESS_ROLE") or "unspecified",
@@ -808,6 +1057,8 @@ class SDRPlusPlusBridge:
         delay = 0.5
         while not self._stop.is_set():
             processor = IQFFTProcessor(self.config, sample_sink=self.retention.append)
+            # Per-connection, like the processor it tracks.
+            decoded = 0
             try:
                 with self._lock:
                     self._state = "connecting"
@@ -821,6 +1072,16 @@ class SDRPlusPlusBridge:
                     self._state = "streaming"
                     self._connected_at = time.time()
                     self._last_error = None
+                    # Grace for a source that has had no time to deliver yet --
+                    # granted once, at the first connection this process makes,
+                    # and never re-granted. A wedged rtl_tcp accepts, greets and
+                    # drops every few seconds; re-arming the clock on each of
+                    # those would hand a permanently dead source a fresh 2.5 s
+                    # of "streaming" forever. Only arriving samples clear it,
+                    # and an open incident survives the flap that did not fix it.
+                    if self._last_sample_monotonic is None:
+                        self._last_sample_monotonic = time.monotonic()
+                        self._last_frame_monotonic = self._last_sample_monotonic
                 # A new socket is a new continuity claim. Whatever the ring held
                 # from before the gap is not contiguous with what follows.
                 self.retention.invalidate("RECONNECT")
@@ -829,6 +1090,9 @@ class SDRPlusPlusBridge:
                     try:
                         chunk = sock.recv(65536)
                     except socket.timeout:
+                        # The only place the bridge is awake while nothing is
+                        # arriving, which is exactly the condition to judge.
+                        self._note_starvation()
                         continue
                     if not chunk:
                         raise ConnectionError("SDR++ IQ exporter closed the connection")
@@ -841,7 +1105,16 @@ class SDRPlusPlusBridge:
                                 self._dongle_info = info
                             LOG.info("rtl_tcp device: %s tuner, %d gains",
                                      info["tuner_type"], info["tuner_gain_count"])
-                    for frame in processor.feed(chunk):
+                    frames = processor.feed(chunk)
+                    if processor.samples_decoded > decoded:
+                        # Samples arrived, so the source is delivering. Read
+                        # after feed, not before: the counter this compares
+                        # against is advanced inside it.
+                        decoded = processor.samples_decoded
+                        with self._lock:
+                            self._last_sample_monotonic = time.monotonic()
+                            self._starvation = None
+                    for frame in frames:
                         # Publish first, unconditionally. Channelization is
                         # analysis layered on top of the spectrum product; it
                         # must never be able to delay or suppress one.
@@ -872,6 +1145,7 @@ class SDRPlusPlusBridge:
 
     def _publish(self, frame: Dict) -> None:
         with self._condition:
+            self._last_frame_monotonic = time.monotonic()
             self._sequence += 1
             frame = {**frame, "sequence": self._sequence, "sensor_id": self.config.sensor_id}
             self._frames.append(frame)

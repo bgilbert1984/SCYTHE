@@ -823,10 +823,16 @@ Python catalogue and its `scythe-web/rfAntennaDeclaration.js` mirror, with
 they are separate parts with separate losses, and one being known says nothing
 about the other.
 
-Note that `signal_chain_hash` covers sensor, antenna, sample type and sample
-rate — **not** the feedline. Two metres of RG58 is a real insertion loss and
-arguably belongs in the chain identity; folding it in would change every existing
-hash, so it is recorded as an open question rather than done quietly.
+Note that `signal_chain_hash` at the time covered sensor, antenna, sample type
+and sample rate — **not** the feedline. Two metres of RG58 is a real insertion
+loss and arguably belongs in the chain identity; folding it in would change every
+existing hash, so it was recorded as an open question rather than done quietly.
+
+**Both halves of that open question have since been closed, and this paragraph is
+kept for the history rather than as current fact.** Revision `v2` folded the
+feedline into the chain identity; revision `v3` folded in the telescopic mast
+extension (§5.17). Each bump set `PRIOR_SIGNAL_CHAIN_REVISION_COMPARABLE = False`
+rather than reinterpreting older hashes.
 
 ### 5.11 Phase 2 entry conditions — **met 2026-09-03**
 
@@ -1057,10 +1063,641 @@ FIR and contract, metamorphic (amplitude scaling, phase rotation, time
 translation and frequency offset must not change the verdict), and adversarial
 (constant-envelope digital, DC spike, clipping harmonics, retune transient,
 analogue FM with periodic content, periodic buffer artefact, sloping spectrum).
-Defects 1, 3 and 4 above were found by layers 1 and 2; the stopband-SNR defect
-that preceded them would have been found by layer 4. That is the lesson being
-carried: the previous suite checked that `_measure` was called and that its
-outputs were plumbed, and never once asked whether the number was right.
+Defects 1, 3 and 4 above were found by layers 1 and 2. The stopband-SNR defect
+that preceded them would have been caught most directly by **layer 1** — a
+ground-truth oracle asking whether a synthetic 20 dB channel reads 20 dB — and
+would also have been caught by layer 4, since "filter skirts" is on the
+adversarial list. Layer 3 caught nothing, which is itself a result: metamorphic
+invariance says the statistic behaves consistently under transformation, and a
+number that is consistently wrong satisfies it perfectly.
+
+Worth noting separately: three of the four new defects were in *declared
+constants* — a threshold, a minimum sample count, a margin — not in logic. Every
+one of them was a number registered against no implementation, or measured once
+and generalised. That is why freezing the strata set alongside the threshold in
+`PromotionCorpusLock` matters more than it first appeared: the constants are
+where the unexamined claims live.
+
+That is the lesson being carried: the previous suite checked that `_measure` was
+called and that its outputs were plumbed, and never once asked whether the
+number was right.
+
+### 5.13 The channel that measures and the channel that analyses are not the same channel
+
+The 50 kBd measurement in §5.12 — cyclic statistic `56.07` unchannelized,
+`1.38` through the production channel — is not attenuation. The channelizer had
+removed the feature the detector exists to find. The squared-envelope timing
+line only exists because the pulse has **excess bandwidth**, and excess
+bandwidth is exactly the spectral shoulder that a channel cut snug to a −20 dB
+occupancy estimate puts into the FIR skirt.
+
+The wrong repair is to move `CHANNEL_MARGIN`. Products already published under
+the measurement lineage are comparable with each other; a margin chosen to help
+a detector would retroactively change what every occupancy and SNR figure meant,
+and it would do so silently, because the digest inputs would not have changed
+shape.
+
+**Two purposes, two lineages.**
+
+| Product | Purpose | Width policy | Margin |
+| --- | --- | --- | --- |
+| `MEASUREMENT_CHANNEL` | occupancy, centroid, local SNR | `OCCUPANCY_FITTED_V1` | 1.25, **frozen** |
+| `STRUCTURE_CHANNEL` | symbol-clock / cyclostationary analysis | `CYCLIC_STRUCTURE_PRESERVING_V1` | provisional, sweep-selected |
+
+`ChannelRequest.channel_purpose` defaults to `MEASUREMENT_CHANNEL`, so an
+existing caller gets the product it already got. The measurement lineage's
+**digest formula is frozen**: its digest inputs end exactly where they ended,
+verified by re-running the pre-change module against the post-change one on the
+same window and comparing byte for byte (`chp-bb3edd31e79682a9` both sides). Any
+other purpose appends its policy to the digest, which is what stops the two
+lineages pooling — same window, same width, different purpose, different digest.
+
+**The other half of the murder.** A wide input filter followed by aggressive
+decimation destroys the cyclic feature just as thoroughly as a narrow filter,
+and leaves cleaner paperwork: the channel width in the product looks generous
+while the output rate cannot represent the cycle frequency at all. The
+squared-envelope line sits at `α = R`, so the structure channel declares
+`output_samples_per_candidate_symbol = 4.0` and the rate floor is checked
+*before* decimation is chosen. A request that violates it is refused with
+`STRUCTURE_RATE_UNSATISFIABLE`, never quietly delivered.
+
+The floor is derived from the **measured** occupancy, not the requested width.
+Deriving it from the request would let a caller lower the floor by asking for a
+narrow channel — the requirement would then be a restatement of the request
+rather than a fact about what the signal needs.
+
+**The purpose reaches the verdict.** `NO_SYMBOL_CLOCK` from a measurement
+channel is close to uninformative; the same outcome from a structure channel is
+evidence. `rf_detector_contract.channel_purpose()` returns
+`CHANNEL_PURPOSE_UNDECLARED` for a product that predates the split rather than
+assuming the answer, and every `SymbolClockVerdict` carries it. Phase 3 must
+stratify on it, which changes the tested bound count — the arithmetic is
+computed in `PENDING_AMENDMENTS` and deliberately **not adopted**, because the
+family is not that module's to redefine and a bound count that drifts while
+nobody is looking is what `PromotionCorpusLock` exists to catch.
+
+**Selecting the width from evidence.** `tools/rf_structure_channel_sweep.py`
+runs the grid the review specified — margin × symbol rate × roll-off × SNR ×
+offset × neighbours, 6,480 cells — through the production `channelize` on a real
+`BoundedIQRing` window, with each candidate margin injected as a real
+`ChannelPolicy`. A sweep that reimplemented the filter would be measuring the
+sweep.
+
+Two things had to be fixed in the harness before it measured anything, and both
+are worth keeping:
+
+*The reference was committing the fault under test.* The first version mixed to
+baseband and decimated with **no** anti-alias filter, which folds the whole
+2.048 MHz of noise into the output band and drives the reference statistic down.
+Retention against that reference is not conservative, it is meaningless. The
+reference is now a *wide channel* — 6× occupancy, capped per cell by Nyquist, by
+the span edge and by the distance to DC, with the margin actually used published
+so a cell whose reference could not clear the widest margin under test is
+excluded rather than quietly averaged in.
+
+*The first run answered the wrong question.* It requested `theoretical occupancy
+× margin` and concluded that margin 1.25 **retains 166%** of the reference
+statistic — while the production path at the same margin had been measured at
+1.38 from 56.07. Both numbers were right. In production the margin multiplies
+the **measured** occupancy, and the −20 dB walk closes inside the brick wall:
+59.75 kHz measured against 69.1 kHz true for a 50 kBd β=0.35 signal, a ratio of
+0.865. Requesting the theoretical width had silently removed the underestimate
+that caused the problem. The margin is not the only term:
+
+```
+flat coverage = margin × (measured occupancy / true occupied) × 0.85
+```
+
+where 0.85 is `PASSBAND_REFERENCE_FRACTION`, the point at which the shipped FIR
+is still flat. For that 50 kBd signal, margin 1.25 gives 0.918 — the flat
+passband covers 92% of the signal and the shoulders carrying the timing line are
+in the skirt. Margin 2.0 gives 1.47. **It is flat coverage, not margin, that
+decides whether the feature survives**, and a margin chosen without the
+occupancy underestimate beside it is a number chosen against the wrong variable.
+
+*And the report was reading noise as evidence.* Retention is only defined where
+there was something to retain. A β = 0 sinc has no excess bandwidth and so no
+timing line; a −10 dB cell has a reference measuring noise. In both, the ratio of
+two noise statistics sits near 1.0, and the first pass over 6,480 cells duly
+concluded that the margin does not matter. The report now conditions on the
+reference having found the true symbol clock, and states that condition in its
+own output.
+
+**The family stays at thirteen.** Channel-purpose aggregates were considered
+and rejected on a structural argument, not an arithmetic one. The two lineages
+are not two populations from which SCYTHE independently makes DIGITAL claims: a
+measurement channel is cut for occupancy, centroid and SNR and cannot produce an
+information-structure verdict at all. Bonferroni must cover the inferential
+claims *eligible for promotion*, not every implementation dimension that appears
+in provenance.
+
+That argument holds only while exactly one lineage is eligible, so the
+prohibition is enforced rather than assumed. `rf_symbol_clock.detect()` refuses a
+verdict from any purpose other than `STRUCTURE_CHANNEL` — before any arithmetic —
+with the outcome `CHANNEL_PURPOSE_NOT_ELIGIBLE` and axis value `NOT_ATTEMPTED`.
+A measurement channel is still **admitted**: the contract's admission rule is
+unchanged and still reads only `transformation.outcome`. It is admitted and then
+refused a verdict, on the ground that it was never eligible for one. An
+undeclared purpose is refused for the same reason — eligibility is a declaration,
+not a default.
+
+```json
+{
+  "validation_family_revision": "rf-digital-q4.v1",
+  "simultaneous_control": "BONFERRONI",
+  "family_alpha": 0.05,
+  "tested_bound_count": 13,
+  "per_bound_alpha": 0.003846153846,
+  "minimum_zero_failure_trials_per_bound": 5561,
+  "channel_purpose_eligible_for_promotion": "STRUCTURE_CHANNEL",
+  "measurement_channel_verdict_production": "PROHIBITED"
+}
+```
+
+Membership is **derived from `STRATA`**, not transcribed beside it: a
+hand-written list would be a second source of truth for the one thing that may
+not drift. The review named its members in operator vocabulary and the corpus
+contract keys them differently in four places (`THERMAL_NOISE` →
+`THERMAL_NO_INPUT`, `ANALOGUE_FM` → `STATIONARY_ANALOGUE_FM`, `ANALOGUE_AM` →
+`AM`, `OVERLOADED_CLIPPED_INPUT` → `OVERLOADED_CLIPPED`); the corpus keys are
+canonical because those are what a labelled window carries, and the mapping is
+published so the correspondence can be audited rather than assumed.
+
+`PromotionCorpusLock` now freezes the family revision and the eligible purpose
+alongside the bound count, and `_corpus_state` reports
+`FAMILY_REVISION_CHANGED_AFTER_FREEZE` and `ELIGIBLE_PURPOSE_CHANGED_AFTER_FREEZE`.
+A bound count of 13 would not notice a family whose *membership* was rewritten at
+the same size, and thirteen bounds do not cover fourteen chances at one
+threshold.
+
+**Six triggers would enlarge the family**, each of them a second path allowed to
+emit the promoted claim: multiple structure-channel margins, multiple FIR
+revisions, multiple threshold variants, alternate preprocessing paths, separate
+detector decisions from measurement channels, or multiple methods each allowed to
+emit it. And the selection rule is recorded explicitly: freezing one structure
+configuration against development data and opening the corpus afterwards does not
+enlarge the family, because only one hypothesis ever meets the corpus. Running
+several configurations against the promotion corpus and keeping the best enlarges
+it by exactly the number run — calling them configuration experiments does not
+stop them being multiple hypothesis tests.
+
+**The sweep selected 2.0, and it is now frozen.** 6,480 cells, scored on the 799
+where a wide reference actually found the true symbol clock. Summary retained at
+`docs/evidence/structure_channel_margin_sweep.json`.
+
+| margin | p5 coverage | median retention | p5 retention | frac < 0.75 | contam dB | DC refusals |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1.25 | 0.93 | 1.695 | 0.485 | 0.072 | 0.00 | 87 |
+| 1.50 | 1.11 | 1.450 | 0.358 | 0.078 | 0.00 | 123 |
+| **2.00** | **1.47** | **1.262** | **0.897** | **0.034** | **0.01** | **177** |
+| 2.50 | 1.72 | 1.200 | 0.861 | 0.018 | 0.07 | 279 |
+| 3.00 | 2.07 | 1.066 | 0.845 | 0.020 | 0.23 | 303 |
+| 4.00 | 2.78 | 1.030 | 0.208 | 0.164 | 0.50 | 360 |
+
+1.25 and 1.5 fail the coverage gate's lower tail and the retention tail; 4.0
+collapses. 2.0 is the **narrowest** margin passing all three declared criteria and
+the cheapest of those that pass. Widening did **not** worsen adjacent-channel
+false positives — the wrong-symbol-rate rate falls from 0.110 at 1.25 to 0.045 at
+2.0 to 0.000 at 3.0, because the errors at narrow margins are half-rate reads off
+a mangled spectrum rather than neighbour contamination. What widening does cost
+is DC refusals, which double by 2.0 and treble by 3.0.
+
+The margin arrives at the number it started at, which is worth being suspicious
+of, so three caveats are published in `channelizer_status()` beside it:
+
+- **The p5 sits on a cliff.** At 2.0 the four lowest retentions are 0.265, 0.286,
+  0.323, 0.333 and the fifth is 0.748. The published 0.897 is decided by where
+  the percentile index lands relative to that gap, not by a margin of safety. The
+  robust form — fraction of cells below 0.75 — is 0.034 against 0.072 at 1.25,
+  supporting the same choice for a better reason.
+- **The residual tail is not a coverage failure.** Three of those four cells are
+  20 kBd at 20 dB across all three offsets, with flat coverage 1.57 — well clear
+  of the gate. The cause is decimation and window length at low symbol rate,
+  already declared as `DECIMATION_LEAVES_TOO_FEW_SAMPLES`. Widening does not fix
+  it and is not credited with doing so.
+- **A different statistic would have chosen 2.5.** On fraction-below-0.75 alone,
+  2.5 scores 0.018 against 2.0's 0.034. The declared criterion was the fifth
+  percentile, declared before the run, and switching statistics after seeing
+  which one changes the winner is the exact failure this project's validation
+  rules exist to prevent.
+
+Selection used development data only and the promotion corpus is unopened, so
+under the recorded selection rule it does not enlarge the validation family.
+
+### 5.14 Two declarations that are absences
+
+**The threshold.** `2.5` is a development heuristic, not a decision boundary.
+`threshold_declaration()` publishes it as `PROVISIONAL` under
+`SYNTHETIC_CALIBRATION` authority with `promotion_eligible: false` and
+`false_alarm_probability: null` — null and not a placeholder, because a number
+there would be the most quotable false claim in the module. A crossing is
+`THRESHOLD_EXCEEDED_IN_SHADOW_MODE` and nothing else; a test asserts that no
+string field of any verdict contains the word DIGITAL, which caught the outcome
+prose still reading "DIGITAL STRUCTURE IS SUPPORTED, NOT PROVEN". Every
+qualifier in that sentence was correct and it was still the sentence someone
+would quote with the qualifiers dropped.
+
+**Direct sampling.** `DIRECT_SAMPLING_CHANGE` stays visibly unwired. Building a
+control so the warning list comes out empty would make the empty list the lie.
+What is published instead is the shape of the gap:
+
+```json
+{
+  "direct_sampling": "UNDECLARED",
+  "expected_capture_regime": "TUNER_QUADRATURE",
+  "expected_regime_authority": "INFERRED_FROM_CONFIGURATION",
+  "runtime_attestation": "UNAVAILABLE",
+  "control": "NOT_IMPLEMENTED"
+}
+```
+
+**The naming is the point, and position is not available.** The first version
+led with `direct_sampling_regime: TUNER_QUADRATURE` beside an authority tag
+reading `ASSUMED_FROM_ABSENT_CONTROL`. Every word of that was true, and the
+regime still read as the primary fact the moment a UI or a log collector
+flattened the object.
+
+The obvious repair — put `UNDECLARED` first — turns out not to be a repair at
+all: the status route serialises with sorted keys, so the object arrives
+alphabetically and `attestation_note` leads on the wire regardless of build
+order. Position cannot be relied on. What can is that **every field which is not
+the state says so in its own name**: `expected_capture_regime`,
+`expected_regime_authority`. A reader reaching for the first plausible key lands
+on one that is self-qualifying. A test enforces that rule over the whole object
+rather than asserting an order that transport discards.
+
+An installed R820T does not prove the active stream uses it. SCYTHE does not
+start `rtl_tcp` and cannot see its arguments, so there is no runtime attestation
+to have, and that absence is published as `UNAVAILABLE` rather than left to be
+noticed. None of it reaches the hashed signal-chain manifest, which still carries
+`direct_sampling: UNDECLARED`: promoting an inference into the instrument's
+identity would advance the chain hash on the strength of a guess. The control transaction is specified before the
+control exists — stop, invalidate and discard the ring, change regime, advance
+the manifest and hash, rebuild the channelizer configuration, reconnect, refuse
+comparison with tuner-quadrature products — because the order is the whole
+content: changing the regime while a ring holds samples captured under the
+previous one produces a window that cannot be described.
+
+**Clock continuity.** The monitor now reports `ZERO_DETECTED_DISCONTINUITIES`,
+never "zero discontinuities", alongside
+`detection_coverage: BOUNDED_BY_DRIFT_TOLERANCE_AND_CHECK_INTERVAL`. It compares
+a sample count against elapsed wall time over a 10 s interval; a loss small
+enough to stay inside the drift tolerance leaves no trace, and `rtl_tcp` hands
+over a byte stream with no per-sample attestation against which one could be.
+Detection coverage is not omniscience.
+
+### 5.15 The receiver is a second instrument with a second chain
+
+`WALKING PASSIVE GEOLOCATION` needs to know where the receiver was. The phone
+supplying that is a **second sensor with its own failure modes**, and folding it
+into `signal_chain_hash` would make a GPS fix change the identity of the
+receiver and a gain step change the identity of a position. Neither is true.
+
+```
+signal_chain_hash           what instrument produced this measurement
+receiver_state_chain_hash   where, when and in what orientation that
+                            instrument was *believed* to be
+```
+
+`rf_receiver_state.py` implements build order item 1: the
+`scythe.rf-receiver-state.v1` contract, its chain hash, the pose budget, the
+four-state alignment gate and the `TIME_ALIGNED_WITH` join. Nothing collects a
+position yet and nothing estimates a location; `receiver_state_status()` declares
+`collection_implemented`, `posterior_implemented`, `planner_implemented` and
+`body_shadow_implemented` all false.
+
+**Course is not heading.** This is the most expensive available mistake here.
+Course describes the direction the receiver is *translating*; heading describes
+where the antenna is *pointing*. At 1.1 m/s they decouple completely and
+destabilise for entirely different reasons — course from GNSS noise divided by a
+small velocity, heading from magnetic disturbance and tilt. A body-shadow
+experiment needs heading and gets nothing from course. `heading_source` is
+`UNDECLARED` until something that actually measures orientation declares it, and
+the constructor **discards a heading value supplied without such a source**
+rather than carrying it. That refusal is at the constructor, not downstream,
+because downstream is where a number becomes a bearing.
+
+**Staleness is metres, not seconds.** The chain excludes the position itself,
+exactly as the signal chain excludes centre frequency — a chain identity that
+moved with every fix would make every state an incomparable island. What it does
+contain is the *apparatus*: device, position authority, course and heading
+sources, alignment method, mount. The gate is then a distance:
+
+```
+sigma_motion = v · sigma_t
+sigma_pose   = sqrt(sigma_GNSS² + (v · sigma_t)² + sigma_mount²)
+```
+
+At 1.1 m/s a 42 ms uncertainty contributes **4.6 cm** and vanishes beside a 4.8 m
+GNSS circle; at 20 m/s the same 42 ms contributes **0.84 m** and starts to
+matter. A state goes `STALE` when the receiver could have moved further than its
+own position circle inside the timing uncertainty — which arrives at 5 s on foot
+and 160 ms at 30 m/s. A seconds-based cutoff would have to pick one and be wrong
+for the other.
+
+The mount term is 2.0 m and is a **declared unknown**, not a measured offset: the
+antenna is on a two-metre magnetic base and its relationship to the operator is
+`UNDECLARED`. It is in the budget so that it cannot be quietly forgotten, which
+is why a nominally 4.8 m fix yields a 5.20 m pose.
+
+**Breadcrumbs are never gated.** Every alignment state permits them, because
+rendering where the operator walked is a record of the survey rather than an
+inference about an emitter. Only `VERIFIED` and `BOUNDED` may update a surface,
+and `BOUNDED` marks bearing-like evidence `CONDITIONAL` — time alignment does not
+supply a verified heading source and so cannot on its own authorise directional
+evidence.
+
+Still to build, in order: phone collection with explicit source authorities;
+bounded device-to-orchestrator clock exchange; the graph edges; an RF likelihood
+adapter over `h3_heatmap.py` — reusing the H3 posterior substrate but **not** its
+search-and-rescue priors, independence assumptions or movement models, and
+selecting resolution from pose uncertainty because cells smaller than the GNSS
+circle are decorative precision; the Fisher-information geometry metrics; the
+planner on the same objective; the point-estimate gate; and the controlled
+body-shadow rotation mode. `doma_rf_motion_model.py` stays out — it predicts
+*emitter* trajectories and is the wrong tool for a receiver-motion posterior.
+
+### 5.16 The rate the trace is labelled with is a launch argument
+
+The bridge sends `rtl_tcp` two control opcodes: `SET_GAIN_MODE` (0x03) and
+`SET_GAIN` (0x04). There is no `SET_SAMPLE_RATE`. The rate is whatever
+`rtl_tcp` was started with via `-s`, and `rtl_tcp` never acknowledges what the
+tuner actually applied — the `RTL0` header carries a tuner type and a gain
+count, not a rate.
+
+That makes `SDRPP_SAMPLE_RATE_HZ` a **claim**, and the claim is load-bearing:
+`bin_width = sample_rate_hz / fft_size`, so it labels every frequency in the
+trace. A configured rate and a confirmed rate produce identical-looking
+spectra. Nothing in the pipeline would raise an error if they diverged; the
+axis would simply be wrong.
+
+Two separate defences, and they do different jobs.
+
+The first removes drift. `scythe-rtl-tcp.service` and the orchestrator now read
+the rate from one file, so the actual `-s` and the declared value cannot
+disagree. `EnvironmentFile=` carries no leading `-`, so a missing file stops
+the orchestrator rather than letting it fall back to the 1 MS/s default in
+`RFBridgeConfig` and silently mislabel the axis by a factor of two.
+
+The second is the one that matters for evidence. Single-sourcing removes
+*disagreement between two configurations*; it does not turn a configuration
+into a measurement. So the payload names its own authority:
+
+```json
+{
+  "sample_rate_hz": 2048000,
+  "sample_rate_authority": "SHARED_LAUNCH_CONFIGURATION",
+  "runtime_attestation": "UNAVAILABLE",
+  "native_bin_width_hz": 500.0
+}
+```
+
+`native_bin_width_hz` is correct *conditional on the configured rate having
+been applied*. This is the same shape as §5.14's direct-sampling block: a value
+that is real, useful, and not attested, published with the qualifier attached
+rather than left for a reader to infer.
+
+Reaching `LAUNCH_CONFIG_CORROBORATED` — still not `USB_MEASURED` — would need a
+capture handshake record: environment-file hash, the actual `rtl_tcp` command
+line, process start time and PID, connection epoch, requested rate, and any
+startup log line stating the applied rate. Estimating the rate from a known
+broadcast station is explicitly **not** that. It would replace configuration
+trust with transmitter trust and call the substitution a measurement.
+
+#### What the bridge refuses to say about its own absence
+
+A refused IQ connection is indistinguishable from a stopped `rtl_tcp`, a wrong
+endpoint, a busy receiver, or — under WSL — a USB device that Windows has not
+attached. The bridge therefore publishes reachability and declines the cause:
+
+```json
+{
+  "transport_state": "DISCONNECTED",
+  "sample_flow_state": "NONE",
+  "availability": "SOURCE_DISCONNECTED",
+  "unreachable_cause": "NOT_DETERMINABLE_FROM_THIS_PROCESS"
+}
+```
+
+The single field became two axes on 2026-09-06, after `rtl_tcp` was observed to
+survive USB removal: the process stays healthy, the socket stays established,
+and nothing arrives on it. Reachability alone called that state connected. It
+now reads `transport_state: CONNECTED` with `sample_flow_state: STARVED`, and
+the derived `availability` is `SOURCE_STARVED`. The refusal to name a cause is
+unchanged and now applies to both axes — a removed USB device, a wedged
+`rtl_tcp` and a suspended host are indistinguishable from this side of the
+socket. See §3-4 of `docs/RTL_TCP_BOOT_CAPTURE.md`.
+
+`WAITING_FOR_USB` would have been the useful-sounding string, and it is the one
+the operator most often wants. It is also a guess. The restart policy that
+governs recovery is a property of a systemd unit the bridge never read, so it
+is documented in `docs/RTL_TCP_BOOT_CAPTURE.md` rather than asserted by a
+process with no access to it.
+
+### 5.17 The same mast at two extensions is two instruments
+
+`declaration_receipt` raised its comparability boundary on `antenna_id` alone:
+
+```python
+changed = bool(previous) and previous.get("antenna_id") != record["antenna_id"]
+```
+
+A telescopic mast retracted from 730 mm to 165 mm keeps the id
+`nesdr-smart-telescopic` throughout. Its derived quarter wave moves from
+102.7 MHz to 454.2 MHz — from the FM broadcast span to the 433 MHz ISM band.
+That is not the same antenna with a different setting; it is a different
+frequency response, and every relative-power product taken either side of the
+change was taken through a different instrument.
+
+The declaration hash already knew this. It was computed over `antenna_id`,
+`feedline_id`, `extension_mm` and `note`, so the extension change moved the hash
+while the boundary stayed silent — the same shape as a sample rate that drifts
+away from the one the trace is labelled with. **A change that moves a hash and
+raises no boundary is a signal-chain change that produces no complaint.**
+
+The boundary now fires on `COMPARABILITY_FIELDS = ("antenna_id", "feedline_id",
+"extension_mm")`. `feedline_id` is included because §5.10 already established
+that a mast on 2 m of RG58 is not the same signal chain as the same mast on the
+SMA port; leaving it out would have re-created the defect one field over.
+
+#### One hash was answering two questions
+
+Excluding `note` from the boundary while leaving it in the hash only moves the
+contradiction. If prose is part of a hash that anything keys comparability from,
+then fixing a typo invalidates products — and a receipt that stays quiet while a
+downstream hash moves is not one system agreeing with itself. The hash is now
+two:
+
+| Hash | Covers | Answers |
+| --- | --- | --- |
+| `instrument_hash` | `antenna_id`, `feedline_id`, `extension_mm` | what did these products come through? |
+| `declaration_hash` | the instrument fields, `authority`, `extension_authority`, `note` | what did the operator assert about it? |
+
+`signalChainChanged` is true exactly when `instrument_hash` moved, and a test
+asserts that equivalence across every field rather than asserting the two
+symptoms separately. The receipt carries `instrumentHash`,
+`previousInstrumentHash`, `changedFields`, `previousFeedlineId` and
+`previousExtensionMm`.
+
+`declared_at` is deliberately **not** in either hash. Two identical declarations
+made a minute apart describe the same instrument and the same assertion, and a
+hash that changes on every re-declaration is an event id rather than an identity.
+
+#### What the product hashes could not see
+
+Auditing the downstream side found the premise half-right and the consequence
+worse than expected. `note` reaches neither `signal_chain_hash`: the retention
+manifest hashes sensor, sample type, rate, antenna, feedline and gain, and the
+sparse analyzer hashes tuner state plus `antenna_id`. Prose was never in a
+product hash, so the contradiction had no downstream victim.
+
+`extension_mm` was not in either one either. Products taken at 730 mm and at
+165 mm carried **identical chain identities** — the receipt would complain and
+the product hash would not, which is the same defect one layer down. Both now
+carry the extension:
+
+- `signal_chain_manifest` gains `antenna.extension_mm` and
+  `antenna.extension_authority`, bumping `SIGNAL_CHAIN_REVISION` from `v2` to
+  `v3` with `PRIOR_SIGNAL_CHAIN_REVISION_COMPARABLE = False`, as v1→v2 did for
+  the feedline.
+- `SparseAnalyzerConfig` gains `antenna_extension_mm`, carried into
+  `_signal_chain` beside `antenna_id`.
+
+The manifest takes the readable fields rather than embedding `instrument_hash` as
+an opaque digest. Its stated purpose is to be retained beside its hash and simply
+read; folding in a digest would satisfy the letter of "incorporate the instrument
+hash" while hiding exactly which field moved. The invariant is the same and is
+tested directly: the chain hash varies with every comparability field and is
+invariant to the note.
+
+A configured extension that does not validate hashes as
+`REFUSED_UNUSABLE_VALUE`, distinct from `UNDECLARED`. An operator who typed
+metres into a millimetre field is not an operator who declined to say, and
+collapsing the two would hide a misconfiguration inside a legitimate omission.
+
+#### A hash formula is not a live instrument
+
+Fixing the formula would have fixed nothing on a running receiver. Both product
+hashes sourced the antenna from `os.environ`: `IQRetentionOwner` built its
+manifest from `antenna_id()` at construction, `SparseAnalyzerConfig.from_env()`
+froze its copy at construction, and `IQRetentionOwner.status()` re-read the
+environment on every call. The declaration endpoint touched none of them.
+
+So an accepted declaration moved the receipt and nothing else. Every subsequent
+window carried the chain hash the process booted with, while the receipt
+announced that the instrument had changed — a contradiction the system published
+rather than merely failed to notice.
+
+The capture owner now holds one active instrument state, bootstrapped from the
+environment and thereafter replaced only by declaration:
+
+```
+validate declaration          AntennaDeclarationStore.declare
+  → replace active state      IQRetentionOwner.set_instrument   ─┐ one lock,
+  → rebuild manifest + hash   _rebuild_chain_locked              │ whole
+  → invalidate ring           SIGNAL_CHAIN_CHANGE                │ sequence
+  → advance epoch             BoundedIQRing.configuration_epoch ─┘
+  → follow in the analyzer    RFSparseAnalyzer.set_instrument
+  → acknowledge receipt       declaration_receipt + persistence
+```
+
+The clear is held under the same lock as the swap. Doing it afterwards leaves a
+window in which a product can be issued carrying the new chain hash under the old
+epoch — a product that looks attributable and is not.
+
+Three further leaks were found and closed while wiring this:
+
+- `set_gain_db` rebuilt the manifest with only `gain_db=`, letting antenna,
+  feedline and extension fall back to the environment. A gain change would have
+  silently reverted the instrument to the boot-time one. Both rebuild sites now
+  go through `_rebuild_chain_locked`, which reads only owner state.
+- `status()` published `antenna_id()` and `feedline_id()` from the environment
+  beside a chain hash computed from the declared instrument, so the payload could
+  contradict itself.
+- `AntennaDeclarationStore.declare` compared against nothing on a first runtime
+  declaration and reported `signalChainChanged: false`, while the capture owner —
+  which had bootstrapped from the environment — cleared its ring for the same
+  event. The store now adopts the boot environment first, so both components
+  answer one question the same way.
+
+`SIGNAL_CHAIN_CHANGE` was in `INVALIDATION_REASONS` but had no wired source. It
+now names one in `WIRED_REASON_SOURCES`, leaving `DIRECT_SAMPLING_CHANGE` as the
+only deliberately unwired reason.
+
+#### Active is not persisted
+
+The runtime store is process-local, so an operator who declares an antenna and
+then reboots loses it. Status distinguishes the two:
+
+```
+RUNTIME DECLARATION // ACTIVE
+BOOT DECLARATION    // PERSISTED | PENDING_PERSISTENCE
+```
+
+`PENDING_PERSISTENCE` says the declaration is genuinely in force for products
+being emitted now and that a restart would adopt a different instrument.
+Persisting it is a separate operation on the unit environment, deliberately not
+performed by the declaration endpoint: writing a systemd drop-in is not something
+an HTTP handler should do on the strength of a form post.
+
+#### The number is geometry, not resonance
+
+`quarter_wave_hz` now travels with `quarter_wave_model: IDEAL_FREE_SPACE` and
+`resonance_claim: NOT_MEASURED`. `c/4L` assumes free space and an infinite ground
+plane; the magnetic base, the surface it is stuck to, body and vehicle proximity
+and the stepped construction of a telescoping whip all move the real optimum, and
+a practical monopole rule lands roughly 4.6% shorter. The model has to be named
+or the figure reads as a property of this antenna.
+
+`extension_authority` separates a length read off a ruler
+(`OPERATOR_MEASURED`) from one arrived at by arithmetic (`OPERATOR_ESTIMATED`,
+the default). Nothing can distinguish them, so `MEASURED` must be claimed and is
+never assumed. It sits in `declaration_hash` and not in `instrument_hash`: a
+better claim about the same geometry is not a different instrument.
+
+Worth stating plainly, because the two get conflated: setting the mast to 173 mm
+for a 433.92 MHz survey derives 433.226 MHz, not 433.92 MHz. 433.92 MHz wants
+172.723 mm under this model, and a mast is set in whole millimetres. The derived
+figure describes the geometry that was declared, never the frequency that was
+intended.
+
+The receipt now carries `changedFields`, `previousFeedlineId` and
+`previousExtensionMm`, and names what moved:
+
+```
+MAST EXTENSION CHANGED 730 mm → 165 mm — DERIVED QUARTER WAVE 102.7 MHz → 454.2 MHz.
+THE MAST IS THE SAME PART; THE INSTRUMENT IS NOT
+```
+
+The instrument panel prints `SIGNAL CHAIN CHANGED (EXTENSION_MM)` rather than the
+bare phrase, because an unqualified "signal chain changed" reads as a swapped
+antenna.
+
+#### A millimetre field that accepted metres
+
+The bound was `0 < extension_mm <= 2000`. `0.73` — 730 mm written by someone
+thinking in metres — validated, and produced a quarter wave of 102.7 **GHz**,
+roughly fifty-eight times the R820T's ceiling, with no complaint. The floor is
+now `MIN_EXTENSION_MM = 10.0` in both the Python catalogue and its
+`rfAntennaDeclaration.js` mirror, refused with the unit error named. This is a
+unit guard, not a hardware claim: the module does not know the tuner's range and
+does not assert one.
+
+#### The declaration had no way to survive a restart
+
+`AntennaDeclarationStore` is process-local and volatile, so an antenna declared
+through the API lasts exactly as long as the orchestrator. On the observed
+workstation the store held `nesdr-smart-telescopic` with the magnetic base while
+the unit drop-in still said `SDRPP_ANTENNA_ID=nesdr-smart-uhf`; the next restart
+would have silently reverted the signal chain to a different mast.
+
+`bootstrap_from_env` now also reads `SDRPP_ANTENNA_EXTENSION_MM`, so the
+extension is durable alongside the antenna and the feedline. An unusable value
+refuses the **whole** bootstrap and leaves the antenna `UNDECLARED` rather than
+degrading into the same mast with no extension — a visible omission instead of an
+invisible substitution. The authority does not change: configuration is still the
+operator speaking, and `OPERATOR_DECLARED` is what it records. Nothing here is
+measured, and no amount of environment file makes it so.
 
 ## 6. Open questions for the operator
 

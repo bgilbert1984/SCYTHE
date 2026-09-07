@@ -15,7 +15,8 @@ import numpy as np
 from rf_bridge import IQFFTProcessor, RFBridgeConfig, SDRPlusPlusBridge
 from rf_iq_ring import DEFAULT_CAPACITY_SAMPLES, INVALIDATION_REASONS
 from rf_iq_retention import (
-    CHANNELIZER_STATE, CLOCK_GAP_S, INACTIVE_REASONS, MAX_INVALIDATION_HISTORY,
+    CHANNELIZER_STATE, CLOCK_CHECK_INTERVAL_S, CLOCK_GAP_S,
+    CLOCK_INCIDENT_RECOVERY_CHECKS, INACTIVE_REASONS, MAX_INVALIDATION_HISTORY,
     RETENTION_NONE, RETENTION_RING, UNWIRED_REASONS, IQRetentionOwner, antenna_id,
     retention_enabled, signal_chain_hash,
 )
@@ -37,7 +38,8 @@ def _samples(count=4096, value=0.25):
 class EnvironmentIsolatedTest(unittest.TestCase):
     """Retention reads a few env vars; none of them may leak between tests."""
 
-    NAMES = ("SCYTHE_PROCESS_ROLE", "SCYTHE_RF_IQ_RETENTION", "SDRPP_ANTENNA_ID")
+    NAMES = ("SCYTHE_PROCESS_ROLE", "SCYTHE_RF_IQ_RETENTION", "SDRPP_ANTENNA_ID",
+             "SDRPP_FEEDLINE_ID", "SDRPP_ANTENNA_EXTENSION_MM")
 
     def setUp(self):
         self._saved = {name: os.environ.get(name) for name in self.NAMES}
@@ -76,7 +78,11 @@ class RetentionActivationTests(EnvironmentIsolatedTest):
         self.assertEqual(status["effective_retention_ms"], 256.0)
         self.assertFalse(status["capacity_limited"])
         self.assertEqual(status["capacity_samples"], 524_288)
-        self.assertFalse(status["raw_iq_exposed"])
+        # Five destination claims, not one boolean. See raw_iq_exposure.
+        exposure = status["raw_iq_exposure"]
+        self.assertFalse(any(exposure[key] for key in (
+            "raw_iq_api_exposed", "raw_iq_browser_exposed", "raw_iq_cloud_exposed",
+            "raw_iq_model_context_exposed", "raw_iq_persisted")))
         self.assertEqual(status["channelizer_state"], "INTEGRATED_NO_CLASSIFICATION")
         self.assertEqual(status["ring"]["held_samples"], 4096)
 
@@ -87,10 +93,10 @@ class RetentionActivationTests(EnvironmentIsolatedTest):
         self.assertEqual(
             {key: status[key] for key in ("iq_retention", "iq_retention_active",
                                           "effective_retention_ms", "capacity_samples",
-                                          "raw_iq_exposed", "channelizer_state")},
+                                          "channelizer_state")},
             {"iq_retention": "PROCESS_LOCAL_BOUNDED_RING", "iq_retention_active": True,
              "effective_retention_ms": 256.0, "capacity_samples": 524288,
-             "raw_iq_exposed": False, "channelizer_state": "INTEGRATED_NO_CLASSIFICATION"})
+             "channelizer_state": "INTEGRATED_NO_CLASSIFICATION"})
 
     def test_no_status_key_reports_a_bare_unqualified_retention_duration(self):
         """A single "retention_ms" cannot be both the request and the reality."""
@@ -347,11 +353,11 @@ class LifecycleTests(EnvironmentIsolatedTest):
         """Samples either side of a gap are not contiguous, whatever the count says."""
         owner = _owner()
         owner.append(_samples(), 1.0)
-        self.assertEqual(owner.status()["clock_continuity"]["discontinuities"], 0)
+        self.assertEqual(owner.status()["clock_continuity"]["detected_discontinuities"], 0)
         # A gap far longer than a stream at this rate can be silent.
         owner.append(_samples(), 1.0 + CLOCK_GAP_S + 5.0)
         status = owner.status()
-        self.assertEqual(status["clock_continuity"]["discontinuities"], 1)
+        self.assertEqual(status["clock_continuity"]["detected_discontinuities"], 1)
         self.assertEqual(status["clock_continuity"]["last_discontinuity"]["kind"], "GAP")
         self.assertEqual(status["invalidation_history"][-1]["reason"],
                          "CLOCK_DISCONTINUITY")
@@ -366,7 +372,7 @@ class LifecycleTests(EnvironmentIsolatedTest):
             # Alternating +/-4% arrival jitter, cumulatively near zero.
             at += per_block * (1.04 if index % 2 else 0.96)
             owner.append(block, at)
-        self.assertEqual(owner.status()["clock_continuity"]["discontinuities"], 0)
+        self.assertEqual(owner.status()["clock_continuity"]["detected_discontinuities"], 0)
 
 
 class BridgeIntegrationTests(EnvironmentIsolatedTest):
@@ -472,10 +478,373 @@ class BridgeIntegrationTests(EnvironmentIsolatedTest):
 
     def test_the_retention_status_carries_no_samples_and_serializes(self):
         bridge = self._bridge()
-        bridge.retention.append(np.full(2048, 1234.5, dtype=np.complex64), 1.0)
+        # A magnitude that cannot collide with a port number, a capacity or a
+        # threshold, so "absent" means absent rather than merely unmatched.
+        bridge.retention.append(np.full(2048, 98765.5, dtype=np.complex64), 1.0)
         payload = json.dumps(bridge.status()["iq_retention"])
-        self.assertNotIn("1234", payload)
-        self.assertIn('"raw_iq_exposed": false', payload)
+        self.assertNotIn("98765", payload)
+        self.assertIn('"raw_iq_api_exposed": false', payload)
+        self.assertIn('"raw_iq_persisted": false', payload)
+        # The transport is named rather than denied.
+        self.assertIn('"raw_iq_local_transport": "LOOPBACK_TCP"', payload)
+
+
+class DetectionCoverageTests(EnvironmentIsolatedTest):
+    """What the monitor found, not what is true of the stream."""
+
+    def test_a_quiet_stream_reports_zero_detected_discontinuities(self):
+        """Not "zero discontinuities". The monitor is not the arbiter of truth."""
+        owner = _owner()
+        owner.append(_samples(), 1.0)
+        continuity = owner.status()["clock_continuity"]
+        self.assertEqual(continuity["continuity_claim"], "ZERO_DETECTED_DISCONTINUITIES")
+        self.assertEqual(continuity["detected_discontinuities"], 0)
+        self.assertEqual(continuity["detection_coverage"],
+                         "BOUNDED_BY_DRIFT_TOLERANCE_AND_CHECK_INTERVAL")
+        self.assertIn("NOT OMNISCIENCE", continuity["coverage_note"])
+
+    def test_the_claim_changes_when_something_is_detected(self):
+        owner = _owner()
+        owner.append(_samples(), 1.0)
+        owner.append(_samples(), 1.0 + CLOCK_GAP_S + 5.0)
+        self.assertEqual(owner.status()["clock_continuity"]["continuity_claim"],
+                         "DISCONTINUITIES_DETECTED")
+
+
+class ClockIncidentAggregationTests(EnvironmentIsolatedTest):
+    """A run of correct checks must not read as a run of faults."""
+
+    # A modest rate keeps 70 s of clean feed cheap. The monitor compares a
+    # sample count against elapsed time, so its behaviour is rate-independent;
+    # only the volume of the test changes.
+    RATE = 48_000.0
+
+    def _owner(self):
+        return _owner(sample_rate_hz=self.RATE)
+
+    def _detections(self, owner):
+        return [e for e in owner.status()["invalidation_history"]
+                if e["reason"] == "CLOCK_DISCONTINUITY"]
+
+    def _storm(self, owner, breaks=7, start=1.0):
+        """Force exactly `breaks` gap detections.
+
+        Counted rather than stepped: an invalidation resets the monitor to an
+        unarmed state, so the append after a break re-arms silently and only
+        the one after that can detect again. Stepping a fixed number of times
+        would silently produce half the intended detections.
+        """
+        at = start
+        owner.append(_samples(), at)
+        while len(self._detections(owner)) < breaks:
+            at += CLOCK_GAP_S + 5.0
+            owner.append(_samples(), at)
+        return at
+
+    def _feed_clean(self, owner, at, seconds, step=0.05):
+        """Arrivals closer together than the gap limit, at the declared rate.
+
+        The step is deliberately small. A check interval is measured from the
+        first arrival after a re-arm, so one extra block is always counted
+        inside it; with half-second blocks that bias is 5% and trips the 1%
+        drift tolerance on its own. Real chunks are a few milliseconds, and the
+        step here is chosen to match that regime rather than to flatter it.
+        """
+        block = np.zeros(int(self.RATE * step), dtype=np.complex64)
+        end = at + seconds
+        while at < end - 1e-9:
+            at += step
+            owner.append(block, at)
+        return at
+
+    def test_seven_checks_across_one_transient_are_one_incident(self):
+        owner = self._owner()
+        self._storm(owner, breaks=7)
+        status = owner.status()
+        cleared = [e for e in status["invalidation_history"]
+                   if e["reason"] == "CLOCK_DISCONTINUITY"]
+        self.assertEqual(len(cleared), 7, "every individual clear is still recorded")
+        self.assertEqual([e["epoch"] for e in cleared], list(range(1, 8)),
+                         "each clear carries the epoch it ended")
+        self.assertEqual(status["clock_incidents"], 1)
+        incident = status["clock_incident"]
+        self.assertEqual(incident["failed_checks"], 7)
+        self.assertEqual(incident["invalidation_count"], 7)
+        self.assertEqual(incident["state"], "ACTIVE")
+        self.assertIsNone(incident["recovery_basis"])
+
+    def test_an_incident_names_what_preceded_it_without_claiming_a_cause(self):
+        owner = self._owner()
+        owner.append(_samples(), 1.0)
+        owner.invalidate("RECONNECT")
+        self._storm(owner, breaks=3, start=100.0)
+        incident = owner.status()["clock_incident"]
+        self.assertEqual(incident["preceding_event"], "RECONNECT")
+        self.assertEqual(incident["relationship"], "TEMPORALLY_CORRELATED")
+        self.assertEqual(incident["cause"], "NOT_ESTABLISHED")
+        for value in incident.values():
+            if isinstance(value, str):
+                self.assertNotIn("SETTLING", value.upper())
+                self.assertNotIn("CAUSED", value.upper())
+
+    def test_recovery_is_counted_in_passing_checks_not_in_quiet_seconds(self):
+        """A starved stream runs no checks, so silence must not close an incident."""
+        owner = self._owner()
+        self._storm(owner, breaks=2)
+        self.assertEqual(owner.status()["clock_incident"]["state"], "ACTIVE")
+        # A long wall-clock silence and nothing else: no append, so no check.
+        self.assertEqual(owner.status()["clock_incident"]["state"], "ACTIVE")
+        # Now feed clean intervals at the declared rate. The first arrival after
+        # a clear only re-arms the monitor, so N intervals of feed yield N-1
+        # completed checks -- one short of the bar, which is the case worth
+        # asserting: recovery is not declared until the count is actually met.
+        at = self._feed_clean(
+            owner, 1000.0, CLOCK_CHECK_INTERVAL_S * CLOCK_INCIDENT_RECOVERY_CHECKS)
+        status = owner.status()
+        self.assertEqual(status["clock_continuity"]["consecutive_passing_checks"],
+                         CLOCK_INCIDENT_RECOVERY_CHECKS - 1)
+        self.assertEqual(status["clock_incident"]["state"], "ACTIVE")
+        at = self._feed_clean(owner, at, CLOCK_CHECK_INTERVAL_S)
+        incident = owner.status()["clock_incident"]
+        self.assertEqual(incident["state"], "RECOVERED")
+        self.assertEqual(incident["recovery_basis"],
+                         f"{CLOCK_INCIDENT_RECOVERY_CHECKS}_CONSECUTIVE_PASSING_CHECKS")
+
+    def test_a_fault_after_recovery_opens_a_second_incident(self):
+        owner = self._owner()
+        self._storm(owner, breaks=2)
+        at = self._feed_clean(
+            owner, 1000.0, CLOCK_CHECK_INTERVAL_S * (CLOCK_INCIDENT_RECOVERY_CHECKS + 1))
+        self.assertEqual(owner.status()["clock_incident"]["state"], "RECOVERED")
+        self.assertEqual(owner.status()["clock_incidents"], 1)
+        owner.append(_samples(), at + CLOCK_GAP_S + 5.0)
+        status = owner.status()
+        self.assertEqual(status["clock_incidents"], 2)
+        self.assertEqual(status["clock_incident"]["incident_id"], "clock-incident-0002")
+        self.assertEqual(status["clock_incident"]["failed_checks"], 1)
+
+
+class RawIQExposureTests(EnvironmentIsolatedTest):
+    """The security claim, sized to what is actually being claimed."""
+
+    def test_every_destination_is_denied_separately(self):
+        exposure = _owner().raw_iq_exposure()
+        for key in ("raw_iq_api_exposed", "raw_iq_browser_exposed",
+                    "raw_iq_cloud_exposed", "raw_iq_model_context_exposed",
+                    "raw_iq_persisted"):
+            self.assertFalse(exposure[key], key)
+
+    def test_an_undeclared_source_does_not_get_a_transport_it_never_had(self):
+        exposure = _owner().raw_iq_exposure()
+        self.assertEqual(exposure["raw_iq_local_transport"], "UNDECLARED")
+        self.assertEqual(exposure["raw_iq_listener"], "UNDECLARED")
+
+    def test_a_declared_source_names_the_socket_rather_than_denying_it(self):
+        owner = IQRetentionOwner(sensor_id="T", sample_type="int16", sample_rate_hz=RATE,
+                                 owns_capture=True, iq_source="127.0.0.1:1234")
+        exposure = owner.raw_iq_exposure()
+        self.assertEqual(exposure["raw_iq_local_transport"], "LOOPBACK_TCP")
+        self.assertEqual(exposure["raw_iq_listener"], "127.0.0.1:1234")
+        self.assertIn("BIND ADDRESS IS THE CONTROL",
+                      exposure["raw_iq_transport_note"])
+
+    def test_the_single_boolean_is_gone_rather_than_kept_beside_the_block(self):
+        """Two names for one claim is how they drift apart."""
+        self.assertNotIn("raw_iq_exposed", _owner().status())
+
+
+class DirectSamplingDeclarationTests(EnvironmentIsolatedTest):
+    """The gap is published rather than papered over."""
+
+    def _direct(self):
+        return _owner().status()["direct_sampling"]
+
+    def test_the_state_leads_and_the_expectation_is_subordinate(self):
+        """A flattened log must not be able to read the expectation as the fact.
+
+        The first version published `direct_sampling_regime: TUNER_QUADRATURE`
+        beside an authority field. Every word was true and the regime still read
+        as the primary claim once a UI dropped the qualifier.
+        """
+        direct = self._direct()
+        self.assertEqual(direct["direct_sampling"], "UNDECLARED")
+        self.assertEqual(direct["expected_capture_regime"], "TUNER_QUADRATURE")
+        self.assertEqual(direct["expected_regime_authority"],
+                         "INFERRED_FROM_CONFIGURATION")
+        # Naming, not position, is what actually defends this. The status route
+        # serialises with sorted keys, so the object arrives alphabetically and
+        # `attestation_note` leads on the wire whatever order it was built in.
+        # Every field that is not the state therefore has to say what it is in
+        # its own name -- "expected_", not "regime" -- because a reader that
+        # reaches for the first plausible key must land on a qualified one.
+        for key in direct:
+            if key in ("direct_sampling", "control", "control_transaction",
+                       "invalidation_wiring", "runtime_attestation",
+                       "attestation_note"):
+                continue
+            self.assertTrue(key.startswith("expected_"), key)
+
+    def test_no_runtime_attestation_is_claimed(self):
+        """An installed R820T does not prove the active stream uses it."""
+        self.assertEqual(self._direct()["runtime_attestation"], "UNAVAILABLE")
+
+    def test_the_absent_control_is_declared_absent(self):
+        direct = self._direct()
+        self.assertEqual(direct["control"], "NOT_IMPLEMENTED")
+        self.assertEqual(direct["invalidation_wiring"],
+                         "REQUIRED_BEFORE_CONTROL_ENABLEMENT")
+        self.assertIn("DIRECT_SAMPLING_CHANGE",
+                      _owner().status()["unwired_invalidation_reasons"])
+
+    def test_the_expectation_did_not_reach_the_hashed_manifest(self):
+        """Promoting an inference into the instrument's identity would move the hash."""
+        status = _owner().status()
+        self.assertEqual(status["signal_chain"]["direct_sampling"], "UNDECLARED")
+        self.assertEqual(status["direct_sampling"]["direct_sampling"], "UNDECLARED")
+
+    def test_the_control_transaction_is_specified_before_it_exists(self):
+        """The order is the content: the ring is discarded before the regime moves."""
+        steps = self._direct()["control_transaction"]
+        self.assertEqual(steps[0], "STOP_CAPTURE")
+        self.assertLess(steps.index("INVALIDATE_AND_DISCARD_RING"),
+                        steps.index("CHANGE_REGIME"))
+        self.assertLess(steps.index("CHANGE_REGIME"),
+                        steps.index("ADVANCE_SIGNAL_CHAIN_MANIFEST_AND_HASH"))
+        self.assertEqual(steps[-1],
+                         "REFUSE_COMPARISON_WITH_TUNER_QUADRATURE_PRODUCTS")
+
+
+class DeclarationReachesProductsWithoutRestartTests(EnvironmentIsolatedTest):
+    """The environment bootstraps the instrument. It must not remain the authority.
+
+    Both product hashes previously sourced the antenna from ``os.environ``, so a
+    declaration accepted at runtime moved the receipt and nothing else: the
+    receipt announced a new instrument while every subsequent window carried the
+    chain hash the process booted with. That is worse than not noticing at all,
+    because the contradiction is published.
+
+    The sequence asserted here is the whole contract, in order:
+    capture, declare, no restart, ring invalidated, epoch advanced, next window
+    on the new chain, both hashes moved, both agreeing with one declaration.
+    """
+
+    def setUp(self):
+        super().setUp()
+        from graphops_rf_antenna import AntennaDeclarationStore
+        os.environ["SDRPP_ANTENNA_ID"] = "nesdr-smart-telescopic"
+        os.environ["SDRPP_FEEDLINE_ID"] = "nesdr-magnetic-base-rg58-2m"
+        os.environ["SDRPP_ANTENNA_EXTENSION_MM"] = "730"
+        self.bridge = SDRPlusPlusBridge()
+        self.store = AntennaDeclarationStore()
+
+    def tearDown(self):
+        self.bridge.retention.invalidate("ORCHESTRATOR_STOP")
+        super().tearDown()
+
+    def _fill_one_window(self):
+        """Push samples until a complete window can be issued, and issue it."""
+        owner = self.bridge.retention
+        for _ in range(64):
+            owner.append(_samples(65_536))
+            if owner.window_ready():
+                break
+        acquisition = owner.acquire_window()
+        self.assertIsNotNone(acquisition, "a window should have been issued")
+        self.assertTrue(acquisition, acquisition.reason)
+        return acquisition.window
+
+    def test_a_runtime_declaration_reaches_both_product_hashes(self):
+        # 1. A product captured under the boot-time instrument.
+        first = self._fill_one_window()
+        boot_chain = first.signal_chain_hash
+        boot_epoch = first.configuration_epoch
+        boot_sparse = self.bridge.sparse.signal_chain()["signal_chain_hash"]
+        self.assertEqual(self.bridge.retention.instrument_state()["extension_mm"], 730.0)
+
+        # 2. Declare a different extension. Same mast, same cable, new instrument.
+        record, receipt = self.store.declare({
+            "antenna_id": "nesdr-smart-telescopic",
+            "feedline_id": "nesdr-magnetic-base-rg58-2m",
+            "extension_mm": 173,
+            "extension_authority": "OPERATOR_MEASURED"})
+        self.assertEqual(record["quarter_wave_hz"], 433_226_095)
+
+        # 3. No restart: the same bridge, retention owner and analyzer objects.
+        applied = self.bridge.apply_antenna_declaration(record)
+        self.assertTrue(applied["applied"])
+        self.assertTrue(applied["changed"])
+        self.assertEqual(applied["runtime_declaration"], "ACTIVE")
+
+        # 4. The ring was cleared and the configuration epoch advanced.
+        self.assertTrue(applied["retention"]["invalidated"])
+        self.assertGreater(applied["retention"]["configuration_epoch"], boot_epoch)
+        self.assertEqual(self.bridge.retention.status()["invalidation_history"][-1]["reason"],
+                         "SIGNAL_CHAIN_CHANGE")
+
+        # 5. The next retained window is issued under the new extension.
+        second = self._fill_one_window()
+        self.assertGreater(second.configuration_epoch, boot_epoch)
+        self.assertEqual(self.bridge.retention.instrument_state()["extension_mm"], 173.0)
+
+        # 6. Both product hashes moved.
+        self.assertNotEqual(second.signal_chain_hash, boot_chain)
+        self.assertNotEqual(self.bridge.sparse.signal_chain()["signal_chain_hash"],
+                            boot_sparse)
+
+        # 7. Both describe the one active declaration, not two different states.
+        manifest = self.bridge.retention.status()["signal_chain"]
+        sparse_chain = self.bridge.sparse.signal_chain()
+        self.assertEqual(manifest["antenna"]["extension_mm"], record["extension_mm"])
+        self.assertEqual(manifest["antenna"]["id"], record["antenna_id"])
+        self.assertEqual(manifest["feedline"]["id"], record["feedline_id"])
+        self.assertEqual(sparse_chain["antenna_extension_mm"], record["extension_mm"])
+        self.assertEqual(sparse_chain["antenna_id"], record["antenna_id"])
+        self.assertEqual(sparse_chain["feedline_id"], record["feedline_id"])
+        self.assertTrue(receipt["signalChainChanged"])
+        self.assertEqual(receipt["changedFields"], ["extension_mm"])
+
+    def test_the_environment_no_longer_overrides_the_active_instrument(self):
+        """A rebuild for an unrelated reason must not resurrect the boot state."""
+        record, _ = self.store.declare({"antenna_id": "nesdr-smart-telescopic",
+                                        "feedline_id": "nesdr-magnetic-base-rg58-2m",
+                                        "extension_mm": 173})
+        self.bridge.apply_antenna_declaration(record)
+        declared = self.bridge.retention.instrument_state()["signal_chain_hash"]
+        # A gain change rebuilds the manifest. It must rebuild it from the
+        # declared instrument, not from SDRPP_ANTENNA_EXTENSION_MM=730.
+        self.bridge.retention.set_gain_db(28.0)
+        state = self.bridge.retention.instrument_state()
+        self.assertEqual(state["extension_mm"], 173.0)
+        self.assertNotEqual(state["signal_chain_hash"], declared,
+                            "the gain is in the chain, so the hash must still move")
+        self.assertEqual(
+            self.bridge.retention.status()["signal_chain"]["antenna"]["extension_mm"], 173.0)
+
+    def test_redeclaring_the_same_instrument_invalidates_nothing(self):
+        """Re-declaring is not a change, and must not discard a filling ring."""
+        self._fill_one_window()
+        record, _ = self.store.declare({"antenna_id": "nesdr-smart-telescopic",
+                                        "feedline_id": "nesdr-magnetic-base-rg58-2m",
+                                        "extension_mm": 730, "note": "same instrument"})
+        before = self.bridge.retention.instrument_state()
+        applied = self.bridge.apply_antenna_declaration(record)
+        self.assertFalse(applied["changed"])
+        self.assertFalse(applied["retention"]["invalidated"])
+        self.assertEqual(self.bridge.retention.instrument_state()["configuration_epoch"],
+                         before["configuration_epoch"])
+
+    def test_status_separates_the_active_declaration_from_the_persisted_one(self):
+        from graphops_rf_antenna import declaration_persistence
+        record, _ = self.store.declare({"antenna_id": "nesdr-smart-telescopic",
+                                        "feedline_id": "nesdr-magnetic-base-rg58-2m",
+                                        "extension_mm": 173})
+        pending = declaration_persistence(record)
+        self.assertEqual(pending["runtime_declaration"], "ACTIVE")
+        self.assertEqual(pending["boot_declaration"], "PENDING_PERSISTENCE")
+        self.assertIn("A RESTART WOULD ADOPT IT", pending["detail"])
+        # Persisting the same geometry to the environment settles it.
+        os.environ["SDRPP_ANTENNA_EXTENSION_MM"] = "173"
+        self.assertEqual(declaration_persistence(record)["boot_declaration"], "PERSISTED")
 
 
 if __name__ == "__main__":

@@ -24,13 +24,14 @@ import numpy as np
 
 import test_rf_channelizer_snr as fixtures
 from rf_channelizer import ChannelRequest, channelize
+from rf_detector_contract import admits
 from rf_iq_ring import BoundedIQRing
 from rf_symbol_clock import (
     AXIS_VALUES, CONSTANT_ENVELOPE_CV, DECISION_THRESHOLD,
     KNOWN_FALSE_NEGATIVE_MODES, KNOWN_FALSE_POSITIVE_MODES,
     MINIMUM_SAMPLE_COUNT, MIN_SYMBOL_PERIODS_PER_SEGMENT, NULL_CHARACTERISATION,
-    OUTCOMES, PROMOTION_STATE, SymbolClockVerdict, detect, detector_status,
-    squared_envelope_statistic,
+    FALSE_ALARM_PROBABILITY, OUTCOMES, PROMOTION_STATE, SymbolClockVerdict, detect,
+    detector_status, squared_envelope_statistic, threshold_declaration,
 )
 
 RATE = 512_000.0
@@ -85,7 +86,13 @@ class _FakeChannelization:
         self.samples = samples
 
 
-def _real_channelization(samples, *, rate_hz=2_048_000.0, offset_hz=400_000.0):
+def _real_channelization(samples, *, rate_hz=2_048_000.0, offset_hz=400_000.0,
+                         purpose="STRUCTURE_CHANNEL"):
+    """The structure channel by default: it is the only lineage that may verdict.
+
+    A measurement-channel product is admitted structurally and then refused a
+    verdict, so a detector test built on one would be testing the refusal.
+    """
     ring = BoundedIQRing(capacity_samples=samples.size, sample_rate_hz=rate_hz,
                          signal_chain_hash=fixtures.CHAIN)
     ring.append(samples)
@@ -93,7 +100,8 @@ def _real_channelization(samples, *, rate_hz=2_048_000.0, offset_hz=400_000.0):
     request = ChannelRequest(capture_center_hz=100e6,
                              target_frequency_hz=100e6 + offset_hz,
                              expected_signal_chain_hash=fixtures.CHAIN,
-                             expected_configuration_epoch=ring.configuration_epoch)
+                             expected_configuration_epoch=ring.configuration_epoch,
+                             channel_purpose=purpose)
     return channelize(acquisition.window, request, ring=ring), ring
 
 
@@ -217,15 +225,42 @@ class EndToEndTests(unittest.TestCase):
         self.assertLess(abs(found_before - baud), 500.0)
 
         carrier = np.exp(2j * np.pi * 400_000.0 * np.arange(524_288) / 2_048_000.0)
-        result, ring = _real_channelization((baseband * carrier).astype(np.complex64))
+        result, _ring = _real_channelization((baseband * carrier).astype(np.complex64),
+                                             purpose="MEASUREMENT_CHANNEL")
         self.assertEqual(result.product.outcome, "CHANNELIZED")
-        verdict = detect(result, ring=ring)
-        # The channelizer did its job; the detector correctly reports no feature.
-        # The feature is gone, and neither component is at fault for that.
-        self.assertEqual(verdict.outcome, "NO_SYMBOL_CLOCK")
-        self.assertLess(verdict.detection_statistic, DECISION_THRESHOLD)
+        # Measured on the samples directly. The measurement channel is no longer
+        # allowed to produce a verdict at all, so asking `detect` here would
+        # return CHANNEL_PURPOSE_NOT_ELIGIBLE and this test would be measuring
+        # the eligibility rule instead of the filter.
+        after, _found_after, _, _, _ = squared_envelope_statistic(
+            result.samples, float(result.product.output_sample_rate_hz))
+        self.assertLess(after, DECISION_THRESHOLD)
+        self.assertLess(after, before / 10.0)
         self.assertIn("CHANNEL_MARGIN_ATTENUATES_EXCESS_BANDWIDTH",
                       KNOWN_FALSE_NEGATIVE_MODES)
+
+    def test_a_measurement_channel_is_admitted_and_then_refused_a_verdict(self):
+        """Structural admission is unchanged; eligibility is a separate gate.
+
+        The contract's admission rule still reads only `transformation.outcome`.
+        What changed is that a lineage which cannot produce an
+        information-structure verdict is not given the chance to produce one --
+        two eligible lineages would be two opportunities to cross one threshold,
+        which the thirteen-bound family does not cover.
+        """
+        carrier = np.exp(2j * np.pi * 400_000.0 * np.arange(524_288) / 2_048_000.0)
+        baseband = _psk(100_000.0, count=524_288, rate_hz=2_048_000.0, noise=0.02)
+        result, ring = _real_channelization((baseband * carrier).astype(np.complex64),
+                                            purpose="MEASUREMENT_CHANNEL")
+        self.assertEqual(result.product.outcome, "CHANNELIZED")
+        # Admitted: the contract does not refuse it.
+        self.assertTrue(admits(result.product.to_dict()))
+        verdict = detect(result, ring=ring)
+        self.assertEqual(verdict.outcome, "CHANNEL_PURPOSE_NOT_ELIGIBLE")
+        # Not a negative. A channel that was never asked has no answer.
+        self.assertEqual(verdict.axis_value, "NOT_ATTEMPTED")
+        self.assertIsNone(verdict.detection_statistic)
+        self.assertEqual(verdict.threshold_comparison, "NOT_COMPARED")
 
     def test_a_short_window_is_insufficient_rather_than_negative(self):
         """Above the contract's usable-sample floor, below the method's minimum."""
@@ -435,6 +470,62 @@ class ShadowModeTests(unittest.TestCase):
         result, ring = _real_channelization((baseband * carrier).astype(np.complex64))
         for key, value in detect(result, ring=ring).to_dict().items():
             self.assertNotIsInstance(value, np.ndarray, key)
+
+
+class ThresholdDeclarationTests(unittest.TestCase):
+    """2.5 is a development heuristic. Every payload has to admit it."""
+
+    def _modulated(self):
+        carrier = np.exp(2j * np.pi * 400_000.0 * np.arange(524_288) / 2_048_000.0)
+        baseband = _psk(100_000.0, count=524_288, rate_hz=2_048_000.0, noise=0.02)
+        return _real_channelization((baseband * carrier).astype(np.complex64))
+
+    def test_the_threshold_publishes_its_own_status(self):
+        declaration = threshold_declaration()
+        self.assertEqual(declaration["threshold"], 2.5)
+        self.assertEqual(declaration["threshold_status"], "PROVISIONAL")
+        self.assertEqual(declaration["threshold_authority"], "SYNTHETIC_CALIBRATION")
+        self.assertFalse(declaration["promotion_eligible"])
+
+    def test_the_declaration_is_carried_in_the_status_payload(self):
+        self.assertEqual(detector_status()["threshold_declaration"],
+                         threshold_declaration())
+
+    def test_the_false_alarm_probability_is_null_and_not_a_placeholder(self):
+        """A number here would be the most quotable false claim in the module."""
+        self.assertIsNone(FALSE_ALARM_PROBABILITY)
+        self.assertIsNone(threshold_declaration()["false_alarm_probability"])
+
+    def test_a_crossing_is_an_event_in_shadow_telemetry_not_a_detection(self):
+        result, ring = self._modulated()
+        verdict = detect(result, ring=ring)
+        self.assertEqual(verdict.outcome, "SYMBOL_CLOCK_LIKE_FEATURE")
+        self.assertEqual(verdict.threshold_comparison, "THRESHOLD_EXCEEDED_IN_SHADOW_MODE")
+        self.assertEqual(verdict.threshold_status, "PROVISIONAL")
+        # And nothing about the crossing reaches a family summary.
+        self.assertEqual(verdict.family_summary, "NOT_DERIVED")
+        self.assertFalse(verdict.promotes)
+
+    def test_a_non_crossing_says_so_in_the_same_vocabulary(self):
+        rng = np.random.default_rng(17)
+        noise = ((rng.normal(0, 0.1, 524_288) + 1j * rng.normal(0, 0.1, 524_288))
+                 .astype(np.complex64))
+        carrier = np.exp(2j * np.pi * 400_000.0 * np.arange(524_288) / 2_048_000.0)
+        result, ring = _real_channelization(
+            (noise * carrier).astype(np.complex64))
+        if not result.product.channelized:
+            self.skipTest("channelizer refused this geometry")
+        verdict = detect(result, ring=ring)
+        self.assertIn(verdict.threshold_comparison,
+                      ("BELOW_THRESHOLD_IN_SHADOW_MODE", "NOT_COMPARED"))
+
+    def test_no_verdict_field_carries_the_word_digital(self):
+        """The one word a shadow detector may never emit."""
+        result, ring = self._modulated()
+        payload = detect(result, ring=ring).to_dict()
+        for key, value in payload.items():
+            if isinstance(value, str):
+                self.assertNotIn("DIGITAL", value.upper(), key)
 
 
 if __name__ == "__main__":
