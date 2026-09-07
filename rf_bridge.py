@@ -650,6 +650,11 @@ class SDRPlusPlusBridge:
         self._last_frame_monotonic: Optional[float] = None
         self._starvation: Optional[Dict[str, Any]] = None
         self._starvation_incidents = 0
+        # Successful connections, not attempts. A recovery policy needs to tell
+        # "the socket has been up untouched for a minute" from "it has been
+        # rebuilt twelve times in that minute", and bytes_received cannot: a
+        # wedged rtl_tcp makes both look like a slowly rising byte count.
+        self._reconnects = 0
         self._callbacks: list[Callable[[Dict], None]] = []
         self.observations = RFObservationStore.from_env()
         # The bounded IQ ring is owned here and nowhere else. The owner refuses
@@ -935,6 +940,13 @@ class SDRPlusPlusBridge:
                 self._starvation_incidents += 1
                 self._starvation = {
                     "incident": self._starvation_incidents,
+                    "incident_id": f"starve-incident-{self._starvation_incidents:04d}",
+                    # Detection, not onset: onset was one threshold earlier. A
+                    # duration measured from here is short by that threshold and
+                    # never long by it, which is the safe direction for anything
+                    # deciding whether to interfere with a running process.
+                    "opened_monotonic_ns": int(now * 1e9),
+                    "onset_monotonic_ns": int(self._last_sample_monotonic * 1e9),
                     "last_sample_monotonic_s": self._last_sample_monotonic,
                     "detected_monotonic_s": now,
                     "silent_s_at_detection": round(silent_s, 3),
@@ -968,6 +980,7 @@ class SDRPlusPlusBridge:
                          else now - self._last_frame_monotonic)
             incident = dict(self._starvation) if self._starvation else None
             incidents = self._starvation_incidents
+            reconnects = self._reconnects
         transport = _TRANSPORT_BY_STATE.get(state, "DISCONNECTED")
         if transport != "CONNECTED":
             flow = "NONE"
@@ -994,6 +1007,7 @@ class SDRPlusPlusBridge:
             "freshness_clock": "MONOTONIC",
             "starvation_incidents": incidents,
             "starvation_incident": incident,
+            "reconnect_count": reconnects,
         }
         if transport != "CONNECTED":
             declaration["unreachable_cause"] = SOURCE_UNREACHABLE_CAUSE
@@ -1072,6 +1086,7 @@ class SDRPlusPlusBridge:
                     self._state = "streaming"
                     self._connected_at = time.time()
                     self._last_error = None
+                    self._reconnects += 1
                     # Grace for a source that has had no time to deliver yet --
                     # granted once, at the first connection this process makes,
                     # and never re-granted. A wedged rtl_tcp accepts, greets and
