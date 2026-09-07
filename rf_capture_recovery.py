@@ -30,6 +30,9 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, replace
 import os
+# Address parsing only. There is no socket call anywhere in this module -- it
+# reads /proc and decides; it never connects to, signals or starts anything.
+import socket
 import time
 from typing import Any, Dict, Optional
 
@@ -53,17 +56,41 @@ SUSTAINED_STARVATION_S = 15.0
 # had time to produce a sample cannot be judged to have failed.
 RECOVERY_COOLDOWN_S = 120.0
 
-# Requests per incident, not per wall-clock window.
+# Two limits over one bounded attempt sequence, both across incidents.
 #
-# The declared observation set carries recovery_attempt_count and
-# last_recovery_attempt_monotonic_ns -- a count and one timestamp. A true
-# "3 per 10 minutes" rolling window needs the timestamps of every attempt, and
-# inventing one from a count would be a rate limit that cannot say what it
-# limited. Scoping the count to the incident is what these fields actually
-# support, and it binds attempts to the fault they address rather than to a
-# clock. With the cooldown above, three requests span at least 240 s.
+# Phase 1 counted attempts per incident, because a count and one timestamp were
+# all the observation carried. That left an escape: a restarted-but-still-broken
+# rtl_tcp arrives with a new PID and opens a new incident, and a per-incident
+# budget hands it a fresh three. The circuit breaker could be laundered by the
+# very failure it exists to stop. The sequence closes it -- the window is wall
+# clock and spans incidents, so repeated failed recoveries accumulate.
 RECOVERY_ATTEMPT_LIMIT = 3
-ATTEMPT_WINDOW_AUTHORITY = "PER_INCIDENT_COUNT_NOT_WALL_CLOCK_WINDOW"
+ATTEMPT_WINDOW_S = 600.0
+# One restart per process identity, ever. A second attempt against the same
+# (boot, pid, start_ticks) is a repetition of something already shown not to
+# work, and identity is exact enough that a genuinely new process is a genuinely
+# new target.
+MAX_ATTEMPTS_PER_PROCESS = 1
+MAX_TRACKED_ATTEMPTS = 32
+ATTEMPT_WINDOW_AUTHORITY = "ROLLING_MONOTONIC_WINDOW_ACROSS_INCIDENTS"
+
+# How long a granted authorization stays good. Long enough to survive the
+# CONNECTED/CONNECTING flap of a wedged source, short enough that an
+# authorization cannot outlive the evidence that justified it.
+AUTHORIZATION_TTL_S = 60.0
+
+# How long after a restart request the system waits for the only thing that
+# counts as success. Beyond it the outcome is PROCESS_RESTARTED_STILL_STARVED:
+# a declared deadline, so "not yet" and "never" are not the same answer.
+OBSERVATION_DEADLINE_S = 45.0
+
+# Three states, not a boolean. "Off" and "watching" are different postures and a
+# flag that conflates them cannot express the one we actually want to run in.
+MODE_DISABLED = "DISABLED"
+MODE_SHADOW = "SHADOW"
+MODE_ARMED = "ARMED"
+RECOVERY_MODES = (MODE_DISABLED, MODE_SHADOW, MODE_ARMED)
+DEFAULT_RECOVERY_MODE = MODE_SHADOW
 
 # Every decision carries this. The policy observes a state; it does not diagnose.
 UNDETERMINED_CAUSE = "NOT_DETERMINABLE_FROM_THIS_PROCESS"
@@ -95,9 +122,12 @@ REASONS: Dict[str, str] = {
     "SUSTAINED_STARVATION_SAME_PROCESS": (
         "AN ESTABLISHED CONNECTION TO AN UNCHANGED CAPTURE PROCESS HAS "
         "DELIVERED NO SAMPLES FOR LONGER THAN THE SUSTAINED THRESHOLD"),
-    "ATTEMPT_LIMIT_REACHED": (
-        "THIS INCIDENT HAS ALREADY EXHAUSTED ITS RESTART REQUESTS. FURTHER "
-        "REQUESTS WOULD BE REPETITION, NOT RECOVERY"),
+    "PROCESS_ALREADY_ATTEMPTED": (
+        "THIS EXACT PROCESS HAS ALREADY BEEN RESTARTED ONCE. RESTARTING IT "
+        "AGAIN WOULD REPEAT SOMETHING ALREADY SHOWN NOT TO WORK"),
+    "ATTEMPT_WINDOW_EXHAUSTED": (
+        "THE ROLLING ATTEMPT WINDOW IS FULL. THE WINDOW SPANS INCIDENTS, SO A "
+        "NEW PID AND A NEW INCIDENT DO NOT REFILL IT"),
 }
 
 
@@ -138,6 +168,31 @@ class ProcessIdentity:
 
 
 @dataclass(frozen=True)
+class RecoveryAttempt:
+    """One restart that was actually requested. Shadow judgements are not these.
+
+    Carries the target's full identity rather than a PID, so a later attempt
+    against "the same process" is a comparison and not an assumption.
+    """
+
+    incident_id: str
+    kernel_boot_id: str
+    target_pid: int
+    target_start_ticks: int
+    attempted_monotonic_ns: int
+
+    def targets(self, identity: Optional["ProcessIdentity"]) -> bool:
+        if identity is None:
+            return False
+        return (self.kernel_boot_id == identity.boot_id
+                and self.target_pid == identity.pid
+                and self.target_start_ticks == identity.start_ticks)
+
+    def as_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
 class RecoveryObservation:
     """One bounded reading. Immutable, serializable, and complete on its own.
 
@@ -157,8 +212,25 @@ class RecoveryObservation:
     # The identity the incident was opened against. Held beside the current one
     # so "unchanged" is a comparison rather than an assumption.
     incident_capture_process: Optional[ProcessIdentity] = None
-    recovery_attempt_count: int = 0
-    last_recovery_attempt_monotonic_ns: Optional[int] = None
+    # The bounded attempt sequence itself, not a count and a timestamp derived
+    # from it. Two summaries of one list can disagree; the list cannot disagree
+    # with itself.
+    recovery_attempts: tuple = ()
+    latest_sequence: int = 0
+
+    def recovery_attempt_count(self) -> int:
+        return len(self.recovery_attempts)
+
+    def last_recovery_attempt_monotonic_ns(self) -> Optional[int]:
+        if not self.recovery_attempts:
+            return None
+        return max(a.attempted_monotonic_ns for a in self.recovery_attempts)
+
+    def last_sample_monotonic_ns(self) -> Optional[int]:
+        """When a sample last arrived, on the same clock as everything else."""
+        if self.last_sample_age_ms is None:
+            return None
+        return int(self.observed_monotonic_ns - float(self.last_sample_age_ms) * 1e6)
 
     def starvation_duration_s(self) -> Optional[float]:
         if self.incident_opened_monotonic_ns is None:
@@ -166,9 +238,19 @@ class RecoveryObservation:
         return (self.observed_monotonic_ns - self.incident_opened_monotonic_ns) / 1e9
 
     def since_last_attempt_s(self) -> Optional[float]:
-        if self.last_recovery_attempt_monotonic_ns is None:
+        last = self.last_recovery_attempt_monotonic_ns()
+        if last is None:
             return None
-        return (self.observed_monotonic_ns - self.last_recovery_attempt_monotonic_ns) / 1e9
+        return (self.observed_monotonic_ns - last) / 1e9
+
+    def attempts_in_window(self, window_s: float = ATTEMPT_WINDOW_S) -> int:
+        """Attempts inside the rolling window, counted across every incident."""
+        floor_ns = self.observed_monotonic_ns - int(window_s * 1e9)
+        return sum(1 for a in self.recovery_attempts
+                   if a.attempted_monotonic_ns >= floor_ns)
+
+    def attempts_against_current_process(self) -> int:
+        return sum(1 for a in self.recovery_attempts if a.targets(self.capture_process))
 
     def as_dict(self) -> Dict[str, Any]:
         payload = asdict(self)
@@ -177,6 +259,9 @@ class RecoveryObservation:
         payload["incident_capture_process"] = (
             None if self.incident_capture_process is None
             else self.incident_capture_process.as_dict())
+        payload["recovery_attempts"] = [a.as_dict() for a in self.recovery_attempts]
+        payload["recovery_attempt_count"] = self.recovery_attempt_count()
+        payload["attempts_in_window"] = self.attempts_in_window()
         payload["starvation_duration_s"] = self.starvation_duration_s()
         return payload
 
@@ -206,6 +291,8 @@ class RecoveryDecision:
                 "sustained_starvation_s": SUSTAINED_STARVATION_S,
                 "recovery_cooldown_s": RECOVERY_COOLDOWN_S,
                 "recovery_attempt_limit": RECOVERY_ATTEMPT_LIMIT,
+                "attempt_window_s": ATTEMPT_WINDOW_S,
+                "max_attempts_per_process": MAX_ATTEMPTS_PER_PROCESS,
                 "attempt_window_authority": ATTEMPT_WINDOW_AUTHORITY,
                 "policy_authority": "CONFIGURED_POLICY",
                 "executes_restart": False,
@@ -254,10 +341,170 @@ def decide(observation: RecoveryObservation) -> RecoveryDecision:
     # Suppression is checked last, and only here. Reached earlier it would let a
     # perfectly healthy source report RECOVERY_SUPPRESSED because of an incident
     # that ended an hour ago.
-    if observation.recovery_attempt_count >= RECOVERY_ATTEMPT_LIMIT:
-        return _decision(RECOVERY_SUPPRESSED, "ATTEMPT_LIMIT_REACHED", observation)
+    if observation.attempts_against_current_process() >= MAX_ATTEMPTS_PER_PROCESS:
+        return _decision(RECOVERY_SUPPRESSED, "PROCESS_ALREADY_ATTEMPTED", observation)
+    if observation.attempts_in_window() >= RECOVERY_ATTEMPT_LIMIT:
+        return _decision(RECOVERY_SUPPRESSED, "ATTEMPT_WINDOW_EXHAUSTED", observation)
 
     return _decision(REQUEST_RESTART, "SUSTAINED_STARVATION_SAME_PROCESS", observation)
+
+
+# -- authorization ---------------------------------------------------------
+# Still pure. An authorization is a claim about a specific broken thing, not a
+# permission slip that floats free of it.
+
+AUTHORIZATION_VALID = "AUTHORIZATION_VALID"
+AUTHORIZATION_EXPIRED = "AUTHORIZATION_EXPIRED"
+AUTHORIZATION_INVALIDATED = "AUTHORIZATION_INVALIDATED"
+
+REVALIDATION_REASONS: Dict[str, str] = {
+    "AUTHORIZATION_STILL_VALID": (
+        "THE SAME INCIDENT, THE SAME PROCESS, AND NOT ONE SAMPLE SINCE"),
+    "TTL_ELAPSED": (
+        "THE AUTHORIZATION OUTLIVED THE EVIDENCE THAT JUSTIFIED IT"),
+    "INCIDENT_CHANGED": (
+        "THE OPEN INCIDENT IS NOT THE ONE THIS AUTHORIZATION WAS GRANTED FOR"),
+    "INCIDENT_CLOSED": "THE INCIDENT THIS AUTHORIZATION NAMED IS NO LONGER OPEN",
+    "TARGET_IDENTITY_CHANGED": (
+        "THE CAPTURE PROCESS IS NOT THE ONE THIS AUTHORIZATION TARGETED. "
+        "RESTARTING NOW WOULD KILL SOMETHING THAT WAS NEVER JUDGED"),
+    "TARGET_IDENTITY_UNAVAILABLE": (
+        "THE CAPTURE PROCESS CANNOT BE IDENTIFIED, SO THE TARGET CANNOT BE "
+        "SHOWN TO BE THE ONE THAT WAS AUTHORIZED"),
+    "SAMPLES_ARRIVED_SINCE_AUTHORIZATION": (
+        "DECODED SAMPLES ARRIVED AFTER THIS WAS AUTHORIZED. THE FAULT RESOLVED "
+        "ITSELF AND THERE IS NOTHING LEFT TO RESTART"),
+}
+
+
+@dataclass(frozen=True)
+class RecoveryAuthorization:
+    """Permission to restart one named process, for one named incident.
+
+    Latched deliberately. A wedged source flaps CONNECTED/CONNECTING every few
+    seconds, so a transport check sampled at the wrong instant would revoke a
+    restart that fifteen seconds of evidence had already justified. Socket
+    flapping is not recovery, and an authorization that a flap can cancel is an
+    authorization that a broken source can veto.
+    """
+
+    authorization_id: str
+    incident_id: str
+    target: ProcessIdentity
+    authorized_monotonic_ns: int
+    sequence_at_authorization: int
+    ttl_s: float = AUTHORIZATION_TTL_S
+
+    def expires_monotonic_ns(self) -> int:
+        return self.authorized_monotonic_ns + int(self.ttl_s * 1e9)
+
+    def as_dict(self) -> Dict[str, Any]:
+        return {"authorization_id": self.authorization_id,
+                "incident_id": self.incident_id,
+                "target": self.target.as_dict(),
+                "authorized_monotonic_ns": self.authorized_monotonic_ns,
+                "sequence_at_authorization": self.sequence_at_authorization,
+                "ttl_s": self.ttl_s,
+                "expires_monotonic_ns": self.expires_monotonic_ns()}
+
+
+@dataclass(frozen=True)
+class Revalidation:
+    outcome: str
+    reason: str
+    reason_note: str
+
+    @property
+    def valid(self) -> bool:
+        return self.outcome == AUTHORIZATION_VALID
+
+    def as_dict(self) -> Dict[str, Any]:
+        return {"outcome": self.outcome, "reason": self.reason,
+                "reason_note": self.reason_note, "valid": self.valid}
+
+
+def _revalidation(outcome: str, reason: str) -> Revalidation:
+    return Revalidation(outcome=outcome, reason=reason,
+                        reason_note=REVALIDATION_REASONS[reason])
+
+
+def authorize(decision: RecoveryDecision, *, authorization_id: str
+              ) -> Optional[RecoveryAuthorization]:
+    """Latch a REQUEST_RESTART to its incident and target. Pure."""
+    if decision.decision != REQUEST_RESTART:
+        return None
+    observation = decision.observation
+    if observation.incident_id is None or observation.capture_process is None:
+        return None
+    return RecoveryAuthorization(
+        authorization_id=authorization_id,
+        incident_id=observation.incident_id,
+        target=observation.capture_process,
+        authorized_monotonic_ns=observation.observed_monotonic_ns,
+        sequence_at_authorization=observation.latest_sequence)
+
+
+def revalidate(authorization: RecoveryAuthorization,
+               observation: RecoveryObservation) -> Revalidation:
+    """The check immediately before acting. Pure, and deliberately not transport.
+
+    Transport state is absent from this by design. The question here is not "is
+    the socket up right now" but "is this still the same broken thing I was
+    authorized against, and has it stayed broken". A flapping wedge answers the
+    first differently every few seconds and the second identically every time.
+    """
+    if observation.observed_monotonic_ns >= authorization.expires_monotonic_ns():
+        return _revalidation(AUTHORIZATION_EXPIRED, "TTL_ELAPSED")
+    if observation.incident_id is None:
+        return _revalidation(AUTHORIZATION_INVALIDATED, "INCIDENT_CLOSED")
+    if observation.incident_id != authorization.incident_id:
+        return _revalidation(AUTHORIZATION_INVALIDATED, "INCIDENT_CHANGED")
+    if observation.capture_process is None:
+        return _revalidation(AUTHORIZATION_INVALIDATED, "TARGET_IDENTITY_UNAVAILABLE")
+    if not observation.capture_process.same_process_as(authorization.target):
+        return _revalidation(AUTHORIZATION_INVALIDATED, "TARGET_IDENTITY_CHANGED")
+    last_sample_ns = observation.last_sample_monotonic_ns()
+    if (last_sample_ns is not None
+            and last_sample_ns > authorization.authorized_monotonic_ns):
+        return _revalidation(AUTHORIZATION_INVALIDATED,
+                             "SAMPLES_ARRIVED_SINCE_AUTHORIZATION")
+    return _revalidation(AUTHORIZATION_VALID, "AUTHORIZATION_STILL_VALID")
+
+
+# -- outcome of a completed attempt ---------------------------------------
+
+SAMPLE_FLOW_RESTORED = "SAMPLE_FLOW_RESTORED"
+PROCESS_RESTARTED_STILL_STARVED = "PROCESS_RESTARTED_STILL_STARVED"
+RECOVERY_OUTCOME_PENDING = "RECOVERY_OUTCOME_PENDING"
+
+
+def recovery_outcome(authorization: RecoveryAuthorization,
+                     observation: RecoveryObservation,
+                     *, deadline_s: float = OBSERVATION_DEADLINE_S) -> str:
+    """Did the restart work? Two conditions, both required.
+
+    Decoded samples must have arrived AFTER the authorization, and the frame
+    sequence must have advanced past where it stood at that moment. The second
+    is not "sequence > 0": an incident beginning after thousands of good frames
+    would satisfy that on the strength of history. Only movement past the
+    recorded mark shows this capture chain producing something now.
+
+    A new PID, a listening socket, a successful connection and another 12-byte
+    RTL0 greeting are all absent from this function on purpose.
+    """
+    last_sample_ns = observation.last_sample_monotonic_ns()
+    samples_after = (last_sample_ns is not None
+                     and last_sample_ns > authorization.authorized_monotonic_ns)
+    sequence_advanced = observation.latest_sequence > authorization.sequence_at_authorization
+    if samples_after and sequence_advanced:
+        return SAMPLE_FLOW_RESTORED
+    elapsed_s = (observation.observed_monotonic_ns
+                 - authorization.authorized_monotonic_ns) / 1e9
+    if elapsed_s >= deadline_s:
+        return PROCESS_RESTARTED_STILL_STARVED
+    # Neither yet. "Not yet" and "never" are different answers and the deadline
+    # is what separates them.
+    return RECOVERY_OUTCOME_PENDING
 
 
 # -- collection ------------------------------------------------------------
@@ -302,6 +549,96 @@ def process_start_ticks(pid: int, proc_root: str = "/proc") -> Optional[int]:
         return None
 
 
+def _proc_hex_address(host: str) -> Optional[str]:
+    """The /proc/net/tcp spelling of an IPv4 address: little-endian, upper hex.
+
+    127.0.0.1 becomes "0100007F". Returns None for anything that is not a plain
+    IPv4 literal, which makes the caller refuse rather than widen its match.
+    """
+    try:
+        packed = socket.inet_aton(host)
+    except OSError:
+        return None
+    return "".join(f"{byte:02X}" for byte in reversed(packed))
+
+
+def _listener_inode(host: str, port: int, proc_root: str = "/proc") -> Optional[int]:
+    """The inode LISTENing on exactly `host:port`.
+
+    The address is matched, not just the port. Matching a bare port would tie
+    recovery authority to "whoever holds 1234" rather than to SCYTHE's declared
+    capture endpoint, and the process this policy may restart must be the one
+    actually serving the connection the bridge is starved on.
+
+    Only /proc/net/tcp is consulted. An IPv6 listener is deliberately not
+    matched: the configured endpoint is an IPv4 literal, and a socket on a
+    different address family is a different endpoint.
+    """
+    wanted = _proc_hex_address(host)
+    if wanted is None:
+        return None
+    try:
+        with open(f"{proc_root}/net/tcp", "r", encoding="utf-8") as handle:
+            rows = handle.read().splitlines()[1:]
+    except OSError:
+        return None
+    for row in rows:
+        parts = row.split()
+        if len(parts) < 10 or parts[3] != "0A":           # 0A == TCP_LISTEN
+            continue
+        try:
+            local_hex, local_port = parts[1].rsplit(":", 1)
+            if int(local_port, 16) != port or local_hex.upper() != wanted:
+                continue
+            return int(parts[9])
+        except (ValueError, IndexError):
+            continue
+    return None
+
+
+def pid_holding_listener(host: str, port: int,
+                         proc_root: str = "/proc") -> Optional[int]:
+    """Which process holds the declared capture endpoint, from /proc alone.
+
+    The bridge owns a socket, not a child: it never starts rtl_tcp and has no
+    handle on it. The endpoint is the only thing the two demonstrably share, so
+    the holder of that listening socket is the process this policy is about --
+    a stronger answer than a unit's MainPID, which is what systemd believes
+    rather than what is serving the connection we are starved on.
+
+    A wildcard-bound listener (0.0.0.0:1234) would serve the bridge's connection
+    and is deliberately NOT matched. rtl_tcp is required to bind loopback only,
+    and a process violating that is not one this module will identify as a
+    restart target. The result is no identity, and therefore NO_ACTION -- the
+    safe direction, and consistent with the bind address being a security
+    control rather than a preference.
+
+    Reads only. Nothing here can signal, start or stop anything.
+    """
+    inode = _listener_inode(host, port, proc_root)
+    if inode is None:
+        return None
+    target = f"socket:[{inode}]"
+    try:
+        entries = os.listdir(proc_root)
+    except OSError:
+        return None
+    for entry in entries:
+        if not entry.isdigit():
+            continue
+        fd_dir = f"{proc_root}/{entry}/fd"
+        try:
+            for fd in os.listdir(fd_dir):
+                try:
+                    if os.readlink(f"{fd_dir}/{fd}") == target:
+                        return int(entry)
+                except OSError:
+                    continue
+        except OSError:
+            continue
+    return None
+
+
 def capture_process_identity(pid: Optional[int], *, proc_root: str = "/proc",
                              boot_id_path: str = BOOT_ID_PATH
                              ) -> Optional[ProcessIdentity]:
@@ -317,8 +654,8 @@ def capture_process_identity(pid: Optional[int], *, proc_root: str = "/proc",
 
 def observe(capture_source: Dict[str, Any], *, capture_pid: Optional[int] = None,
             incident_capture_process: Optional[ProcessIdentity] = None,
-            recovery_attempt_count: int = 0,
-            last_recovery_attempt_monotonic_ns: Optional[int] = None,
+            recovery_attempts: tuple = (),
+            latest_sequence: int = 0,
             reconnect_count: int = 0,
             observed_monotonic_ns: Optional[int] = None,
             proc_root: str = "/proc",
@@ -344,10 +681,8 @@ def observe(capture_source: Dict[str, Any], *, capture_pid: Optional[int] = None
         capture_process=capture_process_identity(
             capture_pid, proc_root=proc_root, boot_id_path=boot_id_path),
         incident_capture_process=incident_capture_process,
-        recovery_attempt_count=int(recovery_attempt_count),
-        last_recovery_attempt_monotonic_ns=(
-            None if last_recovery_attempt_monotonic_ns is None
-            else int(last_recovery_attempt_monotonic_ns)),
+        recovery_attempts=tuple(recovery_attempts),
+        latest_sequence=int(latest_sequence),
     )
 
 
@@ -364,17 +699,29 @@ def policy_status() -> Dict[str, Any]:
         "sustained_starvation_s": SUSTAINED_STARVATION_S,
         "recovery_cooldown_s": RECOVERY_COOLDOWN_S,
         "recovery_attempt_limit": RECOVERY_ATTEMPT_LIMIT,
+        "attempt_window_s": ATTEMPT_WINDOW_S,
+        "max_attempts_per_process": MAX_ATTEMPTS_PER_PROCESS,
         "attempt_window_authority": ATTEMPT_WINDOW_AUTHORITY,
+        "authorization_ttl_s": AUTHORIZATION_TTL_S,
+        "observation_deadline_s": OBSERVATION_DEADLINE_S,
+        "modes": list(RECOVERY_MODES),
+        "default_mode": DEFAULT_RECOVERY_MODE,
+        "revalidation_excludes_transport": True,
+        "revalidation_note": (
+            "THE FINAL CHECK ASKS WHETHER THIS IS STILL THE SAME BROKEN THING, "
+            "NOT WHETHER THE SOCKET IS UP AT THIS INSTANT. SOCKET FLAPPING IS "
+            "NOT RECOVERY"),
+        "success_requires": ("DECODED_SAMPLES_AFTER_AUTHORIZATION",
+                             "LATEST_SEQUENCE_ABOVE_SEQUENCE_AT_AUTHORIZATION"),
         "policy_authority": "CONFIGURED_POLICY",
         "cause": UNDETERMINED_CAUSE,
         "restoration_definition": RESTORATION_DEFINITION,
         "process_identity_fields": ("kernel_boot_id", "capture_pid",
                                     "capture_process_start_ticks"),
         "audit_note": (
-            "A RECOVERY EVENT MUST REACH THE CAPTURE-OWNER AUDIT HISTORY EVEN "
-            "WHEN NO IQ RING EXISTS. RING INVALIDATION AND INCIDENT AUDITING "
-            "CANNOT BE THE SAME MECHANISM, OR PRE-FIRST-SAMPLE FAILURES LEAVE "
-            "NO RECORD -- OBSERVED 2026-09-06, WHEN A 45 s STARVATION WROTE "
-            "NOTHING TO THE INVALIDATION HISTORY BECAUSE NO RING HAD BEEN "
-            "ALLOCATED. NOT IMPLEMENTED IN THIS PHASE"),
+            "RECOVERY EVENTS REACH THE CAPTURE-OWNER AUDIT HISTORY IN "
+            "rf_capture_audit, WHICH IS INDEPENDENT OF RING ALLOCATION. RING "
+            "INVALIDATION AND INCIDENT AUDITING ARE NOT THE SAME MECHANISM -- "
+            "OBSERVED 2026-09-06, WHEN A 45 s STARVATION WROTE NOTHING TO THE "
+            "INVALIDATION HISTORY BECAUSE NO RING HAD BEEN ALLOCATED"),
     }
