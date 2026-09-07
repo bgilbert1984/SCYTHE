@@ -33,11 +33,17 @@ reason. Raw IQ is the only exclusive short circuit.
 
 Malformed is not the same as refused
 ------------------------------------
-A frame missing its own identity -- no frame id, no acquisition bounds, no
-configuration epoch -- is not a frame this contract can assess, and there is no
-reason code in the closed vocabulary that means "this was not a frame".
-``FrameMetadataError`` is raised for those rather than a code being stretched to
-cover them or a fallback invented. See ``ASSESSABILITY_NOTE``.
+An input lacking a contract §2 field, or carrying one in a structurally invalid
+form, is **not a survey frame for the purposes of the contract** and is outside
+the range of every disposition and reason code (§4, *The vocabulary's range*).
+It is not refused: refusal is a verdict about a frame, and this never became
+one. This module signals the class by raising ``FrameMetadataError``, which is
+the implementation half of a category the contract names and leaves open.
+
+Keeping the two apart keeps refusal counts clean. "How often are frames arriving
+unaligned" and "how often is the producer emitting malformed payloads" are
+different questions with different owners, and a store keyed by reason code must
+not have to separate them after the fact.
 """
 
 from __future__ import annotations
@@ -64,10 +70,14 @@ VALIDATION_LIMITATION = (
     "A PERFECTLY FORMED SIGNAL-CHAIN HASH DESCRIBING AN INSTRUMENT THAT WAS "
     "NEVER ATTACHED. VALIDATION IS SYNTAX AND RANGE; IT INFERS NO TRUST"
 )
+# The contract names the category; this maps it onto what the code raises.
 ASSESSABILITY_NOTE = (
-    "A FRAME MISSING ITS OWN IDENTITY OR ACQUISITION BOUNDS IS NOT ASSESSABLE "
-    "UNDER THIS CONTRACT. THE CLOSED REASON VOCABULARY HAS NO CODE MEANING "
-    "'THIS WAS NOT A FRAME', SO IT IS RAISED RATHER THAN STRETCHED INTO ONE"
+    "AN INPUT LACKING A CONTRACT SECTION 2 FIELD, OR CARRYING ONE IN A "
+    "STRUCTURALLY INVALID FORM, IS NOT A SURVEY FRAME FOR THE PURPOSES OF THE "
+    "CONTRACT AND IS OUTSIDE THE RANGE OF EVERY DISPOSITION AND REASON CODE "
+    "(SECTION 4, 'THE VOCABULARY'S RANGE'). IT IS NOT REFUSED, BECAUSE REFUSAL "
+    "IS A VERDICT ABOUT A FRAME. THIS IMPLEMENTATION SIGNALS THE CLASS BY "
+    "RAISING FrameMetadataError"
 )
 
 # -- bounds ---------------------------------------------------------------
@@ -360,7 +370,7 @@ def assess_frame(payload: Any) -> FrameMetadataAssessment:
     missing = [name for name in REQUIRED_IDENTITY_FIELDS if payload.get(name) is None]
     if missing:
         raise FrameMetadataError(
-            f"not an assessable frame; missing {', '.join(missing)}. "
+            f"not a survey frame; missing {', '.join(missing)}. "
             f"{ASSESSABILITY_NOTE}")
 
     start = _integer(payload["acquisition_start_monotonic_ns"],
