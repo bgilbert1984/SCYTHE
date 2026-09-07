@@ -1,8 +1,9 @@
 # RF Walking-Survey Contract
 
 ```text
-Status:                 PROPOSED
-Authority:              NORMATIVE WHEN ACCEPTED
+Status:                 ACCEPTED
+Accepted:               2026-09-07, after review correction 1df55c5
+Authority:              NORMATIVE
 Implemented foundation: rf_receiver_state.py
 Survey ingestion:       NOT_IMPLEMENTED
 Surface update:         NOT_IMPLEMENTED
