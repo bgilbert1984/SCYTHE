@@ -185,6 +185,36 @@ class BoundedBalance:
 
 
 @dataclass(frozen=True)
+class BoundedCeiling:
+    """value <= sum(budget), with a published basis. One-sided, not a balance.
+
+    A balance is two-sided: the total must equal its components within a
+    tolerance, and falling short is as much a violation as overshooting. A
+    ceiling is not. A receiver that moved less than its budget allows has done
+    nothing wrong, and expressing that as a balance would make standing still a
+    finding.
+
+    Keeping the two apart is the same discipline as keeping the three invariant
+    classes apart: calling this a balance would be the lab-coat error one level
+    down.
+    """
+
+    name: str
+    value_field: str
+    budget_fields: Tuple[str, ...]
+    accounting_basis: Tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        if not self.budget_fields:
+            raise LedgerContractError(f"{self.name}: a ceiling needs a budget")
+        if not self.accounting_basis:
+            raise LedgerContractError(
+                f"{self.name}: a ceiling with no published accounting basis "
+                f"cannot be checked; its headroom would absorb effects nobody "
+                f"named")
+
+
+@dataclass(frozen=True)
 class TransitionContract:
     """What one named operation is permitted and required to do."""
 
@@ -195,6 +225,7 @@ class TransitionContract:
     # Coordinates whose movement destroys the comparability of the rest.
     domain_fields: Tuple[str, ...] = ()
     balances: Tuple[BoundedBalance, ...] = ()
+    ceilings: Tuple[BoundedCeiling, ...] = ()
     # Claims this transition may not assert. A retune does not measure a
     # resonance, and a declaration does not calibrate a response; a transition
     # that emitted either would be manufacturing evidence out of bookkeeping.
@@ -300,6 +331,36 @@ def _balance_findings(after: Mapping[str, Coordinate],
     return ()
 
 
+def _numbers(after: Mapping[str, Coordinate], fields: Tuple[str, ...],
+             label: str) -> Any:
+    """Every named field as a finite number, or the finding that says why not."""
+    numbers: Dict[str, float] = {}
+    for name in fields:
+        coordinate = after.get(name, Coordinate(NOT_ASSESSED))
+        if coordinate.kind != VALUE or not isinstance(coordinate.value, (int, float)):
+            return Finding(EVIDENCE_MISSING, name, "A NUMBER", coordinate.kind,
+                           detail=label)
+        numbers[name] = float(coordinate.value)
+    return numbers
+
+
+def _ceiling_findings(after: Mapping[str, Coordinate],
+                      ceiling: BoundedCeiling) -> Tuple[Finding, ...]:
+    numbers = _numbers(after, (ceiling.value_field,) + ceiling.budget_fields,
+                       f"ceiling {ceiling.name}")
+    if isinstance(numbers, Finding):
+        return (numbers,)
+    value = numbers[ceiling.value_field]
+    budget = sum(numbers[name] for name in ceiling.budget_fields)
+    if value > budget:
+        return (Finding(
+            NUMERIC_BALANCE_EXCEEDED, ceiling.value_field,
+            f"<= {budget:.6g}", f"{value:.6g}",
+            detail=(f"ceiling {ceiling.name}; exceeded by {value - budget:.6g}; "
+                    f"accounting basis {', '.join(ceiling.accounting_basis)}")),)
+    return ()
+
+
 def check_transition(before: Mapping[str, Coordinate],
                      operation: str,
                      after: Mapping[str, Coordinate],
@@ -400,6 +461,9 @@ def check_transition(before: Mapping[str, Coordinate],
     for balance in contract.balances:
         findings.extend(_balance_findings(after, balance))
 
+    for ceiling in contract.ceilings:
+        findings.extend(_ceiling_findings(after, ceiling))
+
     if not findings:
         return InvariantVerdict(INVARIANTS_SATISFIED, operation, ())
     verdict = min((f.verdict for f in findings), key=VERDICT_PRECEDENCE.index)
@@ -415,7 +479,12 @@ def ledger_status() -> Dict[str, Any]:
         "verdicts": list(VERDICT_PRECEDENCE),
         "verdict_precedence": list(VERDICT_PRECEDENCE),
         "verdict_notes": dict(VERDICT_NOTES),
-        "invariant_classes": ("EXACT", "REQUIRED_TRANSITION", "BOUNDED_BALANCE"),
+        "invariant_classes": ("EXACT", "REQUIRED_TRANSITION", "BOUNDED_BALANCE",
+                              "BOUNDED_CEILING"),
+        "ceiling_note": (
+            "A CEILING IS ONE-SIDED AND A BALANCE IS NOT. A RECEIVER THAT MOVED "
+            "LESS THAN ITS BUDGET ALLOWS HAS DONE NOTHING WRONG, AND EXPRESSING "
+            "THAT AS A BALANCE WOULD MAKE STANDING STILL A FINDING"),
         "balances_require_accounting_basis": True,
         "prohibited_claims_note": (
             "A CLAIM A TRANSITION MAY NOT ASSERT IS REPORTED AS A PROHIBITED "
