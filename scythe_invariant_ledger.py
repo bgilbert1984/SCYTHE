@@ -195,7 +195,13 @@ class TransitionContract:
     # Coordinates whose movement destroys the comparability of the rest.
     domain_fields: Tuple[str, ...] = ()
     balances: Tuple[BoundedBalance, ...] = ()
+    # Claims this transition may not assert. A retune does not measure a
+    # resonance, and a declaration does not calibrate a response; a transition
+    # that emitted either would be manufacturing evidence out of bookkeeping.
+    # Read from the `claims_field` coordinate, whose value is a collection of
+    # asserted claim tokens.
     prohibited_claims: Tuple[str, ...] = ()
+    claims_field: str = "claims"
 
     def __post_init__(self) -> None:
         groups = {"must_preserve": set(self.must_preserve),
@@ -352,8 +358,12 @@ def check_transition(before: Mapping[str, Coordinate],
                                     CHANGED, UNCHANGED,
                                     before=b.as_dict(), after=a.as_dict()))
 
-    # Anything that moved and was never declared.
+    # Anything that moved and was never declared. The claims coordinate is
+    # exempt when the contract governs it: it is expected to move, and its rule
+    # is which claims may appear rather than whether the set changed.
     declared = set(contract.declared_fields())
+    if contract.prohibited_claims:
+        declared.add(contract.claims_field)
     for name in sorted(set(before) | set(after)):
         if name in declared:
             continue
@@ -364,6 +374,28 @@ def check_transition(before: Mapping[str, Coordinate],
                 PROHIBITED_CHANGE, name, "UNDECLARED_BY_THIS_TRANSITION", CHANGED,
                 before=b.as_dict(), after=a.as_dict(),
                 detail="a transition must enumerate what it may move"))
+
+    # Claims the transition is not permitted to assert. Reported as a
+    # prohibited change rather than a verdict of its own: the claim set moved to
+    # include something this operation may not establish, which is the same kind
+    # of violation as a coordinate moving without authorization.
+    if contract.prohibited_claims:
+        claims = after.get(contract.claims_field, Coordinate(NOT_ASSESSED))
+        if claims.kind == NOT_ASSESSED:
+            findings.append(Finding(
+                EVIDENCE_MISSING, contract.claims_field,
+                f"A CLAIM SET, TO CHECK {len(contract.prohibited_claims)} "
+                f"PROHIBITED CLAIMS AGAINST", NOT_ASSESSED))
+        elif claims.kind == VALUE:
+            asserted = tuple(claims.value or ())
+            for claim in contract.prohibited_claims:
+                if claim in asserted:
+                    findings.append(Finding(
+                        PROHIBITED_CHANGE, contract.claims_field,
+                        f"NOT {claim}", claim,
+                        after=claims.as_dict(),
+                        detail=(f"{contract.name} may not assert {claim}; this "
+                                f"operation does not establish it")))
 
     for balance in contract.balances:
         findings.extend(_balance_findings(after, balance))
@@ -385,6 +417,11 @@ def ledger_status() -> Dict[str, Any]:
         "verdict_notes": dict(VERDICT_NOTES),
         "invariant_classes": ("EXACT", "REQUIRED_TRANSITION", "BOUNDED_BALANCE"),
         "balances_require_accounting_basis": True,
+        "prohibited_claims_note": (
+            "A CLAIM A TRANSITION MAY NOT ASSERT IS REPORTED AS A PROHIBITED "
+            "CHANGE. THE CLAIM SET MOVED TO INCLUDE SOMETHING THE OPERATION "
+            "DOES NOT ESTABLISH, WHICH IS THE SAME KIND OF VIOLATION AS A "
+            "COORDINATE MOVING WITHOUT AUTHORIZATION"),
         "exact_balance_note": (
             "BOUNDED, NEVER EXACT. A RECEIVER'S GAIN, FILTER AND WINDOW "
             "INTENTIONALLY TRANSFORM POWER; DEMANDING AN EXACT IDENTITY ACROSS "
