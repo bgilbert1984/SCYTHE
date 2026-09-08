@@ -17,21 +17,38 @@ import unittest
 
 from rf_receiver_state import (
     ALIGNMENT_CAPABILITIES, DEFAULT_MOUNT_UNCERTAINTY_M, JOIN_REFUSALS,
-    build_receiver_state, canonical_bytes, may_update_posterior,
-    motion_uncertainty_m, pose_uncertainty_m, receiver_state_chain_hash,
+    MAX_CLOCK_MAPPING_UNCERTAINTY_MS, AcquisitionInterval, ClockMapping,
+    MonotonicInstant, ReceiverStateRefused, build_receiver_state,
+    canonical_bytes, may_update_posterior, motion_uncertainty_m,
+    pose_uncertainty_m, receiver_state_chain_hash,
     receiver_state_chain_manifest, receiver_state_status, time_align,
 )
+
+SECOND = 1_000_000_000
+CLOCK = "phone-boot-1"
+# A 100 ms acquisition, the shape a survey sweep actually has.
+ACQ_START = 1_000 * SECOND
+ACQUISITION = AcquisitionInterval(CLOCK, ACQ_START, ACQ_START + 100_000_000)
+
+
+def _at(offset_ms=0.0, source=CLOCK):
+    """A receiver-state instant, offset from the acquisition's start."""
+    return MonotonicInstant(source, int(ACQ_START + offset_ms * 1e6))
 
 
 def _state(**overrides):
     kwargs = dict(device_id="phone-1", latitude=29.735, longitude=-94.977,
                   horizontal_accuracy_m=4.8, position_authority="DEVICE_GNSS",
                   speed_mps=1.1, course_deg=72.0, course_source="GNSS_COURSE",
-                  device_timestamp=1000.0, orchestrator_timestamp=1000.018,
+                  observed_at=_at(50.0), display_wall_time=1000.0,
                   offset_estimate_ms=18.2, alignment_uncertainty_ms=42.0,
                   alignment_method="BOUNDED_CLOCK_EXCHANGE")
     kwargs.update(overrides)
     return build_receiver_state(**kwargs)
+
+
+def _join(state=None, acquisition=ACQUISITION, **kwargs):
+    return time_align(acquisition, _state() if state is None else state, **kwargs)
 
 
 class SeparationTests(unittest.TestCase):
@@ -45,7 +62,7 @@ class SeparationTests(unittest.TestCase):
         incomparable island -- the same reason the signal chain excludes centre
         frequency."""
         first = _state()
-        moved = _state(latitude=29.740, longitude=-94.980, device_timestamp=1010.0)
+        moved = _state(latitude=29.740, longitude=-94.980, observed_at=_at(10_000.0))
         self.assertEqual(first.receiver_state_chain_hash,
                          moved.receiver_state_chain_hash)
         # The state itself is still a different state.
@@ -93,12 +110,22 @@ class CourseIsNotHeadingTests(unittest.TestCase):
         self.assertEqual(state.heading_deg, 124.0)
         self.assertEqual(state.heading_source, "DEVICE_MAGNETOMETER")
 
-    def test_an_unrecognised_source_is_undeclared_rather_than_carried(self):
-        """A vocabulary that accepts anything is not a vocabulary: a consumer
-        matching on DEVICE_GNSS would silently exclude a typo, not refuse it."""
-        self.assertEqual(_state(position_authority="gps").position_authority,
-                         "UNDECLARED")
-        self.assertEqual(_state(course_source="compass").course_source, "UNDECLARED")
+    def test_an_unrecognised_source_is_refused_rather_than_rewritten(self):
+        """A vocabulary that accepts anything is not a vocabulary.
+
+        This is an external ingestion boundary. A phone sending DEVICE_GNS
+        should be told, not silently recorded as UNDECLARED and then reasoned
+        about as though nobody had claimed anything -- a consumer matching on
+        DEVICE_GNSS would exclude the typo rather than refuse it.
+        """
+        for field, bad in (("position_authority", "gps"),
+                           ("course_source", "compass"),
+                           ("heading_source", "magnetometer"),
+                           ("alignment_method", "SHARED_MONOTNIC")):
+            with self.subTest(field=field):
+                with self.assertRaises(ReceiverStateRefused) as caught:
+                    _state(**{field: bad})
+                self.assertIn(field, str(caught.exception))
 
 
 class PoseBudgetTests(unittest.TestCase):
@@ -171,14 +198,21 @@ class AlignmentStateTests(unittest.TestCase):
         At 1.1 m/s, 5 s of timing uncertainty moves the receiver 5.5 m, just past
         a 4.8 m circle. At 30 m/s it takes 160 ms. A seconds-based cutoff would
         have to pick one and be wrong for the other.
+
+        Decided on the JOIN. A state alone holds no acquisition to be stale
+        relative to, so it never carries STALE.
         """
+        self.assertEqual(
+            _join(_state(alignment_uncertainty_ms=5_000.0)).alignment_status, "STALE")
+        self.assertEqual(
+            _join(_state(speed_mps=30.0, alignment_uncertainty_ms=200.0)
+                  ).alignment_status, "STALE")
+        self.assertEqual(
+            _join(_state(speed_mps=30.0, alignment_uncertainty_ms=100.0)
+                  ).alignment_status, "BOUNDED")
+
+    def test_a_state_alone_never_carries_stale(self):
         self.assertEqual(_state(alignment_uncertainty_ms=5_000.0).alignment_status,
-                         "STALE")
-        self.assertEqual(_state(speed_mps=30.0,
-                                alignment_uncertainty_ms=200.0).alignment_status,
-                         "STALE")
-        self.assertEqual(_state(speed_mps=30.0,
-                                alignment_uncertainty_ms=100.0).alignment_status,
                          "BOUNDED")
 
     def test_a_stationary_receiver_does_not_go_stale_from_timing_alone(self):
@@ -210,13 +244,8 @@ class AlignmentStateTests(unittest.TestCase):
 class JoinTests(unittest.TestCase):
     """A survey point enters a posterior through one edge, and it can refuse."""
 
-    def _observation(self, **overrides):
-        payload = {"signal_chain_hash": "blake2s:abc", "frequency_hz": 433_920_000.0}
-        payload.update(overrides)
-        return payload
-
     def test_a_bounded_join_carries_what_a_consumer_must_propagate(self):
-        join = time_align(self._observation(), _state())
+        join = time_align(ACQUISITION, _state())
         self.assertTrue(join.joined)
         self.assertEqual(join.method, "BOUNDED_CLOCK_EXCHANGE")
         self.assertEqual(join.uncertainty_ms, 42.0)
@@ -224,40 +253,36 @@ class JoinTests(unittest.TestCase):
         self.assertTrue(may_update_posterior(join))
 
     def test_a_stale_join_may_not_reach_the_posterior(self):
-        join = time_align(self._observation(),
-                          _state(alignment_uncertainty_ms=5_000.0))
+        join = time_align(ACQUISITION, _state(alignment_uncertainty_ms=5_000.0))
         self.assertTrue(join.joined)
         self.assertEqual(join.alignment_status, "STALE")
         self.assertFalse(may_update_posterior(join))
 
     def test_an_unattempted_alignment_is_refused_with_a_reason(self):
-        join = time_align(self._observation(),
-                          _state(alignment_method="NOT_ATTEMPTED"))
+        join = time_align(ACQUISITION, _state(alignment_method="NOT_ATTEMPTED"))
         self.assertFalse(join.joined)
         self.assertEqual(join.refusal, "ALIGNMENT_NOT_ATTEMPTED")
         self.assertFalse(may_update_posterior(join))
 
     def test_an_unbounded_alignment_is_refused_rather_than_assumed_tight(self):
-        join = time_align(self._observation(),
-                          _state(alignment_uncertainty_ms=None))
+        join = time_align(ACQUISITION, _state(alignment_uncertainty_ms=None))
         self.assertEqual(join.refusal, "ALIGNMENT_UNBOUNDED")
 
     def test_a_state_without_a_position_is_refused(self):
-        join = time_align(self._observation(),
-                          _state(latitude=None, longitude=None))
+        join = time_align(ACQUISITION, _state(latitude=None, longitude=None))
         self.assertEqual(join.refusal, "NO_POSITION")
 
     def test_a_missing_state_is_refused_rather_than_defaulted(self):
-        self.assertEqual(time_align(self._observation(), None).refusal,
+        self.assertEqual(time_align(ACQUISITION, None).refusal,
                          "NO_RECEIVER_STATE")
 
     def test_a_changed_rf_chain_breaks_the_join(self):
-        join = time_align(
-            self._observation(expected_signal_chain_hash="blake2s:other"), _state())
+        join = time_align(ACQUISITION, _state(), signal_chain_hash="blake2s:abc",
+                          expected_signal_chain_hash="blake2s:other")
         self.assertEqual(join.refusal, "SIGNAL_CHAIN_CHANGED")
 
     def test_a_changed_receiver_chain_breaks_the_join(self):
-        join = time_align(self._observation(), _state(),
+        join = time_align(ACQUISITION, _state(),
                           expected_receiver_state_chain_hash="blake2s:stale")
         self.assertEqual(join.refusal, "RECEIVER_STATE_CHAIN_CHANGED")
 
@@ -266,12 +291,12 @@ class JoinTests(unittest.TestCase):
         for refusal, text in JOIN_REFUSALS.items():
             self.assertTrue(text.strip(), refusal)
             self.assertNotEqual(text, refusal, refusal)
-        join = time_align(self._observation(), None)
+        join = time_align(ACQUISITION, None)
         self.assertEqual(join.refusal, "NO_RECEIVER_STATE")
         self.assertIn("NO RECEIVER STATE", join.to_dict()["reason"])
 
     def test_a_successful_join_carries_no_refusal_text(self):
-        self.assertIsNone(time_align(self._observation(), _state()).to_dict()["reason"])
+        self.assertIsNone(time_align(ACQUISITION, _state()).to_dict()["reason"])
 
 
 class ContractTests(unittest.TestCase):
@@ -294,6 +319,123 @@ class ContractTests(unittest.TestCase):
     def test_staleness_basis_is_published_as_distance(self):
         self.assertEqual(receiver_state_status()["staleness_basis"],
                          "METRES_OF_POSSIBLE_MOVEMENT_NOT_SECONDS")
+
+
+class TemporalJoinTests(unittest.TestCase):
+    """The join the contract describes, and the one that used to happen.
+
+    The previous time_align never read an acquisition. It checked hashes and
+    declared clock quality and returned a join -- it would join an empty
+    observation. These tests are written against what it could not have
+    answered.
+    """
+
+    def test_the_false_case_the_old_implementation_accepted(self):
+        """Identical hashes, BOUNDED clock metadata, temporally remote state.
+
+        Everything the old join looked at is unchanged and satisfactory. The
+        only thing that differs is the one thing it never read: how far the
+        receiver state sits from the acquisition it is being joined to. At
+        1.1 m/s an hour of separation is nearly four kilometres of possible
+        movement against a 4.8 m circle.
+        """
+        contemporaneous = _join(_state(observed_at=_at(50.0)))
+        remote = _join(_state(observed_at=_at(-3_600_000.0)))
+
+        # Identical in every respect the old implementation inspected.
+        self.assertEqual(contemporaneous.method, remote.method)
+        self.assertEqual(contemporaneous.uncertainty_ms, remote.uncertainty_ms)
+        self.assertEqual(_state(observed_at=_at(50.0)).receiver_state_chain_hash,
+                         _state(observed_at=_at(-3_600_000.0)).receiver_state_chain_hash)
+
+        self.assertEqual(contemporaneous.alignment_status, "BOUNDED")
+        self.assertTrue(may_update_posterior(contemporaneous))
+        self.assertEqual(remote.alignment_status, "STALE")
+        self.assertFalse(may_update_posterior(remote),
+                         "an hour-old state must not contribute to a surface")
+        self.assertEqual(remote.separation_ms, 3_600_000.0)
+
+    def test_a_state_inside_the_acquisition_has_no_separation(self):
+        """Contemporaneous means inside the window, not near a point."""
+        for offset_ms in (0.0, 50.0, 100.0):
+            self.assertEqual(_join(_state(observed_at=_at(offset_ms))).separation_ms,
+                             0.0, offset_ms)
+
+    def test_separation_is_measured_to_the_nearer_bound(self):
+        self.assertEqual(_join(_state(observed_at=_at(-40.0))).separation_ms, 40.0)
+        self.assertEqual(_join(_state(observed_at=_at(140.0))).separation_ms, 40.0)
+
+    def test_separation_enters_the_budget_beside_the_declared_uncertainty(self):
+        join = _join(_state(observed_at=_at(-500.0), alignment_uncertainty_ms=42.0))
+        self.assertEqual(join.separation_ms, 500.0)
+        self.assertEqual(join.uncertainty_ms, 42.0)
+        self.assertEqual(join.timing_budget_ms, 542.0)
+        # And the budget, not the declared figure, is what moves the pose.
+        tight = _join(_state(observed_at=_at(50.0), alignment_uncertainty_ms=42.0))
+        self.assertGreater(join.pose_uncertainty_m, tight.pose_uncertainty_m)
+
+    def test_an_acquisition_is_required_rather_than_assumed(self):
+        self.assertEqual(time_align(None, _state()).refusal, "NO_ACQUISITION_INTERVAL")
+
+    def test_a_state_without_an_instant_cannot_be_joined(self):
+        join = _join(_state(observed_at=None))
+        self.assertEqual(join.refusal, "NO_RECEIVER_STATE_INSTANT")
+        self.assertFalse(may_update_posterior(join))
+
+    def test_two_monotonic_clocks_are_not_comparable_by_being_monotonic(self):
+        other = _state(observed_at=_at(50.0, source="a-different-boot"))
+        self.assertEqual(_join(other).refusal, "CLOCK_DOMAIN_UNMAPPED")
+
+    def test_a_bounded_mapping_makes_the_domains_comparable(self):
+        other = _state(observed_at=_at(50.0, source="watch-boot-3"))
+        mapping = ClockMapping("watch-boot-3", CLOCK, 0, 20.0)
+        join = _join(other, clock_mapping=mapping)
+        self.assertTrue(join.joined)
+        self.assertEqual(join.clock_mapping_uncertainty_ms, 20.0)
+        self.assertEqual(join.timing_budget_ms, 62.0, "mapping uncertainty is added")
+
+    def test_a_mapping_for_the_wrong_pair_does_not_apply(self):
+        other = _state(observed_at=_at(50.0, source="watch-boot-3"))
+        wrong = ClockMapping("laptop-boot-9", CLOCK, 0, 20.0)
+        self.assertEqual(_join(other, clock_mapping=wrong).refusal,
+                         "CLOCK_DOMAIN_UNMAPPED")
+
+    def test_a_mapping_too_loose_to_propagate_is_refused(self):
+        other = _state(observed_at=_at(50.0, source="watch-boot-3"))
+        loose = ClockMapping("watch-boot-3", CLOCK,
+                             0, MAX_CLOCK_MAPPING_UNCERTAINTY_MS + 1.0)
+        self.assertEqual(_join(other, clock_mapping=loose).refusal,
+                         "CLOCK_MAPPING_UNBOUNDED")
+
+    def test_an_offset_mapping_shifts_the_measured_separation(self):
+        other = _state(observed_at=_at(0.0, source="watch-boot-3"))
+        shifted = ClockMapping("watch-boot-3", CLOCK, -500_000_000, 5.0)
+        join = _join(other, clock_mapping=shifted)
+        self.assertEqual(join.separation_ms, 500.0)
+
+    def test_the_join_evidence_is_immutable(self):
+        """A frozen record with a mutable dict inside it is not frozen.
+
+        may_update_posterior reads capabilities, so a rewritable dict let a
+        consumer grant itself surface eligibility on a stale join.
+        """
+        join = _join(_state(observed_at=_at(-3_600_000.0)))
+        self.assertEqual(join.alignment_status, "STALE")
+        with self.assertRaises(TypeError):
+            join.capabilities["heatmap_update"] = True
+        self.assertFalse(may_update_posterior(join))
+
+    def test_the_payload_names_what_staleness_was_decided_from(self):
+        payload = _join().to_dict()
+        self.assertIn("SEPARATION", payload["staleness_basis"])
+        self.assertIsInstance(payload["capabilities"], dict)
+        json.dumps(payload)
+
+    def test_wall_time_is_carried_for_reading_and_never_compared(self):
+        payload = _state().to_dict()["time_alignment"]
+        self.assertEqual(payload["display_wall_time_note"],
+                         "FOR READING, NEVER FOR COMPARISON")
+        self.assertEqual(payload["status_scope"], "STATE_ONLY_NOT_A_JOIN")
 
 
 if __name__ == "__main__":
