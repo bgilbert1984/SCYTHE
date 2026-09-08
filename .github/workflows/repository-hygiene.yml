@@ -26,8 +26,12 @@ jobs:
       # Globbed on purpose. A hand-maintained list is how test_rf_signal_family,
       # test_graphops_rf_antenna and test_graphops_rf_tune all shipped without CI
       # coverage; a new test module now joins the run by existing.
-      - name: Run RF estimator, bridge and classifier tests
-        run: python -m unittest -v test_rf_*.py test_graphops_rf_*.py
+      - name: Run RF estimator, bridge, classifier and ledger tests
+        # test_scythe_*.py joined the glob when scythe_invariant_ledger landed:
+        # it is deliberately domain-agnostic, so it is not test_rf_*, and it
+        # would otherwise have shipped without CI coverage -- exactly what the
+        # note above says the globbing exists to prevent.
+        run: python -m unittest -v test_rf_*.py test_graphops_rf_*.py test_scythe_*.py
 
   python-graphops:
     runs-on: ubuntu-latest
