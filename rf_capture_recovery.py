@@ -517,14 +517,22 @@ def revalidate(authorization: RecoveryAuthorization,
 SAMPLE_FLOW_RESTORED = "SAMPLE_FLOW_RESTORED"
 PROCESS_RESTARTED_STILL_STARVED = "PROCESS_RESTARTED_STILL_STARVED"
 # Distinct from the above, and the distinction is honesty rather than detail.
-# PROCESS_RESTARTED_STILL_STARVED asserts a restart happened. If the incarnation
-# never advanced, no restart was observed, and reporting one would be a claim
-# about something that did not occur.
+# PROCESS_RESTARTED_STILL_STARVED asserts a restart happened. If no superseding
+# incarnation was observed within the same boot, no restart was observed, and
+# reporting one would be a claim about something that did not occur. Covers both
+# UNCHANGED (the target is still there) and UNOBSERVABLE (nothing holds the
+# endpoint); the precise incarnation state travels as detail.
 RESTART_NOT_OBSERVED = "RESTART_NOT_OBSERVED"
+# Not a failed restart. A boot boundary destroys the incarnation ordering and
+# the monotonic observation domain both, so there is no evidence from which any
+# outcome could be read. Kept out of RESTART_NOT_OBSERVED because a consumer
+# counting recovery failures would otherwise be counting host reboots.
+RECOVERY_OUTCOME_UNDETERMINED = "RECOVERY_OUTCOME_UNDETERMINED"
+KERNEL_BOOT_CHANGED = "KERNEL_BOOT_CHANGED"
 RECOVERY_OUTCOME_PENDING = "RECOVERY_OUTCOME_PENDING"
 RECOVERY_OUTCOMES: Tuple[str, ...] = (
     SAMPLE_FLOW_RESTORED, PROCESS_RESTARTED_STILL_STARVED,
-    RESTART_NOT_OBSERVED, RECOVERY_OUTCOME_PENDING)
+    RESTART_NOT_OBSERVED, RECOVERY_OUTCOME_UNDETERMINED, RECOVERY_OUTCOME_PENDING)
 
 # What the observed incarnation says about the authorized one, after acting.
 SUPERSEDED = "SUPERSEDED"          # the fence advanced: this is what a restart does
@@ -555,9 +563,13 @@ class AttemptEvaluation:
     elapsed_s: float
     sequence_advanced: bool
     samples_after_authorization: bool
+    # Set only when the outcome is undetermined, naming what destroyed the
+    # evidence rather than leaving the absence to be inferred.
+    reason: Optional[str] = None
 
     def as_dict(self) -> Dict[str, Any]:
         return {"outcome": self.outcome, "supersession": self.supersession,
+                "reason": self.reason,
                 "elapsed_s": round(self.elapsed_s, 3),
                 "sequence_advanced": self.sequence_advanced,
                 "samples_after_authorization": self.samples_after_authorization,
@@ -597,18 +609,27 @@ def evaluate_attempt(authorization: RecoveryAuthorization,
     advanced = observation.latest_sequence > authorization.sequence_at_authorization
     elapsed_s = (observation.observed_monotonic_ns
                  - authorization.attempted_monotonic_ns) / 1e9
+    reason = None
     if samples_after and advanced:
         outcome = SAMPLE_FLOW_RESTORED
     elif elapsed_s < deadline_s:
         outcome = RECOVERY_OUTCOME_PENDING
     elif where == SUPERSEDED:
         outcome = PROCESS_RESTARTED_STILL_STARVED
+    elif where == UNRELATED:
+        # A different boot. supersedes() correctly refuses to order incarnations
+        # across one, so there is no evidence here from which a restart could be
+        # judged to have happened or not. Calling that a failed restart would
+        # make a recovery-failure count a reboot count.
+        outcome = RECOVERY_OUTCOME_UNDETERMINED
+        reason = KERNEL_BOOT_CHANGED
     else:
-        # The deadline passed and the incarnation never advanced. Reporting
-        # PROCESS_RESTARTED_STILL_STARVED here would assert a restart that was
-        # not observed to happen.
+        # UNCHANGED or UNOBSERVABLE: the deadline passed and no superseding
+        # incarnation was observed within the same boot. Reporting
+        # PROCESS_RESTARTED_STILL_STARVED would assert a restart that did not
+        # happen; the precise incarnation state travels as detail.
         outcome = RESTART_NOT_OBSERVED
-    return AttemptEvaluation(outcome=outcome, supersession=where,
+    return AttemptEvaluation(outcome=outcome, supersession=where, reason=reason,
                              elapsed_s=elapsed_s, sequence_advanced=advanced,
                              samples_after_authorization=samples_after)
 

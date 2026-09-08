@@ -44,10 +44,16 @@ M_INVALIDATED = "AUTHORIZATION_INVALIDATED"
 M_RESTORED = "SAMPLE_FLOW_RESTORED"
 M_STILL_STARVED = "PROCESS_RESTARTED_STILL_STARVED"
 M_NOT_OBSERVED = "RESTART_NOT_OBSERVED"
+M_UNDETERMINED = "RECOVERY_OUTCOME_UNDETERMINED"
 M_PENDING = None                    # not a verdict: evaluation continues
 
 TERMINAL_VERDICTS = (M_EXPIRED, M_INVALIDATED, M_RESTORED,
-                     M_STILL_STARVED, M_NOT_OBSERVED)
+                     M_STILL_STARVED, M_NOT_OBSERVED, M_UNDETERMINED)
+
+# Which incarnation states can support an assertion about the target at all.
+# UNRELATED cannot: a boot boundary destroys the ordering supersedes() would
+# need, so no outcome is readable from it.
+DETERMINATE_INCARNATIONS = ("SUPERSEDED", "UNCHANGED", "UNOBSERVABLE")
 
 # State variables, chosen from what the verdicts claim to be about rather than
 # from what _settle happens to hold in locals.
@@ -110,6 +116,9 @@ def model_verdict(state):
         return M_PENDING
     if state.incarnation == "SUPERSEDED":
         return M_STILL_STARVED
+    if state.incarnation == "UNRELATED":
+        return M_UNDETERMINED
+    # UNCHANGED or UNOBSERVABLE: no superseding incarnation within this boot.
     return M_NOT_OBSERVED
 
 
@@ -269,13 +278,14 @@ class DifferentialTests(unittest.TestCase):
         """If they cannot be retyped without ambiguity, that is the finding."""
         from rf_capture_recovery import (
             AUTHORIZATION_EXPIRED, AUTHORIZATION_INVALIDATED,
-            PROCESS_RESTARTED_STILL_STARVED, RESTART_NOT_OBSERVED,
-            SAMPLE_FLOW_RESTORED,
+            PROCESS_RESTARTED_STILL_STARVED, RECOVERY_OUTCOME_UNDETERMINED,
+            RESTART_NOT_OBSERVED, SAMPLE_FLOW_RESTORED,
         )
         self.assertEqual(
-            {M_EXPIRED, M_INVALIDATED, M_RESTORED, M_STILL_STARVED, M_NOT_OBSERVED},
+            set(TERMINAL_VERDICTS),
             {AUTHORIZATION_EXPIRED, AUTHORIZATION_INVALIDATED, SAMPLE_FLOW_RESTORED,
-             PROCESS_RESTARTED_STILL_STARVED, RESTART_NOT_OBSERVED})
+             PROCESS_RESTARTED_STILL_STARVED, RESTART_NOT_OBSERVED,
+             RECOVERY_OUTCOME_UNDETERMINED})
 
     def test_the_model_half_of_this_file_imports_nothing_from_the_code(self):
         """Independence is the only thing the model buys over another test."""
@@ -311,43 +321,46 @@ class DifferentialTests(unittest.TestCase):
                 self.fail(f"reachable crash at {dict(zip(State.FIELDS, state))}: {exc}")
 
 
-class UnassessabilityFindingTests(unittest.TestCase):
-    """Is RESTART_NOT_OBSERVED a verdict, or an unassessability code?
+class DeterminacyTests(unittest.TestCase):
+    """No post-attempt verdict may mix an assertion with an absence of one.
 
-    The other three post-attempt verdicts assert something about the target.
-    NOT_OBSERVED is reached from three different incarnation states, and they
-    are not the same kind of claim:
+    The three post-attempt verdicts each assert something about the target.
+    RESTART_NOT_OBSERVED previously also absorbed UNRELATED -- a different boot,
+    where ``supersedes`` correctly refuses to invent an ordering -- so a
+    consumer counting recovery failures was counting host reboots.
 
-        UNCHANGED     the target is still there, unrestarted -- DETERMINATE
-        UNOBSERVABLE  nothing holds the endpoint at all      -- DETERMINATE
-        UNRELATED     a different boot, so no ordering exists -- INDETERMINATE
-
-    The first two are assertions about the world. The third is an admission that
-    the evidence cannot support one, because ``supersedes`` correctly refuses to
-    order incarnations across a boot boundary.
-
-    Recorded as a finding, not endorsed. A consumer counting recovery failures
-    is currently also counting boot boundaries. These tests assert what is true
-    today so that changing it has to be deliberate.
+    RECOVERY_OUTCOME_UNDETERMINED carries that case now, with the reason naming
+    what destroyed the evidence. These properties keep the boundary rather than
+    the specific split: each post-attempt verdict is either wholly determinate
+    or wholly not.
     """
 
     def _incarnations_reaching(self, verdict):
         return {s.incarnation for s in all_states() if model_verdict(s) == verdict}
 
-    def test_not_observed_is_reached_from_determinate_and_indeterminate_states(self):
-        reached = self._incarnations_reaching(M_NOT_OBSERVED)
-        self.assertEqual(reached, {"UNCHANGED", "UNOBSERVABLE", "UNRELATED"})
+    def test_no_post_attempt_verdict_mixes_determinate_with_indeterminate(self):
+        determinate = set(DETERMINATE_INCARNATIONS)
+        for verdict in (M_STILL_STARVED, M_NOT_OBSERVED, M_UNDETERMINED):
+            reached = self._incarnations_reaching(verdict)
+            self.assertTrue(reached <= determinate or reached <= {"UNRELATED"},
+                            f"{verdict} reaches {reached}")
 
-    def test_the_other_post_attempt_verdict_is_single_valued(self):
-        """STILL_STARVED asserts one thing about one incarnation state."""
+    def test_not_observed_asserts_only_about_the_same_boot(self):
+        self.assertEqual(self._incarnations_reaching(M_NOT_OBSERVED),
+                         {"UNCHANGED", "UNOBSERVABLE"})
+
+    def test_undetermined_is_reached_only_across_a_boot_boundary(self):
+        self.assertEqual(self._incarnations_reaching(M_UNDETERMINED), {"UNRELATED"})
+
+    def test_still_starved_is_single_valued(self):
         self.assertEqual(self._incarnations_reaching(M_STILL_STARVED), {"SUPERSEDED"})
 
-    def test_no_other_verdict_mixes_determinate_with_indeterminate_evidence(self):
-        determinate = {"SUPERSEDED", "UNCHANGED", "UNOBSERVABLE"}
-        for verdict in (M_STILL_STARVED, M_EXPIRED):
-            reached = self._incarnations_reaching(verdict)
-            self.assertTrue(reached <= determinate or reached == set(INCARNATIONS),
-                            f"{verdict} reaches {reached}")
+    def test_a_reboot_never_counts_as_a_failed_restart(self):
+        """The metric this split exists to protect."""
+        failures = {M_STILL_STARVED, M_NOT_OBSERVED}
+        for state in all_states():
+            if state.incarnation == "UNRELATED":
+                self.assertNotIn(model_verdict(state), failures, state)
 
 
 if __name__ == "__main__":

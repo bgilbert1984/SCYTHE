@@ -59,6 +59,9 @@ EVENTS: Tuple[str, ...] = (
     # The deadline passed and the incarnation never advanced. Distinct from the
     # line above, which asserts a restart that this one did not observe.
     "RESTART_NOT_OBSERVED",
+    # Not a failed restart: a boot boundary left no evidence to judge one.
+    # Separate so a recovery-failure count never becomes a reboot count.
+    "RECOVERY_OUTCOME_UNDETERMINED",
     "RECOVERY_SUPPRESSED",
     # Shadow's suppression. Named apart from RECOVERY_SUPPRESSED so a simulated
     # budget can never be counted as a real one.
