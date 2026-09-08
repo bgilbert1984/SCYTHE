@@ -49,7 +49,8 @@ from dataclasses import dataclass, field
 import hashlib
 import json
 import math
-from typing import Any, Dict, Optional, Tuple
+from types import MappingProxyType
+from typing import Any, Dict, Mapping, Optional, Tuple
 
 SCHEMA = "scythe.rf-receiver-state.v1"
 CHAIN_SCHEMA = "scythe.rf-receiver-state-chain.v1"
@@ -144,7 +145,120 @@ MIN_POSITION_ACCURACY_M = 1.0
 # a measured offset. It is in the budget so that it cannot be forgotten.
 DEFAULT_MOUNT_UNCERTAINTY_M = 2.0
 
+# -- the temporal join's own vocabulary -----------------------------------
+#
+# Added because the previous time_align never read a frame at all: it validated
+# hashes and declared clock quality, then returned a join. It would join an
+# empty observation. What follows makes the acquisition interval and the
+# receiver state's own instant explicit, and refuses when either is absent or
+# when the two sit in clock domains with no bounded mapping between them.
+
+# Beyond this the mapping between two monotonic domains is too loose to be
+# worth propagating: at any survey speed the position it implies is wider than
+# the GNSS circle it would be added to.
+MAX_CLOCK_MAPPING_UNCERTAINTY_MS = 250.0
+
+
+@dataclass(frozen=True)
+class MonotonicInstant:
+    """A time, and the clock it is a time on.
+
+    Two monotonic clocks are not comparable merely by both being monotonic.
+    ``source_id`` is what makes the comparison legal or illegal, and it travels
+    with every instant so a caller cannot forget to check it.
+    """
+
+    source_id: str
+    ns: int
+
+    def same_domain_as(self, other: "MonotonicInstant") -> bool:
+        return self.source_id == other.source_id
+
+    def as_dict(self) -> Dict[str, Any]:
+        return {"source_id": self.source_id, "ns": self.ns}
+
+
+@dataclass(frozen=True)
+class AcquisitionInterval:
+    """When the RF was acquired, as an interval on one named clock.
+
+    An interval, not an instant. A sweep takes time, and a receiver moves during
+    one; collapsing it to a point asserts an instantaneity the acquisition did
+    not have.
+    """
+
+    source_id: str
+    start_ns: int
+    end_ns: int
+
+    def __post_init__(self) -> None:
+        if self.end_ns <= self.start_ns:
+            raise ValueError("acquisition interval must be ordered start < end")
+
+    def separation_ms(self, instant: MonotonicInstant) -> float:
+        """Distance from `instant` to this interval. Zero when inside it.
+
+        The receiver state is contemporaneous with the acquisition when it falls
+        within the window; otherwise the separation is the gap to the nearer
+        bound, and that gap is what the receiver could have moved during.
+        """
+        if instant.ns < self.start_ns:
+            return (self.start_ns - instant.ns) / 1e6
+        if instant.ns > self.end_ns:
+            return (instant.ns - self.end_ns) / 1e6
+        return 0.0
+
+    def as_dict(self) -> Dict[str, Any]:
+        return {"source_id": self.source_id, "start_ns": self.start_ns,
+                "end_ns": self.end_ns,
+                "span_ms": (self.end_ns - self.start_ns) / 1e6}
+
+
+@dataclass(frozen=True)
+class ClockMapping:
+    """A bounded mapping between two monotonic domains, or there is no join.
+
+    Without one, two instants from different clocks cannot be subtracted. With
+    one, its uncertainty is added to the budget rather than absorbed silently.
+    """
+
+    from_source: str
+    to_source: str
+    offset_ns: int
+    uncertainty_ms: float
+
+    def applies_to(self, frm: str, to: str) -> bool:
+        return self.from_source == frm and self.to_source == to
+
+    def project(self, instant: MonotonicInstant) -> MonotonicInstant:
+        if instant.source_id != self.from_source:
+            raise ValueError("clock mapping does not apply to this instant")
+        return MonotonicInstant(self.to_source, instant.ns + self.offset_ns)
+
+    def as_dict(self) -> Dict[str, Any]:
+        return {"from_source": self.from_source, "to_source": self.to_source,
+                "offset_ns": self.offset_ns, "uncertainty_ms": self.uncertainty_ms}
+
+
+class ReceiverStateRefused(ValueError):
+    """An unrecognised authority is refused rather than coerced."""
+
+
 JOIN_REFUSALS: Dict[str, str] = {
+    "NO_ACQUISITION_INTERVAL": (
+        "THE OBSERVATION CARRIES NO ACQUISITION INTERVAL. THERE IS NOTHING FOR "
+        "A RECEIVER STATE TO BE CONTEMPORANEOUS WITH"),
+    "NO_RECEIVER_STATE_INSTANT": (
+        "THE RECEIVER STATE CARRIES NO MONOTONIC INSTANT, SO ITS SEPARATION "
+        "FROM THE ACQUISITION CANNOT BE MEASURED"),
+    "CLOCK_DOMAIN_UNMAPPED": (
+        "THE ACQUISITION AND THE RECEIVER STATE ARE ON DIFFERENT MONOTONIC "
+        "CLOCKS WITH NO BOUNDED MAPPING BETWEEN THEM. TWO MONOTONIC CLOCKS ARE "
+        "NOT COMPARABLE MERELY BY BOTH BEING MONOTONIC"),
+    "CLOCK_MAPPING_UNBOUNDED": (
+        "THE CROSS-CLOCK MAPPING'S UNCERTAINTY EXCEEDS WHAT IS WORTH "
+        "PROPAGATING; THE POSITION IT IMPLIES IS WIDER THAN THE FIX IT WOULD "
+        "BE ADDED TO"),
     "NO_RECEIVER_STATE": "NO RECEIVER STATE WAS SUPPLIED FOR THIS OBSERVATION",
     "NO_POSITION": (
         "THE RECEIVER STATE CARRIES NO POSITION. A SURVEY POINT WITHOUT ONE IS "
@@ -268,8 +382,12 @@ class ReceiverState:
     heading_source: str
     heading_accuracy_deg: Optional[float]
 
-    device_timestamp: Optional[float]
-    orchestrator_timestamp: Optional[float]
+    # When this state was observed, on a NAMED monotonic clock. The pair of
+    # bare floats that used to sit here could not say which clock they were on,
+    # so nothing could legally subtract them from anything.
+    observed_at: Optional[MonotonicInstant]
+    # Wall clock, for a human reading a log. Never used in a comparison.
+    display_wall_time: Optional[float]
     offset_estimate_ms: Optional[float]
     alignment_uncertainty_ms: Optional[float]
     alignment_method: str
@@ -306,12 +424,17 @@ class ReceiverState:
                 "heading_accuracy_deg": self.heading_accuracy_deg,
             },
             "time_alignment": {
-                "device_timestamp": self.device_timestamp,
-                "orchestrator_timestamp": self.orchestrator_timestamp,
+                "observed_at": None if self.observed_at is None else self.observed_at.as_dict(),
                 "offset_estimate_ms": self.offset_estimate_ms,
                 "uncertainty_ms": self.alignment_uncertainty_ms,
                 "method": self.alignment_method,
-                "status": self.alignment_status,
+                # Clock quality only. STALE is a property of a join and cannot
+                # appear here, because a state holds no acquisition to be stale
+                # relative to.
+                "clock_quality": self.alignment_status,
+                "status_scope": "STATE_ONLY_NOT_A_JOIN",
+                "display_wall_time": self.display_wall_time,
+                "display_wall_time_note": "FOR READING, NEVER FOR COMPARISON",
             },
             "antenna_mount": {
                 "orientation_relative_to_operator":
@@ -326,16 +449,17 @@ class ReceiverState:
         }
 
 
-def _alignment_status(*, method: str, uncertainty_ms: Optional[float],
-                      speed_mps: Optional[float],
-                      position_accuracy_m: Optional[float]) -> str:
-    """Which of the four states this join is in, decided in metres.
+def _clock_quality(*, method: str, uncertainty_ms: Optional[float],
+                   speed_mps: Optional[float] = None,
+                   position_accuracy_m: Optional[float] = None) -> str:
+    """How good the declared clock relationship is, for the state alone.
 
-    STALE is not a duration. A state is stale when the receiver could have moved
-    further than its own position circle inside the timing uncertainty, because
-    at that point the state has stopped describing where the observation was
-    made -- and that threshold arrives at a different number of milliseconds for
-    a walker and for a vehicle.
+    Returns VERIFIED, BOUNDED or UNVERIFIED and **never STALE**. Staleness is a
+    property of a join, not of a state: it asks how far the receiver could have
+    moved between the state and one particular acquisition, and a state holding
+    no acquisition cannot answer that. It was previously decided here from
+    speed x declared uncertainty alone, which made a state stale or fresh
+    without reference to the RF it was about to be joined to.
     """
     if method == "NOT_ATTEMPTED":
         return "UNVERIFIED"
@@ -347,11 +471,6 @@ def _alignment_status(*, method: str, uncertainty_ms: Optional[float],
         return "UNVERIFIED"
     if method == "SHARED_MONOTONIC_SOURCE" or uncertainty_ms <= VERIFIED_UNCERTAINTY_MS:
         return "VERIFIED"
-    motion = motion_uncertainty_m(speed_mps, uncertainty_ms)
-    if motion is not None and position_accuracy_m is not None:
-        circle = max(float(position_accuracy_m), MIN_POSITION_ACCURACY_M)
-        if motion > circle * STALE_MOTION_RATIO:
-            return "STALE"
     return "BOUNDED"
 
 
@@ -367,8 +486,8 @@ def build_receiver_state(*, device_id: str,
                          heading_deg: Optional[float] = None,
                          heading_source: str = "UNDECLARED",
                          heading_accuracy_deg: Optional[float] = None,
-                         device_timestamp: Optional[float] = None,
-                         orchestrator_timestamp: Optional[float] = None,
+                         observed_at: Optional[MonotonicInstant] = None,
+                         display_wall_time: Optional[float] = None,
                          offset_estimate_ms: Optional[float] = None,
                          alignment_uncertainty_ms: Optional[float] = None,
                          alignment_method: str = "NOT_ATTEMPTED",
@@ -382,14 +501,18 @@ def build_receiver_state(*, device_id: str,
     a downstream consumer matching on ``DEVICE_GNSS`` would silently exclude a
     typo instead of refusing it.
     """
-    if position_authority not in POSITION_AUTHORITIES:
-        position_authority = "UNDECLARED"
-    if course_source not in COURSE_SOURCES:
-        course_source = "UNDECLARED"
-    if heading_source not in HEADING_SOURCES:
-        heading_source = "UNDECLARED"
-    if alignment_method not in ALIGNMENT_METHODS:
-        alignment_method = "NOT_ATTEMPTED"
+    # Refused, not rewritten. This is an external ingestion boundary: a phone
+    # sending OBSERVED_GNS should be told, not silently recorded as UNDECLARED
+    # and then reasoned about as though nobody had claimed anything.
+    for value, vocabulary, name in (
+            (position_authority, POSITION_AUTHORITIES, "position_authority"),
+            (course_source, COURSE_SOURCES, "course_source"),
+            (heading_source, HEADING_SOURCES, "heading_source"),
+            (alignment_method, ALIGNMENT_METHODS, "alignment_method")):
+        if value not in vocabulary:
+            raise ReceiverStateRefused(
+                f"unknown {name} {str(value)[:48]!r}; expected one of "
+                f"{', '.join(sorted(vocabulary))}")
     if latitude is None or longitude is None:
         position_authority = "UNDECLARED"
         latitude = longitude = horizontal_accuracy_m = None
@@ -406,18 +529,16 @@ def build_receiver_state(*, device_id: str,
         alignment_method=alignment_method, mount_orientation=mount_orientation,
         mount_uncertainty_m=mount_uncertainty_m)
     chain_hash = receiver_state_chain_hash(manifest)
-    status = _alignment_status(method=alignment_method,
-                               uncertainty_ms=alignment_uncertainty_ms,
-                               speed_mps=speed_mps,
-                               position_accuracy_m=horizontal_accuracy_m)
+    status = _clock_quality(method=alignment_method,
+                            uncertainty_ms=alignment_uncertainty_ms)
     pose = pose_uncertainty_m(position_accuracy_m=horizontal_accuracy_m,
                               speed_mps=speed_mps,
                               alignment_uncertainty_ms=alignment_uncertainty_ms,
                               mount_uncertainty_m=mount_uncertainty_m)
     identity = canonical_bytes({
         "chain": chain_hash,
-        "device_timestamp": device_timestamp,
-        "orchestrator_timestamp": orchestrator_timestamp,
+        "observed_source": None if observed_at is None else observed_at.source_id,
+        "observed_ns": None if observed_at is None else observed_at.ns,
         "latitude": latitude, "longitude": longitude,
     })
     return ReceiverState(
@@ -431,8 +552,8 @@ def build_receiver_state(*, device_id: str,
         speed_mps=speed_mps, course_deg=course_deg, course_source=course_source,
         heading_deg=heading_deg, heading_source=heading_source,
         heading_accuracy_deg=heading_accuracy_deg,
-        device_timestamp=device_timestamp,
-        orchestrator_timestamp=orchestrator_timestamp,
+        observed_at=observed_at,
+        display_wall_time=display_wall_time,
         offset_estimate_ms=offset_estimate_ms,
         alignment_uncertainty_ms=alignment_uncertainty_ms,
         alignment_method=alignment_method, alignment_status=status,
@@ -457,24 +578,55 @@ class TimeAlignedJoin:
     method: str = "NOT_ATTEMPTED"
     authority: str = "DERIVED_MEASUREMENT"
     pose_uncertainty_m: Optional[float] = None
-    capabilities: Dict[str, Any] = field(default_factory=dict)
+    motion_uncertainty_m: Optional[float] = None
+    # Measured, not declared: how far the state's instant sits from the
+    # acquisition interval. Zero when it falls inside one.
+    separation_ms: Optional[float] = None
+    clock_mapping_uncertainty_ms: Optional[float] = None
+    # separation + declared + mapping, the number staleness is decided from.
+    timing_budget_ms: Optional[float] = None
+    # Read-only. The record is frozen, and a mutable dict inside it let a
+    # consumer rewrite heatmap_update on a piece of evidence and have
+    # may_update_posterior believe the rewrite.
+    capabilities: Mapping[str, Any] = field(
+        default_factory=lambda: MappingProxyType({}))
 
     def to_dict(self) -> Dict[str, Any]:
         payload = {f: getattr(self, f) for f in self.__dataclass_fields__}
+        payload["capabilities"] = dict(self.capabilities)
         payload["reason"] = (JOIN_REFUSALS.get(self.refusal, self.refusal)
                              if self.refusal else None)
+        payload["staleness_basis"] = (
+            "SEPARATION_PLUS_DECLARED_UNCERTAINTY_AGAINST_POSITION_CIRCLE")
         return payload
 
 
-def time_align(observation: Dict[str, Any], state: Optional[ReceiverState], *,
+def time_align(acquisition: Optional[AcquisitionInterval],
+               state: Optional[ReceiverState], *,
+               clock_mapping: Optional[ClockMapping] = None,
+               signal_chain_hash: Optional[str] = None,
+               expected_signal_chain_hash: Optional[str] = None,
                expected_receiver_state_chain_hash: Optional[str] = None
                ) -> TimeAlignedJoin:
-    """Join one RF observation to one receiver state, or say why not.
+    """Join one RF acquisition to one receiver state, or say why not.
+
+    This is the temporal join the contract describes, and it is a rewrite. The
+    previous version never read the acquisition at all -- it checked hashes and
+    declared clock quality and then returned a join, and would join an empty
+    observation. What it validated was compatibility; what it claimed was
+    contemporaneity.
+
+    The acquisition is an interval and the state carries an instant, both on
+    named clocks. The separation between them is measured rather than assumed,
+    it enters the pose budget alongside the declared uncertainty, and staleness
+    is decided from the total -- so a state that is compatible, well-declared
+    and an hour away from the acquisition is now STALE, which it was not
+    before.
 
     A survey point enters a posterior only through this edge. The edge carries
-    the offset, its uncertainty, the method and the authority, so that a
-    downstream consumer can propagate the uncertainty rather than discover after
-    the fact that there was none to propagate.
+    the offset, its uncertainty, the separation, the method and the authority,
+    so a downstream consumer can propagate the uncertainty rather than discover
+    after the fact that there was none to propagate.
     """
     if state is None:
         return TimeAlignedJoin(refusal="NO_RECEIVER_STATE")
@@ -485,12 +637,34 @@ def time_align(observation: Dict[str, Any], state: Optional[ReceiverState], *,
             and expected_receiver_state_chain_hash != state.receiver_state_chain_hash):
         return TimeAlignedJoin(refusal="RECEIVER_STATE_CHAIN_CHANGED",
                                alignment_status=state.alignment_status)
-    observed_chain = observation.get("signal_chain_hash")
-    expected_chain = observation.get("expected_signal_chain_hash")
-    if (expected_chain is not None and observed_chain is not None
-            and expected_chain != observed_chain):
+    if (expected_signal_chain_hash is not None and signal_chain_hash is not None
+            and expected_signal_chain_hash != signal_chain_hash):
         return TimeAlignedJoin(refusal="SIGNAL_CHAIN_CHANGED",
                                alignment_status=state.alignment_status)
+    if acquisition is None:
+        return TimeAlignedJoin(refusal="NO_ACQUISITION_INTERVAL",
+                               alignment_status="UNVERIFIED")
+    if state.observed_at is None:
+        return TimeAlignedJoin(refusal="NO_RECEIVER_STATE_INSTANT",
+                               alignment_status="UNVERIFIED")
+
+    # Cross-clock. Two monotonic clocks are not comparable merely by both being
+    # monotonic, so a differing domain needs a bounded mapping or there is no
+    # subtraction to perform.
+    instant = state.observed_at
+    mapping_uncertainty_ms = 0.0
+    if instant.source_id != acquisition.source_id:
+        if clock_mapping is None or not clock_mapping.applies_to(
+                instant.source_id, acquisition.source_id):
+            return TimeAlignedJoin(refusal="CLOCK_DOMAIN_UNMAPPED",
+                                   alignment_status="UNVERIFIED")
+        if (not math.isfinite(clock_mapping.uncertainty_ms)
+                or clock_mapping.uncertainty_ms > MAX_CLOCK_MAPPING_UNCERTAINTY_MS):
+            return TimeAlignedJoin(refusal="CLOCK_MAPPING_UNBOUNDED",
+                                   alignment_status="UNVERIFIED")
+        instant = clock_mapping.project(instant)
+        mapping_uncertainty_ms = abs(float(clock_mapping.uncertainty_ms))
+
     if state.alignment_method == "NOT_ATTEMPTED":
         return TimeAlignedJoin(refusal="ALIGNMENT_NOT_ATTEMPTED",
                                alignment_status="UNVERIFIED")
@@ -499,14 +673,41 @@ def time_align(observation: Dict[str, Any], state: Optional[ReceiverState], *,
         return TimeAlignedJoin(refusal="ALIGNMENT_UNBOUNDED",
                                alignment_status="UNVERIFIED",
                                method=state.alignment_method)
+
+    separation_ms = acquisition.separation_ms(instant)
+    declared_ms = float(state.alignment_uncertainty_ms or 0.0)
+    # Separation is not an uncertainty -- it is a known distance in time -- but
+    # it moves the receiver exactly as an uncertainty would, so it enters the
+    # same budget. Keeping them separate in the payload lets a reader see which
+    # is which.
+    timing_ms = separation_ms + declared_ms + mapping_uncertainty_ms
+    pose = pose_uncertainty_m(position_accuracy_m=state.horizontal_accuracy_m,
+                              speed_mps=state.speed_mps,
+                              alignment_uncertainty_ms=timing_ms,
+                              mount_uncertainty_m=state.mount_uncertainty_m)
+    motion = motion_uncertainty_m(state.speed_mps, timing_ms)
+
+    status = state.alignment_status
+    if motion is not None and state.horizontal_accuracy_m is not None:
+        circle = max(float(state.horizontal_accuracy_m), MIN_POSITION_ACCURACY_M)
+        if motion > circle * STALE_MOTION_RATIO:
+            # The receiver could have moved further than its own position circle
+            # between this state and this acquisition. The state has stopped
+            # describing where the observation was made.
+            status = "STALE"
+
     return TimeAlignedJoin(
         joined=True,
-        alignment_status=state.alignment_status,
+        alignment_status=status,
         offset_estimate_ms=state.offset_estimate_ms,
         uncertainty_ms=state.alignment_uncertainty_ms,
+        separation_ms=separation_ms,
+        clock_mapping_uncertainty_ms=mapping_uncertainty_ms or None,
+        timing_budget_ms=timing_ms,
         method=state.alignment_method,
-        pose_uncertainty_m=state.pose_uncertainty_m,
-        capabilities=dict(ALIGNMENT_CAPABILITIES[state.alignment_status]),
+        pose_uncertainty_m=pose,
+        motion_uncertainty_m=motion,
+        capabilities=MappingProxyType(dict(ALIGNMENT_CAPABILITIES[status])),
     )
 
 
@@ -544,6 +745,19 @@ def receiver_state_status() -> Dict[str, Any]:
         ),
         "alignment_methods": dict(ALIGNMENT_METHODS),
         "alignment_states": list(ALIGNMENT_STATES),
+        "temporal_join": {
+            "acquisition": "INTERVAL_ON_A_NAMED_MONOTONIC_CLOCK",
+            "receiver_state": "INSTANT_ON_A_NAMED_MONOTONIC_CLOCK",
+            "separation": "MEASURED_TO_THE_NEARER_BOUND_ZERO_INSIDE_THE_INTERVAL",
+            "cross_clock": "BOUNDED_MAPPING_OR_REFUSAL",
+            "max_clock_mapping_uncertainty_ms": MAX_CLOCK_MAPPING_UNCERTAINTY_MS,
+            "staleness_scope": "JOIN_NOT_STATE",
+            "staleness_basis": (
+                "SEPARATION_PLUS_DECLARED_UNCERTAINTY_PLUS_MAPPING_AGAINST_"
+                "THE_POSITION_CIRCLE"),
+            "unknown_authority_policy": "REFUSED_NOT_REWRITTEN",
+            "wall_clock": "DISPLAY_ONLY_NEVER_COMPARED",
+        },
         "alignment_capabilities": dict(ALIGNMENT_CAPABILITIES),
         "verified_uncertainty_ms": VERIFIED_UNCERTAINTY_MS,
         "staleness_basis": "METRES_OF_POSSIBLE_MOVEMENT_NOT_SECONDS",
