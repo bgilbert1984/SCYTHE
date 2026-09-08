@@ -33,10 +33,10 @@ import subprocess
 from typing import Dict, Optional, Tuple
 
 from rf_capture_recovery import (
-    MODE_ARMED, MODE_DISABLED, MODE_SHADOW, PROCESS_RESTARTED_STILL_STARVED,
-    RECOVERY_OUTCOME_PENDING, REQUEST_RESTART, RECOVERY_SUPPRESSED,
-    SAMPLE_FLOW_RESTORED, RecoveryAttempt, RecoveryAuthorization,
-    RecoveryObservation, authorize, decide, recovery_outcome, revalidate,
+    MODE_ARMED, MODE_DISABLED, MODE_SHADOW, RECOVERY_OUTCOME_PENDING,
+    REQUEST_RESTART, RECOVERY_SUPPRESSED, RecoveryAttempt,
+    RecoveryAuthorization, RecoveryObservation, authorize, decide,
+    evaluate_attempt, revalidate,
 )
 
 
@@ -109,11 +109,29 @@ class RecoveryCoordinator:
         self._requester = requester
         self._authorization: Optional[RecoveryAuthorization] = None
         self._attempts: list = []
+        # Shadow's simulated budget, kept strictly apart from the real one. A
+        # shadow judgement must never consume a real attempt, and a real attempt
+        # must never be inferred from a shadow run.
+        self._shadow_attempts: list = []
         self._serial = 0
 
     @property
     def attempts(self) -> tuple:
+        """Restarts actually requested. Shadow never appears here."""
         return tuple(self._attempts)
+
+    @property
+    def policy_attempts(self) -> tuple:
+        """What the policy should see as spent budget, for this mode.
+
+        In SHADOW this is the simulated ledger. Without it the breaker never
+        engages in shadow, and the record reports one would-be restart per
+        check for the whole outage -- 2688 of them across four hours on
+        2026-09-07, where ARMED would have made one attempt and then suppressed.
+        A shadow record that cannot reproduce its own circuit breaker is
+        measuring the amplification the breaker exists to prevent.
+        """
+        return tuple(self._shadow_attempts) if self.mode == MODE_SHADOW else self.attempts
 
     @property
     def authorization(self) -> Optional[RecoveryAuthorization]:
@@ -145,9 +163,13 @@ class RecoveryCoordinator:
 
         decision = decide(observation)
         if decision.decision == RECOVERY_SUPPRESSED:
-            self._record("RECOVERY_SUPPRESSED", decision.reason, observation)
+            # Named apart in shadow: a simulated budget is not a real one, and
+            # the counts must never be able to conflate them.
+            event = ("WOULD_BE_SUPPRESSED" if self.mode == MODE_SHADOW
+                     else "RECOVERY_SUPPRESSED")
+            self._record(event, decision.reason, observation)
             return {"mode": self.mode, "decision": decision.decision,
-                    "reason": decision.reason, "action": "NONE"}
+                    "reason": decision.reason, "action": event}
         if decision.decision != REQUEST_RESTART:
             return {"mode": self.mode, "decision": decision.decision,
                     "reason": decision.reason, "action": "NONE"}
@@ -175,6 +197,14 @@ class RecoveryCoordinator:
                          target=authorization.target.as_dict(),
                          detail={"dbus_operation": DBUS_OPERATION,
                                  "would_run": " ".join(RESTART_ARGV)})
+            # Spend the simulated budget, so the next judgement sees the breaker
+            # the way ARMED would. Nothing here touches the real ledger.
+            self._shadow_attempts.append(RecoveryAttempt(
+                incident_id=authorization.incident_id,
+                kernel_boot_id=authorization.target.boot_id,
+                target_pid=authorization.target.pid,
+                target_start_ticks=authorization.target.start_ticks,
+                attempted_monotonic_ns=observation.observed_monotonic_ns))
             self._authorization = None
             return {"mode": self.mode, "decision": decision.decision,
                     "reason": decision.reason, "action": "WOULD_REQUEST_RESTART",
@@ -193,6 +223,10 @@ class RecoveryCoordinator:
         # must leave an attempt that happened and was not counted, never the
         # reverse: an uncounted attempt can restart a process for free.
         self._attempts.append(attempt)
+        # Past the fence. From here the identity comparison flips polarity, and
+        # the type carries which question may be asked of it.
+        self._authorization = authorization = authorization.with_attempt(
+            observation.observed_monotonic_ns)
         self._record("RESTART_ATTEMPTED", reason, observation,
                      attempt_id=authorization.authorization_id,
                      target=authorization.target.as_dict(),
@@ -212,40 +246,59 @@ class RecoveryCoordinator:
                                   "SAMPLES AND A SEQUENCE ADVANCE")}
 
     def _settle(self, observation) -> Optional[Dict]:
-        """Close out an open authorization, or report the attempt's outcome."""
+        """Close out an open authorization, by the question its phase allows.
+
+        Before acting the fence applies: a changed identity means something else
+        replaced the target and the authorization no longer describes anything.
+        After acting the same comparison is a supersession signal and a changed
+        identity is the intended outcome, so the fence is not asked at all.
+
+        Running the fence after acting is what recorded a successful live
+        recovery as AUTHORIZATION_INVALIDATED / TARGET_IDENTITY_CHANGED on
+        2026-09-07. The dispatch below is on the authorization's own phase, so
+        the two cannot be swapped by a caller reading the code in the wrong
+        order.
+        """
         authorization = self._authorization
-        check = revalidate(authorization, observation)
-        if not check.valid:
-            return self._drop(check, observation)
-        outcome = recovery_outcome(authorization, observation)
-        if outcome == RECOVERY_OUTCOME_PENDING:
+        if not authorization.acted:
+            check = revalidate(authorization, observation)
+            if not check.valid:
+                return self._drop(check, observation)
             return None
-        self._record(outcome, outcome, observation,
+        evaluation = evaluate_attempt(authorization, observation)
+        if evaluation.outcome == RECOVERY_OUTCOME_PENDING:
+            return None
+        self._record(evaluation.outcome, evaluation.outcome, observation,
                      attempt_id=authorization.authorization_id,
-                     target=authorization.target.as_dict())
+                     target=authorization.target.as_dict(),
+                     detail={"supersession": evaluation.supersession,
+                             "sequence_advanced": evaluation.sequence_advanced,
+                             "elapsed_s": round(evaluation.elapsed_s, 3)})
         self._authorization = None
-        return {"mode": self.mode, "decision": None, "action": outcome}
+        return {"mode": self.mode, "decision": None, "action": evaluation.outcome,
+                "supersession": evaluation.supersession}
 
     def _drop(self, check, observation) -> Dict:
         authorization = self._authorization
         self._record(check.outcome, check.reason, observation,
                      attempt_id=authorization.authorization_id if authorization else None,
                      target=authorization.target.as_dict() if authorization else None)
-        # An authorization invalidated because samples arrived is the good case.
-        # It is recorded with the same weight as the bad ones, and reported as
-        # the outcome that matters: invalidation is the mechanism, restored
-        # sample flow is the result. A caller told only "AUTHORIZATION_
-        # INVALIDATED" would have to infer the recovery worked.
-        restored = (check.reason == "SAMPLES_ARRIVED_SINCE_AUTHORIZATION"
-                    and authorization is not None
-                    and observation.latest_sequence > authorization.sequence_at_authorization)
-        if restored:
-            self._record(SAMPLE_FLOW_RESTORED, check.reason, observation,
+        # Only reachable before acting, so nothing here judges a restart. A
+        # fence dropped because samples arrived is the fault resolving itself:
+        # recorded, and reported as the outcome that matters rather than as the
+        # mechanism, since a caller told only "AUTHORIZATION_INVALIDATED" would
+        # have to infer that the source came back on its own.
+        healed = (check.reason == "SAMPLES_ARRIVED_SINCE_AUTHORIZATION"
+                  and authorization is not None
+                  and observation.latest_sequence > authorization.sequence_at_authorization)
+        if healed:
+            self._record("SAMPLE_FLOW_RESTORED", check.reason, observation,
                          attempt_id=authorization.authorization_id,
-                         target=authorization.target.as_dict())
+                         target=authorization.target.as_dict(),
+                         detail={"restored_without_intervention": True})
         self._authorization = None
         return {"mode": self.mode, "decision": None,
-                "action": SAMPLE_FLOW_RESTORED if restored else check.outcome,
+                "action": "SAMPLE_FLOW_RESTORED" if healed else check.outcome,
                 "reason": check.reason}
 
     def status(self) -> Dict:
