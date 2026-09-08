@@ -256,6 +256,32 @@ class CoordinatorLifecycleTests(unittest.TestCase):
         self.assertEqual(result["action"], "PROCESS_RESTARTED_STILL_STARVED")
         self.assertEqual(result["supersession"], "SUPERSEDED")
 
+    def test_a_host_reboot_is_undetermined_rather_than_a_failed_restart(self):
+        """The metric the split protects: recovery failures are not reboots."""
+        self.world.will_stream = False
+        self.coordinator.evaluate(self.world.observe())
+        rebooted = ProcessIdentity(boot_id="a-different-boot", pid=4242, start_ticks=7)
+        later = self.world.observe(
+            now=NOW + int(OBSERVATION_DEADLINE_S * SECOND) + SECOND,
+            capture_process=rebooted)
+        result = self.coordinator.evaluate(later)
+        self.assertEqual(result["action"], "RECOVERY_OUTCOME_UNDETERMINED")
+        self.assertEqual(result["supersession"], "UNRELATED")
+        for failure in ("PROCESS_RESTARTED_STILL_STARVED", "RESTART_NOT_OBSERVED"):
+            self.assertNotIn(failure, self._events())
+        recorded = self.audit.status()["records"][-1]
+        self.assertEqual(recorded["detail"]["reason"], "KERNEL_BOOT_CHANGED")
+
+    def test_a_vanished_capture_process_is_still_a_same_boot_assertion(self):
+        self.world.will_stream = False
+        self.coordinator.evaluate(self.world.observe())
+        later = self.world.observe(
+            now=NOW + int(OBSERVATION_DEADLINE_S * SECOND) + SECOND,
+            capture_process=None)
+        result = self.coordinator.evaluate(later)
+        self.assertEqual(result["action"], "RESTART_NOT_OBSERVED")
+        self.assertEqual(result["supersession"], "UNOBSERVABLE")
+
     def test_a_restart_that_never_took_is_not_reported_as_a_restart(self):
         """PROCESS_RESTARTED_STILL_STARVED would assert something that did not happen."""
         self.world.will_take = False

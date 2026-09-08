@@ -272,6 +272,7 @@ class RecoveryCoordinator:
                      attempt_id=authorization.authorization_id,
                      target=authorization.target.as_dict(),
                      detail={"supersession": evaluation.supersession,
+                             "reason": evaluation.reason,
                              "sequence_advanced": evaluation.sequence_advanced,
                              "elapsed_s": round(evaluation.elapsed_s, 3)})
         self._authorization = None
