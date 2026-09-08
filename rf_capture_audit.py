@@ -56,7 +56,13 @@ EVENTS: Tuple[str, ...] = (
     "RESTART_REQUEST_FAILED",
     "SAMPLE_FLOW_RESTORED",
     "PROCESS_RESTARTED_STILL_STARVED",
+    # The deadline passed and the incarnation never advanced. Distinct from the
+    # line above, which asserts a restart that this one did not observe.
+    "RESTART_NOT_OBSERVED",
     "RECOVERY_SUPPRESSED",
+    # Shadow's suppression. Named apart from RECOVERY_SUPPRESSED so a simulated
+    # budget can never be counted as a real one.
+    "WOULD_BE_SUPPRESSED",
 )
 
 # Events that mean a real process was targeted. Shadow may never write one.
@@ -126,7 +132,7 @@ class CaptureRecoveryAudit:
             self._records.append(record)
             self._counts[event] = self._counts.get(event, 0) + 1
             self._recorded += 1
-            if event == "WOULD_REQUEST_RESTART":
+            if event in ("WOULD_REQUEST_RESTART", "WOULD_BE_SUPPRESSED"):
                 self._shadow_decisions += 1
         return record
 

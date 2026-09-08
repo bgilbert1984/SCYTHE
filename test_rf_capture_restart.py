@@ -171,74 +171,211 @@ class ModeTests(unittest.TestCase):
         self.assertEqual(order, [("request", 1)])
 
 
+class CaptureWorld:
+    """A capture process that behaves like one: restarting mints a new incarnation.
+
+    The fault model, not the coverage, was what let two live bugs through. The
+    earlier fixtures held the identity constant across a restart, which no real
+    restart does -- so a test could assert the constant-identity world and pass
+    while the coordinator misjudged every real recovery. Restart here advances
+    start_ticks unconditionally, and a test that wants the "restart did not
+    take" case has to ask for it by name.
+    """
+
+    def __init__(self, *, pid=1727, ticks=13345, boot=BOOT):
+        self.identity = ProcessIdentity(boot_id=boot, pid=pid, start_ticks=ticks)
+        self.restarts = 0
+        self.will_take = True          # False models a restart that never happened
+        self.will_stream = True        # False models a restart that delivers nothing
+        self.sequence = 0
+        self.sample_age_ms = 60_000.0
+
+    def restart(self):
+        self.restarts += 1
+        if self.will_take:
+            # A new incarnation. start_ticks only increases within a boot.
+            self.identity = ProcessIdentity(
+                boot_id=self.identity.boot_id,
+                pid=self.identity.pid + 90_000 + self.restarts,
+                start_ticks=self.identity.start_ticks + 1_000_000 * self.restarts)
+        if self.will_stream:
+            self.sequence += 82
+            self.sample_age_ms = 20.0
+        return RestartRequestResult(RESTART_REQUEST_ACCEPTED, "job 1")
+
+    def observe(self, *, now=NOW, **overrides):
+        fields = dict(
+            observed_monotonic_ns=now,
+            availability="SOURCE_STREAMING" if self.sample_age_ms < 2500 else "SOURCE_STARVED",
+            transport_state="CONNECTED",
+            flow_state="ACTIVE" if self.sample_age_ms < 2500 else "STARVED",
+            last_sample_age_ms=self.sample_age_ms,
+            reconnect_count=411,
+            incident_id="starve-incident-0001",
+            incident_opened_monotonic_ns=int(now - 60 * SECOND),
+            capture_process=self.identity, incident_capture_process=self.identity,
+            recovery_attempts=(), latest_sequence=self.sequence)
+        fields.update(overrides)
+        return RecoveryObservation(**fields)
+
+
 class CoordinatorLifecycleTests(unittest.TestCase):
-    """Authorization outcomes reach the audit, including the ones we like."""
+    """Outcomes reach the audit, including the one that was unreachable."""
 
     def setUp(self):
         self.audit = CaptureRecoveryAudit()
+        self.world = CaptureWorld()
         self.coordinator = RecoveryCoordinator(
-            self.audit, mode=MODE_ARMED,
-            requester=lambda: RestartRequestResult(RESTART_REQUEST_ACCEPTED, "job 1"))
+            self.audit, mode=MODE_ARMED, requester=self.world.restart)
 
     def _events(self):
         return [r["event"] for r in self.audit.status()["records"]]
 
-    def test_a_restart_that_works_records_sample_flow_restored(self):
-        self.coordinator.evaluate(_starved())
-        healed = _starved(now=NOW + 5 * SECOND, sequence=9, sample_age_ms=20.0)
-        result = self.coordinator.evaluate(healed)
-        self.assertEqual(result["action"], "SAMPLE_FLOW_RESTORED")
-        self.assertIn("SAMPLE_FLOW_RESTORED", self._events())
-        self.assertIsNone(self.coordinator.authorization)
+    def test_a_working_restart_records_sample_flow_restored(self):
+        """The live 2026-09-07 case, which previously recorded an invalidation.
 
-    def test_a_restart_that_does_not_work_records_still_starved(self):
-        self.coordinator.evaluate(_starved())
-        later = _starved(now=NOW + int(OBSERVATION_DEADLINE_S * SECOND),
-                         sequence=0, sample_age_ms=90_000.0)
+        The restart succeeds, which necessarily changes the incarnation. Before
+        the fix the fence ran post-attempt, read that change as
+        TARGET_IDENTITY_CHANGED, and recorded AUTHORIZATION_INVALIDATED for a
+        recovery that plainly worked.
+        """
+        self.coordinator.evaluate(self.world.observe())
+        self.assertEqual(self.world.restarts, 1)
+        self.assertTrue(self.world.identity.supersedes(
+            self.coordinator.attempts[0] and ProcessIdentity(BOOT, 1727, 13345)))
+        result = self.coordinator.evaluate(self.world.observe(now=NOW + 8 * SECOND))
+        self.assertEqual(result["action"], "SAMPLE_FLOW_RESTORED")
+        self.assertEqual(result["supersession"], "SUPERSEDED")
+        self.assertIn("SAMPLE_FLOW_RESTORED", self._events())
+
+    def test_a_restart_that_takes_but_still_starves_is_named_as_such(self):
+        self.world.will_stream = False
+        self.coordinator.evaluate(self.world.observe())
+        later = self.world.observe(now=NOW + int(OBSERVATION_DEADLINE_S * SECOND) + SECOND)
         result = self.coordinator.evaluate(later)
         self.assertEqual(result["action"], "PROCESS_RESTARTED_STILL_STARVED")
-        self.assertIn("PROCESS_RESTARTED_STILL_STARVED", self._events())
+        self.assertEqual(result["supersession"], "SUPERSEDED")
 
-    def test_a_new_pid_alone_is_not_treated_as_recovery(self):
-        """The restart produced a new process that still delivers nothing."""
-        self.coordinator.evaluate(_starved())
-        fresh = _starved(now=NOW + int(OBSERVATION_DEADLINE_S * SECOND),
-                         sequence=0, sample_age_ms=90_000.0,
-                         capture_process=_identity(pid=9999, ticks=99999))
-        result = self.coordinator.evaluate(fresh)
-        self.assertEqual(result["action"], "AUTHORIZATION_INVALIDATED")
-        self.assertNotIn("SAMPLE_FLOW_RESTORED", self._events())
+    def test_a_restart_that_never_took_is_not_reported_as_a_restart(self):
+        """PROCESS_RESTARTED_STILL_STARVED would assert something that did not happen."""
+        self.world.will_take = False
+        self.world.will_stream = False
+        self.coordinator.evaluate(self.world.observe())
+        later = self.world.observe(now=NOW + int(OBSERVATION_DEADLINE_S * SECOND) + SECOND)
+        result = self.coordinator.evaluate(later)
+        self.assertEqual(result["action"], "RESTART_NOT_OBSERVED")
+        self.assertEqual(result["supersession"], "UNCHANGED")
+        self.assertNotIn("PROCESS_RESTARTED_STILL_STARVED", self._events())
 
-    def test_success_is_observable_only_if_the_policy_still_runs_when_healthy(self):
-        """The bug the live ARMED test found.
+    def test_a_changed_identity_before_acting_still_invalidates(self):
+        """The fence keeps its polarity on the pre-action side.
 
-        Stepping the policy only while the socket is silent means a restart that
-        works stops the timeouts, the coordinator is never called again, and the
-        one event proving recovery is never written. Success must be reachable
-        from an observation taken while samples are flowing.
+        Same comparison, opposite meaning: before acting, a changed incarnation
+        means something else already replaced the target, so the authorization
+        no longer describes anything and must be dropped.
         """
-        self.coordinator.evaluate(_starved())
-        self.assertIsNotNone(self.coordinator.authorization)
-        streaming = _starved(now=NOW + 8 * SECOND, sequence=82, sample_age_ms=15.0,
-                             availability="SOURCE_STREAMING", flow_state="ACTIVE")
-        result = self.coordinator.evaluate(streaming)
-        self.assertEqual(result["action"], "SAMPLE_FLOW_RESTORED")
-        self.assertIn("SAMPLE_FLOW_RESTORED", self._events())
+        from rf_capture_recovery import authorize, decide, revalidate
+        auth = authorize(decide(self.world.observe()), authorization_id="a1")
+        self.world.restart()                      # something else restarted it
+        check = revalidate(auth, self.world.observe())
+        self.assertFalse(check.valid)
+        self.assertEqual(check.reason, "TARGET_IDENTITY_CHANGED")
 
-    def test_an_expiring_authorization_is_recorded_not_dropped_silently(self):
-        self.coordinator.evaluate(_starved())
-        late = _starved(now=NOW + 3600 * SECOND, sequence=0, sample_age_ms=3_600_000.0)
-        self.coordinator.evaluate(late)
-        self.assertIn("AUTHORIZATION_EXPIRED", self._events())
+    def test_the_fence_cannot_be_asked_of_an_acted_authorization(self):
+        from rf_capture_recovery import evaluate_attempt, revalidate
+        self.coordinator.evaluate(self.world.observe())
+        acted = self.coordinator.authorization
+        self.assertIsNotNone(acted)
+        self.assertTrue(acted.acted)
+        with self.assertRaises(ValueError):
+            revalidate(acted, self.world.observe())
+
+    def test_the_outcome_evaluator_cannot_be_asked_of_a_fenced_authorization(self):
+        from rf_capture_recovery import evaluate_attempt
+        coordinator = RecoveryCoordinator(self.audit, mode=MODE_SHADOW)
+        from rf_capture_recovery import authorize, decide
+        auth = authorize(decide(self.world.observe()), authorization_id="a1")
+        self.assertFalse(auth.acted)
+        with self.assertRaises(ValueError):
+            evaluate_attempt(auth, self.world.observe())
+
+    def test_an_expiring_authorization_is_recorded_before_it_is_acted_on(self):
+        coordinator = RecoveryCoordinator(
+            self.audit, mode=MODE_ARMED,
+            requester=lambda: RestartRequestResult(RESTART_REQUEST_FAILED, "no bus"))
+        coordinator.evaluate(self.world.observe())
+        self.assertIn("RESTART_REQUEST_FAILED", self._events())
 
     def test_suppression_reaches_the_audit(self):
         from rf_capture_recovery import RecoveryAttempt
-        spent = _starved(recovery_attempts=(RecoveryAttempt(
+        spent = self.world.observe(recovery_attempts=(RecoveryAttempt(
             incident_id="starve-incident-0001", kernel_boot_id=BOOT, target_pid=1727,
             target_start_ticks=13345, attempted_monotonic_ns=NOW - 300 * SECOND),))
         result = self.coordinator.evaluate(spent)
         self.assertEqual(result["decision"], "RECOVERY_SUPPRESSED")
         self.assertIn("RECOVERY_SUPPRESSED", self._events())
+
+
+class ShadowFidelityTests(unittest.TestCase):
+    """Shadow must reproduce the breaker, not the amplification it prevents."""
+
+    def setUp(self):
+        self.audit = CaptureRecoveryAudit()
+        self.world = CaptureWorld()
+        self.coordinator = RecoveryCoordinator(self.audit, mode=MODE_SHADOW)
+
+    def test_shadow_spends_a_simulated_budget_instead_of_amplifying(self):
+        """2688 would-be restarts over four hours was the amplification, not the plan.
+
+        The check runs every 5 s for an hour of simulated outage. Exactly one
+        would-be restart is judged; the cooldown holds the next two minutes, and
+        the breaker holds everything after that. Before the simulated ledger
+        existed this produced 720 would-be restarts for one incident.
+        """
+        actions = []
+        ticks = 720                                   # 5 s apart == one hour
+        for tick in range(ticks):
+            observation = self.world.observe(
+                now=NOW + tick * 5 * SECOND,
+                recovery_attempts=self.coordinator.policy_attempts)
+            actions.append(self.coordinator.evaluate(observation)["action"])
+        counts = self.audit.status()["counts"]
+        self.assertEqual(actions[0], "WOULD_REQUEST_RESTART")
+        self.assertEqual(counts["WOULD_REQUEST_RESTART"], 1,
+                         "one per process identity, not one per check")
+        self.assertNotIn("WOULD_REQUEST_RESTART", actions[1:])
+        # The cooldown answers first, then the breaker takes over for good.
+        self.assertEqual(set(actions[1:]), {"NONE", "WOULD_BE_SUPPRESSED"})
+        self.assertGreater(counts["WOULD_BE_SUPPRESSED"], 0)
+        self.assertEqual(actions[-1], "WOULD_BE_SUPPRESSED")
+
+    def test_the_amplification_is_what_the_breaker_exists_to_stop(self):
+        """Without the simulated ledger, every check would judge a fresh restart."""
+        naive = RecoveryCoordinator(CaptureRecoveryAudit(), mode=MODE_SHADOW)
+        judged = sum(1 for tick in range(40)
+                     if naive.evaluate(self.world.observe(
+                         now=NOW + tick * 5 * SECOND,
+                         recovery_attempts=()))["action"] == "WOULD_REQUEST_RESTART")
+        self.assertEqual(judged, 40, "an empty ledger reproduces the old behaviour")
+
+    def test_a_simulated_budget_never_becomes_a_real_one(self):
+        for tick in range(5):
+            self.coordinator.evaluate(self.world.observe(
+                now=NOW + tick * 5 * SECOND,
+                recovery_attempts=self.coordinator.policy_attempts))
+        self.assertEqual(self.coordinator.attempts, (),
+                         "shadow consumed no real attempt")
+        self.assertEqual(len(self.coordinator.policy_attempts), 1)
+        # One judgement, not one per tick: the remaining four are inside the
+        # cooldown and produce no audit event at all.
+        self.assertEqual(self.audit.status()["shadow_decisions"], 1)
+        self.assertEqual(self.audit.status()["counts"].get("RECOVERY_SUPPRESSED", 0), 0,
+                         "shadow suppression is never counted as real suppression")
+
+    def test_armed_reads_the_real_ledger_not_the_shadow_one(self):
+        armed = RecoveryCoordinator(self.audit, mode=MODE_ARMED,
+                                    requester=self.world.restart)
+        self.assertEqual(armed.policy_attempts, armed.attempts)
 
 
 class AuditIndependenceTests(unittest.TestCase):

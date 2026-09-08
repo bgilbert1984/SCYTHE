@@ -161,6 +161,22 @@ class ProcessIdentity:
                 and self.pid == other.pid
                 and self.start_ticks == other.start_ticks)
 
+    def supersedes(self, other: Optional["ProcessIdentity"]) -> bool:
+        """Whether this incarnation came after `other` in the same boot.
+
+        ``start_ticks`` counts from that boot's zero, so within one boot it is
+        an incarnation number and it only increases. That gives the ordering a
+        bare identity comparison cannot: "different" and "later" are not the
+        same claim, and a restart is supposed to produce the second.
+
+        Across boots there is no ordering to have. Each boot restarts the
+        counter, so two identities from different boots are unrelated rather
+        than one being newer, and this returns False for them.
+        """
+        if other is None or self.boot_id != other.boot_id:
+            return False
+        return self.start_ticks > other.start_ticks
+
     def as_dict(self) -> Dict[str, Any]:
         return {"kernel_boot_id": self.boot_id, "capture_pid": self.pid,
                 "capture_process_start_ticks": self.start_ticks,
@@ -394,6 +410,20 @@ class RecoveryAuthorization:
     authorized_monotonic_ns: int
     sequence_at_authorization: int
     ttl_s: float = AUTHORIZATION_TTL_S
+    # None until a restart has actually been requested against this
+    # authorization. Its presence selects which question may be asked of it, so
+    # the two callsites cannot be wired to the wrong one.
+    attempted_monotonic_ns: Optional[int] = None
+
+    @property
+    def acted(self) -> bool:
+        return self.attempted_monotonic_ns is not None
+
+    def with_attempt(self, attempted_monotonic_ns: int) -> "RecoveryAuthorization":
+        """Move the authorization past the fence. One-way."""
+        if self.acted:
+            raise ValueError("this authorization has already been acted on")
+        return replace(self, attempted_monotonic_ns=int(attempted_monotonic_ns))
 
     def expires_monotonic_ns(self) -> int:
         return self.authorized_monotonic_ns + int(self.ttl_s * 1e9)
@@ -405,7 +435,9 @@ class RecoveryAuthorization:
                 "authorized_monotonic_ns": self.authorized_monotonic_ns,
                 "sequence_at_authorization": self.sequence_at_authorization,
                 "ttl_s": self.ttl_s,
-                "expires_monotonic_ns": self.expires_monotonic_ns()}
+                "expires_monotonic_ns": self.expires_monotonic_ns(),
+                "attempted_monotonic_ns": self.attempted_monotonic_ns,
+                "phase": "ACTED" if self.acted else "FENCED"}
 
 
 @dataclass(frozen=True)
@@ -446,13 +478,22 @@ def authorize(decision: RecoveryDecision, *, authorization_id: str
 
 def revalidate(authorization: RecoveryAuthorization,
                observation: RecoveryObservation) -> Revalidation:
-    """The check immediately before acting. Pure, and deliberately not transport.
+    """The fence, immediately before acting. Pure, and deliberately not transport.
 
     Transport state is absent from this by design. The question here is not "is
     the socket up right now" but "is this still the same broken thing I was
     authorized against, and has it stayed broken". A flapping wedge answers the
     first differently every few seconds and the second identically every time.
+
+    Refuses to run on an authorization that has already been acted on. After a
+    restart the identity has changed *because we changed it*, and running the
+    fence there reads the intended outcome as a disqualification -- which is
+    exactly what it did, on a live wedge, on 2026-09-07.
     """
+    if authorization.acted:
+        raise ValueError(
+            "revalidate is the pre-action fence and cannot judge an acted "
+            "authorization; use evaluate_attempt")
     if observation.observed_monotonic_ns >= authorization.expires_monotonic_ns():
         return _revalidation(AUTHORIZATION_EXPIRED, "TTL_ELAPSED")
     if observation.incident_id is None:
@@ -475,7 +516,101 @@ def revalidate(authorization: RecoveryAuthorization,
 
 SAMPLE_FLOW_RESTORED = "SAMPLE_FLOW_RESTORED"
 PROCESS_RESTARTED_STILL_STARVED = "PROCESS_RESTARTED_STILL_STARVED"
+# Distinct from the above, and the distinction is honesty rather than detail.
+# PROCESS_RESTARTED_STILL_STARVED asserts a restart happened. If the incarnation
+# never advanced, no restart was observed, and reporting one would be a claim
+# about something that did not occur.
+RESTART_NOT_OBSERVED = "RESTART_NOT_OBSERVED"
 RECOVERY_OUTCOME_PENDING = "RECOVERY_OUTCOME_PENDING"
+RECOVERY_OUTCOMES: Tuple[str, ...] = (
+    SAMPLE_FLOW_RESTORED, PROCESS_RESTARTED_STILL_STARVED,
+    RESTART_NOT_OBSERVED, RECOVERY_OUTCOME_PENDING)
+
+# What the observed incarnation says about the authorized one, after acting.
+SUPERSEDED = "SUPERSEDED"          # the fence advanced: this is what a restart does
+UNCHANGED = "UNCHANGED"            # the same process is still there
+UNRELATED = "UNRELATED"            # a different boot, or an older incarnation
+UNOBSERVABLE = "UNOBSERVABLE"      # nothing holds the endpoint to identify
+SUPERSESSION_STATES: Tuple[str, ...] = (SUPERSEDED, UNCHANGED, UNRELATED, UNOBSERVABLE)
+
+
+def supersession(authorized: ProcessIdentity,
+                 observed: Optional[ProcessIdentity]) -> str:
+    """Which side of the generation boundary the observed process is on."""
+    if observed is None:
+        return UNOBSERVABLE
+    if observed.same_process_as(authorized):
+        return UNCHANGED
+    if observed.supersedes(authorized):
+        return SUPERSEDED
+    return UNRELATED
+
+
+@dataclass(frozen=True)
+class AttemptEvaluation:
+    """What the restart did, and which side of the fence the process is on."""
+
+    outcome: str
+    supersession: str
+    elapsed_s: float
+    sequence_advanced: bool
+    samples_after_authorization: bool
+
+    def as_dict(self) -> Dict[str, Any]:
+        return {"outcome": self.outcome, "supersession": self.supersession,
+                "elapsed_s": round(self.elapsed_s, 3),
+                "sequence_advanced": self.sequence_advanced,
+                "samples_after_authorization": self.samples_after_authorization,
+                "note": ("A CHANGED INCARNATION AFTER ACTING IS THE INTENDED "
+                         "OUTCOME, NOT A DISQUALIFICATION. SUCCESS IS STILL "
+                         "DECIDED BY DECODED SAMPLES AND A SEQUENCE ADVANCE")}
+
+
+def evaluate_attempt(authorization: RecoveryAuthorization,
+                     observation: RecoveryObservation,
+                     *, deadline_s: float = OBSERVATION_DEADLINE_S
+                     ) -> AttemptEvaluation:
+    """Judge an authorization that has been acted on. Pure.
+
+    The identity comparison here has the opposite polarity to the fence. A
+    restart necessarily produces a new incarnation, so ``SUPERSEDED`` is what
+    success looks like from the identity side and is never a reason to
+    invalidate. It is recorded, then the outcome falls through to the only
+    things that actually establish recovery: decoded samples arriving after the
+    authorization, and a frame sequence past the mark taken at that moment.
+
+    That ordering is why ``SAMPLE_FLOW_RESTORED`` is reachable by construction
+    rather than by a caller remembering to ask the right question first.
+
+    Refuses to run on an authorization that has not been acted on: before a
+    restart, a changed identity means something else replaced the target, which
+    is a fence failure and not an outcome.
+    """
+    if not authorization.acted:
+        raise ValueError(
+            "evaluate_attempt judges a restart that was made; an unacted "
+            "authorization is judged by revalidate")
+    where = supersession(authorization.target, observation.capture_process)
+    last_sample_ns = observation.last_sample_monotonic_ns()
+    samples_after = (last_sample_ns is not None
+                     and last_sample_ns > authorization.attempted_monotonic_ns)
+    advanced = observation.latest_sequence > authorization.sequence_at_authorization
+    elapsed_s = (observation.observed_monotonic_ns
+                 - authorization.attempted_monotonic_ns) / 1e9
+    if samples_after and advanced:
+        outcome = SAMPLE_FLOW_RESTORED
+    elif elapsed_s < deadline_s:
+        outcome = RECOVERY_OUTCOME_PENDING
+    elif where == SUPERSEDED:
+        outcome = PROCESS_RESTARTED_STILL_STARVED
+    else:
+        # The deadline passed and the incarnation never advanced. Reporting
+        # PROCESS_RESTARTED_STILL_STARVED here would assert a restart that was
+        # not observed to happen.
+        outcome = RESTART_NOT_OBSERVED
+    return AttemptEvaluation(outcome=outcome, supersession=where,
+                             elapsed_s=elapsed_s, sequence_advanced=advanced,
+                             samples_after_authorization=samples_after)
 
 
 def recovery_outcome(authorization: RecoveryAuthorization,
@@ -713,6 +848,13 @@ def policy_status() -> Dict[str, Any]:
             "NOT RECOVERY"),
         "success_requires": ("DECODED_SAMPLES_AFTER_AUTHORIZATION",
                              "LATEST_SEQUENCE_ABOVE_SEQUENCE_AT_AUTHORIZATION"),
+        "recovery_outcomes": list(RECOVERY_OUTCOMES),
+        "supersession_states": list(SUPERSESSION_STATES),
+        "identity_polarity_note": (
+            "THE SAME IDENTITY COMPARISON IS A FENCE BEFORE ACTING AND A "
+            "SUPERSESSION SIGNAL AFTER IT. A RESTART NECESSARILY CHANGES THE "
+            "INCARNATION, SO A CHANGED IDENTITY AFTER ACTING IS THE INTENDED "
+            "OUTCOME AND NEVER A DISQUALIFICATION"),
         "policy_authority": "CONFIGURED_POLICY",
         "cause": UNDETERMINED_CAUSE,
         "restoration_definition": RESTORATION_DEFINITION,

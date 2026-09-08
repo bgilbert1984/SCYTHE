@@ -1015,7 +1015,9 @@ class SDRPlusPlusBridge:
                 # compare against; revalidation is what catches a substitution
                 # between authorization and action.
                 incident_capture_process=identity,
-                recovery_attempts=self.recovery.attempts,
+                # policy_attempts, not attempts: in SHADOW this is the
+                # simulated ledger, so the breaker engages there too.
+                recovery_attempts=self.recovery.policy_attempts,
                 latest_sequence=sequence,
                 reconnect_count=source.get("reconnect_count", 0),
                 observed_monotonic_ns=time.monotonic_ns())
