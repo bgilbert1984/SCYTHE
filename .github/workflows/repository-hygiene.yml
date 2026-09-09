@@ -43,7 +43,10 @@ jobs:
       - name: Install GraphOps test dependencies
         run: python -m pip install numpy flask Flask-Cors PyJWT requests
       - name: Compile GraphOps Python modules
-        run: python -m compileall -q rf_*.py graphops_rf_*.py rf_spectrum_contract.py graphops_full_fidelity.py scythe_orchestrator.py
+        # Globbed for the same reason the test step above is: scythe_orchestrator
+        # was named here by hand, so scythe_invariant_ledger, _capsule and the
+        # promotion modules were never compiled by CI at all.
+        run: python -m compileall -q rf_*.py graphops_rf_*.py rf_spectrum_contract.py graphops_full_fidelity.py scythe_*.py
       - name: Run GraphOps workbench tests
         run: python -m unittest -v test_graphops_workbench.py test_graphops_rf_ingest.py test_graphops_full_fidelity.py
 
