@@ -25,12 +25,11 @@ from scythe_promotion_policy import (
 SECOND = 1_000_000_000
 NOW = 10_000 * SECOND
 # Eight preserved fields, so that distinct findings can be built the only way
-# the merged policy actually distinguishes them: by *which* field disagrees.
-# See PromotionIdentityTests.
-PRESERVED = tuple(f"keep_{i}" for i in range(8))
-CONTRACT = TransitionContract(name="T", must_preserve=PRESERVED,
+# the merged policy distinguishes them: since promotion identity v2 that is
+# the coordinate a field moved to. See PromotionIdentityTests.
+CONTRACT = TransitionContract(name="T", must_preserve=("keep", "other"),
                               must_change=("move",), domain_fields=("boot",))
-BASE = dict({f: "same" for f in PRESERVED}, boot="boot-a", move=1)
+BASE = {"boot": "boot-a", "keep": "same", "other": "same", "move": 1}
 CAPSULE = CapsuleIdentity(schema="scythe.invariant-capsule.v1",
                           digest="blake2s:aabbcc", within_bounds=True,
                           carries_samples=False)
@@ -43,9 +42,9 @@ def _verdict(move_to=1, changed_field=None, changed_to="different"):
     """A REQUIRED_CHANGE_NOT_OBSERVED by default, promotable.
 
     `changed_field` adds a PROHIBITED_CHANGE on that field. Distinctness comes
-    from the field, never from the value: verdict_digest carries the shape of a
-    disagreement and not its coordinates, so two different values on one field
-    are one promotion identity. PromotionIdentityTests pins that.
+    from the coordinate it moved to: since promotion identity v2 the digest
+    binds each finding to its before and after values, so two movements of one
+    field are two promotions. PromotionIdentityTests holds that.
     """
     after = dict(BASE, move=move_to)
     if changed_field is not None:
@@ -54,8 +53,8 @@ def _verdict(move_to=1, changed_field=None, changed_to="different"):
 
 
 def _distinct(index):
-    """The index-th of eight findings that the merged policy tells apart."""
-    return _verdict(changed_field=f"keep_{index}")
+    """The index-th of a family of findings, told apart by their coordinate."""
+    return _verdict(changed_field="keep", changed_to=f"100.{index}")
 
 
 def _satisfied():
@@ -325,39 +324,40 @@ class PromotionIdentityTests(unittest.TestCase):
     """
 
     def test_a_disagreement_on_a_different_field_is_a_different_promotion(self):
-        self.assertNotEqual(verdict_digest(_distinct(0)),
-                            verdict_digest(_distinct(1)))
+        self.assertNotEqual(verdict_digest(_verdict(changed_field="keep")),
+                            verdict_digest(_verdict(changed_field="other")))
 
-    def test_two_disagreements_on_one_field_share_a_promotion_identity(self):
-        """KNOWN DEFECT, pinned rather than hidden -- in scythe_promotion_policy,
-        not here.
-
-        verdict_digest hashes (verdict, field, expected, observed), and for a
-        PROHIBITED_CHANGE expected/observed are the literals "UNCHANGED" and
-        "CHANGED". The coordinate values are absent. So a signal chain moving
-        100.1 -> 100.2 MHz and later 100.2 -> 100.3 MHz are two findings with
-        one identity, and a ledger doing its job refuses the second as a
-        duplicate.
-
-        Proposed fix, deliberately NOT applied in this PR: carry the before and
-        after coordinate values in the digest. That changes every existing
-        promotion identity, so it is its own slice. When it lands, this test
-        fails, which is how it should be found.
+    def test_two_movements_of_one_field_are_two_promotions(self):
+        """Repaired in #27. Before it, both hashed alike and the ledger --
+        correctly, on the key it was handed -- refused the second as a
+        duplicate, dropping a real finding without a trace.
         """
-        first = _verdict(changed_field="keep_0", changed_to="100.2")
-        second = _verdict(changed_field="keep_0", changed_to="100.3")
-        self.assertEqual(verdict_digest(first), verdict_digest(second))
-
-    def test_the_collision_costs_a_real_finding(self):
-        """The consequence, stated as behaviour: the second finding is dropped."""
         audit = PromotionAudit()
         coordinator = PromotionCoordinator(audit, mode=MODE_SHADOW)
         first = coordinator.evaluate(
-            _verdict(changed_field="keep_0", changed_to="100.2"),
+            _verdict(changed_field="keep", changed_to="100.2"),
             REQUEST, CAPSULE, now_monotonic_ns=NOW)
         second = coordinator.evaluate(
-            _verdict(changed_field="keep_0", changed_to="100.3"),
+            _verdict(changed_field="keep", changed_to="100.3"),
             REQUEST, CAPSULE, now_monotonic_ns=NOW + SECOND)
+        self.assertEqual(first["outcome"], WOULD_PROMOTE)
+        self.assertEqual(second["outcome"], WOULD_PROMOTE)
+        self.assertEqual(audit.status()["counts"][WOULD_PROMOTE], 2)
+        # Two identities in the simulated ledger, not one entry written twice.
+        self.assertEqual(len(coordinator.policy_keys), 2)
+
+    def test_the_same_finding_twice_is_still_one_promotion(self):
+        """The repair must not have cost idempotency, which is the other half.
+
+        A key that told everything apart, including a re-evaluation of one
+        transition, would make re-checking accumulate records.
+        """
+        audit = PromotionAudit()
+        coordinator = PromotionCoordinator(audit, mode=MODE_SHADOW)
+        first = coordinator.evaluate(_distinct(2), REQUEST, CAPSULE,
+                                     now_monotonic_ns=NOW)
+        second = coordinator.evaluate(_distinct(2), REQUEST, CAPSULE,
+                                      now_monotonic_ns=NOW + SECOND)
         self.assertEqual(first["outcome"], WOULD_PROMOTE)
         self.assertEqual(second["outcome"], WOULD_BE_REFUSED)
         self.assertIn("DUPLICATE_PROMOTION", second["refusals"])
