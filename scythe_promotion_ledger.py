@@ -259,9 +259,16 @@ class PromotionCoordinator:
         return self._act(decision, now_monotonic_ns)
 
     def _act(self, decision: PromotionDecision, now_ns: int) -> Dict[str, Any]:
-        # Appended BEFORE the write. A crash between the call and the record
-        # must leave a promotion that happened and was not counted, never the
-        # reverse: an uncounted promotion can write again for free.
+        # Reserved BEFORE the write, and the reservation is kept whatever the
+        # writer reports -- PROMOTION_FAILED consumes the identity too.
+        #
+        # A crash between the two leaves a reservation whose record was never
+        # written: one finding is lost, and nothing duplicate reaches the
+        # graph. The reverse ordering trades that for the opposite hazard, a
+        # record written and never counted, which the next evaluation is then
+        # free to write again. A lost finding is recoverable by re-running the
+        # check against the same evidence; a duplicate already in GraphOps is
+        # not, because nothing downstream can tell it from a second real one.
         self._promoted.append((decision.idempotency_key, now_ns))
         self._audit.record(PROMOTION_ATTEMPTED, mode=self.mode, reason="ELIGIBLE",
                            idempotency_key=decision.idempotency_key,
