@@ -216,12 +216,16 @@ it degrades the reservation to unresolved, which is the safe direction.
 **A `RESERVED` with no terminal record is `UNRESOLVED`.** The write may have
 landed and may not have.
 
-The reasoning that governs `UNDETERMINED` applies here **in parallel, not by
-extension**: not-knowing must not be recorded as failure. It is deliberately not
-the same rule. `UNDETERMINED` is a verdict about a finding reached through a
-working apparatus; `UNRESOLVED` is the apparatus reporting that it cannot say.
-Stretching the merit rule to cover an executability state would be the exact
-conflation the naming below exists to prevent.
+**This contract's own rule: an `UNRESOLVED` reservation is never recorded as a
+failure.** A write that may have landed is not a write that did not, and the
+ledger has no basis for the stronger claim.
+
+A reader will recognise the shape of the standing rule about `UNDETERMINED`, and
+should not import it. The two are parallel and not the same. `UNDETERMINED` is a
+verdict about a finding, reached through an apparatus that worked; `UNRESOLVED`
+is the apparatus reporting that it cannot say. They belong to different
+vocabularies (§5), and a rule that crossed that boundary would be the conflation
+the naming below exists to prevent.
 
 **The state is `UNRESOLVED` and deliberately not `INDETERMINATE`.** That name is
 already merit-side in merged code — a comparison outcome in
