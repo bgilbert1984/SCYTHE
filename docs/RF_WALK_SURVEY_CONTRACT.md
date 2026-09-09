@@ -4,7 +4,7 @@
 Status:                 ACCEPTED
 Accepted:               2026-09-07, after review correction 1df55c5
 Authority:              NORMATIVE
-Reason vocabulary:      v2 — PROPOSED, see §4 Amendment A
+Reason vocabulary:      v2 — ACCEPTED 2026-09-08, amendment 069ec62 (§4 Amendment A)
 Implemented foundation: rf_receiver_state.py
 Survey ingestion:       NOT_IMPLEMENTED
 Surface update:         NOT_IMPLEMENTED
@@ -274,7 +274,7 @@ another group's reason code.**
 
 ### Amendment A — absent is not disagreeing
 
-*Reason vocabulary v2. Proposed 2026-09-08.*
+*Reason vocabulary v2. Proposed and accepted 2026-09-08, in that order.*
 
 `SIGNAL_CHAIN_CHANGED` and `RECEIVER_STATE_CHAIN_CHANGED` are added because
 §6 already places them "at join" while §4 could not express them. A join can
