@@ -83,6 +83,48 @@ declared as one nowhere. The finding is recorded there because recovery has no
 contract to carry it. When one exists, it carries it, and the vocabularies
 document's conformance table gets a normal row.
 
+## 4. `PROMOTION_EXECUTION_CONTRACT.md` §8 — no exit from a `FAILED` reservation
+
+**Trigger:** slice 7 (reconciliation and generations).
+
+§2 says re-promotion after a failure is an operator action taken against the
+graph. §8's table covers only unresolved reservations — a `RESERVED` with no
+terminal record. A `RESERVED` resolved by `FAILED` is fenced (correctly: the
+write may have landed) and has **no defined path back**, because
+`RECONCILED_RELEASED` is defined against unresolved reservations only.
+
+Found by implementing the read path, which has to place every reservation in
+exactly one of committed / write-failed / unresolved and found the third state
+had an exit while the second did not.
+
+Either §8 extends to `FAILED` reservations, or §2's "operator action" is
+narrowed to say what it actually is. Not resolved here: the slice that writes
+reconciliation records is the one that has to answer it.
+
+---
+
+## 5. `SCYTHE_VERDICT_VOCABULARIES.md` §3 — the name check needs a token source
+
+**Trigger:** the next amendment to that document for a reason of its own.
+
+The substring-root check works and has now caught two real collisions. It also
+has a false-positive class: **uppercase English prose reads as a token.**
+
+Running it for §9 Amendment A reported `FAILED` as a merit-side collision. The
+hit was inside a `VERDICT_NOTES` string — *"THIS IS NOT A FAILED TRANSITION"* —
+which is prose, not a minted name. `FAILED` is free, and the check said
+otherwise.
+
+The rule should say the check runs against **declared token tuples**
+(`COORDINATE_KINDS`, `REFUSALS`, `DISPOSITIONS`, `COMPARISONS`, …) and not
+against raw uppercase text. This repository has now met that false-positive
+class four times; it is the same shape as a raw-text scan hitting a docstring.
+
+A false positive is the safe direction — it costs a rename that was not needed —
+so this is a refinement and not a defect.
+
+---
+
 ---
 
 ## Drain record
