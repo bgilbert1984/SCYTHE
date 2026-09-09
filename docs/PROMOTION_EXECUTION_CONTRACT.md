@@ -3,7 +3,8 @@
 ```text
 Status:                 ACCEPTED — nothing implemented
 Accepted:               2026-09-08, after review amendments cafda8d
-Amendment A:            §9 filesystem capability — PROPOSED 2026-09-09
+Amendment A:            §9 filesystem capability — ACCEPTED 2026-09-09,
+                        amendment 42cc6b5
 Authority:              NORMATIVE
 Constrains:             Step 4 of the promotion sequence (execution adapter)
 Depends on:             SCYTHE_VERDICT_VOCABULARIES.md  (ACCEPTED — §5 declares
