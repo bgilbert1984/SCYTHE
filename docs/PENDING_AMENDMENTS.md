@@ -20,6 +20,25 @@ rediscovery would have lived if recovery's row had not been written down.
 wish. An entry leaves this file when it lands or when it is rejected; a rejected
 entry is recorded as rejected, with the reason, rather than deleted.
 
+## How this file stays honest
+
+**Trigger: read this before adding an entry.** The check is the **drain rate,
+not the contents.**
+
+A queue with a few entries and named triggers is a working queue. The same file
+carrying eleven entries, several of whose triggers have fired without the
+entries landing, is a **second contract that nobody accepted** — non-normative
+by its header and load-bearing in fact, sitting adjacent to accepted documents
+that are silent about it.
+
+So the question to ask is never *is this list long?* It is: **has any entry's
+trigger fired?** An entry whose document opened and closed again without it is
+the failure, whatever the total. Either it lands, or it is recorded as rejected
+with the reason. It does not wait for a second trigger.
+
+This check is written here rather than remembered, for the reason the file
+exists at all.
+
 ---
 
 ## 1. `SCYTHE_VERDICT_VOCABULARIES.md` — the drafting rule
@@ -90,6 +109,21 @@ would surface as the other one silently not holding.
 
 Slice 3 may verify both with a single lookup. That is an implementation
 convenience and not a merge of the requirements.
+
+### 2d. Open question: startup refusal or mode gate
+
+**Refusing to start on an unlisted filesystem and refusing only ARMED are
+different failures for an operator**, and §9 as accepted implies the second: it
+places the lock acquisition before ARMED is reachable and leaves SHADOW
+explicitly permitted on a read-only handle.
+
+That may be right — SHADOW writes nothing, so a mount that does not exclude
+costs it nothing, and a coordinator that refuses to start takes the shadow
+observation down with it. It may also be wrong, if a deployment that cannot
+support ARMED should say so loudly at startup rather than at the moment someone
+tries to arm it.
+
+Unresolved, and the first question slice 3 has to answer.
 
 ### 2c. Expect the amendment
 
