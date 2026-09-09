@@ -66,20 +66,40 @@ DISPOSITIONS: Tuple[str, ...] = (SURFACE_ELIGIBLE, BREADCRUMB_ONLY, FRAME_REFUSE
 TIME_ALIGNMENT_UNVERIFIED = "TIME_ALIGNMENT_UNVERIFIED"
 RECEIVER_STATE_STALE = "RECEIVER_STATE_STALE"
 SIGNAL_CHAIN_UNBOUND = "SIGNAL_CHAIN_UNBOUND"
+SIGNAL_CHAIN_CHANGED = "SIGNAL_CHAIN_CHANGED"
 RECEIVER_STATE_UNBOUND = "RECEIVER_STATE_UNBOUND"
+RECEIVER_STATE_CHAIN_CHANGED = "RECEIVER_STATE_CHAIN_CHANGED"
 PRODUCT_LINEAGE_UNBOUND = "PRODUCT_LINEAGE_UNBOUND"
 POWER_UNIT_UNSUPPORTED = "POWER_UNIT_UNSUPPORTED"
 RAW_IQ_PRESENT = "RAW_IQ_PRESENT"
 
+# Vocabulary v2. Each absent/changed pair is grouped by authority rather than
+# the changed codes being appended, because ordering is a serialization concern
+# and no survey verdict has ever been persisted: the legible order was available
+# once and this was the moment.
+REASON_VOCABULARY_REVISION = "v2"
 REASON_CODES: Tuple[str, ...] = (
     TIME_ALIGNMENT_UNVERIFIED,
     RECEIVER_STATE_STALE,
     SIGNAL_CHAIN_UNBOUND,
+    SIGNAL_CHAIN_CHANGED,
     RECEIVER_STATE_UNBOUND,
+    RECEIVER_STATE_CHAIN_CHANGED,
     PRODUCT_LINEAGE_UNBOUND,
     POWER_UNIT_UNSUPPORTED,
     RAW_IQ_PRESENT,
 )
+# Which authority each lineage reason belongs to, and whether it reports an
+# absence or a disagreement. A group may report one or the other, never both:
+# disagreement needs two identities to compare, and absence means there is not
+# one to compare with.
+AUTHORITY_GROUPS: Dict[str, Dict[str, str]] = {
+    "RF_APPARATUS": {"absent": SIGNAL_CHAIN_UNBOUND,
+                     "disagreeing": SIGNAL_CHAIN_CHANGED},
+    "POSITIONING_APPARATUS": {"absent": RECEIVER_STATE_UNBOUND,
+                              "disagreeing": RECEIVER_STATE_CHAIN_CHANGED},
+    "SURVEY_CONFIGURATION": {"absent": PRODUCT_LINEAGE_UNBOUND},
+}
 _REASON_RANK: Dict[str, int] = {code: index for index, code in enumerate(REASON_CODES)}
 
 # Raw IQ is the only reason that refuses a frame, and it refuses alone.
@@ -96,11 +116,17 @@ REASON_NOTES: Dict[str, str] = {
         "THE RECEIVER STATE IS TOO OLD FOR THIS OBSERVATION AT THIS SPEED. "
         "STALENESS IS METRES OF POSSIBLE MOVEMENT, NOT SECONDS"),
     SIGNAL_CHAIN_UNBOUND: (
-        "THE SIGNAL-CHAIN HASH OR ITS REQUIRED EXPLANATORY FIELDS ARE MISSING. "
-        "REPAIRED BY THE RF APPARATUS DECLARATION"),
+        "THE REQUIRED SIGNAL-CHAIN IDENTITY IS ABSENT. NOBODY DECLARED WHAT THE "
+        "RF PASSED THROUGH. REPAIRED BY DECLARING IT"),
+    SIGNAL_CHAIN_CHANGED: (
+        "TWO SIGNAL-CHAIN IDENTITIES EXIST AND DISAGREE. REPAIRED BY "
+        "ESTABLISHING WHICH IS RIGHT, AND POSSIBLY BY DISCOVERING THAT A "
+        "PRODUCT WAS TAKEN THROUGH AN APPARATUS NOBODY MEANT TO BE USING"),
     RECEIVER_STATE_UNBOUND: (
-        "THE RECEIVER-STATE CHAIN HASH OR POSITIONING IDENTITY IS MISSING. "
-        "REPAIRED BY THE POSITIONING APPARATUS DECLARATION"),
+        "THE REQUIRED POSITIONING IDENTITY IS ABSENT. REPAIRED BY DECLARING IT"),
+    RECEIVER_STATE_CHAIN_CHANGED: (
+        "TWO POSITIONING IDENTITIES EXIST AND DISAGREE. THE APPARATUS OF "
+        "POSITIONING IS NOT THE ONE THE OBSERVATION WAS EXPECTED TO CARRY"),
     PRODUCT_LINEAGE_UNBOUND: (
         "THE SWEEP-PLAN OR PROCESSING REVISION IS MISSING. REPAIRED BY THE "
         "SURVEY CONFIGURATION"),
@@ -175,10 +201,17 @@ class AlignmentAdmissionFacts:
     Every field is required and there is deliberately no default constructor:
     ``AlignmentAdmissionFacts()`` would mean "alignment ran and found nothing
     wrong", which is precisely what an un-run alignment must not be able to say.
+
+    The two chain-disagreement facts live here rather than with metadata
+    because ``time_align`` is what establishes them: metadata validation sees
+    one frame and can only say whether an identity is present, while a
+    disagreement needs a second identity to compare against.
     """
 
     time_alignment_unverified: bool
     receiver_state_stale: bool
+    signal_chain_changed: bool
+    receiver_state_chain_changed: bool
 
 
 @dataclass(frozen=True)
@@ -200,7 +233,9 @@ class AdmissionFacts:
     time_alignment_unverified: bool
     receiver_state_stale: bool
     signal_chain_unbound: bool
+    signal_chain_changed: bool
     receiver_state_unbound: bool
+    receiver_state_chain_changed: bool
     product_lineage_unbound: bool
     power_unit_unsupported: bool
 
@@ -224,6 +259,8 @@ class AdmissionFacts:
             raw_iq_present=False,
             time_alignment_unverified=alignment.time_alignment_unverified,
             receiver_state_stale=alignment.receiver_state_stale,
+            signal_chain_changed=alignment.signal_chain_changed,
+            receiver_state_chain_changed=alignment.receiver_state_chain_changed,
             signal_chain_unbound=metadata.signal_chain_unbound,
             receiver_state_unbound=metadata.receiver_state_unbound,
             product_lineage_unbound=metadata.product_lineage_unbound,
@@ -259,7 +296,9 @@ _FACT_TO_REASON: Dict[str, str] = {
     "time_alignment_unverified": TIME_ALIGNMENT_UNVERIFIED,
     "receiver_state_stale": RECEIVER_STATE_STALE,
     "signal_chain_unbound": SIGNAL_CHAIN_UNBOUND,
+    "signal_chain_changed": SIGNAL_CHAIN_CHANGED,
     "receiver_state_unbound": RECEIVER_STATE_UNBOUND,
+    "receiver_state_chain_changed": RECEIVER_STATE_CHAIN_CHANGED,
     "product_lineage_unbound": PRODUCT_LINEAGE_UNBOUND,
     "power_unit_unsupported": POWER_UNIT_UNSUPPORTED,
     "raw_iq_present": RAW_IQ_PRESENT,
@@ -366,7 +405,14 @@ def admission_status() -> Dict[str, Any]:
         "contract": CONTRACT,
         "contract_section": CONTRACT_SECTION,
         "dispositions": list(DISPOSITIONS),
+        "reason_vocabulary_revision": REASON_VOCABULARY_REVISION,
         "reason_codes": list(REASON_CODES),
+        "authority_groups": {name: dict(kinds)
+                             for name, kinds in AUTHORITY_GROUPS.items()},
+        "absent_is_not_disagreeing": (
+            "AN ABSENT IDENTITY MEANS NOBODY DECLARED ONE. A DISAGREEING "
+            "IDENTITY MEANS TWO EXIST AND DESCRIBE DIFFERENT INSTRUMENTS. A "
+            "GROUP REPORTS ONE OR THE OTHER, NEVER BOTH"),
         "reason_notes": dict(REASON_NOTES),
         "exclusive_reason": EXCLUSIVE_REASON,
         "ordinary_reasons": list(ORDINARY_REASONS),

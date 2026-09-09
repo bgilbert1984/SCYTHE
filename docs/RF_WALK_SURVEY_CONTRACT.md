@@ -4,6 +4,7 @@
 Status:                 ACCEPTED
 Accepted:               2026-09-07, after review correction 1df55c5
 Authority:              NORMATIVE
+Reason vocabulary:      v2 — ACCEPTED 2026-09-08, amendment 069ec62 (§4 Amendment A)
 Implemented foundation: rf_receiver_state.py
 Survey ingestion:       NOT_IMPLEMENTED
 Surface update:         NOT_IMPLEMENTED
@@ -167,11 +168,13 @@ disposition — exactly one:
   BREADCRUMB_ONLY
   FRAME_REFUSED
 
-reason_codes — zero or more, closed vocabulary:
+reason_codes — zero or more, closed vocabulary (v2):
   TIME_ALIGNMENT_UNVERIFIED
   RECEIVER_STATE_STALE
   SIGNAL_CHAIN_UNBOUND
+  SIGNAL_CHAIN_CHANGED
   RECEIVER_STATE_UNBOUND
+  RECEIVER_STATE_CHAIN_CHANGED
   PRODUCT_LINEAGE_UNBOUND
   POWER_UNIT_UNSUPPORTED
   RAW_IQ_PRESENT
@@ -244,28 +247,73 @@ mean parsing more of a payload that already violated the boundary.
 |---|---|
 | `TIME_ALIGNMENT_UNVERIFIED` | Nothing joined the observation to a receiver state |
 | `RECEIVER_STATE_STALE` | The state is too old for the observation at this speed |
-| `SIGNAL_CHAIN_UNBOUND` | The signal-chain hash or its required explanatory fields are missing |
-| `RECEIVER_STATE_UNBOUND` | The receiver-state chain hash or receiver-state identity is missing |
+| `SIGNAL_CHAIN_UNBOUND` | The required signal-chain identity is absent |
+| `SIGNAL_CHAIN_CHANGED` | Both signal-chain identities exist and disagree |
+| `RECEIVER_STATE_UNBOUND` | The required positioning identity is absent |
+| `RECEIVER_STATE_CHAIN_CHANGED` | Both positioning identities exist and disagree |
 | `PRODUCT_LINEAGE_UNBOUND` | The sweep-plan or processing revision is missing |
 | `POWER_UNIT_UNSUPPORTED` | `DBM` without a qualifying calibration, or an unknown unit |
 | `RAW_IQ_PRESENT` | The frame carried samples |
 
-**Three unbound reasons, not one.** §1 insists that receiver-state identity and
-signal-chain identity are separate and never merged; collapsing every missing §6
-field into a single reason would undo that insistence at the moment it matters
-most, leaving an operator told only that *something* about the frame's lineage
-was absent. The three answer different questions and are repaired by different
-people:
+**Three authority groups, and two questions about each.** §1 insists that
+receiver-state identity and signal-chain identity are separate and never merged;
+collapsing lineage failures into a single reason would undo that insistence at
+the moment it matters most, leaving an operator told only that *something* about
+the frame's lineage was wrong. The groups answer different questions and are
+repaired by different people:
 
-| Reason | What is missing | Who repairs it |
-|---|---|---|
-| `SIGNAL_CHAIN_UNBOUND` | signal-chain hash, or antenna / feedline / extension / gain / sample rate | the RF apparatus declaration |
-| `RECEIVER_STATE_UNBOUND` | receiver-state chain hash, or the positioning identity behind it | the positioning apparatus declaration |
-| `PRODUCT_LINEAGE_UNBOUND` | `sweep_plan_revision` or `processing_revision` | the survey configuration |
+| Group | Absent | Disagreeing | Who repairs it |
+|---|---|---|---|
+| RF apparatus | `SIGNAL_CHAIN_UNBOUND` | `SIGNAL_CHAIN_CHANGED` | the RF apparatus declaration |
+| Positioning apparatus | `RECEIVER_STATE_UNBOUND` | `RECEIVER_STATE_CHAIN_CHANGED` | the positioning apparatus declaration |
+| Survey configuration | `PRODUCT_LINEAGE_UNBOUND` | — | the survey configuration |
 
-A frame missing fields from more than one group carries a reason code for each,
-so a single repair cannot appear to be the whole remedy. No group's absence may
-produce another group's reason code.
+A frame failing more than one group carries a reason code for each, so a single
+repair cannot appear to be the whole remedy. **No group's failure may produce
+another group's reason code.**
+
+### Amendment A — absent is not disagreeing
+
+*Reason vocabulary v2. Proposed and accepted 2026-09-08, in that order.*
+
+`SIGNAL_CHAIN_CHANGED` and `RECEIVER_STATE_CHAIN_CHANGED` are added because
+§6 already places them "at join" while §4 could not express them. A join can
+refuse for either, and an implementation meeting both sections had no honest
+code to report it with — the same shape as the §2/§4 gap this contract already
+corrected once, in a different place.
+
+**Absent and disagreeing are different failures.** An absent identity means
+nobody declared what the RF passed through, or what the positioning apparatus
+was; a disagreeing identity means two declarations exist and describe different
+instruments. The first is repaired by declaring; the second is repaired by
+establishing which declaration is right, and possibly by discovering that a
+product was taken through an apparatus nobody meant to be using.
+
+Both produce `BREADCRUMB_ONLY`. Neither may contribute to a surface: a product
+whose apparatus is disputed is not comparable with one whose apparatus is
+agreed, and the whole purpose of §6 is to keep those apart.
+
+**An authority group cannot be both `UNBOUND` and `CHANGED` in one verdict.**
+Disagreement requires two identities to compare; absence means there is not one
+to compare with. A verdict carrying both about one group would be asserting that
+an identity is simultaneously missing and different, which describes no frame.
+
+**Both `CHANGED` reasons may coexist** when the RF chain and the positioning
+chain independently moved. They are separate authorities, and a frame can be
+wrong about both.
+
+*Ordering.* The vocabulary order groups each absent/changed pair by authority
+rather than appending the new codes at the end. Ordering is a serialization
+concern and no stored record depends on it: no survey verdict has ever been
+persisted, so the legible order is available now and will not be later. This is
+the same timing argument the earlier amendment made, and it is the last moment
+it applies.
+
+*What this does not create.* The amendment makes existing join results
+expressible. It does **not** create the survey-level authority that supplies an
+expected identity to compare against — nothing yet owns a survey's identity over
+time, so nothing yet produces these codes. A vocabulary that can describe a
+result is not a mechanism that produces one.
 
 ### The raw-IQ refusal is scoped to the frame
 
@@ -359,12 +407,13 @@ That is not one antenna with a setting; it is a different frequency response,
 and every relative-power product either side of the change was taken through a
 different instrument.
 
-Comparability failures are routed by which identity is absent, per §4: the
-reason codes `SIGNAL_CHAIN_UNBOUND`, `RECEIVER_STATE_UNBOUND` or
-`PRODUCT_LINEAGE_UNBOUND` at admission, under a `BREADCRUMB_ONLY` disposition;
-`SIGNAL_CHAIN_CHANGED` or `RECEIVER_STATE_CHAIN_CHANGED` at join. A frame
-missing fields from more than one group carries a reason code for each, so a
-single repair cannot appear to be the whole remedy.
+Comparability failures are routed by which authority failed and how, per §4.
+An absent identity gives `SIGNAL_CHAIN_UNBOUND`, `RECEIVER_STATE_UNBOUND` or
+`PRODUCT_LINEAGE_UNBOUND`; two identities that exist and disagree give
+`SIGNAL_CHAIN_CHANGED` or `RECEIVER_STATE_CHAIN_CHANGED`. All of them sit under
+a `BREADCRUMB_ONLY` disposition and none may contribute to a surface. A frame
+failing more than one group carries a reason code for each, so a single repair
+cannot appear to be the whole remedy.
 
 ---
 
@@ -520,12 +569,19 @@ A replacement is admissible only when tests demonstrate **each** of:
   contribution;
 - a `BOUNDED` join propagating its uncertainty into the recorded pose
   uncertainty rather than discarding it;
-- each of the three unbound reasons reached by its own missing field group:
-  `SIGNAL_CHAIN_UNBOUND` for a missing chain hash or apparatus field,
-  `RECEIVER_STATE_UNBOUND` for a missing receiver-state identity, and
-  `PRODUCT_LINEAGE_UNBOUND` for a missing `sweep_plan_revision` or
-  `processing_revision` — with a frame failing two groups carrying both codes
-  under one disposition, and no field group able to produce another group's code;
+- each lineage reason reached by its own authority group and failure kind:
+  `SIGNAL_CHAIN_UNBOUND` and `RECEIVER_STATE_UNBOUND` for an absent identity,
+  `SIGNAL_CHAIN_CHANGED` and `RECEIVER_STATE_CHAIN_CHANGED` for two identities
+  that exist and disagree, and `PRODUCT_LINEAGE_UNBOUND` for a missing
+  `sweep_plan_revision` or `processing_revision` — with a frame failing two
+  groups carrying both codes under one disposition, and no group able to produce
+  another group's code;
+- no verdict carrying both `UNBOUND` and `CHANGED` for one authority group,
+  which would assert that an identity is simultaneously missing and different;
+- both `CHANGED` codes coexisting when the RF and positioning chains moved
+  independently;
+- every `CHANGED` code producing `BREADCRUMB_ONLY` and never surface
+  eligibility;
 - a `MEASUREMENT_CHANNEL` product supplying a survey power measurement and being
   refused an information-structure detector verdict, and survey power **not**
   routed through `STRUCTURE_CHANNEL` to obtain one;
