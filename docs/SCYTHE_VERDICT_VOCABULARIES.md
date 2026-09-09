@@ -1,12 +1,14 @@
 # Verdict Vocabularies
 
 ```text
-Status:      PROPOSED — not accepted
-Authority:   NORMATIVE once accepted, over the rule in §1 only
+Status:      ACCEPTED
+Accepted:    2026-09-08, after review amendments 13816fd
+Authority:   NORMATIVE, over the rule in §1 only
 Scope:       Every SCYTHE module that produces judgements
 Conformance: Declared per module, in that module's own contract, when that
              contract is next amended for its own reasons (§7). This document
-             opens no accepted contract.
+             opens no accepted contract, including itself: §7 applies to this
+             document too, and amendments to it wait for a reason of its own.
 ```
 
 This document states one rule. It exists because the same design need has been
