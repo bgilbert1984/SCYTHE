@@ -4,13 +4,15 @@
 Status:                 PROPOSED — not accepted, nothing implemented
 Authority:              NORMATIVE once accepted
 Constrains:             Step 4 of the promotion sequence (execution adapter)
-Depends on:             scythe_promotion_policy.py  (v2 identity, MERGED)
-                        scythe_promotion_ledger.py  (shadow coordinator, MERGED)
+Depends on:             SCYTHE_VERDICT_VOCABULARIES.md  (PROPOSED — §5 instantiates it)
+                        scythe_promotion_policy.py      (v2 identity, MERGED)
+                        scythe_promotion_ledger.py      (shadow coordinator, MERGED)
                         rf_capture_recovery.ProcessIdentity (MERGED, reused)
 Atomic reservation:     NOT_IMPLEMENTED
 Durable ledger:         NOT_IMPLEMENTED
+Reconciliation:         NOT_IMPLEMENTED
 Execution adapter:      NOT_IMPLEMENTED
-ARMED graph mutation:   REQUIRES SEPARATE EXPLICIT AUTHORIZATION (step 6)
+ARMED graph mutation:   REQUIRES SEPARATE EXPLICIT AUTHORIZATION (step 8)
 ```
 
 This document is the promise a Step 4 implementation must satisfy. It is written
@@ -26,7 +28,7 @@ Two defects gate Step 4, both found by review of the merged shadow ledger:
    That is acceptable for a read-only shadow slice and insufficient as the
    authoritative idempotency ledger for real GraphOps writes.
 
-Neither is fixed by the other. §3 answers the first, §5–§9 the second.
+Neither is fixed by the other. §3–§4 answer the first, §6–§13 the second.
 
 ---
 
@@ -38,9 +40,11 @@ Neither is fixed by the other. §3 answers the first, §5–§9 the second.
 | **reservation** | A durable claim on one identity. Not a claim that a record exists. |
 | **terminal record** | The `COMMITTED` or `FAILED` entry that resolves a reservation. |
 | **indeterminate reservation** | A reservation with no terminal record. Neither success nor failure. |
-| **incarnation** | `ProcessIdentity(boot_id, pid, start_ticks)` — the existing type, reused, not re-invented. |
-| **the ledger** | The durable, single-writer, append-only file defined in §5. |
-| **the window** | The process-local budget structure defined in §5. Not the ledger. |
+| **reconciliation** | The operator act that resolves an indeterminate against the graph (§8). |
+| **generation** | One lifetime of the ledger. Ended only by an explicit operator act (§11). |
+| **incarnation** | `ProcessIdentity(boot_id, pid, start_ticks)` — the existing type, reused. |
+| **the ledger** | The durable, single-writer, append-only file defined in §6–§9. |
+| **the window** | The process-local budget structure defined in §6. Not the ledger. |
 
 ---
 
@@ -67,7 +71,7 @@ real finding, which is why the asymmetry runs the way it does:
 - A duplicate record is not recoverable. It is indistinguishable from evidence.
 
 Re-promotion after a failure is therefore an operator action taken against the
-graph, never an automatic retry.
+graph (§8), never an automatic retry.
 
 ---
 
@@ -77,13 +81,13 @@ graph, never an automatic retry.
   ┌── coordinator lock held ───────────────────────────────────┐
   │  1. snapshot the identity set                              │
   │  2. decide_promotion(..., already_promoted=snapshot)       │
-  │  3. budget check against the window                        │
+  │  3. executability checks: budget, ceilings, ledger state   │
   │  4. append RESERVED to the ledger, fsync                   │
   │  5. add to the window                                      │
   │  6. audit PROMOTION_ATTEMPTED                              │
   └── release ─────────────────────────────────────────────────┘
      7. call the writer                    <- outside the lock
-     8. append COMMITTED or FAILED         <- no fsync required (§6)
+     8. append COMMITTED or FAILED         <- no fsync required (§7)
      9. audit PROMOTION_RECORDED / PROMOTION_FAILED
 ```
 
@@ -121,13 +125,51 @@ re-entry is a bug that should be impossible by construction; a plain `Lock`
 makes it a deadlock rather than a wrong answer.
 
 **Lock order is coordinator → audit, never the reverse.** `PromotionAudit` holds
-its own `RLock` and is called at step 6, inside the coordinator lock. `PromotionAudit`
-does not know the coordinator exists and must not learn: nothing holding the
-audit lock may call back into the coordinator.
+its own `RLock` and is called at step 6, inside the coordinator lock.
+`PromotionAudit` does not know the coordinator exists and must not learn:
+nothing holding the audit lock may call back into the coordinator.
 
 ---
 
-## 5. Two structures, not one
+## 5. The coordinator's executability vocabulary
+
+This section instantiates `SCYTHE_VERDICT_VOCABULARIES.md` for the promotion
+sequence. The two vocabularies live in **different modules**, deliberately:
+
+| | **merit** | **executability** |
+| --- | --- | --- |
+| owner | `scythe_promotion_policy` | `scythe_promotion_ledger` (the coordinator) |
+| answers | is this finding fit to promote? | could we act on it at all? |
+| examples | `VERDICT_NOT_PROMOTABLE`, `CAPSULE_UNBOUND`, `DUPLICATE_PROMOTION` | `BUDGET_EXHAUSTED`, `DURABLE_CEILING_REACHED`, `INDETERMINATE_CEILING_REACHED`, `IDENTITY_UNRESOLVED`, `LEDGER_UNAVAILABLE`, `LEDGER_NOT_OWNED`, `LEDGER_TORN` |
+| repaired by | changing the finding, or accepting the judgement | fixing the apparatus; the finding may be sound |
+
+`BUDGET_EXHAUSTED` already lives in the coordinator rather than the policy. That
+separation was made ad hoc and is the executability vocabulary's first member,
+created before there was a name for the set it belonged to.
+
+**The ceilings are enforced here, not as policy refusal reasons.** A policy
+reason is a verdict about a finding's merits; a ceiling refusal says nothing
+about the finding, which may be entirely promotable. Putting it in the policy
+vocabulary would contaminate refusal-by-reason counts with executability
+conditions, and downstream nothing could distinguish *we judged this not worth
+promoting* from *we declined to act at all*.
+
+**The boundary case, which tests the rule.** `DUPLICATE_PROMOTION` and
+`IDENTITY_UNRESOLVED` describe the same identity in adjacent states and belong
+to different sets:
+
+- `DUPLICATE_PROMOTION` — **merit.** This finding was already recorded. A fact
+  about the subject's history. The repair is nothing; it is already in the graph.
+- `IDENTITY_UNRESOLVED` — **executability.** We do not know whether it was
+  recorded. A fact about the apparatus. The repair is reconciliation (§8), and
+  the finding may be perfectly promotable once we know.
+
+**Counts are reported per set and never summed.** `status()` publishes
+`merit_refusals` and `executability_refusals` separately.
+
+---
+
+## 6. Two structures, not one
 
 `_promoted: List[(identity, monotonic_ns)]` currently serves both idempotency and
 rate limiting. They have different persistence semantics and must be separated
@@ -150,56 +192,114 @@ window would produce a number that looks like a rate and is not one.
 
 So the window resets on restart, `status()` publishes
 `budget_window_survives_restart: false`, and the cross-restart bound is provided
-by a different mechanism entirely — §9, not a longer window.
+by a different mechanism entirely — §11, not a longer window.
 
 ---
 
-## 6. Two-phase records
+## 7. Two-phase records
 
 Each promotion writes two ledger entries.
 
 ```json
 {"kind":"RESERVED","seq":41,"identity":"promotion:…","target_graph":"…",
  "record_class":"INVARIANT_FINDING","incarnation":{"boot_id":"…","pid":…,
- "start_ticks":…},"monotonic_ns":…,"utc_display":"…","crc":"…"}
-{"kind":"COMMITTED","seq":42,"reserves":41,"crc":"…"}
+ "start_ticks":…},"monotonic_ns":…,"utc_display":"…","len":…,"crc":"…"}
+{"kind":"COMMITTED","seq":42,"reserves":41,"len":…,"crc":"…"}
 ```
 
 `RESERVED` **must** be fsynced (§3). The terminal record **need not** be: losing
 it degrades the reservation to indeterminate, which is the safe direction.
 
 **A `RESERVED` with no terminal record is `INDETERMINATE`.** The write may have
-landed and may not have. This is the project's existing vocabulary and its
-existing rule applies without amendment: an `UNDETERMINED` result must not be
-converted into a failure. Therefore an indeterminate reservation:
+landed and may not have. The project's existing rule applies without amendment:
+an `UNDETERMINED` result must not be converted into a failure. Therefore an
+indeterminate reservation:
 
-- **blocks re-promotion of its identity** — fail closed against duplicates;
+- **blocks re-promotion of its own identity, and only its own** — `IDENTITY_UNRESOLVED`;
 - **is surfaced and counted** in `status()`;
-- **is never auto-retried and never auto-released.**
+- **is never auto-retried and never auto-released.** It is released only by §8.
 
-Adjudication is an operator action, taken by looking at the graph. The ledger
-cannot perform it, because the ledger is exactly the thing that does not know.
+**One indeterminate does not halt ARMED.** The containment is already complete:
+the reservation exists, that identity is blocked, no duplicate can reach the
+graph. Halting ARMED globally on one indeterminate would convert a contained
+uncertainty into a total stop, and the predictable result is an operator under
+pressure clearing indeterminates carelessly to get ARMED back — destroying the
+thing the record was protecting.
+
+**The rate of indeterminates is a different signal, and it is not
+identity-scoped.** An adapter timing out on every write produces indeterminates
+indefinitely, each individually contained, collectively meaning the graph
+boundary is not working. That is bounded in §11 as a ceiling, using the same
+mechanism as the reservation ceiling — two ceilings over one durable structure,
+not two kinds of ceiling.
 
 ---
 
-## 7. Ownership
+## 8. Reconciliation
+
+Indeterminates accumulate monotonically and gate ARMED through §11. Without a
+named operation to resolve one, "never auto-released" would mean "released by
+hand-editing a file" — unaudited, outside §9's single-writer rule, and performed
+by exactly the person that rule protects. The ceiling would be a trap with no
+exit.
+
+**Reconciliation is an operator determination made by looking at the graph, and
+recorded in the ledger.** The ledger records *that a determination was made and
+by whom*; it never re-derives one, because the ledger is precisely the thing
+that does not know.
+
+| record | meaning | effect |
+| --- | --- | --- |
+| `RECONCILED_COMMITTED` | the write landed | the reservation becomes a normal promotion; the identity stays fenced |
+| `RECONCILED_RELEASED` | the write did not land | the identity is freed and may be promoted again |
+
+- Both are **appended and checksummed like any other record**, never a hand
+  edit. §9's rule that no other component appends is not suspended for an
+  operator.
+- `RECONCILED_RELEASED` is the **only** path that frees an identity.
+- Reconciliation requires a **ledger authority**, distinct from the policy's
+  promotion authorities: it acts on the ledger, not on a finding's merits. The
+  same authority ends a generation (§11).
+- **Reconciliation clears the indeterminate ceiling, and does not refund the
+  reservation ceiling.** A spent reservation stays spent whichever way the
+  determination goes. Refunding it would let a timing-out adapter plus a diligent
+  operator restore unlimited amplification through the counter that exists to
+  stop it.
+
+---
+
+## 9. Ownership, location and the write path
 
 **Exactly one writer.** Two coordinator processes sharing one ledger reproduce
 the race of §3 one level up, where a mutex cannot reach it.
 
 - The writing coordinator holds `fcntl.flock(fd, LOCK_EX | LOCK_NB)` for its
   entire lifetime, acquired before ARMED is reachable.
-- Failure to acquire refuses ARMED. It does **not** refuse SHADOW, which opens
-  the ledger read-only (§10).
+- Failure to acquire refuses ARMED (`LEDGER_NOT_OWNED`). It does **not** refuse
+  SHADOW, which opens the ledger read-only (§12).
 - The holder writes its `ProcessIdentity` into a header record, so a reader can
   name the owner rather than infer one. This is the same incarnation type the
   recovery work already uses; a second identity type would be a second answer to
   a question that has one.
 
-**Location: outside the repository.** A configured state directory, following
-the pattern already used for the ARMED acceptance snapshots. A promotion ledger
-inside the tree would put claims about graph records under version control,
-where a checkout could silently move the fence.
+**Location: explicitly configured, in a directory owned by the coordinator's
+state.** Never defaulted into the working tree, and never under `/tmp`.
+
+- In the tree, a checkout could silently move the fence.
+- On tmpfs, the ledger vanishes on reboot, which turns §10's *a missing ledger
+  refuses ARMED* into *ARMED always refuses after reboot* — and the pressure that
+  creates is to weaken the rule rather than to fix the path.
+
+**Two write-path details, because they are where reserve-before-write actually
+fails:**
+
+1. **fsync on the file is not sufficient for a newly created ledger.** The file's
+   existence is not durable until the **parent directory** is fsynced. A crash in
+   that window leaves a missing ledger, which correctly refuses ARMED — for a
+   reason nobody will diagnose.
+2. **Per-record framing.** Each record carries a length and a checksum so a torn
+   tail is *detected* rather than inferred from a parse failure. §13 governs what
+   is then done with it.
 
 **No other component appends.** Not the checker, not the adapter, not the model
 path. The standing rule that the checker must not call WriteBus directly applies
@@ -208,47 +308,63 @@ validation tool.
 
 ---
 
-## 8. Restart
+## 10. Restart
 
 | rebuilt from the ledger | not rebuilt |
 | --- | --- |
-| the identity set | the window (§5) |
+| the identity set | the window (§6) |
 | indeterminate reservations | the audit ring (in-memory, bounded, by design) |
-| the durable total (§9) | |
+| the generation totals (§11) | |
 
-**A missing ledger is a missing fence, and ARMED must be refused.** Starting from
-an empty identity set after the file is lost would silently re-enable every
-promotion ever made. The empty-file case and the missing-file case are therefore
-distinguished: a ledger created by this contract's own initialization is empty
-and valid; a ledger that is absent where one was configured is a refusal.
+**A missing ledger is a missing fence, and ARMED must be refused**
+(`LEDGER_UNAVAILABLE`). Starting from an empty identity set after the file is
+lost would silently re-enable every promotion ever made. The empty-file case and
+the missing-file case are therefore distinguished: a ledger created by this
+contract's own initialization is empty and valid; a ledger that is absent where
+one was configured is a refusal.
 
 ---
 
-## 9. The cross-restart bound is a ceiling, not a window
+## 11. Two ceilings, one mechanism
 
-A crash loop restarts the process, and §5 resets the window on restart. Without
-a second bound, a crash loop would refill the budget on every restart — the
+A crash loop restarts the process, and §6 resets the window on restart. Without a
+second bound, a crash loop would refill the budget on every restart — the
 amplification the breaker exists to prevent, arriving through the breaker's own
 reset path.
 
-The bound is a **one-sided ceiling on the durable total**, not a longer window:
+Both bounds are **one-sided ceilings on durable totals**, clock-free, and are the
+`BoundedCeiling` invariant class this repository already defines. Two ceilings
+over one durable structure, not two kinds of ceiling.
 
 ```
-total records written to target graph G by this ledger  <=  CEILING
+C1   reservations made in this generation        <=  RESERVATION_CEILING
+C2   outstanding unreconciled indeterminates     <=  INDETERMINATE_CEILING
 ```
 
-Clock-free, so it survives restarts where a window cannot, and it is the
-`BoundedCeiling` invariant class this repository already defines rather than a
-second rate concept. Reaching it refuses promotion and requires explicit
-re-authorization; it does not decay.
+**C1 counts reservations, not confirmed writes.** If it counted only successes,
+an adapter timing out forever would burn unlimited reservations while the counter
+stayed at zero — the amplification arriving through the counter that exists to
+stop it.
 
-This needs one new refusal reason in `scythe_promotion_policy`
-(`DURABLE_CEILING_REACHED`), which is a policy amendment and therefore its own
-slice, ordered before the implementation.
+**C1 has no per-boot scope of any kind.** It is a running total over the
+generation, reset only by an explicit operator act that starts a new one, under
+the same ledger authority as reconciliation (§8). Any per-boot scoping would
+reintroduce the refill path this section closes.
+
+**C2 is cleared by reconciliation** (§8), not by time and not by restart.
+
+**On the value of C1.** It is not a rate limit and must not be tuned near the
+expected promotion rate. It is a *this has gone wrong* bound: roughly an order of
+magnitude above the highest plausible legitimate lifetime total for one
+generation. **If it ever fires during correct operation, it was set wrong — and
+that is its calibration test.**
+
+Both refusals are executability codes (§5): `DURABLE_CEILING_REACHED`,
+`INDETERMINATE_CEILING_REACHED`.
 
 ---
 
-## 10. SHADOW against the durable ledger
+## 12. SHADOW against the durable ledger
 
 SHADOW **reads** the ledger and **appends nothing**. It seeds its simulated
 identity set from real history.
@@ -260,46 +376,58 @@ ARMED would do. This is the same argument that gave SHADOW a simulated budget in
 the first place.
 
 SHADOW does not take the exclusive lock, so it may run beside an ARMED writer.
-It therefore reads a file that is being appended to, and must tolerate a
-truncated final line exactly as startup does (§11).
+It therefore reads a file that is being appended to, and must tolerate a torn
+tail exactly as startup does (§13).
 
 **Testable property:** the ledger file is byte-identical before and after a
 SHADOW run.
 
 ---
 
-## 11. Corruption and growth
+## 13. A torn tail is indeterminate, not absent
 
-**A truncated final line refuses ARMED and permits SHADOW.** A crash mid-append
-leaves a partial record whose identity cannot be read. The one thing the ledger
-must not do is guess which identity was in flight, so it declares the condition
-rather than resolving it. Each line carries a checksum so truncation is detected
-rather than inferred from a parse error.
+A crash mid-append leaves a partial record. §9's framing makes that detectable.
+What follows is the same question as the adapter's lost acknowledgement, and gets
+the same answer.
+
+> **A torn tail loads as an indeterminate reservation of unknown identity. It is
+> never discarded.**
+
+Discarding it would assert that no reservation was made — which is exactly
+write-first semantics reappearing at the storage layer, one level below where §2
+excluded it.
+
+Because its identity cannot be read, it cannot fence anything. So unlike a
+well-formed indeterminate, which blocks only its own identity (§7), a torn tail
+**refuses ARMED until it is reconciled** (`LEDGER_TORN`) and counts toward C2.
+This is not a special case: it is §7's containment argument applied to a
+reservation whose containment radius is unknown.
 
 **Growth is bounded by refusal, not by pruning.** At the current budget the
 ledger accrues on the order of 1,150 records/day. Compaction is a separate slice
 with its own correctness argument — pruning an identity set is deleting a fence,
-and it must be shown that the pruned identities can never recur. Until then the
-ledger declares a maximum record count and refuses ARMED beyond it.
+and it must be shown that the pruned identities can never recur. Until then C1
+serves as the bound.
 
 ---
 
-## 12. What this does not do
+## 14. What this does not do
 
 - It does **not** make the graph write idempotent. It prevents *this coordinator*
   from writing an identity twice. Anything else invoking the adapter is outside
   the fence.
 - It does **not** detect a record present in the graph but absent from the
   ledger. The ledger is not a mirror of the graph and must never be read as one.
-- It does **not** adjudicate indeterminate reservations. It surfaces them (§6).
-- It does **not** synchronize two coordinators. It refuses the second (§7).
+- It does **not** adjudicate indeterminate reservations. It surfaces them and
+  records an operator's determination (§8).
+- It does **not** synchronize two coordinators. It refuses the second (§9).
 - It is **not evidence.** It records claims on identities. A reservation is not a
   finding, and a promotion is not a confirmation — the verdict was already true
   or false before anything was written.
 
 ---
 
-## 13. Acceptance tests
+## 15. Acceptance tests
 
 Step 4 is not authorized until these pass. Concurrency tests are stated as
 observable outcomes, not as timing.
@@ -320,51 +448,88 @@ observable outcomes, not as timing.
 
 7. The writer, when called, observes the identity already present and fsynced in
    the ledger file.
-8. A ledger holding a lone `RESERVED` record → that identity is refused on
-   restart, reported as indeterminate, neither auto-retried nor auto-released.
-9. Restart rebuilds the identity set; a previously committed identity is refused.
-10. A SHADOW run leaves the ledger byte-identical, and seeds its simulated set
-    from it.
-11. A truncated final line refuses ARMED, permits SHADOW, and is surfaced.
+8. Creating a new ledger fsyncs the parent directory, not only the file.
+9. A ledger holding a lone `RESERVED` record → that identity alone is refused on
+   restart with `IDENTITY_UNRESOLVED`; other identities still promote; ARMED is
+   not halted.
+10. Restart rebuilds the identity set; a previously committed identity is refused.
+11. A missing ledger file refuses ARMED rather than starting empty.
 12. A second coordinator on the same ledger path refuses ARMED.
-13. A missing ledger file refuses ARMED rather than starting empty.
-14. `status()` reports `budget_window_survives_restart: false`, and the window is
+13. A configured path in the working tree or under `/tmp` is refused.
+
+**Torn tail**
+
+14. A torn tail is detected by framing, loads as an indeterminate of unknown
+    identity, is not discarded, refuses ARMED, and counts toward C2.
+
+**Reconciliation**
+
+15. `RECONCILED_COMMITTED` keeps the identity fenced; `RECONCILED_RELEASED` frees
+    it; nothing else frees it.
+16. Reconciliation clears C2 and does **not** refund C1.
+17. Reconciliation requires the ledger authority and is refused without it.
+
+**Ceilings**
+
+18. C1 counts reservations: a writer that always fails still advances it.
+19. C1 does not reset on restart; only a new generation resets it, and only under
+    the ledger authority.
+20. C1 and C2 refuse with executability codes, never policy refusal reasons.
+
+**Vocabularies**
+
+21. The merit and executability sets are disjoint, and `status()` reports their
+    counts separately without a summed total.
+22. `DUPLICATE_PROMOTION` and `IDENTITY_UNRESOLVED` are distinct, in different
+    sets, and reachable in the states §5 describes.
+
+**SHADOW**
+
+23. A SHADOW run leaves the ledger byte-identical, and seeds its simulated set
+    from it.
+24. `status()` reports `budget_window_survives_restart: false`, and the window is
     empty after a restart.
-15. The durable ceiling refuses promotion and does not decay.
-16. Ledger records carry both `monotonic_ns` and `utc_display`, and no decision
+25. Ledger records carry both `monotonic_ns` and `utc_display`, and no decision
     path reads the UTC field — AST scan, matching the existing scope tests.
 
 ---
 
-## 14. Questions for the reviewer
+## 16. Decisions
 
-1. **Indeterminate reservations and ARMED.** Proposed: an indeterminate
-   reservation blocks its own identity, and ARMED start is refused while any
-   exist unless the coordinator is constructed with an explicit acknowledged
-   count. The alternative — block only the identity, let ARMED proceed — is less
-   fail-closed but keeps ARMED reachable after a single bus timeout.
-2. **The ceiling.** Its value, and whether it is per target graph or global.
-3. **Ledger location.** Which state directory, given the existing snapshot path
-   convention.
-4. **Where the ceiling is enforced.** Proposed: as a policy refusal reason, since
-   refusals are the policy's vocabulary and the coordinator does not own them.
+Recorded rather than left open, so the reasoning survives the review that
+produced it.
+
+1. **An indeterminate blocks only its own identity.** Global halt was rejected:
+   it converts a contained uncertainty into a total stop and creates pressure to
+   clear indeterminates carelessly (§7). Rate is bounded separately by C2 (§11).
+2. **C1 is a lifetime total over the generation, counting reservations.** Not
+   per-boot in any form; not successes only (§11).
+3. **The ledger path is explicitly configured, never the working tree, never
+   `/tmp`,** and the parent directory is fsynced on creation (§9).
+4. **The ceilings are coordinator-enforced, not policy refusal reasons** (§5).
+5. **Reconciliation is a named, audited, authority-gated ledger operation** (§8).
+   Added because §7's "never auto-released" otherwise meant "released by hand".
 
 ---
 
-## 15. Slice order
+## 17. Slice order
 
 Following the accepted pattern — amendment first, implementation only after the
 amendment is accepted:
 
-1. This contract, accepted.
-2. Policy amendment: `DURABLE_CEILING_REACHED` refusal reason (§9).
-3. Atomic reservation over the existing in-memory structures (§3, §4) — closes
-   the race without introducing a file.
-4. Durable ledger, read path and restart (§5–§8, §10, §11).
-5. Durable ledger, write path.
-6. Execution adapter with one fixed WriteBus schema.
-7. Live SHADOW observation.
-8. Separate explicit authorization before any ARMED graph mutation.
+1. `SCYTHE_VERDICT_VOCABULARIES.md`, accepted.
+2. This contract, accepted.
+3. Coordinator executability vocabulary (§5), over the existing in-memory
+   structures.
+4. Atomic reservation (§3, §4) — closes the race without introducing a file.
+5. Durable ledger: format, framing, read path, restart (§7, §9, §10, §13).
+6. Durable ledger: write path, fsync discipline, ownership lock.
+7. Reconciliation and generations (§8, §11).
+8. Ceilings C1 and C2 (§11).
+9. Execution adapter with one fixed WriteBus schema.
+10. Live SHADOW observation.
+11. Separate explicit authorization before any ARMED graph mutation.
 
-Steps 3 and 4 are separable and should stay separate: the lock is correct
-without the file, and the file is testable without the adapter.
+**Slices 4 and 5 stay separate**, and this is the boundary to protect if anything
+is compressed: the lock is correct and testable without durability, and
+durability is where the subtle bugs are.
