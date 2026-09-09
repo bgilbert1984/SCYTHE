@@ -29,7 +29,7 @@ second one is needed.
 
 ## 2. The evidence
 
-### 2.1 The instance that predates the rule
+### 2.1 Two instances that were not argued into the rule
 
 `BUDGET_EXHAUSTED` lives in `scythe_promotion_ledger` (the coordinator) and not
 in `scythe_promotion_policy` (the refusal vocabulary), where every other reason
@@ -50,6 +50,19 @@ a distinction to be in the problem rather than in the describer.
 It is also one member deep and unnamed, which is precisely the failure this
 document addresses: the set existed, and the next module still started with one
 vocabulary.
+
+**The second instance is a collision, not a placement.** While this document was
+being written, its own first application was found to have named an
+executability state `INDETERMINATE` — a token the merit vocabulary already owns
+in merged code (§6). The rule caught an error, in the document proposing the
+rule, at the moment of writing it.
+
+The two instances demonstrate different things and are both needed. The first
+shows **the set exists unnamed**: the distinction was already being applied
+correctly by someone with no word for it. The second shows **naming it catches
+things**: a distinction that only described work already done would be a
+vocabulary for the past, and this one found a live defect the first time it was
+pointed at anything.
 
 ### 2.2 Three rediscoveries
 
@@ -103,6 +116,32 @@ and the subject may be entirely sound.
 in unless the repair test positively says the apparatus is what changes. The rule
 creates one new place to put things; it does not create a reason to move things
 there.
+
+### Minting a new token
+
+The default above governs codes that already have a placement. A new code has
+none, so two further rules apply to it.
+
+**If the repair test returns both readings, split the code. There is no
+tiebreak.** A code that is genuinely both is naming two events at once. A write
+rejected for an invalid payload is a merit judgement about the subject *and* an
+apparatus refusal; it is two codes, for the same reason §5.3 keeps
+`AUTHORITY_INSUFFICIENT` and `LEDGER_NOT_OWNED` apart — a consumer has to be able
+to tell them apart, and one code cannot be told apart from itself.
+
+A tiebreak clause would be the shape a licence takes: whichever way it resolved,
+it would let an author stop thinking at the moment the thinking matters.
+
+**Check the name against the other vocabulary before minting it, across the
+tree, as a substring root.** Not an exact-match check: `INDETERMINATE` was the
+root of `INDETERMINATE_AS_FAILURE`, and exact match would have passed it (§6).
+Any hit in the other set is a collision, and the name is changed rather than
+argued for.
+
+This exists because the collision in §6 was found **by looking**, and looking is
+not repeatable. A future author needs a mechanical step they can follow without
+having noticed the problem first — otherwise this document records a save
+instead of preventing the next one.
 
 ---
 
@@ -239,4 +278,18 @@ This is slower than a sweep and much harder to get wrong.
 | --- | --- | --- |
 | promotion | `PROMOTION_EXECUTION_CONTRACT.md` §5 | declared — `PROPOSED`, opening now |
 | admission | `RF_WALK_SURVEY_CONTRACT.md` §4 | conforms in fact; sealed, no line |
-| recovery | none | conforms in fact; line due when a contract exists |
+| recovery | none | **finding recorded below**; line due when a contract exists |
+
+**Recovery, recorded as a finding rather than left as an obligation.**
+`RESTART_NOT_OBSERVED` exists in merged code (`rf_capture_audit.py`), sits among
+three verdicts about the target process, is an **executability** code, and is
+declared as one nowhere. That is the current state, and it is written down here
+because recovery is the module where the second rediscovery happened.
+
+Recording it costs a line and closes the path by which the fifth rediscovery is
+still available: a contract written months from now by someone reading only the
+code would meet three merit verdicts and one executability code with nothing
+anywhere saying which is which, and would have to work it out again.
+
+This is not an amendment to anything. No code changes, no contract opens. The
+finding stands until recovery's contract exists to carry it.
