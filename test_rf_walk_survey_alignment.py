@@ -12,10 +12,10 @@ from rf_receiver_state import (
 )
 from rf_walk_survey_admission import (
     BREADCRUMB_ONLY, SURFACE_ELIGIBLE, AdmissionFacts, AlignmentAdmissionFacts,
-    decide,
+    MetadataAdmissionFacts, decide,
 )
 from rf_walk_survey_alignment import (
-    CHAIN_CHANGE_GAP, AlignmentAssessment, AlignmentUnmappable,
+    CHAIN_CHANGE_NOTE, AlignmentAssessment, AlignmentUnmappable,
     alignment_status, assess_alignment, facts_for,
 )
 from rf_walk_survey_metadata import assess_frame
@@ -53,13 +53,17 @@ class MappingTests(unittest.TestCase):
         self.assertEqual(table["VERIFIED"], table["BOUNDED"])
         self.assertEqual(table["VERIFIED"],
                          {"time_alignment_unverified": False,
-                          "receiver_state_stale": False})
+                          "receiver_state_stale": False,
+                          "signal_chain_changed": False,
+                          "receiver_state_chain_changed": False})
 
     def test_stale_is_not_reported_as_unverified(self):
         """Something did join. 'Nothing joined' would be a different claim."""
         table = alignment_status()["status_to_facts"]
         self.assertEqual(table["STALE"], {"time_alignment_unverified": False,
-                                          "receiver_state_stale": True})
+                                          "receiver_state_stale": True,
+                                          "signal_chain_changed": False,
+                                          "receiver_state_chain_changed": False})
 
     def test_every_refusal_maps_to_nothing_joined(self):
         mappable = set(JOIN_REFUSALS) - {"SIGNAL_CHAIN_CHANGED",
@@ -75,38 +79,94 @@ class MappingTests(unittest.TestCase):
         with self.assertRaises(AlignmentUnmappable):
             facts_for(TimeAlignedJoin(joined=True, alignment_status="PROBABLY_FINE"))
 
-    def test_the_two_alignment_facts_are_mutually_exclusive(self):
-        """Unlike the metadata facts, which accumulate.
-
-        A join is either absent, or present and stale, or present and fine. It
-        cannot be both absent and stale, so admission never carries both
-        alignment reasons at once.
-        """
+    def test_a_joined_result_never_reports_two_alignment_faults(self):
+        """A join is absent, or present and stale, or present and fine."""
         for status in ALIGNMENT_STATES:
             facts = facts_for(TimeAlignedJoin(joined=True, alignment_status=status))
             self.assertFalse(facts.time_alignment_unverified
                              and facts.receiver_state_stale, status)
 
 
-class ChainChangeGapTests(unittest.TestCase):
-    """A contract gap, refused rather than papered over."""
+class ChainChangeTests(unittest.TestCase):
+    """Vocabulary v2: the two disagreement refusals map without approximation."""
 
-    def test_a_chain_change_refusal_cannot_be_mapped(self):
-        for refusal in ("SIGNAL_CHAIN_CHANGED", "RECEIVER_STATE_CHAIN_CHANGED"):
+    MAPPING = {
+        "SIGNAL_CHAIN_CHANGED": "signal_chain_changed",
+        "RECEIVER_STATE_CHAIN_CHANGED": "receiver_state_chain_changed",
+    }
+
+    def test_each_refusal_maps_to_exactly_its_own_fact(self):
+        for refusal, field in self.MAPPING.items():
             with self.subTest(refusal=refusal):
-                with self.assertRaises(AlignmentUnmappable) as caught:
-                    facts_for(TimeAlignedJoin(refusal=refusal))
-                self.assertIn("NO REASON CODE", str(caught.exception))
+                facts = facts_for(TimeAlignedJoin(refusal=refusal))
+                self.assertTrue(getattr(facts, field))
+                others = set(self.MAPPING.values()) - {field}
+                for other in others:
+                    self.assertFalse(getattr(facts, other),
+                                     "one authority's disagreement is not another's")
 
-    def test_the_stage_accepts_no_expected_hashes(self):
-        """So the unmappable refusals are unreachable from here."""
+    def test_a_disagreement_is_not_reported_as_nothing_joined(self):
+        """Two different failures; reporting both sends an operator to two places."""
+        for refusal in self.MAPPING:
+            facts = facts_for(TimeAlignedJoin(refusal=refusal))
+            self.assertFalse(facts.time_alignment_unverified, refusal)
+            self.assertFalse(facts.receiver_state_stale, refusal)
+
+    def test_a_chain_disagreement_produces_breadcrumb_only(self):
+        for refusal, _field in self.MAPPING.items():
+            with self.subTest(refusal=refusal):
+                facts = facts_for(TimeAlignedJoin(refusal=refusal))
+                verdict = decide(AdmissionFacts.from_stages(
+                    MetadataAdmissionFacts(False, False, False, False), facts))
+                self.assertEqual(verdict.disposition, BREADCRUMB_ONLY)
+                self.assertNotEqual(verdict.disposition, SURFACE_ELIGIBLE)
+
+    def test_absent_and_changed_are_distinct_codes(self):
+        from rf_walk_survey_admission import (
+            RECEIVER_STATE_CHAIN_CHANGED, RECEIVER_STATE_UNBOUND,
+            SIGNAL_CHAIN_CHANGED, SIGNAL_CHAIN_UNBOUND,
+        )
+        self.assertNotEqual(SIGNAL_CHAIN_UNBOUND, SIGNAL_CHAIN_CHANGED)
+        self.assertNotEqual(RECEIVER_STATE_UNBOUND, RECEIVER_STATE_CHAIN_CHANGED)
+
+    def test_a_group_is_never_both_unbound_and_changed(self):
+        """Disagreement needs two identities; absence means there is not one."""
+        from rf_walk_survey_admission import AUTHORITY_GROUPS
+        for group, kinds in AUTHORITY_GROUPS.items():
+            if "disagreeing" not in kinds:
+                continue
+            with self.subTest(group=group):
+                # The two facts come from different stages, so the only way both
+                # could appear is if a stage set the other's field.
+                for refusal in self.MAPPING:
+                    facts = facts_for(TimeAlignedJoin(refusal=refusal))
+                    metadata = MetadataAdmissionFacts(False, False, False, False)
+                    reasons = decide(
+                        AdmissionFacts.from_stages(metadata, facts)).reasons
+                    self.assertNotIn(kinds["absent"], reasons)
+
+    def test_both_disagreements_may_coexist_when_both_chains_moved(self):
+        """Separate authorities. A frame can be wrong about both."""
+        facts = AlignmentAdmissionFacts(False, False, True, True)
+        verdict = decide(AdmissionFacts.from_stages(
+            MetadataAdmissionFacts(False, False, False, False), facts))
+        self.assertEqual(verdict.disposition, BREADCRUMB_ONLY)
+        self.assertEqual(verdict.reasons,
+                         ("SIGNAL_CHAIN_CHANGED", "RECEIVER_STATE_CHAIN_CHANGED"))
+
+    def test_the_raise_remains_for_a_genuinely_unmapped_refusal(self):
+        with self.assertRaises(AlignmentUnmappable):
+            facts_for(TimeAlignedJoin(refusal="SOME_FUTURE_REFUSAL"))
+
+    def test_no_expected_hashes_are_accepted_merely_because_codes_exist(self):
+        """A vocabulary that can describe a result is not one that produces it."""
         parameters = list(inspect.signature(assess_alignment).parameters)
         self.assertEqual(parameters, ["acquisition", "state", "clock_mapping"])
         self.assertFalse(alignment_status()["accepts_expected_hashes"])
+        self.assertIn("NOT A MECHANISM THAT PRODUCES ONE", CHAIN_CHANGE_NOTE)
 
-    def test_the_gap_names_the_contract_sections_it_falls_between(self):
-        self.assertIn("SECTION 6", CHAIN_CHANGE_GAP)
-        self.assertIn("SECTION 4", CHAIN_CHANGE_GAP)
+    def test_the_status_publishes_the_vocabulary_revision(self):
+        self.assertEqual(alignment_status()["reason_vocabulary_revision"], "v2")
 
 
 class AssessmentTests(unittest.TestCase):
@@ -134,7 +194,7 @@ class AssessmentTests(unittest.TestCase):
         """
         assessment = assess_alignment(ACQUISITION, _state(observed_at=_at(-400.0)))
         self.assertEqual(assessment.facts,
-                         AlignmentAdmissionFacts(False, False))
+                         AlignmentAdmissionFacts(False, False, False, False))
         self.assertEqual(assessment.join.separation_ms, 400.0)
         self.assertEqual(assessment.join.timing_budget_ms, 442.0)
         self.assertIsNotNone(assessment.join.pose_uncertainty_m)

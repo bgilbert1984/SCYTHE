@@ -20,24 +20,21 @@ the booleans.
 This module decides nothing about alignment. ``rf_receiver_state`` does that;
 here the join is performed and its result is translated.
 
-Expected-hash comparison is deliberately absent
------------------------------------------------
+Chain disagreement is now expressible, and still not produced
+-------------------------------------------------------------
 ``time_align`` can refuse with ``SIGNAL_CHAIN_CHANGED`` or
 ``RECEIVER_STATE_CHAIN_CHANGED`` when a frame's identity differs from an
-expectation. Two things are true about that here:
+expectation. Reason vocabulary v2 gives both an honest admission code, so
+``facts_for`` maps them exactly rather than raising: §4 previously had codes
+only for identities that were *absent*, and a disagreement is a different
+failure with a different repair.
 
-* nothing in this phase establishes a survey-level expectation to compare
-  against -- that belongs to whatever owns a survey's identity over time, and
-  it does not exist;
-* the admission vocabulary has **no reason code** for a chain that *changed*.
-  §4's three unbound codes are about identities that are *absent*.
-  ``RF_WALK_SURVEY_CONTRACT.md`` §6 says these failures happen "at join", and
-  §4 cannot express them. That is a contract gap, recorded in
-  ``CHAIN_CHANGE_GAP`` and not papered over.
-
-So this module does not accept expected hashes. Those refusals are unreachable
-from here rather than silently mapped onto a reason that would misdescribe
-them, and a caller cannot produce one by accident.
+This module still accepts **no expected hashes**. Nothing in this phase
+establishes a survey-level expectation to compare against -- that belongs to
+whatever owns a survey's identity over time, and it does not exist. A vocabulary
+that can describe a result is not a mechanism that produces one, so these
+refusals remain unreachable from here; what changed is that they would now be
+reported rather than crash if a future caller supplied an expectation.
 """
 
 from __future__ import annotations
@@ -50,20 +47,27 @@ from rf_receiver_state import (
     AcquisitionInterval, ClockMapping, ReceiverState, TimeAlignedJoin,
     may_update_posterior, time_align,
 )
-from rf_walk_survey_admission import AlignmentAdmissionFacts
+from rf_walk_survey_admission import (
+    REASON_VOCABULARY_REVISION, AlignmentAdmissionFacts,
+)
+
+
+def _facts_payload(facts: AlignmentAdmissionFacts) -> Dict[str, bool]:
+    return {"time_alignment_unverified": facts.time_alignment_unverified,
+            "receiver_state_stale": facts.receiver_state_stale,
+            "signal_chain_changed": facts.signal_chain_changed,
+            "receiver_state_chain_changed": facts.receiver_state_chain_changed}
 
 
 SCHEMA = "scythe.rf-walk-survey-alignment.v1"
 CONTRACT = "docs/RF_WALK_SURVEY_CONTRACT.md"
 
-CHAIN_CHANGE_GAP = (
-    "time_align CAN REFUSE WITH SIGNAL_CHAIN_CHANGED OR "
-    "RECEIVER_STATE_CHAIN_CHANGED, AND THE ADMISSION VOCABULARY HAS NO REASON "
-    "CODE FOR AN IDENTITY THAT CHANGED -- ITS THREE UNBOUND CODES ARE ABOUT "
-    "IDENTITIES THAT ARE ABSENT. CONTRACT SECTION 6 PLACES THESE FAILURES 'AT "
-    "JOIN' AND SECTION 4 CANNOT EXPRESS THEM. THIS MODULE THEREFORE ACCEPTS NO "
-    "EXPECTED HASHES, SO THE REFUSALS ARE UNREACHABLE FROM HERE RATHER THAN "
-    "MAPPED ONTO A REASON THAT WOULD MISDESCRIBE THEM"
+CHAIN_CHANGE_NOTE = (
+    "SIGNAL_CHAIN_CHANGED AND RECEIVER_STATE_CHAIN_CHANGED ARE MAPPED EXACTLY "
+    "UNDER REASON VOCABULARY v2 (CONTRACT SECTION 4, AMENDMENT A). THIS MODULE "
+    "STILL ACCEPTS NO EXPECTED HASHES: NOTHING YET OWNS A SURVEY'S IDENTITY "
+    "OVER TIME, SO NOTHING YET SUPPLIES AN EXPECTATION TO DISAGREE WITH. A "
+    "VOCABULARY THAT CAN DESCRIBE A RESULT IS NOT A MECHANISM THAT PRODUCES ONE"
 )
 
 # Every alignment status, mapped to the two facts. Total by construction: a
@@ -72,27 +76,36 @@ CHAIN_CHANGE_GAP = (
 # A refusal is not in here. Nothing joined, so there is no status to map, and
 # the facts for that case are named separately below.
 _STATUS_FACTS: Dict[str, AlignmentAdmissionFacts] = {
-    "VERIFIED": AlignmentAdmissionFacts(time_alignment_unverified=False,
-                                        receiver_state_stale=False),
-    "BOUNDED": AlignmentAdmissionFacts(time_alignment_unverified=False,
-                                       receiver_state_stale=False),
-    "UNVERIFIED": AlignmentAdmissionFacts(time_alignment_unverified=True,
-                                          receiver_state_stale=False),
+    "VERIFIED": AlignmentAdmissionFacts(False, False, False, False),
+    "BOUNDED": AlignmentAdmissionFacts(False, False, False, False),
+    "UNVERIFIED": AlignmentAdmissionFacts(True, False, False, False),
     # Something did join, and it was too old. That is not "nothing joined",
     # which is why STALE does not also set time_alignment_unverified.
-    "STALE": AlignmentAdmissionFacts(time_alignment_unverified=False,
-                                     receiver_state_stale=True),
+    "STALE": AlignmentAdmissionFacts(False, True, False, False),
 }
 
-# A refusal means nothing joined the observation to a receiver state, whatever
-# the reason. Staleness cannot arise from a refusal: it is a property of a join
-# that happened.
-_REFUSED_FACTS = AlignmentAdmissionFacts(time_alignment_unverified=True,
-                                         receiver_state_stale=False)
+# A refusal means nothing joined the observation to a receiver state. Staleness
+# cannot arise from one: it is a property of a join that happened.
+_REFUSED_FACTS = AlignmentAdmissionFacts(True, False, False, False)
+
+# The two refusals that are not "nothing joined" but "the identities disagree".
+# They do NOT set time_alignment_unverified: the join was refused on
+# comparability, which is a different failure from having no join to make, and
+# reporting both would tell an operator to look in two places for one fault.
+_CHAIN_CHANGE_FACTS: Dict[str, AlignmentAdmissionFacts] = {
+    "SIGNAL_CHAIN_CHANGED": AlignmentAdmissionFacts(False, False, True, False),
+    "RECEIVER_STATE_CHAIN_CHANGED": AlignmentAdmissionFacts(False, False, False, True),
+}
 
 
 class AlignmentUnmappable(ValueError):
-    """A join outcome the admission vocabulary cannot express."""
+    """A join outcome the admission vocabulary cannot express.
+
+    Narrowed by vocabulary v2: the two chain-disagreement refusals are mapped
+    now, and this remains only for a join refusal or status the vocabulary has
+    genuinely never had a code for -- a guard against a future refusal being
+    added to ``rf_receiver_state`` and silently defaulting to admitted here.
+    """
 
 
 @dataclass(frozen=True)
@@ -121,10 +134,7 @@ class AlignmentAssessment:
             "contract": CONTRACT,
             "contract_section": "5",
             "join": self.join.to_dict(),
-            "facts": {
-                "time_alignment_unverified": self.facts.time_alignment_unverified,
-                "receiver_state_stale": self.facts.receiver_state_stale,
-            },
+            "facts": _facts_payload(self.facts),
             "may_update_surface": self.may_update_surface,
             "facts_are_lossy": True,
             "lossy_note": (
@@ -141,8 +151,13 @@ class AlignmentAssessment:
 def facts_for(join: TimeAlignedJoin) -> AlignmentAdmissionFacts:
     """Translate one join into the two admission facts. Pure and total."""
     if not join.joined:
-        if join.refusal in ("SIGNAL_CHAIN_CHANGED", "RECEIVER_STATE_CHAIN_CHANGED"):
-            raise AlignmentUnmappable(f"{join.refusal}: {CHAIN_CHANGE_GAP}")
+        if join.refusal in _CHAIN_CHANGE_FACTS:
+            return _CHAIN_CHANGE_FACTS[join.refusal]
+        if join.refusal not in JOIN_REFUSALS:
+            raise AlignmentUnmappable(
+                f"unmapped join refusal {join.refusal!r}; the mapping must be "
+                f"total, and defaulting to admitted would be the wrong "
+                f"direction to fail in")
         return _REFUSED_FACTS
     try:
         return _STATUS_FACTS[join.alignment_status]
@@ -175,15 +190,14 @@ def alignment_status() -> Dict[str, Any]:
         "alignment_states": list(ALIGNMENT_STATES),
         "capabilities_authority": "rf_receiver_state.ALIGNMENT_CAPABILITIES",
         "join_refusals": list(JOIN_REFUSALS),
-        "status_to_facts": {
-            status: {"time_alignment_unverified": facts.time_alignment_unverified,
-                     "receiver_state_stale": facts.receiver_state_stale}
-            for status, facts in _STATUS_FACTS.items()},
-        "refused_facts": {
-            "time_alignment_unverified": _REFUSED_FACTS.time_alignment_unverified,
-            "receiver_state_stale": _REFUSED_FACTS.receiver_state_stale},
+        "status_to_facts": {status: _facts_payload(facts)
+                            for status, facts in _STATUS_FACTS.items()},
+        "refused_facts": _facts_payload(_REFUSED_FACTS),
+        "chain_change_facts": {refusal: _facts_payload(facts)
+                               for refusal, facts in _CHAIN_CHANGE_FACTS.items()},
+        "reason_vocabulary_revision": REASON_VOCABULARY_REVISION,
         "accepts_expected_hashes": False,
-        "chain_change_gap": CHAIN_CHANGE_GAP,
+        "chain_change_note": CHAIN_CHANGE_NOTE,
         "decides_metadata_facts": False,
         "decides_surface_update": False,
         "side_effects": "NONE",

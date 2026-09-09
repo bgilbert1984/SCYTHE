@@ -17,7 +17,7 @@ from rf_walk_survey_metadata import (
     ValidatedMetadata, assess_frame, find_sample_bearing_field, metadata_status,
 )
 
-ALIGNED = AlignmentAdmissionFacts(False, False)
+ALIGNED = AlignmentAdmissionFacts(False, False, False, False)
 
 
 def _frame(**overrides):
@@ -362,7 +362,9 @@ class ValidationMeaningTests(unittest.TestCase):
         facts = assess_frame(_frame()).facts
         starved = AdmissionFacts.from_stages(
             facts, AlignmentAdmissionFacts(time_alignment_unverified=True,
-                                           receiver_state_stale=False))
+                                           receiver_state_stale=False,
+                                           signal_chain_changed=False,
+                                           receiver_state_chain_changed=False))
         self.assertEqual(decide(starved).disposition, BREADCRUMB_ONLY)
         aligned = AdmissionFacts.from_stages(facts, ALIGNED)
         self.assertEqual(decide(aligned).disposition, SURFACE_ELIGIBLE)
