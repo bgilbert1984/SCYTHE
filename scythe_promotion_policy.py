@@ -237,14 +237,22 @@ def _encode(item: Any) -> str:
 
 
 def _canonical_value(value: Any, depth: int = 0) -> Any:
-    """A type-tagged, order-canonical encoding of one coordinate value.
+    """Type-tagged scalars, canonical container families, order-canonical.
 
-    Tagged, so that 1, 1.0, True and "1" are four values and not one. Not
-    repr(): repr is a display form, several types share one, and an identity
-    built on it would silently merge things the checker distinguished --
-    which is the whole failure v2 corrects. Mappings sort by encoded key, so
-    insertion order cannot move an identity. Sequences keep their order,
-    because for a sequence the order is part of the content.
+    Scalars are tagged, so that 1, 1.0, True and "1" are four values and not
+    one. Not repr(): repr is a display form, several types share one, and an
+    identity built on it would silently merge things the checker
+    distinguished -- which is the whole failure v2 corrects.
+
+    Containers are deliberately *not* tagged to their concrete type. list and
+    tuple share the seq family, set and frozenset share set, bytes and
+    bytearray share bytes: those pairs differ in mutability and in nothing a
+    coordinate asserts, and an identity that moved when a caller passed a
+    tuple instead of a list would be recording the caller's plumbing. The
+    families stay distinct from each other -- a seq is never a set.
+
+    Mappings sort by encoded key, so insertion order cannot move an identity.
+    Sequences keep their order, because for a sequence the order is content.
     """
     if depth > MAX_IDENTITY_DEPTH:
         raise PromotionIdentityError(
@@ -258,12 +266,21 @@ def _canonical_value(value: Any, depth: int = 0) -> Any:
     if isinstance(value, int):
         return ["int", str(value)]
     if isinstance(value, float):
+        # Non-finite coordinates are refused rather than encoded. hex() is
+        # exact for every finite float, for the infinities and for signed
+        # zero, but it flattens every NaN to one token while
+        # Coordinate.compare treats NaN as CHANGED -- so two findings that
+        # the checker distinguished would share an identity, which is the
+        # v1 defect in a smaller costume. NaN in an evidentiary coordinate
+        # is an undeclared absence wearing a lab coat: the ledger already
+        # has five honest kinds for not knowing a value.
         if value != value:
-            return ["float", "nan"]
-        if value == float("inf"):
-            return ["float", "inf"]
-        if value == float("-inf"):
-            return ["float", "-inf"]
+            raise PromotionIdentityError(
+                "NaN coordinate has no promotion identity; state the absence "
+                f"with a coordinate kind ({', '.join(COORDINATE_KINDS[:-1])})")
+        if value in (float("inf"), float("-inf")):
+            raise PromotionIdentityError(
+                f"non-finite coordinate {value!r} has no promotion identity")
         # hex() round-trips a float exactly and keeps -0.0 apart from 0.0.
         # Decimal text in general does neither.
         return ["float", value.hex()]
@@ -285,20 +302,51 @@ def _canonical_value(value: Any, depth: int = 0) -> Any:
         f"encoding; hashing its repr would make two different findings one")
 
 
+_COORDINATE_FIELDS = frozenset(("kind", "value"))
+
+
 def _canonical_coordinate(recorded: Optional[Mapping[str, Any]]) -> Any:
-    """One side of a finding, encoded. Every governed kind is representable."""
+    """One side of a finding, encoded. Every governed kind is representable.
+
+    The mapping is validated rather than trusted. Coordinate enforces these
+    rules at construction, but Finding has no __post_init__ and its before
+    and after sides are plain dictionaries, so a hand-built verdict -- which
+    the tests themselves show is supported -- reaches here unchecked. Without
+    validation {"kind": "VALUE"} would encode exactly like an explicit
+    VALUE(None), a non-VALUE kind could smuggle a value that is then silently
+    dropped, and an extra field would be ignored. Each is a distinct pair of
+    inputs collapsing to one identity: the v1 defect again, arriving by a
+    different door.
+    """
     if recorded is None:
         return _NO_COORDINATE
-    kind = recorded.get("kind")
+    if not isinstance(recorded, Mapping):
+        raise PromotionIdentityError(
+            f"a finding side must be a coordinate mapping or None, not "
+            f"{type(recorded).__name__!r}")
+    present = set(recorded)
+    if present != _COORDINATE_FIELDS:
+        missing = sorted(_COORDINATE_FIELDS - present)
+        extra = sorted(present - _COORDINATE_FIELDS)
+        raise PromotionIdentityError(
+            f"a coordinate mapping carries exactly kind and value; "
+            f"missing {missing or 'nothing'}, unexpected {extra or 'nothing'}")
+    kind = recorded["kind"]
+    value = recorded["value"]
     if kind not in COORDINATE_KINDS:
         raise PromotionIdentityError(
             f"unknown coordinate kind {str(kind)[:48]!r} in a finding; the "
             f"identity will not guess what it was meant to say")
     if kind != VALUE:
         # The four absence kinds carry no value by construction. Encoding one
-        # anyway would let an identity depend on a field that cannot vary.
+        # anyway would let an identity depend on a field that cannot vary --
+        # and dropping one that is there would hash away a contradiction.
+        if value is not None:
+            raise PromotionIdentityError(
+                f"{kind} carries no value; a non-VALUE coordinate holding "
+                f"{str(value)[:48]!r} is two claims at once")
         return ["kind", kind]
-    return ["value", _canonical_value(recorded.get("value"))]
+    return ["value", _canonical_value(value)]
 
 
 def _canonical_finding(finding: Any) -> Any:

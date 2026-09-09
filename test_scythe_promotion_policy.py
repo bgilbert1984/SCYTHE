@@ -416,6 +416,19 @@ class PromotionIdentityCoordinateTests(unittest.TestCase):
             policy_module._canonical_coordinate(None),
             policy_module._canonical_coordinate(Coordinate("ABSENT").as_dict()))
 
+    def test_container_families_are_canonical_rather_than_concrete_types(self):
+        """list/tuple, set/frozenset and bytes/bytearray differ in mutability
+        and in nothing a coordinate asserts. An identity that moved when a
+        caller passed a tuple instead of a list would record the plumbing.
+        """
+        canon = policy_module._canonical_value
+        self.assertEqual(canon(["a", "b"]), canon(("a", "b")))
+        self.assertEqual(canon({"a"}), canon(frozenset({"a"})))
+        self.assertEqual(canon(b"ab"), canon(bytearray(b"ab")))
+        # The families stay apart from each other.
+        self.assertNotEqual(canon(["a"]), canon({"a"}))
+        self.assertNotEqual(canon(["a"]), canon({"a": None}))
+
     def test_values_that_share_a_display_form_are_kept_apart(self):
         """1, 1.0, True and "1" are four coordinates, not one repr()."""
         digests = {verdict_digest(_moved(0, value))
@@ -442,6 +455,65 @@ class PromotionIdentityCoordinateTests(unittest.TestCase):
         self.assertNotEqual(
             verdict_digest(InvariantVerdict(PROHIBITED_CHANGE, "M", (one,))),
             verdict_digest(InvariantVerdict(PROHIBITED_CHANGE, "M", (one, one))))
+
+    def test_a_kind_with_no_value_field_is_not_an_explicit_value_of_none(self):
+        """Finding has no __post_init__, so a hand-built side arrives unchecked.
+
+        Untrusted, {"kind": "VALUE"} would encode exactly like VALUE(None):
+        two different inputs, one identity. The v1 defect by another door.
+        """
+        self.assertEqual(
+            policy_module._canonical_coordinate({"kind": VALUE, "value": None}),
+            ["value", ["null", ""]])
+        with self.assertRaises(PromotionIdentityError):
+            policy_module._canonical_coordinate({"kind": VALUE})
+
+    def test_a_non_value_kind_may_not_smuggle_a_value(self):
+        """Dropping it silently would hash away a contradiction."""
+        with self.assertRaises(PromotionIdentityError):
+            policy_module._canonical_coordinate(
+                {"kind": "ABSENT", "value": "unexpected"})
+
+    def test_an_unexpected_coordinate_field_is_refused_not_ignored(self):
+        with self.assertRaises(PromotionIdentityError):
+            policy_module._canonical_coordinate(
+                {"kind": VALUE, "value": 1, "authority": "OPERATOR"})
+
+    def test_a_finding_side_that_is_no_coordinate_at_all_is_refused(self):
+        for side in ("VALUE", 1, ["kind", VALUE]):
+            with self.subTest(side=side), self.assertRaises(PromotionIdentityError):
+                policy_module._canonical_coordinate(side)
+
+    def test_every_coordinate_the_ledger_builds_passes_validation(self):
+        """The strictness must not refuse what check_transition produces."""
+        for kind in COORDINATE_KINDS:
+            coordinate = (Coordinate.of("v") if kind == VALUE
+                          else Coordinate(kind))
+            with self.subTest(kind=kind):
+                policy_module._canonical_coordinate(coordinate.as_dict())
+
+    def test_nan_has_no_promotion_identity(self):
+        """hex() flattens every NaN to one token, and compare() calls NaN
+        CHANGED -- so encoding it would collapse findings the checker told
+        apart. NaN in an evidentiary coordinate is an undeclared absence
+        wearing a lab coat; the ledger has five honest kinds for not knowing.
+        """
+        with self.assertRaises(PromotionIdentityError):
+            verdict_digest(_moved(1.0, float("nan")))
+
+    def test_the_infinities_have_no_promotion_identity(self):
+        for value in (float("inf"), float("-inf")):
+            with self.subTest(value=value), self.assertRaises(PromotionIdentityError):
+                verdict_digest(_moved(1.0, value))
+
+    def test_a_non_finite_float_inside_a_container_is_still_refused(self):
+        with self.assertRaises(PromotionIdentityError):
+            verdict_digest(_moved(("x",), ("a", {"b": [float("nan")]})))
+
+    def test_finite_floats_that_share_a_decimal_form_stay_apart(self):
+        """hex() is exact, so signed zero survives where decimal text may not."""
+        self.assertNotEqual(verdict_digest(_moved("z", 0.0)),
+                            verdict_digest(_moved("z", -0.0)))
 
     def test_a_value_with_no_canonical_encoding_is_refused_not_approximated(self):
         verdict = _moved("before", object())
