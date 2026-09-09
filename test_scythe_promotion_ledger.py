@@ -225,7 +225,9 @@ class ArmedTests(unittest.TestCase):
         self.assertEqual(len(self.written), 1)
 
     def test_the_key_is_ledgered_before_the_write(self):
-        """An uncounted promotion can write again for free."""
+        """Reserve first: a crash then loses a finding rather than duplicating
+        one. A record written and never counted is free to be written again.
+        """
         order = []
 
         def writer(decision):
