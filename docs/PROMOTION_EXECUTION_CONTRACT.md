@@ -39,8 +39,8 @@ Neither is fixed by the other. §3–§4 answer the first, §6–§13 the second
 | **identity** | A promotion identity, `promotion_identity()` under digest revision v2. |
 | **reservation** | A durable claim on one identity. Not a claim that a record exists. |
 | **terminal record** | The `COMMITTED` or `FAILED` entry that resolves a reservation. |
-| **indeterminate reservation** | A reservation with no terminal record. Neither success nor failure. |
-| **reconciliation** | The operator act that resolves an indeterminate against the graph (§8). |
+| **unresolved reservation** | A reservation with no terminal record. Neither success nor failure. **Not** `INDETERMINATE`, which is a merit-side token in merged code — see §7. |
+| **reconciliation** | The operator act that resolves an unresolved reservation against the graph (§8). |
 | **generation** | One lifetime of the ledger. Ended only by an explicit operator act (§11). |
 | **incarnation** | `ProcessIdentity(boot_id, pid, start_ticks)` — the existing type, reused. |
 | **the ledger** | The durable, single-writer, append-only file defined in §6–§9. |
@@ -133,14 +133,17 @@ nothing holding the audit lock may call back into the coordinator.
 
 ## 5. The coordinator's executability vocabulary
 
-This section instantiates `SCYTHE_VERDICT_VOCABULARIES.md` for the promotion
-sequence. The two vocabularies live in **different modules**, deliberately:
+**Conformance:** this contract conforms to `SCYTHE_VERDICT_VOCABULARIES.md`, and
+this section is its declaration. The line is added here because this contract is
+`PROPOSED` and open; no accepted contract is opened to add one.
+
+This section instantiates that rule for the promotion sequence. The two vocabularies live in **different modules**, deliberately:
 
 | | **merit** | **executability** |
 | --- | --- | --- |
 | owner | `scythe_promotion_policy` | `scythe_promotion_ledger` (the coordinator) |
 | answers | is this finding fit to promote? | could we act on it at all? |
-| examples | `VERDICT_NOT_PROMOTABLE`, `CAPSULE_UNBOUND`, `DUPLICATE_PROMOTION` | `BUDGET_EXHAUSTED`, `DURABLE_CEILING_REACHED`, `INDETERMINATE_CEILING_REACHED`, `IDENTITY_UNRESOLVED`, `LEDGER_UNAVAILABLE`, `LEDGER_NOT_OWNED`, `LEDGER_TORN` |
+| examples | `VERDICT_NOT_PROMOTABLE`, `CAPSULE_UNBOUND`, `DUPLICATE_PROMOTION` | `BUDGET_EXHAUSTED`, `DURABLE_CEILING_REACHED`, `UNRESOLVED_CEILING_REACHED`, `IDENTITY_UNRESOLVED`, `LEDGER_UNAVAILABLE`, `LEDGER_NOT_OWNED`, `LEDGER_TORN` |
 | repaired by | changing the finding, or accepting the judgement | fixing the apparatus; the finding may be sound |
 
 `BUDGET_EXHAUSTED` already lives in the coordinator rather than the policy. That
@@ -208,26 +211,41 @@ Each promotion writes two ledger entries.
 ```
 
 `RESERVED` **must** be fsynced (§3). The terminal record **need not** be: losing
-it degrades the reservation to indeterminate, which is the safe direction.
+it degrades the reservation to unresolved, which is the safe direction.
 
-**A `RESERVED` with no terminal record is `INDETERMINATE`.** The write may have
-landed and may not have. The project's existing rule applies without amendment:
-an `UNDETERMINED` result must not be converted into a failure. Therefore an
-indeterminate reservation:
+**A `RESERVED` with no terminal record is `UNRESOLVED`.** The write may have
+landed and may not have.
+
+The reasoning that governs `UNDETERMINED` applies here **in parallel, not by
+extension**: not-knowing must not be recorded as failure. It is deliberately not
+the same rule. `UNDETERMINED` is a verdict about a finding reached through a
+working apparatus; `UNRESOLVED` is the apparatus reporting that it cannot say.
+Stretching the merit rule to cover an executability state would be the exact
+conflation the naming below exists to prevent.
+
+**The state is `UNRESOLVED` and deliberately not `INDETERMINATE`.** That name is
+already merit-side in merged code — a comparison outcome in
+`scythe_invariant_ledger`, and the root of `INDETERMINATE_AS_FAILURE` in
+`scythe_promotion_policy`. An executability state one prefix away from
+`UNDETERMINED`, whose standing rule names only the merit sense, would be read as
+the same concept whatever this contract said. `UNRESOLVED` also pairs with the
+`IDENTITY_UNRESOLVED` code and with the reconciliation that resolves it.
+
+Therefore an unresolved reservation:
 
 - **blocks re-promotion of its own identity, and only its own** — `IDENTITY_UNRESOLVED`;
 - **is surfaced and counted** in `status()`;
 - **is never auto-retried and never auto-released.** It is released only by §8.
 
-**One indeterminate does not halt ARMED.** The containment is already complete:
+**One unresolved reservation does not halt ARMED.** The containment is already complete:
 the reservation exists, that identity is blocked, no duplicate can reach the
-graph. Halting ARMED globally on one indeterminate would convert a contained
+graph. Halting ARMED globally on one unresolved reservation would convert a contained
 uncertainty into a total stop, and the predictable result is an operator under
-pressure clearing indeterminates carelessly to get ARMED back — destroying the
+pressure clearing unresolved reservations carelessly to get ARMED back — destroying the
 thing the record was protecting.
 
-**The rate of indeterminates is a different signal, and it is not
-identity-scoped.** An adapter timing out on every write produces indeterminates
+**The rate of unresolved reservations is a different signal, and it is not
+identity-scoped.** An adapter timing out on every write produces unresolved reservations
 indefinitely, each individually contained, collectively meaning the graph
 boundary is not working. That is bounded in §11 as a ceiling, using the same
 mechanism as the reservation ceiling — two ceilings over one durable structure,
@@ -237,7 +255,7 @@ not two kinds of ceiling.
 
 ## 8. Reconciliation
 
-Indeterminates accumulate monotonically and gate ARMED through §11. Without a
+Unresolved reservations accumulate monotonically and gate ARMED through §11. Without a
 named operation to resolve one, "never auto-released" would mean "released by
 hand-editing a file" — unaudited, outside §9's single-writer rule, and performed
 by exactly the person that rule protects. The ceiling would be a trap with no
@@ -260,7 +278,7 @@ that does not know.
 - Reconciliation requires a **ledger authority**, distinct from the policy's
   promotion authorities: it acts on the ledger, not on a finding's merits. The
   same authority ends a generation (§11).
-- **Reconciliation clears the indeterminate ceiling, and does not refund the
+- **Reconciliation clears the unresolved ceiling, and does not refund the
   reservation ceiling.** A spent reservation stays spent whichever way the
   determination goes. Refunding it would let a timing-out adapter plus a diligent
   operator restore unlimited amplification through the counter that exists to
@@ -313,7 +331,7 @@ validation tool.
 | rebuilt from the ledger | not rebuilt |
 | --- | --- |
 | the identity set | the window (§6) |
-| indeterminate reservations | the audit ring (in-memory, bounded, by design) |
+| unresolved reservations | the audit ring (in-memory, bounded, by design) |
 | the generation totals (§11) | |
 
 **A missing ledger is a missing fence, and ARMED must be refused**
@@ -338,7 +356,7 @@ over one durable structure, not two kinds of ceiling.
 
 ```
 C1   reservations made in this generation        <=  RESERVATION_CEILING
-C2   outstanding unreconciled indeterminates     <=  INDETERMINATE_CEILING
+C2   outstanding unreconciled reservations     <=  UNRESOLVED_CEILING
 ```
 
 **C1 counts reservations, not confirmed writes.** If it counted only successes,
@@ -360,7 +378,7 @@ generation. **If it ever fires during correct operation, it was set wrong — an
 that is its calibration test.**
 
 Both refusals are executability codes (§5): `DURABLE_CEILING_REACHED`,
-`INDETERMINATE_CEILING_REACHED`.
+`UNRESOLVED_CEILING_REACHED`.
 
 ---
 
@@ -384,13 +402,13 @@ SHADOW run.
 
 ---
 
-## 13. A torn tail is indeterminate, not absent
+## 13. A torn tail is unresolved, not absent
 
 A crash mid-append leaves a partial record. §9's framing makes that detectable.
 What follows is the same question as the adapter's lost acknowledgement, and gets
 the same answer.
 
-> **A torn tail loads as an indeterminate reservation of unknown identity. It is
+> **A torn tail loads as an unresolved reservation of unknown identity. It is
 > never discarded.**
 
 Discarding it would assert that no reservation was made — which is exactly
@@ -398,7 +416,7 @@ write-first semantics reappearing at the storage layer, one level below where §
 excluded it.
 
 Because its identity cannot be read, it cannot fence anything. So unlike a
-well-formed indeterminate, which blocks only its own identity (§7), a torn tail
+well-formed unresolved reservation, which blocks only its own identity (§7), a torn tail
 **refuses ARMED until it is reconciled** (`LEDGER_TORN`) and counts toward C2.
 This is not a special case: it is §7's containment argument applied to a
 reservation whose containment radius is unknown.
@@ -418,7 +436,7 @@ serves as the bound.
   the fence.
 - It does **not** detect a record present in the graph but absent from the
   ledger. The ledger is not a mirror of the graph and must never be read as one.
-- It does **not** adjudicate indeterminate reservations. It surfaces them and
+- It does **not** adjudicate unresolved reservations. It surfaces them and
   records an operator's determination (§8).
 - It does **not** synchronize two coordinators. It refuses the second (§9).
 - It is **not evidence.** It records claims on identities. A reservation is not a
@@ -459,7 +477,7 @@ observable outcomes, not as timing.
 
 **Torn tail**
 
-14. A torn tail is detected by framing, loads as an indeterminate of unknown
+14. A torn tail is detected by framing, loads as unresolved with an unknown
     identity, is not discarded, refuses ARMED, and counts toward C2.
 
 **Reconciliation**
@@ -499,9 +517,9 @@ observable outcomes, not as timing.
 Recorded rather than left open, so the reasoning survives the review that
 produced it.
 
-1. **An indeterminate blocks only its own identity.** Global halt was rejected:
+1. **An unresolved reservation blocks only its own identity.** Global halt was rejected:
    it converts a contained uncertainty into a total stop and creates pressure to
-   clear indeterminates carelessly (§7). Rate is bounded separately by C2 (§11).
+   clear unresolved reservations carelessly (§7). Rate is bounded separately by C2 (§11).
 2. **C1 is a lifetime total over the generation, counting reservations.** Not
    per-boot in any form; not successes only (§11).
 3. **The ledger path is explicitly configured, never the working tree, never
@@ -509,6 +527,8 @@ produced it.
 4. **The ceilings are coordinator-enforced, not policy refusal reasons** (§5).
 5. **Reconciliation is a named, audited, authority-gated ledger operation** (§8).
    Added because §7's "never auto-released" otherwise meant "released by hand".
+6. **The state is `UNRESOLVED`, not `INDETERMINATE`** (§7). Disjoint sets whose
+   names are not visibly disjoint are disjoint only in the document.
 
 ---
 
