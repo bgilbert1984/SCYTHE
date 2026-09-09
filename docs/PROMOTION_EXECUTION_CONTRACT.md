@@ -3,6 +3,7 @@
 ```text
 Status:                 ACCEPTED — nothing implemented
 Accepted:               2026-09-08, after review amendments cafda8d
+Amendment A:            §9 filesystem capability — PROPOSED 2026-09-09
 Authority:              NORMATIVE
 Constrains:             Step 4 of the promotion sequence (execution adapter)
 Depends on:             SCYTHE_VERDICT_VOCABULARIES.md  (ACCEPTED — §5 declares
@@ -146,7 +147,7 @@ This section instantiates that rule for the promotion sequence. The two vocabula
 | --- | --- | --- |
 | owner | `scythe_promotion_policy` | `scythe_promotion_ledger` (the coordinator) |
 | answers | is this finding fit to promote? | could we act on it at all? |
-| examples | `VERDICT_NOT_PROMOTABLE`, `CAPSULE_UNBOUND`, `DUPLICATE_PROMOTION` | `BUDGET_EXHAUSTED`, `DURABLE_CEILING_REACHED`, `UNRESOLVED_CEILING_REACHED`, `IDENTITY_UNRESOLVED`, `LEDGER_UNAVAILABLE`, `LEDGER_NOT_OWNED`, `LEDGER_TORN` |
+| examples | `VERDICT_NOT_PROMOTABLE`, `CAPSULE_UNBOUND`, `DUPLICATE_PROMOTION` | `BUDGET_EXHAUSTED`, `DURABLE_CEILING_REACHED`, `UNRESOLVED_CEILING_REACHED`, `IDENTITY_UNRESOLVED`, `LEDGER_UNAVAILABLE`, `LEDGER_NOT_OWNED`, `LEDGER_TORN`, `LOCK_EXCLUSION_UNATTESTED`, `RESERVATION_DURABILITY_UNATTESTED` |
 | repaired by | changing the finding, or accepting the judgement | fixing the apparatus; the finding may be sound |
 
 `BUDGET_EXHAUSTED` already lives in the coordinator rather than the policy. That
@@ -331,6 +332,112 @@ path. The standing rule that the checker must not call WriteBus directly applies
 here in the same shape: a validation tool that can move the fence is no longer a
 validation tool.
 
+### Amendment A — the gate is on ARMED, not on starting
+
+*Proposed and accepted 2026-09-09, in that order. Settles the question this
+contract left open, and lands `PENDING_AMENDMENTS.md` entries 2a, 2b and 2d.*
+
+`flock` returning success and `fsync` returning success are claims about the
+**mount**, not about the file. On a mount that does not exclude, two coordinators
+with different configured directories both acquire successfully, so the check
+*can I acquire my own lock* answers yes in exactly the case that matters. §9 as
+originally written left it open whether that condition refuses ARMED or refuses
+the process.
+
+**It refuses ARMED. The coordinator starts.**
+
+- SHADOW does not append, reserve, fsync, or claim exclusive ownership. It
+  exercises none of the capabilities in question.
+- Refusing to start would discard useful observation because a capability the
+  process is not using is unavailable.
+- ARMED still fails closed. Nothing is weakened.
+- This is §9 as accepted, made explicit rather than changed: failure to acquire
+  ownership refuses ARMED and does **not** refuse SHADOW.
+
+**The refusal is published at startup, not discovered at the moment of arming.**
+A mode gate that stayed silent until someone tried to arm would be the same
+design with the operator's cost moved ten minutes later, for no gain.
+
+```json
+{
+  "mode": "SHADOW",
+  "armed_capability": "UNAVAILABLE",
+  "armed_refusals": ["LOCK_EXCLUSION_UNATTESTED",
+                     "RESERVATION_DURABILITY_UNATTESTED"],
+  "ledger_readability": "AVAILABLE",
+  "shadow_fidelity": "DEGRADED_FILESYSTEM_NOT_ARMABLE"
+}
+```
+
+### Amendment A — four states, never collapsed
+
+| condition | startup | SHADOW | ARMED |
+| --- | --- | --- | --- |
+| ledger readable, allowlisted filesystem | start | full fidelity | eligible on the other conditions |
+| ledger readable, unlisted filesystem | start degraded | read-only observation | refused |
+| ledger missing or structurally unreadable | start degraded | no seeded simulation; **explicitly unavailable**, not silently empty | refused |
+| torn tail | start degraded | surfaces the unknown reservation | refused until reconciled (§13) |
+
+Row 3 is the one that must not collapse into row 1. A SHADOW that cannot seed is
+not a SHADOW with nothing to seed from: it is an observation whose fidelity is
+unknown, and reporting it as full fidelity would make §12's whole argument false
+in the one case where it matters.
+
+### Amendment A — attestation inspects the mount
+
+The coordinator identifies the **filesystem type backing the configured
+directory** at startup and refuses ARMED on anything not allowlisted. It does not
+infer capability from a successful `flock` (see above), and it does not attempt
+to demonstrate exclusion, which would require a second process.
+
+| | |
+| --- | --- |
+| **allowlisted** | `ext4`; `xfs` and `btrfs` only once explicitly tested on this deployment |
+| **refused for ARMED** | `drvfs`, `9p`, `cifs`, `nfs`, `fuse`, `overlay`, and anything unrecognised |
+
+The list is deliberately narrow and will refuse some sound configurations. That
+is the correct direction: a refused ARMED on a good host is recoverable by
+extending the allowlist after testing; an accepted ARMED on a host that does not
+exclude **is** the race §3 exists to prevent, arriving one level below where the
+mutex can see it. It also states the requirement in terms an operator can act on,
+which *verify your lock semantics* does not.
+
+The observed type is recorded, not only the verdict, so an operator can see what
+was refused rather than only that something was.
+
+### Amendment A — two claims, one lookup
+
+```text
+lock_exclusion:          ATTESTED_BY_FILESYSTEM_POLICY | UNATTESTED
+reservation_durability:  ATTESTED_BY_FILESYSTEM_POLICY | UNATTESTED
+```
+
+These fail on the same mounts *here*, so one lookup supplies both. They remain
+two claims. A filesystem that fsyncs honestly and locks badly, or the reverse, is
+entirely ordinary; §7's reserve-before-write depends on the first and §3's mutex
+on the second, and one precondition covering both would tie two independent
+guarantees to whichever was checked. **One lookup is an implementation
+convenience and not a merge of the requirements.**
+
+### Amendment A — the codes were renamed before minting
+
+The names proposed for these codes were `LOCK_SEMANTICS_UNVERIFIED`,
+`FSYNC_DURABILITY_UNVERIFIED` and `VERIFIED_BY_FILESYSTEM_POLICY`. The
+substring-root check required by `SCYTHE_VERDICT_VOCABULARIES.md` §3 refuses
+them: **`UNVERIFIED` is a merit-side token**, one of `COORDINATE_KINDS` in
+`scythe_invariant_ledger`.
+
+The collision is semantic and not only lexical, which makes it worse than the
+`INDETERMINATE` case. The merit `UNVERIFIED` means *present, and its authority is
+not established* — very nearly what these codes want to say about a filesystem.
+A reader meeting both would have every reason to think they were one concept.
+
+Renamed to `UNATTESTED` / `ATTESTED_BY_FILESYSTEM_POLICY`. `armed_capability`
+takes `AVAILABLE` / `UNAVAILABLE` rather than the more natural `ELIGIBLE` /
+`REFUSED`, because `PROMOTION_ELIGIBLE` and `PROMOTION_REFUSED` are merit
+dispositions. The rule says the name is changed rather than argued for, and these
+were changed.
+
 ---
 
 ## 10. Restart
@@ -482,6 +589,18 @@ observable outcomes, not as timing.
 12. A second coordinator on the same ledger path refuses ARMED.
 13. A configured path in the working tree or under `/tmp` is refused.
 
+**Capability attestation (Amendment A)**
+
+13a. An unlisted filesystem starts the coordinator, permits SHADOW, refuses
+    ARMED, and publishes both `LOCK_EXCLUSION_UNATTESTED` and
+    `RESERVATION_DURABILITY_UNATTESTED` — two codes, not one.
+13b. The capability assessment is published at startup, before any attempt to arm.
+13c. The four states of Amendment A are distinguishable; in particular a ledger
+    that cannot be read reports `shadow_fidelity` as degraded and never as full.
+13d. Attestation reads the filesystem type of the configured directory. A
+    successful `flock` on an unlisted filesystem attests nothing.
+13e. The observed filesystem type is recorded alongside the verdict.
+
 **Torn tail**
 
 14. A torn tail is detected by framing, loads as unresolved with an unknown
@@ -536,6 +655,12 @@ produced it.
    Added because §7's "never auto-released" otherwise meant "released by hand".
 6. **The state is `UNRESOLVED`, not `INDETERMINATE`** (§7). Disjoint sets whose
    names are not visibly disjoint are disjoint only in the document.
+7. **Filesystem capability is a mode gate on ARMED, not a startup refusal, and is
+   published at startup** (§9 Amendment A). Refusing to start would discard
+   observation because of a capability SHADOW does not use; staying silent until
+   someone arms would move the operator's cost later for no gain.
+8. **Attestation inspects the mount against an allowlist, not the success of an
+   acquisition** (§9 Amendment A). A non-excluding mount grants every lock.
 
 ---
 
