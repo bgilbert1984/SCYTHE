@@ -1,10 +1,12 @@
 # Promotion Execution Contract
 
 ```text
-Status:                 PROPOSED — not accepted, nothing implemented
-Authority:              NORMATIVE once accepted
+Status:                 ACCEPTED — nothing implemented
+Accepted:               2026-09-08, after review amendments cafda8d
+Authority:              NORMATIVE
 Constrains:             Step 4 of the promotion sequence (execution adapter)
-Depends on:             SCYTHE_VERDICT_VOCABULARIES.md  (PROPOSED — §5 instantiates it)
+Depends on:             SCYTHE_VERDICT_VOCABULARIES.md  (ACCEPTED — §5 declares
+                        conformance)
                         scythe_promotion_policy.py      (v2 identity, MERGED)
                         scythe_promotion_ledger.py      (shadow coordinator, MERGED)
                         rf_capture_recovery.ProcessIdentity (MERGED, reused)
@@ -134,8 +136,9 @@ nothing holding the audit lock may call back into the coordinator.
 ## 5. The coordinator's executability vocabulary
 
 **Conformance:** this contract conforms to `SCYTHE_VERDICT_VOCABULARIES.md`, and
-this section is its declaration. The line is added here because this contract is
-`PROPOSED` and open; no accepted contract is opened to add one.
+this section is its declaration. The line was added while this contract was
+`PROPOSED` and open, which is the only moment its own §7 allows: no accepted
+contract is opened to add a reference.
 
 This section instantiates that rule for the promotion sequence. The two vocabularies live in **different modules**, deliberately:
 
