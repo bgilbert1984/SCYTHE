@@ -7,10 +7,10 @@ import unittest
 
 import scythe_promotion_policy as policy_module
 from scythe_invariant_ledger import (
-    COMPARISON_DOMAIN_CHANGED, EVIDENCE_MISSING, INVARIANTS_SATISFIED,
-    NUMERIC_BALANCE_EXCEEDED, PROHIBITED_CHANGE, REQUIRED_CHANGE_NOT_OBSERVED,
-    Coordinate, InvariantVerdict, TransitionContract, check_transition,
-    signature,
+    COMPARISON_DOMAIN_CHANGED, COORDINATE_KINDS, EVIDENCE_MISSING,
+    INVARIANTS_SATISFIED, NUMERIC_BALANCE_EXCEEDED, PROHIBITED_CHANGE,
+    REQUIRED_CHANGE_NOT_OBSERVED, VALUE, Coordinate, Finding, InvariantVerdict,
+    TransitionContract, check_transition, signature,
 )
 from scythe_promotion_policy import (
     AUTHORITY_INSUFFICIENT, CAPSULE_REVISION_UNSUPPORTED, CAPSULE_UNBOUND,
@@ -18,9 +18,11 @@ from scythe_promotion_policy import (
     INVARIANT_FINDING, MODEL_RESPONSE_USED_AS_AUTHORITY, NO_PROMOTION_REQUESTED,
     OBSERVATION_GAP, POLICY_REVISION, PROMOTION_AUTHORITIES, PROMOTION_ELIGIBLE,
     PROMOTION_REFUSED, RECORD_CLASSES, REFUSALS, TARGET_UNSUPPORTED,
+    PRIOR_PROMOTION_IDENTITY_COMPARABLE, VERDICT_DIGEST_REVISION,
     VERDICT_NOT_PROMOTABLE, VERDICT_RECORD_CLASS, CapsuleIdentity,
-    PromotionDecision, PromotionRequest, PromotionRequestError,
-    decide_promotion, policy_status, promotion_identity, verdict_digest,
+    PromotionDecision, PromotionIdentityError, PromotionRequest,
+    PromotionRequestError, decide_promotion, policy_status, promotion_identity,
+    verdict_digest,
 )
 
 CONTRACT = TransitionContract(name="T", must_preserve=("keep",),
@@ -333,6 +335,233 @@ class ScopeTests(unittest.TestCase):
         for _ in range(5):
             self.assertEqual(decide_promotion(verdict, _request(), CAPSULE).as_dict(),
                              first)
+
+
+# -- promotion identity, v2 -----------------------------------------------
+
+MOVED = TransitionContract(name="M", must_preserve=("chain",),
+                           must_change=("seq",), domain_fields=("boot",))
+
+
+def _moved(before_value, after_value, seq_to=2):
+    """A PROHIBITED_CHANGE on `chain`, carrying real coordinates."""
+    verdict = check_transition(
+        signature(boot="boot-a", chain=before_value, seq=1), "M",
+        signature(boot="boot-a", chain=after_value, seq=seq_to), MOVED)
+    assert verdict.verdict == PROHIBITED_CHANGE, verdict.verdict
+    return verdict
+
+
+class PromotionIdentityCoordinateTests(unittest.TestCase):
+    """The v1 digest hashed the shape of a disagreement, not its coordinates.
+
+    For a PROHIBITED_CHANGE, `expected` and `observed` are the literals
+    UNCHANGED and CHANGED, so every movement of one field hashed alike. The
+    ledger then refused the second as a duplicate and a distinct finding was
+    dropped silently. These tests hold the repair: a finding is bound to the
+    canonical before and after coordinates the checker already recorded.
+    """
+
+    def test_two_movements_of_one_field_are_two_identities(self):
+        """The defect, stated as the behaviour that replaces it.
+
+        Under v1 these hashed identically, and the second promotion was
+        refused as DUPLICATE_PROMOTION.
+        """
+        self.assertNotEqual(verdict_digest(_moved(100.1, 100.2)),
+                            verdict_digest(_moved(100.2, 100.3)))
+
+    def test_the_shape_of_the_disagreement_is_still_identical(self):
+        """So the distinction above can only come from the coordinates."""
+        first, second = _moved(100.1, 100.2), _moved(100.2, 100.3)
+        shape = lambda v: [(f.verdict, f.field, f.expected, f.observed)
+                           for f in v.findings]
+        self.assertEqual(shape(first), shape(second))
+
+    def test_re_evaluating_one_transition_gives_one_identity(self):
+        digests = {verdict_digest(_moved(100.1, 100.2)) for _ in range(5)}
+        self.assertEqual(len(digests), 1)
+
+    def test_reversing_before_and_after_moves_the_identity(self):
+        self.assertNotEqual(verdict_digest(_moved(100.1, 100.2)),
+                            verdict_digest(_moved(100.2, 100.1)))
+
+    def test_mapping_insertion_order_does_not_move_the_identity(self):
+        one = _moved({"x": 0}, {"a": 1, "b": 2})
+        other = _moved({"x": 0}, {"b": 2, "a": 1})
+        self.assertEqual(verdict_digest(one), verdict_digest(other))
+        # Not vacuous: the same two keys with a different value still differ.
+        self.assertNotEqual(verdict_digest(one),
+                            verdict_digest(_moved({"x": 0}, {"a": 1, "b": 3})))
+
+    def test_sequence_order_does_move_the_identity(self):
+        """For a sequence the order is content, unlike a mapping's."""
+        self.assertNotEqual(verdict_digest(_moved(("x",), ("a", "b"))),
+                            verdict_digest(_moved(("x",), ("b", "a"))))
+
+    def test_every_governed_coordinate_kind_is_canonically_representable(self):
+        encoded = {}
+        for kind in COORDINATE_KINDS:
+            coordinate = (Coordinate.of("a value") if kind == VALUE
+                          else Coordinate(kind))
+            encoded[kind] = policy_module._canonical_coordinate(
+                coordinate.as_dict())
+            json.dumps(encoded[kind])
+        self.assertEqual(len(COORDINATE_KINDS), len(encoded))
+        self.assertEqual(len(encoded), len({json.dumps(e) for e in encoded.values()}))
+
+    def test_a_side_nobody_recorded_is_not_a_coordinate_saying_absent(self):
+        """A prohibited claim has an after and no before. That is not ABSENT."""
+        self.assertNotEqual(
+            policy_module._canonical_coordinate(None),
+            policy_module._canonical_coordinate(Coordinate("ABSENT").as_dict()))
+
+    def test_container_families_are_canonical_rather_than_concrete_types(self):
+        """list/tuple, set/frozenset and bytes/bytearray differ in mutability
+        and in nothing a coordinate asserts. An identity that moved when a
+        caller passed a tuple instead of a list would record the plumbing.
+        """
+        canon = policy_module._canonical_value
+        self.assertEqual(canon(["a", "b"]), canon(("a", "b")))
+        self.assertEqual(canon({"a"}), canon(frozenset({"a"})))
+        self.assertEqual(canon(b"ab"), canon(bytearray(b"ab")))
+        # The families stay apart from each other.
+        self.assertNotEqual(canon(["a"]), canon({"a"}))
+        self.assertNotEqual(canon(["a"]), canon({"a": None}))
+
+    def test_values_that_share_a_display_form_are_kept_apart(self):
+        """1, 1.0, True and "1" are four coordinates, not one repr()."""
+        digests = {verdict_digest(_moved(0, value))
+                   for value in (1, 1.0, True, "1")}
+        self.assertEqual(len(digests), 4)
+
+    def test_findings_are_ordered_canonically_not_by_discovery_order(self):
+        """Identity describes the evidence set, not the order it arrived in."""
+        one = Finding(PROHIBITED_CHANGE, "a", "UNCHANGED", "CHANGED",
+                      before={"kind": VALUE, "value": 1},
+                      after={"kind": VALUE, "value": 2})
+        other = Finding(PROHIBITED_CHANGE, "b", "UNCHANGED", "CHANGED",
+                        before={"kind": VALUE, "value": 3},
+                        after={"kind": VALUE, "value": 4})
+        self.assertEqual(
+            verdict_digest(InvariantVerdict(PROHIBITED_CHANGE, "M", (one, other))),
+            verdict_digest(InvariantVerdict(PROHIBITED_CHANGE, "M", (other, one))))
+
+    def test_a_repeated_finding_is_not_collapsed_into_one(self):
+        """Sorting is not de-duplication: two identical findings are two."""
+        one = Finding(PROHIBITED_CHANGE, "a", "UNCHANGED", "CHANGED",
+                      before={"kind": VALUE, "value": 1},
+                      after={"kind": VALUE, "value": 2})
+        self.assertNotEqual(
+            verdict_digest(InvariantVerdict(PROHIBITED_CHANGE, "M", (one,))),
+            verdict_digest(InvariantVerdict(PROHIBITED_CHANGE, "M", (one, one))))
+
+    def test_a_kind_with_no_value_field_is_not_an_explicit_value_of_none(self):
+        """Finding has no __post_init__, so a hand-built side arrives unchecked.
+
+        Untrusted, {"kind": "VALUE"} would encode exactly like VALUE(None):
+        two different inputs, one identity. The v1 defect by another door.
+        """
+        self.assertEqual(
+            policy_module._canonical_coordinate({"kind": VALUE, "value": None}),
+            ["value", ["null", ""]])
+        with self.assertRaises(PromotionIdentityError):
+            policy_module._canonical_coordinate({"kind": VALUE})
+
+    def test_a_non_value_kind_may_not_smuggle_a_value(self):
+        """Dropping it silently would hash away a contradiction."""
+        with self.assertRaises(PromotionIdentityError):
+            policy_module._canonical_coordinate(
+                {"kind": "ABSENT", "value": "unexpected"})
+
+    def test_an_unexpected_coordinate_field_is_refused_not_ignored(self):
+        with self.assertRaises(PromotionIdentityError):
+            policy_module._canonical_coordinate(
+                {"kind": VALUE, "value": 1, "authority": "OPERATOR"})
+
+    def test_a_finding_side_that_is_no_coordinate_at_all_is_refused(self):
+        for side in ("VALUE", 1, ["kind", VALUE]):
+            with self.subTest(side=side), self.assertRaises(PromotionIdentityError):
+                policy_module._canonical_coordinate(side)
+
+    def test_every_coordinate_the_ledger_builds_passes_validation(self):
+        """The strictness must not refuse what check_transition produces."""
+        for kind in COORDINATE_KINDS:
+            coordinate = (Coordinate.of("v") if kind == VALUE
+                          else Coordinate(kind))
+            with self.subTest(kind=kind):
+                policy_module._canonical_coordinate(coordinate.as_dict())
+
+    def test_nan_has_no_promotion_identity(self):
+        """hex() flattens every NaN to one token, and compare() calls NaN
+        CHANGED -- so encoding it would collapse findings the checker told
+        apart. NaN in an evidentiary coordinate is an undeclared absence
+        wearing a lab coat; the ledger has five honest kinds for not knowing.
+        """
+        with self.assertRaises(PromotionIdentityError):
+            verdict_digest(_moved(1.0, float("nan")))
+
+    def test_the_infinities_have_no_promotion_identity(self):
+        for value in (float("inf"), float("-inf")):
+            with self.subTest(value=value), self.assertRaises(PromotionIdentityError):
+                verdict_digest(_moved(1.0, value))
+
+    def test_a_non_finite_float_inside_a_container_is_still_refused(self):
+        with self.assertRaises(PromotionIdentityError):
+            verdict_digest(_moved(("x",), ("a", {"b": [float("nan")]})))
+
+    def test_finite_floats_that_share_a_decimal_form_stay_apart(self):
+        """hex() is exact, so signed zero survives where decimal text may not."""
+        self.assertNotEqual(verdict_digest(_moved("z", 0.0)),
+                            verdict_digest(_moved("z", -0.0)))
+
+    def test_a_value_with_no_canonical_encoding_is_refused_not_approximated(self):
+        verdict = _moved("before", object())
+        with self.assertRaises(PromotionIdentityError):
+            verdict_digest(verdict)
+
+    def test_an_identity_computation_terminates(self):
+        deep = current = []
+        for _ in range(policy_module.MAX_IDENTITY_DEPTH + 4):
+            nested = []
+            current.append(nested)
+            current = nested
+        with self.assertRaises(PromotionIdentityError):
+            verdict_digest(_moved("before", deep))
+
+    def test_the_identity_break_is_published_rather_than_migrated(self):
+        status = policy_status()
+        self.assertEqual(status["policy_revision"], "v2")
+        self.assertEqual(status["verdict_digest_revision"], "v2")
+        self.assertFalse(status["prior_promotion_identity_comparable"])
+        self.assertFalse(PRIOR_PROMOTION_IDENTITY_COMPARABLE)
+        self.assertEqual(VERDICT_DIGEST_REVISION, "v2")
+
+    def test_the_digest_revision_is_bound_into_the_material(self):
+        """A digest revision must move every key, or it is not a namespace."""
+        verdict = _moved(100.1, 100.2)
+        before = verdict_digest(verdict)
+        original = policy_module.VERDICT_DIGEST_REVISION
+        try:
+            policy_module.VERDICT_DIGEST_REVISION = "v3"
+            self.assertNotEqual(before, verdict_digest(verdict))
+        finally:
+            policy_module.VERDICT_DIGEST_REVISION = original
+
+    def test_the_promotion_key_moves_with_the_coordinates(self):
+        """End to end: the ledger's idempotency key, not just the digest."""
+        target = "scythe.graphops.evidence"
+        self.assertNotEqual(
+            promotion_identity(_moved(100.1, 100.2), CAPSULE, target),
+            promotion_identity(_moved(100.2, 100.3), CAPSULE, target))
+
+    def test_two_movements_of_one_field_are_two_promotions(self):
+        """The cost the collision used to impose, now absent."""
+        first = decide_promotion(_moved(100.1, 100.2), _request(), CAPSULE)
+        second = decide_promotion(_moved(100.2, 100.3), _request(), CAPSULE,
+                                  already_promoted=[first.idempotency_key])
+        self.assertEqual(second.disposition, PROMOTION_ELIGIBLE)
+        self.assertNotIn(DUPLICATE_PROMOTION, second.refusals)
 
 
 if __name__ == "__main__":
