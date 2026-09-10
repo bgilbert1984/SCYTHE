@@ -41,6 +41,20 @@ exists at all.
 
 ---
 
+**One entry was written here that did not belong.** Slice 4 minted
+`RETRY_REQUIRES_OPERATOR` in code and queued the contract amendment behind it,
+which inverts the proposal → acceptance → implementation order this file exists
+to protect rather than to route around. It was caught in review and became
+Amendment C, and no entry for it ever reached `main`.
+
+*An amendment with no trigger is a wish.* An amendment whose trigger has already
+fired in code is not a queue entry at all — it is a note apologising for one.
+Entry 6 is the legitimate shape: the rule lives in the reader because the reader
+had to enforce something to be written, and its trigger is a slice that has not
+started.
+
+---
+
 ## 1. `SCYTHE_VERDICT_VOCABULARIES.md` — the drafting rule
 
 **Trigger:** the next amendment to that document for a reason of its own.
@@ -100,6 +114,13 @@ had an exit while the second did not.
 Either §8 extends to `FAILED` reservations, or §2's "operator action" is
 narrowed to say what it actually is. Not resolved here: the slice that writes
 reconciliation records is the one that has to answer it.
+
+**Sharpened by Amendment C (2026-09-10).** The condition has a name now —
+`RETRY_REQUIRES_OPERATOR`, §13b — so a caller is told why the identity is refused
+and what would repair it, and §13b C.4 states in the contract itself that the
+repair does not yet exist. What is missing is unchanged: there is no operation
+an operator can perform against a `FAILED` reservation. The refusal is honest,
+the exit is still absent, and this entry is what carries the difference.
 
 ---
 
@@ -202,28 +223,6 @@ a headerless ledger refuses ARMED, and if it does, under which code.
 
 ---
 
-## 8. `scythe_promotion_ledger_store.py` — `fenced` cites the ground Amendment B moved
-
-**Trigger:** slice 4, when the coordinator first produces a terminal record.
-
-`LedgerRead.fenced` fences committed, write-failed and unresolved identities
-together, and its docstring gives one reason for all three:
-
-> A failed write fences because `WriteResult(accepted=False)` covers a
-> rejection, a timeout and a landed write whose acknowledgement was lost, and
-> those are indistinguishable from outside the bus.
-
-Amendment B (§13a B.3) splits that. A `FAILED` record now means the adapter
-**definitely** attested that no record was created, so it fences on §2's
-operator-action rule; only `UNRESOLVED` fences on indistinguishability. The
-behaviour is unchanged — all three still fence — but the stated reason is now
-right for one row of three.
-
-The comment is **not yet false**: `WriteResult(accepted: bool)` is still what is
-merged, and nothing produces a three-state result. It becomes false the moment
-slice 4 does. Queued rather than corrected now for that reason, and it is the
-entry whose trigger fires soonest.
-
 ---
 
 ---
@@ -239,6 +238,12 @@ what is still pending. This is a record, not a queue: nothing here is waiting.
 | 2a — attestation inspects the mount, not the acquisition | `PROMOTION_EXECUTION_CONTRACT.md` §9 Amendment A | `42cc6b5` |
 | 2b — two preconditions, not one | `PROMOTION_EXECUTION_CONTRACT.md` §9 Amendment A | `42cc6b5` |
 | 2d — startup refusal or mode gate | `PROMOTION_EXECUTION_CONTRACT.md` §9 Amendment A | `42cc6b5` |
+| 8 — `fenced` cited the ground Amendment B moved | `scythe_promotion_ledger_store.py` docstring | slice 4 |
+
+An entry for `RETRY_REQUIRES_OPERATOR` was written on the slice-4 branch and
+never merged; it is absent from this table because it was never a pending
+obligation of the repository. Amendment C settled it before the code landed,
+which is the order that made the queue entry unnecessary.
 
 Entry 2c was not an amendment but an expectation — *a contract amended at slice 3
 because a real filesystem disagreed with it is the process working*. It was
