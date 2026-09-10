@@ -7,7 +7,7 @@ Amendment A:            §9 filesystem capability — ACCEPTED 2026-09-09,
                         amendment 42cc6b5
 Amendment B:            §13a three-state writer result — ACCEPTED 2026-09-10
 Amendment C:            §13b RETRY_REQUIRES_OPERATOR — ACCEPTED 2026-09-10
-Amendment D:            §13c sequence, generation, gated write — PROPOSED
+Amendment D:            §13c sequence, generation, gated write — ACCEPTED
                         2026-09-10
 Authority:              NORMATIVE
 Constrains:             Step 4 of the promotion sequence (execution adapter)
@@ -803,9 +803,10 @@ not looked.
 
 ## 13c. Amendment D — what the writer must know before it may write
 
-*Proposed 2026-09-10. **Not yet accepted.** Settles `PENDING_AMENDMENTS.md`
-entries 6 and 7, whose trigger is slice 6, and raises one finding and one scope
-question that working out `next_seq` produced. Touches §9, §10 and §17.*
+*Proposed 2026-09-10 and accepted 2026-09-10, after review strengthened D.2,
+D.3 and D.4. Settles `PENDING_AMENDMENTS.md` entries 6 and 7, whose trigger is
+slice 6, and records one finding and one scope division that working out
+`next_seq` produced. Touches §9, §10 and §17.*
 
 ### D.1 The record sequence (entry 6)
 
