@@ -46,3 +46,8 @@ UnityProject/Builds/
 .solver-envs/
 .conda-pkgs/
 solvers/itm/build/
+
+# Reference papers live in docs/ but are not part of the repository.
+# Tracked once by accident, in the Amendment D proposal commit 8f9e8c9, by a
+# `git add -A docs/` that swept up whatever was sitting beside the contract.
+docs/*.pdf
