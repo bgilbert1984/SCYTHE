@@ -7,6 +7,8 @@ Amendment A:            §9 filesystem capability — ACCEPTED 2026-09-09,
                         amendment 42cc6b5
 Amendment B:            §13a three-state writer result — ACCEPTED 2026-09-10
 Amendment C:            §13b RETRY_REQUIRES_OPERATOR — ACCEPTED 2026-09-10
+Amendment D:            §13c sequence, generation, gated write — ACCEPTED
+                        2026-09-10
 Authority:              NORMATIVE
 Constrains:             Step 4 of the promotion sequence (execution adapter)
 Depends on:             SCYTHE_VERDICT_VOCABULARIES.md  (ACCEPTED — §5 declares
@@ -163,7 +165,7 @@ This section instantiates that rule for the promotion sequence. The two vocabula
 | --- | --- | --- |
 | owner | `scythe_promotion_policy` | `scythe_promotion_ledger` (the coordinator) |
 | answers | is this finding fit to promote? | could we act on it at all? |
-| examples | `VERDICT_NOT_PROMOTABLE`, `CAPSULE_UNBOUND`, `DUPLICATE_PROMOTION` | `BUDGET_EXHAUSTED`, `DURABLE_CEILING_REACHED`, `UNRESOLVED_CEILING_REACHED`, `IDENTITY_UNRESOLVED`, `RETRY_REQUIRES_OPERATOR`, `LEDGER_UNAVAILABLE`, `LEDGER_NOT_OWNED`, `LEDGER_TORN`, `LOCK_EXCLUSION_UNATTESTED`, `RESERVATION_DURABILITY_UNATTESTED` |
+| examples | `VERDICT_NOT_PROMOTABLE`, `CAPSULE_UNBOUND`, `DUPLICATE_PROMOTION` | `BUDGET_EXHAUSTED`, `DURABLE_CEILING_REACHED`, `UNRESOLVED_CEILING_REACHED`, `IDENTITY_UNRESOLVED`, `RETRY_REQUIRES_OPERATOR`, `LEDGER_UNAVAILABLE`, `LEDGER_NOT_OWNED`, `LEDGER_TORN`, `LEDGER_GENERATION_UNDECLARED`, `LOCK_EXCLUSION_UNATTESTED`, `RESERVATION_DURABILITY_UNATTESTED` |
 | repaired by | changing the finding, or accepting the judgement | fixing the apparatus; the finding may be sound |
 
 The coordinator **returns** `IDENTITY_UNRESOLVED` on a second evaluation of an
@@ -350,6 +352,9 @@ fails:**
 2. **Per-record framing.** Each record carries a length and a checksum so a torn
    tail is *detected* rather than inferred from a parse failure. §13 governs what
    is then done with it.
+3. **One strictly increasing sequence across every record kind** (§13c D.1),
+   allocated inside the critical section, and **never appended to a torn
+   ledger** (§13c D.2).
 
 **No other component appends.** Not the checker, not the adapter, not the model
 path. The standing rule that the checker must not call WriteBus directly applies
@@ -471,6 +476,11 @@ were changed.
 | the identity set | the window (§6) |
 | unresolved reservations | the audit ring (in-memory, bounded, by design) |
 | the generation totals (§11) | |
+| `next_seq`, as `last_seq + 1` (§13c D.1) | |
+
+*Amended by §13c D.3: an empty ledger is valid and readable, and refuses ARMED
+under `LEDGER_GENERATION_UNDECLARED` because it declares no generation for C1 to
+total over.*
 
 **A missing ledger is a missing fence, and ARMED must be refused**
 (`LEDGER_UNAVAILABLE`). Starting from an empty identity set after the file is
@@ -791,6 +801,177 @@ not looked.
 
 ---
 
+## 13c. Amendment D — what the writer must know before it may write
+
+*Proposed 2026-09-10 and accepted 2026-09-10, after review strengthened D.2,
+D.3 and D.4. Settles `PENDING_AMENDMENTS.md` entries 6 and 7, whose trigger is
+slice 6, and records one finding and one scope division that working out
+`next_seq` produced. Touches §9, §10 and §17.*
+
+### D.1 The record sequence (entry 6)
+
+> **One sequence across every record kind, the header included, strictly
+> increasing. Gaps are permitted.**
+
+The reader has enforced this since slice 5 and no accepted document has said it,
+which is the shape `PENDING_AMENDMENTS.md` exists to prevent standing.
+
+`next_seq` has to be answerable from **the last record of the file**, whatever
+kind that record is. A per-kind counter makes *the last record* a question with
+three answers, and a writer that had to scan for the last record of its own kind
+would be reading the whole file to append one line. Strictly increasing gives
+global uniqueness for free and subsumes the narrower duplicate-reservation check
+the reader carried before.
+
+**Gaps are permitted deliberately.** A gap is what a writer that took a sequence
+number and crashed before framing the record leaves behind. Refusing gaps would
+make a lost record render the entire ledger unreadable rather than merely lost —
+converting the recoverable failure into the unrecoverable one, which is the
+inversion this contract exists to prevent.
+
+**Allocation is inside the critical section.** `next_seq` is taken under the
+coordinator lock, in the same section as the reservation (§3 steps 3–4). Two
+evaluations allocating outside it would reproduce §3's race one level down,
+where the reservation is atomic and the number written beside it is not.
+
+§10 gains `next_seq` to its rebuilt-from-the-ledger column: it is
+`last_seq + 1`, read at startup, and never persisted separately. A counter kept
+beside the ledger is a second answer that can disagree with the first.
+
+### D.2 A torn ledger is never appended to
+
+**Found by asking where `next_seq` comes from after a crash**, which is the
+question §13 does not reach.
+
+§13 says a torn tail loads as unresolved and is not discarded. That invites the
+reading that the writer simply carries on after it. It must not, and the reason
+is the reader's own rule: slice 5 treats a malformed record with well-formed
+records *after* it as corruption rather than a torn tail, because the writer got
+past it. So appending to a torn ledger converts a detected, contained torn tail
+into `LEDGER_UNREADABLE` — losing every identity in the file to save one append.
+
+`LEDGER_TORN` already refuses ARMED, so nothing changes in behaviour. What
+changes is that the reason is written down, because the behaviour currently
+holds by a coincidence of two rules meeting rather than by either one saying so.
+
+The repair is reconciliation's (slice 7), not the writer's. **`LEDGER_TORN` is
+append-ineligible, and the writer must neither truncate, repair, normalize nor
+otherwise modify a torn ledger** — not the tail, not the records before it, not
+the file's length. A writer that repaired the file it is about to append to is a
+writer that can destroy evidence to make its own next operation legal, and it
+would do so at exactly the moment the evidence is most load-bearing.
+
+Evidence preservation wins over availability here, and the trade is deliberate:
+a torn ledger that refuses every append is a coordinator that cannot promote,
+which is recoverable. A torn ledger that has been tidied is a set of identities
+nobody can audit, which is not.
+
+### D.3 A ledger with no declared generation (entry 7)
+
+§10 says a ledger created by this contract's own initialization is empty and
+valid. §9 says the holder writes its `ProcessIdentity` into a header record. A
+crash between the two leaves a zero-byte ledger: valid, fencing nothing, and
+carrying **no generation identifier** — which is the thing C1 is a lifetime
+total over (§11).
+
+**It stays readable and valid, and it refuses ARMED**, under a new
+executability code:
+
+```
+LEDGER_GENERATION_UNDECLARED
+```
+
+Not `LEDGER_UNREADABLE`: the file is perfectly readable and says, correctly,
+that nothing has been promoted. Not silence either — a ceiling whose scope is
+undeclared is a ceiling that cannot be enforced, and ARMED must fail closed on
+every condition that can be observed.
+
+SHADOW is unaffected and seeds from an empty fence, which is the truth about
+that ledger rather than a degradation of it.
+
+**The exit exists and is the writer's**: the owning coordinator writes the
+header, and the generation is declared from that moment. Recorded here because
+§13b C.4 established the rule — a refusal whose repair does not exist should say
+so in the document that mints it — and this one's repair *does* exist, in the
+slice that mints the code.
+
+**The writer must not silently initialize, infer or adopt a generation because
+the file is empty.** Establishing a generation is an explicit governed
+operation, under the same authority that ends one (§11) and that performs
+reconciliation (§8). An empty file is an invitation to treat initialization as a
+side effect of the first write, and a generation that began as a side effect is
+one nobody authorized, dated or can name the boundary of — while C1 is a
+lifetime total over exactly that boundary.
+
+So the refusal stands until a generation is established *deliberately*. A writer
+that started one on its own would clear `LEDGER_GENERATION_UNDECLARED` by
+removing the condition rather than by answering it.
+
+### D.4 §17 slice 6 divides, and the write path lands behind a closed gate
+
+§17's slice 6 reads *write path, fsync discipline, ownership lock*. Those are
+two slices, and the boundary between them is the same one §17 already protects
+between slices 4 and 5: **the mechanism is testable before its guard, and the
+guard is where the subtle failures are.**
+
+| | 6 | 6b |
+| --- | --- | --- |
+| record framing and append | ✓ | |
+| fsync discipline, parent directory included | ✓ | |
+| sequence allocation (D.1) | ✓ | |
+| header and generation (D.3) | ✓ | |
+| `fcntl.flock` ownership for the process lifetime | | ✓ |
+| `LEDGER_NOT_OWNED` becomes reachable | | ✓ |
+
+**Slice 6's write path must be unreachable without an ownership proof it cannot
+yet obtain.** Every append is gated on one; slice 6 supplies no way to produce
+one, so the only caller that can reach an append is a test that injects it —
+the same seam `mounts` and `refused_prefixes` already use.
+
+This is deliberately stronger than *we will add the lock next*. A write path
+that works and is merely not yet guarded is a write path someone can call. One
+that refuses every append until a later slice teaches it to prove ownership
+cannot be used early by accident, and the refusal is `LEDGER_NOT_OWNED`, which
+§5 already names.
+
+#### The proof is a live scope, not a flag
+
+A boolean, a token, or a recorded attestation would reintroduce the hazard the
+gate exists to close, one level up: ownership could be attested, released, and
+the append performed afterwards against a ledger this process no longer owns.
+The check would pass and the guarantee would be gone — a
+time-of-check-to-time-of-use hole with none of the difficulty that usually
+accompanies one.
+
+The ownership proof must therefore be:
+
+- **bound to the specific ledger**, so a proof for one file cannot admit a write
+  to another;
+- **valid across the whole allocate-and-append critical section**, not
+  re-checked at two points with a gap between them — the gap is the hole;
+- **incapable of being retained and reused** after ownership ends: a reference
+  held past the owning scope is inert, and using it is a refusal rather than a
+  silent success;
+- **not producible by production code before slice 6b**, and reachable in slice 6
+  only through the test seam.
+
+**Slice 6 exposes no generally callable append that takes
+`ownership_attested=True`.** A parameter a caller can pass is a parameter a
+caller can pass wrongly, and the reviewer of the call site cannot see whether
+the claim was true. The append is internal and takes a live scope; slice 6b
+invokes it from inside the scope where the lock is actually held, which is the
+only place the scope can exist.
+
+### D.5 What slice 6 still does not do
+
+SHADOW does not append (§12), and the split above does not change that.
+Reconciliation is slice 7 and this amendment supplies none of it — in
+particular, `RETRY_REQUIRES_OPERATOR` names a repair that slice 6 **must not
+fabricate merely because the token now exists**. Ceilings are slice 8, the
+adapter slice 9, ARMED slice 11.
+
+---
+
 ## 14. What this does not do
 
 - It does **not** make the graph write idempotent. It prevents *this coordinator*
@@ -933,6 +1114,40 @@ already written down. Introduced by Amendment B, noticed by Amendment C.*
 27d. `RETRY_REQUIRES_OPERATOR` is counted as executability and never appears in
     `merit_refusals`.
 
+**Amendment D (§13c)**
+
+28a. A record written by the write path is accepted by slice 5's reader without
+    any change to the reader — the same bytes, read by the code already merged.
+28b. `next_seq` is `last_seq + 1` over every record kind, and a header, a
+    reservation and a terminal record allocated in sequence are strictly
+    increasing.
+28c. Concurrent evaluations allocate distinct, strictly increasing sequence
+    numbers; the test forces the interleaving and fails before allocation moves
+    inside the critical section.
+28d. `next_seq` after restart is rebuilt from the file and never from a
+    persisted counter; a ledger with a gap yields a number above the gap.
+28e. A torn ledger is never appended to, and no append truncates, rewrites or
+    tidies a torn tail. The file is byte-identical after a refused append.
+28f. A zero-byte ledger is readable, fences nothing, and refuses ARMED with
+    `LEDGER_GENERATION_UNDECLARED`; SHADOW is unaffected.
+28g. A ledger whose header the writer has written declares a generation, and
+    the refusal is gone.
+28h. Every append refuses with `LEDGER_NOT_OWNED` unless a live ownership scope
+    is supplied, and slice 6 provides no production path that produces one.
+28k. A scope retained past the end of its ownership is inert: a later append
+    through it refuses with `LEDGER_NOT_OWNED` rather than succeeding.
+28l. A scope bound to one ledger does not admit a write to another.
+28m. AST — the public surface exposes no append taking an ownership flag, and
+    no append that can be called without a scope.
+28n. The writer does not establish a generation on an empty ledger: after an
+    attempted append to a zero-byte ledger with no generation, the file is
+    byte-identical and the refusal stands.
+28i. A failed or unresolved write is never readable as a committed promotion:
+    the reader's `committed` set contains only identities whose terminal record
+    is `COMMITTED`.
+28j. Exception messages, returned values and adapter free text do not reach any
+    durable record.
+
 ---
 
 ## 16. Decisions
@@ -979,6 +1194,27 @@ produced it.
 15. **The code is minted without its repair, and says so** (§13b C.4). A refusal
     whose repair does not exist should be named in the document that mints it,
     or the next reader assumes the repair is somewhere they have not looked.
+16. **Sequence gaps are legal** (§13c D.1). Refusing them would make a lost
+    record render the whole ledger unreadable — converting the recoverable
+    failure into the unrecoverable one.
+17. **A torn ledger is never appended to, and never repaired by the writer**
+    (§13c D.2). Appending turns a contained torn tail into `LEDGER_UNREADABLE`
+    by the reader's own corruption rule; repairing it lets a writer destroy
+    evidence to make its own next operation legal.
+18. **An empty ledger refuses ARMED rather than being silent or unreadable**
+    (§13c D.3). It is readable and correct; what it lacks is the generation C1
+    totals over, and a ceiling with an undeclared scope cannot be enforced.
+19. **§17 slice 6 divides, and the write path lands behind a closed gate**
+    (§13c D.4). A write path that merely lacks its guard is one someone can
+    call; one that refuses every append until a later slice teaches it to prove
+    ownership cannot be used early by accident.
+20. **The ownership proof is a live scope, not a flag** (§13c D.4). A boolean or
+    a recorded attestation permits attest-release-append, which passes the check
+    with the guarantee already gone — a time-of-check-to-time-of-use hole with
+    none of the difficulty that usually accompanies one.
+21. **A generation is never established as a side effect of a write** (§13c
+    D.3). A generation that began as a side effect is one nobody authorized or
+    dated, and C1 is a lifetime total over exactly that boundary.
 
 ---
 
@@ -998,7 +1234,12 @@ amendment is accepted:
 5. Durable ledger: format, framing, read path, restart (§7, §9, §10, §13).
    Read path **landed** 2026-09-10 (`bd9e9ca`), ahead of slices 3 and 4, and
    stays disconnected from the coordinator until slice 6.
-6. Durable ledger: write path, fsync discipline, ownership lock.
+6. Durable ledger: write path, fsync discipline, sequence and generation
+   (§13c D.1, D.3). The append is gated on an ownership attestation this slice
+   cannot produce (§13c D.4).
+6b. Durable ledger: `fcntl.flock` ownership for the process lifetime, which is
+   what makes the gate above openable — by supplying the live scope, from
+   inside which the internal append is invoked.
 7. Reconciliation and generations (§8, §11).
 8. Ceilings C1 and C2 (§11).
 9. Execution adapter with one fixed WriteBus schema.
