@@ -173,6 +173,30 @@ a headerless ledger refuses ARMED, and if it does, under which code.
 
 ---
 
+## 8. `scythe_promotion_ledger_store.py` — `fenced` cites the ground Amendment B moved
+
+**Trigger:** slice 4, when the coordinator first produces a terminal record.
+
+`LedgerRead.fenced` fences committed, write-failed and unresolved identities
+together, and its docstring gives one reason for all three:
+
+> A failed write fences because `WriteResult(accepted=False)` covers a
+> rejection, a timeout and a landed write whose acknowledgement was lost, and
+> those are indistinguishable from outside the bus.
+
+Amendment B (§13a B.3) splits that. A `FAILED` record now means the adapter
+**definitely** attested that no record was created, so it fences on §2's
+operator-action rule; only `UNRESOLVED` fences on indistinguishability. The
+behaviour is unchanged — all three still fence — but the stated reason is now
+right for one row of three.
+
+The comment is **not yet false**: `WriteResult(accepted: bool)` is still what is
+merged, and nothing produces a three-state result. It becomes false the moment
+slice 4 does. Queued rather than corrected now for that reason, and it is the
+entry whose trigger fires soonest.
+
+---
+
 ---
 
 ## Drain record
