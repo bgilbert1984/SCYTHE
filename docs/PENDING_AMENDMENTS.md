@@ -101,6 +101,12 @@ Either §8 extends to `FAILED` reservations, or §2's "operator action" is
 narrowed to say what it actually is. Not resolved here: the slice that writes
 reconciliation records is the one that has to answer it.
 
+**Sharpened by slice 4 (2026-09-10).** The coordinator now *names* the condition
+— `RETRY_REQUIRES_OPERATOR`, entry 9 — so a caller is told why the identity is
+refused and what would repair it. What still does not exist is the repair: there
+is no operation an operator can perform. The refusal is honest and the exit is
+still missing, which is a better state than before and not the resolved one.
+
 ---
 
 ## 5. `SCYTHE_VERDICT_VOCABULARIES.md` §3 — the name check needs a token source
@@ -202,27 +208,37 @@ a headerless ledger refuses ARMED, and if it does, under which code.
 
 ---
 
-## 8. `scythe_promotion_ledger_store.py` — `fenced` cites the ground Amendment B moved
+## 9. `PROMOTION_EXECUTION_CONTRACT.md` §5 — `RETRY_REQUIRES_OPERATOR` is unlisted
 
-**Trigger:** slice 4, when the coordinator first produces a terminal record.
+**Trigger:** the next amendment to this contract for a reason of its own.
 
-`LedgerRead.fenced` fences committed, write-failed and unresolved identities
-together, and its docstring gives one reason for all three:
+Amendment B created a state that §5's vocabulary does not name. Once
+`NOT_CREATED` means the adapter **definitely** attested that no record was
+created, `DUPLICATE_PROMOTION` becomes a false claim about a failed identity —
+it says the finding is already in the graph, and B.3 says it is not.
 
-> A failed write fences because `WriteResult(accepted=False)` covers a
-> rejection, a timeout and a landed write whose acknowledgement was lost, and
-> those are indistinguishable from outside the bus.
+So re-evaluating a `FAILED` identity had three candidate answers and none of
+them was right:
 
-Amendment B (§13a B.3) splits that. A `FAILED` record now means the adapter
-**definitely** attested that no record was created, so it fences on §2's
-operator-action rule; only `UNRESOLVED` fences on indistinguishability. The
-behaviour is unchanged — all three still fence — but the stated reason is now
-right for one row of three.
+| candidate | why not |
+| --- | --- |
+| `DUPLICATE_PROMOTION` | claims the record exists; B.3 says it does not |
+| `IDENTITY_UNRESOLVED` | claims we do not know; we do |
+| release the identity | an automatic retry loop bounded only by the budget |
 
-The comment is **not yet false**: `WriteResult(accepted: bool)` is still what is
-merged, and nothing produces a three-state result. It becomes false the moment
-slice 4 does. Queued rather than corrected now for that reason, and it is the
-entry whose trigger fires soonest.
+Slice 4 minted `RETRY_REQUIRES_OPERATOR`, ran the §3 name check against both
+vocabularies before writing it, and gave it a repair note rather than a gloss.
+The refusal is executability: it says nothing about the finding, which may be
+entirely promotable, and the repair is an operator re-promoting it.
+
+**Minting is implementation; recording it in §5 is an amendment.** This is the
+same split the sequence rule took in entry 6, and it is the second entry of that
+shape — worth noticing if a third appears, because a vocabulary that grows in
+code and is ratified in batches is one the contract no longer describes.
+
+§5 should list it, or replace it with a name the contract prefers.
+
+---
 
 ---
 
@@ -239,6 +255,7 @@ what is still pending. This is a record, not a queue: nothing here is waiting.
 | 2a — attestation inspects the mount, not the acquisition | `PROMOTION_EXECUTION_CONTRACT.md` §9 Amendment A | `42cc6b5` |
 | 2b — two preconditions, not one | `PROMOTION_EXECUTION_CONTRACT.md` §9 Amendment A | `42cc6b5` |
 | 2d — startup refusal or mode gate | `PROMOTION_EXECUTION_CONTRACT.md` §9 Amendment A | `42cc6b5` |
+| 8 — `fenced` cited the ground Amendment B moved | `scythe_promotion_ledger_store.py` docstring | slice 4 |
 
 Entry 2c was not an amendment but an expectation — *a contract amended at slice 3
 because a real filesystem disagreed with it is the process working*. It was

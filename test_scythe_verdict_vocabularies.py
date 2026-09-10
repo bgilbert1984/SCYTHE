@@ -145,14 +145,27 @@ def is_negation_pair(candidate, other):
     exists to prevent.
     """
     a, b = set(components(candidate)), set(components(other))
-    for word in a:
-        for prefix in NEGATIONS:
-            if word.startswith(prefix) and word[len(prefix):] in b:
-                return True
-    for word in b:
-        for prefix in NEGATIONS:
-            if word.startswith(prefix) and word[len(prefix):] in a:
-                return True
+    for one, two in ((a, b), (b, a)):
+        # Shape 1: the negation is a prefix on a word. UNVERIFIED / VERIFIED.
+        for word in one:
+            for prefix in NEGATIONS:
+                # The len() guard matters: a component that *is* the prefix --
+                # the NOT in NOT_CREATED -- leaves an empty stem, and an empty
+                # stem matches nothing meaningful.
+                if (len(word) > len(prefix) and word.startswith(prefix)
+                        and word[len(prefix):] in two):
+                    return True
+    # Shape 2: the negation is a word of its own. NOT_CREATED / CREATED_RECORD.
+    # Found by writing a test for shape 1 and picking an example that turned
+    # out to be the other shape, which is the more useful way to find it.
+    for one, two in ((candidate, other), (other, candidate)):
+        stripped = tuple(w for w in components(one) if w not in NEGATIONS)
+        if len(stripped) == len(components(one)) or not stripped:
+            continue
+        whole = components(two)
+        if any(whole[i:i + len(stripped)] == stripped
+               for i in range(len(whole) - len(stripped) + 1)):
+            return True
     return False
 
 
@@ -212,6 +225,13 @@ class CheckMechanismTests(unittest.TestCase):
         self.assertFalse(is_negation_pair("UNRESOLVED", "IDENTITY_RESERVED"))
         self.assertFalse(is_negation_pair("BUDGET_EXHAUSTED", "CAPSULE_UNBOUND"))
 
+    def test_a_component_that_is_only_a_negating_prefix_leaves_no_stem(self):
+        """NOT_CREATED carries a bare NOT. An unguarded check compares the
+        empty string against the other token's components and is correct only
+        by accident of what that set happens to hold."""
+        self.assertFalse(is_negation_pair("NOT_CREATED", "CAPSULE_UNBOUND"))
+        self.assertTrue(is_negation_pair("NOT_CREATED", "CREATED_RECORD"))
+
     def test_prose_in_a_notes_string_is_not_a_token(self):
         """Entry 5's false positive, pinned. The grep form of this check
         reported FAILED as a merit collision; the hit was inside a VERDICT_NOTES
@@ -266,8 +286,11 @@ class DisjointnessTests(unittest.TestCase):
 class ReachabilityTests(unittest.TestCase):
     """A declared code nothing can return looks exactly like a bug."""
 
-    def test_the_unreachable_set_is_declared_rather_than_assumed(self):
-        self.assertEqual(NOT_YET_REACHABLE, ("IDENTITY_UNRESOLVED",))
+    def test_the_unreachable_set_emptied_when_slice_4_landed(self):
+        """Slice 3 declared IDENTITY_UNRESOLVED unreachable and said this test
+        would have to change when a reservation existed that could be
+        unresolved. Slice 4 built one."""
+        self.assertEqual(NOT_YET_REACHABLE, ())
         for code in NOT_YET_REACHABLE:
             self.assertIn(code, EXECUTABILITY_REFUSALS)
 

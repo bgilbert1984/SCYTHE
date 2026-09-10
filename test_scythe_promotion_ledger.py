@@ -4,6 +4,7 @@ import ast
 import inspect
 import itertools
 import json
+import threading
 import unittest
 
 import scythe_promotion_ledger as ledger_module
@@ -11,7 +12,10 @@ from scythe_invariant_ledger import (
     Coordinate, TransitionContract, check_transition, signature,
 )
 from scythe_promotion_ledger import (
-    ACTING_EVENTS, BUDGET_EXHAUSTED, DEFAULT_MODE, EVENTS,
+    ACTING_EVENTS, BUDGET_EXHAUSTED, COMMITTED, CREATED, DEFAULT_MODE, EVENTS,
+    FAILED, MAX_AUDIT_RECORDS, NOT_CREATED,
+    PROMOTION_OUTCOME_UNRESOLVED, RESERVED,
+    RETRY_REQUIRES_OPERATOR, UNKNOWN, WRITE_OUTCOMES,
     EXECUTABILITY_NOTES, EXECUTABILITY_REFUSALS, IDENTITY_UNRESOLVED,
     MERIT_REFUSALS, NOT_YET_REACHABLE, MODE_ARMED,
     MODE_DISABLED, MODE_SHADOW, MODES, NONE, PROMOTION_ATTEMPTED,
@@ -65,10 +69,29 @@ def _satisfied():
                             signature(**dict(BASE, move=2)), CONTRACT)
 
 
+def _collect(results, lock, coordinator, verdict):
+    outcome = coordinator.evaluate(verdict, REQUEST, CAPSULE,
+                                   now_monotonic_ns=NOW)["outcome"]
+    with lock:
+        results.append(outcome)
+
+
+def _unknown_for(prefix, *, accept_others=False):
+    """A writer that answers UNKNOWN once, then CREATED."""
+    state = {"used": False}
+
+    def writer(decision):
+        if not state["used"]:
+            state["used"] = True
+            return WriteResult(UNKNOWN, "no answer")
+        return WriteResult(CREATED if accept_others else UNKNOWN)
+    return writer
+
+
 def _accepting_writer(log):
     def writer(decision):
         log.append(decision.idempotency_key)
-        return WriteResult(True, "record created")
+        return WriteResult(CREATED, "record created")
     return writer
 
 
@@ -126,14 +149,23 @@ class ShadowFidelityTests(unittest.TestCase):
 
     def test_an_empty_simulated_ledger_reproduces_the_amplification(self):
         """The behaviour the simulation exists to prevent, pinned so the fix
-        cannot silently regress."""
-        naive = PromotionCoordinator(PromotionAudit(), mode=MODE_SHADOW)
+        cannot silently regress.
+
+        The budget is raised out of the way deliberately. Before §6's split one
+        list served both idempotency and the window, so clearing it reset both
+        and the amplification showed unimpeded; now clearing the identity map
+        leaves the window spent, and a budget of 8 would stop the run at 8 for a
+        reason that has nothing to do with the simulated ledger. Two structures
+        means two things to say about, which is the point of separating them.
+        """
+        naive = PromotionCoordinator(PromotionAudit(), mode=MODE_SHADOW,
+                                     budget=100)
         verdict = _verdict()
         judged = 0
         for tick in range(20):
             # Emptying the simulated ledger each cycle is what a shadow mode
             # without one amounts to.
-            naive._shadow_promoted.clear()
+            naive._shadow.identities.clear()
             if naive.evaluate(verdict, REQUEST, CAPSULE,
                               now_monotonic_ns=NOW + tick * 5 * SECOND
                               )["outcome"] == WOULD_PROMOTE:
@@ -230,26 +262,39 @@ class ArmedTests(unittest.TestCase):
     def test_the_key_is_ledgered_before_the_write(self):
         """Reserve first: a crash then loses a finding rather than duplicating
         one. A record written and never counted is free to be written again.
+
+        The identity is RESERVED when the writer runs, not COMMITTED -- the
+        fence exists before the write and the terminal state only afterwards.
         """
-        order = []
+        seen = []
 
         def writer(decision):
-            order.append(len(coordinator.promoted_keys))
-            return WriteResult(True)
+            seen.append((coordinator.fenced_keys, coordinator.promoted_keys,
+                         coordinator.unresolved_keys))
+            return WriteResult(CREATED)
 
         coordinator = PromotionCoordinator(self.audit, mode=MODE_ARMED,
                                            writer=writer)
         coordinator.evaluate(_verdict(), REQUEST, CAPSULE, now_monotonic_ns=NOW)
-        self.assertEqual(order, [1])
+        (fenced, promoted, unresolved), = seen
+        self.assertEqual(len(fenced), 1)
+        self.assertEqual(promoted, ())
+        self.assertEqual(unresolved, fenced)
+        self.assertEqual(len(coordinator.promoted_keys), 1)
 
-    def test_a_failed_write_is_recorded_and_still_consumes_the_identity(self):
+    def test_a_definite_failure_is_recorded_and_still_consumes_the_identity(self):
+        """NOT_CREATED: the adapter attests nothing was written. It still
+        fences, on §2's operator-action rule rather than on ambiguity."""
         coordinator = PromotionCoordinator(
             self.audit, mode=MODE_ARMED,
-            writer=lambda d: WriteResult(False, "bus unavailable"))
+            writer=lambda d: WriteResult(NOT_CREATED, "rejected by schema"))
         result = coordinator.evaluate(_verdict(), REQUEST, CAPSULE,
                                       now_monotonic_ns=NOW)
         self.assertEqual(result["outcome"], PROMOTION_FAILED)
-        self.assertEqual(len(coordinator.promoted_keys), 1)
+        self.assertEqual(result["write_outcome"], NOT_CREATED)
+        self.assertEqual(len(coordinator.write_failed_keys), 1)
+        self.assertEqual(coordinator.promoted_keys, ())
+        self.assertEqual(len(coordinator.fenced_keys), 1)
 
     def test_the_same_finding_is_never_written_twice(self):
         verdict = _verdict()
@@ -260,6 +305,7 @@ class ArmedTests(unittest.TestCase):
         self.assertEqual(first["outcome"], PROMOTION_RECORDED)
         self.assertEqual(second["outcome"], PROMOTION_REFUSED)
         self.assertIn("DUPLICATE_PROMOTION", second["refusals"])
+        self.assertEqual(second["outcome"], PROMOTION_REFUSED)
         self.assertEqual(len(self.written), 1)
 
     def test_armed_reads_the_real_ledger_not_the_shadow_one(self):
@@ -494,18 +540,18 @@ class VocabularyTests(unittest.TestCase):
         counts = self.coordinator.status()["merit_refusals"]
         self.assertEqual(sorted(set(counts.values())), [2])
 
-    def test_identity_unresolved_is_declared_and_not_yet_reachable(self):
-        """Slice 4 makes it reachable and must change this test."""
+    def test_identity_unresolved_became_reachable_in_slice_4(self):
+        """Slice 3 declared it unreachable and said this test would have to
+        change. It changed."""
         self.assertIn(IDENTITY_UNRESOLVED, EXECUTABILITY_REFUSALS)
-        self.assertEqual(NOT_YET_REACHABLE, (IDENTITY_UNRESOLVED,))
+        self.assertEqual(NOT_YET_REACHABLE, ())
         self.assertEqual(
-            self.coordinator.status()["executability_not_yet_reachable"],
-            [IDENTITY_UNRESOLVED])
+            self.coordinator.status()["executability_not_yet_reachable"], [])
 
-    def test_the_coordinator_lock_is_declared_absent(self):
-        """Slice 4. Published rather than left for a reader to assume, because
-        the counters above are as unlocked as everything else here."""
+    def test_the_coordinator_lock_is_declared_present(self):
         self.assertEqual(self.coordinator.status()["coordinator_lock"],
+                         "PLAIN_LOCK")
+        self.assertEqual(self.coordinator.status()["durable_ledger"],
                          "NOT_IMPLEMENTED")
 
     def test_the_store_is_not_imported_by_the_coordinator(self):
@@ -515,6 +561,369 @@ class VocabularyTests(unittest.TestCase):
         with open(ledger_module.__file__, "r", encoding="utf-8") as handle:
             tree = ast.parse(handle.read())
         for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom):
+                self.assertNotIn("ledger_store", node.module or "")
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    self.assertNotIn("ledger_store", alias.name)
+
+
+class WriteResultTests(unittest.TestCase):
+    """Three states, not a Boolean (§13a B.1)."""
+
+    def test_the_three_outcomes_are_the_declared_set(self):
+        self.assertEqual(WRITE_OUTCOMES, (CREATED, NOT_CREATED, UNKNOWN))
+
+    def test_a_bool_is_not_a_write_outcome(self):
+        """The old shape. It must fail loudly rather than mean something."""
+        for value in (True, False):
+            with self.assertRaises(PromotionLedgerError):
+                WriteResult(value)
+
+    def test_an_unknown_outcome_is_refused_rather_than_recorded(self):
+        with self.assertRaises(PromotionLedgerError):
+            WriteResult("MAYBE")
+
+
+class UnresolvedTests(unittest.TestCase):
+    """UNKNOWN and exceptions take the same path (§13a B.2)."""
+
+    def setUp(self):
+        self.audit = PromotionAudit()
+
+    def _armed(self, writer):
+        return PromotionCoordinator(self.audit, mode=MODE_ARMED, writer=writer)
+
+    def _events(self):
+        return [r["event"] for r in self.audit.status()["records"]]
+
+    def test_an_unknown_result_leaves_the_identity_reserved(self):
+        coordinator = self._armed(lambda d: WriteResult(UNKNOWN, "timed out"))
+        result = coordinator.evaluate(_verdict(), REQUEST, CAPSULE,
+                                      now_monotonic_ns=NOW)
+        self.assertEqual(result["outcome"], PROMOTION_OUTCOME_UNRESOLVED)
+        self.assertEqual(result["executability_code"], IDENTITY_UNRESOLVED)
+        self.assertEqual(len(coordinator.unresolved_keys), 1)
+        self.assertEqual(coordinator.promoted_keys, ())
+        self.assertEqual(coordinator.write_failed_keys, ())
+
+    def test_no_terminal_event_is_recorded_for_an_unknown_result(self):
+        coordinator = self._armed(lambda d: WriteResult(UNKNOWN))
+        coordinator.evaluate(_verdict(), REQUEST, CAPSULE, now_monotonic_ns=NOW)
+        self.assertEqual(self._events(),
+                         [PROMOTION_ATTEMPTED, PROMOTION_OUTCOME_UNRESOLVED])
+        self.assertNotIn(PROMOTION_FAILED, self._events())
+
+    def test_a_raising_writer_does_not_propagate(self):
+        """Raising hands the caller no idempotency key, and the key is the only
+        handle on a reservation that already fences an identity."""
+        def writer(decision):
+            raise TimeoutError("bus did not answer")
+
+        coordinator = self._armed(writer)
+        result = coordinator.evaluate(_verdict(), REQUEST, CAPSULE,
+                                      now_monotonic_ns=NOW)
+        self.assertEqual(result["outcome"], PROMOTION_OUTCOME_UNRESOLVED)
+        self.assertIn("idempotency_key", result)
+        self.assertEqual(len(coordinator.unresolved_keys), 1)
+
+    def test_the_exception_message_is_discarded_and_not_truncated(self):
+        """Adapter exception text carries endpoints, payload fragments and
+        credentials. The class name is the part about the apparatus."""
+        secret = "https://graphops.internal/write?token=hunter2"
+
+        def writer(decision):
+            raise ConnectionError(secret)
+
+        coordinator = self._armed(writer)
+        result = coordinator.evaluate(_verdict(), REQUEST, CAPSULE,
+                                      now_monotonic_ns=NOW)
+        self.assertEqual(result["detail"], {"exception_type": "ConnectionError"})
+        blob = json.dumps([result, coordinator.status(), self.audit.status()])
+        self.assertNotIn("hunter2", blob)
+        self.assertNotIn("graphops.internal", blob)
+        # Not merely absent because it was cut short.
+        self.assertNotIn(secret[:20], blob)
+
+    def test_an_adapter_returning_something_else_told_us_nothing(self):
+        """Nothing is UNKNOWN, never NOT_CREATED, which would be a claim."""
+        coordinator = self._armed(lambda d: "ok")
+        result = coordinator.evaluate(_verdict(), REQUEST, CAPSULE,
+                                      now_monotonic_ns=NOW)
+        self.assertEqual(result["outcome"], PROMOTION_OUTCOME_UNRESOLVED)
+        self.assertEqual(coordinator.write_failed_keys, ())
+
+    def test_a_second_evaluation_is_unresolved_and_not_a_duplicate(self):
+        """§13a B.4. Both fence; only one of them claims the finding reached
+        the graph, and that one would be false."""
+        coordinator = self._armed(lambda d: WriteResult(UNKNOWN))
+        verdict = _verdict()
+        coordinator.evaluate(verdict, REQUEST, CAPSULE, now_monotonic_ns=NOW)
+        second = coordinator.evaluate(verdict, REQUEST, CAPSULE,
+                                      now_monotonic_ns=NOW + SECOND)
+        self.assertEqual(second["executability_code"], IDENTITY_UNRESOLVED)
+        self.assertNotIn("refusals", second)
+        self.assertNotIn("DUPLICATE_PROMOTION", json.dumps(second))
+
+    def test_a_definite_failure_refuses_a_retry_and_is_not_a_duplicate(self):
+        """NOT_CREATED means nothing is in the graph, so DUPLICATE_PROMOTION
+        would be a false claim. Re-promotion is an operator action."""
+        coordinator = self._armed(lambda d: WriteResult(NOT_CREATED))
+        verdict = _verdict()
+        coordinator.evaluate(verdict, REQUEST, CAPSULE, now_monotonic_ns=NOW)
+        second = coordinator.evaluate(verdict, REQUEST, CAPSULE,
+                                      now_monotonic_ns=NOW + SECOND)
+        self.assertEqual(second["executability_code"], RETRY_REQUIRES_OPERATOR)
+        self.assertNotIn("DUPLICATE_PROMOTION", json.dumps(second))
+
+    def test_an_unresolved_identity_blocks_only_itself(self):
+        coordinator = self._armed(_unknown_for("promotion", accept_others=True))
+        first = coordinator.evaluate(_distinct(0), REQUEST, CAPSULE,
+                                     now_monotonic_ns=NOW)
+        self.assertEqual(first["outcome"], PROMOTION_OUTCOME_UNRESOLVED)
+        second = coordinator.evaluate(_distinct(1), REQUEST, CAPSULE,
+                                      now_monotonic_ns=NOW)
+        self.assertEqual(second["outcome"], PROMOTION_RECORDED)
+
+    def test_the_unresolved_set_outlives_the_audit_ring(self):
+        """§13a B.5. The ring is bounded by design and drops the transition
+        while the reservation itself persists forever."""
+        coordinator = self._armed(_unknown_for("promotion", accept_others=True))
+        coordinator.evaluate(_distinct(0), REQUEST, CAPSULE, now_monotonic_ns=NOW)
+        key = coordinator.unresolved_keys[0]
+        for index in range(1, MAX_AUDIT_RECORDS + 10):
+            coordinator.evaluate(_distinct(index), REQUEST, CAPSULE,
+                                 now_monotonic_ns=NOW + index * 200 * SECOND)
+        ring = json.dumps(self.audit.status()["records"])
+        self.assertNotIn(key, ring)
+        self.assertEqual(coordinator.unresolved_keys, (key,))
+        self.assertEqual(coordinator.status()["unresolved_keys"], [key])
+
+    def test_the_window_is_not_spent_twice_by_a_slow_writer(self):
+        """Spent at reservation. Spending it again at the terminal update would
+        measure the adapter's latency as promotion rate."""
+        coordinator = self._armed(lambda d: WriteResult(CREATED))
+        for index in range(3):
+            coordinator.evaluate(_distinct(index), REQUEST, CAPSULE,
+                                 now_monotonic_ns=NOW)
+        self.assertEqual(len(coordinator._real.window), 3)
+
+
+class LockTests(unittest.TestCase):
+    """§3 and §4. The races are forced rather than waited for."""
+
+    def setUp(self):
+        self.audit = PromotionAudit()
+
+    def _race(self, coordinator, verdicts, *, at="decision"):
+        """Run evaluations on threads, tripping a barrier mid-step.
+
+        The barrier forces the interleaving; it is not what is asserted. Under
+        the lock only one thread reaches it and the barrier times out, so the
+        assertion is on the outcome and a timing wobble makes the test skip an
+        interleaving rather than report a false result.
+
+        `at` chooses which check-then-act window is forced, and the choice
+        matters: a barrier inside the policy forces two threads to decide before
+        either reserves, which is §3's *same identity* race, and leaves the
+        budget race unforced because the budget is read later. `at="budget"`
+        opens the window between reading the spend and taking the reservation,
+        which is §3's *distinct identities* race.
+        """
+        barrier = threading.Barrier(len(verdicts), timeout=0.35)
+        results = []
+        lock = threading.Lock()
+
+        def trip():
+            try:
+                barrier.wait()
+            except threading.BrokenBarrierError:
+                pass
+
+        real_decide = ledger_module.decide_promotion
+        real_spend = ledger_module._Posture.spent_in_window
+
+        def decide(*args, **kwargs):
+            decision = real_decide(*args, **kwargs)
+            trip()
+            return decision
+
+        def spend(self_, *args, **kwargs):
+            count = real_spend(self_, *args, **kwargs)
+            trip()
+            return count
+
+        if at == "decision":
+            ledger_module.decide_promotion = decide
+        else:
+            ledger_module._Posture.spent_in_window = spend
+        try:
+            threads = [threading.Thread(target=lambda v=v: _collect(
+                results, lock, coordinator, v)) for v in verdicts]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join(timeout=5)
+                self.assertFalse(thread.is_alive(), "an evaluation never finished")
+        finally:
+            ledger_module.decide_promotion = real_decide
+            ledger_module._Posture.spent_in_window = real_spend
+        return results
+
+    def test_two_evaluations_of_one_identity_produce_one_promotion(self):
+        """§3's first race. Both threads pass the duplicate check before either
+        reserves, unless the section is atomic."""
+        written = []
+        coordinator = PromotionCoordinator(
+            self.audit, mode=MODE_ARMED, writer=_accepting_writer(written))
+        verdict = _verdict()
+        outcomes = self._race(coordinator, [verdict, verdict])
+        self.assertEqual(len(written), 1)
+        self.assertEqual(outcomes.count(PROMOTION_RECORDED), 1)
+        self.assertEqual(len(coordinator.fenced_keys), 1)
+
+    def test_concurrent_distinct_identities_do_not_overspend_the_budget(self):
+        """§3's second race. All threads pass the budget check before any
+        reserves, unless the section is atomic."""
+        written = []
+        coordinator = PromotionCoordinator(
+            self.audit, mode=MODE_ARMED, budget=3,
+            writer=_accepting_writer(written))
+        outcomes = self._race(coordinator, [_distinct(i) for i in range(8)],
+                              at="budget")
+        self.assertEqual(len(written), 3)
+        self.assertEqual(outcomes.count(PROMOTION_RECORDED), 3)
+        self.assertEqual(outcomes.count(PROMOTION_SUPPRESSED), 5)
+
+    def test_shadow_takes_the_same_lock(self):
+        """§3: the lock is not conditional on mode. A SHADOW that is not locked
+        measures a concurrency behaviour ARMED will not have."""
+        coordinator = PromotionCoordinator(self.audit, mode=MODE_SHADOW)
+        verdict = _verdict()
+        outcomes = self._race(coordinator, [verdict, verdict])
+        self.assertEqual(outcomes.count(WOULD_PROMOTE), 1)
+        self.assertEqual(outcomes.count(WOULD_BE_REFUSED), 1)
+
+    def test_the_writer_is_called_with_the_lock_released(self):
+        """A non-blocking acquire from the writer's own thread. With a plain
+        Lock, a held lock cannot be reacquired by its holder, so success here
+        means it is genuinely free."""
+        observed = []
+
+        def writer(decision):
+            acquired = coordinator._lock.acquire(blocking=False)
+            observed.append(acquired)
+            if acquired:
+                coordinator._lock.release()
+            return WriteResult(CREATED)
+
+        coordinator = PromotionCoordinator(self.audit, mode=MODE_ARMED,
+                                           writer=writer)
+        coordinator.evaluate(_verdict(), REQUEST, CAPSULE, now_monotonic_ns=NOW)
+        self.assertEqual(observed, [True])
+
+    def test_a_writer_that_re_enters_the_coordinator_completes(self):
+        """Release-before-call, proved by the thing it exists to permit."""
+        seen = []
+
+        def writer(decision):
+            if not seen:
+                seen.append(decision.idempotency_key)
+                inner = coordinator.evaluate(_distinct(99), REQUEST, CAPSULE,
+                                             now_monotonic_ns=NOW)
+                seen.append(inner["outcome"])
+            return WriteResult(CREATED)
+
+        coordinator = PromotionCoordinator(self.audit, mode=MODE_ARMED,
+                                           writer=writer)
+        result = coordinator.evaluate(_distinct(0), REQUEST, CAPSULE,
+                                      now_monotonic_ns=NOW)
+        self.assertEqual(result["outcome"], PROMOTION_RECORDED)
+        self.assertEqual(seen[1], PROMOTION_RECORDED)
+
+    def test_re_entry_inside_the_critical_section_deadlocks(self):
+        """§4: a plain Lock makes the mistake a deadlock rather than a wrong
+        answer under the interleaving hardest to reproduce.
+
+        Asserted by a non-blocking second acquisition rather than by stranding a
+        thread: a deadlocked thread in this process would hold the lock for
+        every test after it.
+        """
+        coordinator = PromotionCoordinator(self.audit, mode=MODE_SHADOW)
+        self.assertNotIsInstance(coordinator._lock, type(threading.RLock()))
+        with coordinator._lock:
+            self.assertFalse(coordinator._lock.acquire(blocking=False))
+
+    def test_the_public_accessors_acquire(self):
+        """Held from another thread, every public accessor blocks. If one did
+        not, it would be reading a structure mid-mutation."""
+        coordinator = PromotionCoordinator(self.audit, mode=MODE_SHADOW)
+        for name in ("promoted_keys", "policy_keys", "unresolved_keys",
+                     "write_failed_keys", "fenced_keys"):
+            done = threading.Event()
+            thread = threading.Thread(
+                target=lambda n=name: (getattr(coordinator, n), done.set()))
+            with coordinator._lock:
+                thread.start()
+                self.assertFalse(done.wait(timeout=0.1), f"{name} did not acquire")
+            thread.join(timeout=5)
+            self.assertTrue(done.is_set(), name)
+
+    def test_status_acquires(self):
+        coordinator = PromotionCoordinator(self.audit, mode=MODE_SHADOW)
+        done = threading.Event()
+        thread = threading.Thread(target=lambda: (coordinator.status(), done.set()))
+        with coordinator._lock:
+            thread.start()
+            self.assertFalse(done.wait(timeout=0.1))
+        thread.join(timeout=5)
+        self.assertTrue(done.is_set())
+
+
+class CriticalSectionScopeTests(unittest.TestCase):
+    """What the critical section is allowed to touch."""
+
+    def setUp(self):
+        with open(ledger_module.__file__, "r", encoding="utf-8") as handle:
+            self.tree = ast.parse(handle.read())
+        self.functions = {node.name: node for node in ast.walk(self.tree)
+                          if isinstance(node, ast.FunctionDef)}
+
+    def _attributes(self, name):
+        return {node.attr for node in ast.walk(self.functions[name])
+                if isinstance(node, ast.Attribute)}
+
+    def test_the_critical_section_calls_no_locking_accessor(self):
+        """§13a B.7. Calling your own property does not look like calling out,
+        which is the direction a later refactor reintroduces it from -- and with
+        a plain Lock the result is a deadlock, in production, under load."""
+        locking = {"promoted_keys", "policy_keys", "unresolved_keys",
+                   "write_failed_keys", "fenced_keys", "status"}
+        for name in ("_reserve_unlocked", "_refuse_unlocked",
+                     "_resolve_unlocked", "_status_unlocked"):
+            self.assertEqual(self._attributes(name) & locking, set(), name)
+
+    def test_the_writer_is_not_called_from_inside_the_lock(self):
+        for name in ("_reserve_unlocked", "_resolve_unlocked"):
+            self.assertNotIn("_writer", self._attributes(name), name)
+
+    def test_the_posture_class_takes_no_lock_of_its_own(self):
+        """Two locks on one object make the order between them a question
+        nobody asked."""
+        posture = {node.name for node in ast.walk(self.tree)
+                   if isinstance(node, ast.ClassDef) and node.name == "_Posture"}
+        self.assertEqual(posture, {"_Posture"})
+        source = ast.get_source_segment(
+            open(ledger_module.__file__, encoding="utf-8").read(),
+            [n for n in ast.walk(self.tree)
+             if isinstance(n, ast.ClassDef) and n.name == "_Posture"][0])
+        self.assertNotIn("Lock", source)
+        self.assertNotIn("self._lock", source)
+
+    def test_the_durable_ledger_store_is_still_not_imported(self):
+        """Slice 5's reader stays disconnected from the coordinator until
+        slice 6."""
+        for node in ast.walk(self.tree):
             if isinstance(node, ast.ImportFrom):
                 self.assertNotIn("ledger_store", node.module or "")
             if isinstance(node, ast.Import):

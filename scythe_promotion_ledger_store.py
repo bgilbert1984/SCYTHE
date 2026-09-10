@@ -333,10 +333,16 @@ class LedgerRead:
     def fenced(self) -> Tuple[str, ...]:
         """Every identity that may not be promoted again.
 
-        All three states fence. A failed write fences because
-        WriteResult(accepted=False) covers a rejection, a timeout and a landed
-        write whose acknowledgement was lost, and those are indistinguishable
-        from outside the bus (§2).
+        All three states fence, and since §13a Amendment B they fence for three
+        different reasons. COMMITTED because the record exists. UNRESOLVED
+        because it may -- that is the row indistinguishability still argues, and
+        the only one. FAILED because the adapter attested that nothing was
+        written and §2 makes re-promotion after a failure an operator action,
+        never an automatic retry.
+
+        The behaviour is unchanged; the earlier single reason was accurate only
+        while WriteResult was a Boolean that could not tell a definite rejection
+        from a lost acknowledgement.
         """
         return tuple(sorted(set(self.committed) | set(self.write_failed)
                             | set(self.unresolved)))
