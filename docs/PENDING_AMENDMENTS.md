@@ -115,6 +115,12 @@ Either §8 extends to `FAILED` reservations, or §2's "operator action" is
 narrowed to say what it actually is. Not resolved here: the slice that writes
 reconciliation records is the one that has to answer it.
 
+**A dated architectural liability as of 2026-09-10.** Slice 7 must supply the
+repair `RETRY_REQUIRES_OPERATOR` names. Slice 6 must not fabricate it early
+merely because the token exists — a reconciliation written to discharge a debt
+rather than to answer a question is how the exit ends up shaped by the
+convenience of the slice that wrote it.
+
 **Sharpened by Amendment C (2026-09-10).** The condition has a name now —
 `RETRY_REQUIRES_OPERATOR`, §13b — so a caller is told why the identity is refused
 and what would repair it, and §13b C.4 states in the contract itself that the
