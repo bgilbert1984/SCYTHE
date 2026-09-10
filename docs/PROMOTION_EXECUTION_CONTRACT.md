@@ -6,6 +6,7 @@ Accepted:               2026-09-08, after review amendments cafda8d
 Amendment A:            §9 filesystem capability — ACCEPTED 2026-09-09,
                         amendment 42cc6b5
 Amendment B:            §13a three-state writer result — ACCEPTED 2026-09-10
+Amendment C:            §13b RETRY_REQUIRES_OPERATOR — ACCEPTED 2026-09-10
 Authority:              NORMATIVE
 Constrains:             Step 4 of the promotion sequence (execution adapter)
 Depends on:             SCYTHE_VERDICT_VOCABULARIES.md  (ACCEPTED — §5 declares
@@ -82,7 +83,9 @@ real finding, which is why the asymmetry runs the way it does:
 
 Re-promotion after a failure is therefore an operator action taken against the
 graph (§8), never an automatic retry. This holds for a definitely-failed write
-as well, and there it is the whole reason (§13a B.3).
+as well, and there it is the whole reason (§13a B.3). The coordinator names that
+refusal `RETRY_REQUIRES_OPERATOR` (§13b), and §13b C.4 records that the
+operation the name refers to does not exist until slice 7.
 
 ---
 
@@ -160,11 +163,13 @@ This section instantiates that rule for the promotion sequence. The two vocabula
 | --- | --- | --- |
 | owner | `scythe_promotion_policy` | `scythe_promotion_ledger` (the coordinator) |
 | answers | is this finding fit to promote? | could we act on it at all? |
-| examples | `VERDICT_NOT_PROMOTABLE`, `CAPSULE_UNBOUND`, `DUPLICATE_PROMOTION` | `BUDGET_EXHAUSTED`, `DURABLE_CEILING_REACHED`, `UNRESOLVED_CEILING_REACHED`, `IDENTITY_UNRESOLVED`, `LEDGER_UNAVAILABLE`, `LEDGER_NOT_OWNED`, `LEDGER_TORN`, `LOCK_EXCLUSION_UNATTESTED`, `RESERVATION_DURABILITY_UNATTESTED` |
+| examples | `VERDICT_NOT_PROMOTABLE`, `CAPSULE_UNBOUND`, `DUPLICATE_PROMOTION` | `BUDGET_EXHAUSTED`, `DURABLE_CEILING_REACHED`, `UNRESOLVED_CEILING_REACHED`, `IDENTITY_UNRESOLVED`, `RETRY_REQUIRES_OPERATOR`, `LEDGER_UNAVAILABLE`, `LEDGER_NOT_OWNED`, `LEDGER_TORN`, `LOCK_EXCLUSION_UNATTESTED`, `RESERVATION_DURABILITY_UNATTESTED` |
 | repaired by | changing the finding, or accepting the judgement | fixing the apparatus; the finding may be sound |
 
 The coordinator **returns** `IDENTITY_UNRESOLVED` on a second evaluation of an
-unresolved identity, and never `DUPLICATE_PROMOTION` (§13a B.4).
+unresolved identity, and never `DUPLICATE_PROMOTION` (§13a B.4). It returns
+`RETRY_REQUIRES_OPERATOR` on a second evaluation of a definitely-failed one
+(§13b), which is the third answer the three stored states require.
 
 `BUDGET_EXHAUSTED` already lives in the coordinator rather than the policy. That
 separation was made ad hoc and is the executability vocabulary's first member,
@@ -711,6 +716,81 @@ main test process leaves the lock held for every test that follows it.
 
 ---
 
+## 13b. Amendment C — `RETRY_REQUIRES_OPERATOR`
+
+*Proposed 2026-09-10 and accepted 2026-09-10, in that order. Names the
+executability code that Amendment B's third state requires and §5 does not list.
+Touches §5 and §2.*
+
+### C.1 The state Amendment B created, and the answer it left missing
+
+Before Amendment B, `accepted=False` covered a rejection and a lost
+acknowledgement alike, and one fence with one reason covered both. B.1 split
+them. `NOT_CREATED` now means the adapter **attests that no record was
+created** — and that makes a second evaluation of a failed identity a question
+with three plausible answers, none of them true:
+
+| candidate | why it is false |
+| --- | --- |
+| `DUPLICATE_PROMOTION` | merit; claims the finding is already in the graph, and B.3 says it is not |
+| `IDENTITY_UNRESOLVED` | executability; claims we do not know, and here we do |
+| release the identity | not a refusal at all — an automatic retry loop bounded only by the budget |
+
+The third is the one worth naming as rejected rather than overlooked. The budget
+exists to bound a thousand *different* findings arriving at once (§6); it was
+never a retry limiter, and a failing adapter would consume it repeatedly on one
+finding while the graph stayed empty.
+
+### C.2 The code
+
+```
+RETRY_REQUIRES_OPERATOR
+```
+
+**Executability**, and §5's set gains it. It says nothing about the finding,
+which may be entirely promotable; it says the apparatus recorded a definite
+failure and will not act again on its own. The repair is an operator's, which is
+the question the two vocabularies are told apart by.
+
+Returned when, and only when, the identity's stored state is `FAILED` — that is,
+a `RESERVED` resolved by a `NOT_CREATED` attestation (§13a B.3). An identity
+that is `RESERVED` with no terminal record returns `IDENTITY_UNRESOLVED`, and an
+identity that is `COMMITTED` reaches the policy and returns
+`DUPLICATE_PROMOTION`. Three states, three answers, and none of them borrowed.
+
+### C.3 It fences that identity and nothing else
+
+Exactly the containment §7 already gives an unresolved reservation, for the same
+reason. One failed write is contained: that identity is blocked, no duplicate
+can reach the graph, and every unrelated identity proceeds subject to the shared
+budget.
+
+A global halt on a definite failure would be worse here than for an unresolved
+one, because a definite failure is the *better*-understood condition — the
+apparatus told us exactly what happened. Converting the best-understood outcome
+into a total stop would make the system most fragile where it is best informed.
+
+The rate of failed writes is a different signal and is not identity-scoped. It
+is bounded by C2's mechanism in §11, not by this code.
+
+### C.4 It authorizes no retry operation
+
+**This amendment names a refusal. It creates no way out of it.**
+
+There is no operation an operator can perform against a `FAILED` reservation:
+§8's reconciliation is defined against unresolved reservations only, which is
+the gap `PENDING_AMENDMENTS.md` entry 4 has carried since the read path was
+written. The operator-controlled exit remains **slice 7**, and until it exists
+`RETRY_REQUIRES_OPERATOR` describes a repair that cannot yet be carried out.
+
+That is a worse state than having the exit, and a better one than the refusal
+being silent or wearing a false name. It is recorded here rather than left to be
+discovered: a code whose repair does not exist should say so in the document
+that mints it, or the next reader will assume the repair is somewhere they have
+not looked.
+
+---
+
 ## 14. What this does not do
 
 - It does **not** make the graph write idempotent. It prevents *this coordinator*
@@ -758,6 +838,11 @@ observable outcomes, not as timing.
 13. A configured path in the working tree or under `/tmp` is refused.
 
 **Capability attestation (Amendment A)**
+
+*A collision worth naming rather than renumbering: these tests were `13a`–`13e`
+before Amendment B took the section number `§13a`. Test numbers here carry no
+`§`, section numbers always do, and renumbering either would break references
+already written down. Introduced by Amendment B, noticed by Amendment C.*
 
 13a. An unlisted filesystem starts the coordinator, permits SHADOW, refuses
     ARMED, and publishes both `LOCK_EXCLUSION_UNATTESTED` and
@@ -836,6 +921,18 @@ observable outcomes, not as timing.
 26m. AST — no body inside the critical section names a lock-acquiring public
     accessor.
 
+**Amendment C (§13b)**
+
+27a. A second evaluation of a `FAILED` identity returns
+    `RETRY_REQUIRES_OPERATOR`, and neither `DUPLICATE_PROMOTION` nor
+    `IDENTITY_UNRESOLVED`.
+27b. The three stored states produce three distinct answers, reachable in one
+    test that walks all three.
+27c. A failed identity fences itself and nothing else: an unrelated identity in
+    the same posture proceeds.
+27d. `RETRY_REQUIRES_OPERATOR` is counted as executability and never appears in
+    `merit_refusals`.
+
 ---
 
 ## 16. Decisions
@@ -876,6 +973,12 @@ produced it.
 13. **`NOT_CREATED` still fences, and is not retried automatically** (§13a B.3).
     An automatic retry is a loop bounded only by the budget, which exists to
     bound many findings once rather than one finding many times.
+14. **A definite failure gets its own code rather than borrowing one** (§13b).
+    Three stored states need three answers; the two existing codes are each
+    false about a failed identity, and in opposite directions.
+15. **The code is minted without its repair, and says so** (§13b C.4). A refusal
+    whose repair does not exist should be named in the document that mints it,
+    or the next reader assumes the repair is somewhere they have not looked.
 
 ---
 
