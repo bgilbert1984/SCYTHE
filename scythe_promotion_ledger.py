@@ -25,6 +25,7 @@ yet, so ARMED cannot be constructed in production until one exists.
 
 from __future__ import annotations
 
+import bisect
 from collections import deque
 from dataclasses import dataclass, field
 import threading
@@ -69,16 +70,16 @@ MERIT_REFUSALS: Tuple[str, ...] = REFUSALS
 BUDGET_EXHAUSTED = "BUDGET_EXHAUSTED"
 IDENTITY_UNRESOLVED = "IDENTITY_UNRESOLVED"
 
-# Minted by slice 4, and §5 does not list it. Amendment B created the state that
-# needs it: once NOT_CREATED means the adapter *definitely* attests that no
-# record was created, DUPLICATE_PROMOTION becomes a false claim about that
-# identity -- it says the finding is already in the graph, and it is not.
+# §13b Amendment C. Amendment B created the state that needs it: once
+# NOT_CREATED means the adapter *definitely* attests that no record was created,
+# DUPLICATE_PROMOTION becomes a false claim about that identity -- it says the
+# finding is already in the graph, and it is not.
 #
-# The refusal is about the apparatus, not the finding: §2 says re-promotion
-# after a failure is an operator action and never an automatic retry, and until
-# reconciliation exists (slice 7) there is no operator action to take. The name
-# states the repair, which is the question the two vocabularies are told apart
-# by. PENDING_AMENDMENTS.md entry 9 carries the obligation to record it in §5.
+# The refusal is about the apparatus, not the finding, and the name states the
+# repair, which is the question the two vocabularies are told apart by. C.4
+# records that the repair does not yet exist: there is no operation an operator
+# can perform against a FAILED reservation until slice 7, because §8's
+# reconciliation is defined against unresolved reservations only.
 RETRY_REQUIRES_OPERATOR = "RETRY_REQUIRES_OPERATOR"
 
 EXECUTABILITY_REFUSALS: Tuple[str, ...] = (BUDGET_EXHAUSTED, IDENTITY_UNRESOLVED,
@@ -149,6 +150,23 @@ CREATED = "CREATED"
 NOT_CREATED = "NOT_CREATED"
 UNKNOWN = "UNKNOWN"
 WRITE_OUTCOMES: Tuple[str, ...] = (CREATED, NOT_CREATED, UNKNOWN)
+
+# -- why a promotion is unresolved ----------------------------------------
+#
+# Three causes, because they are three different facts about the apparatus and
+# an operator diagnoses them differently. Reporting an invalid return value as
+# an `exception_type` was an evidence-label error: no exception occurred, and a
+# reader chasing a TimeoutError that never happened is being sent somewhere it
+# is not.
+#
+# Each carries bounded, structured metadata and never free text: not the
+# exception's message, not the value the adapter returned. Both are arbitrary
+# and carry endpoints, payload fragments and credentials.
+WRITER_EXCEPTION = "WRITER_EXCEPTION"
+INVALID_WRITER_RESULT = "INVALID_WRITER_RESULT"
+ADAPTER_REPORTED_UNKNOWN = "ADAPTER_REPORTED_UNKNOWN"
+UNRESOLVED_CAUSES: Tuple[str, ...] = (WRITER_EXCEPTION, INVALID_WRITER_RESULT,
+                                      ADAPTER_REPORTED_UNKNOWN)
 
 # -- what the coordinator remembers about an identity (§13a B.6) ----------
 #
@@ -275,7 +293,21 @@ class _Posture:
 
     def reserve(self, identity: str, now_ns: int) -> None:
         self.identities[identity] = RESERVED
-        self.window.append(now_ns)
+        # Inserted in order, not appended. The lock orders *acquisitions*, not
+        # the instants callers captured before acquiring it: two threads can
+        # read 100 and 101, and the one holding 101 can win the lock, leaving
+        # [101, 100]. Pruning from the left would then stop at 101 and keep the
+        # expired 100 behind it -- a rolling window that is quietly wrong.
+        #
+        # It fails conservatively, over-suppressing rather than overspending,
+        # which is why it would have survived review as a passing test suite.
+        #
+        # The insert is O(n) in a structure the budget bounds: spent_in_window
+        # prunes before the budget check, and a reservation is only taken when
+        # the count is below the budget, so the deque never exceeds it. Eight
+        # elements. Sorting on the way in is cheaper than a tolerated-reordering
+        # policy would be to define, let alone to test.
+        bisect.insort(self.window, now_ns)
 
     def resolve(self, identity: str, state: str) -> None:
         self.identities[identity] = state
@@ -283,11 +315,13 @@ class _Posture:
     def spent_in_window(self, now_ns: int, window_ns: int) -> int:
         """Prunes as it counts.
 
-        The deque is in order because it is appended to under the lock with a
-        caller-supplied instant, so the left end is always the oldest and
-        pruning never scans the middle. The old list was an O(n) scan over an
-        unbounded structure, inside the critical section: §6's split shortens
-        the section rather than lengthening it.
+        The deque is in order because ``reserve`` inserts in order -- see there
+        for why holding the lock is not enough to make that true. Pruning from
+        the left is therefore correct, and never has to scan the middle.
+
+        The structure this replaced was an O(n) scan over an unbounded list
+        inside the critical section, so §6's split still shortens the section
+        rather than lengthening it.
         """
         floor = now_ns - window_ns
         while self.window and self.window[0] < floor:
@@ -448,10 +482,10 @@ class PromotionCoordinator:
         # holding across it would serialize every evaluation behind the slowest
         # bus call, and a writer that re-entered the coordinator would deadlock
         # while holding a half-made reservation.
-        outcome, exception_type, detail = self._call_writer(decision)
+        outcome, cause, evidence, detail = self._call_writer(decision)
 
         with self._lock:
-            return self._resolve_unlocked(decision, outcome, exception_type,
+            return self._resolve_unlocked(decision, outcome, cause, evidence,
                                           detail, now_monotonic_ns)
 
     # -- inside the lock --------------------------------------------------
@@ -553,8 +587,8 @@ class PromotionCoordinator:
                 "idempotency_key": decision.idempotency_key}
 
     def _resolve_unlocked(self, decision: PromotionDecision, outcome: str,
-                          exception_type: Optional[str], detail: str,
-                          now_ns: int) -> Dict[str, Any]:
+                          cause: Optional[str], evidence: Dict[str, str],
+                          detail: str, now_ns: int) -> Dict[str, Any]:
         """Step 8, with the lock reacquired.
 
         The window is deliberately not touched: it was spent at reservation, and
@@ -570,19 +604,17 @@ class PromotionCoordinator:
                                reason=IDENTITY_UNRESOLVED,
                                idempotency_key=decision.idempotency_key,
                                record_class=decision.record_class,
-                               monotonic_ns=now_ns,
-                               detail=exception_type or UNKNOWN)
+                               monotonic_ns=now_ns, detail=cause)
             return {"mode": self.mode, "outcome": PROMOTION_OUTCOME_UNRESOLVED,
                     "executability_code": IDENTITY_UNRESOLVED,
                     "record_class": decision.record_class,
                     "idempotency_key": decision.idempotency_key,
-                    # Class name only. Adapter exception text is arbitrary and
-                    # carries endpoints, payload fragments and credentials; the
-                    # class is the part that describes the apparatus. Discarded
+                    # A declared cause and bounded metadata. Type names only:
+                    # exception text and returned values are arbitrary and carry
+                    # endpoints, payload fragments and credentials. Discarded
                     # rather than truncated, because truncation is a length
                     # policy applied to content that should not be here at all.
-                    "detail": ({"exception_type": exception_type}
-                               if exception_type else {"write_outcome": UNKNOWN})}
+                    "detail": dict({"cause": cause}, **evidence)}
 
         self._real.resolve(decision.idempotency_key,
                            COMMITTED if outcome == CREATED else FAILED)
@@ -603,8 +635,8 @@ class PromotionCoordinator:
     # -- outside the lock -------------------------------------------------
 
     def _call_writer(self, decision: PromotionDecision
-                     ) -> Tuple[str, Optional[str], str]:
-        """Step 7. Returns (outcome, exception class name or None, detail).
+                     ) -> Tuple[str, Optional[str], Dict[str, str], str]:
+        """Step 7. Returns (outcome, unresolved cause, its evidence, detail).
 
         An exception is UNKNOWN and not a failure: a socket that raised on read
         may have delivered its request. It is caught rather than propagated
@@ -620,12 +652,19 @@ class PromotionCoordinator:
         try:
             result = self._writer(decision)
         except Exception as exc:            # noqa: BLE001 -- see the docstring
-            return UNKNOWN, type(exc).__name__, ""
+            return (UNKNOWN, WRITER_EXCEPTION,
+                    {"exception_type": type(exc).__name__}, "")
         if not isinstance(result, WriteResult):
             # An adapter that returned something else has told us nothing, and
             # nothing is UNKNOWN. Never NOT_CREATED, which would be a claim.
-            return UNKNOWN, type(result).__name__, ""
-        return result.outcome, None, result.detail
+            #
+            # Its own cause: no exception occurred, and calling this one would
+            # send an operator looking for a failure that never happened.
+            return (UNKNOWN, INVALID_WRITER_RESULT,
+                    {"returned_type": type(result).__name__}, "")
+        if result.outcome == UNKNOWN:
+            return UNKNOWN, ADAPTER_REPORTED_UNKNOWN, {}, result.detail
+        return result.outcome, None, {}, result.detail
 
     def status(self) -> Dict[str, Any]:
         with self._lock:
@@ -665,6 +704,7 @@ class PromotionCoordinator:
                 "WHICH IS THE DISTINCTION THE TWO VOCABULARIES EXIST TO KEEP"),
             "executability_not_yet_reachable": list(NOT_YET_REACHABLE),
             "write_outcomes": list(WRITE_OUTCOMES),
+            "unresolved_causes": list(UNRESOLVED_CAUSES),
             "coordinator_lock": "PLAIN_LOCK",
             "lock_note": (
                 "DECISION, BUDGET AND RESERVATION ARE ATOMIC. THE WRITER IS "

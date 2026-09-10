@@ -13,7 +13,8 @@ from scythe_invariant_ledger import (
 )
 from scythe_promotion_ledger import (
     ACTING_EVENTS, BUDGET_EXHAUSTED, COMMITTED, CREATED, DEFAULT_MODE, EVENTS,
-    FAILED, MAX_AUDIT_RECORDS, NOT_CREATED,
+    ADAPTER_REPORTED_UNKNOWN, FAILED, INVALID_WRITER_RESULT,
+    MAX_AUDIT_RECORDS, NOT_CREATED, UNRESOLVED_CAUSES, WRITER_EXCEPTION,
     PROMOTION_OUTCOME_UNRESOLVED, RESERVED,
     RETRY_REQUIRES_OPERATOR, UNKNOWN, WRITE_OUTCOMES,
     EXECUTABILITY_NOTES, EXECUTABILITY_REFUSALS, IDENTITY_UNRESOLVED,
@@ -425,7 +426,7 @@ class ScopeTests(unittest.TestCase):
                 imported.add(node.module or "")
             elif isinstance(node, ast.Import):
                 imported.update(a.name for a in node.names)
-        self.assertEqual(imported, {"__future__", "collections", "dataclasses",
+        self.assertEqual(imported, {"__future__", "bisect", "collections", "dataclasses",
                                     "threading", "typing",
                                     "scythe_promotion_policy",
                                     "scythe_invariant_ledger"})
@@ -638,7 +639,8 @@ class UnresolvedTests(unittest.TestCase):
         coordinator = self._armed(writer)
         result = coordinator.evaluate(_verdict(), REQUEST, CAPSULE,
                                       now_monotonic_ns=NOW)
-        self.assertEqual(result["detail"], {"exception_type": "ConnectionError"})
+        self.assertEqual(result["detail"], {"cause": WRITER_EXCEPTION,
+                                            "exception_type": "ConnectionError"})
         blob = json.dumps([result, coordinator.status(), self.audit.status()])
         self.assertNotIn("hunter2", blob)
         self.assertNotIn("graphops.internal", blob)
@@ -652,6 +654,45 @@ class UnresolvedTests(unittest.TestCase):
                                       now_monotonic_ns=NOW)
         self.assertEqual(result["outcome"], PROMOTION_OUTCOME_UNRESOLVED)
         self.assertEqual(coordinator.write_failed_keys, ())
+
+    def test_an_invalid_return_is_not_labelled_an_exception(self):
+        """No exception occurred. Calling it one sends an operator looking for
+        a failure that never happened."""
+        coordinator = self._armed(lambda d: "ok")
+        result = coordinator.evaluate(_verdict(), REQUEST, CAPSULE,
+                                      now_monotonic_ns=NOW)
+        self.assertEqual(result["detail"], {"cause": INVALID_WRITER_RESULT,
+                                            "returned_type": "str"})
+        self.assertNotIn("exception_type", result["detail"])
+
+    def test_an_adapter_that_says_unknown_is_its_own_cause(self):
+        """The adapter answered, and its answer was that it does not know.
+        That is a different fact from a writer that raised."""
+        coordinator = self._armed(lambda d: WriteResult(UNKNOWN, "timed out"))
+        result = coordinator.evaluate(_verdict(), REQUEST, CAPSULE,
+                                      now_monotonic_ns=NOW)
+        self.assertEqual(result["detail"], {"cause": ADAPTER_REPORTED_UNKNOWN})
+
+    def test_the_three_causes_are_distinguishable_and_declared(self):
+        self.assertEqual(UNRESOLVED_CAUSES,
+                         (WRITER_EXCEPTION, INVALID_WRITER_RESULT,
+                          ADAPTER_REPORTED_UNKNOWN))
+        causes = set()
+        for writer in (lambda d: (_ for _ in ()).throw(TimeoutError("x")),
+                       lambda d: object(),
+                       lambda d: WriteResult(UNKNOWN)):
+            coordinator = self._armed(writer)
+            causes.add(coordinator.evaluate(_verdict(), REQUEST, CAPSULE,
+                                            now_monotonic_ns=NOW)["detail"]["cause"])
+        self.assertEqual(causes, set(UNRESOLVED_CAUSES))
+
+    def test_a_returned_value_is_never_carried_out(self):
+        """Type name only, for the same reason as an exception message."""
+        coordinator = self._armed(lambda d: "token=hunter2")
+        result = coordinator.evaluate(_verdict(), REQUEST, CAPSULE,
+                                      now_monotonic_ns=NOW)
+        blob = json.dumps([result, coordinator.status(), self.audit.status()])
+        self.assertNotIn("hunter2", blob)
 
     def test_a_second_evaluation_is_unresolved_and_not_a_duplicate(self):
         """§13a B.4. Both fence; only one of them claims the finding reached
@@ -698,6 +739,33 @@ class UnresolvedTests(unittest.TestCase):
         self.assertNotIn(key, ring)
         self.assertEqual(coordinator.unresolved_keys, (key,))
         self.assertEqual(coordinator.status()["unresolved_keys"], [key])
+
+    def test_the_window_stays_ordered_when_instants_arrive_out_of_order(self):
+        """The lock orders acquisitions, not the instants callers captured
+        before acquiring it. Two threads can read 1000 and 1010, and the one
+        holding 1010 can win the lock.
+
+        Appending would leave [1010, 1000], and pruning from the left would stop
+        at 1010 and keep the expired 1000 behind it. That fails conservatively
+        -- over-suppressing rather than overspending -- which is exactly why a
+        passing suite would not have caught it.
+        """
+        posture = ledger_module._Posture()
+        for index, instant in enumerate((1010, 1000, 1020)):
+            posture.reserve(f"key-{index}", instant)
+        self.assertEqual(list(posture.window), [1000, 1010, 1020])
+        # floor = 1005, between the first two.
+        self.assertEqual(posture.spent_in_window(now_ns=1020, window_ns=15), 2)
+        self.assertEqual(list(posture.window), [1010, 1020])
+
+    def test_the_window_never_outgrows_the_budget(self):
+        """What makes the ordered insert affordable: pruning happens before the
+        budget check, and a reservation is only taken below it."""
+        coordinator = self._armed(lambda d: WriteResult(CREATED))
+        for index in range(PROMOTION_BUDGET + 6):
+            coordinator.evaluate(_distinct(index), REQUEST, CAPSULE,
+                                 now_monotonic_ns=NOW + index)
+        self.assertLessEqual(len(coordinator._real.window), PROMOTION_BUDGET)
 
     def test_the_window_is_not_spent_twice_by_a_slow_writer(self):
         """Spent at reservation. Spending it again at the terminal update would
