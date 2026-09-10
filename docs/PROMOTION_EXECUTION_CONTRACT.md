@@ -5,6 +5,7 @@ Status:                 ACCEPTED — nothing implemented
 Accepted:               2026-09-08, after review amendments cafda8d
 Amendment A:            §9 filesystem capability — ACCEPTED 2026-09-09,
                         amendment 42cc6b5
+Amendment B:            §13a three-state writer result — PROPOSED 2026-09-10
 Authority:              NORMATIVE
 Constrains:             Step 4 of the promotion sequence (execution adapter)
 Depends on:             SCYTHE_VERDICT_VOCABULARIES.md  (ACCEPTED — §5 declares
@@ -60,9 +61,14 @@ Neither is fixed by the other. §3–§4 answer the first, §6–§13 the second
 This is the load-bearing definition, and everything below follows from it.
 
 The reason it must be a claim on the identity and not on the record is that the
-adapter boundary cannot tell the two apart. `WriteResult(accepted=False)` is
-returned for a rejection, for a timeout, and for a write that landed whose
-acknowledgement was lost. Those are indistinguishable from outside the bus.
+adapter boundary cannot always tell the two apart. A timeout and a write that
+landed whose acknowledgement was lost are indistinguishable from outside the
+bus.
+
+*Amended by §13a (B.1, B.3): the boundary reports `CREATED`, `NOT_CREATED` or
+`UNKNOWN`, and this paragraph now describes the `UNKNOWN` case. A rejection the
+adapter can definitely attest to is `NOT_CREATED`, which fences on the closing
+rule of this section rather than on ambiguity.*
 
 So **retaining the reservation across a failed write is not a convenience; it is
 forced.** Releasing it would mean re-promoting an identity whose record may
@@ -75,7 +81,8 @@ real finding, which is why the asymmetry runs the way it does:
 - A duplicate record is not recoverable. It is indistinguishable from evidence.
 
 Re-promotion after a failure is therefore an operator action taken against the
-graph (§8), never an automatic retry.
+graph (§8), never an automatic retry. This holds for a definitely-failed write
+as well, and there it is the whole reason (§13a B.3).
 
 ---
 
@@ -91,8 +98,8 @@ graph (§8), never an automatic retry.
   │  6. audit PROMOTION_ATTEMPTED                              │
   └── release ─────────────────────────────────────────────────┘
      7. call the writer                    <- outside the lock
-     8. append COMMITTED or FAILED         <- no fsync required (§7)
-     9. audit PROMOTION_RECORDED / PROMOTION_FAILED
+     8. reacquire, append COMMITTED or FAILED  <- no fsync required (§7)
+     9. audit PROMOTION_RECORDED / PROMOTION_FAILED / the unresolved event
 ```
 
 **Steps 1–3 must be atomic with 4–5** or the checks decide against state that has
@@ -106,6 +113,11 @@ crash if the reservation is on disk before the writer is called. An unsynced
 reservation gives write-first semantics with extra steps, and write-first is the
 ordering that produces duplicates. The fsync latency is inside the critical
 section by necessity; that cost is one of the reasons the budget exists.
+
+**Step 8 reacquires the lock** and does not touch the window: it was spent at
+step 5, and spending it again would measure the adapter's latency as promotion
+rate (§13a B.8). An `UNKNOWN` answer or an exception writes no terminal record
+at all and leaves the identity `RESERVED` (§13a B.2).
 
 **The lock is released before step 7** because the writer is unbounded external
 I/O. Holding across it would serialize every evaluation behind the slowest bus
@@ -151,6 +163,9 @@ This section instantiates that rule for the promotion sequence. The two vocabula
 | examples | `VERDICT_NOT_PROMOTABLE`, `CAPSULE_UNBOUND`, `DUPLICATE_PROMOTION` | `BUDGET_EXHAUSTED`, `DURABLE_CEILING_REACHED`, `UNRESOLVED_CEILING_REACHED`, `IDENTITY_UNRESOLVED`, `LEDGER_UNAVAILABLE`, `LEDGER_NOT_OWNED`, `LEDGER_TORN`, `LOCK_EXCLUSION_UNATTESTED`, `RESERVATION_DURABILITY_UNATTESTED` |
 | repaired by | changing the finding, or accepting the judgement | fixing the apparatus; the finding may be sound |
 
+The coordinator **returns** `IDENTITY_UNRESOLVED` on a second evaluation of an
+unresolved identity, and never `DUPLICATE_PROMOTION` (§13a B.4).
+
 `BUDGET_EXHAUSTED` already lives in the coordinator rather than the policy. That
 separation was made ad hoc and is the executability vocabulary's first member,
 created before there was a name for the set it belonged to.
@@ -180,7 +195,7 @@ to different sets:
 ## 6. Two structures, not one
 
 `_promoted: List[(identity, monotonic_ns)]` currently serves both idempotency and
-rate limiting. They have different persistence semantics and must be separated
+rate limiting. Its in-memory replacement is `_Posture` (§13a B.6). They have different persistence semantics and must be separated
 before either can be made durable.
 
 | | **identity set** | **window** |
@@ -219,7 +234,9 @@ Each promotion writes two ledger entries.
 it degrades the reservation to unresolved, which is the safe direction.
 
 **A `RESERVED` with no terminal record is `UNRESOLVED`.** The write may have
-landed and may not have.
+landed and may not have. An `UNKNOWN` result and an exception from the writer
+both produce exactly this, and neither produces a `FAILED` record (§13a B.1,
+B.2).
 
 **This contract's own rule: an `UNRESOLVED` reservation is never recorded as a
 failure.** A write that may have landed is not a write that did not, and the
@@ -243,7 +260,8 @@ the same concept whatever this contract said. `UNRESOLVED` also pairs with the
 Therefore an unresolved reservation:
 
 - **blocks re-promotion of its own identity, and only its own** — `IDENTITY_UNRESOLVED`;
-- **is surfaced and counted** in `status()`;
+- **is surfaced and counted** in `status()`, from the identity map and never
+  from the bounded audit ring (§13a B.5);
 - **is never auto-retried and never auto-released.** It is released only by §8.
 
 **One unresolved reservation does not halt ARMED.** The containment is already complete:
@@ -544,6 +562,155 @@ serves as the bound.
 
 ---
 
+## 13a. Amendment B — the writer's answer has three states, not two
+
+*Proposed 2026-09-10. **Not yet accepted.** Settles what §3
+step 7 and §7 left open: what an exception from the writer means, and what
+`accepted=False` actually claims. Touches §2, §3, §5, §6 and §7; each carries a
+pointer back to here.*
+
+### B.1 A Boolean cannot carry the answer
+
+`WriteResult(accepted: bool)` has to represent three outcomes and has two
+values:
+
+```python
+CREATED     = "CREATED"       # the adapter attests a record was created
+NOT_CREATED = "NOT_CREATED"   # the adapter attests that none was
+UNKNOWN     = "UNKNOWN"       # the adapter cannot say
+```
+
+§2 resolved the shortfall by collapsing the last two into `accepted=False` and
+fencing on the strength of the ambiguity. That is right where the ambiguity is
+real and wrong where it is not: an adapter that receives an explicit rejection
+**knows** no record was created, and reporting that identically to a timeout
+discards the knowledge at the one boundary that has it.
+
+`NOT_CREATED` requires a definite attestation. Timeout, lost acknowledgement,
+transport interruption, cancellation, an unexpected exception and any ambiguous
+negative response are `UNKNOWN`. **An adapter that is unsure reports `UNKNOWN`,
+never `NOT_CREATED`** — the direction of that default is the whole safety
+property, and an adapter author who gets it backwards produces duplicates
+silently.
+
+### B.2 An exception from the writer is `UNKNOWN`
+
+Caught, never re-raised. No terminal record is written and the identity stays
+`RESERVED`. Two reasons, and the second is the one that is easy to miss:
+
+- An exception is not evidence that nothing was written. A socket that raised on
+  read may have delivered its request.
+- `evaluate()` raising hands the caller **no idempotency key**, and the key is
+  the only handle on a reservation that now exists and fences an identity. A
+  caller cannot reconcile what it was never told the name of.
+
+The returned shape:
+
+```json
+{"outcome": "PROMOTION_OUTCOME_UNRESOLVED",
+ "executability_code": "IDENTITY_UNRESOLVED",
+ "idempotency_key": "promotion:…",
+ "detail": {"exception_type": "TimeoutError"}}
+```
+
+**The exception message is discarded, not truncated.** Adapter exception text is
+arbitrary and carries endpoints, payload fragments and credentials; the class
+name is the part that describes the apparatus. This is the standing rule about
+what may cross a boundary, applied to a narrower pipe than the model path.
+
+### B.3 What survives in §2, and what changes
+
+The load-bearing definition survives unchanged, and is **strengthened**: it no
+longer rests on the boundary's ambiguity. What changes is the argument for
+retaining a reservation across a *definite* failure.
+
+| the adapter says | terminal record | fences | on what ground |
+| --- | --- | --- | --- |
+| `CREATED` | `COMMITTED` | yes | the record exists |
+| `NOT_CREATED` | `FAILED` | yes | §2's closing rule: re-promotion after a failure is an operator action, never an automatic retry |
+| `UNKNOWN`, or an exception | none — stays `RESERVED` | yes | forced: the record may exist |
+
+§2's paragraph beginning *"The reason it must be a claim on the identity"* now
+describes the `UNKNOWN` row only. The other two rows fence for reasons of their
+own, and both reasons are stronger than the one they replace.
+
+An automatic retry on `NOT_CREATED` was rejected rather than overlooked: it is a
+retry loop inside the coordinator, bounded only by the budget, and the budget
+exists to bound a thousand distinct findings rather than one finding a thousand
+times.
+
+### B.4 `IDENTITY_UNRESOLVED` is identity-scoped, and is not `DUPLICATE_PROMOTION`
+
+A second evaluation of an unresolved identity returns the executability code.
+Every unrelated identity proceeds, subject to the shared budget. §5 and §7
+already say this; Amendment B adds only that the coordinator must **return** it
+rather than merely honour it.
+
+The fencing behaviour is identical under either name, which is exactly why the
+wrong one here would never be noticed: the identity map makes the fence
+effective, and the code is the only thing that makes its reason honest.
+
+### B.5 The audit ring is not the unresolved set
+
+`MAX_AUDIT_RECORDS = 64`, bounded by design (§6). A reservation whose writer
+never answered ages out of the ring while the reservation itself persists
+forever. The ring therefore cannot answer *which reservations are unresolved*.
+
+State belongs in the identity map. The ring stays a bounded observation of
+transitions, and §7's requirement that unresolved reservations be surfaced and
+counted is met from the map.
+
+### B.6 `_Posture` is §6's in-memory expression
+
+```python
+@dataclass
+class _Posture:
+    identities: Dict[str, str]   # identity -> RESERVED | COMMITTED | FAILED
+    window: Deque[int]           # monotonic_ns, pruned from the left
+```
+
+Instantiated twice and independently, real and shadow. Named for the posture
+rather than for either structure, because the alternative is a mode ternary at
+five call sites and that is where such a bug hides.
+
+**Exactly three stored states.** `RESERVED` with no terminal record *is* the
+in-memory representation of unresolved; a fourth stored `UNRESOLVED` would be a
+second name for one fence with no observable transition between them.
+
+The identity map does not prune. The deque does, from the left, inside the lock
+— which makes the budget check O(1) amortised where it is currently an O(n) scan
+of an unbounded list, so §6's split **shortens** the critical section rather
+than lengthening it. Lifetime growth of the map is §11's problem and durability
+is §9's; neither is solved here and neither is hidden.
+
+### B.7 Accessor lock discipline
+
+Public `promoted_keys`, `policy_keys` and `status()` acquire the coordinator
+lock. The critical section uses `_..._unlocked` helpers only.
+
+This is §4's *nothing inside the critical section may call out*, applied to the
+object's own public surface — which is the direction a later refactor
+reintroduces, because calling your own property does not look like calling out.
+A plain `Lock` turns the mistake into a deadlock rather than a wrong answer, so
+the helpers must exist rather than be a convention.
+
+### B.8 The terminal update reacquires the lock
+
+Writer I/O happens with the lock released (§3). The `RESERVED` →
+`COMMITTED`/`FAILED` transition reacquires it.
+
+**The window is not touched at terminal time.** It was spent at reservation (§3
+step 5), and spending it again would count one promotion twice — inflating the
+rate measure with the adapter's latency rather than with the promotion rate.
+
+### B.9 A deadlock is tested without stranding a thread
+
+The re-entry test uses a subprocess, or asserts on a non-blocking second
+acquisition of the plain lock. A test that leaves a deadlocked thread inside the
+main test process leaves the lock held for every test that follows it.
+
+---
+
 ## 14. What this does not do
 
 - It does **not** make the graph write idempotent. It prevents *this coordinator*
@@ -637,6 +804,38 @@ observable outcomes, not as timing.
 25. Ledger records carry both `monotonic_ns` and `utc_display`, and no decision
     path reads the UTC field — AST scan, matching the existing scope tests.
 
+**Amendment B (§13a)**
+
+26a. A writer returning `UNKNOWN` leaves the identity `RESERVED`, writes no
+    terminal record, and returns `IDENTITY_UNRESOLVED`.
+26b. A writer that raises does the same, and `evaluate()` does not propagate the
+    exception.
+26c. The returned detail carries the exception **class name only**; a message
+    containing a URL, a payload fragment or a credential does not appear in the
+    result, the audit entry or `status()`.
+26d. `NOT_CREATED` writes `FAILED` and fences; a second evaluation of that
+    identity is refused.
+26e. A second evaluation of an unresolved identity returns
+    `IDENTITY_UNRESOLVED` and **not** `DUPLICATE_PROMOTION`; an unrelated
+    identity in the same posture proceeds.
+26f. The unresolved set is recoverable from `status()` after more than
+    `MAX_AUDIT_RECORDS` intervening events have aged the transition out of the
+    ring.
+26g. Two concurrent evaluations of one identity produce exactly one reservation;
+    the test forces the interleaving and fails before the lock is added.
+26h. Concurrent evaluations of distinct identities against a nearly-spent budget
+    produce exactly the budget, not more.
+26i. The writer observes the coordinator lock **not** held; a writer that
+    re-enters `evaluate()` completes rather than deadlocking.
+26j. A re-entrant call from inside the critical section deadlocks rather than
+    answering — asserted without stranding a thread in the test process.
+26k. SHADOW loses the same race before the lock and wins it after; the lock is
+    not conditional on mode.
+26l. The window is spent once per promotion: a slow writer does not consume
+    budget twice.
+26m. AST — no body inside the critical section names a lock-acquiring public
+    accessor.
+
 ---
 
 ## 16. Decisions
@@ -662,6 +861,21 @@ produced it.
    someone arms would move the operator's cost later for no gain.
 8. **Attestation inspects the mount against an allowlist, not the success of an
    acquisition** (§9 Amendment A). A non-excluding mount grants every lock.
+9. **The writer's answer has three states** (§13a B.1). A Boolean had to carry
+   `CREATED`/`NOT_CREATED`/`UNKNOWN` and could not; collapsing the last two
+   discarded the one piece of knowledge the boundary actually has.
+10. **An exception from the writer is `UNKNOWN`, caught and not re-raised**
+    (§13a B.2). Raising returns no idempotency key, and the key is the only
+    handle on a reservation that already fences an identity.
+11. **The exception message is discarded rather than truncated** (§13a B.2).
+    Truncation is a length policy applied to arbitrary adapter text; the class
+    name is the part that is about the apparatus.
+12. **Exactly three stored identity states** (§13a B.6). A stored `UNRESOLVED`
+    beside `RESERVED` would be two names for one fence with no observable
+    transition between them.
+13. **`NOT_CREATED` still fences, and is not retried automatically** (§13a B.3).
+    An automatic retry is a loop bounded only by the budget, which exists to
+    bound many findings once rather than one finding many times.
 
 ---
 
@@ -673,9 +887,14 @@ amendment is accepted:
 1. `SCYTHE_VERDICT_VOCABULARIES.md`, accepted.
 2. This contract, accepted.
 3. Coordinator executability vocabulary (§5), over the existing in-memory
-   structures.
-4. Atomic reservation (§3, §4) — closes the race without introducing a file.
+   structures. **Not yet landed** — the durable-ledger read path of slice 5
+   landed first, out of order.
+4. Atomic reservation (§3, §4, §13a) — closes the race without introducing a
+   file. Depends on slice 3 for `IDENTITY_UNRESOLVED` and the unresolved audit
+   event.
 5. Durable ledger: format, framing, read path, restart (§7, §9, §10, §13).
+   Read path **landed** 2026-09-10 (`bd9e9ca`), ahead of slices 3 and 4, and
+   stays disconnected from the coordinator until slice 6.
 6. Durable ledger: write path, fsync discipline, ownership lock.
 7. Reconciliation and generations (§8, §11).
 8. Ceilings C1 and C2 (§11).
