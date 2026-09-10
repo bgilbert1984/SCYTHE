@@ -6,7 +6,7 @@ Accepted:               2026-09-08, after review amendments cafda8d
 Amendment A:            §9 filesystem capability — ACCEPTED 2026-09-09,
                         amendment 42cc6b5
 Amendment B:            §13a three-state writer result — ACCEPTED 2026-09-10
-Amendment C:            §13b RETRY_REQUIRES_OPERATOR — PROPOSED 2026-09-10
+Amendment C:            §13b RETRY_REQUIRES_OPERATOR — ACCEPTED 2026-09-10
 Authority:              NORMATIVE
 Constrains:             Step 4 of the promotion sequence (execution adapter)
 Depends on:             SCYTHE_VERDICT_VOCABULARIES.md  (ACCEPTED — §5 declares
@@ -718,8 +718,9 @@ main test process leaves the lock held for every test that follows it.
 
 ## 13b. Amendment C — `RETRY_REQUIRES_OPERATOR`
 
-*Proposed 2026-09-10. **Not yet accepted.** Names the executability code that
-Amendment B's third state requires and §5 does not list. Touches §5 and §2.*
+*Proposed 2026-09-10 and accepted 2026-09-10, in that order. Names the
+executability code that Amendment B's third state requires and §5 does not list.
+Touches §5 and §2.*
 
 ### C.1 The state Amendment B created, and the answer it left missing
 
