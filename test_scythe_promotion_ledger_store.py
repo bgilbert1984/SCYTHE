@@ -11,6 +11,7 @@ import scythe_promotion_ledger_store as store_module
 from scythe_promotion_ledger_store import (
     ATTESTED_BY_FILESYSTEM_POLICY, AVAILABLE, COMMITTED, FAILED,
     FIDELITY_DEGRADED_NOT_ARMABLE, FIDELITY_FULL, FIDELITY_UNSEEDED, HEADER,
+    FRAME_VERSION, LEDGER_SCHEMA,
     LEDGER_TORN, LEDGER_UNAVAILABLE, LEDGER_UNREADABLE,
     LOCK_EXCLUSION_UNATTESTED, RESERVATION_DURABILITY_UNATTESTED, RESERVED,
     UNATTESTED, UNAVAILABLE, CapabilityAttestation, LedgerFrameError,
@@ -33,7 +34,22 @@ def _reserved(seq, identity):
             "monotonic_ns": 1000 * seq, "utc_display": "2026-09-09T00:00:00Z"}
 
 
-def _ledger(*payloads, torn=None):
+def _header(seq=0, **overrides):
+    payload = {"kind": HEADER, "seq": seq, "schema": LEDGER_SCHEMA,
+               "frame_version": FRAME_VERSION, "generation": "g1",
+               "owner": {"boot_id": "b", "pid": 1, "start_ticks": 2}}
+    payload.update(overrides)
+    for absent in [k for k, v in overrides.items() if v is _ABSENT]:
+        payload.pop(absent)
+    return payload
+
+
+_ABSENT = object()
+
+
+def _ledger(*payloads, torn=None, header=True):
+    if header and not (payloads and payloads[0].get("kind") == HEADER):
+        payloads = (_header(),) + payloads
     body = b"".join(frame_of(p) for p in payloads)
     if torn is not None:
         body += torn
@@ -181,7 +197,7 @@ class ReadTests(unittest.TestCase):
 
     def test_committed_failed_and_unresolved_are_reconstructed(self):
         path = _write(self.dir, _ledger(
-            {"kind": HEADER, "generation": "g1", "schema": "x"},
+            _header(generation="g1"),
             _reserved(1, "promotion:aa"), {"kind": COMMITTED, "seq": 2, "reserves": 1},
             _reserved(3, "promotion:bb"), {"kind": FAILED, "seq": 4, "reserves": 3},
             _reserved(5, "promotion:cc")))
@@ -224,8 +240,8 @@ class ReadTests(unittest.TestCase):
         good = frame_of(_reserved(1, "promotion:aa"))
         broken = bytearray(frame_of(_reserved(3, "promotion:bb")))
         broken[-4] = broken[-4] ^ 0x01
-        path = _write(self.dir, good + bytes(broken) + frame_of(
-            _reserved(5, "promotion:cc")))
+        path = _write(self.dir, frame_of(_header()) + good + bytes(broken)
+                      + frame_of(_reserved(5, "promotion:cc")))
         read = read_ledger(path)
         self.assertEqual(read.readability, LEDGER_UNREADABLE)
         self.assertFalse(read.torn_tail)
@@ -244,14 +260,168 @@ class ReadTests(unittest.TestCase):
 
     def test_a_header_after_the_first_record_is_unreadable(self):
         path = _write(self.dir, _ledger(
-            _reserved(1, "promotion:aa"), {"kind": HEADER, "generation": "g2"}))
+            _reserved(1, "promotion:aa"), _header(seq=2, generation="g2")))
         self.assertEqual(read_ledger(path).readability, LEDGER_UNREADABLE)
 
     def test_an_empty_ledger_is_readable_and_fences_nothing(self):
+        """Initialized and valid (§10): a crash between creating the file and
+        writing the header leaves exactly this, and it is not a missing fence.
+        Its generation is undeclared, and it is reported as undeclared rather
+        than inferred from the filename."""
         path = _write(self.dir, b"")
         read = read_ledger(path)
         self.assertEqual(read.readability, AVAILABLE)
         self.assertEqual(read.fenced, ())
+        self.assertFalse(read.header_present)
+        self.assertIsNone(read.generation)
+
+
+class HeaderTests(unittest.TestCase):
+    """A populated ledger begins with exactly one valid HEADER.
+
+    Without it the reader reconstructs a durable identity set from records
+    whose schema, framing version, generation and owner it has guessed. Every
+    failure below is LEDGER_UNREADABLE: the header is the only record that says
+    what the others mean, so there is nothing to fall back to.
+    """
+
+    def setUp(self):
+        self._dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self._dir.cleanup)
+        self.dir = self._dir.name
+
+    def _unreadable(self, *payloads, contains=None):
+        path = _write(self.dir, _ledger(*payloads, header=False))
+        read = read_ledger(path)
+        self.assertEqual(read.readability, LEDGER_UNREADABLE)
+        self.assertFalse(read.header_present)
+        self.assertEqual(read.fenced, ())
+        if contains is not None:
+            self.assertIn(contains, read.detail)
+        return read
+
+    def test_a_populated_ledger_with_no_header_is_unreadable(self):
+        self._unreadable(_reserved(1, "promotion:aa"),
+                         contains="begins with RESERVED")
+
+    def test_a_header_carrying_no_generation_is_unreadable(self):
+        self._unreadable(_header(generation=None),
+                         contains="no generation identifier")
+
+    def test_an_empty_generation_string_is_not_a_generation(self):
+        self._unreadable(_header(generation=""),
+                         contains="no generation identifier")
+
+    def test_a_missing_generation_field_is_unreadable(self):
+        self._unreadable(_header(generation=_ABSENT), contains="missing")
+
+    def test_a_foreign_schema_is_unreadable(self):
+        self._unreadable(_header(schema="x"), contains="this reader reads")
+
+    def test_an_unsupported_frame_version_is_unreadable(self):
+        self._unreadable(_header(frame_version="pl2"),
+                         contains="frame version")
+
+    def test_a_header_with_no_owner_is_unreadable(self):
+        """§9: the holder writes its ProcessIdentity so a reader can name the
+        owner rather than infer one."""
+        self._unreadable(_header(owner=_ABSENT), contains="missing")
+
+    def test_an_owner_that_is_not_a_process_identity_is_unreadable(self):
+        self._unreadable(_header(owner={"boot_id": "b", "pid": 1}),
+                         contains="ProcessIdentity field set")
+
+    def test_an_owner_pid_that_is_not_an_integer_is_unreadable(self):
+        self._unreadable(
+            _header(owner={"boot_id": "b", "pid": "1", "start_ticks": 2}),
+            contains="pid is not an integer")
+
+    def test_a_true_is_not_a_pid(self):
+        self._unreadable(
+            _header(owner={"boot_id": "b", "pid": True, "start_ticks": 2}),
+            contains="pid is not an integer")
+
+    def test_an_owner_with_no_boot_id_is_unreadable(self):
+        self._unreadable(
+            _header(owner={"boot_id": "", "pid": 1, "start_ticks": 2}),
+            contains="no boot id")
+
+    def test_an_extra_header_field_is_unreadable(self):
+        """Closed, like the record kinds. A field this reader does not know is
+        a header written by a coordinator that knows more than it does."""
+        self._unreadable(_header(retention="forever"),
+                         contains="unexpected ['retention']")
+
+    def test_a_second_header_is_unreadable(self):
+        path = _write(self.dir, _ledger(_header(), _header(seq=1, generation="g2")))
+        self.assertEqual(read_ledger(path).readability, LEDGER_UNREADABLE)
+
+    def test_a_valid_header_alone_declares_the_generation(self):
+        path = _write(self.dir, _ledger(header=True))
+        read = read_ledger(path)
+        self.assertEqual(read.readability, AVAILABLE)
+        self.assertTrue(read.header_present)
+        self.assertEqual(read.generation, "g1")
+        self.assertEqual(read.fenced, ())
+
+    def test_the_generation_is_never_taken_from_the_filename(self):
+        path = _write(self.dir, _ledger(), name="g9.jsonl")
+        self.assertEqual(read_ledger(path).generation, "g1")
+
+
+class SequenceTests(unittest.TestCase):
+    """One sequence across every record kind, strictly increasing.
+
+    The writer's next_seq has to be answerable from the last record of the file
+    whatever kind that record is; a per-kind counter makes "the last record" a
+    question with three answers. Strictly increasing gives uniqueness for free.
+    """
+
+    def setUp(self):
+        self._dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self._dir.cleanup)
+        self.dir = self._dir.name
+
+    def _unreadable(self, *payloads):
+        path = _write(self.dir, _ledger(*payloads))
+        read = read_ledger(path)
+        self.assertEqual(read.readability, LEDGER_UNREADABLE)
+        self.assertEqual(read.fenced, ())
+        return read
+
+    def test_two_reservations_may_not_share_a_sequence_number(self):
+        self._unreadable(_reserved(1, "promotion:aa"), _reserved(1, "promotion:bb"))
+
+    def test_two_terminal_records_may_not_share_a_sequence_number(self):
+        self._unreadable(
+            _reserved(1, "promotion:aa"), {"kind": COMMITTED, "seq": 2, "reserves": 1},
+            _reserved(3, "promotion:bb"), {"kind": FAILED, "seq": 2, "reserves": 3})
+
+    def test_a_terminal_record_may_not_reuse_a_reservation_sequence(self):
+        self._unreadable(
+            _reserved(1, "promotion:aa"), {"kind": COMMITTED, "seq": 1, "reserves": 1})
+
+    def test_sequence_numbers_may_not_go_backwards(self):
+        self._unreadable(_reserved(5, "promotion:aa"), _reserved(2, "promotion:bb"))
+
+    def test_the_header_is_part_of_the_same_sequence(self):
+        self._unreadable(_header(seq=7), _reserved(2, "promotion:aa"))
+
+    def test_a_non_integer_sequence_is_unreadable(self):
+        self._unreadable(dict(_reserved(1, "promotion:aa"), seq="1"))
+
+    def test_a_boolean_is_not_a_sequence_number(self):
+        self._unreadable(dict(_reserved(1, "promotion:aa"), seq=True))
+
+    def test_gaps_are_permitted(self):
+        """Strictly increasing, not contiguous. A gap is what a writer that
+        reserved and crashed before framing leaves behind, and refusing it
+        would make a lost record unreadable instead of merely lost."""
+        path = _write(self.dir, _ledger(
+            _reserved(4, "promotion:aa"), _reserved(90, "promotion:bb")))
+        read = read_ledger(path)
+        self.assertEqual(read.readability, AVAILABLE)
+        self.assertEqual(read.reservations_total, 2)
 
 
 class ShadowTests(unittest.TestCase):
@@ -260,7 +430,7 @@ class ShadowTests(unittest.TestCase):
         self.addCleanup(self._dir.cleanup)
         self.dir = self._dir.name
         self.path = _write(self.dir, _ledger(
-            {"kind": HEADER, "generation": "g1"},
+            _header(generation="g1"),
             _reserved(1, "promotion:aa"), {"kind": COMMITTED, "seq": 2, "reserves": 1},
             _reserved(3, "promotion:cc")))
 
@@ -289,6 +459,56 @@ class ShadowTests(unittest.TestCase):
         self.assertEqual(before, after)
         self.assertEqual(stat_before.st_size, os.stat(self.path).st_size)
         self.assertEqual(stat_before.st_mtime_ns, os.stat(self.path).st_mtime_ns)
+
+    def test_a_snapshot_sees_reservations_made_after_the_first_read(self):
+        """§12 permits SHADOW beside an ARMED writer, so the fence moves under
+        a long-lived reader. A view taken once at startup would report
+        WOULD_PROMOTE for an identity ARMED had already fenced."""
+        store = self._store()
+        self.assertNotIn("promotion:dd", store.snapshot().fenced)
+        with open(self.path, "ab") as handle:
+            handle.write(frame_of(_reserved(4, "promotion:dd")))
+        self.assertIn("promotion:dd", store.snapshot().fenced)
+        self.assertIn("promotion:dd", store.seed_for_shadow())
+        self.assertIn("promotion:dd", store.assessment()["ledger"]["unresolved"])
+
+    def test_the_cached_view_is_named_as_cached_and_cannot_pass_for_current(self):
+        """The non-refreshing accessor exists for reporting one view twice. It
+        is not spelled read(), because a reader reaching for the current fence
+        would reach for that name."""
+        store = self._store()
+        store.snapshot()
+        with open(self.path, "ab") as handle:
+            handle.write(frame_of(_reserved(4, "promotion:dd")))
+        self.assertNotIn("promotion:dd", store.cached_snapshot().fenced)
+        self.assertIn("promotion:dd", store.snapshot().fenced)
+        self.assertFalse([name for name in dir(store)
+                          if name == "read" or name.startswith("read_")])
+
+    def test_a_refreshed_snapshot_that_ends_mid_record_is_torn(self):
+        store = self._store()
+        self.assertEqual(store.snapshot().readability, AVAILABLE)
+        with open(self.path, "ab") as handle:
+            handle.write(b"0000004a 1234abcd {\"kind\":\"RESER")
+        read = store.snapshot()
+        self.assertEqual(read.readability, LEDGER_TORN)
+        self.assertTrue(read.torn_tail)
+
+    def test_an_assessment_reports_one_snapshot_and_not_three(self):
+        """armed_capability, shadow_fidelity and the published ledger view all
+        describe the same read; three fresh reads could describe three
+        different ledgers."""
+        store = self._store()
+        reads = []
+        original = store.snapshot
+
+        def counting():
+            reads.append(1)
+            return original()
+
+        store.snapshot = counting
+        store.assessment()
+        self.assertEqual(len(reads), 1)
 
     def test_an_unreadable_ledger_never_reports_full_fidelity(self):
         """Row 3 must not collapse into row 1: a SHADOW that cannot seed is not
