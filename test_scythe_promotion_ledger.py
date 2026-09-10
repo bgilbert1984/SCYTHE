@@ -11,7 +11,9 @@ from scythe_invariant_ledger import (
     Coordinate, TransitionContract, check_transition, signature,
 )
 from scythe_promotion_ledger import (
-    ACTING_EVENTS, BUDGET_EXHAUSTED, DEFAULT_MODE, EVENTS, MODE_ARMED,
+    ACTING_EVENTS, BUDGET_EXHAUSTED, DEFAULT_MODE, EVENTS,
+    EXECUTABILITY_NOTES, EXECUTABILITY_REFUSALS, IDENTITY_UNRESOLVED,
+    MERIT_REFUSALS, NOT_YET_REACHABLE, MODE_ARMED,
     MODE_DISABLED, MODE_SHADOW, MODES, NONE, PROMOTION_ATTEMPTED,
     PROMOTION_BUDGET, PROMOTION_FAILED, PROMOTION_RECORDED, PROMOTION_REFUSED,
     PROMOTION_SUPPRESSED, SHADOW_EVENTS, WOULD_BE_REFUSED, WOULD_BE_SUPPRESSED,
@@ -19,6 +21,7 @@ from scythe_promotion_ledger import (
     UnknownPromotionEvent, WriteResult,
 )
 from scythe_promotion_policy import (
+    REFUSALS as policy_refusals,
     CapsuleIdentity, PromotionRequest, verdict_digest,
 )
 
@@ -416,6 +419,107 @@ class ScopeTests(unittest.TestCase):
     def test_status_is_serialisable(self):
         json.dumps(PromotionCoordinator(PromotionAudit()).status())
         json.dumps(PromotionAudit().status())
+
+
+class VocabularyTests(unittest.TestCase):
+    """§5, the coordinator's half of SCYTHE_VERDICT_VOCABULARIES.md.
+
+    The cross-vocabulary name check lives in test_scythe_verdict_vocabularies,
+    because it reads more modules than this one.
+    """
+
+    def setUp(self):
+        self.audit = PromotionAudit()
+        self.coordinator = PromotionCoordinator(self.audit, mode=MODE_SHADOW)
+
+    def test_the_merit_set_is_bound_by_reference_and_not_copied(self):
+        """A copy is a second answer to a question that has one, and it drifts
+        in the direction that makes disjointness pass while the vocabulary is
+        wrong."""
+        self.assertIs(MERIT_REFUSALS, policy_refusals)
+
+    def test_budget_exhausted_is_executability_and_not_merit(self):
+        """It was placed here ad hoc before the set it belonged to had a name."""
+        self.assertIn(BUDGET_EXHAUSTED, EXECUTABILITY_REFUSALS)
+        self.assertNotIn(BUDGET_EXHAUSTED, MERIT_REFUSALS)
+
+    def test_every_executability_code_carries_its_repair(self):
+        """The discriminating question is who repairs it, and how. A code whose
+        note is a gloss rather than a repair has not answered it."""
+        for code in EXECUTABILITY_REFUSALS:
+            self.assertIn(code, EXECUTABILITY_NOTES)
+            self.assertIn("REPAIRED BY", EXECUTABILITY_NOTES[code])
+
+    def test_a_merit_refusal_is_counted_only_in_the_merit_set(self):
+        self.coordinator.evaluate(_satisfied(), REQUEST, CAPSULE,
+                                  now_monotonic_ns=NOW)
+        status = self.coordinator.status()
+        self.assertTrue(status["merit_refusals"])
+        self.assertEqual(status["executability_refusals"], {})
+
+    def test_a_budget_refusal_is_counted_only_in_the_executability_set(self):
+        for index in range(PROMOTION_BUDGET + 3):
+            self.coordinator.evaluate(_distinct(index), REQUEST, CAPSULE,
+                                      now_monotonic_ns=NOW)
+        status = self.coordinator.status()
+        self.assertEqual(status["executability_refusals"], {BUDGET_EXHAUSTED: 3})
+        self.assertEqual(status["merit_refusals"], {})
+
+    def test_the_two_counts_are_never_summed(self):
+        """A total would answer 'how many refusals' with a number mixing a
+        judgement about the finding and a judgement about the apparatus."""
+        status = self.coordinator.status()
+        for key in status:
+            self.assertNotIn("total_refusals", key)
+        self.assertIn("NEVER SUMMED", status["refusal_counts_note"])
+
+    def test_a_refused_result_names_its_refusals_as_merit(self):
+        result = self.coordinator.evaluate(_satisfied(), REQUEST, CAPSULE,
+                                           now_monotonic_ns=NOW)
+        self.assertEqual(result["merit_refusals"], result["refusals"])
+        self.assertNotIn("executability_code", result)
+
+    def test_a_suppressed_result_names_its_executability_code(self):
+        for index in range(PROMOTION_BUDGET + 1):
+            result = self.coordinator.evaluate(_distinct(index), REQUEST, CAPSULE,
+                                               now_monotonic_ns=NOW)
+        self.assertEqual(result["executability_code"], BUDGET_EXHAUSTED)
+        self.assertNotIn("merit_refusals", result)
+
+    def test_the_counts_survive_across_evaluations(self):
+        self.coordinator.evaluate(_satisfied(), REQUEST, CAPSULE,
+                                  now_monotonic_ns=NOW)
+        self.coordinator.evaluate(_satisfied(), REQUEST, CAPSULE,
+                                  now_monotonic_ns=NOW + SECOND)
+        counts = self.coordinator.status()["merit_refusals"]
+        self.assertEqual(sorted(set(counts.values())), [2])
+
+    def test_identity_unresolved_is_declared_and_not_yet_reachable(self):
+        """Slice 4 makes it reachable and must change this test."""
+        self.assertIn(IDENTITY_UNRESOLVED, EXECUTABILITY_REFUSALS)
+        self.assertEqual(NOT_YET_REACHABLE, (IDENTITY_UNRESOLVED,))
+        self.assertEqual(
+            self.coordinator.status()["executability_not_yet_reachable"],
+            [IDENTITY_UNRESOLVED])
+
+    def test_the_coordinator_lock_is_declared_absent(self):
+        """Slice 4. Published rather than left for a reader to assume, because
+        the counters above are as unlocked as everything else here."""
+        self.assertEqual(self.coordinator.status()["coordinator_lock"],
+                         "NOT_IMPLEMENTED")
+
+    def test_the_store_is_not_imported_by_the_coordinator(self):
+        """Slice 5's reader stays disconnected until slice 6. An import taken
+        to fill in a tuple is that connection arriving in the form nobody
+        reviews."""
+        with open(ledger_module.__file__, "r", encoding="utf-8") as handle:
+            tree = ast.parse(handle.read())
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom):
+                self.assertNotIn("ledger_store", node.module or "")
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    self.assertNotIn("ledger_store", alias.name)
 
 
 if __name__ == "__main__":

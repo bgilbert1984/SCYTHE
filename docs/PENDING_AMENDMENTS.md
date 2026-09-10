@@ -123,6 +123,35 @@ class four times; it is the same shape as a raw-text scan hitting a docstring.
 A false positive is the safe direction — it costs a rename that was not needed —
 so this is a refinement and not a defect.
 
+**Update, slice 3 (2026-09-10).** The mechanical check now exists as
+`test_scythe_verdict_vocabularies.py`, reading declared token tuples from the
+AST and never raw text. The prose false-positive class is pinned by a test. The
+entry stays queued because the *document* still describes the check that was
+run by hand; the amendment is now a matter of writing down what the code does.
+
+Building it surfaced a second thing §3 does not settle. **"Substring root" does
+not say whether the unit is characters or words**, and the two answers differ on
+a case that already occurred:
+
+| pair | by character | by word |
+| --- | --- | --- |
+| `INDETERMINATE` / `INDETERMINATE_AS_FAILURE` | collision | collision |
+| `UNVERIFIED` / `LOCK_SEMANTICS_UNVERIFIED` | collision | collision |
+| `UNVERIFIED` / `VERIFIED_BY_FILESYSTEM_POLICY` | collision | **clear** |
+| `RESERVED` / `UNRESERVED` | collision | clear |
+
+The by-hand check read characters and refused `VERIFIED_BY_FILESYSTEM_POLICY`;
+the word-level check clears it. Reading characters is not the fix — it also
+reports every accidental spelling overlap, and a name check that cries wolf is
+one an author learns to skip, which is the outcome §3 exists to prevent.
+
+The implementation settles it with **two checks**: word-level containment, plus
+a narrow negation-pair check for tokens differing by an `UN`/`NON`/`NOT` prefix
+on a shared word. Two codes that read as each other's negation are the worst
+neighbours across two vocabularies whatever their components say. All three
+historical cases are reproduced and all four minted names clear. §3 should say
+this rather than leave "substring root" to be read either way.
+
 ---
 
 ## 6. `PROMOTION_EXECUTION_CONTRACT.md` §9 — the record sequence is a reader-only rule
