@@ -181,51 +181,27 @@ this rather than leave "substring root" to be read either way.
 
 ---
 
-## 6. `PROMOTION_EXECUTION_CONTRACT.md` §9 — the record sequence is a reader-only rule
+## 8. `PROMOTION_EXECUTION_CONTRACT.md` §13c D.1 — the coordinator does not yet allocate
 
-**Trigger:** slice 6 (the ledger write path), before the writer needs `next_seq`.
+**Trigger:** slice 6b, or whichever slice first connects the coordinator to the
+writer.
 
-§9 requires per-record framing — a length and a checksum — and says nothing
-about record sequence numbers. The read path now enforces a stronger rule that
-the writer has to honour and that no accepted document states:
+D.1 says `next_seq` is taken **under the coordinator lock**, in the same section
+as the reservation. Slice 6 built the writer's own allocate-and-append session
+and satisfies D.4's span, which the amendment also calls a critical section.
+Those are the same span once the two are composed, and they are not composed
+yet: `PromotionCoordinator` does not hold a `LedgerWriter`, and the durable
+ledger takes no part in an evaluation.
 
-> One sequence across every record kind, header included, strictly increasing.
+So D.1's sentence is true of the writer and not yet true of the coordinator.
+Nothing is wrong — no production path writes, because no production path can
+obtain a scope — but the contract describes a composition the code has not
+performed, which is the shape this file exists to keep visible rather than
+remembered.
 
-It was chosen for a reason worth writing down: `next_seq` has to be answerable
-from the **last record of the file**, whatever kind that record is, and a
-per-kind counter makes *the last record* a question with three answers. Strictly
-increasing gives global uniqueness for free, and subsumes the narrower
-duplicate-reservation check the reader had before.
-
-Gaps are permitted deliberately. A gap is what a writer that took a sequence
-number and crashed before framing the record leaves behind; refusing it would
-make a lost record render the whole ledger unreadable rather than merely lost.
-
-This is queued rather than amended because slice 6 opens §9 for its own reasons.
-A rule the writer must obey that lives only in the reader is the second contract
-nobody accepted — which is exactly what this file exists to prevent, so it is
-also the entry most worth watching drain.
-
----
-
-## 7. `PROMOTION_EXECUTION_CONTRACT.md` §10 — a valid ledger with no declared generation
-
-**Trigger:** slice 6 (the ledger write path).
-
-§10 says a ledger created by this contract's own initialization is empty and
-valid. §9 says the holder writes its `ProcessIdentity` into a header record. A
-crash between the two leaves a zero-byte ledger: valid per §10, fencing nothing,
-and with **no generation identifier**, which is the thing C1 is a lifetime total
-over (§11).
-
-The read path reports it as readable with `header_present: false` and
-`generation: null`. It does **not** refuse ARMED on that basis, because doing so
-would mint an executability code, and minting one needs §5 amended — outside
-what slice 3 was authorized to do.
-
-The exit exists and is in slice 6: the writer takes ownership and writes the
-header. So this is a gap in what is *stated*, not a trap. §10 should say whether
-a headerless ledger refuses ARMED, and if it does, under which code.
+Slice 6 left it undone deliberately: connecting them is where a promotion write
+becomes production-*reachable* in shape, and that was outside the authorized
+boundary.
 
 ---
 
@@ -245,6 +221,8 @@ what is still pending. This is a record, not a queue: nothing here is waiting.
 | 2b — two preconditions, not one | `PROMOTION_EXECUTION_CONTRACT.md` §9 Amendment A | `42cc6b5` |
 | 2d — startup refusal or mode gate | `PROMOTION_EXECUTION_CONTRACT.md` §9 Amendment A | `42cc6b5` |
 | 8 — `fenced` cited the ground Amendment B moved | `scythe_promotion_ledger_store.py` docstring | slice 4 |
+| 6 — the record sequence was a reader-only rule | `PROMOTION_EXECUTION_CONTRACT.md` §13c D.1 | Amendment D |
+| 7 — a valid ledger with no declared generation | `PROMOTION_EXECUTION_CONTRACT.md` §13c D.3 | Amendment D |
 
 An entry for `RETRY_REQUIRES_OPERATOR` was written on the slice-4 branch and
 never merged; it is absent from this table because it was never a pending
