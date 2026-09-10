@@ -31,7 +31,7 @@ import threading
 from typing import Any, Callable, Dict, Optional, Sequence, Tuple
 
 from scythe_promotion_policy import (
-    NO_PROMOTION_REQUESTED, PROMOTION_ELIGIBLE, PROMOTION_REFUSED,
+    NO_PROMOTION_REQUESTED, PROMOTION_ELIGIBLE, PROMOTION_REFUSED, REFUSALS,
     CapsuleIdentity, PromotionDecision, PromotionRequest, decide_promotion,
 )
 from scythe_invariant_ledger import InvariantVerdict
@@ -52,7 +52,53 @@ DEFAULT_MODE = MODE_SHADOW
 # different findings arriving at once.
 PROMOTION_BUDGET = 8
 PROMOTION_WINDOW_S = 600.0
+
+# -- the two vocabularies (§5) --------------------------------------------
+#
+# SCYTHE_VERDICT_VOCABULARIES.md: a merit code says something about the subject,
+# an executability code says whether a verdict could be reached or acted on. The
+# sets are disjoint, named disjointly, counted separately, and neither is a
+# fallback for the other. The discriminating question is *who repairs it, and
+# how* -- which is why each code below carries its repair rather than a gloss.
+#
+# The merit set is bound by reference, not copied. A copy is a second answer to
+# a question that has one, and it drifts silently in exactly the direction that
+# makes the disjointness test pass while the vocabulary is wrong.
+MERIT_REFUSALS: Tuple[str, ...] = REFUSALS
+
 BUDGET_EXHAUSTED = "BUDGET_EXHAUSTED"
+IDENTITY_UNRESOLVED = "IDENTITY_UNRESOLVED"
+EXECUTABILITY_REFUSALS: Tuple[str, ...] = (BUDGET_EXHAUSTED, IDENTITY_UNRESOLVED)
+
+EXECUTABILITY_NOTES: Dict[str, str] = {
+    BUDGET_EXHAUSTED: (
+        "TOO MANY PROMOTIONS LATELY, ACROSS IDENTITIES. SAYS NOTHING ABOUT THIS "
+        "FINDING, WHICH MAY BE ENTIRELY PROMOTABLE. REPAIRED BY WAITING OUT THE "
+        "WINDOW OR BY RAISING A BOUND THAT WAS SET WRONG"),
+    IDENTITY_UNRESOLVED: (
+        "A RESERVATION FOR THIS IDENTITY HAS NO TERMINAL RECORD. WE DO NOT KNOW "
+        "WHETHER IT REACHED THE GRAPH. NOT A DUPLICATE, WHICH WOULD BE A CLAIM "
+        "THAT IT DID. REPAIRED BY RECONCILIATION, AND THE FINDING MAY BE "
+        "PERFECTLY PROMOTABLE ONCE WE KNOW"),
+}
+
+# Declared here, reachable in slice 4. IDENTITY_UNRESOLVED needs a reservation
+# that can *be* unresolved, and this slice does not build one.
+#
+# Declaring it early is what makes slice 4's dependency on this slice real
+# rather than remembered. A code nothing can return is indistinguishable from a
+# code that is never returned because of a bug, so the gap is pinned by a test
+# that has to be changed when slice 4 lands, rather than left to reading.
+NOT_YET_REACHABLE: Tuple[str, ...] = (IDENTITY_UNRESOLVED,)
+
+# §5 names five more: DURABLE_CEILING_REACHED and UNRESOLVED_CEILING_REACHED
+# (slice 8), and LEDGER_UNAVAILABLE, LEDGER_NOT_OWNED and LEDGER_TORN -- of
+# which slice 5 already minted three in scythe_promotion_ledger_store.
+#
+# They are deliberately NOT imported. The store stays disconnected from the
+# coordinator until slice 6, and an import taken for the sake of filling in a
+# tuple is that connection arriving early in the one form nobody reviews. The
+# tests check all three vocabularies for collisions; the module does not.
 
 MAX_AUDIT_RECORDS = 64
 MAX_TEXT = 240
@@ -176,6 +222,16 @@ class PromotionCoordinator:
         self._window_ns = int(window_s * 1e9)
         self._promoted: list = []           # real (key, monotonic_ns)
         self._shadow_promoted: list = []    # simulated, never real
+        # Counted per set and never summed (§5). A total would answer "how many
+        # refusals" with a number mixing "we judged this not worth promoting"
+        # and "we declined to act at all", which is the one distinction the two
+        # vocabularies exist to keep.
+        #
+        # These increments are as unlocked as everything else here until slice
+        # 4; status() publishes coordinator_lock: NOT_IMPLEMENTED rather than
+        # letting the reader assume otherwise.
+        self._merit_counts: Dict[str, int] = {}
+        self._executability_counts: Dict[str, int] = {}
 
     # -- ledgers ----------------------------------------------------------
 
@@ -196,6 +252,13 @@ class PromotionCoordinator:
         if self.mode == MODE_SHADOW:
             return tuple(key for key, _at in self._shadow_promoted)
         return self.promoted_keys
+
+    def _count_merit(self, refusals: Sequence[str]) -> None:
+        for refusal in refusals:
+            self._merit_counts[refusal] = self._merit_counts.get(refusal, 0) + 1
+
+    def _count_executability(self, code: str) -> None:
+        self._executability_counts[code] = self._executability_counts.get(code, 0) + 1
 
     def _spent_in_window(self, now_ns: int) -> int:
         ledger = self._shadow_promoted if self.mode == MODE_SHADOW else self._promoted
@@ -222,15 +285,22 @@ class PromotionCoordinator:
                     "disposition": decision.disposition}
 
         if decision.disposition == PROMOTION_REFUSED:
+            # Merit. The policy judged the finding; nothing about the apparatus
+            # is being reported here.
+            self._count_merit(decision.refusals)
             event = WOULD_BE_REFUSED if self.mode == MODE_SHADOW else PROMOTION_REFUSED
             self._audit.record(event, mode=self.mode,
                                reason=",".join(decision.refusals),
                                monotonic_ns=now_monotonic_ns)
             return {"mode": self.mode, "outcome": event,
                     "disposition": decision.disposition,
-                    "refusals": list(decision.refusals)}
+                    "refusals": list(decision.refusals),
+                    "merit_refusals": list(decision.refusals)}
 
         if self._spent_in_window(now_monotonic_ns) >= self._budget:
+            # Executability. This finding may be entirely promotable; we
+            # declined to act, and the refusal says so.
+            self._count_executability(BUDGET_EXHAUSTED)
             event = (WOULD_BE_SUPPRESSED if self.mode == MODE_SHADOW
                      else PROMOTION_SUPPRESSED)
             self._audit.record(event, mode=self.mode, reason=BUDGET_EXHAUSTED,
@@ -239,6 +309,7 @@ class PromotionCoordinator:
                                monotonic_ns=now_monotonic_ns)
             return {"mode": self.mode, "outcome": event,
                     "reason": BUDGET_EXHAUSTED,
+                    "executability_code": BUDGET_EXHAUSTED,
                     "idempotency_key": decision.idempotency_key}
 
         if self.mode == MODE_SHADOW:
@@ -301,6 +372,17 @@ class PromotionCoordinator:
                 "IS ABOUT A THOUSAND DIFFERENT FINDINGS ARRIVING AT ONCE"),
             "promoted": len(self._promoted),
             "shadow_promoted": len(self._shadow_promoted),
+            "merit_vocabulary": list(MERIT_REFUSALS),
+            "executability_vocabulary": list(EXECUTABILITY_REFUSALS),
+            "executability_notes": dict(EXECUTABILITY_NOTES),
+            "merit_refusals": dict(sorted(self._merit_counts.items())),
+            "executability_refusals": dict(sorted(self._executability_counts.items())),
+            "refusal_counts_note": (
+                "COUNTED PER SET AND NEVER SUMMED. A TOTAL WOULD MIX 'WE JUDGED "
+                "THIS NOT WORTH PROMOTING' WITH 'WE DECLINED TO ACT AT ALL', "
+                "WHICH IS THE DISTINCTION THE TWO VOCABULARIES EXIST TO KEEP"),
+            "executability_not_yet_reachable": list(NOT_YET_REACHABLE),
+            "coordinator_lock": "NOT_IMPLEMENTED",
             "shadow_simulates_idempotency": True,
             "shadow_note": (
                 "SHADOW SPENDS A SIMULATED LEDGER SO ITS RECORD SHOWS WHAT "
