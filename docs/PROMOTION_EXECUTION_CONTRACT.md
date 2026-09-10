@@ -853,10 +853,17 @@ into `LEDGER_UNREADABLE` — losing every identity in the file to save one appen
 changes is that the reason is written down, because the behaviour currently
 holds by a coincidence of two rules meeting rather than by either one saying so.
 
-The repair is reconciliation's (slice 7), not the writer's. **The write path
-must not truncate, rewrite or otherwise tidy a torn tail** — a writer that
-repaired the file it is about to append to is a writer that can destroy evidence
-to make its own next operation legal.
+The repair is reconciliation's (slice 7), not the writer's. **`LEDGER_TORN` is
+append-ineligible, and the writer must neither truncate, repair, normalize nor
+otherwise modify a torn ledger** — not the tail, not the records before it, not
+the file's length. A writer that repaired the file it is about to append to is a
+writer that can destroy evidence to make its own next operation legal, and it
+would do so at exactly the moment the evidence is most load-bearing.
+
+Evidence preservation wins over availability here, and the trade is deliberate:
+a torn ledger that refuses every append is a coordinator that cannot promote,
+which is recoverable. A torn ledger that has been tidied is a set of identities
+nobody can audit, which is not.
 
 ### D.3 A ledger with no declared generation (entry 7)
 
@@ -887,6 +894,18 @@ header, and the generation is declared from that moment. Recorded here because
 so in the document that mints it — and this one's repair *does* exist, in the
 slice that mints the code.
 
+**The writer must not silently initialize, infer or adopt a generation because
+the file is empty.** Establishing a generation is an explicit governed
+operation, under the same authority that ends one (§11) and that performs
+reconciliation (§8). An empty file is an invitation to treat initialization as a
+side effect of the first write, and a generation that began as a side effect is
+one nobody authorized, dated or can name the boundary of — while C1 is a
+lifetime total over exactly that boundary.
+
+So the refusal stands until a generation is established *deliberately*. A writer
+that started one on its own would clear `LEDGER_GENERATION_UNDECLARED` by
+removing the condition rather than by answering it.
+
 ### D.4 §17 slice 6 divides, and the write path lands behind a closed gate
 
 §17's slice 6 reads *write path, fsync discipline, ownership lock*. Those are
@@ -903,16 +922,44 @@ guard is where the subtle failures are.**
 | `fcntl.flock` ownership for the process lifetime | | ✓ |
 | `LEDGER_NOT_OWNED` becomes reachable | | ✓ |
 
-**Slice 6's write path must be unreachable without an ownership attestation it
-cannot yet obtain.** Every append is gated on that attestation; slice 6 supplies
-no way to produce one, so the only caller that can reach an append is a test
-that injects it — the same seam `mounts` and `refused_prefixes` already use.
+**Slice 6's write path must be unreachable without an ownership proof it cannot
+yet obtain.** Every append is gated on one; slice 6 supplies no way to produce
+one, so the only caller that can reach an append is a test that injects it —
+the same seam `mounts` and `refused_prefixes` already use.
 
 This is deliberately stronger than *we will add the lock next*. A write path
 that works and is merely not yet guarded is a write path someone can call. One
-that refuses every append until a later slice teaches it how to prove ownership
+that refuses every append until a later slice teaches it to prove ownership
 cannot be used early by accident, and the refusal is `LEDGER_NOT_OWNED`, which
 §5 already names.
+
+#### The proof is a live scope, not a flag
+
+A boolean, a token, or a recorded attestation would reintroduce the hazard the
+gate exists to close, one level up: ownership could be attested, released, and
+the append performed afterwards against a ledger this process no longer owns.
+The check would pass and the guarantee would be gone — a
+time-of-check-to-time-of-use hole with none of the difficulty that usually
+accompanies one.
+
+The ownership proof must therefore be:
+
+- **bound to the specific ledger**, so a proof for one file cannot admit a write
+  to another;
+- **valid across the whole allocate-and-append critical section**, not
+  re-checked at two points with a gap between them — the gap is the hole;
+- **incapable of being retained and reused** after ownership ends: a reference
+  held past the owning scope is inert, and using it is a refusal rather than a
+  silent success;
+- **not producible by production code before slice 6b**, and reachable in slice 6
+  only through the test seam.
+
+**Slice 6 exposes no generally callable append that takes
+`ownership_attested=True`.** A parameter a caller can pass is a parameter a
+caller can pass wrongly, and the reviewer of the call site cannot see whether
+the claim was true. The append is internal and takes a live scope; slice 6b
+invokes it from inside the scope where the lock is actually held, which is the
+only place the scope can exist.
 
 ### D.5 What slice 6 still does not do
 
@@ -1084,8 +1131,16 @@ already written down. Introduced by Amendment B, noticed by Amendment C.*
     `LEDGER_GENERATION_UNDECLARED`; SHADOW is unaffected.
 28g. A ledger whose header the writer has written declares a generation, and
     the refusal is gone.
-28h. Every append refuses with `LEDGER_NOT_OWNED` unless an ownership
-    attestation is supplied, and slice 6 provides no way to produce one.
+28h. Every append refuses with `LEDGER_NOT_OWNED` unless a live ownership scope
+    is supplied, and slice 6 provides no production path that produces one.
+28k. A scope retained past the end of its ownership is inert: a later append
+    through it refuses with `LEDGER_NOT_OWNED` rather than succeeding.
+28l. A scope bound to one ledger does not admit a write to another.
+28m. AST — the public surface exposes no append taking an ownership flag, and
+    no append that can be called without a scope.
+28n. The writer does not establish a generation on an empty ledger: after an
+    attempted append to a zero-byte ledger with no generation, the file is
+    byte-identical and the refusal stands.
 28i. A failed or unresolved write is never readable as a committed promotion:
     the reader's `committed` set contains only identities whose terminal record
     is `COMMITTED`.
@@ -1152,6 +1207,13 @@ produced it.
     (§13c D.4). A write path that merely lacks its guard is one someone can
     call; one that refuses every append until a later slice teaches it to prove
     ownership cannot be used early by accident.
+20. **The ownership proof is a live scope, not a flag** (§13c D.4). A boolean or
+    a recorded attestation permits attest-release-append, which passes the check
+    with the guarantee already gone — a time-of-check-to-time-of-use hole with
+    none of the difficulty that usually accompanies one.
+21. **A generation is never established as a side effect of a write** (§13c
+    D.3). A generation that began as a side effect is one nobody authorized or
+    dated, and C1 is a lifetime total over exactly that boundary.
 
 ---
 
@@ -1175,7 +1237,8 @@ amendment is accepted:
    (§13c D.1, D.3). The append is gated on an ownership attestation this slice
    cannot produce (§13c D.4).
 6b. Durable ledger: `fcntl.flock` ownership for the process lifetime, which is
-   what makes the gate above openable.
+   what makes the gate above openable — by supplying the live scope, from
+   inside which the internal append is invoked.
 7. Reconciliation and generations (§8, §11).
 8. Ceilings C1 and C2 (§11).
 9. Execution adapter with one fixed WriteBus schema.
