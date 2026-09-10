@@ -5,7 +5,7 @@ Status:                 ACCEPTED — nothing implemented
 Accepted:               2026-09-08, after review amendments cafda8d
 Amendment A:            §9 filesystem capability — ACCEPTED 2026-09-09,
                         amendment 42cc6b5
-Amendment B:            §13a three-state writer result — PROPOSED 2026-09-10
+Amendment B:            §13a three-state writer result — ACCEPTED 2026-09-10
 Authority:              NORMATIVE
 Constrains:             Step 4 of the promotion sequence (execution adapter)
 Depends on:             SCYTHE_VERDICT_VOCABULARIES.md  (ACCEPTED — §5 declares
@@ -564,7 +564,7 @@ serves as the bound.
 
 ## 13a. Amendment B — the writer's answer has three states, not two
 
-*Proposed 2026-09-10. **Not yet accepted.** Settles what §3
+*Proposed 2026-09-10 and accepted 2026-09-10, in that order. Settles what §3
 step 7 and §7 left open: what an exception from the writer means, and what
 `accepted=False` actually claims. Touches §2, §3, §5, §6 and §7; each carries a
 pointer back to here.*
