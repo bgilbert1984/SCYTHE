@@ -11,7 +11,7 @@ import scythe_promotion_ledger_store as store_module
 from scythe_promotion_ledger_store import (
     ATTESTED_BY_FILESYSTEM_POLICY, AVAILABLE, COMMITTED, FAILED,
     FIDELITY_DEGRADED_NOT_ARMABLE, FIDELITY_FULL, FIDELITY_UNSEEDED, HEADER,
-    FRAME_VERSION, LEDGER_SCHEMA,
+    FRAME_VERSION, KNOWN_KINDS, LEDGER_SCHEMA, RECONCILIATION_KINDS,
     LEDGER_TORN, LEDGER_UNAVAILABLE, LEDGER_UNREADABLE,
     LOCK_EXCLUSION_UNATTESTED, RESERVATION_DURABILITY_UNATTESTED, RESERVED,
     UNATTESTED, UNAVAILABLE, CapabilityAttestation, LedgerFrameError,
@@ -89,11 +89,23 @@ class FramingTests(unittest.TestCase):
 
     def test_an_unrecognised_record_kind_is_refused_not_skipped(self):
         """A ledger written by a coordinator that knows more kinds is not one
-        this slice may read past. RECONCILED_RELEASED is the real case."""
+        this reader may read past.
+
+        The example used to be RECONCILED_RELEASED, named in slice 3 as *the
+        real case*. Slice 7 wrote it, so it is a known kind now and the example
+        had to move — which is the vocabulary extending when its mechanism
+        lands, exactly as that comment said it would.
+        """
         with self.assertRaises(LedgerFrameError) as caught:
-            parse_frame(frame_of({"kind": "RECONCILED_RELEASED", "seq": 2,
+            parse_frame(frame_of({"kind": "GENERATION_CLOSED", "seq": 2,
                                   "reserves": 1}).rstrip(b"\n"))
         self.assertIn("does not understand", str(caught.exception))
+
+    def test_the_reconciliation_kinds_are_now_known(self):
+        for kind in RECONCILIATION_KINDS:
+            self.assertIn(kind, KNOWN_KINDS)
+            parse_frame(frame_of({"kind": kind, "seq": 2,
+                                  "reserves": 1}).rstrip(b"\n"))
 
 
 class LocationTests(unittest.TestCase):

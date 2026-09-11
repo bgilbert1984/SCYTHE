@@ -97,101 +97,6 @@ declared as one nowhere. The finding is recorded there because recovery has no
 contract to carry it. When one exists, it carries it, and the vocabularies
 document's conformance table gets a normal row.
 
-## 5. `SCYTHE_VERDICT_VOCABULARIES.md` §3 — the name check needs a token source
-
-**Trigger:** the next amendment to that document for a reason of its own.
-
-The substring-root check works and has now caught two real collisions. It also
-has a false-positive class: **uppercase English prose reads as a token.**
-
-Running it for §9 Amendment A reported `FAILED` as a merit-side collision. The
-hit was inside a `VERDICT_NOTES` string — *"THIS IS NOT A FAILED TRANSITION"* —
-which is prose, not a minted name. `FAILED` is free, and the check said
-otherwise.
-
-The rule should say the check runs against **declared token tuples**
-(`COORDINATE_KINDS`, `REFUSALS`, `DISPOSITIONS`, `COMPARISONS`, …) and not
-against raw uppercase text.
-
-This repository has now met that false-positive class **seven** times. Four
-preceded this entry. The fifth was slice 6's scope test, asserting that the write
-path imports no `fcntl` and matching the word in a docstring describing what 6b
-would do. The sixth and seventh were slice 6b's, matching `ARMED` inside a
-sentence saying that failing to acquire refuses ARMED, and `append` inside
-`halt_appends` and `O_APPEND`.
-
-**All three were written after this entry existed, by the author who wrote it.**
-That is the finding worth keeping: knowing the class does not prevent writing
-another one, because a text scan is the shortest thing to type and passes on the
-first file you try it on. Reading declared names from the AST is the only
-durable form, and it belongs in §3 rather than in an author's memory.
-
-**A second defect, found while drafting Amendment F.** The check's merit universe
-is a hand-written list of five `(module, tuple)` pairs, and it is incomplete.
-`rf_capture_recovery` declares `SUPERSESSION_STATES` and `RECOVERY_OUTCOMES` —
-eight merit-side tokens — and none of them is in the list.
-
-The consequence was live. `GENERATION_SUPERSEDED` was checked, reported **clear**,
-and collides with recovery's `SUPERSEDED`. It was caught only because the drafter
-opened `rf_capture_recovery.py` for an unrelated reason and recognised the word
-— which is exactly the *found by looking* failure §3 exists to replace.
-
-A hand-listed universe is a check that stays silent about whatever nobody
-remembered to add. Either the universe is discovered — every module-level
-UPPER_SNAKE tuple in the tree, minus a declared exclusion list — or an omission
-has to fail loudly rather than pass quietly. The trade is real: discovery
-produces false positives against tuples that are not vocabularies, and §3's own
-rule says a check that cries wolf is one an author learns to skip.
-
-**Repaired as slice 7's first code change (2026-09-10).** The universe is now
-discovered — every module-level token in every non-test module, 300 of them,
-against 25 in the hand-listed merit set. `rf_capture_recovery`'s 21 tokens are
-discovered, of which the old universe contained one.
-
-The false-positive cost §3 predicts is paid by a `JUDGED` table rather than by
-silence: a hit is either a real collision or a recorded judgement with a reason,
-and there is no third state. Erasing one by renaming a token that did not need
-renaming is not available, and a judgement must name a hit that actually
-collides **and** a token the tree actually declares — a test that caught a
-judgement recorded against `RELEASED`, which nothing declares, on its first run.
-
-The entry stays open for the part that is still true: the *document* describes
-the by-hand check. §3 should say what the implementation now does.
-
-A false positive is the safe direction — it costs a rename that was not needed —
-so this is a refinement and not a defect.
-
-**Update, slice 3 (2026-09-10).** The mechanical check now exists as
-`test_scythe_verdict_vocabularies.py`, reading declared token tuples from the
-AST and never raw text. The prose false-positive class is pinned by a test. The
-entry stays queued because the *document* still describes the check that was
-run by hand; the amendment is now a matter of writing down what the code does.
-
-Building it surfaced a second thing §3 does not settle. **"Substring root" does
-not say whether the unit is characters or words**, and the two answers differ on
-a case that already occurred:
-
-| pair | by character | by word |
-| --- | --- | --- |
-| `INDETERMINATE` / `INDETERMINATE_AS_FAILURE` | collision | collision |
-| `UNVERIFIED` / `LOCK_SEMANTICS_UNVERIFIED` | collision | collision |
-| `UNVERIFIED` / `VERIFIED_BY_FILESYSTEM_POLICY` | collision | **clear** |
-| `RESERVED` / `UNRESERVED` | collision | clear |
-
-The by-hand check read characters and refused `VERIFIED_BY_FILESYSTEM_POLICY`;
-the word-level check clears it. Reading characters is not the fix — it also
-reports every accidental spelling overlap, and a name check that cries wolf is
-one an author learns to skip, which is the outcome §3 exists to prevent.
-
-The implementation settles it with **two checks**: word-level containment, plus
-a narrow negation-pair check for tokens differing by an `UN`/`NON`/`NOT` prefix
-on a shared word. Two codes that read as each other's negation are the worst
-neighbours across two vocabularies whatever their components say. All three
-historical cases are reproduced and all four minted names clear. §3 should say
-this rather than leave "substring root" to be read either way.
-
----
-
 ---
 
 ---
@@ -212,6 +117,7 @@ what is still pending. This is a record, not a queue: nothing here is waiting.
 | 7 — a valid ledger with no declared generation | `PROMOTION_EXECUTION_CONTRACT.md` §13c D.3 | Amendment D |
 | 8 — the coordinator did not yet allocate | `scythe_promotion_ledger.py`, slice 6b | slice 6b |
 | 4 — no exit from a `FAILED` reservation | `PROMOTION_EXECUTION_CONTRACT.md` §13e Amendment F | Amendment F |
+| 5 — the name check needed a token source | `SCYTHE_VERDICT_VOCABULARIES.md` §3, *The mechanical step, as implemented* | slice 7 |
 
 An entry for `RETRY_REQUIRES_OPERATOR` was written on the slice-4 branch and
 never merged; it is absent from this table because it was never a pending

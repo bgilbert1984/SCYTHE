@@ -49,18 +49,32 @@ HEADER_FIELDS = frozenset(("kind", "seq", "schema", "frame_version",
                            "generation", "owner"))
 OWNER_FIELDS = frozenset(("boot_id", "pid", "start_ticks"))
 
+# Optional, and closed when present (§13e F.4). A generation that supersedes
+# another carries this; the first generation of a lineage does not. It is the
+# only optional header field, and it is validated as strictly as the required
+# ones -- a malformed supersedes block would make a successor unreadable, which
+# is the fail-closed direction, rather than an unattributed one.
+SUPERSEDES_FIELDS = frozenset(("generation", "path", "bytes", "digest",
+                               "closed_because", "closed_by", "request_id"))
+
 # -- record kinds this slice understands ----------------------------------
 #
-# Closed, and closed hard: RECONCILED_COMMITTED and RECONCILED_RELEASED are
-# defined by §8 and are NOT here, because the slice that writes them has not
-# landed. A ledger containing one is unreadable to this module rather than
-# partially readable, which is the fail-closed direction.
+# Closed, and closed hard. RECONCILED_COMMITTED and RECONCILED_RELEASED joined
+# in slice 7, which is the slice that writes them -- the vocabulary extends when
+# its mechanism lands, never before. A ledger containing a kind not listed here
+# is unreadable to this module rather than partially readable, which is the
+# fail-closed direction.
 HEADER = "HEADER"
 RESERVED = "RESERVED"
 COMMITTED = "COMMITTED"
 FAILED = "FAILED"
-KNOWN_KINDS: Tuple[str, ...] = (HEADER, RESERVED, COMMITTED, FAILED)
+RECONCILED_COMMITTED = "RECONCILED_COMMITTED"
+RECONCILED_RELEASED = "RECONCILED_RELEASED"
+KNOWN_KINDS: Tuple[str, ...] = (HEADER, RESERVED, COMMITTED, FAILED,
+                                RECONCILED_COMMITTED, RECONCILED_RELEASED)
 TERMINAL_KINDS: Tuple[str, ...] = (COMMITTED, FAILED)
+RECONCILIATION_KINDS: Tuple[str, ...] = (RECONCILED_COMMITTED,
+                                         RECONCILED_RELEASED)
 
 # -- readability ----------------------------------------------------------
 AVAILABLE = "AVAILABLE"
@@ -155,7 +169,7 @@ def _refuse_header(payload: Mapping[str, Any]) -> Optional[str]:
     failure here is LEDGER_UNREADABLE rather than a repair, because the header
     is the only record that says what the others mean.
     """
-    extra = set(payload) - HEADER_FIELDS
+    extra = set(payload) - HEADER_FIELDS - {"supersedes"}
     missing = HEADER_FIELDS - set(payload)
     if extra or missing:
         return (f"header field set is not the declared one; missing "
@@ -183,6 +197,17 @@ def _refuse_header(payload: Mapping[str, Any]) -> Optional[str]:
         # bool before int: bool subclasses int, and True is not a pid.
         if isinstance(value, bool) or not isinstance(value, int):
             return f"header owner {numeric} is not an integer"
+    if "supersedes" in payload:
+        block = payload["supersedes"]
+        if not isinstance(block, dict) or set(block) != SUPERSEDES_FIELDS:
+            return "header supersedes block is not the declared field set"
+        for text in ("generation", "path", "digest", "closed_because",
+                     "closed_by", "request_id"):
+            if not isinstance(block[text], str) or not block[text]:
+                return f"header supersedes {text} is not a non-empty string"
+        size = block["bytes"]
+        if isinstance(size, bool) or not isinstance(size, int) or size < 0:
+            return "header supersedes bytes is not a length"
     return None
 
 
@@ -323,6 +348,7 @@ class LedgerRead:
     header_present: bool = False
     committed: Tuple[str, ...] = ()
     write_failed: Tuple[str, ...] = ()
+    released: Tuple[str, ...] = ()
     unresolved: Tuple[str, ...] = ()
     torn_tail: bool = False
     reservations_total: int = 0
@@ -333,7 +359,11 @@ class LedgerRead:
     def fenced(self) -> Tuple[str, ...]:
         """Every identity that may not be promoted again.
 
-        All three states fence, and since §13a Amendment B they fence for three
+        Released identities are **not** here, and that is what reconciliation
+        is for: an operator established that no record exists, so the identity
+        is promotable again (§13e F.2).
+
+        The other three fence, and since §13a Amendment B they fence for three
         different reasons. COMMITTED because the record exists. UNRESOLVED
         because it may -- that is the row indistinguishability still argues, and
         the only one. FAILED because the adapter attested that nothing was
@@ -344,8 +374,8 @@ class LedgerRead:
         while WriteResult was a Boolean that could not tell a definite rejection
         from a lost acknowledgement.
         """
-        return tuple(sorted(set(self.committed) | set(self.write_failed)
-                            | set(self.unresolved)))
+        return tuple(sorted((set(self.committed) | set(self.write_failed)
+                             | set(self.unresolved)) - set(self.released)))
 
     def as_dict(self) -> Dict[str, Any]:
         return {"path": self.path, "readability": self.readability,
@@ -353,6 +383,7 @@ class LedgerRead:
                 "header_present": self.header_present,
                 "committed": list(self.committed),
                 "write_failed": list(self.write_failed),
+                "released": list(self.released),
                 "unresolved": list(self.unresolved),
                 "fenced_total": len(self.fenced),
                 "torn_tail": self.torn_tail,
@@ -391,6 +422,7 @@ def read_ledger(path: str) -> LedgerRead:
     header_present = False
     reserved: Dict[int, str] = {}
     terminal: Dict[int, str] = {}
+    reconciled: Dict[int, str] = {}
     order: List[int] = []
     # Strictly increasing across every record kind, header included. One
     # sequence, not one per kind: the writer's next_seq has to be answerable
@@ -453,21 +485,57 @@ def read_ledger(path: str) -> LedgerRead:
                 path=path, readability=LEDGER_UNREADABLE, records_read=index,
                 detail=f"record {index}: {kind} resolves seq {reserves!r}, which "
                        f"no RESERVED record claimed")
+        if kind in RECONCILIATION_KINDS:
+            # §13e F.1. A reconciliation acts on a reservation that is
+            # unresolved or definitely failed; a COMMITTED one has nothing
+            # uncertain about it, and recording a decision over a settled fact
+            # is what NOT_RECONCILABLE exists to refuse.
+            if terminal.get(reserves) == COMMITTED:
+                return LedgerRead(
+                    path=path, readability=LEDGER_UNREADABLE, records_read=index,
+                    detail=f"record {index}: seq {reserves} is COMMITTED and "
+                           f"cannot be reconciled")
+            if reserves in reconciled:
+                return LedgerRead(path=path, readability=LEDGER_UNREADABLE,
+                                  records_read=index,
+                                  detail=f"record {index}: seq {reserves} "
+                                         f"reconciled twice")
+            reconciled[reserves] = kind
+            continue
         if reserves in terminal:
             return LedgerRead(path=path, readability=LEDGER_UNREADABLE,
                               records_read=index,
                               detail=f"record {index}: seq {reserves} resolved twice")
+        if reserves in reconciled:
+            return LedgerRead(path=path, readability=LEDGER_UNREADABLE,
+                              records_read=index,
+                              detail=f"record {index}: seq {reserves} was "
+                                     f"reconciled and cannot be resolved after")
         terminal[reserves] = kind
 
-    committed = tuple(reserved[s] for s in order if terminal.get(s) == COMMITTED)
-    failed = tuple(reserved[s] for s in order if terminal.get(s) == FAILED)
-    unresolved = tuple(reserved[s] for s in order if s not in terminal)
+    def _state(seq):
+        """A reconciliation outranks the terminal record it followed (§13e F.2).
+
+        That is the whole point of the operation: it is a later, better-informed
+        judgement about the same reservation, made by an operator who could look
+        where the coordinator could not.
+        """
+        if seq in reconciled:
+            return reconciled[seq]
+        return terminal.get(seq)
+
+    committed = tuple(reserved[s] for s in order
+                      if _state(s) in (COMMITTED, RECONCILED_COMMITTED))
+    failed = tuple(reserved[s] for s in order if _state(s) == FAILED)
+    released = tuple(reserved[s] for s in order
+                     if _state(s) == RECONCILED_RELEASED)
+    unresolved = tuple(reserved[s] for s in order if _state(s) is None)
 
     return LedgerRead(
         path=path,
         readability=LEDGER_TORN if torn else AVAILABLE,
         generation=generation, header_present=header_present,
-        committed=committed, write_failed=failed,
+        committed=committed, write_failed=failed, released=released,
         unresolved=unresolved, torn_tail=torn,
         # C1 counts reservations, not confirmed writes (§11). A torn tail is a
         # reservation that may have been made, so it counts.

@@ -41,8 +41,9 @@ from typing import Any, Callable, Dict, Iterator, Optional, Sequence, Tuple
 
 from scythe_promotion_ledger_store import (
     COMMITTED, FAILED, FRAME_VERSION, HEADER, LEDGER_SCHEMA, LEDGER_TORN,
-    LEDGER_UNAVAILABLE, LEDGER_UNREADABLE, OWNER_FIELDS, RESERVED,
-    LedgerRead, frame_of, read_ledger, refuse_location,
+    LEDGER_UNAVAILABLE, LEDGER_UNREADABLE, OWNER_FIELDS,
+    RECONCILIATION_KINDS, RESERVED, LedgerRead, frame_of, read_ledger,
+    refuse_location,
 )
 
 SCHEMA = "scythe.promotion-ledger-writer.v1"
@@ -199,6 +200,27 @@ class LedgerWriter:
             # session that survived its own failure would be a scope whose
             # lifetime is decided by the caller.
             scope._expire()
+
+    def lineage_fenced(self) -> Tuple[str, ...]:
+        """Every identity the whole lineage refuses (§13e F.5).
+
+        Empty when this ledger is not part of a lineage -- a single generation
+        that supersedes nothing fences exactly what it holds, and the chain read
+        would say the same thing more slowly.
+        """
+        from scythe_promotion_lineage import Lineage, LineageError, ordinal_of
+
+        directory = os.path.dirname(os.path.abspath(self.path))
+        base = os.path.basename(self.path)
+        root = os.path.join(directory, base.rsplit(".", 2)[0])
+        if ordinal_of(root, os.path.abspath(self.path)) is None:
+            # Not named as a generation of a lineage, so there is no chain to
+            # read and this file fences exactly what it holds.
+            return ()
+        # A fork or a broken chain propagates. Seeding cannot invent a fence it
+        # could not read, and must not fall back to the newest file -- that is
+        # the failure that looks like it worked.
+        return Lineage(root=root).fenced()
 
     def read(self) -> LedgerRead:
         """A fresh snapshot, for a caller that holds the writer and not the
@@ -389,6 +411,26 @@ class _WriteSession:
         seq = self._prepare(require_generation=True)
         self._append({"kind": kind, "seq": seq, "reserves": int(reserves)},
                      durable=False)
+        return seq
+
+    def append_reconciliation(self, kind: str, reserves: int,
+                              evidence: Dict[str, str]) -> int:
+        """A reconciliation record (§13e). Fsynced, because it is a decision.
+
+        A terminal record may be lost without harm -- the reservation degrades
+        to unresolved, which is safe. A reconciliation cannot: losing one
+        re-opens a question an operator already answered, and the next reader
+        would see the reservation as still uncertain while the operator
+        believes it is settled.
+        """
+        if kind not in RECONCILIATION_KINDS:
+            raise LedgerWriteRefused(
+                LEDGER_UNREADABLE,
+                f"{str(kind)[:32]!r} is not a reconciliation record kind")
+        seq = self._prepare(require_generation=True)
+        record = {"kind": kind, "seq": seq, "reserves": int(reserves)}
+        record.update({k: str(v)[:64] for k, v in evidence.items()})
+        self._append(record, durable=True)
         return seq
 
     # -- shared ------------------------------------------------------------

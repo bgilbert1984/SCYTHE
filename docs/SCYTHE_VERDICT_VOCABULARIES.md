@@ -145,6 +145,49 @@ not repeatable. A future author needs a mechanical step they can follow without
 having noticed the problem first — otherwise this document records a save
 instead of preventing the next one.
 
+### The mechanical step, as implemented
+
+`test_scythe_verdict_vocabularies.py` is that step. Four things it settles that
+this section left open, each because leaving it open cost something:
+
+**1. It reads declared tokens from the AST, never source text.** A text scan
+reports uppercase prose as a token. This repository met that false positive
+seven times, and three of them were written *after* it was first recorded, by
+the author who recorded it — a text scan is the shortest thing to type and it
+passes on the first file you try it on. *Declared* means a module-level
+assignment of a string, or a tuple of them, resolved through name references:
+the sets are declared as `REFUSALS = (VERDICT_NOT_PROMOTABLE, …)`, and a reader
+that took only literals would find them empty and report no collisions.
+
+**2. "Substring root" means words, not characters.** The two readings disagree
+on cases that occurred: `UNVERIFIED` / `VERIFIED_BY_FILESYSTEM_POLICY` collides
+by character and not by word. Characters are not the fix — they also report
+every accidental spelling overlap, and a check that cries wolf is one an author
+learns to skip. So: **word-level containment, plus a narrow negation-pair
+check** for tokens differing by an `UN`/`NON`/`NOT` prefix on a shared word, in
+either of its two shapes — a prefix on a word (`UNVERIFIED`) or a word of its
+own (`NOT_CREATED`). Two codes that read as each other's negation are the worst
+neighbours two vocabularies can have, whatever their components say.
+
+**3. The universe is discovered, not listed.** A hand-listed universe is a check
+that stays silent about whatever nobody remembered to add, and this one was:
+`rf_capture_recovery` declares 21 tokens and the list named one, so
+`GENERATION_SUPERSEDED` was checked, reported clear, and collided with
+`SUPERSEDED`. It was caught by a person recognising a word — this section's own
+failure mode, reappearing inside the mechanism written to replace it.
+
+**4. A hit is a collision or a recorded judgement, and there is no third state.**
+Discovery finds tuples that are not vocabularies at all, which is the false-
+positive cost named above. It is paid by a `JUDGED` table carrying the reason
+each accepted hit is not a collision — `RECONCILED_COMMITTED` beside the record
+kind `COMMITTED` is the same family by design; `GENERATION_CLOSED` beside an IQ
+ring's `CLOSED` is a different subject in a different domain. Without somewhere
+to say *this one is fine, and here is why*, the only way to quiet the check is
+to rename a token that did not need renaming, which is how a check stops
+recording anything. A judgement must name a hit that structurally collides **and**
+a token the tree actually declares; the second half caught a judgement recorded
+against `RELEASED`, which nothing declares.
+
 ---
 
 ## 4. Requirements
