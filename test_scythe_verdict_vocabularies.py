@@ -15,6 +15,7 @@ VERDICT_NOTES string. A token is something a module declared as a token.
 import ast
 import os
 import unittest
+from typing import Dict
 
 from scythe_promotion_ledger import (
     EXECUTABILITY_REFUSALS, MERIT_REFUSALS, NOT_YET_REACHABLE,
@@ -22,9 +23,11 @@ from scythe_promotion_ledger import (
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 
-# Merit-side declarations, by module and name. Explicit rather than discovered:
-# a scan that decided for itself which tuples were merit-side would be making
-# the judgement the rule exists to force an author to make.
+# Merit-side declarations, by module and name. Explicit, because deciding which
+# tuples are *merit-side* is the judgement the rule exists to force an author to
+# make. This list is the narrow set; it is NOT the universe a new name is
+# checked against -- see DISCOVERED below for why that distinction cost a real
+# collision.
 MERIT_SOURCES = (
     ("scythe_promotion_policy", "REFUSALS"),
     ("scythe_promotion_policy", "DISPOSITIONS"),
@@ -188,6 +191,69 @@ def _collect(sources):
     return tokens
 
 
+# -- the discovered universe ----------------------------------------------
+#
+# A hand-listed universe is a check that stays silent about whatever nobody
+# remembered to add, and this one was. `rf_capture_recovery` declares 21 tokens
+# and MERIT_SOURCES named none of them, so `GENERATION_SUPERSEDED` was checked,
+# reported clear, and collided with recovery's `SUPERSEDED`. It was caught by a
+# person recognising a word -- the "found by looking" failure
+# SCYTHE_VERDICT_VOCABULARIES.md §3 exists to replace.
+#
+# So the universe is discovered rather than listed. The cost is false positives
+# against tuples that are not vocabularies at all, and §3's own rule says a
+# check that cries wolf is one an author learns to skip. JUDGED is how that cost
+# is paid without silencing the check: a hit is either a real collision or a
+# recorded judgement with a reason, and there is no third state.
+
+EXCLUDED_MODULES = frozenset({
+    # Not vocabularies: configuration, schema plumbing, and generated aliases.
+    "adaptive_schema_engine",
+})
+
+
+_DISCOVERED: Dict[frozenset, Dict[str, set]] = {}
+
+
+def discovered_tokens(exclude=EXCLUDED_MODULES):
+    """Every module-level token any non-test module in the tree declares.
+
+    Memoized: it parses every module in the tree, and the answer cannot change
+    inside one run.
+    """
+    key = frozenset(exclude)
+    if key in _DISCOVERED:
+        return _DISCOVERED[key]
+    tokens = {}
+    for entry in sorted(os.listdir(ROOT)):
+        if not entry.endswith(".py") or entry.startswith("test_"):
+            continue
+        module = entry[:-3]
+        if module in exclude:
+            continue
+        try:
+            declared = _module_tokens(module)
+        except SyntaxError:                 # pragma: no cover
+            continue
+        for name, values in declared.items():
+            for value in values:
+                tokens.setdefault(value, set()).add(f"{module}.{name}")
+    _DISCOVERED[key] = tokens
+    return tokens
+
+
+# Hits that are not collisions, each with the reason it is not. Recorded here so
+# the check stays loud: an unjudged hit fails, and erasing one by renaming a
+# token that did not need renaming is not available.
+JUDGED = {
+    ("RECONCILED_COMMITTED", "COMMITTED"):
+        "both are ledger record kinds; the same family is what the naming is for",
+    ("GENERATION_CLOSED", "CLOSED"):
+        "CLOSED is an rf_iq_ring buffer state -- a different subject in a "
+        "different domain, and neither is a verdict vocabulary",
+}
+
+
 class CheckMechanismTests(unittest.TestCase):
     """The check itself, against the two collisions this repository has met."""
 
@@ -247,6 +313,75 @@ class CheckMechanismTests(unittest.TestCase):
 
     def test_a_declared_tuple_is_read_without_importing_the_module(self):
         self.assertIn("REFUSALS", _module_tokens("scythe_promotion_policy"))
+
+
+class DiscoveryTests(unittest.TestCase):
+    """The universe is found, not remembered."""
+
+    def setUp(self):
+        self.tokens = discovered_tokens()
+
+    def test_recovery_is_in_the_universe(self):
+        """The omission that cost a real collision. All 21, not the eight the
+        merit list would have suggested."""
+        recovery = {t for t, where in self.tokens.items()
+                    if any(w.startswith("rf_capture_recovery.") for w in where)}
+        self.assertGreaterEqual(len(recovery), 21)
+        for token in ("SUPERSEDED", "UNCHANGED", "UNRELATED", "UNOBSERVABLE",
+                      "RESTART_NOT_OBSERVED", "SAMPLE_FLOW_RESTORED",
+                      "RECOVERY_OUTCOME_UNDETERMINED", "RECOVERY_OUTCOME_PENDING",
+                      "PROCESS_RESTARTED_STILL_STARVED"):
+            self.assertIn(token, recovery, token)
+
+    def test_the_hand_listed_universe_is_a_strict_subset(self):
+        self.assertTrue(_collect(MERIT_SOURCES) <= set(self.tokens))
+        self.assertLess(len(_collect(MERIT_SOURCES)), len(self.tokens))
+
+    def test_the_rejected_candidate_collides_against_the_discovered_universe(self):
+        """`GENERATION_SUPERSEDED` was reported clear by the hand-listed check.
+        This is the regression: the repair must catch it."""
+        self.assertEqual(collisions("GENERATION_SUPERSEDED", set(self.tokens)),
+                         ["SUPERSEDED"])
+        self.assertEqual(collisions("GENERATION_SUPERSEDED",
+                                    _collect(MERIT_SOURCES)), [])
+
+    def test_the_accepted_replacement_is_clear_apart_from_its_judged_hit(self):
+        hits = set(collisions("GENERATION_CLOSED", set(self.tokens)))
+        self.assertEqual(hits, {"CLOSED"})
+        self.assertIn(("GENERATION_CLOSED", "CLOSED"), JUDGED)
+
+    def test_every_judgement_carries_a_reason(self):
+        for pair, reason in JUDGED.items():
+            self.assertTrue(len(reason) > 30, pair)
+
+    def test_a_judgement_is_only_recorded_for_a_real_hit(self):
+        """A judgement for something that does not collide is a line nobody
+        will ever remove, asserting a fact that was never true.
+
+        This caught one on its first run: a judgement was recorded for
+        `RECONCILED_RELEASED` against `RELEASED`, which nothing in the tree
+        declares. The structural check alone passed it -- the two words do
+        contain one another -- so the test also requires the hit to be a token
+        that actually exists.
+        """
+        for candidate, hit in JUDGED:
+            self.assertIn(hit, self.tokens, f"{hit} is declared nowhere")
+            self.assertTrue(
+                is_substring_root(candidate, hit) or is_negation_pair(candidate, hit),
+                f"{candidate} does not actually hit {hit}")
+
+    def test_amendment_f_tokens_are_clear_or_judged(self):
+        """The sweep §13e records, run as a test rather than quoted."""
+        universe = set(self.tokens)
+        for candidate in ("RECONCILED_COMMITTED", "RECONCILED_RELEASED",
+                          "NOT_RECONCILABLE", "GENERATION_CHAIN_BROKEN",
+                          "GENERATION_CLOSED", "GENERATION_LINEAGE_FORKED",
+                          "GENERATION_PUBLICATION_UNCERTAIN",
+                          "GRAPH_RECORD_FOUND", "GRAPH_RECORD_NOT_FOUND",
+                          "ADAPTER_DENIED_CREATION", "CEILING_REACHED"):
+            unjudged = [hit for hit in collisions(candidate, universe - {candidate})
+                        if (candidate, hit) not in JUDGED]
+            self.assertEqual(unjudged, [], f"{candidate}: {unjudged}")
 
 
 class DisjointnessTests(unittest.TestCase):
