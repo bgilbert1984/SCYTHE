@@ -9,12 +9,18 @@ Implements PROMOTION_EXECUTION_CONTRACT.md §9 and §13d Amendment E.
 
 Three things shape this module:
 
-  **The lock is on a derived sidecar** (E.1). Acquiring ownership requires
-  opening the ledger, creating the ledger requires ownership, and opening one
-  that does not exist fails -- so the lock cannot be on the ledger itself. The
-  sidecar's name is derived from the ledger path and is never configured,
-  because a configured lock file reproduces §9 Amendment A's failure in a new
-  place: two coordinators, one ledger, two locks, both acquired, both satisfied.
+  **The lock is on a derived sidecar** (E.1), and it is derived from the
+  **lineage root** rather than from any one generation file (§13e F.10).
+  Acquiring ownership requires opening something, creating the ledger requires
+  ownership, and opening a file that does not exist fails -- so the lock cannot
+  be on a ledger. The name is derived and never configured, because a configured
+  lock reproduces §9 Amendment A's failure in a new place: two coordinators, one
+  lineage, two locks, both acquired, both satisfied.
+
+  There is **no compatibility path** to E.1's per-generation sidecar. Consulting
+  whichever of two files exists, or migrating one to the other, would manufacture
+  exactly the ambiguity this derivation removes -- and the old path was never
+  production-reachable, so there is no deployment to preserve.
 
   **A successful flock is not ownership** (E.2). On a mount that does not
   exclude, every acquisition succeeds and none of them means anything. The
@@ -67,8 +73,14 @@ NOT_HELD = "NOT_HELD"
 HALTED = "APPENDS_HALTED"
 
 
-def sidecar_path(ledger_path: str) -> str:
-    return ledger_path + SIDECAR_SUFFIX
+def sidecar_path(lineage_root: str) -> str:
+    """One lineage, one lock (§13e F.10).
+
+    Derived from the **root**, so every generation beneath it contends for the
+    same file. Locks on two generation files of one lineage exclude nobody who
+    matters, which is what F.10 corrected in E.1.
+    """
+    return lineage_root + SIDECAR_SUFFIX
 
 
 def device_filesystems(source: str = "/proc/self/mountinfo") -> Dict[int, str]:
@@ -110,7 +122,7 @@ class LedgerOwnership:
     in this design can tell whether it did.
     """
 
-    ledger_path: str
+    lineage_root: str
     mounts: Optional[Sequence[Tuple[str, str]]] = None
     repo_root: Optional[str] = None
     refused_prefixes: Optional[Sequence[str]] = None
@@ -139,7 +151,7 @@ class LedgerOwnership:
 
     @property
     def sidecar(self) -> str:
-        return sidecar_path(self.ledger_path)
+        return sidecar_path(self.lineage_root)
 
     @property
     def holds(self) -> bool:
@@ -151,7 +163,7 @@ class LedgerOwnership:
         return self._halt_reason is not None
 
     def attestation_refusals(self) -> Tuple[str, ...]:
-        directory = os.path.dirname(os.path.abspath(self.ledger_path))
+        directory = os.path.dirname(os.path.abspath(self.lineage_root))
         attestation = attest(directory, repo_root=self.repo_root,
                              mounts=self.mounts,
                              refused_prefixes=self.refused_prefixes)
@@ -177,7 +189,7 @@ class LedgerOwnership:
         if refusals:
             self._refusals = refusals
             return False
-        directory = os.path.dirname(os.path.abspath(self.ledger_path))
+        directory = os.path.dirname(os.path.abspath(self.lineage_root))
         if not os.path.isdir(directory):
             self._refusals = (LEDGER_NOT_OWNED,)
             return False
@@ -263,7 +275,7 @@ class LedgerOwnership:
         one, and this file is not fsynced because nothing depends on it.
         """
         record = {"schema": SCHEMA, "boot_id": _boot_id(), "pid": os.getpid(),
-                  "ledger": self.ledger_path,
+                  "lineage_root": self.lineage_root,
                   "note": "DIAGNOSTIC ONLY. THE HEADER RECORD NAMES THE OWNER"}
         body = json.dumps(record, sort_keys=True).encode("utf-8") + b"\n"
         os.ftruncate(self._fd, 0)
@@ -312,9 +324,21 @@ class LedgerOwnership:
                     "this owner held the ledger and no longer does; ownership "
                     "is not reacquired")
             return None
-        if os.path.realpath(path) != os.path.realpath(self.ledger_path):
+        if not self.covers(path):
             return None
         return OwnershipScope(path, holder=self)
+
+    def covers(self, path: str) -> bool:
+        """Does this lock authorise writing that file?
+
+        A generation beneath the root, rather than the root itself -- the root
+        is an identity, not a file anything is written to. The check is on the
+        derived prefix, so a scope for one lineage cannot admit a write to a
+        neighbouring one that happens to sit in the same directory.
+        """
+        root = os.path.realpath(self.lineage_root)
+        target = os.path.realpath(path)
+        return target.startswith(root + ".")
 
     def halt_appends(self, reason: str) -> None:
         """Stop appending in this process, through **every** session (§13d E.6).
@@ -329,7 +353,7 @@ class LedgerOwnership:
     def status(self) -> Dict[str, Any]:
         return {
             "schema": SCHEMA,
-            "ledger": self.ledger_path,
+            "lineage_root": self.lineage_root,
             "sidecar": self.sidecar,
             "sidecar_name_is_derived": True,
             "ownership": (HALTED if self.halted

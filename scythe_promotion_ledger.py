@@ -480,6 +480,12 @@ class PromotionCoordinator:
         """
         read = ledger.read()
         self._seeded_from = read.readability
+        # §13e F.5: the fence is the union over the chain, not this file alone.
+        # Seeding from only the newest generation would release every identity a
+        # closed predecessor still holds -- and it would look like it worked.
+        for identity in ledger.lineage_fenced():
+            self._real.identities.setdefault(identity, COMMITTED)
+            self._shadow.identities.setdefault(identity, COMMITTED)
         if read.readability in (LEDGER_UNAVAILABLE, LEDGER_UNREADABLE):
             # Nothing to seed from. ARMED refuses on the same condition, and
             # SHADOW keeps observing with a fidelity that says it is unseeded.

@@ -50,6 +50,8 @@ EXECUTABILITY_SOURCES = (
     ("scythe_promotion_ledger_writer", "LEDGER_GENERATION_UNDECLARED"),
     ("scythe_promotion_ledger_writer", "OWNERSHIP_LOST"),
     ("scythe_promotion_ledger_writer", "RESERVATION_NOT_DURABLE"),
+    ("scythe_promotion_lineage", "LINEAGE_REFUSALS"),
+    ("scythe_promotion_reconciliation", "NOT_RECONCILABLE"),
 )
 
 
@@ -242,12 +244,29 @@ def discovered_tokens(exclude=EXCLUDED_MODULES):
     return tokens
 
 
-# Hits that are not collisions, each with the reason it is not. Recorded here so
-# the check stays loud: an unjudged hit fails, and erasing one by renaming a
-# token that did not need renaming is not available.
+def cross_set_collisions(candidate, tokens):
+    """Hits outside the candidate's own declared sets.
+
+    Two tokens declared in the same tuple are **alternatives in one
+    enumeration**, and resembling each other is what enumerations do:
+    GRAPH_RECORD_FOUND and GRAPH_RECORD_NOT_FOUND are a negation pair on
+    purpose, being the two answers to one question, and RECONCILED_COMMITTED
+    sits in KNOWN_KINDS beside the COMMITTED it is named after.
+
+    The rule is about **disjointness between the two vocabularies**, so a hit
+    within one set is not what it is asking about. Found by the check firing on
+    Amendment F's own evidence set, which is the right way to find it: the rule
+    was stated for cross-set comparison and implemented against the whole tree.
+    """
+    mine = tokens.get(candidate, set())
+    return sorted(hit for hit in collisions(candidate, set(tokens) - {candidate})
+                  if not (mine & tokens.get(hit, set())))
+
+
+# Cross-set hits that are not collisions, each with the reason. Recorded so the
+# check stays loud: an unjudged hit fails, and quieting one by renaming a token
+# that did not need renaming is not available.
 JUDGED = {
-    ("RECONCILED_COMMITTED", "COMMITTED"):
-        "both are ledger record kinds; the same family is what the naming is for",
     ("GENERATION_CLOSED", "CLOSED"):
         "CLOSED is an rf_iq_ring buffer state -- a different subject in a "
         "different domain, and neither is a verdict vocabulary",
@@ -346,9 +365,19 @@ class DiscoveryTests(unittest.TestCase):
                                     _collect(MERIT_SOURCES)), [])
 
     def test_the_accepted_replacement_is_clear_apart_from_its_judged_hit(self):
-        hits = set(collisions("GENERATION_CLOSED", set(self.tokens)))
-        self.assertEqual(hits, {"CLOSED"})
+        self.assertEqual(cross_set_collisions("GENERATION_CLOSED", self.tokens),
+                         ["CLOSED"])
         self.assertIn(("GENERATION_CLOSED", "CLOSED"), JUDGED)
+
+    def test_alternatives_in_one_enumeration_are_not_collisions(self):
+        """A closed set says the same thing several ways on purpose."""
+        self.assertEqual(
+            cross_set_collisions("GRAPH_RECORD_FOUND", self.tokens), [])
+        self.assertIn("GRAPH_RECORD_NOT_FOUND",
+                      collisions("GRAPH_RECORD_FOUND",
+                                 set(self.tokens) - {"GRAPH_RECORD_FOUND"}))
+        self.assertEqual(
+            cross_set_collisions("RECONCILED_COMMITTED", self.tokens), [])
 
     def test_every_judgement_carries_a_reason(self):
         for pair, reason in JUDGED.items():
@@ -372,14 +401,13 @@ class DiscoveryTests(unittest.TestCase):
 
     def test_amendment_f_tokens_are_clear_or_judged(self):
         """The sweep §13e records, run as a test rather than quoted."""
-        universe = set(self.tokens)
         for candidate in ("RECONCILED_COMMITTED", "RECONCILED_RELEASED",
                           "NOT_RECONCILABLE", "GENERATION_CHAIN_BROKEN",
                           "GENERATION_CLOSED", "GENERATION_LINEAGE_FORKED",
                           "GENERATION_PUBLICATION_UNCERTAIN",
                           "GRAPH_RECORD_FOUND", "GRAPH_RECORD_NOT_FOUND",
                           "ADAPTER_DENIED_CREATION", "CEILING_REACHED"):
-            unjudged = [hit for hit in collisions(candidate, universe - {candidate})
+            unjudged = [hit for hit in cross_set_collisions(candidate, self.tokens)
                         if (candidate, hit) not in JUDGED]
             self.assertEqual(unjudged, [], f"{candidate}: {unjudged}")
 

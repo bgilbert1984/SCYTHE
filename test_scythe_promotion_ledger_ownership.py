@@ -20,6 +20,7 @@ from scythe_promotion_ledger_writer import (
     LedgerWriteRefused, LedgerWriter,
 )
 from scythe_promotion_ledger_ownership import LedgerOwnership, sidecar_path
+from scythe_promotion_lineage import generation_path
 from scythe_promotion_policy import CapsuleIdentity, PromotionRequest
 
 GOOD_MOUNTS = (("/", "ext4"),)
@@ -48,7 +49,10 @@ class OwnershipTestCase(unittest.TestCase):
         self._dir = tempfile.TemporaryDirectory()
         self.addCleanup(self._dir.cleanup)
         self.dir = self._dir.name
-        self.path = os.path.join(self.dir, "ledger.jsonl")
+        # The lineage root is an identity, not a file. Generations live beneath
+        # it and the lock is derived from it (§13e F.10).
+        self.root = os.path.join(self.dir, "promotion")
+        self.path = generation_path(self.root, 0)
 
     def _devices(self, fstype="ext4"):
         """What the kernel would say about the device the tempdir is on.
@@ -59,7 +63,7 @@ class OwnershipTestCase(unittest.TestCase):
         return {os.stat(self.dir).st_dev: fstype}
 
     def _owner(self, mounts=GOOD_MOUNTS, devices=None):
-        owner = LedgerOwnership(ledger_path=self.path, mounts=mounts,
+        owner = LedgerOwnership(lineage_root=self.root, mounts=mounts,
                                 refused_prefixes=(),
                                 devices=self._devices() if devices is None
                                 else devices)
@@ -81,12 +85,31 @@ class OwnershipTestCase(unittest.TestCase):
 
 
 class SidecarTests(OwnershipTestCase):
-    def test_the_sidecar_name_is_derived_from_the_ledger_path(self):
-        """Derived, never configured. A configured lock file reproduces §9
-        Amendment A's failure: two coordinators, one ledger, two locks, both
-        acquired, both satisfied."""
-        self.assertEqual(sidecar_path(self.path), self.path + ".lock")
-        self.assertEqual(self._owner().sidecar, self.path + ".lock")
+    def test_the_sidecar_is_derived_from_the_lineage_root(self):
+        """§13e F.10. One lineage, one lock, whatever generation is current --
+        locks on two generation files of one lineage exclude nobody who
+        matters."""
+        self.assertEqual(sidecar_path(self.root), self.root + ".lock")
+        self.assertEqual(self._owner().sidecar, self.root + ".lock")
+        self.assertNotEqual(self._owner().sidecar, self.path + ".lock")
+
+    def test_every_generation_of_one_lineage_shares_the_lock(self):
+        owner = self._owner()
+        for ordinal in range(4):
+            self.assertTrue(owner.covers(generation_path(self.root, ordinal)))
+        self.assertEqual(owner.sidecar, self.root + ".lock")
+
+    def test_there_is_no_per_generation_sidecar_fallback(self):
+        """No compatibility path: consulting whichever of two files exists
+        would manufacture the ambiguity the derivation removes."""
+        source = open(ownership_module.__file__, encoding="utf-8").read()
+        tree = ast.parse(source)
+        names = {n.id for n in ast.walk(tree) if isinstance(n, ast.Name)}
+        for absent in ("legacy", "fallback", "migrate", "compat"):
+            self.assertFalse([n for n in names if absent in n.lower()], absent)
+        owner = self._owner()
+        owner.acquire()
+        self.assertFalse(os.path.exists(self.path + ".lock"))
 
     def test_no_constructor_field_configures_the_lock_path(self):
         fields = set(LedgerOwnership.__dataclass_fields__)
@@ -94,10 +117,10 @@ class SidecarTests(OwnershipTestCase):
             self.assertNotIn("lock", name)
             self.assertNotIn("sidecar", name)
 
-    def test_two_owners_for_one_ledger_lock_the_same_file(self):
-        first = LedgerOwnership(ledger_path=self.path, mounts=GOOD_MOUNTS)
-        second = LedgerOwnership(ledger_path=os.path.join(self.dir, ".",
-                                                          "ledger.jsonl"),
+    def test_two_owners_for_one_lineage_lock_the_same_file(self):
+        first = LedgerOwnership(lineage_root=self.root, mounts=GOOD_MOUNTS)
+        second = LedgerOwnership(lineage_root=os.path.join(self.dir, ".",
+                                                           "promotion"),
                                  mounts=GOOD_MOUNTS)
         self.assertEqual(os.path.realpath(first.sidecar),
                          os.path.realpath(second.sidecar))
@@ -146,7 +169,7 @@ class AcquisitionTests(OwnershipTestCase):
         self.assertFalse(owner.holds)
         self.assertIsNone(owner.scope(self.path))
         # The lock itself was available: the refusal is about the mount.
-        proof = os.open(sidecar_path(self.path), os.O_CREAT | os.O_RDWR, 0o600)
+        proof = os.open(sidecar_path(self.root), os.O_CREAT | os.O_RDWR, 0o600)
         fcntl.flock(proof, fcntl.LOCK_EX | fcntl.LOCK_NB)
         os.close(proof)
 
@@ -157,10 +180,11 @@ class AcquisitionTests(OwnershipTestCase):
         owner.acquire()
         self.assertFalse(os.path.exists(owner.sidecar))
 
-    def test_a_scope_for_another_ledger_is_not_minted(self):
+    def test_a_scope_for_another_lineage_is_not_minted(self):
         owner = self._owner()
         owner.acquire()
-        self.assertIsNone(owner.scope(os.path.join(self.dir, "other.jsonl")))
+        self.assertIsNone(owner.scope(os.path.join(self.dir, "other.000000.jsonl")))
+        self.assertFalse(owner.covers(os.path.join(self.dir, "other.000000.jsonl")))
 
     def test_absent_authority_and_invalidated_authority_are_different(self):
         """Never acquired is LEDGER_NOT_OWNED -- go and find who holds it.
@@ -222,7 +246,7 @@ class DescriptorAttestationTests(OwnershipTestCase):
     def test_the_flock_itself_was_available(self):
         """So the refusal is about the filesystem and not about contention."""
         self._mismatched(self._devices("drvfs"))
-        proof = os.open(sidecar_path(self.path), os.O_CREAT | os.O_RDWR, 0o600)
+        proof = os.open(sidecar_path(self.root), os.O_CREAT | os.O_RDWR, 0o600)
         fcntl.flock(proof, fcntl.LOCK_EX | fcntl.LOCK_NB)
         fcntl.flock(proof, fcntl.LOCK_UN)
         os.close(proof)
@@ -239,16 +263,16 @@ class DescriptorAttestationTests(OwnershipTestCase):
 
     def test_a_sidecar_this_attempt_created_is_removed(self):
         self._mismatched(self._devices("drvfs"))
-        self.assertFalse(os.path.exists(sidecar_path(self.path)))
+        self.assertFalse(os.path.exists(sidecar_path(self.root)))
 
     def test_a_sidecar_it_found_is_preserved(self):
         """Removing one we did not create would destroy another process's lock
         file on the strength of our own bad luck."""
-        with open(sidecar_path(self.path), "wb") as handle:
+        with open(sidecar_path(self.root), "wb") as handle:
             handle.write(b"someone else was here\n")
         self._mismatched(self._devices("drvfs"))
-        self.assertTrue(os.path.exists(sidecar_path(self.path)))
-        with open(sidecar_path(self.path), "rb") as handle:
+        self.assertTrue(os.path.exists(sidecar_path(self.root)))
+        with open(sidecar_path(self.root), "rb") as handle:
             self.assertEqual(handle.read(), b"someone else was here\n")
 
     def test_the_refusal_names_both_claims(self):
