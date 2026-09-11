@@ -11,6 +11,9 @@ Amendment D:            §13c sequence, generation, gated write — ACCEPTED
                         2026-09-10
 Amendment E:            §13d ownership, seeding, durability — ACCEPTED
                         2026-09-10, E.6 on the drafter's recommendation
+Amendment F:            §13e reconciliation by supersession — ACCEPTED
+                        2026-09-10, after review strengthened F.6 and added
+                        F.10
 Authority:              NORMATIVE
 Constrains:             Step 4 of the promotion sequence (execution adapter)
 Depends on:             SCYTHE_VERDICT_VOCABULARIES.md  (ACCEPTED — §5 declares
@@ -86,7 +89,8 @@ real finding, which is why the asymmetry runs the way it does:
 - A duplicate record is not recoverable. It is indistinguishable from evidence.
 
 Re-promotion after a failure is therefore an operator action taken against the
-graph (§8), never an automatic retry. This holds for a definitely-failed write
+graph (§8), never an automatic retry. §13e F.2 says what that action is and on
+whose authority it rests. This holds for a definitely-failed write
 as well, and there it is the whole reason (§13a B.3). The coordinator names that
 refusal `RETRY_REQUIRES_OPERATOR` (§13b), and §13b C.4 records that the
 operation the name refers to does not exist until slice 7.
@@ -167,7 +171,7 @@ This section instantiates that rule for the promotion sequence. The two vocabula
 | --- | --- | --- |
 | owner | `scythe_promotion_policy` | `scythe_promotion_ledger` (the coordinator) |
 | answers | is this finding fit to promote? | could we act on it at all? |
-| examples | `VERDICT_NOT_PROMOTABLE`, `CAPSULE_UNBOUND`, `DUPLICATE_PROMOTION` | `BUDGET_EXHAUSTED`, `DURABLE_CEILING_REACHED`, `UNRESOLVED_CEILING_REACHED`, `IDENTITY_UNRESOLVED`, `RETRY_REQUIRES_OPERATOR`, `LEDGER_UNAVAILABLE`, `LEDGER_NOT_OWNED`, `LEDGER_TORN`, `LEDGER_GENERATION_UNDECLARED`, `OWNERSHIP_LOST`, `RESERVATION_NOT_DURABLE`, `LOCK_EXCLUSION_UNATTESTED`, `RESERVATION_DURABILITY_UNATTESTED` |
+| examples | `VERDICT_NOT_PROMOTABLE`, `CAPSULE_UNBOUND`, `DUPLICATE_PROMOTION` | `BUDGET_EXHAUSTED`, `DURABLE_CEILING_REACHED`, `UNRESOLVED_CEILING_REACHED`, `IDENTITY_UNRESOLVED`, `RETRY_REQUIRES_OPERATOR`, `NOT_RECONCILABLE`, `GENERATION_CHAIN_BROKEN`, `GENERATION_LINEAGE_FORKED`, `GENERATION_PUBLICATION_UNCERTAIN`, `LEDGER_UNAVAILABLE`, `LEDGER_NOT_OWNED`, `LEDGER_TORN`, `LEDGER_GENERATION_UNDECLARED`, `OWNERSHIP_LOST`, `RESERVATION_NOT_DURABLE`, `LOCK_EXCLUSION_UNATTESTED`, `RESERVATION_DURABILITY_UNATTESTED` |
 | repaired by | changing the finding, or accepting the judgement | fixing the apparatus; the finding may be sound |
 
 The coordinator **returns** `IDENTITY_UNRESOLVED` on a second evaluation of an
@@ -329,8 +333,10 @@ the race of §3 one level up, where a mutex cannot reach it.
 
 - The writing coordinator holds `fcntl.flock(fd, LOCK_EX | LOCK_NB)` for its
   entire lifetime, acquired before ARMED is reachable. *Amended by §13d E.1: the
-  lock is taken on a sidecar `<ledger>.lock` whose name is derived, because a
-  ledger that does not yet exist cannot be opened to lock it.*
+  lock is taken on a sidecar whose name is derived, because a ledger that does
+  not yet exist cannot be opened to lock it. Amended again by §13e F.10: it is
+  derived from the **lineage root**, not from one generation file, or two
+  processes can lock two generations and each publish a successor.*
 - Failure to acquire refuses ARMED (`LEDGER_NOT_OWNED`). It does **not** refuse
   SHADOW, which opens the ledger read-only (§12).
 - The holder writes its `ProcessIdentity` into a header record, so a reader can
@@ -482,6 +488,7 @@ were changed.
 | the generation totals (§11) | |
 | `next_seq`, as `last_seq + 1` (§13c D.1) | |
 | the identity map, as a cache of the ledger (§13d E.4, E.5) | |
+| the authoritative generation, from the supersession chain (§13e F.6) | |
 
 *Amended by §13c D.3: an empty ledger is valid and readable, and refuses ARMED
 under `LEDGER_GENERATION_UNDECLARED` because it declares no generation for C1 to
@@ -1118,6 +1125,299 @@ reachable *in shape*, which is why it can land before slice 9 rather than after.
 
 ---
 
+## 13e. Amendment F — reconciliation supersedes, and never repairs
+
+*Proposed 2026-09-10, strengthened in review, and accepted 2026-09-10. Settles
+§8 and lands `PENDING_AMENDMENTS.md` entry 4, open since the read path and the
+oldest debt in the queue. Touches §2, §8, §9, §10, §11, §13d and §17.*
+
+**Name check, run before any token here was written.** The repository's
+mechanical check is known-incomplete — its merit universe is a hand-listed five
+pairs and omits `rf_capture_recovery` entirely (entry 5) — so this sweep was run
+against the merit set **extended with all 21 tokens that module declares**, and
+separately against every module-level token in the tree.
+
+Every token below is clear against merit + recovery and against the
+executability set. The whole-tree sweep produced two hits, both judged rather
+than cleared:
+
+| hit | judgement |
+| --- | --- |
+| `RECONCILED_COMMITTED` / `COMMITTED` | **not a collision, and deliberate.** `COMMITTED` is a ledger record kind and `RECONCILED_COMMITTED` is another one; they are the same family, which is what the naming is for |
+| `GENERATION_CLOSED` / `CLOSED` | **not a collision.** `CLOSED` is an `rf_iq_ring` buffer state — a different subject in a different domain, and neither is a verdict vocabulary |
+
+Those two are exactly the false-positive cost entry 5 predicts from a discovered
+universe, shown rather than argued. The earlier candidate
+`GENERATION_SUPERSEDED` was **not** clear: it collides with recovery's
+`SUPERSEDED`, which the incomplete checker reported as clear.
+
+**The governing rule, from which the rest follows:**
+
+> Reconciliation is **append-only with respect to existing evidence.** A torn or
+> failed generation is preserved byte-for-byte. A governed operation records why
+> it was closed and establishes a successor. Nothing truncates, edits or tidies
+> a predecessor.
+
+That keeps §13c D.2 intact while finally making `RETRY_REQUIRES_OPERATOR`
+actionable — the two things that looked like they were in tension.
+
+### F.1 What may be reconciled, and what may not
+
+| stored state | reconcilable | why |
+| --- | --- | --- |
+| `RESERVED`, no terminal record | **yes** | we do not know whether the record reached the graph, and an operator can look |
+| `FAILED` | **yes** | the adapter attested no record was created; what remains is whether it may be promoted again |
+| `COMMITTED` | **no** | the record exists. There is no uncertainty to resolve and nothing an operator could discover |
+
+Reconciling a `COMMITTED` identity is refused with `NOT_RECONCILABLE`. It is not
+an error of authority but of subject: the operation has nothing to act on, and a
+ledger that let it proceed would be recording a decision about a settled fact.
+
+### F.2 The two outcomes, and the asymmetry between them
+
+```
+RECONCILED_COMMITTED   the record exists in the graph; the identity stays fenced
+RECONCILED_RELEASED    it does not; the identity becomes promotable again
+```
+
+**The two reconcilable states reach `RECONCILED_RELEASED` on different
+authority, and the ledger records which.**
+
+- A `FAILED` reservation is released on the **adapter's** attestation. `NOT_CREATED`
+  already means *no record was created* (§13a B.1), so nothing further need be
+  established. This is where Amendment B's third state finally pays for itself:
+  under the old Boolean, no failure could ever be released, because none of them
+  could be distinguished from a lost acknowledgement.
+- An `UNRESOLVED` reservation is released on an **operator's inspection of the
+  graph**. Nothing in this system knows whether the record landed, and no amount
+  of ledger reasoning will produce the answer — it is out-of-band by
+  construction.
+
+Recording which of the two was relied on is what makes a later audit able to ask
+the right question of the right party.
+
+### F.3 Per-identity reconciliation appends; a broken generation is closed
+
+Two operations, and the distinction is whether the *ledger* is healthy:
+
+**Reconciling an identity** appends a record to the current generation. The
+ledger is fine; one reservation was uncertain. No new generation.
+
+**Closing a generation** is for when the ledger itself cannot be used: it is
+torn, unreadable, or has reached a ceiling (§11). A successor is established and
+the predecessor is never written to again.
+
+The split answers a question §8 left joined. It also falls out of §13c D.2
+rather than being chosen: a torn ledger **cannot be appended to**, so per-identity
+reconciliation is not available there, and supersession is the only path that
+exists. §9 Amendment A's shape again — the rule and the mechanism agreeing
+because they are the same rule.
+
+### F.4 A closed generation is immutable, and the successor says so
+
+The successor's header carries a `supersedes` block:
+
+```json
+{"kind":"HEADER","seq":0,"schema":"…","frame_version":"pl1",
+ "generation":"gen-2","owner":{…},
+ "supersedes":{"generation":"gen-1","path":"…","bytes":40961,
+               "digest":"blake2s:…","closed_because":"LEDGER_TORN",
+               "closed_by":"operator-id","request_id":"…"}}
+```
+
+The predecessor is **never opened for writing again**. Its length and digest are
+recorded in the successor, so the predecessor is not merely preserved by
+convention — a later reader can prove it has not changed, and a predecessor that
+*has* changed is detectable rather than quietly authoritative.
+
+### F.5 The identity set is the union over the chain
+
+**The successor does not copy the predecessor's identities forward.**
+
+Copying would make the predecessor ceremonial — preserved, and load-bearing for
+nothing. Reading the chain makes it load-bearing: a missing or altered
+predecessor is `GENERATION_CHAIN_BROKEN`, which refuses ARMED, rather than a
+silently smaller fence.
+
+A **torn predecessor is still read for fencing**, up to its tear. Torn means *not
+appendable*, never *not readable* — §13 has said that since the read path, and
+this is the first place the distinction does real work.
+
+### F.6 Publication, and what makes a successor real
+
+*Strengthened in review. The first draft said the transition was atomic "when
+the successor's header reaches disk", which is a claim and not a protocol. A
+crash **during** the header write leaves a nonzero, malformed candidate, and
+§13c D.3 settles only the zero-byte case. An `fsync` on the file does not make
+its directory entry durable either.*
+
+> **The predecessor remains authoritative until a complete, valid successor
+> header is durably published.**
+
+**Publication is a five-step protocol, and every step is load-bearing:**
+
+1. **Create a temporary sibling** exclusively (`O_CREAT | O_EXCL`), under a name
+   that is never scanned as a generation.
+2. **Write the complete header.**
+3. **`fsync` the file.**
+4. **Atomically rename** it to its final deterministic name.
+5. **`fsync` the containing directory.**
+
+Why each one:
+
+- A partial header written under the *final* name would be the malformed
+  candidate D.3 cannot classify. Writing under a name nothing scans **removes
+  the question instead of answering it** — the same move as deriving the sidecar
+  name rather than validating a configured one.
+- `fsync` before the rename, because a rename whose target contents are not yet
+  durable can survive a crash as a correctly-named file full of nothing.
+- `fsync` the directory, because the rename's **visibility** is not durable until
+  the directory is. This is §9's *the parent directory must be fsynced* rule
+  arriving in the place it actually bites.
+
+**A temporary file supersedes nothing**, whatever its contents. Zero-byte,
+partial, malformed, or complete-but-never-renamed — all the same: not a
+generation, because it does not carry the name a generation is published under.
+
+**Leftover temporaries are evidence and are preserved.** Never interpreted,
+never repaired, never deleted — not even by a later attempt, which uses a
+distinct temporary name derived from its own `request_id`. This is deliberately
+*unlike* §13d E.1's sidecar rule, and the difference is the point: a sidecar is a
+lock artefact and its removal costs nothing, while a partial successor is the
+record of an attempt that may be the only evidence of what someone was doing
+when the machine stopped.
+
+**Retry rediscovers; it does not republish.** An operator whose acknowledgement
+was lost retries, and the operation first looks for an already-published
+successor of this predecessor:
+
+- one exists with **this** `request_id` — report it and stop. The work is done.
+- one exists with a **different** `request_id` — refuse. Publishing a second
+  would be the fork this section exists to prevent.
+- none exists — proceed with the protocol above.
+
+### F.6a Selecting the authoritative generation
+
+Startup reads every published generation header and follows the `supersedes`
+chain. There is still no pointer file.
+
+| valid successors of the predecessor | conclusion |
+| --- | --- |
+| zero | the predecessor is authoritative |
+| exactly one | the successor is authoritative |
+| more than one | `GENERATION_LINEAGE_FORKED` — refuse |
+
+**A fork is never resolved by timestamp, filename, or directory order.** Every
+one of those is a property of the filesystem's bookkeeping rather than of the
+evidence, and choosing by one would make the fence depend on which file happened
+to be written second. A fork means two processes believed they owned this
+lineage, and the right response to that is to stop, not to pick.
+
+### F.6b A publication whose durability is unknown
+
+A crash — or an error — **after the rename and before the directory `fsync`**
+leaves the initiating process unable to say whether the publication is durable.
+The rename may be visible now and absent after a reboot.
+
+That process must **stop all further generation operations** under
+`GENERATION_PUBLICATION_UNCERTAIN`, and resuming requires re-reading durable
+state rather than trusting anything it believes it just did. It is the shape of
+§13d E.6 one level up: a process that cannot establish the durability of what it
+wrote stops writing, rather than continuing on the assumption that worked last
+time.
+
+A later reader is unaffected — it sees either a published successor or not, and
+both are well-defined states. The uncertainty belongs to the writer alone, which
+is why the halt is process-local and not a property of the ledger.
+
+### F.6c Closing ends the process's ownership
+
+**The original reason for this no longer holds, and the rule survives anyway.**
+
+The first draft argued that the successor is a different file with a different
+lock, so ownership could not carry across. Under §13e F.10 the lock is on the
+lineage and does not change, so that argument is gone.
+
+The rule stands on a better one: re-entering service after a close requires
+re-seeding the identity map from the new authoritative generation, and that is
+precisely the startup path (§13d E.5). Keeping one path is worth more than
+saving one restart, and a second in-process route to a seeded coordinator is a
+second place for §13d E.5's failure — a coordinator that writes durably and
+starts from an empty fence — to reappear.
+
+### F.7 Idempotency, and what an operator may say
+
+Every reconciliation carries an operator identity and a `request_id`, both
+bounded.
+
+**A repeat of the same `request_id` against the same identity is reported, not
+re-applied**: the ledger returns the record it already holds. A *different*
+`request_id` against an identity that is no longer reconcilable is refused with
+`NOT_RECONCILABLE`, which is the state check of F.1 doing the work — the
+identity moved, so the operation has nothing to act on.
+
+Idempotency therefore rests on the stored state, and the `request_id` exists so a
+repeat can be *recognised* rather than merely refused. An operator who lost a
+response and retried should be told *this already happened*, not *you may not do
+that*.
+
+**The evidence is a closed token set. There is no notes field, ever.**
+
+```
+GRAPH_RECORD_FOUND         the operator inspected the graph and the record is there
+GRAPH_RECORD_NOT_FOUND     the operator inspected the graph and it is not
+ADAPTER_DENIED_CREATION    the adapter attested NOT_CREATED; no inspection needed
+LEDGER_TORN                the generation was closed because it was torn
+LEDGER_UNREADABLE          closed because it could not be parsed
+CEILING_REACHED            closed because C1 or C2 was reached (§11)
+```
+
+No free text, no exception messages, no returned values, no operator prose. The
+rule is the one §13a B.2 and §13d E.6 already apply to adapter output, and it
+applies here for a stronger reason: this is the record of a human decision about
+evidence, and a free-text field is where the reasoning goes to stop being
+checkable.
+
+### F.8 Ownership and attestation are required, unchanged
+
+A reconciliation record is an append, so it needs a live ledger-bound scope —
+which already requires `flock` **and** the mount attestation, checked on the
+descriptor (§13d E.1–E.3). Closing a generation additionally requires ownership
+of the predecessor, and creates the successor under it.
+
+Nothing here weakens those. Reconciliation is the most authority-bearing
+operation in this contract, and it is the last place to relax the conditions on
+writing.
+
+### F.9 What this does not do
+
+It does not promote anything, and it does not call the adapter. `RECONCILED_RELEASED`
+makes an identity promotable again; whether it is promoted is a later
+evaluation's decision, under the budget and the ceilings like any other.
+
+It defines no automatic trigger. Every operation here is an operator's act, as
+§2 has said since the contract was accepted.
+
+### F.10 Ownership covers the lineage, not one generation file
+
+*This amends §13d E.1.*
+
+E.1 derived the sidecar from **the ledger path**. With supersession that is
+wrong: two processes holding locks on two different generation files can each
+publish a successor, and each one's lock excludes nobody who matters. It is §9
+Amendment A's failure a third time — the check succeeding while the thing it was
+meant to exclude happens beside it.
+
+**The sidecar is derived from the lineage root**, the configured stable identity
+of the ledger family, and generation files are named deterministically beneath
+it. One lineage, one lock, whatever generation is current.
+
+The derivation rule from E.1 is unchanged and now matters more: the root is
+configured, the sidecar and the generation names are **derived**, and nothing in
+the configuration can name a second lock for the same lineage.
+
+---
+
 ## 14. What this does not do
 
 - It does **not** make the graph write idempotent. It prevents *this coordinator*
@@ -1308,6 +1608,46 @@ already written down. Introduced by Amendment B, noticed by Amendment C.*
     stays false.
 29i. A write whose `fsync` fails fences the identity, refuses with
     `RESERVATION_NOT_DURABLE`, and stops further appends in that process.
+
+**Amendment F (§13e)**
+
+30a. A `COMMITTED` identity cannot be reconciled — `NOT_RECONCILABLE`.
+30b. `RECONCILED_COMMITTED` leaves the identity fenced; `RECONCILED_RELEASED`
+    makes it promotable again, and a subsequent evaluation promotes it.
+30c. The record names which authority the release rested on: the adapter's
+    attestation for a `FAILED` reservation, an operator's inspection for an
+    unresolved one.
+30d. Reconciling an identity appends to the current generation and starts no new
+    one.
+30e. A torn generation cannot be reconciled per-identity and can only be closed.
+30f. A closed predecessor is **byte-identical** afterwards, and its recorded
+    length and digest match it.
+30g. The fenced set is the union over the chain: an identity committed in a
+    closed predecessor is still refused after supersession.
+30h. A torn predecessor is still read for fencing, up to its tear.
+30i. A missing or altered predecessor is `GENERATION_CHAIN_BROKEN` and refuses
+    ARMED.
+30j. A temporary successor — zero-byte, partial, malformed, or complete but
+    never renamed — supersedes nothing, and the predecessor stays authoritative.
+30k. A leftover temporary is preserved byte-for-byte across a later attempt,
+    which uses a distinct temporary name derived from its own `request_id`.
+30l. Publication follows create-exclusive, write, `fsync` file, rename, `fsync`
+    directory — asserted by the observed syscall order, not by the outcome.
+30m. A retry after a lost acknowledgement rediscovers the published successor
+    and creates no second one; a different `request_id` against an already
+    superseded predecessor is refused.
+30n. Two valid successors of one predecessor are `GENERATION_LINEAGE_FORKED`,
+    and no timestamp, filename or directory order resolves it.
+30o. A failure between the rename and the directory `fsync` stops further
+    generation operations under `GENERATION_PUBLICATION_UNCERTAIN`.
+30p. One sidecar covers the lineage: two coordinators on two generation files of
+    the same lineage contend for the same lock.
+30q. Closing a generation ends the closing process's ownership.
+30r. A repeated `request_id` is reported with the existing record and applied
+    once; a different one against a settled identity is `NOT_RECONCILABLE`.
+30s. AST — no reconciliation record carries a free-text field, and the evidence
+    token set is closed.
+30t. Reconciliation calls no adapter and promotes nothing.
 28i. A failed or unresolved write is never readable as a committed promotion:
     the reader's `committed` set contains only identities whose terminal record
     is `COMMITTED`.
@@ -1392,6 +1732,33 @@ produced it.
 25. **A refused durable append takes no reservation at all** (§13d E.4). The
     alternative is a fence that exists until the next restart and then does
     not.
+26. **Reconciliation supersedes and never repairs** (§13e). It keeps §13c D.2
+    intact while making `RETRY_REQUIRES_OPERATOR` actionable, which looked like
+    a tension and was not.
+27. **The successor does not copy the predecessor's identities forward**
+    (§13e F.5). Copying makes the predecessor ceremonial; reading the chain
+    makes a missing predecessor detectable instead of a silently smaller fence.
+28. **There is no pointer to the live generation** (§13e F.6a). The authoritative
+    generation is the one nothing supersedes, and a pointer would be a second
+    answer that can disagree with the first.
+29. **Closing a generation ends the closing process's ownership** (§13e F.6c) —
+    and the reason changed under review. The first was *the successor is a
+    different lock*, which F.10 removed. The rule stands on re-seeding being the
+    startup path, and one path being worth more than one saved restart.
+31. **Publication is a protocol, not a moment** (§13e F.6). "The header reaches
+    disk" does not say what happens to a header half-written under its final
+    name, and `fsync` on a file says nothing about its directory entry.
+32. **A fork is never resolved by timestamp, filename or directory order**
+    (§13e F.6a). Each is a property of the filesystem's bookkeeping rather than
+    of the evidence.
+33. **Leftover temporaries are preserved, unlike sidecars** (§13e F.6). A
+    sidecar is a lock artefact; a partial successor may be the only record of
+    what someone was doing when the machine stopped.
+34. **One lineage, one lock** (§13e F.10, amending §13d E.1). Locks on two
+    generation files of one lineage exclude nobody who matters.
+30. **Operator evidence is a closed token set with no notes field** (§13e F.7).
+    This is the record of a human decision about evidence, and free text is
+    where the reasoning goes to stop being checkable.
 
 ---
 
@@ -1419,7 +1786,9 @@ amendment is accepted:
    inside which the internal append is invoked. Also the coordinator
    connection and restart seeding (§13d E.4, E.5), because a durable ledger
    the coordinator does not read at startup is worse than none.
-7. Reconciliation and generations (§8, §11).
+7. Reconciliation and generations (§8, §11, §13e). Per-identity reconciliation
+   and generation closure are two operations, and the second ends the closing
+   process's ownership.
 8. Ceilings C1 and C2 (§11).
 9. Execution adapter with one fixed WriteBus schema.
 10. Live SHADOW observation.

@@ -97,39 +97,6 @@ declared as one nowhere. The finding is recorded there because recovery has no
 contract to carry it. When one exists, it carries it, and the vocabularies
 document's conformance table gets a normal row.
 
-## 4. `PROMOTION_EXECUTION_CONTRACT.md` §8 — no exit from a `FAILED` reservation
-
-**Trigger:** slice 7 (reconciliation and generations).
-
-§2 says re-promotion after a failure is an operator action taken against the
-graph. §8's table covers only unresolved reservations — a `RESERVED` with no
-terminal record. A `RESERVED` resolved by `FAILED` is fenced (correctly: the
-write may have landed) and has **no defined path back**, because
-`RECONCILED_RELEASED` is defined against unresolved reservations only.
-
-Found by implementing the read path, which has to place every reservation in
-exactly one of committed / write-failed / unresolved and found the third state
-had an exit while the second did not.
-
-Either §8 extends to `FAILED` reservations, or §2's "operator action" is
-narrowed to say what it actually is. Not resolved here: the slice that writes
-reconciliation records is the one that has to answer it.
-
-**A dated architectural liability as of 2026-09-10.** Slice 7 must supply the
-repair `RETRY_REQUIRES_OPERATOR` names. Slice 6 must not fabricate it early
-merely because the token exists — a reconciliation written to discharge a debt
-rather than to answer a question is how the exit ends up shaped by the
-convenience of the slice that wrote it.
-
-**Sharpened by Amendment C (2026-09-10).** The condition has a name now —
-`RETRY_REQUIRES_OPERATOR`, §13b — so a caller is told why the identity is refused
-and what would repair it, and §13b C.4 states in the contract itself that the
-repair does not yet exist. What is missing is unchanged: there is no operation
-an operator can perform against a `FAILED` reservation. The refusal is honest,
-the exit is still absent, and this entry is what carries the difference.
-
----
-
 ## 5. `SCYTHE_VERDICT_VOCABULARIES.md` §3 — the name check needs a token source
 
 **Trigger:** the next amendment to that document for a reason of its own.
@@ -144,8 +111,41 @@ otherwise.
 
 The rule should say the check runs against **declared token tuples**
 (`COORDINATE_KINDS`, `REFUSALS`, `DISPOSITIONS`, `COMPARISONS`, …) and not
-against raw uppercase text. This repository has now met that false-positive
-class four times; it is the same shape as a raw-text scan hitting a docstring.
+against raw uppercase text.
+
+This repository has now met that false-positive class **seven** times. Four
+preceded this entry. The fifth was slice 6's scope test, asserting that the write
+path imports no `fcntl` and matching the word in a docstring describing what 6b
+would do. The sixth and seventh were slice 6b's, matching `ARMED` inside a
+sentence saying that failing to acquire refuses ARMED, and `append` inside
+`halt_appends` and `O_APPEND`.
+
+**All three were written after this entry existed, by the author who wrote it.**
+That is the finding worth keeping: knowing the class does not prevent writing
+another one, because a text scan is the shortest thing to type and passes on the
+first file you try it on. Reading declared names from the AST is the only
+durable form, and it belongs in §3 rather than in an author's memory.
+
+**A second defect, found while drafting Amendment F.** The check's merit universe
+is a hand-written list of five `(module, tuple)` pairs, and it is incomplete.
+`rf_capture_recovery` declares `SUPERSESSION_STATES` and `RECOVERY_OUTCOMES` —
+eight merit-side tokens — and none of them is in the list.
+
+The consequence was live. `GENERATION_SUPERSEDED` was checked, reported **clear**,
+and collides with recovery's `SUPERSEDED`. It was caught only because the drafter
+opened `rf_capture_recovery.py` for an unrelated reason and recognised the word
+— which is exactly the *found by looking* failure §3 exists to replace.
+
+A hand-listed universe is a check that stays silent about whatever nobody
+remembered to add. Either the universe is discovered — every module-level
+UPPER_SNAKE tuple in the tree, minus a declared exclusion list — or an omission
+has to fail loudly rather than pass quietly. The trade is real: discovery
+produces false positives against tuples that are not vocabularies, and §3's own
+rule says a check that cries wolf is one an author learns to skip.
+
+Not fixed here: slice 7 is authorized as contract work only, and this is a test
+change. It is the first thing slice 7's code should do, and until then the check
+is known-incomplete rather than trusted.
 
 A false positive is the safe direction — it costs a rename that was not needed —
 so this is a refinement and not a defect.
@@ -200,6 +200,7 @@ what is still pending. This is a record, not a queue: nothing here is waiting.
 | 6 — the record sequence was a reader-only rule | `PROMOTION_EXECUTION_CONTRACT.md` §13c D.1 | Amendment D |
 | 7 — a valid ledger with no declared generation | `PROMOTION_EXECUTION_CONTRACT.md` §13c D.3 | Amendment D |
 | 8 — the coordinator did not yet allocate | `scythe_promotion_ledger.py`, slice 6b | slice 6b |
+| 4 — no exit from a `FAILED` reservation | `PROMOTION_EXECUTION_CONTRACT.md` §13e Amendment F | Amendment F |
 
 An entry for `RETRY_REQUIRES_OPERATOR` was written on the slice-4 branch and
 never merged; it is absent from this table because it was never a pending
