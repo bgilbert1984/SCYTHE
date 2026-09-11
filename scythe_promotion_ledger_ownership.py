@@ -26,6 +26,16 @@ Three things shape this module:
   onto that holding, so its liveness is derived from this object rather than
   tracked locally: a scope that outlived the lock would keep authorising appends
   after ownership ended.
+
+And one thing the attestation alone does not establish. A path-based check
+answers a question about a *name*, and the object that ends up locked is reached
+through that name at four separate moments: attestation, open, `flock`, and
+minting. A mount arriving or departing anywhere in that window leaves the
+producer holding a lock on something other than what it attested, with every
+check having reported success. So the attestation runs twice: once on the path
+before anything is created, and once **on the open descriptor** immediately
+before the first scope exists. The second is the authoritative one, because a
+descriptor cannot be remounted out from under itself.
 """
 
 from __future__ import annotations
@@ -37,7 +47,8 @@ import os
 from typing import Any, Dict, Optional, Sequence, Tuple
 
 from scythe_promotion_ledger_store import (
-    LOCK_EXCLUSION_UNATTESTED, RESERVATION_DURABILITY_UNATTESTED, attest,
+    ALLOWLISTED_FILESYSTEMS, LOCK_EXCLUSION_UNATTESTED,
+    RESERVATION_DURABILITY_UNATTESTED, attest,
 )
 from scythe_promotion_ledger_writer import (
     LEDGER_NOT_OWNED, OWNERSHIP_LOST, RESERVATION_NOT_DURABLE,
@@ -60,6 +71,35 @@ def sidecar_path(ledger_path: str) -> str:
     return ledger_path + SIDECAR_SUFFIX
 
 
+def device_filesystems(source: str = "/proc/self/mountinfo") -> Dict[int, str]:
+    """st_dev -> filesystem type, from the mount table's major:minor field.
+
+    Keyed by device rather than by mount point, because this is what an open
+    descriptor can be checked against. A path lookup answers *what is mounted at
+    this name right now*; `os.fstat(fd).st_dev` answers *what is this object
+    actually on*, and only the second survives a remount.
+    """
+    devices: Dict[int, str] = {}
+    try:
+        with open(source, "r", encoding="utf-8") as handle:
+            for line in handle:
+                fields = line.split()
+                if " - " not in line or len(fields) < 6:
+                    continue
+                separator = fields.index("-")
+                if len(fields) <= separator + 1:
+                    continue
+                major, _, minor = fields[2].partition(":")
+                try:
+                    devices[os.makedev(int(major), int(minor))] = \
+                        fields[separator + 1]
+                except (ValueError, OverflowError):
+                    continue
+    except OSError:
+        return {}
+    return devices
+
+
 @dataclass
 class LedgerOwnership:
     """Process-lifetime ownership of one ledger, and the source of its scopes.
@@ -74,6 +114,9 @@ class LedgerOwnership:
     mounts: Optional[Sequence[Tuple[str, str]]] = None
     repo_root: Optional[str] = None
     refused_prefixes: Optional[Sequence[str]] = None
+    # st_dev -> filesystem type, for the post-open check. Injectable for the
+    # same reason `mounts` is: a test needs to state what the kernel would say.
+    devices: Optional[Dict[int, str]] = None
 
     def __post_init__(self) -> None:
         self._fd: Optional[int] = None
@@ -86,6 +129,11 @@ class LedgerOwnership:
         self._ever_held = False
         self._halt_reason: Optional[str] = None
         self._refusals: Tuple[str, ...] = ()
+        # A mount that changed under an acquisition is not a condition to retry
+        # through. The owner is finished, and a later acquire() refuses without
+        # touching the filesystem again.
+        self._terminal = False
+        self._preflight_dev: Optional[int] = None
 
     # -- acquisition ------------------------------------------------------
 
@@ -120,6 +168,11 @@ class LedgerOwnership:
         """
         if self._held:
             return True
+        if self._terminal:
+            return False
+
+        # Stage one: the path, before anything is created. Its only job is to
+        # stop a sidecar appearing on a mount already known to be unacceptable.
         refusals = self.attestation_refusals()
         if refusals:
             self._refusals = refusals
@@ -128,19 +181,79 @@ class LedgerOwnership:
         if not os.path.isdir(directory):
             self._refusals = (LEDGER_NOT_OWNED,)
             return False
-        fd = os.open(self.sidecar, os.O_CREAT | os.O_RDWR, 0o600)
+        self._preflight_dev = os.stat(directory).st_dev
+
+        # O_EXCL first, so the answer to *did this process create it* is a fact
+        # rather than an inference. It decides whether the file may be removed
+        # if stage two refuses.
+        created = False
+        try:
+            fd = os.open(self.sidecar, os.O_CREAT | os.O_EXCL | os.O_RDWR, 0o600)
+            created = True
+        except FileExistsError:
+            fd = os.open(self.sidecar, os.O_RDWR)
         try:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError:
             os.close(fd)
             self._refusals = (LEDGER_NOT_OWNED,)
             return False
+
+        # Stage two: the descriptor, and this is the authoritative one. The
+        # lock is already held, so nothing can move underneath the answer.
+        mismatch = self._verify_descriptor(fd)
+        if mismatch is not None:
+            self._abandon(fd, created, mismatch)
+            return False
+
         self._fd = fd
         self._held = True
         self._ever_held = True
         self._refusals = ()
         self._write_diagnostics()
         return True
+
+    def _device_map(self) -> Dict[int, str]:
+        return device_filesystems() if self.devices is None else dict(self.devices)
+
+    def _verify_descriptor(self, fd: int) -> Optional[str]:
+        """What the locked object is actually on. None if it is what we attested.
+
+        Two checks, because they fail differently. The device changing means the
+        name now reaches a different object than the one attested. The device
+        being the same but off the allowlist means the mount itself changed
+        underneath a stable name -- and a path lookup cannot see either.
+        """
+        observed = os.fstat(fd).st_dev
+        if self._preflight_dev is not None and observed != self._preflight_dev:
+            return (f"the locked descriptor is on device {observed}, and "
+                    f"{self._preflight_dev} was attested")
+        found = self._device_map().get(observed)
+        if found not in ALLOWLISTED_FILESYSTEMS:
+            return (f"the locked descriptor is on {found!r}, which is not an "
+                    f"attested filesystem, whatever the path said")
+        return None
+
+    def _abandon(self, fd: int, created: bool, detail: str) -> None:
+        """Give the lock back and finish. The ledger is never touched.
+
+        The sidecar is removed **only** if this process created it during this
+        attempt -- proven by O_EXCL, not assumed. Removing one we found would
+        destroy another process's lock file on the strength of our own bad luck.
+        """
+        try:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+        finally:
+            os.close(fd)
+        if created:
+            try:
+                os.unlink(self.sidecar)
+            except OSError:              # pragma: no cover - best effort
+                pass
+        self._terminal = True
+        self._refusals = (LOCK_EXCLUSION_UNATTESTED,
+                          RESERVATION_DURABILITY_UNATTESTED)
+        self._verification_detail = detail
 
     def _write_diagnostics(self) -> None:
         """Who holds it, for whoever is reading `lsof` at 3am.
@@ -171,9 +284,18 @@ class LedgerOwnership:
     def scope(self, path: str) -> Optional[OwnershipScope]:
         """Mint a scope, or refuse. This is `LedgerWriter.ownership`.
 
-        Returning None produces LEDGER_NOT_OWNED at the writer. The halted case
-        raises instead, because RESERVATION_NOT_DURABLE is a different fact and
-        reporting it as *not owned* would send an operator to the lock.
+        Three refusals, and they are three different facts:
+
+        **Never acquired** -> None, which the writer reports as
+        LEDGER_NOT_OWNED. Absent authority: go and find who does hold it.
+
+        **Acquired and since lost or released** -> OWNERSHIP_LOST, and terminal.
+        Invalidated authority, which is not the same as never having had it, and
+        the difference is the one already drawn elsewhere in this contract.
+
+        **Halted after an unsyncable write** -> RESERVATION_NOT_DURABLE. Raised
+        rather than returned, because reporting it as *not owned* would send an
+        operator to the lock when the uncertainty is about the file.
         """
         if self._halt_reason is not None:
             raise LedgerWriteRefused(
@@ -181,6 +303,8 @@ class LedgerOwnership:
                 "this process stopped appending after a reservation whose "
                 "durability could not be established; a new session does not "
                 "clear that, because the uncertainty is about the file")
+        if self._terminal:
+            return None
         if not self._held:
             if self._ever_held:
                 raise LedgerWriteRefused(
@@ -214,6 +338,9 @@ class LedgerOwnership:
             "halt_reason": self._halt_reason,
             "reacquires": False,
             "ever_held": self._ever_held,
+            "terminal": self._terminal,
+            "verification_detail": getattr(self, "_verification_detail", None),
+            "attested_twice": True,
             "note": (
                 "THE LOCK IS TAKEN ONCE AND NEVER REACQUIRED. A WINDOW BETWEEN "
                 "LOSING IT AND TAKING IT AGAIN IS ONE NOTHING HERE CAN SEE "

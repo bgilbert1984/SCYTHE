@@ -50,9 +50,19 @@ class OwnershipTestCase(unittest.TestCase):
         self.dir = self._dir.name
         self.path = os.path.join(self.dir, "ledger.jsonl")
 
-    def _owner(self, mounts=GOOD_MOUNTS):
+    def _devices(self, fstype="ext4"):
+        """What the kernel would say about the device the tempdir is on.
+
+        Injected rather than read, so the post-open check is exercised against a
+        stated answer instead of whatever this host happens to be running.
+        """
+        return {os.stat(self.dir).st_dev: fstype}
+
+    def _owner(self, mounts=GOOD_MOUNTS, devices=None):
         owner = LedgerOwnership(ledger_path=self.path, mounts=mounts,
-                                refused_prefixes=())
+                                refused_prefixes=(),
+                                devices=self._devices() if devices is None
+                                else devices)
         self.addCleanup(owner.release)
         return owner
 
@@ -152,11 +162,102 @@ class AcquisitionTests(OwnershipTestCase):
         owner.acquire()
         self.assertIsNone(owner.scope(os.path.join(self.dir, "other.jsonl")))
 
+    def test_absent_authority_and_invalidated_authority_are_different(self):
+        """Never acquired is LEDGER_NOT_OWNED -- go and find who holds it.
+        Acquired and since lost is OWNERSHIP_LOST, and terminal. The same
+        distinction this contract already draws elsewhere."""
+        never = self._owner()
+        self.assertIsNone(never.scope(self.path))
+
+        lost = self._owner()
+        self.assertTrue(lost.acquire())
+        lost.release()
+        with self.assertRaises(LedgerWriteRefused) as caught:
+            lost.scope(self.path)
+        self.assertEqual(caught.exception.code, OWNERSHIP_LOST)
+
     def test_ownership_is_not_reacquired_after_release(self):
         owner, ledger = self._prepared()
         owner.release()
         self.assertFalse(owner.holds)
         self.assertFalse(owner.status()["reacquires"])
+
+
+class DescriptorAttestationTests(OwnershipTestCase):
+    """The mount can change between attesting a path and locking an object.
+
+    A path check answers a question about a *name*, and the object reached
+    through that name is resolved again at open, at flock, and at minting. The
+    authoritative check is on the descriptor, which cannot be remounted out from
+    under itself.
+    """
+
+    def _mismatched(self, devices):
+        owner = self._owner(devices=devices)
+        self.assertFalse(owner.acquire())
+        return owner
+
+    def test_a_device_that_changed_after_preflight_mints_no_scope(self):
+        owner = self._owner()
+        real_fstat = os.fstat
+
+        def moved(fd):
+            st = real_fstat(fd)
+            return os.stat_result(tuple(st)[:2] + (st.st_dev + 1,) + tuple(st)[3:])
+
+        os.fstat = moved
+        try:
+            self.assertFalse(owner.acquire())
+        finally:
+            os.fstat = real_fstat
+        self.assertFalse(owner.holds)
+        self.assertIsNone(owner.scope(self.path))
+
+    def test_an_unattested_filesystem_behind_a_good_path_mints_no_scope(self):
+        """The path says ext4 and the device says drvfs. The lock succeeded."""
+        owner = self._mismatched(self._devices("drvfs"))
+        self.assertFalse(owner.holds)
+        self.assertIn("drvfs", owner.status()["verification_detail"])
+
+    def test_the_flock_itself_was_available(self):
+        """So the refusal is about the filesystem and not about contention."""
+        self._mismatched(self._devices("drvfs"))
+        proof = os.open(sidecar_path(self.path), os.O_CREAT | os.O_RDWR, 0o600)
+        fcntl.flock(proof, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        fcntl.flock(proof, fcntl.LOCK_UN)
+        os.close(proof)
+
+    def test_the_lock_is_released_and_the_owner_is_finished(self):
+        owner = self._mismatched(self._devices("drvfs"))
+        self.assertTrue(owner.status()["terminal"])
+        self.assertFalse(owner.acquire())
+        self.assertIsNone(owner.scope(self.path))
+
+    def test_the_ledger_is_never_touched(self):
+        self._mismatched(self._devices("drvfs"))
+        self.assertFalse(os.path.exists(self.path))
+
+    def test_a_sidecar_this_attempt_created_is_removed(self):
+        self._mismatched(self._devices("drvfs"))
+        self.assertFalse(os.path.exists(sidecar_path(self.path)))
+
+    def test_a_sidecar_it_found_is_preserved(self):
+        """Removing one we did not create would destroy another process's lock
+        file on the strength of our own bad luck."""
+        with open(sidecar_path(self.path), "wb") as handle:
+            handle.write(b"someone else was here\n")
+        self._mismatched(self._devices("drvfs"))
+        self.assertTrue(os.path.exists(sidecar_path(self.path)))
+        with open(sidecar_path(self.path), "rb") as handle:
+            self.assertEqual(handle.read(), b"someone else was here\n")
+
+    def test_the_refusal_names_both_claims(self):
+        """One lookup, two claims -- the same rule §9 Amendment A set."""
+        owner = self._mismatched(self._devices("drvfs"))
+        self.assertEqual(len(owner.status()["refusals"]), 2)
+
+    def test_status_says_the_attestation_runs_twice(self):
+        self.assertTrue(self._owner().status()["attested_twice"])
 
 
 class ScopeLivenessTests(OwnershipTestCase):
