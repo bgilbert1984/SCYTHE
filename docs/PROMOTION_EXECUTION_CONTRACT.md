@@ -9,6 +9,8 @@ Amendment B:            §13a three-state writer result — ACCEPTED 2026-09-10
 Amendment C:            §13b RETRY_REQUIRES_OPERATOR — ACCEPTED 2026-09-10
 Amendment D:            §13c sequence, generation, gated write — ACCEPTED
                         2026-09-10
+Amendment E:            §13d ownership, seeding, durability — PROPOSED
+                        2026-09-10
 Authority:              NORMATIVE
 Constrains:             Step 4 of the promotion sequence (execution adapter)
 Depends on:             SCYTHE_VERDICT_VOCABULARIES.md  (ACCEPTED — §5 declares
@@ -165,7 +167,7 @@ This section instantiates that rule for the promotion sequence. The two vocabula
 | --- | --- | --- |
 | owner | `scythe_promotion_policy` | `scythe_promotion_ledger` (the coordinator) |
 | answers | is this finding fit to promote? | could we act on it at all? |
-| examples | `VERDICT_NOT_PROMOTABLE`, `CAPSULE_UNBOUND`, `DUPLICATE_PROMOTION` | `BUDGET_EXHAUSTED`, `DURABLE_CEILING_REACHED`, `UNRESOLVED_CEILING_REACHED`, `IDENTITY_UNRESOLVED`, `RETRY_REQUIRES_OPERATOR`, `LEDGER_UNAVAILABLE`, `LEDGER_NOT_OWNED`, `LEDGER_TORN`, `LEDGER_GENERATION_UNDECLARED`, `LOCK_EXCLUSION_UNATTESTED`, `RESERVATION_DURABILITY_UNATTESTED` |
+| examples | `VERDICT_NOT_PROMOTABLE`, `CAPSULE_UNBOUND`, `DUPLICATE_PROMOTION` | `BUDGET_EXHAUSTED`, `DURABLE_CEILING_REACHED`, `UNRESOLVED_CEILING_REACHED`, `IDENTITY_UNRESOLVED`, `RETRY_REQUIRES_OPERATOR`, `LEDGER_UNAVAILABLE`, `LEDGER_NOT_OWNED`, `LEDGER_TORN`, `LEDGER_GENERATION_UNDECLARED`, `OWNERSHIP_LOST`, `RESERVATION_NOT_DURABLE`, `LOCK_EXCLUSION_UNATTESTED`, `RESERVATION_DURABILITY_UNATTESTED` |
 | repaired by | changing the finding, or accepting the judgement | fixing the apparatus; the finding may be sound |
 
 The coordinator **returns** `IDENTITY_UNRESOLVED` on a second evaluation of an
@@ -326,7 +328,9 @@ that does not know.
 the race of §3 one level up, where a mutex cannot reach it.
 
 - The writing coordinator holds `fcntl.flock(fd, LOCK_EX | LOCK_NB)` for its
-  entire lifetime, acquired before ARMED is reachable.
+  entire lifetime, acquired before ARMED is reachable. *Amended by §13d E.1: the
+  lock is taken on a sidecar `<ledger>.lock` whose name is derived, because a
+  ledger that does not yet exist cannot be opened to lock it.*
 - Failure to acquire refuses ARMED (`LEDGER_NOT_OWNED`). It does **not** refuse
   SHADOW, which opens the ledger read-only (§12).
 - The holder writes its `ProcessIdentity` into a header record, so a reader can
@@ -477,6 +481,7 @@ were changed.
 | unresolved reservations | the audit ring (in-memory, bounded, by design) |
 | the generation totals (§11) | |
 | `next_seq`, as `last_seq + 1` (§13c D.1) | |
+| the identity map, as a cache of the ledger (§13d E.4, E.5) | |
 
 *Amended by §13c D.3: an empty ledger is valid and readable, and refuses ARMED
 under `LEDGER_GENERATION_UNDECLARED` because it declares no generation for C1 to
@@ -972,6 +977,147 @@ adapter slice 9, ARMED slice 11.
 
 ---
 
+## 13d. Amendment E — how ownership is obtained, and what it costs to hold
+
+*Proposed 2026-09-10. **Not yet accepted.** Settles what slice 6b needs and §9
+does not supply: how a lock is acquired on a ledger that may not exist, what a
+scope's liveness is derived from, and what the durable record's failure means
+for the reservation beside it. Touches §3, §9, §10 and §17.*
+
+Three of the four decisions below were taken in review. The fourth, E.6, is
+mine and is flagged as such.
+
+### E.1 The bootstrap, and the sidecar lock
+
+Acquiring ownership requires opening the ledger. Creating the ledger requires
+ownership. Opening a ledger that does not exist fails — verified on this host,
+`ENOENT` — so §9's *acquire the lock, then write* cannot start from nothing.
+
+**Ownership is taken on a sidecar lock file**, `<ledger path>.lock`, created if
+absent. The ledger is then created and written under it.
+
+**Its name is derived from the ledger path and is never configured.** That is
+the load-bearing part. A separately configured lock file reproduces §9
+Amendment A's failure in a new place: two coordinators, one ledger, two
+different locks, both acquired, both satisfied. Deriving the name forecloses it
+rather than documenting against it.
+
+Its contents are **diagnostic only** — the owner's `ProcessIdentity`, written
+for whoever is reading `lsof` at 3am. The authoritative owner is the header
+record (§9), and a second authority would be a second answer to a question that
+has one.
+
+The alternative considered and rejected was opening the ledger itself with
+`O_CREAT` to acquire the lock. It does not formally violate §13c D.3, which
+governs generations rather than files — but it makes the ledger appear as a
+consequence of asking whether we own it, which is the shape D.3 exists to
+discourage one level up, and it makes `initialize()` vestigial.
+
+### E.2 Ownership is two conditions, and the attestation gates the scope
+
+§9 Amendment A established that `flock` returning success on a mount that does
+not exclude attests nothing. A scope is therefore minted only when **both** hold:
+
+1. `fcntl.flock(fd, LOCK_EX | LOCK_NB)` succeeded on the sidecar, and
+2. the filesystem backing the configured directory is on the allowlist.
+
+**The attestation gates scope creation, not only ARMED.** Checking it at arming
+only would let slice 6b mint scopes on `drvfs`, where the lock does not exclude
+— every check reporting success while the guarantee is absent, which is the
+condition Amendment A was written for. A gate that is checked somewhere other
+than where it is relied on is not a gate.
+
+### E.3 A scope's liveness is derived from the owner, never local
+
+§9 holds `flock` for the process's entire lifetime; §13c D.4 makes a scope valid
+for the allocate-and-append span. Both are right about different objects: the
+lock is acquired once and never re-acquired, and a **scope is a window onto that
+holding**, minted per session and closed at the end of it.
+
+So a scope is live when its session is open **and the owner still holds the
+lock**. A scope whose liveness were purely local would keep authorising appends
+after ownership ended — the fd closed, a lease expired on a filesystem that has
+them — which is exactly the hole D.4 closed at the session level, reappearing
+one level up. `OWNERSHIP_LOST` is that condition, and it is terminal for the
+process: ownership is acquired once, so an owner that has lost it does not
+reacquire.
+
+Holding for the process lifetime also removes a lock-ordering question rather
+than answering one: no `flock` is taken inside the coordinator's critical
+section, so there is no third lock to order against coordinator → audit (§4).
+
+### E.4 The durable append **is** the reservation
+
+Once the coordinator holds a ledger, §3 step 4 writes the record and step 5
+records it in memory, **in that order, and the second does not happen if the
+first refused.**
+
+A refusal — `LEDGER_TORN`, `LEDGER_NOT_OWNED`, `LEDGER_GENERATION_UNDECLARED`,
+`OWNERSHIP_LOST` — ends the evaluation with that executability code and takes no
+reservation at all. The alternative, reserving in memory and proceeding, yields
+a fence that exists until the next restart and then does not, which is the
+failure that looks like success.
+
+The in-memory identity map becomes a **cache of the ledger** rather than the
+authority. §6's table already says the identity set is durable; this is the
+sentence that makes it true.
+
+### E.5 Restart seeding belongs to slice 6b
+
+`_Posture.identities` is rebuilt from `read_ledger()` at startup: committed →
+`COMMITTED`, write-failed → `FAILED`, unresolved → `RESERVED`. The window is not
+rebuilt (§6) — a persisted `monotonic_ns` from a previous boot is meaningless
+rather than stale.
+
+**This is not an optimisation and cannot be deferred.** A coordinator that
+writes durably and seeds an empty identity set re-promotes every identity in the
+file on its next start. That is strictly worse than the in-memory-only
+coordinator that preceded it, because it has a durable ledger and ignores it —
+the fence is visible in the file and absent from the behaviour, which is the
+hardest kind of absence to notice.
+
+§10 has required this rebuild since the contract was accepted. Slice 6b is where
+it stops being a description.
+
+### E.6 A write that lands and cannot be synced
+
+*Not ruled on in review. This is the drafter's recommendation, marked so that a
+later reader does not mistake it for a settled decision.*
+
+`os.write` succeeds and `os.fsync` then fails. The record may be durable and may
+not be: the `UNKNOWN` shape of §13a B.1, one layer down, and the bytes are
+already in the file either way.
+
+Proposed: **fence the identity in memory, refuse the evaluation with
+`RESERVATION_NOT_DURABLE`, and stop appending in this process** until the ledger
+is re-read. A process that cannot make a reservation durable should stop making
+reservations — if it carries on, later records are durable while an earlier one
+may not be, and the file stops supporting the ordering argument that
+reserve-before-write rests on.
+
+The identity is fenced rather than released for the usual reason: the record may
+have reached the disk, and a released identity may be promoted again.
+
+### E.7 What slice 6b contains
+
+| in 6b | not in 6b |
+| --- | --- |
+| the sidecar lock and the ownership producer (E.1, E.2) | reconciliation (§8), which is slice 7 |
+| owner-derived scope liveness (E.3) | the ceilings (§11), slice 8 |
+| the coordinator's ledger connection (E.4) | the execution adapter, slice 9 |
+| restart seeding (E.5) | any ARMED path, slice 11 |
+| `RESERVATION_NOT_DURABLE` (E.6) | any repair of a torn ledger (§13c D.2) |
+
+`FAILED` records become writable in 6b, and **the exit from a `FAILED`
+reservation must not be invented here** merely because the records now exist.
+That is `PENDING_AMENDMENTS.md` entry 4 and it belongs to slice 7.
+
+Durable writes remain unreachable in production after 6b: SHADOW does not append
+(§12), and ARMED cannot be constructed without an adapter. 6b makes the path
+reachable *in shape*, which is why it can land before slice 9 rather than after.
+
+---
+
 ## 14. What this does not do
 
 - It does **not** make the graph write idempotent. It prevents *this coordinator*
@@ -1142,6 +1288,26 @@ already written down. Introduced by Amendment B, noticed by Amendment C.*
 28n. The writer does not establish a generation on an empty ledger: after an
     attempted append to a zero-byte ledger with no generation, the file is
     byte-identical and the refusal stands.
+
+**Amendment E (§13d)**
+
+29a. A second coordinator on one ledger is refused `LEDGER_NOT_OWNED`, while its
+    SHADOW observation continues.
+29b. The sidecar's name is derived from the ledger path and cannot be configured
+    — AST, and a test that two writers for one ledger lock the same file.
+29c. A scope is refused on an unattested mount even though `flock` succeeded.
+29d. A scope goes dead when the owner loses the lock, not only when its session
+    ends; the refusal is `OWNERSHIP_LOST`.
+29e. A refused durable append takes no in-memory reservation: the identity is
+    absent from the identity map and from `status()`.
+29f. A fresh coordinator against an existing ledger refuses an identity
+    committed before the restart, and admits one never promoted.
+29g. An unresolved reservation written before a restart is still fenced after
+    it, and is reported as unresolved rather than as failed.
+29h. The window is not rebuilt at startup, and `budget_window_survives_restart`
+    stays false.
+29i. A write whose `fsync` fails fences the identity, refuses with
+    `RESERVATION_NOT_DURABLE`, and stops further appends in that process.
 28i. A failed or unresolved write is never readable as a committed promotion:
     the reader's `committed` set contains only identities whose terminal record
     is `COMMITTED`.
@@ -1215,6 +1381,17 @@ produced it.
 21. **A generation is never established as a side effect of a write** (§13c
     D.3). A generation that began as a side effect is one nobody authorized or
     dated, and C1 is a lifetime total over exactly that boundary.
+22. **Ownership is taken on a derived sidecar, not the ledger** (§13d E.1). A
+    ledger that does not exist cannot be opened to lock it, and a *configured*
+    lock file would reproduce Amendment A's two-coordinators failure exactly.
+23. **The mount attestation gates scope creation, not only ARMED** (§13d E.2).
+    A gate checked somewhere other than where it is relied on is not a gate.
+24. **Restart seeding lands with the connection, not after it** (§13d E.5). A
+    coordinator with a durable ledger it does not read at startup re-promotes
+    everything in it — worse than having no ledger, because it looks durable.
+25. **A refused durable append takes no reservation at all** (§13d E.4). The
+    alternative is a fence that exists until the next restart and then does
+    not.
 
 ---
 
@@ -1239,7 +1416,9 @@ amendment is accepted:
    cannot produce (§13c D.4).
 6b. Durable ledger: `fcntl.flock` ownership for the process lifetime, which is
    what makes the gate above openable — by supplying the live scope, from
-   inside which the internal append is invoked.
+   inside which the internal append is invoked. Also the coordinator
+   connection and restart seeding (§13d E.4, E.5), because a durable ledger
+   the coordinator does not read at startup is worse than none.
 7. Reconciliation and generations (§8, §11).
 8. Ceilings C1 and C2 (§11).
 9. Execution adapter with one fixed WriteBus schema.
