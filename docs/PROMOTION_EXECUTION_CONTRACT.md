@@ -11,8 +11,9 @@ Amendment D:            §13c sequence, generation, gated write — ACCEPTED
                         2026-09-10
 Amendment E:            §13d ownership, seeding, durability — ACCEPTED
                         2026-09-10, E.6 on the drafter's recommendation
-Amendment F:            §13e reconciliation by supersession — PROPOSED
-                        2026-09-10
+Amendment F:            §13e reconciliation by supersession — ACCEPTED
+                        2026-09-10, after review strengthened F.6 and added
+                        F.10
 Authority:              NORMATIVE
 Constrains:             Step 4 of the promotion sequence (execution adapter)
 Depends on:             SCYTHE_VERDICT_VOCABULARIES.md  (ACCEPTED — §5 declares
@@ -170,7 +171,7 @@ This section instantiates that rule for the promotion sequence. The two vocabula
 | --- | --- | --- |
 | owner | `scythe_promotion_policy` | `scythe_promotion_ledger` (the coordinator) |
 | answers | is this finding fit to promote? | could we act on it at all? |
-| examples | `VERDICT_NOT_PROMOTABLE`, `CAPSULE_UNBOUND`, `DUPLICATE_PROMOTION` | `BUDGET_EXHAUSTED`, `DURABLE_CEILING_REACHED`, `UNRESOLVED_CEILING_REACHED`, `IDENTITY_UNRESOLVED`, `RETRY_REQUIRES_OPERATOR`, `NOT_RECONCILABLE`, `GENERATION_CHAIN_BROKEN`, `LEDGER_UNAVAILABLE`, `LEDGER_NOT_OWNED`, `LEDGER_TORN`, `LEDGER_GENERATION_UNDECLARED`, `OWNERSHIP_LOST`, `RESERVATION_NOT_DURABLE`, `LOCK_EXCLUSION_UNATTESTED`, `RESERVATION_DURABILITY_UNATTESTED` |
+| examples | `VERDICT_NOT_PROMOTABLE`, `CAPSULE_UNBOUND`, `DUPLICATE_PROMOTION` | `BUDGET_EXHAUSTED`, `DURABLE_CEILING_REACHED`, `UNRESOLVED_CEILING_REACHED`, `IDENTITY_UNRESOLVED`, `RETRY_REQUIRES_OPERATOR`, `NOT_RECONCILABLE`, `GENERATION_CHAIN_BROKEN`, `GENERATION_LINEAGE_FORKED`, `GENERATION_PUBLICATION_UNCERTAIN`, `LEDGER_UNAVAILABLE`, `LEDGER_NOT_OWNED`, `LEDGER_TORN`, `LEDGER_GENERATION_UNDECLARED`, `OWNERSHIP_LOST`, `RESERVATION_NOT_DURABLE`, `LOCK_EXCLUSION_UNATTESTED`, `RESERVATION_DURABILITY_UNATTESTED` |
 | repaired by | changing the finding, or accepting the judgement | fixing the apparatus; the finding may be sound |
 
 The coordinator **returns** `IDENTITY_UNRESOLVED` on a second evaluation of an
@@ -332,8 +333,10 @@ the race of §3 one level up, where a mutex cannot reach it.
 
 - The writing coordinator holds `fcntl.flock(fd, LOCK_EX | LOCK_NB)` for its
   entire lifetime, acquired before ARMED is reachable. *Amended by §13d E.1: the
-  lock is taken on a sidecar `<ledger>.lock` whose name is derived, because a
-  ledger that does not yet exist cannot be opened to lock it.*
+  lock is taken on a sidecar whose name is derived, because a ledger that does
+  not yet exist cannot be opened to lock it. Amended again by §13e F.10: it is
+  derived from the **lineage root**, not from one generation file, or two
+  processes can lock two generations and each publish a successor.*
 - Failure to acquire refuses ARMED (`LEDGER_NOT_OWNED`). It does **not** refuse
   SHADOW, which opens the ledger read-only (§12).
 - The holder writes its `ProcessIdentity` into a header record, so a reader can
@@ -1124,9 +1127,29 @@ reachable *in shape*, which is why it can land before slice 9 rather than after.
 
 ## 13e. Amendment F — reconciliation supersedes, and never repairs
 
-*Proposed 2026-09-10. **Not yet accepted.** Settles §8 and lands
-`PENDING_AMENDMENTS.md` entry 4, which has been open since the read path and is
-the oldest debt in the queue. Touches §2, §8, §10, §11 and §17.*
+*Proposed 2026-09-10, strengthened in review, and accepted 2026-09-10. Settles
+§8 and lands `PENDING_AMENDMENTS.md` entry 4, open since the read path and the
+oldest debt in the queue. Touches §2, §8, §9, §10, §11, §13d and §17.*
+
+**Name check, run before any token here was written.** The repository's
+mechanical check is known-incomplete — its merit universe is a hand-listed five
+pairs and omits `rf_capture_recovery` entirely (entry 5) — so this sweep was run
+against the merit set **extended with all 21 tokens that module declares**, and
+separately against every module-level token in the tree.
+
+Every token below is clear against merit + recovery and against the
+executability set. The whole-tree sweep produced two hits, both judged rather
+than cleared:
+
+| hit | judgement |
+| --- | --- |
+| `RECONCILED_COMMITTED` / `COMMITTED` | **not a collision, and deliberate.** `COMMITTED` is a ledger record kind and `RECONCILED_COMMITTED` is another one; they are the same family, which is what the naming is for |
+| `GENERATION_CLOSED` / `CLOSED` | **not a collision.** `CLOSED` is an `rf_iq_ring` buffer state — a different subject in a different domain, and neither is a verdict vocabulary |
+
+Those two are exactly the false-positive cost entry 5 predicts from a discovered
+universe, shown rather than argued. The earlier candidate
+`GENERATION_SUPERSEDED` was **not** clear: it collides with recovery's
+`SUPERSEDED`, which the incomplete checker reported as clear.
 
 **The governing rule, from which the rest follows:**
 
@@ -1220,37 +1243,107 @@ A **torn predecessor is still read for fencing**, up to its tear. Torn means *no
 appendable*, never *not readable* — §13 has said that since the read path, and
 this is the first place the distinction does real work.
 
-### F.6 Crash during a transition, and how startup chooses
+### F.6 Publication, and what makes a successor real
 
-**There is no pointer file.** A pointer is a second answer that can disagree with
-the first, and the ledgers already describe their own order.
+*Strengthened in review. The first draft said the transition was atomic "when
+the successor's header reaches disk", which is a claim and not a protocol. A
+crash **during** the header write leaves a nonzero, malformed candidate, and
+§13c D.3 settles only the zero-byte case. An `fsync` on the file does not make
+its directory entry durable either.*
 
-> **The authoritative generation is the one no other generation supersedes.**
+> **The predecessor remains authoritative until a complete, valid successor
+> header is durably published.**
 
-Startup enumerates the generation files, reads each header, and follows the
-`supersedes` chain. Exactly one generation is unsuperseded; that is the live one.
+**Publication is a five-step protocol, and every step is load-bearing:**
 
-Crash behaviour follows without any further mechanism:
+1. **Create a temporary sibling** exclusively (`O_CREAT | O_EXCL`), under a name
+   that is never scanned as a generation.
+2. **Write the complete header.**
+3. **`fsync` the file.**
+4. **Atomically rename** it to its final deterministic name.
+5. **`fsync` the containing directory.**
 
-| crash point | on disk | what startup concludes |
-| --- | --- | --- |
-| after creating the successor, before its header | a zero-byte successor | **a file with no header is not a generation** (§13c D.3). It names no predecessor, so the predecessor is still unsuperseded and still authoritative |
-| after the successor's header is fsynced | a complete chain | the successor is authoritative; the predecessor is closed |
+Why each one:
 
-**The transition is atomic at the moment the successor's header reaches the
-disk**, and the atomicity is a consequence of D.3's rule rather than a new
-guarantee. Nothing else has to be made durable in the right order.
+- A partial header written under the *final* name would be the malformed
+  candidate D.3 cannot classify. Writing under a name nothing scans **removes
+  the question instead of answering it** — the same move as deriving the sidecar
+  name rather than validating a configured one.
+- `fsync` before the rename, because a rename whose target contents are not yet
+  durable can survive a crash as a correctly-named file full of nothing.
+- `fsync` the directory, because the rename's **visibility** is not durable until
+  the directory is. This is §9's *the parent directory must be fsynced* rule
+  arriving in the place it actually bites.
 
-Two unsuperseded generations is a **fork** and refuses ARMED
-(`GENERATION_CHAIN_BROKEN`). It is prevented rather than merely detected: closing
-a generation requires ownership of the predecessor (§13d), and two processes
-cannot hold that lock.
+**A temporary file supersedes nothing**, whatever its contents. Zero-byte,
+partial, malformed, or complete-but-never-renamed — all the same: not a
+generation, because it does not carry the name a generation is published under.
 
-**Closing a generation ends the closing process's ownership.** The coordinator
-does not continue into the successor — ownership is taken once and not
-reacquired (§13d E.3), and the successor is a different file with a different
-lock. The next start takes it. A process that closed a generation and carried on
-would be holding authority over a ledger it had just declared unusable.
+**Leftover temporaries are evidence and are preserved.** Never interpreted,
+never repaired, never deleted — not even by a later attempt, which uses a
+distinct temporary name derived from its own `request_id`. This is deliberately
+*unlike* §13d E.1's sidecar rule, and the difference is the point: a sidecar is a
+lock artefact and its removal costs nothing, while a partial successor is the
+record of an attempt that may be the only evidence of what someone was doing
+when the machine stopped.
+
+**Retry rediscovers; it does not republish.** An operator whose acknowledgement
+was lost retries, and the operation first looks for an already-published
+successor of this predecessor:
+
+- one exists with **this** `request_id` — report it and stop. The work is done.
+- one exists with a **different** `request_id` — refuse. Publishing a second
+  would be the fork this section exists to prevent.
+- none exists — proceed with the protocol above.
+
+### F.6a Selecting the authoritative generation
+
+Startup reads every published generation header and follows the `supersedes`
+chain. There is still no pointer file.
+
+| valid successors of the predecessor | conclusion |
+| --- | --- |
+| zero | the predecessor is authoritative |
+| exactly one | the successor is authoritative |
+| more than one | `GENERATION_LINEAGE_FORKED` — refuse |
+
+**A fork is never resolved by timestamp, filename, or directory order.** Every
+one of those is a property of the filesystem's bookkeeping rather than of the
+evidence, and choosing by one would make the fence depend on which file happened
+to be written second. A fork means two processes believed they owned this
+lineage, and the right response to that is to stop, not to pick.
+
+### F.6b A publication whose durability is unknown
+
+A crash — or an error — **after the rename and before the directory `fsync`**
+leaves the initiating process unable to say whether the publication is durable.
+The rename may be visible now and absent after a reboot.
+
+That process must **stop all further generation operations** under
+`GENERATION_PUBLICATION_UNCERTAIN`, and resuming requires re-reading durable
+state rather than trusting anything it believes it just did. It is the shape of
+§13d E.6 one level up: a process that cannot establish the durability of what it
+wrote stops writing, rather than continuing on the assumption that worked last
+time.
+
+A later reader is unaffected — it sees either a published successor or not, and
+both are well-defined states. The uncertainty belongs to the writer alone, which
+is why the halt is process-local and not a property of the ledger.
+
+### F.6c Closing ends the process's ownership
+
+**The original reason for this no longer holds, and the rule survives anyway.**
+
+The first draft argued that the successor is a different file with a different
+lock, so ownership could not carry across. Under §13e F.10 the lock is on the
+lineage and does not change, so that argument is gone.
+
+The rule stands on a better one: re-entering service after a close requires
+re-seeding the identity map from the new authoritative generation, and that is
+precisely the startup path (§13d E.5). Keeping one path is worth more than
+saving one restart, and a second in-process route to a seeded coordinator is a
+second place for §13d E.5's failure — a coordinator that writes durably and
+starts from an empty fence — to reappear.
 
 ### F.7 Idempotency, and what an operator may say
 
@@ -1304,6 +1397,24 @@ evaluation's decision, under the budget and the ceilings like any other.
 
 It defines no automatic trigger. Every operation here is an operator's act, as
 §2 has said since the contract was accepted.
+
+### F.10 Ownership covers the lineage, not one generation file
+
+*This amends §13d E.1.*
+
+E.1 derived the sidecar from **the ledger path**. With supersession that is
+wrong: two processes holding locks on two different generation files can each
+publish a successor, and each one's lock excludes nobody who matters. It is §9
+Amendment A's failure a third time — the check succeeding while the thing it was
+meant to exclude happens beside it.
+
+**The sidecar is derived from the lineage root**, the configured stable identity
+of the ledger family, and generation files are named deterministically beneath
+it. One lineage, one lock, whatever generation is current.
+
+The derivation rule from E.1 is unchanged and now matters more: the root is
+configured, the sidecar and the generation names are **derived**, and nothing in
+the configuration can name a second lock for the same lineage.
 
 ---
 
@@ -1516,18 +1627,27 @@ already written down. Introduced by Amendment B, noticed by Amendment C.*
 30h. A torn predecessor is still read for fencing, up to its tear.
 30i. A missing or altered predecessor is `GENERATION_CHAIN_BROKEN` and refuses
     ARMED.
-30j. A crash after creating the successor and before its header leaves the
-    predecessor authoritative — the headerless file is not a generation.
-30k. A crash after the successor's header is fsynced leaves the successor
-    authoritative.
-30l. Two unsuperseded generations refuse ARMED, and a second process cannot
-    create one because it cannot hold the predecessor's lock.
-30m. Closing a generation ends the closing process's ownership.
-30n. A repeated `request_id` is reported with the existing record and applied
+30j. A temporary successor — zero-byte, partial, malformed, or complete but
+    never renamed — supersedes nothing, and the predecessor stays authoritative.
+30k. A leftover temporary is preserved byte-for-byte across a later attempt,
+    which uses a distinct temporary name derived from its own `request_id`.
+30l. Publication follows create-exclusive, write, `fsync` file, rename, `fsync`
+    directory — asserted by the observed syscall order, not by the outcome.
+30m. A retry after a lost acknowledgement rediscovers the published successor
+    and creates no second one; a different `request_id` against an already
+    superseded predecessor is refused.
+30n. Two valid successors of one predecessor are `GENERATION_LINEAGE_FORKED`,
+    and no timestamp, filename or directory order resolves it.
+30o. A failure between the rename and the directory `fsync` stops further
+    generation operations under `GENERATION_PUBLICATION_UNCERTAIN`.
+30p. One sidecar covers the lineage: two coordinators on two generation files of
+    the same lineage contend for the same lock.
+30q. Closing a generation ends the closing process's ownership.
+30r. A repeated `request_id` is reported with the existing record and applied
     once; a different one against a settled identity is `NOT_RECONCILABLE`.
-30o. AST — no reconciliation record carries a free-text field, and the evidence
+30s. AST — no reconciliation record carries a free-text field, and the evidence
     token set is closed.
-30p. Reconciliation calls no adapter and promotes nothing.
+30t. Reconciliation calls no adapter and promotes nothing.
 28i. A failed or unresolved write is never readable as a committed promotion:
     the reader's `committed` set contains only identities whose terminal record
     is `COMMITTED`.
@@ -1618,12 +1738,24 @@ produced it.
 27. **The successor does not copy the predecessor's identities forward**
     (§13e F.5). Copying makes the predecessor ceremonial; reading the chain
     makes a missing predecessor detectable instead of a silently smaller fence.
-28. **There is no pointer to the live generation** (§13e F.6). The authoritative
+28. **There is no pointer to the live generation** (§13e F.6a). The authoritative
     generation is the one nothing supersedes, and a pointer would be a second
     answer that can disagree with the first.
-29. **Closing a generation ends the closing process's ownership** (§13e F.6). A
-    process that closed a generation and carried on would hold authority over a
-    ledger it had just declared unusable.
+29. **Closing a generation ends the closing process's ownership** (§13e F.6c) —
+    and the reason changed under review. The first was *the successor is a
+    different lock*, which F.10 removed. The rule stands on re-seeding being the
+    startup path, and one path being worth more than one saved restart.
+31. **Publication is a protocol, not a moment** (§13e F.6). "The header reaches
+    disk" does not say what happens to a header half-written under its final
+    name, and `fsync` on a file says nothing about its directory entry.
+32. **A fork is never resolved by timestamp, filename or directory order**
+    (§13e F.6a). Each is a property of the filesystem's bookkeeping rather than
+    of the evidence.
+33. **Leftover temporaries are preserved, unlike sidecars** (§13e F.6). A
+    sidecar is a lock artefact; a partial successor may be the only record of
+    what someone was doing when the machine stopped.
+34. **One lineage, one lock** (§13e F.10, amending §13d E.1). Locks on two
+    generation files of one lineage exclude nobody who matters.
 30. **Operator evidence is a closed token set with no notes field** (§13e F.7).
     This is the record of a human decision about evidence, and free text is
     where the reasoning goes to stop being checkable.
