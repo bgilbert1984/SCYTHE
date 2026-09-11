@@ -181,30 +181,6 @@ this rather than leave "substring root" to be read either way.
 
 ---
 
-## 8. `PROMOTION_EXECUTION_CONTRACT.md` §13c D.1 — the coordinator does not yet allocate
-
-**Trigger:** slice 6b, or whichever slice first connects the coordinator to the
-writer.
-
-D.1 says `next_seq` is taken **under the coordinator lock**, in the same section
-as the reservation. Slice 6 built the writer's own allocate-and-append session
-and satisfies D.4's span, which the amendment also calls a critical section.
-Those are the same span once the two are composed, and they are not composed
-yet: `PromotionCoordinator` does not hold a `LedgerWriter`, and the durable
-ledger takes no part in an evaluation.
-
-So D.1's sentence is true of the writer and not yet true of the coordinator.
-Nothing is wrong — no production path writes, because no production path can
-obtain a scope — but the contract describes a composition the code has not
-performed, which is the shape this file exists to keep visible rather than
-remembered.
-
-Slice 6 left it undone deliberately: connecting them is where a promotion write
-becomes production-*reachable* in shape, and that was outside the authorized
-boundary.
-
----
-
 ---
 
 ---
@@ -223,6 +199,7 @@ what is still pending. This is a record, not a queue: nothing here is waiting.
 | 8 — `fenced` cited the ground Amendment B moved | `scythe_promotion_ledger_store.py` docstring | slice 4 |
 | 6 — the record sequence was a reader-only rule | `PROMOTION_EXECUTION_CONTRACT.md` §13c D.1 | Amendment D |
 | 7 — a valid ledger with no declared generation | `PROMOTION_EXECUTION_CONTRACT.md` §13c D.3 | Amendment D |
+| 8 — the coordinator did not yet allocate | `scythe_promotion_ledger.py`, slice 6b | slice 6b |
 
 An entry for `RETRY_REQUIRES_OPERATOR` was written on the slice-4 branch and
 never merged; it is absent from this table because it was never a pending

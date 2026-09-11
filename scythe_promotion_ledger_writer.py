@@ -54,9 +54,18 @@ SCHEMA = "scythe.promotion-ledger-writer.v1"
 # readable and correct and simply has no generation for C1 to total over.
 LEDGER_NOT_OWNED = "LEDGER_NOT_OWNED"
 LEDGER_GENERATION_UNDECLARED = "LEDGER_GENERATION_UNDECLARED"
+
+# §13d E.3. Terminal for the process: ownership is acquired once and never
+# reacquired, so an owner that has lost it does not get it back.
+OWNERSHIP_LOST = "OWNERSHIP_LOST"
+
+# §13d E.6. The write landed and its durability could not be established.
+RESERVATION_NOT_DURABLE = "RESERVATION_NOT_DURABLE"
+
 APPEND_REFUSALS: Tuple[str, ...] = (
-    LEDGER_NOT_OWNED, LEDGER_GENERATION_UNDECLARED, LEDGER_TORN,
-    LEDGER_UNAVAILABLE, LEDGER_UNREADABLE,
+    LEDGER_NOT_OWNED, LEDGER_GENERATION_UNDECLARED, OWNERSHIP_LOST,
+    RESERVATION_NOT_DURABLE, LEDGER_TORN, LEDGER_UNAVAILABLE,
+    LEDGER_UNREADABLE,
 )
 
 
@@ -84,22 +93,51 @@ class OwnershipScope:
     a scope that authorised any append would be a boolean wearing a class.
     """
 
-    __slots__ = ("_path", "_live")
+    __slots__ = ("_path", "_open", "_holder")
 
-    def __init__(self, path: str) -> None:
+    def __init__(self, path: str, holder: Optional[Any] = None) -> None:
         self._path = os.path.realpath(path)
-        self._live = True
+        self._open = True
+        self._holder = holder
 
     @property
     def path(self) -> str:
         return self._path
 
     @property
+    def holder(self) -> Optional[Any]:
+        return self._holder
+
+    @property
     def live(self) -> bool:
-        return self._live
+        return self.refusal() is None
+
+    def refusal(self) -> Optional[str]:
+        """Why this scope authorises nothing, or None.
+
+        The holder is checked **first**. A closed session whose owner has also
+        lost the lock is reported as OWNERSHIP_LOST, because that is the more
+        serious of the two facts and the one an operator has to act on -- a
+        session ending is ordinary.
+
+        Liveness derives from the holder rather than from this object (§13d
+        E.3). A locally-tracked scope would keep authorising appends after
+        ownership ended, which is the hole D.4 closed at the session level
+        reappearing one level up.
+        """
+        if self._holder is not None and not self._holder.holds:
+            return OWNERSHIP_LOST
+        if not self._open:
+            return LEDGER_NOT_OWNED
+        return None
+
+    def halt(self, reason: str) -> None:
+        """Stop appends for the whole owner, not just this scope (§13d E.6)."""
+        if self._holder is not None:
+            self._holder.halt_appends(reason)
 
     def _expire(self) -> None:
-        self._live = False
+        self._open = False
 
     def __repr__(self) -> str:      # pragma: no cover - diagnostics only
         state = "live" if self._live else "expired"
@@ -162,6 +200,11 @@ class LedgerWriter:
             # lifetime is decided by the caller.
             scope._expire()
 
+    def read(self) -> LedgerRead:
+        """A fresh snapshot, for a caller that holds the writer and not the
+        store. Keeps the dependency one way: coordinator -> writer -> reader."""
+        return read_ledger(self.path)
+
     def status(self) -> Dict[str, Any]:
         return {
             "schema": SCHEMA,
@@ -195,7 +238,14 @@ class _WriteSession:
     # -- the gate ---------------------------------------------------------
 
     def _require_scope(self) -> None:
-        if not self.scope.live:
+        refusal = self.scope.refusal()
+        if refusal == OWNERSHIP_LOST:
+            raise LedgerWriteRefused(
+                OWNERSHIP_LOST,
+                "the owner no longer holds the ledger; ownership is taken once "
+                "and not reacquired, because a window between losing it and "
+                "taking it again is one nothing here can see across")
+        if refusal is not None:
             raise LedgerWriteRefused(
                 LEDGER_NOT_OWNED,
                 "the ownership scope has expired; a session kept past its "
@@ -367,7 +417,20 @@ class _WriteSession:
         try:
             os.write(handle, line)
             if durable:
-                os.fsync(handle)
+                try:
+                    os.fsync(handle)
+                except OSError as exc:
+                    # The bytes are in the file and may or may not survive: the
+                    # UNKNOWN shape of §13a B.1, one layer down. The caller
+                    # fences the identity; this stops the process appending, so
+                    # that later records are not durable while an earlier one
+                    # may not be -- which would leave the file unable to support
+                    # the ordering reserve-before-write rests on (§13d E.6).
+                    self.scope.halt(RESERVATION_NOT_DURABLE)
+                    raise LedgerWriteRefused(
+                        RESERVATION_NOT_DURABLE,
+                        f"the record was written and could not be synced: "
+                        f"{type(exc).__name__}") from None
         finally:
             os.close(handle)
 

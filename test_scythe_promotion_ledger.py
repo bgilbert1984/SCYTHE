@@ -427,6 +427,7 @@ class ScopeTests(unittest.TestCase):
             elif isinstance(node, ast.Import):
                 imported.update(a.name for a in node.names)
         self.assertEqual(imported, {"__future__", "bisect", "collections", "dataclasses",
+                                    "scythe_promotion_ledger_writer",
                                     "threading", "typing",
                                     "scythe_promotion_policy",
                                     "scythe_invariant_ledger"})
@@ -550,23 +551,20 @@ class VocabularyTests(unittest.TestCase):
             self.coordinator.status()["executability_not_yet_reachable"], [])
 
     def test_the_coordinator_lock_is_declared_present(self):
-        self.assertEqual(self.coordinator.status()["coordinator_lock"],
-                         "PLAIN_LOCK")
-        self.assertEqual(self.coordinator.status()["durable_ledger"],
-                         "NOT_IMPLEMENTED")
+        status = self.coordinator.status()
+        self.assertEqual(status["coordinator_lock"], "PLAIN_LOCK")
+        self.assertFalse(status["durable_ledger_connected"])
+        self.assertIsNone(status["seeded_from_ledger"])
 
-    def test_the_store_is_not_imported_by_the_coordinator(self):
-        """Slice 5's reader stays disconnected until slice 6. An import taken
-        to fill in a tuple is that connection arriving in the form nobody
-        reviews."""
+    def test_the_store_is_reached_through_the_writer_and_not_directly(self):
+        """Slice 6b connected the coordinator to the ledger, and did it one way:
+        coordinator -> writer -> reader. The store keeps exactly one caller."""
         with open(ledger_module.__file__, "r", encoding="utf-8") as handle:
             tree = ast.parse(handle.read())
-        for node in ast.walk(tree):
-            if isinstance(node, ast.ImportFrom):
-                self.assertNotIn("ledger_store", node.module or "")
-            if isinstance(node, ast.Import):
-                for alias in node.names:
-                    self.assertNotIn("ledger_store", alias.name)
+        modules = {node.module for node in ast.walk(tree)
+                   if isinstance(node, ast.ImportFrom)}
+        self.assertNotIn("scythe_promotion_ledger_store", modules)
+        self.assertIn("scythe_promotion_ledger_writer", modules)
 
 
 class WriteResultTests(unittest.TestCase):
@@ -988,15 +986,13 @@ class CriticalSectionScopeTests(unittest.TestCase):
         self.assertNotIn("Lock", source)
         self.assertNotIn("self._lock", source)
 
-    def test_the_durable_ledger_store_is_still_not_imported(self):
-        """Slice 5's reader stays disconnected from the coordinator until
-        slice 6."""
-        for node in ast.walk(self.tree):
-            if isinstance(node, ast.ImportFrom):
-                self.assertNotIn("ledger_store", node.module or "")
-            if isinstance(node, ast.Import):
-                for alias in node.names:
-                    self.assertNotIn("ledger_store", alias.name)
+    def test_the_ownership_module_is_not_imported(self):
+        """The coordinator is handed a writer; how ownership was obtained is
+        not its business, and importing the producer would make it so."""
+        modules = {node.module for node in ast.walk(self.tree)
+                   if isinstance(node, ast.ImportFrom)}
+        self.assertNotIn("scythe_promotion_ledger_ownership", modules)
+        self.assertNotIn("fcntl", modules)
 
 
 if __name__ == "__main__":

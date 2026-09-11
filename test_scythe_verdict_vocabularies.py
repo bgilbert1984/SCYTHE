@@ -45,6 +45,8 @@ EXECUTABILITY_SOURCES = (
     ("scythe_promotion_ledger_store", "RESERVATION_DURABILITY_UNATTESTED"),
     ("scythe_promotion_ledger_writer", "LEDGER_NOT_OWNED"),
     ("scythe_promotion_ledger_writer", "LEDGER_GENERATION_UNDECLARED"),
+    ("scythe_promotion_ledger_writer", "OWNERSHIP_LOST"),
+    ("scythe_promotion_ledger_writer", "RESERVATION_NOT_DURABLE"),
 )
 
 
