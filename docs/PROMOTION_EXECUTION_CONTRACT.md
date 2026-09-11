@@ -9,8 +9,8 @@ Amendment B:            §13a three-state writer result — ACCEPTED 2026-09-10
 Amendment C:            §13b RETRY_REQUIRES_OPERATOR — ACCEPTED 2026-09-10
 Amendment D:            §13c sequence, generation, gated write — ACCEPTED
                         2026-09-10
-Amendment E:            §13d ownership, seeding, durability — PROPOSED
-                        2026-09-10
+Amendment E:            §13d ownership, seeding, durability — ACCEPTED
+                        2026-09-10, E.6 on the drafter's recommendation
 Authority:              NORMATIVE
 Constrains:             Step 4 of the promotion sequence (execution adapter)
 Depends on:             SCYTHE_VERDICT_VOCABULARIES.md  (ACCEPTED — §5 declares
@@ -979,8 +979,8 @@ adapter slice 9, ARMED slice 11.
 
 ## 13d. Amendment E — how ownership is obtained, and what it costs to hold
 
-*Proposed 2026-09-10. **Not yet accepted.** Settles what slice 6b needs and §9
-does not supply: how a lock is acquired on a ledger that may not exist, what a
+*Proposed 2026-09-10 and accepted 2026-09-10, in that order. Settles what slice
+6b needs and §9 does not supply: how a lock is acquired on a ledger that may not exist, what a
 scope's liveness is derived from, and what the durable record's failure means
 for the reservation beside it. Touches §3, §9, §10 and §17.*
 
