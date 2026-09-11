@@ -36,6 +36,13 @@ from scythe_promotion_policy import (
     CapsuleIdentity, PromotionDecision, PromotionRequest, decide_promotion,
 )
 from scythe_invariant_ledger import InvariantVerdict
+# One way: coordinator -> writer -> reader. The two ledger-readability codes
+# come through the writer rather than from the store directly, so the store
+# keeps exactly one caller and this module keeps exactly one ledger dependency.
+from scythe_promotion_ledger_writer import (
+    LEDGER_UNAVAILABLE, LEDGER_UNREADABLE, RESERVATION_NOT_DURABLE,
+    LedgerWriteRefused, LedgerWriter,
+)
 
 
 SCHEMA = "scythe.promotion-ledger.v1"
@@ -270,6 +277,20 @@ class WriteResult:
                 f"of {', '.join(WRITE_OUTCOMES)}. A bool is not one of them")
 
 
+def _reservation_record(decision: PromotionDecision, now_ns: int) -> Dict[str, Any]:
+    """What a RESERVED record carries (§7).
+
+    Both clocks, and no free text. monotonic_ns is what any decision reads;
+    utc_display is for a human and is never read by a decision path, because on
+    this host the wall clock takes ~23.5 h steps that retroactively re-render
+    past timestamps.
+    """
+    return {"identity": decision.idempotency_key,
+            "record_class": decision.record_class,
+            "monotonic_ns": now_ns,
+            "utc_display": "UNSET"}
+
+
 @dataclass
 class _Posture:
     """One posture's books: §6's two structures, kept visibly two (§13a B.6).
@@ -343,7 +364,8 @@ class PromotionCoordinator:
     def __init__(self, audit: PromotionAudit, *, mode: str = DEFAULT_MODE,
                  writer: Optional[Callable[[PromotionDecision], WriteResult]] = None,
                  budget: int = PROMOTION_BUDGET,
-                 window_s: float = PROMOTION_WINDOW_S) -> None:
+                 window_s: float = PROMOTION_WINDOW_S,
+                 ledger: Optional[LedgerWriter] = None) -> None:
         if mode not in MODES:
             raise PromotionLedgerError(f"unknown promotion mode {mode!r}")
         if mode == MODE_ARMED and writer is None:
@@ -363,6 +385,14 @@ class PromotionCoordinator:
         self._lock = threading.Lock()
         self._real = _Posture()
         self._shadow = _Posture()
+        self._ledger = ledger
+        # identity -> the seq its RESERVED record was written at, so the
+        # terminal record can name what it resolves. Held here rather than on
+        # the decision, which is frozen and is the policy's object.
+        self._durable_seq: Dict[str, int] = {}
+        self._seeded_from: Optional[str] = None
+        if ledger is not None:
+            self._seed_from_ledger(ledger)
         # Counted per set and never summed (§5). A total would answer "how many
         # refusals" with a number mixing "we judged this not worth promoting"
         # and "we declined to act at all", which is the one distinction the two
@@ -431,6 +461,37 @@ class PromotionCoordinator:
         three different reasons (§13a B.3)."""
         with self._lock:
             return tuple(sorted(self._real.identities))
+
+    def _seed_from_ledger(self, ledger: LedgerWriter) -> None:
+        """§10, and §13d E.5. Rebuilt at startup, not optional.
+
+        A coordinator that writes durably and starts from an empty identity set
+        re-promotes every identity in the file. That is worse than having no
+        ledger at all, because the fence is visible in the file and absent from
+        the behaviour -- the hardest kind of absence to notice.
+
+        The window is deliberately not rebuilt (§6): a persisted monotonic_ns
+        from a previous boot is not stale, it is meaningless.
+
+        SHADOW is seeded too, and everything fenced arrives as COMMITTED there.
+        Shadow has no writer to have been uncertain about, so reproducing the
+        real posture's RESERVED entries would make it report IDENTITY_UNRESOLVED
+        for writes it never attempted (§12).
+        """
+        read = ledger.read()
+        self._seeded_from = read.readability
+        if read.readability in (LEDGER_UNAVAILABLE, LEDGER_UNREADABLE):
+            # Nothing to seed from. ARMED refuses on the same condition, and
+            # SHADOW keeps observing with a fidelity that says it is unseeded.
+            return
+        for identity in read.committed:
+            self._real.identities[identity] = COMMITTED
+        for identity in read.write_failed:
+            self._real.identities[identity] = FAILED
+        for identity in read.unresolved:
+            self._real.identities[identity] = RESERVED
+        for identity in read.fenced:
+            self._shadow.identities[identity] = COMMITTED
 
     def _count_merit(self, refusals: Sequence[str]) -> None:
         for refusal in refusals:
@@ -555,6 +616,20 @@ class PromotionCoordinator:
                      "record_class": decision.record_class,
                      "idempotency_key": decision.idempotency_key}, None)
 
+        # The durable record IS the reservation (§13d E.4). If it refuses,
+        # nothing is reserved in memory either: reserving anyway would give a
+        # fence that exists until the next restart and then does not, which is
+        # the failure that looks like success.
+        if self._ledger is not None and self.mode != MODE_SHADOW:
+            try:
+                with self._ledger.owned() as session:
+                    self._durable_seq[decision.idempotency_key] = (
+                        session.append_reserved(
+                            _reservation_record(decision, now_ns)))
+            except LedgerWriteRefused as refused:
+                return (self._refuse_unlocked(refused.code, decision, now_ns,
+                                              durable=False), None)
+
         # Reserved BEFORE the write, and kept whatever the writer reports.
         #
         # A crash between the two leaves a reservation whose record was never
@@ -572,10 +647,18 @@ class PromotionCoordinator:
         return ({}, decision)
 
     def _refuse_unlocked(self, code: str, decision: PromotionDecision,
-                         now_ns: int) -> Dict[str, Any]:
+                         now_ns: int, *, durable: bool = True) -> Dict[str, Any]:
         """An executability refusal: we declined to act, and the finding may be
-        entirely promotable."""
+        entirely promotable.
+
+        `durable=False` marks a refusal that came from the ledger rather than
+        from the coordinator's own state. RESERVATION_NOT_DURABLE is the one
+        case where the identity is still fenced afterwards -- the record may
+        have reached the disk, and a released identity may be promoted again.
+        """
         self._count_executability(code)
+        if code == RESERVATION_NOT_DURABLE:
+            self._posture_unlocked().reserve(decision.idempotency_key, now_ns)
         event = (WOULD_BE_SUPPRESSED if self.mode == MODE_SHADOW
                  else PROMOTION_SUPPRESSED)
         self._audit.record(event, mode=self.mode, reason=code,
@@ -616,8 +699,31 @@ class PromotionCoordinator:
                     # policy applied to content that should not be here at all.
                     "detail": dict({"cause": cause}, **evidence)}
 
-        self._real.resolve(decision.idempotency_key,
-                           COMMITTED if outcome == CREATED else FAILED)
+        state = COMMITTED if outcome == CREATED else FAILED
+        if self._ledger is not None:
+            # The terminal record before the in-memory resolution, for the same
+            # reason the reservation went first: memory is a cache of the file.
+            # A refusal here leaves the identity RESERVED, which is unresolved
+            # -- correct, because the terminal record did not land.
+            reserves = self._durable_seq.get(decision.idempotency_key)
+            try:
+                if reserves is None:
+                    raise LedgerWriteRefused(
+                        LEDGER_UNREADABLE,
+                        "no durable reservation was recorded for this identity")
+                with self._ledger.owned() as session:
+                    session.append_terminal(state, reserves)
+                self._durable_seq.pop(decision.idempotency_key, None)
+            except LedgerWriteRefused as refused:
+                self._count_executability(refused.code)
+                return {"mode": self.mode,
+                        "outcome": PROMOTION_OUTCOME_UNRESOLVED,
+                        "executability_code": IDENTITY_UNRESOLVED,
+                        "record_class": decision.record_class,
+                        "idempotency_key": decision.idempotency_key,
+                        "detail": {"cause": ADAPTER_REPORTED_UNKNOWN,
+                                   "terminal_record": refused.code}}
+        self._real.resolve(decision.idempotency_key, state)
         event = PROMOTION_RECORDED if outcome == CREATED else PROMOTION_FAILED
         self._audit.record(event, mode=self.mode, reason="ELIGIBLE",
                            idempotency_key=decision.idempotency_key,
@@ -706,11 +812,13 @@ class PromotionCoordinator:
             "write_outcomes": list(WRITE_OUTCOMES),
             "unresolved_causes": list(UNRESOLVED_CAUSES),
             "coordinator_lock": "PLAIN_LOCK",
+            "durable_ledger_connected": self._ledger is not None,
+            "seeded_from_ledger": self._seeded_from,
             "lock_note": (
                 "DECISION, BUDGET AND RESERVATION ARE ATOMIC. THE WRITER IS "
                 "CALLED WITH THE LOCK RELEASED, AND THE TERMINAL UPDATE "
                 "REACQUIRES IT"),
-            "durable_ledger": "NOT_IMPLEMENTED",
+
             "shadow_simulates_idempotency": True,
             "shadow_note": (
                 "SHADOW SPENDS A SIMULATED LEDGER SO ITS RECORD SHOWS WHAT "
