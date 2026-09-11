@@ -143,9 +143,20 @@ has to fail loudly rather than pass quietly. The trade is real: discovery
 produces false positives against tuples that are not vocabularies, and §3's own
 rule says a check that cries wolf is one an author learns to skip.
 
-Not fixed here: slice 7 is authorized as contract work only, and this is a test
-change. It is the first thing slice 7's code should do, and until then the check
-is known-incomplete rather than trusted.
+**Repaired as slice 7's first code change (2026-09-10).** The universe is now
+discovered — every module-level token in every non-test module, 300 of them,
+against 25 in the hand-listed merit set. `rf_capture_recovery`'s 21 tokens are
+discovered, of which the old universe contained one.
+
+The false-positive cost §3 predicts is paid by a `JUDGED` table rather than by
+silence: a hit is either a real collision or a recorded judgement with a reason,
+and there is no third state. Erasing one by renaming a token that did not need
+renaming is not available, and a judgement must name a hit that actually
+collides **and** a token the tree actually declares — a test that caught a
+judgement recorded against `RELEASED`, which nothing declares, on its first run.
+
+The entry stays open for the part that is still true: the *document* describes
+the by-hand check. §3 should say what the implementation now does.
 
 A false positive is the safe direction — it costs a rename that was not needed —
 so this is a refinement and not a defect.
