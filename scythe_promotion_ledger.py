@@ -26,6 +26,7 @@ yet, so ARMED cannot be constructed in production until one exists.
 from __future__ import annotations
 
 import bisect
+import os
 from collections import deque
 from dataclasses import dataclass, field
 import threading
@@ -295,6 +296,26 @@ def _reservation_record(decision: PromotionDecision, now_ns: int) -> Dict[str, A
             "utc_display": "UNSET"}
 
 
+def _reservation_facts(ledger: LedgerWriter, decision: PromotionDecision,
+                       seq: int) -> Any:
+    """The immutable ledger facts one reservation yields (§13g H.1).
+
+    Imported lazily so the coordinator does not depend on the adapter: a
+    coordinator with a plain writer never reaches this, and slice 9 adds no
+    production path that does.
+    """
+    from scythe_graphops_adapter import ReservationFacts
+
+    read = ledger.read()
+    return ReservationFacts(
+        lineage_id=os.path.basename(ledger.path).rsplit(".", 2)[0],
+        generation_id=read.generation or "UNDECLARED",
+        reservation_seq=seq,
+        subject_identity=decision.idempotency_key,
+        payload={"record_class": decision.record_class,
+                 "identity": decision.idempotency_key})
+
+
 @dataclass
 class _Posture:
     """One posture's books: §6's two structures, kept visibly two (§13a B.6).
@@ -394,6 +415,9 @@ class PromotionCoordinator:
         # terminal record can name what it resolves. Held here rather than on
         # the decision, which is frozen and is the policy's object.
         self._durable_seq: Dict[str, int] = {}
+        # identity -> the immutable facts an adapter derives its operation
+        # identity from. Built inside the critical section, used outside it.
+        self._facts: Dict[str, Any] = {}
         # §11, §13f. Seeded from the ledger below and maintained under the
         # lock, like the identity map: memory is a cache of the file.
         self._ceilings = CeilingTotals()
@@ -647,9 +671,11 @@ class PromotionCoordinator:
         if self._ledger is not None and self.mode != MODE_SHADOW:
             try:
                 with self._ledger.owned() as session:
-                    self._durable_seq[decision.idempotency_key] = (
-                        session.append_reserved(
-                            _reservation_record(decision, now_ns)))
+                    seq = session.append_reserved(
+                        _reservation_record(decision, now_ns))
+                    self._durable_seq[decision.idempotency_key] = seq
+                    self._facts[decision.idempotency_key] = _reservation_facts(
+                        self._ledger, decision, seq)
             except LedgerWriteRefused as refused:
                 return (self._refuse_unlocked(refused.code, decision, now_ns,
                                               durable=False), None)
@@ -785,21 +811,41 @@ class PromotionCoordinator:
         event that was never going to be written is the worse trade.
         """
         try:
-            result = self._writer(decision)
+            # An adapter needs the reservation's immutable ledger facts to
+            # derive its operation identity (§13g H.1); a plain writer does not.
+            # The attribute is the declaration, so existing writers are
+            # unaffected and an adapter cannot be called without them.
+            if getattr(self._writer, "accepts_reservation_facts", False):
+                facts = self._facts.get(decision.idempotency_key)
+                if facts is None:
+                    raise LedgerWriteRefused(
+                        LEDGER_UNREADABLE,
+                        "an adapter was given no reservation facts; its "
+                        "operation identity cannot be derived")
+                result = self._writer(facts)
+            else:
+                result = self._writer(decision)
         except Exception as exc:            # noqa: BLE001 -- see the docstring
             return (UNKNOWN, WRITER_EXCEPTION,
                     {"exception_type": type(exc).__name__}, "")
-        if not isinstance(result, WriteResult):
-            # An adapter that returned something else has told us nothing, and
-            # nothing is UNKNOWN. Never NOT_CREATED, which would be a claim.
-            #
-            # Its own cause: no exception occurred, and calling this one would
-            # send an operator looking for a failure that never happened.
+        # Checked by shape, not by class. §13a B.1 declared a WriteResult here
+        # and §13g H.3 declares a richer one in the adapter -- same three
+        # outcomes, with the adapter's carrying the operation identity and the
+        # evidence it concluded from. H's is a superset of B's, so the
+        # coordinator accepts either by the field both are about.
+        #
+        # An object with no outcome in the declared set has told us nothing, and
+        # nothing is UNKNOWN. Never NOT_CREATED, which would be a claim.
+        outcome = getattr(result, "outcome", None)
+        if outcome not in WRITE_OUTCOMES:
             return (UNKNOWN, INVALID_WRITER_RESULT,
                     {"returned_type": type(result).__name__}, "")
-        if result.outcome == UNKNOWN:
-            return UNKNOWN, ADAPTER_REPORTED_UNKNOWN, {}, result.detail
-        return result.outcome, None, {}, result.detail
+        detail = getattr(result, "detail", "")
+        if outcome == UNKNOWN:
+            evidence = getattr(result, "evidence_code", None)
+            return (UNKNOWN, ADAPTER_REPORTED_UNKNOWN,
+                    {"evidence_code": evidence} if evidence else {}, detail)
+        return outcome, None, {}, detail
 
     def status(self) -> Dict[str, Any]:
         with self._lock:
