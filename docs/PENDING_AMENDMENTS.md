@@ -116,6 +116,12 @@ record carries `run_class: APPARATUS_CERTIFICATION`, a caller may demand
 `require_live` and receive `DERIVED_EVIDENCE_UNAVAILABLE` instead of a
 substitution, and a test asserts no derived-evidence source exists here.
 
+**Amendment J (§13i) defines the interface, proposed 2026-09-12.** It settles
+the artefact class, makes `carries_samples` a finding rather than a claim, and
+keeps the interface read-only so *no acquisition* stays untouched. It does not
+drain this entry: an interface is not an artefact, and the entry waits on
+evidence existing rather than on a way to read it.
+
 **Two things are owed.**
 
 1. A derived-evidence source: an artefact this repository persists or is
