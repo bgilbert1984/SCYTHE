@@ -97,6 +97,40 @@ declared as one nowhere. The finding is recorded there because recovery has no
 contract to carry it. When one exists, it carries it, and the vocabularies
 document's conformance table gets a normal row.
 
+## 7. §17 slice 10 — the live source does not exist, and §17 still says it does
+
+**Trigger:** the first persisted or supplied derived-evidence interface. Not a
+date, and not "when convenient": the entry drains when something can produce
+derived RF evidence without acquisition.
+
+Slice 10 was authorized as live SHADOW observation. What landed is **slice 10a**,
+an apparatus certification: production checkers — `check_walk_step` and its
+contracts — driven over **constructed** inputs, because nothing in this
+repository stores derived RF evidence and §13h I.3 forbids acquiring any.
+
+The verdicts are genuine. A real `NUMERIC_BALANCE_EXCEEDED` fires once walk
+displacement accumulates past its ceiling, which is the invariant apparatus
+working rather than a fixture asserting that it does. **That does not make the
+evidence live**, and the code now says so in three places rather than one: the
+record carries `run_class: APPARATUS_CERTIFICATION`, a caller may demand
+`require_live` and receive `DERIVED_EVIDENCE_UNAVAILABLE` instead of a
+substitution, and a test asserts no derived-evidence source exists here.
+
+**Two things are owed.**
+
+1. A derived-evidence source: an artefact this repository persists or is
+   supplied, readable without acquisition, from which real verdicts follow. Only
+   then is `EVIDENCE_DERIVED_ARTEFACT` reachable and slice 10 completable.
+2. §17 still reads *"10. Live SHADOW observation of the apparatus"*, which
+   describes a stage that has not happened. It should record 10a as landed and
+   10 as open, at the contract's next amendment for a reason of its own — the
+   on-next-amendment convention, not a sweep.
+
+**The fifth stage of the six-stage sequence is not complete**, and the thing most
+likely to go wrong here is that it looks complete: there is a module, a record, a
+green suite and a passing control. The entry exists because that appearance is
+exactly what a queue is for.
+
 ---
 
 ---

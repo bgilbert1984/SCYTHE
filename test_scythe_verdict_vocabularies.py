@@ -55,6 +55,7 @@ EXECUTABILITY_SOURCES = (
     ("scythe_promotion_ceilings", "CEILING_REFUSALS"),
     ("scythe_graphops_adapter", "EVIDENCE_CODES"),
     ("scythe_graphops_adapter", "ADAPTER_NOT_CONFORMANT"),
+    ("scythe_shadow_observation", "OBSERVATION_REFUSALS"),
 )
 
 
