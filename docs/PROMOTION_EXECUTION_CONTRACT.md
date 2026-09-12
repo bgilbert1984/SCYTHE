@@ -17,6 +17,8 @@ Amendment F:            §13e reconciliation by supersession — ACCEPTED
 Amendment G:            §13f the two ceilings, declared — ACCEPTED 2026-09-11,
                         after review renamed the C2 refusal
 Amendment H:            §13g the execution boundary — ACCEPTED 2026-09-12
+Amendment I:            §13h what live SHADOW can observe — PROPOSED
+                        2026-09-12
 Authority:              NORMATIVE
 Constrains:             Step 4 of the promotion sequence (execution adapter)
 Depends on:             SCYTHE_VERDICT_VOCABULARIES.md  (ACCEPTED — §5 declares
@@ -560,8 +562,10 @@ identity set from real history.
 
 Without seeding, SHADOW measures a system that does not exist: starting from an
 empty history it systematically under-counts `WOULD_BE_REFUSED` and over-counts
-`WOULD_PROMOTE`, and the whole purpose of the shadow slice is to predict what
-ARMED would do. This is the same argument that gave SHADOW a simulated budget in
+`WOULD_PROMOTE`. *Amended by §13h I.1: the purpose stated here — to predict what
+ARMED would do — is not achievable, because ARMED's rate depends on a requester
+that does not exist. SHADOW observes the apparatus instead, and says so in its
+own record.* This is the same argument that gave SHADOW a simulated budget in
 the first place.
 
 SHADOW does not take the exclusive lock, so it may run beside an ARMED writer.
@@ -1845,6 +1849,134 @@ rather than what is missing from a file.
 
 ---
 
+## 13h. Amendment I — what live SHADOW can actually observe
+
+*Proposed 2026-09-12. **Not yet accepted.** Narrows §12's claim before slice 10
+implements it, because the claim as written cannot be met. Touches §12 and §17.*
+
+### I.1 SHADOW cannot predict what ARMED would do
+
+§12 says the whole purpose of the shadow slice is to predict what ARMED would
+do. That is not achievable, and the reason is structural rather than a matter of
+effort.
+
+`decide_promotion` requires a `PromotionRequest`. **Nothing in production builds
+one.** `PromotionRequest` and `CapsuleIdentity` are constructed in exactly two
+places in this tree: the module that defines them, and tests. `PromotionCoordinator`
+has never been instantiated outside a test either.
+
+Real verdicts do exist — `rf_walk_transitions` and `rf_sparse_accounting` call
+`check_transition` over real evidence and produce genuine `InvariantVerdict`s.
+**The checks are live and the asking is not.**
+
+And the asking cannot be supplied, because `scythe_promotion_policy` already
+rules it out: *frame arrival, a completed check, a model's commentary — none of
+these is an ask, and the absence of one is not a refusal either.* A SHADOW that
+synthesized a request per verdict would measure a system in which every finding
+is requested, which is not the system and never will be by that rule.
+
+> **ARMED's promotion rate depends on a requester that does not exist. It is
+> undefined, not merely unobserved, and SHADOW cannot forecast it.**
+
+### I.2 What it observes instead: the apparatus
+
+Slice 10 observes the machinery against real verdicts — whether seeding works on
+a real ledger, whether the budget and the ceilings engage, whether promotion
+identity is stable across real evidence, and whether the file is byte-identical
+afterwards.
+
+That is a smaller claim than "live SHADOW observation" sounds like, and it is
+written here rather than left to a code comment so the record cannot quietly
+grow back into a forecast.
+
+**Every synthesized request is marked `SYNTHETIC_REQUEST` in the record**, and
+the record states in its own text that it is an apparatus observation and
+`NOT_A_PREDICTION`. A reader who takes a promotion count from it and calls it a
+rate is then contradicting the document they are reading, which is the most a
+document can do.
+
+§12's testable property is unchanged and finally testable where it was meant to
+be: slice 5 proved byte-identity against a temporary directory, and §12's claim
+is about a live run beside a possible writer.
+
+### I.3 Verdicts come from checks, never from acquisition
+
+The source is the existing transition checkers over evidence that already
+exists. **Slice 10 initiates no capture and opens no `rtl_tcp`.**
+
+The raw-IQ and loopback-binding constraints are therefore not engaged carefully
+— they are not engaged at all, which is the stronger position. A slice that
+acquires in order to observe would have to argue that it handled raw IQ
+correctly; this one does not have the buffer.
+
+### I.4 The observation record
+
+Written **once, at the end of a bounded run**, to a configured path **outside the
+lineage root**, and never appended to.
+
+Not merely differently named. `Lineage.published()` matches
+`<root>.NNNNNN.jsonl` and would ignore it, but relying on a filename pattern to
+keep a non-ledger out of the ledger is the near-miss this contract has spent
+nine slices removing. **A file that accumulates is a second ledger nobody
+accepted.**
+
+It carries: verdicts seen and their dispositions; simulated promotions and
+refusals by code, with the two vocabularies counted separately (§5); the durable
+ceiling totals read from the real ledger and the simulated ones named apart
+(§13f G.7); what it seeded from; the byte-identical proof as a digest before and
+after; and the configuration identities already defined, so the record says
+which contract it was taken under.
+
+### I.5 Two bounds, and reaching either is a normal ending
+
+The run ends on whichever arrives first:
+
+```
+VERDICT_COUNT_REACHED          a declared number of verdicts observed
+OBSERVATION_DURATION_REACHED   a declared monotonic duration elapsed
+```
+
+**Monotonic, never the wall clock.** On this host UTC takes ~23.5 h steps that
+retroactively re-render past timestamps, which is why §6 will not persist a
+window and why a duration bound measured in UTC would be a number that looks
+like a duration and is not one.
+
+Reaching either bound is recorded as a normal ending. Neither is an error, and a
+run that ends because it saw everything it was asked to see has succeeded.
+
+### I.6 Foreground, in-process, and it stops by itself
+
+**No daemon, no background process, no scheduled task.** The Windows Scheduled
+Task remains documentation-only, and this is not the slice that changes it.
+
+Everything since slice 3 has been provable in a test; this one executes against
+real data, which changes the risk in kind rather than in degree. This repository
+carries a wedged PID from the last time something ran and did not stop, and the
+recovery work exists because of it. A bounded foreground run cannot become that.
+
+### I.7 A run that fails still writes its record
+
+If the observation ends on an exception rather than on a bound, it **still
+writes the record**, marked `OBSERVATION_INTERRUPTED` and naming the bound it did
+not reach.
+
+An observation that produces nothing when it fails is indistinguishable from one
+that never started, and the difference between those two is the only thing the
+record was for.
+
+### I.8 What slice 10 must not do
+
+No ARMED constructor, no adapter invocation, no ledger append, no capture, no
+`rtl_tcp`, no recovery arming, no scheduled task, no background process, and
+nothing that touches PID `315535`.
+
+### I.9 The name check
+
+Eight candidates run against the discovered universe before any was written.
+All eight clear, and none required a judgement.
+
+---
+
 ## 14. What this does not do
 
 - It does **not** make the graph write idempotent. It prevents *this coordinator*
@@ -2112,6 +2244,27 @@ already written down. Introduced by Amendment B, noticed by Amendment C.*
     hash is part of the adapter's configuration identity.
 32q. Once an attempt is `UNKNOWN`, no further adapter call is made for that
     reservation — AST and behaviour.
+
+**Amendment I (§13h)**
+
+33a. The observation record declares itself `NOT_A_PREDICTION` and marks every
+    synthesized request `SYNTHETIC_REQUEST`.
+33b. The ledger file is byte-identical across a live observation, proven by a
+    digest before and after, and the record carries both.
+33c. The record is written outside the lineage root, and a `Lineage` rooted
+    there does not discover it as a generation.
+33d. The record is written once and never appended to: a second run at one path
+    is refused rather than extending the first.
+33e. A run ends on `VERDICT_COUNT_REACHED` or `OBSERVATION_DURATION_REACHED`,
+    whichever is first, and both are normal endings.
+33f. The duration bound is monotonic; no decision path reads a wall clock — AST.
+33g. A run that ends on an exception still writes its record, marked
+    `OBSERVATION_INTERRUPTED` and naming the bound it did not reach.
+33h. The observer initiates no capture and opens no socket — AST.
+33i. The observer appends nothing to the ledger and constructs no ARMED
+    coordinator and no adapter — AST.
+33j. Merit and executability counts are reported separately in the record, and
+    durable and simulated ceiling totals are named apart.
 31b. Every declared ceiling states subject, accounting source, scope, reset rule
     and refusal; a ceiling missing any of them is refused at construction.
 31c. C1 counts reservations regardless of terminal outcome: a writer that never
@@ -2276,7 +2429,17 @@ produced it.
     choose our hash. Recorded so a tidy-up finds the reason before the edit.
 44. **Having a query method is not having the authority to use it** (§13g H.6).
     The adapter acquiring a lookup is exactly when that stops being obvious.
-45. **An endpoint does not imply a capability** (§13g H.7). Conformance is a
+45. **SHADOW observes the apparatus, not a promotion rate** (§13h I.1). §12's
+    stated purpose is unachievable: ARMED's rate depends on a requester that
+    does not exist, and synthesizing one would measure a system in which every
+    finding is requested — which the policy's own rule forbids.
+46. **The observer acquires nothing** (§13h I.3). A slice that captured in order
+    to observe would have to argue it handled raw IQ correctly; this one has no
+    buffer to argue about.
+47. **A failed observation still writes its record** (§13h I.7). One that
+    produces nothing when it fails cannot be told from one that never started,
+    and that difference is what the record was for.
+48. **An endpoint does not imply a capability** (§13g H.7). Conformance is a
     reviewed declaration hashed into configuration identity, at a boundary where
     the other party can change without telling us. SHADOW cannot generate new unresolved reservations and can certainly
     observe real ones, and reporting zero would be a false statement about the
@@ -2318,7 +2481,9 @@ amendment is accepted:
 9. Execution adapter with one fixed WriteBus schema (§13g). Stable operation
    identity, closed command, closed result, evidence-based classification, and
    a deterministic fake GraphOps for conformance tests.
-10. Live SHADOW observation.
+10. Live SHADOW observation of the **apparatus** (§13h), bounded, foreground,
+    in-process, initiating no capture, and writing one record outside the
+    lineage.
 11. Separate explicit authorization before any ARMED graph mutation.
 
 **Slices 4 and 5 stay separate**, and this is the boundary to protect if anything
