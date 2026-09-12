@@ -22,7 +22,7 @@ Amendment I:            §13h what live SHADOW can observe — ACCEPTED
                         and I.4a
 Amendment J:            §13i derived evidence — ACCEPTED 2026-09-12, after
                         review qualified J.3 and set exact bounds
-Amendment K:            §13j record-rate bound — PROPOSED 2026-09-12
+Amendment K:            §13j record-rate bound — ACCEPTED 2026-09-12
 Authority:              NORMATIVE
 Constrains:             Step 4 of the promotion sequence (execution adapter)
 Depends on:             SCYTHE_VERDICT_VOCABULARIES.md  (ACCEPTED — §5 declares
@@ -2308,9 +2308,9 @@ ledger's record kind — which is why the provenance record is called what it is
 
 ## 13j. Amendment K — a record-rate bound, and what it does not prove
 
-*Proposed 2026-09-12. **Not yet accepted.** Adds the fifth entry to §13i J.5's
-structural exclusion profile, so slice 10b's one-sample-per-record control has
-something real to break. Touches §13i only.*
+*Proposed 2026-09-12 and accepted 2026-09-12, in that order. Adds the fifth
+entry to §13i J.5's structural exclusion profile, so slice 10b's
+one-sample-per-record control has something real to break. Touches §13i only.*
 
 ### K.1 Why this exists, and the control that could not be written
 
