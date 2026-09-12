@@ -16,7 +16,7 @@ Amendment F:            §13e reconciliation by supersession — ACCEPTED
                         F.10
 Amendment G:            §13f the two ceilings, declared — ACCEPTED 2026-09-11,
                         after review renamed the C2 refusal
-Amendment H:            §13g the execution boundary — PROPOSED 2026-09-12
+Amendment H:            §13g the execution boundary — ACCEPTED 2026-09-12
 Authority:              NORMATIVE
 Constrains:             Step 4 of the promotion sequence (execution adapter)
 Depends on:             SCYTHE_VERDICT_VOCABULARIES.md  (ACCEPTED — §5 declares
@@ -1652,11 +1652,18 @@ No adapter, no live SHADOW, no ARMED constructor, no new closure reason —
 
 ## 13g. Amendment H — the execution boundary
 
-*Proposed 2026-09-12. **Not yet accepted.** The first contract in this document
-whose subject is **outside this repository**. Every previous amendment bounded
-something SCYTHE does to itself and could be settled by reading merged code; this
-one is a claim about what another system will accept, and it lands before an
-implementation can imply it. Touches §2, §5, §7, §11 and §17.*
+*Proposed 2026-09-12 and accepted 2026-09-12, in that order — but the proposal
+merged before the acceptance, and that is recorded here rather than tidied away.
+The omission was noticed on `main` and repaired by a forward acceptance commit,
+not a rewritten merge: treating the conversation as acceptance while the
+document said otherwise would have left a contract contradicting itself, which
+is worse than a visible two-step. Nothing in H changed between the two.*
+
+*The first contract in this document whose subject is **outside this
+repository**. Every previous amendment bounded something SCYTHE does to itself
+and could be settled by reading merged code; this one is a claim about what
+another system will accept, and it lands before an implementation can imply it.
+Touches §2, §5, §7, §11 and §17.*
 
 > **GraphOps success is a claim requiring evidence. GraphOps failure is not
 > proof that nothing happened.**
