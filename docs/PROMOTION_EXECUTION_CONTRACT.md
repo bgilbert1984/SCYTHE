@@ -16,6 +16,7 @@ Amendment F:            §13e reconciliation by supersession — ACCEPTED
                         F.10
 Amendment G:            §13f the two ceilings, declared — ACCEPTED 2026-09-11,
                         after review renamed the C2 refusal
+Amendment H:            §13g the execution boundary — PROPOSED 2026-09-12
 Authority:              NORMATIVE
 Constrains:             Step 4 of the promotion sequence (execution adapter)
 Depends on:             SCYTHE_VERDICT_VOCABULARIES.md  (ACCEPTED — §5 declares
@@ -173,7 +174,7 @@ This section instantiates that rule for the promotion sequence. The two vocabula
 | --- | --- | --- |
 | owner | `scythe_promotion_policy` | `scythe_promotion_ledger` (the coordinator) |
 | answers | is this finding fit to promote? | could we act on it at all? |
-| examples | `VERDICT_NOT_PROMOTABLE`, `CAPSULE_UNBOUND`, `DUPLICATE_PROMOTION` | `BUDGET_EXHAUSTED`, `DURABLE_CEILING_REACHED`, `OUTSTANDING_RESERVATION_CEILING_REACHED`, `IDENTITY_UNRESOLVED`, `RETRY_REQUIRES_OPERATOR`, `NOT_RECONCILABLE`, `GENERATION_CHAIN_BROKEN`, `GENERATION_LINEAGE_FORKED`, `GENERATION_PUBLICATION_UNCERTAIN`, `LEDGER_UNAVAILABLE`, `LEDGER_NOT_OWNED`, `LEDGER_TORN`, `LEDGER_GENERATION_UNDECLARED`, `OWNERSHIP_LOST`, `RESERVATION_NOT_DURABLE`, `LOCK_EXCLUSION_UNATTESTED`, `RESERVATION_DURABILITY_UNATTESTED` |
+| examples | `VERDICT_NOT_PROMOTABLE`, `CAPSULE_UNBOUND`, `DUPLICATE_PROMOTION` | `BUDGET_EXHAUSTED`, `DURABLE_CEILING_REACHED`, `OUTSTANDING_RESERVATION_CEILING_REACHED`, `IDENTITY_UNRESOLVED`, `RETRY_REQUIRES_OPERATOR`, `NOT_RECONCILABLE`, `ADAPTER_NOT_CONFORMANT`, `GENERATION_CHAIN_BROKEN`, `GENERATION_LINEAGE_FORKED`, `GENERATION_PUBLICATION_UNCERTAIN`, `LEDGER_UNAVAILABLE`, `LEDGER_NOT_OWNED`, `LEDGER_TORN`, `LEDGER_GENERATION_UNDECLARED`, `OWNERSHIP_LOST`, `RESERVATION_NOT_DURABLE`, `LOCK_EXCLUSION_UNATTESTED`, `RESERVATION_DURABILITY_UNATTESTED` |
 | repaired by | changing the finding, or accepting the judgement | fixing the apparatus; the finding may be sound |
 
 The coordinator **returns** `IDENTITY_UNRESOLVED` on a second evaluation of an
@@ -1649,6 +1650,194 @@ No adapter, no live SHADOW, no ARMED constructor, no new closure reason —
 
 ---
 
+## 13g. Amendment H — the execution boundary
+
+*Proposed 2026-09-12. **Not yet accepted.** The first contract in this document
+whose subject is **outside this repository**. Every previous amendment bounded
+something SCYTHE does to itself and could be settled by reading merged code; this
+one is a claim about what another system will accept, and it lands before an
+implementation can imply it. Touches §2, §5, §7, §11 and §17.*
+
+> **GraphOps success is a claim requiring evidence. GraphOps failure is not
+> proof that nothing happened.**
+
+Everything below follows from those two sentences being different shapes.
+
+### H.1 One reservation addresses one operation, forever
+
+Every durable reservation deterministically yields a **stable operation
+identity**:
+
+```
+promotion_operation_id =
+    SHA-256( schema_version || lineage_id || generation_id || reservation_seq
+             || subject_identity || canonical_payload_digest )
+```
+
+**The adapter may not mint a fresh identity on retry.** One reservation always
+addresses the same GraphOps operation, so a second attempt is the *same*
+operation rather than a new one, and GraphOps can refuse it without SCYTHE
+having to know whether the first arrived. Different payload bytes under one
+operation identity are an **integrity conflict**, not a new version.
+
+**SHA-256 rather than blake2s, deliberately.** Everything internal here uses
+blake2s — `verdict_digest`, the successor digest, the ceiling configuration
+identity. This one crosses a boundary and must be computable by a system that
+did not choose our hash. Recorded so a later reader tidying for consistency
+finds the reason before the edit.
+
+**GraphOps must enforce atomic create-if-absent on this identity.** If it
+cannot, the adapter is not conformant and cannot support ARMED
+(`ADAPTER_NOT_CONFORMANT`). This is not a preference: without it, *the same
+reservation attempted twice* and *two reservations* are indistinguishable at the
+far end, and the fence this contract spent eight slices building stops at our
+side of the wire.
+
+### H.2 The canonical command
+
+One closed, versioned structure carrying only fields GraphOps has agreed to
+accept: schema version, `promotion_operation_id`, lineage and generation
+identifiers, reservation sequence, subject identity, canonical payload, payload
+digest, and contract/configuration identity. Serialization is deterministic.
+
+**Secrets, credentials, headers, URLs, exception text and GraphOps response
+bodies never enter the ledger or structured evidence.** The rule §13a B.2 set
+for exception messages and §13d E.6 for write outcomes, applied where the
+temptation is largest: a response body is the one artefact that would make
+debugging easy, and it is arbitrary text from another system.
+
+### H.3 The adapter result is closed
+
+```python
+@dataclass(frozen=True)
+class WriteResult:
+    outcome: Literal["CREATED", "NOT_CREATED", "UNKNOWN"]
+    operation_id: str
+    payload_digest: str
+    evidence_code: str
+    receipt_digest: str | None
+```
+
+No free-text detail, no raw body. `evidence_code` is a closed set, and it is
+what makes the three-state result auditable: the outcome says what we concluded,
+the evidence code says what we concluded it *from*.
+
+### H.4 Classification, and what each state must be able to show
+
+**`CREATED` — only on authoritative evidence** that GraphOps holds the mutation
+under the expected operation identity *and* payload digest:
+
+- a valid creation receipt (`CREATION_RECEIPT_VALID`), or
+- an idempotent already-exists whose stored digest matches exactly
+  (`IDEMPOTENT_MATCH`).
+
+**Already-exists with a different digest is not success.** It is
+`IDEMPOTENT_DIGEST_CONFLICT`, classified `UNKNOWN`, and it halts the adapter:
+something under our operation identity is not what we sent, and no further
+attempt can improve that.
+
+**`NOT_CREATED` — only on authoritative evidence** that the mutation did not
+occur: local validation failed before transport (`LOCAL_VALIDATION_REFUSED`);
+the transport attests no request bytes were submitted (`SUBMISSION_NEVER_BEGAN`);
+a defined, authenticated, mutation-free rejection (`MUTATION_FREE_REJECTION`); or
+a strongly consistent lookup proving absence where the GraphOps contract
+guarantees absence is authoritative (`AUTHORITATIVE_ABSENCE`).
+
+> **DNS failure and connection refusal are `NOT_CREATED` only if the transport
+> seam can positively attest that submission never began — never because
+> creation seems unlikely.**
+
+That sentence is the whole amendment in miniature. A connection refused *looks*
+like nothing happened, and looking like nothing happened is exactly the evidence
+this contract does not accept. The seam must *know*, and if it does not, the
+answer is `UNKNOWN`.
+
+**`UNKNOWN` — every ambiguous boundary**, and the list is long on purpose:
+timeout after submission may have begun; connection loss after any request bytes
+were sent (`SUBMISSION_BOUNDARY_CROSSED`); cancellation during submission;
+service failure without a mutation-free guarantee; a malformed
+(`RECEIPT_MALFORMED`) or unauthenticated (`RECEIPT_UNAUTHENTICATED`) receipt; a
+receipt whose operation identity or digest does not match
+(`RECEIPT_IDENTITY_MISMATCH`); a conflicting existing object; a weakly
+consistent or unavailable read-back (`LOOKUP_INCONCLUSIVE`); an adapter
+exception with no stronger bounded evidence (`TRANSPORT_INTERRUPTED`).
+
+**When uncertain, `UNKNOWN`. No silent retry.**
+
+### H.5 The coordinator sequence, unchanged, and what each result costs
+
+§3's order stands: checks and the durable reservation under the lock, exactly
+**one** adapter attempt with the lock released, the terminal record under the
+reacquired lock, and posture updated only after that record is durable.
+
+| the adapter says | ledger | consequence |
+| --- | --- | --- |
+| `CREATED` | append `COMMITTED` | the identity is promoted |
+| `NOT_CREATED` | append `FAILED` | fenced; release still requires §13e F.2's authority |
+| `UNKNOWN` | **append nothing** | the reservation stays unresolved and counts toward C2 |
+
+**A crash after GraphOps created the object and before the committed record is
+appended leaves the reservation unresolved on restart, and never triggers
+re-execution.** That is reserve-before-write paying out at the far boundary: the
+ledger under-claims, an operator reconciles, and nothing duplicates.
+
+**A terminal-record failure after `CREATED`** leaves the graph object in place
+and the ledger unable to say so. §13d E.6 already halts appends in that process;
+the object is preserved, the reservation is unresolved, and the repair is
+reconciliation. Losing the terminal record is the safe direction precisely
+because this is what it costs.
+
+### H.6 No automatic retry after ambiguity
+
+**Automatic retry is permitted only where the adapter can prove submission never
+began** — and in that case the result was already `NOT_CREATED`, so there is no
+ambiguity to retry through. **Once an attempt is `UNKNOWN`, SCYTHE does not
+invoke GraphOps again for that reservation.**
+
+Resolution is Amendment F's, using the stable operation identity: an exact
+identity-and-digest match reconciles committed; authoritative absence makes the
+identity eligible for an operator-governed release; a conflict or an
+inconclusive lookup leaves it unresolved.
+
+**Slice 9 must not automate that authority merely because the adapter has a
+query method.** Having the means is not having the authority, and the adapter
+acquiring a lookup is exactly when that distinction stops being obvious.
+
+### H.7 Conformance is declared, not configured
+
+**An endpoint does not imply a capability.** An adapter is conformant only when a
+versioned declaration establishes: atomic idempotency-key enforcement; stable
+operation lookup; receipt authentication or otherwise authoritative provenance;
+payload-digest echo or lookup; consistency semantics; mutation-free rejection
+codes; maximum request and response sizes; timeout and cancellation behaviour.
+
+That declaration is **hashed into the adapter's configuration identity**, as the
+ceilings are (§13f G.4). A changed GraphOps contract requires a new reviewed
+identity and not a quiet environment-variable edit — the same rule, for the same
+reason, at a boundary where the other party can change without telling us.
+
+### H.8 What slice 9 may and may not do
+
+**May:** the adapter protocol, a command encoder, a transport seam, receipt
+validation, result classification, coordinator composition behind the existing
+unreachable ARMED boundary, and a deterministic fake GraphOps for conformance
+tests.
+
+**May not:** a production ARMED constructor, live credentials, an enabled
+endpoint, live SHADOW, automatic reconciliation, Step 4 authority, or any graph
+mutation from the current process.
+
+### H.9 The name check
+
+Sixteen candidates were run against the discovered universe before any was
+written here. Fifteen are clear. One was **rejected rather than judged**:
+`GRAPHOPS_CONFORMANCE_UNDECLARED` is a negation pair with `OPERATOR_DECLARED`,
+`MODEL_DECLARED` and `UNDECLARED` across the RF modules. The refusal is
+`ADAPTER_NOT_CONFORMANT`, which is clear and says what is wrong with the adapter
+rather than what is missing from a file.
+
+---
+
 ## 14. What this does not do
 
 - It does **not** make the graph write idempotent. It prevents *this coordinator*
@@ -1886,6 +2075,36 @@ already written down. Introduced by Amendment B, noticed by Amendment C.*
     refusal is a merit finding.
 31o. The C2 refusal names its subject: `OUTSTANDING_RESERVATION_CEILING_REACHED`
     is declared, and no ceiling code contains the component `UNRESOLVED`.
+
+**Amendment H (§13g)**
+
+32a. A creation receipt with matching operation identity and payload digest is
+    `CREATED`.
+32b. An existing operation with an exactly matching digest is `CREATED`, and no
+    second object is created.
+32c. An existing operation with a **different** digest is `UNKNOWN` and halts
+    the adapter.
+32d. A proven pre-submission refusal is `NOT_CREATED`.
+32e. A timeout before any proven submission is classified from **positive
+    transport evidence**, never from elapsed time.
+32f. A timeout after one submitted byte is `UNKNOWN`.
+32g. A disconnect after a complete request is `UNKNOWN`.
+32h. A malformed, oversized or unauthenticated receipt is `UNKNOWN`.
+32i. A created graph object followed by a coordinator crash leaves the
+    reservation unresolved after restart, with no automatic retry.
+32j. A terminal-record failure after `CREATED` preserves the graph object, halts
+    appends in that process, and leaves the repair to reconciliation.
+32k. The adapter is invoked with the coordinator lock **released**.
+32l. A ceiling refusal invokes no adapter.
+32m. SHADOW invokes no adapter.
+32n. Raw responses, credentials, headers, URLs and exception strings reach
+    neither the ledger nor `status()` nor the audit ring.
+32o. The operation identity is derived from immutable ledger facts and is
+    **identical** across two attempts at one reservation.
+32p. A conformance declaration is required before ARMED is supportable, and its
+    hash is part of the adapter's configuration identity.
+32q. Once an attempt is `UNKNOWN`, no further adapter call is made for that
+    reservation — AST and behaviour.
 31b. Every declared ceiling states subject, accounting source, scope, reset rule
     and refusal; a ceiling missing any of them is refused at construction.
 31c. C1 counts reservations regardless of terminal outcome: a writer that never
@@ -2037,7 +2256,22 @@ produced it.
     have made a third use permanent on the grounds that the prose uses the word
     — which is a reason to keep the prose.
 40. **Durable and simulated totals are never published under one name** (§13f
-    G.7). SHADOW cannot generate new unresolved reservations and can certainly
+    G.7).
+41. **GraphOps failure is not proof that nothing happened** (§13g). A refused
+    connection looks like nothing happened, and looking like nothing happened
+    is the evidence this contract does not accept.
+42. **One reservation addresses one operation identity, forever** (§13g H.1). A
+    fresh identity on retry makes *the same reservation twice* and *two
+    reservations* indistinguishable at the far end, and the fence stops at our
+    side of the wire.
+43. **SHA-256 for the operation identity, not blake2s** (§13g H.1). Everything
+    internal uses blake2s; this one must be computable by a system that did not
+    choose our hash. Recorded so a tidy-up finds the reason before the edit.
+44. **Having a query method is not having the authority to use it** (§13g H.6).
+    The adapter acquiring a lookup is exactly when that stops being obvious.
+45. **An endpoint does not imply a capability** (§13g H.7). Conformance is a
+    reviewed declaration hashed into configuration identity, at a boundary where
+    the other party can change without telling us. SHADOW cannot generate new unresolved reservations and can certainly
     observe real ones, and reporting zero would be a false statement about the
     record rather than an honest one about simulation.
 30. **Operator evidence is a closed token set with no notes field** (§13e F.7).
@@ -2074,7 +2308,9 @@ amendment is accepted:
    and generation closure are two operations, and the second ends the closing
    process's ownership.
 8. Ceilings C1 and C2 (§11).
-9. Execution adapter with one fixed WriteBus schema.
+9. Execution adapter with one fixed WriteBus schema (§13g). Stable operation
+   identity, closed command, closed result, evidence-based classification, and
+   a deterministic fake GraphOps for conformance tests.
 10. Live SHADOW observation.
 11. Separate explicit authorization before any ARMED graph mutation.
 
