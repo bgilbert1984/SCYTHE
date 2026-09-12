@@ -14,6 +14,7 @@ Amendment E:            §13d ownership, seeding, durability — ACCEPTED
 Amendment F:            §13e reconciliation by supersession — ACCEPTED
                         2026-09-10, after review strengthened F.6 and added
                         F.10
+Amendment G:            §13f the two ceilings, declared — PROPOSED 2026-09-11
 Authority:              NORMATIVE
 Constrains:             Step 4 of the promotion sequence (execution adapter)
 Depends on:             SCYTHE_VERDICT_VOCABULARIES.md  (ACCEPTED — §5 declares
@@ -510,9 +511,12 @@ second bound, a crash loop would refill the budget on every restart — the
 amplification the breaker exists to prevent, arriving through the breaker's own
 reset path.
 
-Both bounds are **one-sided ceilings on durable totals**, clock-free, and are the
-`BoundedCeiling` invariant class this repository already defines. Two ceilings
-over one durable structure, not two kinds of ceiling.
+Both bounds are **one-sided ceilings on durable totals**, clock-free, and are
+ceilings of the kind `BoundedCeiling` describes — one-sided rather than
+two-sided, and undeclared without a published accounting basis. *Amended by §13f
+G.1: the class itself is **not** reused, because its violations are merit
+findings and these refusals are executability codes.* Two ceilings over one
+durable structure, not two kinds of ceiling.
 
 ```
 C1   reservations made in this generation        <=  RESERVATION_CEILING
@@ -530,6 +534,9 @@ the same ledger authority as reconciliation (§8). Any per-boot scoping would
 reintroduce the refill path this section closes.
 
 **C2 is cleared by reconciliation** (§8), not by time and not by restart.
+*Amended by §13f G.3: C2 counts **unresolved** reservations — `RESERVED` with
+neither a valid terminal nor a valid reconciliation record — across the whole
+lineage, and generation closure does not clear it. `FAILED` does not count.*
 
 **On the value of C1.** It is not a rate limit and must not be tuned near the
 expected promotion rate. It is a *this has gone wrong* bound: roughly an order of
@@ -538,7 +545,9 @@ generation. **If it ever fires during correct operation, it was set wrong — an
 that is its calibration test.**
 
 Both refusals are executability codes (§5): `DURABLE_CEILING_REACHED`,
-`UNRESOLVED_CEILING_REACHED`.
+`UNRESOLVED_CEILING_REACHED`. Both are checked **before** the durable append and
+a refusal writes no record (§13f G.5); both totals are seeded from the ledger
+(§13f G.6); the values are contract-declared constants (§13f G.4).
 
 ---
 
@@ -1418,6 +1427,189 @@ the configuration can name a second lock for the same lineage.
 
 ---
 
+## 13f. Amendment G — the two ceilings, declared
+
+*Proposed 2026-09-11. **Not yet accepted.** Settles §11 before slice 8 is
+written. Touches §5, §11 and §12.*
+
+### G.1 `BoundedCeiling` is not reused
+
+§11 said the ceilings "are the `BoundedCeiling` invariant class this repository
+already defines." Read literally that contradicts §5, and the contradiction is
+in merged code rather than in prose:
+
+```python
+# scythe_invariant_ledger._ceiling_findings
+return (Finding(NUMERIC_BALANCE_EXCEEDED, ...),)
+```
+
+`BoundedCeiling` is merit-side apparatus. It is declared on a
+`TransitionContract`, evaluated by `check_transition` over coordinate mappings,
+and a violation is a **merit finding about a subject**. §5 says the ceilings are
+enforced in the coordinator and are executability codes. Importing the class
+would route an executability condition through the merit vocabulary's finding
+type — the contamination §5 exists to forbid, arriving by reuse rather than by
+carelessness.
+
+**Only the discipline is reused**, and it is `BoundedCeiling`'s best idea: *a
+ceiling with no published accounting basis cannot be checked; its headroom would
+absorb effects nobody named.* So every ceiling here declares five things, and a
+ceiling missing any of them is not declared:
+
+| | what it must state |
+| --- | --- |
+| **subject** | what is counted |
+| **accounting source** | where the count is read from |
+| **scope** | over what the total runs |
+| **reset rule** | what returns it to zero, and under whose authority |
+| **refusal** | which executability code it produces |
+
+### G.2 C1 — the catastrophe ceiling
+
+| | |
+| --- | --- |
+| subject | **every durable reservation in the authoritative generation, regardless of terminal outcome** |
+| accounting source | `RESERVED` records in that generation's file, a torn tail included |
+| scope | one generation |
+| reset | publication of a valid successor generation (§13e F.6) |
+| refusal | `DURABLE_CEILING_REACHED` |
+
+"Regardless of terminal outcome" is the load-bearing clause and §11 already gave
+the reason: if C1 counted only successes, an adapter timing out forever would
+burn unlimited reservations while the counter stayed at zero.
+
+**The exit already exists.** `CEILING_REACHED` is a declared closure reason
+(§13e F.7), so C1 firing is answered by an operator closing the generation and
+the successor starting at zero. Slice 7 put the exit in place without inventing
+the ceiling, which is the shape entry 4 was opened to catch the absence of.
+
+### G.3 C2 — the operational circuit breaker
+
+| | |
+| --- | --- |
+| subject | **unresolved reservations: `RESERVED` with neither a valid terminal record nor a valid reconciliation record** |
+| accounting source | those records across the complete validated lineage |
+| scope | the lineage, **not** the generation |
+| decrement | a valid reconciliation record only, under §13e F.2's authority rules |
+| refusal | `UNRESOLVED_CEILING_REACHED` |
+
+**`FAILED` does not count toward C2.** It is resolved and not unresolved: the
+adapter answered. C1 already bounds it, and counting it here would make C2 fire
+for an adapter that is working correctly and rejecting.
+
+**C2 is lineage-wide, and this is the sharp edge.** If closing a generation
+cleared it, an operator facing C2 could clear it by closing — converting *too
+many writes went unanswered, the graph boundary is not working* into *close the
+generation and carry on*. That is §11's own refill-through-the-reset-path
+failure and §7's warning about an operator under pressure, arriving together. An
+unresolved reservation in a closed predecessor was never reconciled; it is still
+outstanding, and the chain is where it stays visible.
+
+### G.4 The two are calibrated by opposite tests
+
+> **C1 should never fire. C2 is meant to.**
+
+§11 gave C1 its calibration test — *if it ever fires during correct operation, it
+was set wrong.* That test is **wrong for C2**, which is not a *this has gone
+wrong* bound but the designed detector for the condition §7 describes. C2 firing
+is the mechanism working.
+
+```
+RESERVATION_CEILING = 10_000     # C1
+UNRESOLVED_CEILING  = 32         # C2
+```
+
+**Contract-declared constants, not runtime knobs.** They are not configurable at
+startup, by environment, or by argument. Changing either requires a reviewed
+amendment, and `status()` publishes a **ceiling configuration identity** so a
+value that changed without one is visible rather than inferred.
+
+The basis, recorded so a later reader can argue with the arithmetic rather than
+the number:
+
+- **C1.** The budget is 8 per 600 s. A generation saturating that for a year is
+  ~420 000, which would itself be pathological. Real promotions are findings,
+  plausibly hundreds a year. 10 000 is roughly an order of magnitude above
+  plausible and two below saturation. It is the value most worth revisiting
+  against real data, and the one that costs nothing to have set too high.
+- **C2.** Each one is an adapter call that never answered. A handful is a bad
+  day; thirty-two is a boundary that has stopped working, and noticing later is
+  worth nothing.
+
+### G.5 Where the check happens, and what a refusal costs
+
+**Both ceilings are checked before the durable append**, with the other
+executability checks (§3 step 3). A reservation refused by a ceiling must not
+reach the file — otherwise C1 would count the reservations it refused, and the
+ceiling would raise itself every time it fired.
+
+**A ceiling refusal writes no record at all**, durable or in-memory. This is
+§13d E.4's rule reached from the other side: there, a refused durable append
+takes no in-memory reservation; here, a refused in-memory check takes no durable
+one.
+
+### G.6 Seeded from the ledger, and checked against it
+
+Both totals are **seeded from the ledger at startup** and maintained under the
+coordinator lock, exactly as the identity map is (§13d E.4, E.5). Memory is a
+cache of the file.
+
+What keeps a cache honest is not a promise. **A test recomputes both totals from
+the files and compares them to the maintained values**, and that comparison is
+the guarantee — the same trade E.4 made, with the same guard.
+
+### G.7 Durable and simulated are published apart
+
+SHADOW cannot generate new C2 events: it has no adapter that could fail to
+answer. **It can still observe a real one.** A coordinator starting in SHADOW
+reads a lineage that may hold unresolved reservations from an earlier authorized
+run, and reporting that as zero would be a false statement about the durable
+record rather than an honest statement about simulation.
+
+So the two are published under different names and different authorities, and
+neither may stand in for the other:
+
+```json
+{"durable_reservations_in_generation": 1204,
+ "durable_unresolved_in_lineage": 3,
+ "shadow_simulated_reservations": 17,
+ "shadow_unresolved_simulation": "NOT_SIMULABLE",
+ "shadow_simulation_note": "SHADOW HAS NO ADAPTER THAT COULD FAIL TO ANSWER",
+ "ceiling_configuration_identity": "blake2s:…"}
+```
+
+A SHADOW-only hypothetical C1 must not masquerade as the durable one. The
+durable fields are read from the ledger under any mode; the simulated fields are
+SHADOW's own arithmetic and are named as such.
+
+### G.8 Three collisions the check found in §5's own codes
+
+The mechanical check (slice 7) was run over the whole tree against these names.
+§5's two ceiling codes were declared when this contract was accepted, **before
+the check existed**, and have never been through it. Two hits, both judged:
+
+| hit | judgement |
+| --- | --- |
+| `DURABLE_CEILING_REACHED` / `CEILING_REACHED` | **not a collision, and deliberate.** `CEILING_REACHED` is §13e F.7's closure reason; the two name the same ceiling event from two sides, and renaming either would hide the link an operator needs |
+| `UNRESOLVED_CEILING_REACHED` / `UNRESOLVED` | **not a collision.** That `UNRESOLVED` is an `rf_signal_family` modulation and protocol value — a different subject in a different domain |
+
+The second is worth recording beyond the judgement: **this repository already
+uses `UNRESOLVED` for two unrelated things** — a modulation that could not be
+identified, and a reservation whose write was never answered. Neither is wrong
+and the check is right to mention it. It is a pre-existing ambiguity that
+predates the rule, surfaced by running the rule over ground it had not covered.
+
+A third candidate was rejected rather than judged: the SHADOW capability value
+was going to be `SIMULATION_UNAVAILABLE_WITHOUT_ADAPTER`, which is a negation
+pair with `AVAILABLE`/`UNAVAILABLE` in the store. `NOT_SIMULABLE` is clear.
+
+### G.9 What slice 8 does not do
+
+No adapter, no live SHADOW, no ARMED constructor, no new closure reason —
+`CEILING_REACHED` exists — and no change to §13e's authority rules.
+
+---
+
 ## 14. What this does not do
 
 - It does **not** make the graph write idempotent. It prevents *this coordinator*
@@ -1648,6 +1840,38 @@ already written down. Introduced by Amendment B, noticed by Amendment C.*
 30s. AST — no reconciliation record carries a free-text field, and the evidence
     token set is closed.
 30t. Reconciliation calls no adapter and promotes nothing.
+
+**Amendment G (§13f)**
+
+31a. `BoundedCeiling` is not imported by the coordinator — AST — and no ceiling
+    refusal is a merit finding.
+31b. Every declared ceiling states subject, accounting source, scope, reset rule
+    and refusal; a ceiling missing any of them is refused at construction.
+31c. C1 counts reservations regardless of terminal outcome: a writer that never
+    answers advances it.
+31d. C1 resets on publication of a valid successor, and **C2 does not**.
+31e. C2 counts `RESERVED` with neither a valid terminal nor a valid
+    reconciliation record; a `FAILED` reservation does not advance it.
+31f. C2 counts across the whole validated lineage, including closed
+    predecessors.
+31g. C2 decreases only on a valid reconciliation record, and not on a terminal
+    one arriving late, a restart, or a generation closure.
+31h. A ceiling refusal writes no record, durable or in-memory: the file is
+    byte-identical and the identity map unchanged.
+31i. Both totals are rebuilt from the ledger at startup and survive a restart.
+31j. A test recomputes both totals from the files and compares them to the
+    maintained values.
+31k. The ceiling values are not configurable: no constructor argument,
+    environment variable or setter changes them — AST and behaviour.
+31l. `status()` publishes the ceiling configuration identity, and it changes
+    when a declared value changes.
+31m. Durable and simulated totals are published under different names; a SHADOW
+    coordinator reports a **non-zero** durable C2 when the lineage holds
+    unresolved reservations from an earlier run, and `NOT_SIMULABLE` for its own
+    C2 simulation.
+31n. Calibration: replacing `RESERVATION_CEILING` with `8` makes ordinary
+    budget-valid operation reach the catastrophe ceiling, and the calibration
+    test fails.
 28i. A failed or unresolved write is never readable as a committed promotion:
     the reader's `committed` set contains only identities whose terminal record
     is `COMMITTED`.
@@ -1756,6 +1980,21 @@ produced it.
     what someone was doing when the machine stopped.
 34. **One lineage, one lock** (§13e F.10, amending §13d E.1). Locks on two
     generation files of one lineage exclude nobody who matters.
+35. **`BoundedCeiling` is not reused, only its discipline** (§13f G.1). Its
+    violations are merit findings; these refusals are executability codes, and
+    reuse would be §5's contamination arriving through a shared class.
+36. **C2 is lineage-wide** (§13f G.3). Were it per-generation, an operator
+    facing C2 could clear it by closing the generation — the refill-through-the-
+    reset-path failure §11 was written to close.
+37. **C1 should never fire and C2 is meant to** (§13f G.4). One calibration test
+    does not fit both, and §11's belongs to C1 alone.
+38. **The values are contract-declared, not configurable** (§13f G.4). A ceiling
+    a deployment can raise is a ceiling that will be raised at the moment it
+    first fires, which is the moment it is doing its job.
+39. **Durable and simulated totals are never published under one name** (§13f
+    G.7). SHADOW cannot generate new unresolved reservations and can certainly
+    observe real ones, and reporting zero would be a false statement about the
+    record rather than an honest one about simulation.
 30. **Operator evidence is a closed token set with no notes field** (§13e F.7).
     This is the record of a human decision about evidence, and free text is
     where the reasoning goes to stop being checkable.
