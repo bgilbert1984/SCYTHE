@@ -20,7 +20,8 @@ Amendment H:            §13g the execution boundary — ACCEPTED 2026-09-12
 Amendment I:            §13h what live SHADOW can observe — ACCEPTED
                         2026-09-12, after review added I.2a, the bound maxima
                         and I.4a
-Amendment J:            §13i derived evidence — PROPOSED 2026-09-12
+Amendment J:            §13i derived evidence — ACCEPTED 2026-09-12, after
+                        review qualified J.3 and set exact bounds
 Authority:              NORMATIVE
 Constrains:             Step 4 of the promotion sequence (execution adapter)
 Depends on:             SCYTHE_VERDICT_VOCABULARIES.md  (ACCEPTED — §5 declares
@@ -2069,10 +2070,12 @@ All eight clear, and none required a judgement.
 
 ## 13i. Amendment J — derived evidence, and why it cannot carry samples
 
-*Proposed 2026-09-12. **Not yet accepted.** Defines the artefact class that
-`PENDING_AMENDMENTS.md` entry 7 waits on, so slice 10 can be completed without
-acquisition. Touches §12, §17, and the merged `CapsuleIdentity`. J.1 is the
-drafter's reading of an operator grant and is marked so.*
+*Proposed 2026-09-12 and accepted 2026-09-12, after review found the governing
+claim overstated: a closed schema proves conformance to a representation and not
+semantic origin. J.3 now carries a qualified three-state assessment, J.7 and
+J.7a specify the read and the digest, and J.8 sets exact bounds. Defines the
+artefact class `PENDING_AMENDMENTS.md` entry 7 waits on. Touches §12, §17, and
+the merged `CapsuleIdentity`.*
 
 > **A closed coordinate schema cannot carry raw IQ, because no field is declared
 > for it.**
@@ -2118,23 +2121,43 @@ category is not new, only its persistence is.**
 And `CapsuleIdentity` already carries `carries_samples`, which the policy already
 refuses. The type the reader must produce is fixed.
 
-### J.3 `carries_samples` becomes a finding, not a claim
+### J.3 `carries_samples` is reader-derived, and qualified
 
 **This amends a merged type's contract**, and it is the change with the most
 reach in this amendment.
 
-Today `carries_samples` is a value passed to a constructor: a caller asserts it,
-and the policy refuses on the assertion. For a derived artefact that is not good
-enough. The reader runs `find_sample_bearing_field` over **every record** and
-constructs the capsule with `carries_samples=False` **only if nothing was
-found**. A caller may not supply the field for an artefact-derived capsule.
+Today `carries_samples` is a value passed to a constructor: a caller asserts it
+and the policy refuses on the assertion. **Callers may not supply it for an
+artefact-derived capsule.** The reader produces a closed assessment instead:
 
-The most important flag in the promotion path stops being asserted and starts
-being established — the same move §13g H.4 made for the submission boundary, and
-§13d E.2 made for the mount. `SAMPLE_FREEDOM_CHECKED` names the finding.
+```
+SAMPLE_BEARING_DETECTED      a sample-bearing field was found
+DERIVED_SCHEMA_CONFORMANT    the artefact passed the structural exclusion profile
+SAMPLE_STATUS_UNVERIFIABLE   the profile could not be applied in full
+```
 
-A capsule built any other way is unaffected; what changes is that one built from
-an artefact cannot be told a convenient answer.
+**Only `DERIVED_SCHEMA_CONFORMANT` may derive `carries_samples=False`**, and it
+means exactly one thing:
+
+> the artefact passed the accepted structural exclusion profile. It is **not** a
+> cryptographic proof that a dishonest producer never encoded samples.
+
+`SAMPLE_BEARING_DETECTED` and `SAMPLE_STATUS_UNVERIFIABLE` both **refuse before
+either checker runs**. Not a degraded observation and not a partial yield: a
+verdict derived from evidence whose sample status is unknown would carry that
+uncertainty into a promotion identity, and nothing downstream could recover it.
+
+**Origin is attested, not inferred.** The separately authorized writer (J.4)
+must attest that every coordinate came from the declared aggregation and checker
+pipeline. The reader validates that attestation and the schema; it does **not**
+claim to reconstruct provenance from values. That is the distinction §13g H.7
+draws for GraphOps conformance: some properties can only be declared by the
+party that has them, and a consumer that inferred them would be inventing
+authority.
+
+The flag stops being asserted by a caller and starts being established by a
+check whose limits are written beside it — which is more than it had, and less
+than the first draft of this section claimed.
 
 ### J.4 Read-only, and that is the whole shape
 
@@ -2194,26 +2217,73 @@ Saying so is the honest version of a check that cannot be performed here. A
 reader that compared the recorded hash against something it invented would be
 manufacturing the authority §13g H.7 refuses endpoints for implying.
 
-### J.7 A digest, and no lock
+### J.7 One descriptor, one read, and a digest over what was consumed
 
-The artefact is immutable and read-only, so it needs no ownership and no lock —
+The artefact is read-only and immutable, so it needs no ownership and no lock:
 there is no second writer to exclude, because there is no writer.
 
-What it needs is a **content digest**, so the observation record names exactly
-what it read rather than a path that may since have changed. A path is a name; a
-digest is the thing.
+What it needs is the read itself to be honest:
 
-### J.8 Bounds
+- **one descriptor**, opened once;
+- the target must be a **regular file** — not a FIFO, not a device, not a
+  directory;
+- read **within the fixed bounds below**, never to exhaustion;
+- the **digest is computed over the exact bytes consumed**, not over a later
+  re-read of the path.
+
+**The path is never reopened during one read.** A path is a name and the name
+can be repointed between opens; a digest taken from a second open would attest
+bytes that the verdicts did not come from. This is §13d E.2's lesson one layer
+down — attest the descriptor, not the path.
+
+### J.7a The digest is not recursive
+
+A digest that covered the header that carries it cannot be computed. So:
 
 ```
-MAX_ARTEFACT_BYTES     = 4_194_304      # 4 MiB
-MAX_ARTEFACT_RECORDS   = 10_000
-MAX_COORDINATE_CHARS   = 512
+content_digest = hash( the exact framed evidence-record bytes )
+artifact_id    = hash( schema identity || canonical provenance || content_digest )
 ```
 
-Contract-declared, not runtime knobs, for §13f G.4's reason. **An unbounded
-artefact is an unbounded run wearing a file**, and slice 10's own bounds would
-be satisfied while the read that feeds them was not.
+The provenance record carries **both** and is **excluded from `content_digest`**.
+
+Five refusals follow directly, and each closes a way the two could disagree:
+
+| refusal | what it stops |
+| --- | --- |
+| trailing bytes after the last record | content outside the digest's reach |
+| more than one provenance record | two headers, two identities, one file |
+| a duplicate artefact identity | the same name over different content |
+| a record count that does not match the declared one | records added or removed beneath the digest |
+| `CONTENT_DIGEST_MISMATCH` | the bytes consumed are not the bytes attested |
+
+### J.8 Bounds, exactly
+
+```
+MAX_ARTEFACT_RECORDS       = 1_000       evidence records
+MAX_ARTEFACT_BYTES         = 4_194_304   4 MiB total
+MAX_RECORD_BYTES           = 16_384      16 KiB per framed record
+MAX_STRING_BYTES           = 256         UTF-8 bytes per ordinary string field
+```
+
+**Numeric scalars are finite and bounded, and five shapes are refused**, each
+because it is a way to carry more than a measurement:
+
+- `NaN` and the infinities — an evidentiary coordinate has a value or it has a
+  declared absence, and §13a's identity rules already refuse non-finite
+  coordinates for the same reason;
+- **excessive precision** — a float's mantissa is sixty-odd bits of anywhere the
+  producer likes, and precision far beyond the instrument is the covert archive
+  this profile is least able to see;
+- **booleans masquerading as integers** — `bool` subclasses `int`, and the check
+  must be ordered accordingly;
+- **numeric strings** — `"1.0"` is a string that reads as a number, and
+  accepting it would let the string bound and the numeric bound each assume the
+  other applied.
+
+Contract-declared, not runtime knobs (§13f G.4). **An unbounded artefact is an
+unbounded run wearing a file**, and slice 10's own bounds would be satisfied
+while the read that feeds them was not.
 
 ### J.9 What this does not do
 
@@ -2533,11 +2603,23 @@ already written down. Introduced by Amendment B, noticed by Amendment C.*
 34c. A string beyond `MAX_COORDINATE_CHARS` is `OVERSIZED_COORDINATE` — tested
     with base64-encoded bytes, which pass the first two refusals.
 34d. `find_sample_bearing_field` is run over every record, and a hit anywhere,
-    including nested, is `SAMPLE_BEARING_FIELD_FOUND`.
-34e. A capsule derived from an artefact carries `carries_samples=False` **only
-    because** the check found nothing; a caller cannot supply the field.
-34f. An artefact containing a sample-bearing field yields **no verdicts at all**
-    rather than the ones preceding it.
+    including nested, is `SAMPLE_BEARING_DETECTED`.
+34e. Only `DERIVED_SCHEMA_CONFORMANT` derives `carries_samples=False`; a caller
+    cannot supply the field, and `SAMPLE_STATUS_UNVERIFIABLE` does not derive it.
+34f. `SAMPLE_BEARING_DETECTED` and `SAMPLE_STATUS_UNVERIFIABLE` each yield **no
+    verdicts at all**, refusing before either checker runs.
+34m. The reader opens **one descriptor**, requires a regular file, and refuses a
+    FIFO, a device and a directory.
+34n. The digest is computed over the bytes consumed; the path is not reopened
+    during one read, and repointing it between opens changes no attested digest.
+34o. `content_digest` excludes the provenance record, and `artifact_id` is
+    derived from schema identity, canonical provenance and `content_digest`.
+34p. Trailing bytes, a second provenance record, a duplicate artefact identity,
+    a record-count mismatch and `CONTENT_DIGEST_MISMATCH` are each refused.
+34q. `NaN`, the infinities, excessive precision, a `bool` where an integer is
+    declared, and a numeric string are each refused as coordinate values.
+34r. `MAX_ARTEFACT_RECORDS`, `MAX_ARTEFACT_BYTES`, `MAX_RECORD_BYTES` and
+    `MAX_STRING_BYTES` are contract-declared and not configurable — AST.
 34g. The reader exposes no write path: AST — no write-mode `open`, no `os.write`,
     no rename, no unlink.
 34h. An artefact beyond `MAX_ARTEFACT_BYTES` or `MAX_ARTEFACT_RECORDS` is
@@ -2745,11 +2827,21 @@ produced it.
     own writes from another's, and the honest report of that is silence about
     attribution.
 50. **A failed observation still writes its record** (§13h I.7).
-52. **A closed coordinate schema cannot carry raw IQ** (§13i). The prohibition
-    becomes a shape the artefact cannot take rather than a rule someone obeys.
-53. **`carries_samples` becomes a finding, not a claim** (§13i J.3). The most
-    important flag in the promotion path stops being asserted — the same move
-    made for the submission boundary and for the mount.
+52. **A closed schema proves representation, not origin** (§13i). The first
+    draft claimed it could not carry raw IQ; one sample per scalar record, a
+    covert archive in numeric mantissas, or coordinates at sample cadence all
+    pass it. The guarantee is stated at the strength it has.
+53. **`carries_samples` is reader-derived and qualified** (§13i J.3). Only
+    `DERIVED_SCHEMA_CONFORMANT` derives it false, meaning the structural
+    exclusion profile passed — never that a dishonest producer is impossible.
+53a. **Origin is attested by the producer, never inferred by the reader** (§13i
+    J.3). Some properties can only be declared by the party that has them.
+53b. **A digest cannot cover the header that carries it** (§13i J.7a). The
+    content digest excludes provenance, and the artefact identity is derived
+    from it rather than the reverse.
+53c. **Attest the descriptor, not the path** (§13i J.7). A path is a name and
+    can be repointed between opens; a digest from a second open attests bytes
+    the verdicts did not come from.
 54. **A declared maximum string length is part of the sample bar** (§13i J.5).
     A base64 blob is one long string and passes both the obvious checks.
 55. **The interface is a reader; writing artefacts is a separate act** (§13i
