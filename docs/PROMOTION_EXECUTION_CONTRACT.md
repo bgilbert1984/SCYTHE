@@ -20,6 +20,7 @@ Amendment H:            §13g the execution boundary — ACCEPTED 2026-09-12
 Amendment I:            §13h what live SHADOW can observe — ACCEPTED
                         2026-09-12, after review added I.2a, the bound maxima
                         and I.4a
+Amendment J:            §13i derived evidence — PROPOSED 2026-09-12
 Authority:              NORMATIVE
 Constrains:             Step 4 of the promotion sequence (execution adapter)
 Depends on:             SCYTHE_VERDICT_VOCABULARIES.md  (ACCEPTED — §5 declares
@@ -2066,6 +2067,173 @@ All eight clear, and none required a judgement.
 
 ---
 
+## 13i. Amendment J — derived evidence, and why it cannot carry samples
+
+*Proposed 2026-09-12. **Not yet accepted.** Defines the artefact class that
+`PENDING_AMENDMENTS.md` entry 7 waits on, so slice 10 can be completed without
+acquisition. Touches §12, §17, and the merged `CapsuleIdentity`. J.1 is the
+drafter's reading of an operator grant and is marked so.*
+
+> **A closed coordinate schema cannot carry raw IQ, because no field is declared
+> for it.**
+
+The prohibition stops being a rule someone must obey and becomes a shape the
+artefact cannot take. Everything else here is in service of that sentence being
+true rather than aspirational.
+
+### J.1 What this is under the Q1 grant
+
+*The drafter's reading, recorded as such. The grant is the operator's and this
+section does not extend it.*
+
+The standing raw-IQ grant is **process-local, volatile, fixed-capacity,
+non-persistent, non-transportable, non-model-context, bridge-owned, and
+invalidated on signal-chain change** — permission for a DSP working buffer and
+explicitly *"not permission for an IQ archive"*, with *"no disk fallback, swap-
+oriented buffering or crash dump facility"* added under it.
+
+A derived-evidence artefact is none of those things. It carries **coordinates**:
+named scalars the invariant apparatus already operates on, which have never
+contained a sample because `check_transition` has never been able to receive
+one. Persisting coordinates is not persisting IQ, and the artefact is not a
+fallback for the buffer — it cannot hold what the buffer holds.
+
+**The reading is recorded rather than assumed** because the grant's language is
+about intent as much as content, and a later reader should find the argument
+rather than infer that nobody noticed the question.
+
+### J.2 Three of the four pieces are already merged
+
+This amendment defines less than it looks like, and that is the strongest thing
+about it.
+
+`rf_walk_survey_metadata.find_sample_bearing_field` already walks a payload
+recursively, skips `evidence_refs` because its values are names, and returns the
+first sample-bearing key anywhere inside. The structural check this artefact
+needs exists and is tested.
+
+That module already separates `RAW_IQ_FRAME` from `METADATA_ASSESSED`: **the
+category is not new, only its persistence is.**
+
+And `CapsuleIdentity` already carries `carries_samples`, which the policy already
+refuses. The type the reader must produce is fixed.
+
+### J.3 `carries_samples` becomes a finding, not a claim
+
+**This amends a merged type's contract**, and it is the change with the most
+reach in this amendment.
+
+Today `carries_samples` is a value passed to a constructor: a caller asserts it,
+and the policy refuses on the assertion. For a derived artefact that is not good
+enough. The reader runs `find_sample_bearing_field` over **every record** and
+constructs the capsule with `carries_samples=False` **only if nothing was
+found**. A caller may not supply the field for an artefact-derived capsule.
+
+The most important flag in the promotion path stops being asserted and starts
+being established — the same move §13g H.4 made for the submission boundary, and
+§13d E.2 made for the mount. `SAMPLE_FREEDOM_CHECKED` names the finding.
+
+A capsule built any other way is unaffected; what changes is that one built from
+an artefact cannot be told a convenient answer.
+
+### J.4 Read-only, and that is the whole shape
+
+**The interface is a reader. There is no writer.**
+
+Slice 10 gains the ability to consume an artefact; nothing here gains the
+ability to produce one. §13h I.3's *no acquisition* is therefore untouched
+rather than carefully preserved — there is no acquiring path to preserve it
+against.
+
+```
+derived_walk_verdicts(path) -> (verdict, subject, capsule) triples
+```
+
+The same triple slice 10a's constructed source already yields, so
+`EVIDENCE_DERIVED_ARTEFACT` becomes reachable by substitution and nothing else
+in slice 10 changes.
+
+**Writing artefacts is a separate concern and a separate authorization.** A
+writer is a new durable output from the acquisition path, and it deserves its
+own act rather than arriving inside a reader's amendment.
+
+### J.5 The closed schema, and four refusals
+
+Framing reuses `frame_of` — length, CRC, JSON, one record per line — because the
+reasons for framing are identical and a second format is a second thing to get
+wrong. The **kind set is separate**, so an artefact can never be read as a
+generation.
+
+One `ARTEFACT_PROVENANCE` record first, then transition records. Provenance
+carries the schema, artefact identity, a content digest, and the capture facts
+the verdicts need: `device_id`, `signal_chain_hash`, `configuration_epoch`,
+`monotonic_source_id`.
+
+Every coordinate value is refused unless it passes all four:
+
+| refusal | what it stops |
+| --- | --- |
+| `COORDINATE_NOT_IN_SCHEMA` | an undeclared name; the set is closed like the ledger's record kinds |
+| `NON_SCALAR_COORDINATE` | a list or mapping, which is how samples arrive |
+| `OVERSIZED_COORDINATE` | a string beyond a declared length |
+| `SAMPLE_BEARING_FIELD_FOUND` | the recursive check, over the whole record |
+
+**The third is the one worth arguing for.** The first two are obvious, and a
+sample blob base64-encoded into one long string passes both of them. A declared
+maximum string length is what makes "no samples" hold against the encoding that
+was designed to get binary through text.
+
+### J.6 The signal chain is recorded, not verified
+
+Q1's grant invalidates on signal-chain change, and a reader has **no live
+receiver to compare against**. The artefact is evidence about a past chain
+state; the observation record carries which one and claims nothing about whether
+that chain is current.
+
+Saying so is the honest version of a check that cannot be performed here. A
+reader that compared the recorded hash against something it invented would be
+manufacturing the authority §13g H.7 refuses endpoints for implying.
+
+### J.7 A digest, and no lock
+
+The artefact is immutable and read-only, so it needs no ownership and no lock —
+there is no second writer to exclude, because there is no writer.
+
+What it needs is a **content digest**, so the observation record names exactly
+what it read rather than a path that may since have changed. A path is a name; a
+digest is the thing.
+
+### J.8 Bounds
+
+```
+MAX_ARTEFACT_BYTES     = 4_194_304      # 4 MiB
+MAX_ARTEFACT_RECORDS   = 10_000
+MAX_COORDINATE_CHARS   = 512
+```
+
+Contract-declared, not runtime knobs, for §13f G.4's reason. **An unbounded
+artefact is an unbounded run wearing a file**, and slice 10's own bounds would
+be satisfied while the read that feeds them was not.
+
+### J.9 What this does not do
+
+No writer, no acquisition, no socket, no capture trigger, no change to the Q1
+buffer, and **no fallback to constructed evidence when an artefact is missing**.
+Slice 10a's `DERIVED_EVIDENCE_UNAVAILABLE` exists precisely so absence is
+reported rather than filled, and a reader that quietly substituted would undo
+the distinction the previous slice was held back to make.
+
+### J.10 The name check
+
+Ten candidates against the discovered universe. Six clear; **four rejected rather
+than judged**, each landing on ground that is already crowded:
+`UNDECLARED_COORDINATE` and `COORDINATE_NOT_DECLARED` against the five
+`DECLARED` tokens across the RF modules, `SAMPLE_FREEDOM_VERIFIED` against
+`VERIFIED` and `UNVERIFIED`, and every name containing `HEADER` against the
+ledger's record kind — which is why the provenance record is called what it is.
+
+---
+
 ## 14. What this does not do
 
 - It does **not** make the graph write idempotent. It prevents *this coordinator*
@@ -2357,6 +2525,30 @@ already written down. Introduced by Amendment B, noticed by Amendment C.*
     through the same syscall seam.
 33r. A second run at one path is `OBSERVATION_PUBLICATION_REFUSED` and leaves
     the first record byte-identical.
+
+**Amendment J (§13i)**
+
+34a. A coordinate not in the closed schema is `COORDINATE_NOT_IN_SCHEMA`.
+34b. A list, tuple or mapping value is `NON_SCALAR_COORDINATE`.
+34c. A string beyond `MAX_COORDINATE_CHARS` is `OVERSIZED_COORDINATE` — tested
+    with base64-encoded bytes, which pass the first two refusals.
+34d. `find_sample_bearing_field` is run over every record, and a hit anywhere,
+    including nested, is `SAMPLE_BEARING_FIELD_FOUND`.
+34e. A capsule derived from an artefact carries `carries_samples=False` **only
+    because** the check found nothing; a caller cannot supply the field.
+34f. An artefact containing a sample-bearing field yields **no verdicts at all**
+    rather than the ones preceding it.
+34g. The reader exposes no write path: AST — no write-mode `open`, no `os.write`,
+    no rename, no unlink.
+34h. An artefact beyond `MAX_ARTEFACT_BYTES` or `MAX_ARTEFACT_RECORDS` is
+    refused before any record is yielded.
+34i. The artefact's kind set is disjoint from the ledger's: a `Lineage` rooted
+    at its directory discovers no generation, and `read_ledger` refuses it.
+34j. The observation record names the artefact by **digest**, not only by path.
+34k. The recorded `signal_chain_hash` is reported and never compared against
+    anything the reader invented.
+34l. A missing artefact is `DERIVED_EVIDENCE_UNAVAILABLE` and never a fallback
+    to constructed evidence.
 33c. The record is written outside the lineage root, and a `Lineage` rooted
     there does not discover it as a generation.
 33d. The record is written once and never appended to: a second run at one path
@@ -2552,7 +2744,19 @@ produced it.
     §12 permits SHADOW beside an ARMED writer, so the observer cannot tell its
     own writes from another's, and the honest report of that is silence about
     attribution.
-50. **A failed observation still writes its record** (§13h I.7). One that
+50. **A failed observation still writes its record** (§13h I.7).
+52. **A closed coordinate schema cannot carry raw IQ** (§13i). The prohibition
+    becomes a shape the artefact cannot take rather than a rule someone obeys.
+53. **`carries_samples` becomes a finding, not a claim** (§13i J.3). The most
+    important flag in the promotion path stops being asserted — the same move
+    made for the submission boundary and for the mount.
+54. **A declared maximum string length is part of the sample bar** (§13i J.5).
+    A base64 blob is one long string and passes both the obvious checks.
+55. **The interface is a reader; writing artefacts is a separate act** (§13i
+    J.4). *No acquisition* is then untouched rather than carefully preserved.
+56. **The signal chain is recorded and not verified** (§13i J.6). A reader with
+    no live receiver that compared against something it invented would be
+    manufacturing authority. One that
     produces nothing when it fails cannot be told from one that never started,
     and that difference is what the record was for.
 51. **An endpoint does not imply a capability** (§13g H.7). Conformance is a
