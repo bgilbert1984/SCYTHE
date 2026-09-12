@@ -52,6 +52,7 @@ EXECUTABILITY_SOURCES = (
     ("scythe_promotion_ledger_writer", "RESERVATION_NOT_DURABLE"),
     ("scythe_promotion_lineage", "LINEAGE_REFUSALS"),
     ("scythe_promotion_reconciliation", "NOT_RECONCILABLE"),
+    ("scythe_promotion_ceilings", "CEILING_REFUSALS"),
 )
 
 
@@ -244,6 +245,73 @@ def discovered_tokens(exclude=EXCLUDED_MODULES):
     return tokens
 
 
+# -- one word, or two? ----------------------------------------------------
+#
+# A set of token strings cannot tell *this word means one thing, declared in two
+# places* from *this word means two things in two domains*. Collapsing them was
+# not merely blindness: `cross_set_collisions` clears a hit when candidate and
+# hit share a declaring set, and a token declared in several sets cleared
+# against **any** of them -- so a genuine cross-domain neighbour could be
+# skipped because the same word was also declared somewhere harmless. A false
+# negative produced by the mechanism added to control false positives.
+#
+# So every token declared by more than one module carries a verdict here, and a
+# TWO_CONCEPTS token never clears: resembling it is always a real neighbour.
+ONE_CONCEPT = "ONE_CONCEPT"
+TWO_CONCEPTS = "TWO_CONCEPTS"
+
+DUPLICATE_DECLARATIONS = {
+    # One concept, declared where it is produced and where it is recorded.
+    "AUTHORIZATION_EXPIRED": (ONE_CONCEPT, "a recovery outcome, also declared as the audit event that records it"),
+    "AUTHORIZATION_INVALIDATED": (ONE_CONCEPT, "a recovery outcome, also declared as the audit event that records it"),
+    "PROCESS_RESTARTED_STILL_STARVED": (ONE_CONCEPT, "a recovery outcome, also declared as the audit event that records it"),
+    "RECOVERY_OUTCOME_UNDETERMINED": (ONE_CONCEPT, "a recovery outcome, also declared as the audit event that records it"),
+    "RECOVERY_SUPPRESSED": (ONE_CONCEPT, "a recovery outcome, also declared as the audit event that records it"),
+    "RESTART_NOT_OBSERVED": (ONE_CONCEPT, "a recovery outcome, also declared as the audit event that records it"),
+    "SAMPLE_FLOW_RESTORED": (ONE_CONCEPT, "a recovery outcome, also declared as the audit event that records it"),
+    "RESTART_REQUEST_ACCEPTED": (ONE_CONCEPT, "a restart outcome, also declared as the audit event that records it"),
+    "RESTART_REQUEST_FAILED": (ONE_CONCEPT, "a restart outcome, also declared as the audit event that records it"),
+    "WOULD_BE_SUPPRESSED": (ONE_CONCEPT, "a shadow promotion judgement, also declared as the audit event that records it"),
+
+    # One concept, shared by a reader and a writer of the same records.
+    "RESERVED": (ONE_CONCEPT, "the coordinator's identity state and the ledger's record kind, deliberately one word (§13a B.6)"),
+    "COMMITTED": (ONE_CONCEPT, "the coordinator's identity state and the ledger's record kind, deliberately one word (§13a B.6)"),
+    "FAILED": (ONE_CONCEPT, "the coordinator's identity state and the ledger's record kind, deliberately one word (§13a B.6)"),
+    "LEDGER_TORN": (ONE_CONCEPT, "a readability state, re-declared as the closure reason that cites it (§13e F.7)"),
+    "LEDGER_UNREADABLE": (ONE_CONCEPT, "a readability state, re-declared as the closure reason that cites it (§13e F.7)"),
+
+    # One concept, one vocabulary deliberately reused across subsystems.
+    "ARMED": (ONE_CONCEPT, "the same three postures, applied to recovery and to promotion"),
+    "SHADOW": (ONE_CONCEPT, "the same three postures, applied to recovery and to promotion"),
+    "DISABLED": (ONE_CONCEPT, "the same three postures, applied to recovery and to promotion"),
+    "GREATER_IS_STRONGER": (ONE_CONCEPT, "one statistic direction, declared by two family modules"),
+    "REGISTERED_NOT_VALIDATED": (ONE_CONCEPT, "one validation status, declared by two family modules"),
+    "STRUCTURE_CHANNEL": (ONE_CONCEPT, "one channel role, declared by the symbol clock and the manifest"),
+    "NOISE_COMPATIBLE": (ONE_CONCEPT, "one finding -- consistent with noise -- declared by two analyzers"),
+    "DIRECT_SAMPLING_CHANGE": (ONE_CONCEPT, "one event, invalidating the ring and unwiring retention"),
+    "RECONNECT": (ONE_CONCEPT, "one action, declared by retention and by the ring"),
+    "LOOPBACK_TCP": (ONE_CONCEPT, "one transport, declared by the bridge and by retention"),
+    "NOT_DETERMINABLE_FROM_THIS_PROCESS": (ONE_CONCEPT, "one epistemic state about what this process can see"),
+    "NOT_IMPLEMENTED": (ONE_CONCEPT, "a status marker meaning the same thing wherever it appears"),
+
+    # Two concepts wearing one word. These never clear a collision.
+    "UNVERIFIED": (TWO_CONCEPTS, "rf_receiver_state: an alignment state beside VERIFIED/BOUNDED/STALE. scythe_invariant_ledger: a coordinate that is present with its authority not established. This overload is why LOCK_SEMANTICS_UNVERIFIED was renamed"),
+    "UNCHANGED": (TWO_CONCEPTS, "scythe_invariant_ledger: a coordinate that did not move. rf_capture_recovery: the same process is still there"),
+    "NONE": (TWO_CONCEPTS, "scythe_promotion_ledger: nothing was asked. rf_bridge and rf_iq_ring: an absent value"),
+    "UNAVAILABLE": (TWO_CONCEPTS, "scythe_promotion_ledger_store: a ledger that cannot be read, paired with AVAILABLE. rf_bridge and rf_iq_retention: a runtime attestation that could not be obtained"),
+}
+
+
+def declaring_modules(token, tokens):
+    return {where.split(".")[0] for where in tokens.get(token, ())}
+
+
+def duplicate_declarations(tokens):
+    """Tokens declared by more than one module, with where."""
+    return {token: sorted(where) for token, where in tokens.items()
+            if len(declaring_modules(token, tokens)) > 1}
+
+
 def cross_set_collisions(candidate, tokens):
     """Hits outside the candidate's own declared sets.
 
@@ -259,8 +327,16 @@ def cross_set_collisions(candidate, tokens):
     was stated for cross-set comparison and implemented against the whole tree.
     """
     mine = tokens.get(candidate, set())
-    return sorted(hit for hit in collisions(candidate, set(tokens) - {candidate})
-                  if not (mine & tokens.get(hit, set())))
+    out = []
+    for hit in collisions(candidate, set(tokens) - {candidate}):
+        verdict = DUPLICATE_DECLARATIONS.get(hit, (None, ""))[0]
+        if mine & tokens.get(hit, set()) and verdict != TWO_CONCEPTS:
+            # Alternatives in one enumeration. Not cleared when the hit is one
+            # word for two things: sharing a set with one of its meanings says
+            # nothing about the other.
+            continue
+        out.append(hit)
+    return sorted(out)
 
 
 # Cross-set hits that are not collisions, each with the reason. Recorded so the
@@ -270,7 +346,26 @@ JUDGED = {
     ("GENERATION_CLOSED", "CLOSED"):
         "CLOSED is an rf_iq_ring buffer state -- a different subject in a "
         "different domain, and neither is a verdict vocabulary",
+    ("DURABLE_CEILING_REACHED", "CEILING_REACHED"):
+        "§13f G.8: CEILING_REACHED is the closure reason an operator cites "
+        "when closing a generation the ceiling stopped. The two name the same "
+        "event from the refusal side and the closure side, and renaming either "
+        "would hide a link an operator needs",
+    ("OUTSTANDING_RESERVATION_CEILING_REACHED", "CEILING_REACHED"):
+        "§13f G.8: the same event from the refusal side and the closure side. "
+        "This code names its subject rather than the state it counts, because "
+        "UNRESOLVED is already doubled in this tree",
 }
+
+
+def judged(one, other):
+    """A judgement is about a pair, not about an ordering.
+
+    Keyed one way and read the other, a recorded judgement silently stops
+    applying -- which is how the ceiling codes failed their own check after
+    Amendment G had judged them.
+    """
+    return (one, other) in JUDGED or (other, one) in JUDGED
 
 
 class CheckMechanismTests(unittest.TestCase):
@@ -383,6 +478,26 @@ class DiscoveryTests(unittest.TestCase):
         for pair, reason in JUDGED.items():
             self.assertTrue(len(reason) > 30, pair)
 
+    def test_a_judgement_reads_in_both_directions(self):
+        """Keyed one way and read the other, a judgement silently stops
+        applying. That is how the ceiling codes failed their own check after
+        Amendment G had already judged them."""
+        for one, other in JUDGED:
+            self.assertTrue(judged(one, other))
+            self.assertTrue(judged(other, one))
+
+    def test_the_ceiling_codes_are_judged_against_the_closure_reason(self):
+        for code in ("DURABLE_CEILING_REACHED",
+                     "OUTSTANDING_RESERVATION_CEILING_REACHED"):
+            hits = cross_set_collisions(code, self.tokens)
+            self.assertEqual(hits, ["CEILING_REACHED"])
+            self.assertTrue(judged(code, "CEILING_REACHED"))
+
+    def test_the_rejected_c2_name_is_absent_from_the_tree(self):
+        """§13f G.8 renamed it rather than judging it: UNRESOLVED is already
+        two concepts here, and a third would have been made permanent."""
+        self.assertNotIn("UNRESOLVED_CEILING_REACHED", self.tokens)
+
     def test_a_judgement_is_only_recorded_for_a_real_hit(self):
         """A judgement for something that does not collide is a line nobody
         will ever remove, asserting a fact that was never true.
@@ -406,10 +521,55 @@ class DiscoveryTests(unittest.TestCase):
                           "GENERATION_CLOSED", "GENERATION_LINEAGE_FORKED",
                           "GENERATION_PUBLICATION_UNCERTAIN",
                           "GRAPH_RECORD_FOUND", "GRAPH_RECORD_NOT_FOUND",
-                          "ADAPTER_DENIED_CREATION", "CEILING_REACHED"):
+                          "ADAPTER_DENIED_CREATION", "CEILING_REACHED",
+                          "DURABLE_CEILING_REACHED",
+                          "OUTSTANDING_RESERVATION_CEILING_REACHED"):
             unjudged = [hit for hit in cross_set_collisions(candidate, self.tokens)
-                        if (candidate, hit) not in JUDGED]
+                        if not judged(candidate, hit)]
             self.assertEqual(unjudged, [], f"{candidate}: {unjudged}")
+
+
+class ProvenanceTests(unittest.TestCase):
+    """One token declared twice is a question, not a fact."""
+
+    def setUp(self):
+        self.tokens = discovered_tokens()
+        self.duplicates = duplicate_declarations(self.tokens)
+
+    def test_every_cross_module_duplicate_carries_a_verdict(self):
+        """A new one fails here rather than passing quietly, which is the whole
+        repair: the check cannot stay silent about what nobody added."""
+        missing = sorted(set(self.duplicates) - set(DUPLICATE_DECLARATIONS))
+        self.assertEqual(missing, [], f"undeclared duplicates: {missing}")
+
+    def test_every_verdict_is_about_a_real_duplicate(self):
+        stale = sorted(set(DUPLICATE_DECLARATIONS) - set(self.duplicates))
+        self.assertEqual(stale, [], f"no longer duplicated: {stale}")
+
+    def test_every_verdict_names_its_two_places(self):
+        for token, (verdict, reason) in DUPLICATE_DECLARATIONS.items():
+            self.assertIn(verdict, (ONE_CONCEPT, TWO_CONCEPTS), token)
+            self.assertGreater(len(reason), 30, token)
+
+    def test_a_two_concept_token_never_clears_a_collision(self):
+        """Sharing a set with one meaning says nothing about the other."""
+        two = [t for t, (v, _r) in DUPLICATE_DECLARATIONS.items()
+               if v == TWO_CONCEPTS]
+        self.assertTrue(two)
+        for token in two:
+            for where in self.tokens[token]:
+                sibling_set = where
+                siblings = [t for t, w in self.tokens.items()
+                            if sibling_set in w and t != token]
+                for sibling in siblings:
+                    if is_substring_root(sibling, token) or is_negation_pair(sibling, token):
+                        self.assertIn(token, cross_set_collisions(sibling, self.tokens))
+
+    def test_the_overload_that_caused_a_rename_is_recorded(self):
+        """UNVERIFIED is why LOCK_SEMANTICS_UNVERIFIED became
+        LOCK_EXCLUSION_UNATTESTED, and it is two concepts, not one."""
+        self.assertEqual(DUPLICATE_DECLARATIONS["UNVERIFIED"][0], TWO_CONCEPTS)
+        self.assertIn("UNVERIFIED", self.duplicates)
 
 
 class DisjointnessTests(unittest.TestCase):
