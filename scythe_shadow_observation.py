@@ -45,7 +45,8 @@ from scythe_invariant_ledger import InvariantVerdict
 from scythe_promotion_ceilings import configuration_identity as ceiling_identity
 from scythe_promotion_lineage import Lineage, LineageError, Syscalls
 from scythe_promotion_policy import (
-    PROMOTION_ELIGIBLE, PROMOTION_REFUSED, REFUSALS, verdict_digest,
+    PROMOTION_ELIGIBLE, PROMOTION_REFUSED, REFUSALS, PolicyFacts,
+    evaluate_policy, verdict_digest,
 )
 
 SCHEMA = "scythe.shadow-observation.v1"
@@ -86,6 +87,20 @@ EVIDENCE_CONSTRUCTED = "EVIDENCE_CONSTRUCTED"
 EVIDENCE_DERIVED_ARTEFACT = "EVIDENCE_DERIVED_ARTEFACT"
 EVIDENCE_SOURCES: Tuple[str, ...] = (EVIDENCE_CONSTRUCTED,
                                      EVIDENCE_DERIVED_ARTEFACT)
+
+# What a run *is*, which is not the same question as where its verdicts came
+# from. Running production checkers over invented inputs certifies the
+# apparatus; it does not observe anything live, and calling the verdicts genuine
+# does not make the evidence live.
+APPARATUS_CERTIFICATION = "APPARATUS_CERTIFICATION"
+LIVE_OBSERVATION = "LIVE_OBSERVATION"
+NOT_A_LIVE_OBSERVATION = "NOT_A_LIVE_OBSERVATION"
+DERIVED_EVIDENCE_UNAVAILABLE = "DERIVED_EVIDENCE_UNAVAILABLE"
+
+# Only one source is eligible to be live, and it is not the one available today.
+_LIVE_ELIGIBLE: Tuple[str, ...] = (EVIDENCE_DERIVED_ARTEFACT,)
+
+OBSERVATION_REFUSALS = OBSERVATION_REFUSALS + (DERIVED_EVIDENCE_UNAVAILABLE,)
 
 # -- contract-declared maxima (§13h I.5) ----------------------------------
 #
@@ -137,32 +152,33 @@ class ObservationOutcome:
     origin: str = SYNTHETIC_REQUEST
 
 
+def _facts_of(subject: ObservationSubject) -> PolicyFacts:
+    """A subject yields facts. It does not yield a request, here or anywhere.
+
+    §13h I.2a forbids the conversion, and the policy's shared core is what makes
+    obeying it cost nothing: both paths evaluate the same rules because the
+    rules belong to neither the ask nor the observation.
+    """
+    return PolicyFacts(requested_by=subject.requested_by,
+                       target_graph=subject.target_graph,
+                       justification_source=subject.justification_source)
+
+
 def _evaluate(verdict: InvariantVerdict, subject: ObservationSubject,
               capsule: Any, already: Tuple[str, ...]) -> ObservationOutcome:
-    """Pure policy evaluation over a subject, returning an outcome.
+    """Evaluate the shared core and wrap the conclusion as an outcome.
 
-    The PromotionRequest built here is local, never returned, and never reaches
-    anything that can act. It exists because the alternative is a second copy of
-    the policy's rules, and two copies of a rule are two rules that can disagree
-    -- which is a worse failure than the one the type separation is guarding
-    against.
-
-    §13h I.2a's guarantee is that nothing escapes: no public function in this
-    module returns a PromotionRequest or a PromotionDecision, and a test asserts
-    it from the AST.
+    `evaluate_policy` returns a `PolicyConclusion`, which no act path accepts.
+    Only `decide_promotion` wraps one into a `PromotionDecision`, and this
+    module does not call it: no `PromotionRequest` is built here, so there is
+    nothing to convert and nothing to leak.
     """
-    from scythe_promotion_policy import PromotionRequest, decide_promotion
-
-    decision = decide_promotion(
-        verdict,
-        PromotionRequest(requested_by=subject.requested_by,
-                         target_graph=subject.target_graph,
-                         justification_source=subject.justification_source),
-        capsule, already_promoted=already)
+    conclusion = evaluate_policy(verdict, _facts_of(subject), capsule,
+                                 already_promoted=already)
     return ObservationOutcome(
-        identity=decision.idempotency_key or verdict_digest(verdict),
-        disposition=decision.disposition,
-        merit_refusals=tuple(decision.refusals),
+        identity=conclusion.idempotency_key or verdict_digest(verdict),
+        disposition=conclusion.disposition,
+        merit_refusals=tuple(conclusion.refusals),
         executability_refusals=(),
     )
 
@@ -242,8 +258,18 @@ class ShadowObservation:
     verdict_limit: int
     duration_s: float
     evidence_source: str = EVIDENCE_CONSTRUCTED
+    # A caller asking for a live observation gets one or gets a refusal. It
+    # never gets constructed evidence wearing the label, which is the whole
+    # reason this is a separate flag rather than an inference from the source.
+    require_live: bool = False
     syscalls: Syscalls = field(default_factory=Syscalls)
     clock: Callable[[], float] = time.monotonic
+
+    @property
+    def run_class(self) -> str:
+        """What this run is. Derived from the source and never asserted."""
+        return (LIVE_OBSERVATION if self.evidence_source in _LIVE_ELIGIBLE
+                else APPARATUS_CERTIFICATION)
 
     def _validate(self) -> None:
         """Before anything is read or written (§13h I.5).
@@ -266,6 +292,14 @@ class ShadowObservation:
         if self.evidence_source not in EVIDENCE_SOURCES:
             raise ObservationRefused(OBSERVATION_LIMIT_INVALID,
                                      "the evidence source is not a declared one")
+        if self.require_live and self.evidence_source not in _LIVE_ELIGIBLE:
+            # A bounded refusal, never a substitution. Constructed evidence
+            # cannot stand in for a derived artefact, because the substitution
+            # would be invisible in the record that exists to prevent it.
+            raise ObservationRefused(
+                DERIVED_EVIDENCE_UNAVAILABLE,
+                "no derived-evidence source is available; constructed evidence "
+                "certifies the apparatus and is not a live observation")
         refuse_record_path(self.record_path, self.lineage_root)
 
     def run(self, verdicts: Iterable[Tuple[InvariantVerdict, ObservationSubject, Any]]
@@ -319,6 +353,13 @@ class ShadowObservation:
                 f"{self.record_path}:{started}".encode("utf-8"),
                 digest_size=8).hexdigest(),
             "claim": NOT_A_PREDICTION,
+            "run_class": self.run_class,
+            "live_observation": self.run_class == LIVE_OBSERVATION,
+            "live_note": (
+                "RUNNING PRODUCTION CHECKERS OVER INVENTED INPUTS CERTIFIES THE "
+                "APPARATUS. IT IS " + NOT_A_LIVE_OBSERVATION + ": THE VERDICTS "
+                "ARE GENUINE AND THE EVIDENCE IS NOT LIVE, AND THE FIRST DOES "
+                "NOT MAKE THE SECOND TRUE"),
             "claim_note": (
                 "THIS IS AN OBSERVATION OF THE APPARATUS. IT IS NOT A FORECAST "
                 "OF WHAT ARMED WOULD DO: ARMED'S RATE DEPENDS ON A REQUESTER "

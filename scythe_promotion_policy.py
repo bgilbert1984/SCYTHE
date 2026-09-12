@@ -448,31 +448,68 @@ class PromotionDecision:
         }
 
 
-def decide_promotion(verdict: InvariantVerdict,
-                     request: Optional[PromotionRequest],
-                     capsule: Optional[CapsuleIdentity] = None,
-                     *, already_promoted: Sequence[str] = ()) -> PromotionDecision:
-    """Pure. Decides eligibility; performs nothing.
+@dataclass(frozen=True)
+class PolicyFacts:
+    """What the policy actually evaluates over.
+
+    The shared pure core, and the reason it exists: a `PromotionRequest` is an
+    **ask**, and an `ObservationSubject` is not. They carry the same facts and
+    mean different things, so the evaluation belongs to neither of them.
+
+    Before this existed, the observation path had to build a request to reuse
+    the rules -- which is the conversion §13h I.2a forbids -- or keep a second
+    copy of them, and two copies of a rule are two rules that can disagree.
+    Neither was acceptable, so the rules moved to where both can reach them
+    without either becoming the other.
+    """
+
+    requested_by: str
+    target_graph: str
+    justification_source: str
+    record_class: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class PolicyConclusion:
+    """The pure result. Deliberately **not** a `PromotionDecision`.
+
+    Every path that can reach the ledger or the graph takes a
+    `PromotionDecision`. This type is not one, so a conclusion cannot be acted
+    on by anything -- it has to be wrapped first, and only `decide_promotion`
+    wraps it into something that can act.
+    """
+
+    disposition: str
+    record_class: Optional[str] = None
+    idempotency_key: Optional[str] = None
+    refusals: Tuple[str, ...] = ()
+    detail: Tuple[str, ...] = ()
+
+
+def evaluate_policy(verdict: InvariantVerdict, facts: Optional[PolicyFacts],
+                    capsule: Optional[CapsuleIdentity] = None,
+                    *, already_promoted: Sequence[str] = ()) -> PolicyConclusion:
+    """Pure. Decides eligibility; performs nothing; wraps nothing.
 
     Refusals accumulate rather than stopping at the first, so a requester
     repairing one does not discover the next on the following attempt.
     """
-    if request is None:
+    if facts is None:
         # Frame arrival, a completed check, a model's commentary: none of these
         # is an ask, and the absence of one is not a refusal either.
-        return PromotionDecision(NO_PROMOTION_REQUESTED)
+        return PolicyConclusion(NO_PROMOTION_REQUESTED)
 
     refusals: list = []
     detail: list = []
 
-    if request.requested_by not in PROMOTION_AUTHORITIES:
+    if facts.requested_by not in PROMOTION_AUTHORITIES:
         refusals.append(AUTHORITY_INSUFFICIENT)
-        detail.append(f"requested_by={request.requested_by[:64]}")
-    if request.justification_source == MODEL_SOURCE:
+        detail.append(f"requested_by={facts.requested_by[:64]}")
+    if facts.justification_source == MODEL_SOURCE:
         refusals.append(MODEL_RESPONSE_USED_AS_AUTHORITY)
-    if request.target_graph not in SUPPORTED_TARGET_GRAPHS:
+    if facts.target_graph not in SUPPORTED_TARGET_GRAPHS:
         refusals.append(TARGET_UNSUPPORTED)
-        detail.append(f"target_graph={request.target_graph[:64]}")
+        detail.append(f"target_graph={facts.target_graph[:64]}")
 
     if capsule is None:
         refusals.append(CAPSULE_UNBOUND)
@@ -488,8 +525,8 @@ def decide_promotion(verdict: InvariantVerdict,
     if permitted is None:
         refusals.append(VERDICT_NOT_PROMOTABLE)
         detail.append(f"verdict={verdict.verdict}")
-    elif request.record_class is not None and request.record_class != permitted:
-        if permitted == OBSERVATION_GAP and request.record_class == INVARIANT_FINDING:
+    elif facts.record_class is not None and facts.record_class != permitted:
+        if permitted == OBSERVATION_GAP and facts.record_class == INVARIANT_FINDING:
             refusals.append(INDETERMINATE_AS_FAILURE)
             detail.append(f"{verdict.verdict} is an observation gap")
         else:
@@ -499,20 +536,51 @@ def decide_promotion(verdict: InvariantVerdict,
             # promotable AS THAT CLASS.
             refusals.append(VERDICT_NOT_PROMOTABLE)
             detail.append(
-                f"{verdict.verdict} is a {permitted}, not a {request.record_class}")
+                f"{verdict.verdict} is a {permitted}, not a {facts.record_class}")
 
     key = None
     if capsule is not None and permitted is not None:
-        key = promotion_identity(verdict, capsule, request.target_graph)
+        key = promotion_identity(verdict, capsule, facts.target_graph)
         if key in tuple(already_promoted):
             refusals.append(DUPLICATE_PROMOTION)
 
     ordered = tuple(dict.fromkeys(refusals))
     if ordered:
-        return PromotionDecision(PROMOTION_REFUSED, refusals=ordered,
-                                 detail=tuple(detail[:8]))
-    return PromotionDecision(PROMOTION_ELIGIBLE, record_class=permitted,
-                             idempotency_key=key)
+        return PolicyConclusion(PROMOTION_REFUSED, refusals=ordered,
+                                detail=tuple(detail[:8]))
+    return PolicyConclusion(PROMOTION_ELIGIBLE, record_class=permitted,
+                            idempotency_key=key)
+
+
+def facts_of(request: PromotionRequest) -> PolicyFacts:
+    """One direction only: a request yields facts. Facts never yield a request.
+
+    §13h I.2a's boundary in one function signature.
+    """
+    return PolicyFacts(requested_by=request.requested_by,
+                       target_graph=request.target_graph,
+                       justification_source=request.justification_source,
+                       record_class=request.record_class)
+
+
+def decide_promotion(verdict: InvariantVerdict,
+                     request: Optional[PromotionRequest],
+                     capsule: Optional[CapsuleIdentity] = None,
+                     *, already_promoted: Sequence[str] = ()) -> PromotionDecision:
+    """The asking path: evaluate the facts, then wrap as something that can act.
+
+    The wrapping is the whole difference between this and the observation path.
+    They reach identical conclusions from identical facts -- a test proves it --
+    and only this one produces a type an act path will accept.
+    """
+    conclusion = evaluate_policy(
+        verdict, None if request is None else facts_of(request), capsule,
+        already_promoted=already_promoted)
+    return PromotionDecision(conclusion.disposition,
+                             record_class=conclusion.record_class,
+                             idempotency_key=conclusion.idempotency_key,
+                             refusals=conclusion.refusals,
+                             detail=conclusion.detail)
 
 
 def policy_status() -> Dict[str, Any]:

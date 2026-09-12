@@ -11,6 +11,8 @@ from scythe_promotion_ledger_ownership import LedgerOwnership
 from scythe_promotion_ledger_writer import LedgerWriter
 from scythe_promotion_lineage import Syscalls, generation_path
 from scythe_shadow_observation import (
+    APPARATUS_CERTIFICATION, DERIVED_EVIDENCE_UNAVAILABLE,
+    EVIDENCE_DERIVED_ARTEFACT, LIVE_OBSERVATION, NOT_A_LIVE_OBSERVATION,
     EVIDENCE_CONSTRUCTED, LINEAGE_NOT_QUIESCENT, LINEAGE_QUIESCENT,
     MAX_OBSERVATION_DURATION_S, MAX_OBSERVATION_VERDICTS, NOT_A_PREDICTION,
     OBSERVATION_DURATION_REACHED, OBSERVATION_INTERRUPTED,
@@ -85,6 +87,133 @@ class ClaimTests(ObservationTestCase):
         self.assertIn("executability_refusals", record)
         self.assertNotIn("total_refusals", record)
         self.assertTrue(record["merit_refusals"])
+
+
+class LiveClassTests(ObservationTestCase):
+    """Slice 10a. Constructed evidence certifies; it does not observe.
+
+    Running production checkers over invented inputs is worth having and is not
+    the fifth stage. The verdicts are genuine and the evidence is not live, and
+    the first does not make the second true.
+    """
+
+    def test_a_constructed_run_reports_itself_as_certification(self):
+        record = self._observer().run(constructed_walk_verdicts(5))
+        self.assertEqual(record["run_class"], APPARATUS_CERTIFICATION)
+        self.assertFalse(record["live_observation"])
+        self.assertIn(NOT_A_LIVE_OBSERVATION, record["live_note"])
+
+    def test_constructed_evidence_cannot_report_itself_as_live(self):
+        record = self._observer().run(constructed_walk_verdicts(5))
+        self.assertNotEqual(record["run_class"], LIVE_OBSERVATION)
+        self.assertNotIn(LIVE_OBSERVATION, json.dumps(record["run_class"]))
+
+    def test_requiring_live_refuses_rather_than_substituting(self):
+        """A bounded refusal, never a silent substitution: the substitution
+        would be invisible in the record that exists to prevent it."""
+        with self.assertRaises(ObservationRefused) as caught:
+            self._observer(require_live=True).run(constructed_walk_verdicts(5))
+        self.assertEqual(caught.exception.code, DERIVED_EVIDENCE_UNAVAILABLE)
+        self.assertFalse(os.path.exists(self.record))
+
+    def test_only_a_derived_artefact_is_eligible_to_be_live(self):
+        observer = self._observer(evidence_source=EVIDENCE_DERIVED_ARTEFACT)
+        self.assertEqual(observer.run_class, LIVE_OBSERVATION)
+        self.assertEqual(self._observer().run_class, APPARATUS_CERTIFICATION)
+
+    def test_no_derived_artefact_source_exists_in_this_repository(self):
+        """The honest state of slice 10, asserted rather than described.
+
+        The declared class `EVIDENCE_DERIVED_ARTEFACT` exists; a *source* that
+        produces such evidence does not. When a derived-evidence interface
+        arrives, this test is what has to change -- which is the point of
+        writing it as an assertion rather than a sentence in a PR.
+        """
+        sources = [name for name, value in vars(observation_module).items()
+                   if callable(value) and name.endswith("_verdicts")]
+        self.assertEqual(sources, ["constructed_walk_verdicts"])
+
+
+class PureCoreTests(unittest.TestCase):
+    """§13h I.2a: one set of rules, two wrappers, no conversion."""
+
+    def test_the_observation_module_constructs_no_promotion_request(self):
+        with open(observation_module.__file__, encoding="utf-8") as handle:
+            tree = ast.parse(handle.read())
+        called = {n.func.id for n in ast.walk(tree)
+                  if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)}
+        self.assertNotIn("PromotionRequest", called)
+        self.assertNotIn("decide_promotion", called)
+        imported = {a.name for n in ast.walk(tree)
+                    if isinstance(n, ast.ImportFrom) for a in n.names}
+        self.assertNotIn("PromotionRequest", imported)
+        self.assertNotIn("decide_promotion", imported)
+
+    def test_the_shared_core_returns_no_promotion_decision(self):
+        from scythe_promotion_policy import (
+            PolicyConclusion, PolicyFacts, PromotionDecision, evaluate_policy,
+        )
+        from test_scythe_promotion_ledger import CAPSULE, _verdict
+
+        conclusion = evaluate_policy(
+            _verdict(), PolicyFacts(requested_by="OPERATOR",
+                                    target_graph="scythe.graphops.evidence",
+                                    justification_source="OPERATOR"), CAPSULE)
+        self.assertIsInstance(conclusion, PolicyConclusion)
+        self.assertNotIsInstance(conclusion, PromotionDecision)
+
+    def test_facts_flow_one_way_only(self):
+        from scythe_promotion_policy import PolicyFacts
+
+        self.assertFalse([n for n in dir(PolicyFacts) if "request" in n.lower()])
+        self.assertFalse([n for n in dir(ObservationSubject)
+                          if n.startswith("to_") or n.startswith("as_")])
+
+    def test_both_wrappers_reach_identical_conclusions(self):
+        """The equivalence that makes the type boundary free: identical facts
+        produce identical policy conclusions through both wrappers, so the
+        separation costs no divergence."""
+        from scythe_promotion_policy import (
+            CapsuleIdentity, PromotionRequest, decide_promotion,
+        )
+        from test_scythe_promotion_ledger import _distinct, _satisfied
+
+        capsules = [
+            CapsuleIdentity(schema="scythe.invariant-capsule.v1",
+                            digest="blake2s:aa", within_bounds=True,
+                            carries_samples=False),
+            CapsuleIdentity(schema="scythe.invariant-capsule.v1",
+                            digest="blake2s:bb", within_bounds=False,
+                            carries_samples=False),
+            None,
+        ]
+        askers = [("OPERATOR", "scythe.graphops.evidence", "OPERATOR"),
+                  ("MODEL", "scythe.graphops.evidence", "MODEL"),
+                  ("OPERATOR", "somewhere.else", "OPERATOR")]
+        verdicts = [_distinct(0), _distinct(1), _satisfied()]
+
+        for capsule in capsules:
+            for who, graph, source in askers:
+                for verdict in verdicts:
+                    with self.subTest(capsule=capsule, who=who, verdict=verdict):
+                        decision = decide_promotion(
+                            verdict,
+                            PromotionRequest(requested_by=who, target_graph=graph,
+                                             justification_source=source),
+                            capsule, already_promoted=())
+                        outcome = observation_module._evaluate(
+                            verdict,
+                            ObservationSubject(requested_by=who,
+                                               target_graph=graph,
+                                               justification_source=source),
+                            capsule, ())
+                        self.assertEqual(outcome.disposition,
+                                         decision.disposition)
+                        self.assertEqual(outcome.merit_refusals,
+                                         decision.refusals)
+                        if decision.idempotency_key:
+                            self.assertEqual(outcome.identity,
+                                             decision.idempotency_key)
 
 
 class BoundTests(ObservationTestCase):
