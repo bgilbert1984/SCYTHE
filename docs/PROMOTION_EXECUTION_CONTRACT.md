@@ -14,7 +14,8 @@ Amendment E:            §13d ownership, seeding, durability — ACCEPTED
 Amendment F:            §13e reconciliation by supersession — ACCEPTED
                         2026-09-10, after review strengthened F.6 and added
                         F.10
-Amendment G:            §13f the two ceilings, declared — PROPOSED 2026-09-11
+Amendment G:            §13f the two ceilings, declared — ACCEPTED 2026-09-11,
+                        after review renamed the C2 refusal
 Authority:              NORMATIVE
 Constrains:             Step 4 of the promotion sequence (execution adapter)
 Depends on:             SCYTHE_VERDICT_VOCABULARIES.md  (ACCEPTED — §5 declares
@@ -172,7 +173,7 @@ This section instantiates that rule for the promotion sequence. The two vocabula
 | --- | --- | --- |
 | owner | `scythe_promotion_policy` | `scythe_promotion_ledger` (the coordinator) |
 | answers | is this finding fit to promote? | could we act on it at all? |
-| examples | `VERDICT_NOT_PROMOTABLE`, `CAPSULE_UNBOUND`, `DUPLICATE_PROMOTION` | `BUDGET_EXHAUSTED`, `DURABLE_CEILING_REACHED`, `UNRESOLVED_CEILING_REACHED`, `IDENTITY_UNRESOLVED`, `RETRY_REQUIRES_OPERATOR`, `NOT_RECONCILABLE`, `GENERATION_CHAIN_BROKEN`, `GENERATION_LINEAGE_FORKED`, `GENERATION_PUBLICATION_UNCERTAIN`, `LEDGER_UNAVAILABLE`, `LEDGER_NOT_OWNED`, `LEDGER_TORN`, `LEDGER_GENERATION_UNDECLARED`, `OWNERSHIP_LOST`, `RESERVATION_NOT_DURABLE`, `LOCK_EXCLUSION_UNATTESTED`, `RESERVATION_DURABILITY_UNATTESTED` |
+| examples | `VERDICT_NOT_PROMOTABLE`, `CAPSULE_UNBOUND`, `DUPLICATE_PROMOTION` | `BUDGET_EXHAUSTED`, `DURABLE_CEILING_REACHED`, `OUTSTANDING_RESERVATION_CEILING_REACHED`, `IDENTITY_UNRESOLVED`, `RETRY_REQUIRES_OPERATOR`, `NOT_RECONCILABLE`, `GENERATION_CHAIN_BROKEN`, `GENERATION_LINEAGE_FORKED`, `GENERATION_PUBLICATION_UNCERTAIN`, `LEDGER_UNAVAILABLE`, `LEDGER_NOT_OWNED`, `LEDGER_TORN`, `LEDGER_GENERATION_UNDECLARED`, `OWNERSHIP_LOST`, `RESERVATION_NOT_DURABLE`, `LOCK_EXCLUSION_UNATTESTED`, `RESERVATION_DURABILITY_UNATTESTED` |
 | repaired by | changing the finding, or accepting the judgement | fixing the apparatus; the finding may be sound |
 
 The coordinator **returns** `IDENTITY_UNRESOLVED` on a second evaluation of an
@@ -545,7 +546,7 @@ generation. **If it ever fires during correct operation, it was set wrong — an
 that is its calibration test.**
 
 Both refusals are executability codes (§5): `DURABLE_CEILING_REACHED`,
-`UNRESOLVED_CEILING_REACHED`. Both are checked **before** the durable append and
+`OUTSTANDING_RESERVATION_CEILING_REACHED`. Both are checked **before** the durable append and
 a refusal writes no record (§13f G.5); both totals are seeded from the ledger
 (§13f G.6); the values are contract-declared constants (§13f G.4).
 
@@ -1429,8 +1430,9 @@ the configuration can name a second lock for the same lineage.
 
 ## 13f. Amendment G — the two ceilings, declared
 
-*Proposed 2026-09-11. **Not yet accepted.** Settles §11 before slice 8 is
-written. Touches §5, §11 and §12.*
+*Proposed 2026-09-11 and accepted 2026-09-11, after review renamed the C2
+refusal rather than judging it. Settles §11 before slice 8 is written. Touches
+§5, §11 and §12.*
 
 ### G.1 `BoundedCeiling` is not reused
 
@@ -1491,7 +1493,7 @@ the ceiling, which is the shape entry 4 was opened to catch the absence of.
 | accounting source | those records across the complete validated lineage |
 | scope | the lineage, **not** the generation |
 | decrement | a valid reconciliation record only, under §13e F.2's authority rules |
-| refusal | `UNRESOLVED_CEILING_REACHED` |
+| refusal | `OUTSTANDING_RESERVATION_CEILING_REACHED` — see G.8 for why it is not named after the state it counts |
 
 **`FAILED` does not count toward C2.** It is resolved and not unresolved: the
 adapter answered. C1 already bounds it, and counting it here would make C2 fire
@@ -1591,17 +1593,54 @@ the check existed**, and have never been through it. Two hits, both judged:
 | hit | judgement |
 | --- | --- |
 | `DURABLE_CEILING_REACHED` / `CEILING_REACHED` | **not a collision, and deliberate.** `CEILING_REACHED` is §13e F.7's closure reason; the two name the same ceiling event from two sides, and renaming either would hide the link an operator needs |
-| `UNRESOLVED_CEILING_REACHED` / `UNRESOLVED` | **not a collision.** That `UNRESOLVED` is an `rf_signal_family` modulation and protocol value — a different subject in a different domain |
+| `UNRESOLVED_CEILING_REACHED` / `UNRESOLVED` | **rejected, not judged.** See below |
 
-The second is worth recording beyond the judgement: **this repository already
-uses `UNRESOLVED` for two unrelated things** — a modulation that could not be
-identified, and a reservation whose write was never answered. Neither is wrong
-and the check is right to mention it. It is a pre-existing ambiguity that
-predates the rule, surfaced by running the rule over ground it had not covered.
+**The C2 code was renamed rather than judged.** `UNRESOLVED_CEILING_REACHED`
+would have added a *third* use of a term this repository already overloads: an
+unclassified modulation in `rf_signal_family`, and a reservation whose write was
+never answered here. A judgement would have made that permanent on the grounds
+that the surrounding prose says "unresolved" — which is a reason to keep the
+prose, not to keep the name.
 
-A third candidate was rejected rather than judged: the SHADOW capability value
+**So the code names its subject and the prose keeps the state.** §11 and G.3
+still define C2 over *unresolved* reservations, because that is what they are.
+The refusal is `OUTSTANDING_RESERVATION_CEILING_REACHED`, which says what was
+counted rather than borrowing the word for what each one is. Checked against the
+discovered universe before adoption: its only hit is `CEILING_REACHED`, the same
+deliberate link `DURABLE_CEILING_REACHED` has.
+
+A judgement should record a resemblance worth keeping. Neither of the two above
+is the *third* meaning of an already-doubled word.
+
+A further candidate was rejected rather than judged: the SHADOW capability value
 was going to be `SIMULATION_UNAVAILABLE_WITHOUT_ADAPTER`, which is a negation
 pair with `AVAILABLE`/`UNAVAILABLE` in the store. `NOT_SIMULABLE` is clear.
+
+### G.8a The checker cannot see a token declared twice
+
+Finding the above exposed a limit in the mechanical check, and it is a real one.
+
+The check holds tokens as a **set of strings**. One identical token declared by
+two unrelated closed sets collapses to one member, so the check cannot tell
+*this word means one thing* from *this word means two things in two domains*.
+`UNRESOLVED` is exactly that case and the check reported it as a single
+neighbour.
+
+It is worse than blindness. `cross_set_collisions` clears a hit when the
+candidate and the hit share a declaring set — and a token declared in several
+sets clears against **any** of them, so a genuine cross-domain neighbour can be
+skipped because the same word is also declared somewhere harmless.
+
+The scale is not one case: **31 tokens in this tree are declared by more than one
+module.** Some are deliberate — `COMMITTED` in the coordinator and the reader are
+one concept in two places — and some are two concepts wearing one word.
+
+**The repair:** the check keeps declaration provenance, a multimap of token to
+declaring module and set, and a **cross-domain duplicate declaration requires a
+recorded judgement** exactly as a collision does. `PENDING_AMENDMENTS.md` carries
+the obligation, and it is implemented **before** any slice-8 ceiling code — the
+check is what slice 8's names will be argued from, and it is known-incomplete
+again until then.
 
 ### G.9 What slice 8 does not do
 
@@ -1845,6 +1884,8 @@ already written down. Introduced by Amendment B, noticed by Amendment C.*
 
 31a. `BoundedCeiling` is not imported by the coordinator — AST — and no ceiling
     refusal is a merit finding.
+31o. The C2 refusal names its subject: `OUTSTANDING_RESERVATION_CEILING_REACHED`
+    is declared, and no ceiling code contains the component `UNRESOLVED`.
 31b. Every declared ceiling states subject, accounting source, scope, reset rule
     and refusal; a ceiling missing any of them is refused at construction.
 31c. C1 counts reservations regardless of terminal outcome: a writer that never
@@ -1991,7 +2032,11 @@ produced it.
 38. **The values are contract-declared, not configurable** (§13f G.4). A ceiling
     a deployment can raise is a ceiling that will be raised at the moment it
     first fires, which is the moment it is doing its job.
-39. **Durable and simulated totals are never published under one name** (§13f
+39. **The C2 code names its subject rather than the state it counts** (§13f
+    G.8). `UNRESOLVED` is already doubled in this tree, and a judgement would
+    have made a third use permanent on the grounds that the prose uses the word
+    — which is a reason to keep the prose.
+40. **Durable and simulated totals are never published under one name** (§13f
     G.7). SHADOW cannot generate new unresolved reservations and can certainly
     observe real ones, and reporting zero would be a false statement about the
     record rather than an honest one about simulation.

@@ -97,6 +97,42 @@ declared as one nowhere. The finding is recorded there because recovery has no
 contract to carry it. When one exists, it carries it, and the vocabularies
 document's conformance table gets a normal row.
 
+## 6. `test_scythe_verdict_vocabularies.py` — a token declared twice collapses
+
+**Trigger:** before any slice-8 ceiling code. Not *with* it, and not after.
+
+The check holds tokens as a **set of strings**. One identical token declared by
+two unrelated closed sets collapses to one member, so the check cannot tell *this
+word means one thing* from *this word means two things in two domains*.
+`UNRESOLVED` — an unclassified modulation in `rf_signal_family`, and a
+reservation whose write was never answered in the promotion ledger — is exactly
+that, and the check reported it as one neighbour.
+
+It is worse than blindness. `cross_set_collisions` clears a hit when the
+candidate and the hit share a declaring set, and a token declared in several
+sets clears against **any** of them. A genuine cross-domain neighbour can
+therefore be skipped because the same word is also declared somewhere harmless
+— a false *negative* produced by the mechanism added to prevent false positives.
+
+**Scale, measured rather than guessed: 31 tokens in this tree are declared by
+more than one module.** Some are deliberate (`COMMITTED` in the coordinator and
+the reader are one concept in two places); some are two concepts wearing one
+word (`NOISE_COMPATIBLE` in `NULL_REASON_CODES` and `NULL_OUTCOMES`).
+
+**The repair.** Provenance is already collected — `discovered_tokens` returns a
+multimap of token to declaring `module.SET`. What is missing is using it:
+
+1. a cross-domain duplicate declaration requires a **recorded judgement**,
+   exactly as a collision does;
+2. same-set clearing must not fire on a token whose *other* declaration is in an
+   unrelated domain.
+
+Recorded now and implemented before slice 8's ceiling code, because that check is
+what slice 8's names will be argued from. Until then it is known-incomplete
+again — the second time, and the first repair is what surfaced this one.
+
+---
+
 ---
 
 ---
