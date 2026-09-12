@@ -17,8 +17,9 @@ Amendment F:            §13e reconciliation by supersession — ACCEPTED
 Amendment G:            §13f the two ceilings, declared — ACCEPTED 2026-09-11,
                         after review renamed the C2 refusal
 Amendment H:            §13g the execution boundary — ACCEPTED 2026-09-12
-Amendment I:            §13h what live SHADOW can observe — PROPOSED
-                        2026-09-12
+Amendment I:            §13h what live SHADOW can observe — ACCEPTED
+                        2026-09-12, after review added I.2a, the bound maxima
+                        and I.4a
 Authority:              NORMATIVE
 Constrains:             Step 4 of the promotion sequence (execution adapter)
 Depends on:             SCYTHE_VERDICT_VOCABULARIES.md  (ACCEPTED — §5 declares
@@ -1851,8 +1852,11 @@ rather than what is missing from a file.
 
 ## 13h. Amendment I — what live SHADOW can actually observe
 
-*Proposed 2026-09-12. **Not yet accepted.** Narrows §12's claim before slice 10
-implements it, because the claim as written cannot be met. Touches §12 and §17.*
+*Proposed 2026-09-12 and accepted 2026-09-12, after review required synthetic
+input to be non-executable by construction (I.2a), the bounds to be capped by
+the contract (I.5), and the digest claim to be narrowed (I.4a). Narrows §12's
+claim before slice 10 implements it, because the claim as written cannot be met.
+Touches §12 and §17.*
 
 ### I.1 SHADOW cannot predict what ARMED would do
 
@@ -1889,11 +1893,33 @@ That is a smaller claim than "live SHADOW observation" sounds like, and it is
 written here rather than left to a code comment so the record cannot quietly
 grow back into a forecast.
 
-**Every synthesized request is marked `SYNTHETIC_REQUEST` in the record**, and
-the record states in its own text that it is an apparatus observation and
+The record states in its own text that it is an apparatus observation and
 `NOT_A_PREDICTION`. A reader who takes a promotion count from it and calls it a
 rate is then contradicting the document they are reading, which is the most a
 document can do.
+
+### I.2a Synthetic input is non-executable by construction
+
+**`SYNTHETIC_REQUEST` may not be a flag on an otherwise executable
+`PromotionRequest`.** That is the ownership-boolean problem again (§13d E.4): a
+flag can be omitted or falsified, and the call site does not show whether the
+claim was true.
+
+The observation path uses a **distinct type**, `ObservationSubject`, and produces
+a **distinct outcome**, `ObservationOutcome`. Five prohibitions, and each is
+structural rather than a rule someone must remember:
+
+| | how it is prevented |
+| --- | --- |
+| cannot reach the adapter | the observer holds none, and the adapter refuses both types by name |
+| cannot create a durable reservation | the observer holds no ownership scope, and without one no append exists (§13c D.4) |
+| cannot mutate durable posture | the observer holds no `LedgerWriter`; it reads through `read_ledger` and `Lineage` |
+| cannot become a production `PromotionRequest` | no conversion exists, and the synthetic path **never produces a `PromotionDecision`** — every act path takes one, so there is nothing for an act path to accept |
+| is refused at every execution boundary | the write session and the adapter reject `ObservationSubject` and `ObservationOutcome` explicitly, so a future wiring mistake fails loudly rather than relying on absence |
+
+Pure policy evaluation and in-memory simulation may be reused. What may not be
+reused is the production ask, and the guarantee is that the observation path has
+no value to hand one.
 
 §12's testable property is unchanged and finally testable where it was meant to
 be: slice 5 proved byte-identity against a temporary directory, and §12's claim
@@ -1909,25 +1935,66 @@ The raw-IQ and loopback-binding constraints are therefore not engaged carefully
 acquires in order to observe would have to argue that it handled raw IQ
 correctly; this one does not have the buffer.
 
-### I.4 The observation record
+### I.4 The observation record, and how it is published
 
-Written **once, at the end of a bounded run**, to a configured path **outside the
-lineage root**, and never appended to.
+Written **once, at the end of a bounded run**, to a path **outside the complete
+ledger-lineage namespace**, and never appended to.
 
-Not merely differently named. `Lineage.published()` matches
-`<root>.NNNNNN.jsonl` and would ignore it, but relying on a filename pattern to
-keep a non-ledger out of the ledger is the near-miss this contract has spent
-nine slices removing. **A file that accumulates is a second ledger nobody
-accepted.**
+Not merely differently named, and not merely outside the root by prefix: the
+resolved output path and the resolved lineage namespace are compared after
+symlink resolution, and containment refuses with `OBSERVATION_PATH_REFUSED`.
+`Lineage.published()` would ignore a differently-named file by pattern, but
+relying on a filename pattern to keep a non-ledger out of the ledger is the
+near-miss this contract has spent nine slices removing. **A file that
+accumulates is a second ledger nobody accepted.**
+
+**Published by §13e F.6's protocol**, because it is the same problem: create a
+temporary sibling exclusively, write it complete, `fsync` the file, rename
+atomically to the final name, `fsync` the directory. Exclusive creation, never
+overwrite and never append — a second run at one path is
+`OBSERVATION_PUBLICATION_REFUSED`, not an extension of the first.
+
+**Bounded structured failure codes only.** No exception strings, no credentials,
+no paths that carry secrets, no arbitrary source data. The rule §13a B.2 set for
+exception messages, applied to a record whose whole purpose is to be read later
+by someone who was not there.
+
+**What the record does not claim.** A best-effort terminal record is written for
+a recoverable exception (I.7). It claims nothing about surviving `SIGKILL`,
+power loss, or a failure of its own publication — an observation cannot report
+its own violent end, and a record that implied otherwise would be the only
+untrue thing in it.
 
 It carries: verdicts seen and their dispositions; simulated promotions and
 refusals by code, with the two vocabularies counted separately (§5); the durable
 ceiling totals read from the real ledger and the simulated ones named apart
-(§13f G.7); what it seeded from; the byte-identical proof as a digest before and
-after; and the configuration identities already defined, so the record says
-which contract it was taken under.
+(§13f G.7); what it seeded from; the digests before and after; and the
+configuration identities already defined, so the record says which contract it
+was taken under.
 
-### I.5 Two bounds, and reaching either is a normal ending
+### I.4a What equal digests prove, and what they do not
+
+**Equal digests show the ledger was unchanged during the observation interval.
+They do not attribute that to the observer.**
+
+§12 permits SHADOW to run beside an ARMED writer. So byte-identity is evidence
+that *nothing wrote*, not that *this process did not write* — and where another
+writer may run, the two are different claims. The record must not make the
+second one from the first.
+
+So the record states whether the lineage was **quiescent**:
+
+```
+LINEAGE_QUIESCENT       nothing changed across the interval
+LINEAGE_NOT_QUIESCENT   something did, and the observer makes no claim about why
+```
+
+Under `LINEAGE_NOT_QUIESCENT` the record reports the change and **draws no
+conclusion about its cause**. The observer cannot tell its own writes from
+another process's, and the honest report of that is silence about attribution
+rather than a confident sentence about a file it does not own.
+
+### I.5 Two bounds, both capped by the contract
 
 The run ends on whichever arrives first:
 
@@ -1943,6 +2010,28 @@ like a duration and is not one.
 
 Reaching either bound is recorded as a normal ending. Neither is an error, and a
 run that ends because it saw everything it was asked to see has succeeded.
+
+**A configurable bound is not a bound.** "Configured count and duration" permits
+a billion verdicts or several years, which is an unbounded run with a number
+attached. Both requested limits are checked against **contract-declared
+maxima**:
+
+```
+MAX_OBSERVATION_VERDICTS   = 1_000
+MAX_OBSERVATION_DURATION_S = 900        # 15 monotonic minutes
+
+1 <= requested_verdict_limit   <= MAX_OBSERVATION_VERDICTS
+0 <  requested_duration        <= MAX_OBSERVATION_DURATION_S
+```
+
+**Both limits stay active**; the first reached ends the run. A missing or
+out-of-range limit is `OBSERVATION_LIMIT_INVALID` and **refuses before
+observation begins** — nothing is read, nothing is written, and no record is
+published, because a run that never started has nothing to report.
+
+The maxima are contract-declared constants and not runtime knobs, for §13f G.4's
+reason: a ceiling a deployment can raise is one that will be raised at the
+moment it first binds.
 
 ### I.6 Foreground, in-process, and it stops by itself
 
@@ -2247,10 +2336,27 @@ already written down. Introduced by Amendment B, noticed by Amendment C.*
 
 **Amendment I (§13h)**
 
-33a. The observation record declares itself `NOT_A_PREDICTION` and marks every
-    synthesized request `SYNTHETIC_REQUEST`.
-33b. The ledger file is byte-identical across a live observation, proven by a
-    digest before and after, and the record carries both.
+33a. The observation record declares itself `NOT_A_PREDICTION`.
+33b. The record carries the digest before and after, and states
+    `LINEAGE_QUIESCENT` or `LINEAGE_NOT_QUIESCENT`; under the second it draws no
+    conclusion about the cause.
+33k. `ObservationSubject` and `ObservationOutcome` are distinct types, and the
+    write session and the adapter refuse both by name.
+33l. The synthetic path produces no `PromotionDecision` — AST over its public
+    functions' returns.
+33m. The observer holds no ownership scope, no `LedgerWriter` and no adapter,
+    so no append exists for it to make.
+33n. A verdict limit outside `1..MAX_OBSERVATION_VERDICTS`, or a duration
+    outside `0 < d <= MAX_OBSERVATION_DURATION_S`, is `OBSERVATION_LIMIT_INVALID`
+    and refuses **before** anything is read or written; no record is published.
+33o. Both maxima are contract-declared constants: no argument, environment
+    variable or setter changes them — AST and behaviour.
+33p. The resolved output path is compared to the resolved lineage namespace
+    after symlink resolution; containment is `OBSERVATION_PATH_REFUSED`.
+33q. The record is published by §13e F.6's five steps, in that order, asserted
+    through the same syscall seam.
+33r. A second run at one path is `OBSERVATION_PUBLICATION_REFUSED` and leaves
+    the first record byte-identical.
 33c. The record is written outside the lineage root, and a `Lineage` rooted
     there does not discover it as a generation.
 33d. The record is written once and never appended to: a second run at one path
@@ -2436,10 +2542,20 @@ produced it.
 46. **The observer acquires nothing** (§13h I.3). A slice that captured in order
     to observe would have to argue it handled raw IQ correctly; this one has no
     buffer to argue about.
-47. **A failed observation still writes its record** (§13h I.7). One that
+47. **Synthetic input is a distinct type, not a flagged request** (§13h I.2a).
+    A flag can be omitted or falsified and the call site does not show whether
+    the claim was true — the ownership-boolean problem, one layer up.
+48. **A configurable bound is not a bound** (§13h I.5). Contract-declared
+    maxima, because a limit a deployment can raise will be raised at the moment
+    it first binds.
+49. **Equal digests prove nothing wrote, not that we did not** (§13h I.4a).
+    §12 permits SHADOW beside an ARMED writer, so the observer cannot tell its
+    own writes from another's, and the honest report of that is silence about
+    attribution.
+50. **A failed observation still writes its record** (§13h I.7). One that
     produces nothing when it fails cannot be told from one that never started,
     and that difference is what the record was for.
-48. **An endpoint does not imply a capability** (§13g H.7). Conformance is a
+51. **An endpoint does not imply a capability** (§13g H.7). Conformance is a
     reviewed declaration hashed into configuration identity, at a boundary where
     the other party can change without telling us. SHADOW cannot generate new unresolved reservations and can certainly
     observe real ones, and reporting zero would be a false statement about the
