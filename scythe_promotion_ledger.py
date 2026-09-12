@@ -39,6 +39,10 @@ from scythe_invariant_ledger import InvariantVerdict
 # One way: coordinator -> writer -> reader. The two ledger-readability codes
 # come through the writer rather than from the store directly, so the store
 # keeps exactly one caller and this module keeps exactly one ledger dependency.
+from scythe_promotion_ceilings import (
+    CEILING_REFUSALS, CeilingTotals, configuration_identity,
+    status as ceiling_status,
+)
 from scythe_promotion_ledger_writer import (
     LEDGER_UNAVAILABLE, LEDGER_UNREADABLE, RESERVATION_NOT_DURABLE,
     LedgerWriteRefused, LedgerWriter,
@@ -390,6 +394,9 @@ class PromotionCoordinator:
         # terminal record can name what it resolves. Held here rather than on
         # the decision, which is frozen and is the policy's object.
         self._durable_seq: Dict[str, int] = {}
+        # §11, §13f. Seeded from the ledger below and maintained under the
+        # lock, like the identity map: memory is a cache of the file.
+        self._ceilings = CeilingTotals()
         self._seeded_from: Optional[str] = None
         if ledger is not None:
             self._seed_from_ledger(ledger)
@@ -496,6 +503,11 @@ class PromotionCoordinator:
             self._real.identities[identity] = FAILED
         for identity in read.unresolved:
             self._real.identities[identity] = RESERVED
+        # C1 from this generation's own reservations; C2 from the lineage,
+        # because an unresolved reservation in a closed predecessor was never
+        # reconciled and is still outstanding (§13f G.3).
+        self._ceilings.reservations_in_generation = read.reservations_total
+        self._ceilings.unresolved_in_lineage = ledger.lineage_unresolved()
         for identity in read.fenced:
             self._shadow.identities[identity] = COMMITTED
 
@@ -603,6 +615,12 @@ class PromotionCoordinator:
             # This finding may be entirely promotable; we declined to act.
             return (self._refuse_unlocked(BUDGET_EXHAUSTED, decision, now_ns), None)
 
+        # §13f G.5: checked BEFORE the durable append. A ceiling that counted
+        # the reservations it refused would raise itself every time it fired.
+        ceiling = self._ceilings.refusal()
+        if ceiling is not None:
+            return (self._refuse_unlocked(ceiling, decision, now_ns), None)
+
         if self.mode == MODE_SHADOW:
             # Spend the simulated budget so the next evaluation sees the
             # duplicate refusal and the window the way ARMED would.
@@ -646,6 +664,8 @@ class PromotionCoordinator:
         # against the same evidence; a duplicate already in GraphOps is not,
         # because nothing downstream can tell it from a second real one.
         posture.reserve(decision.idempotency_key, now_ns)
+        if self.mode != MODE_SHADOW:
+            self._ceilings.reserve()
         self._audit.record(PROMOTION_ATTEMPTED, mode=self.mode, reason="ELIGIBLE",
                            idempotency_key=decision.idempotency_key,
                            record_class=decision.record_class,
@@ -730,6 +750,9 @@ class PromotionCoordinator:
                         "detail": {"cause": ADAPTER_REPORTED_UNKNOWN,
                                    "terminal_record": refused.code}}
         self._real.resolve(decision.idempotency_key, state)
+        # C1 does not move: it counts reservations regardless of outcome. C2
+        # does -- the reservation is no longer outstanding.
+        self._ceilings.resolve()
         event = PROMOTION_RECORDED if outcome == CREATED else PROMOTION_FAILED
         self._audit.record(event, mode=self.mode, reason="ELIGIBLE",
                            idempotency_key=decision.idempotency_key,
@@ -819,6 +842,9 @@ class PromotionCoordinator:
             "unresolved_causes": list(UNRESOLVED_CAUSES),
             "coordinator_lock": "PLAIN_LOCK",
             "durable_ledger_connected": self._ledger is not None,
+            "ceilings": ceiling_status(
+                self._ceilings, mode=self.mode,
+                simulated_reservations=len(self._shadow.identities)),
             "seeded_from_ledger": self._seeded_from,
             "lock_note": (
                 "DECISION, BUDGET AND RESERVATION ARE ATOMIC. THE WRITER IS "

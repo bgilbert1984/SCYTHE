@@ -427,6 +427,7 @@ class ScopeTests(unittest.TestCase):
             elif isinstance(node, ast.Import):
                 imported.update(a.name for a in node.names)
         self.assertEqual(imported, {"__future__", "bisect", "collections", "dataclasses",
+                                    "scythe_promotion_ceilings",
                                     "scythe_promotion_ledger_writer",
                                     "threading", "typing",
                                     "scythe_promotion_policy",

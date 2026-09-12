@@ -222,6 +222,23 @@ class LedgerWriter:
         # the failure that looks like it worked.
         return Lineage(root=root).fenced()
 
+    def lineage_unresolved(self) -> int:
+        """How many reservations the whole lineage is still waiting on (§13f G.3).
+
+        Across the chain, because an unresolved reservation in a closed
+        predecessor was never reconciled. A count scoped to this generation
+        would fall to zero on a closure, which is the reset path C2 exists to
+        deny.
+        """
+        from scythe_promotion_lineage import Lineage, ordinal_of
+
+        directory = os.path.dirname(os.path.abspath(self.path))
+        root = os.path.join(directory, os.path.basename(self.path).rsplit(".", 2)[0])
+        if ordinal_of(root, os.path.abspath(self.path)) is None:
+            return len(self.read().unresolved)
+        return sum(len(generation.read.unresolved)
+                   for generation in Lineage(root=root).chain())
+
     def read(self) -> LedgerRead:
         """A fresh snapshot, for a caller that holds the writer and not the
         store. Keeps the dependency one way: coordinator -> writer -> reader."""
