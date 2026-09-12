@@ -53,6 +53,8 @@ EXECUTABILITY_SOURCES = (
     ("scythe_promotion_lineage", "LINEAGE_REFUSALS"),
     ("scythe_promotion_reconciliation", "NOT_RECONCILABLE"),
     ("scythe_promotion_ceilings", "CEILING_REFUSALS"),
+    ("scythe_graphops_adapter", "EVIDENCE_CODES"),
+    ("scythe_graphops_adapter", "ADAPTER_NOT_CONFORMANT"),
 )
 
 
@@ -293,6 +295,13 @@ DUPLICATE_DECLARATIONS = {
     "LOOPBACK_TCP": (ONE_CONCEPT, "one transport, declared by the bridge and by retention"),
     "NOT_DETERMINABLE_FROM_THIS_PROCESS": (ONE_CONCEPT, "one epistemic state about what this process can see"),
     "NOT_IMPLEMENTED": (ONE_CONCEPT, "a status marker meaning the same thing wherever it appears"),
+
+    # One concept: Amendment B declared the three outcomes for the coordinator
+    # and Amendment H's adapter declares the same three. Two WriteResult types
+    # exist -- B's and H's superset -- and these are the field both are about.
+    "CREATED": (ONE_CONCEPT, "the three write outcomes, declared by the coordinator (§13a B.1) and by the adapter that produces them (§13g H.3)"),
+    "NOT_CREATED": (ONE_CONCEPT, "the three write outcomes, declared by the coordinator (§13a B.1) and by the adapter that produces them (§13g H.3)"),
+    "UNKNOWN": (ONE_CONCEPT, "the three write outcomes, declared by the coordinator (§13a B.1) and by the adapter that produces them (§13g H.3)"),
 
     # Two concepts wearing one word. These never clear a collision.
     "UNVERIFIED": (TWO_CONCEPTS, "rf_receiver_state: an alignment state beside VERIFIED/BOUNDED/STALE. scythe_invariant_ledger: a coordinate that is present with its authority not established. This overload is why LOCK_SEMANTICS_UNVERIFIED was renamed"),
