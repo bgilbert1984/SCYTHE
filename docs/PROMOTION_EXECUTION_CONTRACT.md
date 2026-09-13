@@ -28,7 +28,7 @@ Amendment L:            §13k the producer — ACCEPTED 2026-09-12, after
 Amendment M:            §13l the run that is not a capture — ACCEPTED
                         2026-09-12
 Amendment N:            §13m the act, and the identities it must not invent —
-                        PROPOSED 2026-09-13
+                        ACCEPTED 2026-09-13, after review corrected N.5 twice
 Authority:              NORMATIVE
 Constrains:             Step 4 of the promotion sequence (execution adapter)
 Depends on:             SCYTHE_VERDICT_VOCABULARIES.md  (ACCEPTED — §5 declares
@@ -2766,9 +2766,18 @@ been a second name for it.
 
 ## 13m. Amendment N — the act, and the identities it must not invent
 
-*Proposed 2026-09-13. **Not yet accepted.** No implementation may land against
-it until an explicit acceptance decision and an acceptance commit exist
-(§13l).*
+*Proposed 2026-09-13 and accepted 2026-09-13, **in that order, and with the
+acceptance commit before the merge**. The first amendment in this document to
+manage it: H, L and M each merged while still self-described as `PROPOSED` and
+were repaired forward, which is why §13l states the gate this one passed
+through.*
+
+*Two review passes corrected N.5 before acceptance. The first found that
+`act_configuration_identity` had no specification and that only one manifest
+builder reads the environment; the second found three sentences claiming more
+than N.5 establishes — most usefully that "a literal is refused" describes no
+possible runtime determination, since an evaluated digest and an identical
+literal are the same string. Nothing in N.1–N.8 changed after acceptance.*
 
 *Written because slice 10h was **drafted and carried on its own branch** with
 its behavioural declarations in the same commit as the code implementing them
