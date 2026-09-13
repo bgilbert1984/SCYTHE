@@ -405,6 +405,21 @@ class ShadowObservation:
 
 # -- a verdict source that uses the real checkers -------------------------
 
+def derived_walk_verdicts(artefact_path: str) -> Iterator[
+        Tuple[InvariantVerdict, ObservationSubject, Any]]:
+    """Verdicts from a derived artefact, the only source eligible to be live.
+
+    Delegates to the reader, which refuses before either checker runs if the
+    artefact's sample status is not schema-conformant. **There is no fallback**:
+    a missing or refused artefact raises rather than quietly becoming a
+    constructed run, because the substitution would be invisible in the record
+    that exists to prevent it (§13h I.2, §13i J.9).
+    """
+    from scythe_derived_evidence import derived_walk_verdicts as _read
+
+    return _read(artefact_path)
+
+
 def constructed_walk_verdicts(count: int) -> Iterator[
         Tuple[InvariantVerdict, ObservationSubject, Any]]:
     """Real `check_walk_step`, over inputs this repository does not store.
