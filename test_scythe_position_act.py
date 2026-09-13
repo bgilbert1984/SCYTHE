@@ -207,15 +207,36 @@ class ExtractionTests(unittest.TestCase):
         self.assertIn("rf_signal_chain_identity", imports)
         self.assertNotIn("rf_iq_retention", imports)
 
-    def test_the_real_preflight_passes_with_nothing_reachable(self):
-        """37as. On the pinned paths, read-only, with the real constants."""
+    def test_nothing_forbidden_is_reachable(self):
+        """37as, the half that is a fact about the code.
+
+        Runs anywhere: the reachability list, the construct detection and the
+        closure membership depend on the import graph and on nothing else.
+        """
         report = preflight(run_identity("t"))
         self.assertEqual(report["forbidden_modules_reachable"], [])
         self.assertEqual(report["dynamic_import_constructs_detected"], [])
         self.assertNotIn("rf_iq_retention", report["first_party_modules"])
         self.assertIn("rf_signal_chain_identity", report["first_party_modules"])
-        self.assertEqual(report["outcome"], PREFLIGHT_PASSED)
+        self.assertNotIn("threading (via rf_iq_retention)",
+                         report["forbidden_modules_reachable"])
+
+    def test_the_real_preflight_passes_where_the_pinned_tree_exists(self):
+        """37as, the half that is a fact about a host.
+
+        Skipped where the pinned directories are absent, which is every machine
+        but the one the act is authorized on. An earlier version asserted
+        PREFLIGHT_PASSED unconditionally and failed CI -- correctly: a green
+        check has to mean the same thing everywhere it runs, and "the operator's
+        directories exist" is not something CI can be asked to know.
+        """
+        for directory in (act_module.DERIVED_DIRECTORY,
+                          act_module.RECORDS_DIRECTORY):
+            if not os.path.isdir(directory):
+                self.skipTest("the pinned observation tree is not on this host")
+        report = preflight(run_identity("t"))
         self.assertEqual(report["findings"], [])
+        self.assertEqual(report["outcome"], PREFLIGHT_PASSED)
 
 
 class IdentityTests(unittest.TestCase):
