@@ -2831,8 +2831,9 @@ failed second step would destroy the only record of the part that worked.*
 
 ### N.5 Provenance identities are computed, never typed
 
-Every chain identity and configuration identity in the act is **computed from
-the pinned declaration by this repository's existing canonical helpers**:
+Each identity is **computed from the pinned declaration**. Existing canonical
+helpers compute the two chain identities; N.5a specifies the new helper for the
+act configuration:
 
 | value | computed by |
 | --- | --- |
@@ -2840,18 +2841,31 @@ the pinned declaration by this repository's existing canonical helpers**:
 | `receiver_state_chain_hash` | `rf_receiver_state.receiver_state_chain_hash` over the declared manifest |
 | `configuration_identity` | `act_configuration_identity`, defined in N.5a — **no canonical helper for this exists today** |
 
-A literal is refused. **A typed digest agrees with nothing**: it cannot be
-recomputed, it does not change when the thing it identifies changes, and two
-runs of different configurations carry the same one.
+**The act accepts no identity from a caller and computes all three
+internally.** That is the enforceable boundary, and it is the whole of the
+rule.
 
-A change to any declared value must change the corresponding digest, and a test
-must demonstrate it rather than assert it.
+*"A literal is refused" was the earlier wording and describes no possible
+runtime determination: after evaluation a computed digest and an identical
+literal are the same string, and nothing at run time can ask which one it was.
+What can be established is where the value came from — a parameter, or a
+computation — and that is a property of the code rather than of the string.*
+
+The guarantee is therefore carried by the suite: **a negative control replacing
+a computation with a literal must make 37ah fail.** A change to any declared
+value must likewise change the corresponding digest, demonstrated rather than
+asserted.
 
 #### N.5a `act_configuration_identity`
 
 The third row has no existing helper, and "a digest over the complete pinned
 declaration" is not mechanically decidable without saying which fields. A
-separately named helper is introduced under these rules:
+separately named helper is introduced under these rules.
+
+Its subject is the **complete semantic configuration declaration** — what the
+instrument and the run were declared to be. **Deployment paths are resolved and
+recorded separately**, outside this identity, so that relocating the output
+does not invent a different instrument configuration.
 
 ```
 schema        scythe.position-act-configuration.v1
@@ -2861,9 +2875,12 @@ algorithm     blake2s, digest_size=16
 prefix        "blake2s:"
 ```
 
-Matching `rf_receiver_state.canonical_bytes` and
-`rf_iq_retention.canonical_signal_chain_bytes` exactly, so a reader who has
-verified one has verified all three.
+The serialization matches `rf_receiver_state.canonical_bytes` and
+`rf_iq_retention.canonical_signal_chain_bytes` exactly. **All three use the
+same canonical serialization convention, but each identity remains
+independently recomputed and verified** — a shared convention settles the byte
+encoding and says nothing about the schema, the field set, or the input
+values.
 
 The manifest is a **closed** field set. A field not on this list is not hashed,
 and a field on it that is missing is a refusal rather than an omission:
@@ -2879,9 +2896,12 @@ artefact_schema
 ```
 
 `instrument_settings` is the complete labelled mapping, sorted by the
-serializer. Paths are **not** in it: where an artefact is written is not part of
-what the instrument was configured as, and folding a directory into the
-identity would make a relocated output look like a different instrument.
+serializer. Paths are **not** in it, which is why the subject is named the
+semantic configuration declaration rather than the pinned declaration: where an
+artefact is written is not part of what the instrument was configured as, and
+folding a directory into the identity would make a relocated output look like a
+different instrument. The preflight resolves and reports the paths, and they
+are checked there.
 
 #### N.5b The declaration must be complete, and one helper is why
 
@@ -3432,16 +3452,22 @@ authorized and has not been.*
     Every construct in §13m N.6a is a finding wherever it appears in that
     closure; a module the test harness loaded is not; and the report names the
     closed set it detected.
-37ah. Every provenance identity is recomputed from the pinned declaration and
-    compared to the value the act carries. A literal digest fails.
+37ah. The act accepts no identity from a caller and computes all three
+    internally. Each is recomputed in the test from the declaration and
+    compared to the value the act carries, and **a negative control replacing
+    any one computation with a literal makes this test fail**. The test is the
+    guarantee: an evaluated digest and an identical literal are the same
+    string, so nothing at run time can tell them apart.
 37ai. Changing any declared value changes the corresponding digest, for each of
     the three identities.
 37aj. `signal_chain_hash` is unchanged with `SDRPP_ANTENNA_ID`,
     `SDRPP_FEEDLINE_ID` and `SDRPP_ANTENNA_EXTENSION_MM` set to arbitrary
     values (§13m N.5b).
-37ak. `act_configuration_identity` covers exactly §13m N.5a's field set:
-    removing any one refuses, adding an undeclared one refuses, and changing
-    any one changes the digest.
+37ak. `act_configuration_identity` covers exactly §13m N.5a's field set —
+    the complete **semantic** configuration declaration, deployment paths
+    excluded. Removing any field refuses, adding an undeclared one refuses, and
+    changing any one changes the digest. Relocating the output directories
+    leaves the identity unchanged.
 
 37r. Negative controls — inference from populated settings, inference from
     device identity, the value sets opened, the fields defaulted, the pairing
@@ -3755,9 +3781,12 @@ produced it.
     capability check reports whatever the harness imported — `unittest` loads
     `signal` — so the answerable question is what this act's own import graph
     can reach.
-53ae. **A typed digest agrees with nothing** (§13m N.5). It cannot be
-    recomputed, it does not change when its subject changes, and two different
-    configurations carry the same one.
+53ae. **Where a value came from is a property of the code, not the string**
+    (§13m N.5). After evaluation a computed digest and an identical literal are
+    indistinguishable, so "a literal is refused" is unenforceable at run time.
+    The enforceable rule is that the act accepts no identity from a caller and
+    computes all three itself, and the guarantee is a negative control that
+    substitutes a literal and makes 37ah fail.
 53af. **An incomplete declaration is a digest over the shell** (§13m N.5b).
     `signal_chain_manifest` reads three environment variables for values nobody
     declared, so an identity built from a partial declaration identifies the
