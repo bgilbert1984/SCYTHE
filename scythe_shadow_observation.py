@@ -73,6 +73,25 @@ OBSERVATION_REFUSALS: Tuple[str, ...] = (
 )
 
 # -- what the digests are allowed to say (§13h I.4a) ----------------------
+# -- was there a lineage at all? ------------------------------------------
+#
+# An empty digest map has three causes and they are not the same fact: the
+# namespace does not exist, it exists and holds no generation, or a read
+# failed. Reporting `{}` and LINEAGE_QUIESCENT for the first would let a record
+# be read as *a valid empty generation was observed and did not change*, which
+# is a claim nobody made. So the source state is recorded explicitly beside the
+# digests rather than inferred from their emptiness.
+#
+# Named NO_LINEAGE_NAMESPACE rather than LINEAGE_ABSENT: the latter collides
+# with `scythe_invariant_ledger.ABSENT`, a coordinate kind. Checked, then
+# rejected rather than judged.
+NO_LINEAGE_NAMESPACE = "NO_LINEAGE_NAMESPACE"
+LINEAGE_HOLDS_NO_GENERATION = "LINEAGE_HOLDS_NO_GENERATION"
+LINEAGE_PRESENT = "LINEAGE_PRESENT"
+LINEAGE_PRESENCES: Tuple[str, ...] = (NO_LINEAGE_NAMESPACE,
+                                      LINEAGE_HOLDS_NO_GENERATION,
+                                      LINEAGE_PRESENT)
+
 LINEAGE_QUIESCENT = "LINEAGE_QUIESCENT"
 LINEAGE_NOT_QUIESCENT = "LINEAGE_NOT_QUIESCENT"
 
@@ -317,6 +336,22 @@ def lineage_digest(root: str) -> Dict[str, Optional[str]]:
     return digests
 
 
+def lineage_presence(root: str) -> str:
+    """Whether a lineage was there, asked separately from what it held.
+
+    The namespace is the root's parent directory, because `generation_path`
+    makes the root a filename prefix rather than a directory of its own.
+    """
+    namespace = os.path.dirname(os.path.abspath(root))
+    if not os.path.isdir(namespace):
+        return NO_LINEAGE_NAMESPACE
+    try:
+        published = list(Lineage(root=root).published())
+    except LineageError:
+        return LINEAGE_HOLDS_NO_GENERATION
+    return LINEAGE_PRESENT if published else LINEAGE_HOLDS_NO_GENERATION
+
+
 def refuse_record_path(record_path: str, lineage_root: str) -> None:
     """Outside the complete lineage namespace, after symlink resolution.
 
@@ -430,6 +465,7 @@ class ShadowObservation:
         declaration = source.declaration
 
         started = self.clock()
+        presence_before = lineage_presence(self.lineage_root)
         before = lineage_digest(self.lineage_root)
         observed: List[ObservationOutcome] = []
         promoted: List[str] = []
@@ -455,8 +491,10 @@ class ShadowObservation:
             interrupted_by = type(exc).__name__
 
         after = lineage_digest(self.lineage_root)
+        presence_after = lineage_presence(self.lineage_root)
         record = self._record(started, observed, promoted, merit, before, after,
-                              ending, interrupted_by, declaration)
+                              ending, interrupted_by, declaration,
+                              presence_before, presence_after)
         publish_record(self.record_path, record, self.syscalls)
         return record
 
@@ -489,7 +527,8 @@ class ShadowObservation:
                 "instrument status to carry")
 
     def _record(self, started, observed, promoted, merit, before, after,
-                ending, interrupted_by, declaration) -> Dict[str, Any]:
+                ending, interrupted_by, declaration,
+                presence_before, presence_after) -> Dict[str, Any]:
         quiescent = before == after
         return {
             "schema": SCHEMA,
@@ -536,6 +575,15 @@ class ShadowObservation:
                             "RESERVES NOTHING"),
             "merit_vocabulary": list(REFUSALS),
             "lineage_root": self.lineage_root,
+            "lineage_presence_before": presence_before,
+            "lineage_presence_after": presence_after,
+            "lineage_present": presence_before == LINEAGE_PRESENT,
+            "presence_note": (
+                "AN EMPTY DIGEST MAP IS NOT A GENERATION. WHERE THE PRESENCE "
+                "IS " + NO_LINEAGE_NAMESPACE + " OR " +
+                LINEAGE_HOLDS_NO_GENERATION + ", NO GENERATION WAS OBSERVED AT "
+                "ALL, AND THE QUIESCENCE BELOW COMPARES TWO ABSENCES RATHER "
+                "THAN TWO READINGS"),
             "lineage_digest_before": before,
             "lineage_digest_after": after,
             "quiescence": LINEAGE_QUIESCENT if quiescent else LINEAGE_NOT_QUIESCENT,

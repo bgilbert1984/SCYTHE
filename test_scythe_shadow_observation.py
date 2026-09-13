@@ -21,6 +21,7 @@ from scythe_shadow_observation import (
     CARRIED_FROM_ARTEFACT, DECLARATION_AUTHORITIES, NO_DECLARATION,
     NO_INSTRUMENT_DECLARATION, VERDICT_SOURCE_REFUSED, InstrumentDeclaration,
     ObservationOutcome, ObservationRefused, ObservationSubject,
+    LINEAGE_HOLDS_NO_GENERATION, LINEAGE_PRESENT, NO_LINEAGE_NAMESPACE,
     ShadowObservation, VerdictSource, constructed_walk_verdicts,
     derived_walk_verdicts,
 )
@@ -734,3 +735,87 @@ class InstrumentDeclarationTests(ObservationTestCase):
                       collisions("ARTEFACT_ATTESTED", universe))
         self.assertEqual(collisions(CARRIED_FROM_ARTEFACT, universe),
                          [CARRIED_FROM_ARTEFACT])
+
+
+class LineagePresenceTests(ObservationTestCase):
+    """Slice 10f: an empty digest map is not a generation.
+
+    `{}` has three causes -- no namespace, a namespace holding no generation,
+    and a read that failed -- and a record reporting only `{}` and
+    LINEAGE_QUIESCENT can be read as *a valid empty generation was observed and
+    did not change*. That is a claim nobody made.
+    """
+
+    def _absent_root(self):
+        """A root whose *namespace* -- its parent directory -- is not there."""
+        return os.path.join(self._dir.name, "nowhere", "promotion")
+
+    def test_a_missing_namespace_is_reported_as_one(self):
+        record = self._observer(lineage_root=self._absent_root()).run(
+            constructed_walk_verdicts(3))
+        self.assertEqual(record["lineage_presence_before"], NO_LINEAGE_NAMESPACE)
+        self.assertEqual(record["lineage_presence_after"], NO_LINEAGE_NAMESPACE)
+        self.assertFalse(record["lineage_present"])
+        self.assertEqual(record["lineage_digest_before"], {})
+        self.assertEqual(record["quiescence"], LINEAGE_QUIESCENT)
+
+    def test_an_empty_namespace_is_not_a_missing_one(self):
+        record = self._observer().run(constructed_walk_verdicts(3))
+        self.assertEqual(record["lineage_presence_before"],
+                         LINEAGE_HOLDS_NO_GENERATION)
+        self.assertFalse(record["lineage_present"])
+        self.assertEqual(record["lineage_digest_before"], {})
+
+    def test_a_populated_lineage_is_reported_present(self):
+        self._ledger()
+        record = self._observer().run(constructed_walk_verdicts(3))
+        self.assertEqual(record["lineage_presence_before"], LINEAGE_PRESENT)
+        self.assertTrue(record["lineage_present"])
+        self.assertTrue(record["lineage_digest_before"])
+
+    def test_quiescence_alone_cannot_be_read_as_a_generation(self):
+        """The three states are distinguishable in the record even though all
+        three can report LINEAGE_QUIESCENT with an empty digest map."""
+        absent = self._observer(lineage_root=self._absent_root()).run(
+            constructed_walk_verdicts(3))
+        os.remove(self.record)
+        empty = self._observer().run(constructed_walk_verdicts(3))
+        self.assertEqual(absent["quiescence"], empty["quiescence"])
+        self.assertEqual(absent["lineage_digest_before"],
+                         empty["lineage_digest_before"])
+        self.assertNotEqual(absent["lineage_presence_before"],
+                            empty["lineage_presence_before"])
+
+    def test_the_presence_states_are_closed(self):
+        self.assertEqual(observation_module.LINEAGE_PRESENCES,
+                         (NO_LINEAGE_NAMESPACE, LINEAGE_HOLDS_NO_GENERATION,
+                          LINEAGE_PRESENT))
+        for record_presence in ("lineage_presence_before", "lineage_presence_after"):
+            record = self._observer().run(constructed_walk_verdicts(1))
+            self.assertIn(record[record_presence],
+                          observation_module.LINEAGE_PRESENCES)
+            os.remove(self.record)
+
+    def test_the_record_says_an_empty_map_is_not_a_generation(self):
+        record = self._observer().run(constructed_walk_verdicts(1))
+        self.assertIn(NO_LINEAGE_NAMESPACE, record["presence_note"])
+        self.assertIn(LINEAGE_HOLDS_NO_GENERATION, record["presence_note"])
+
+    def test_the_presence_names_collide_with_nothing_unjudged(self):
+        from test_scythe_verdict_vocabularies import (
+            cross_set_collisions, discovered_tokens, judged,
+        )
+        tokens = discovered_tokens()
+        for candidate in observation_module.LINEAGE_PRESENCES:
+            with self.subTest(candidate=candidate):
+                self.assertIn(candidate, tokens)
+                unjudged = [hit for hit in cross_set_collisions(candidate, tokens)
+                            if not judged(candidate, hit)]
+                self.assertEqual(unjudged, [])
+
+    def test_the_rejected_presence_name_would_have_collided(self):
+        """LINEAGE_ABSENT was checked against the universe and rejected: it
+        collides with the ledger's ABSENT coordinate kind."""
+        from test_scythe_verdict_vocabularies import collisions, discovered_tokens
+        self.assertIn("ABSENT", collisions("LINEAGE_ABSENT",
+                                           set(discovered_tokens())))

@@ -3177,6 +3177,12 @@ authorized and has not been.*
     carried declaration holding a value the reader does not declare, and a
     no-artefact declaration holding any value are each refused in
     `__post_init__`.
+37x. The observation record states the lineage's **source state** explicitly:
+    `NO_LINEAGE_NAMESPACE`, `LINEAGE_HOLDS_NO_GENERATION` or `LINEAGE_PRESENT`,
+    before and after, beside a `lineage_present` boolean. An empty digest map
+    plus `LINEAGE_QUIESCENT` must not be readable as *a valid empty generation
+    was observed and did not change* — three causes, distinguished in the
+    record rather than inferred from `{}`.
 37r. Negative controls — inference from populated settings, inference from
     device identity, the value sets opened, the fields defaulted, the pairing
     dropped, the label unchecked, the scalar bound removed, an undeclared name
@@ -3190,7 +3196,10 @@ authorized and has not been.*
     artefact opened twice, the observer writing the status itself, a
     measurement value spliced into the observer's source, a declaration field
     added to the observer, the authority set opened onto the reader's values,
-    and the rejected authority name minted.
+    and the rejected authority name minted. Slice 10f adds six: the presence
+    inferred from the digest map, the two absences collapsed, every run
+    reporting a present lineage, the presence set opened, the note that blocks
+    the misreading removed, and `LINEAGE_ABSENT` minted instead of rejected.
 36c. Every provenance claim names the component that supplied it; a claim with
     no named source refuses publication.
 36d. The producer neither writes nor accepts `carries_samples` — AST and
@@ -3459,6 +3468,10 @@ produced it.
 53o. **An induced ceiling demonstrates nothing** (§13l M.5). A run producing no
     violation is complete; baiting the invariant proves only that its conditions
     can be arranged.
+53v. **An empty map is not a reading** (37x). `{}` means the namespace is
+    absent, or present and holding no generation, or unreadable — three facts a
+    record that published only the map would flatten into one, and the flattened
+    version reads as the most reassuring of the three.
 53t. **The party that touched nothing states nothing** (37s, 37t). The observer
     never met an instrument and neither did the producer; the only party with a
     claim to make is the artefact, which makes it in writing. So the record
@@ -3554,7 +3567,8 @@ amendment is accepted:
     lineage. Split as it was built: **10a** the pure policy core and the
     observer; **10b** the derived-evidence reader (§13i, §13j); **10c** the
     producer (§13k); **10d** the measurement and instrument declarations
-    (§13l M.4); **10e** the observer carrying them into the record (37b). All
+    (§13l M.4); **10e** the observer carrying them into the record (37b);
+    **10f** the lineage's source state, stated rather than inferred (37x). All
     code only. The bounded act M.8 describes is **not** a slice and is
     separately authorized.
 11. Separate explicit authorization before any ARMED graph mutation.
