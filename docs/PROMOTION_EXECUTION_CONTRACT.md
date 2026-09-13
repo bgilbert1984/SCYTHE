@@ -23,7 +23,8 @@ Amendment I:            §13h what live SHADOW can observe — ACCEPTED
 Amendment J:            §13i derived evidence — ACCEPTED 2026-09-12, after
                         review qualified J.3 and set exact bounds
 Amendment K:            §13j record-rate bound — ACCEPTED 2026-09-12
-Amendment L:            §13k the producer — ACCEPTED 2026-09-12
+Amendment L:            §13k the producer — PROPOSED 2026-09-12,
+                        corrected after review
 Authority:              NORMATIVE
 Constrains:             Step 4 of the promotion sequence (execution adapter)
 Depends on:             SCYTHE_VERDICT_VOCABULARIES.md  (ACCEPTED — §5 declares
@@ -2386,12 +2387,11 @@ clear; none required a judgement.
 
 ## 13k. Amendment L — the producer, and how far it is kept from a capture
 
-*Proposed 2026-09-12 and accepted 2026-09-12 — the proposal merged first, as
-Amendment H's did, and the acceptance follows forward rather than by rewriting
-the merge. The second occurrence of that order, which is why it is recorded here
-as a pattern rather than an accident: an amendment approved for merge is
-approved on its substance, and the document has to say so before any slice
-begins. Nothing in L changed between the two.*
+*Proposed 2026-09-12; the proposal merged before acceptance, as Amendment H's
+did; the premature status flip was prepared; review then found L.1 overclaiming
+what a Python annotation guarantees; the corrected text is what is accepted. The
+order is recorded rather than tidied, because the correction is the reason the
+flip should not have been taken at face value.*
 
 *Defines the separately authorized producer §13i J.4 deferred, so
 `PENDING_AMENDMENTS.md` entry 7 can eventually drain. Touches §13i, §13j and
@@ -2412,16 +2412,55 @@ It must **never** receive an IQ buffer, a byte stream, a sample array, a capture
 handle, an SDR object, a socket, or a generic mapping.
 
 **Family-specific entrypoints, never `write_record(dict)`.** A generic mapping
-parameter is a hole shaped like anything, and the point of this boundary is that
-the parameter's *type* refuses what the schema would only catch afterwards.
-`record_walk_step(before, after)` can be handed a signature or nothing;
-`write_record(payload)` can be handed a buffer, and then the only thing standing
-between that buffer and a file is a check somebody remembered to write.
+parameter is a hole shaped like anything, and a named family entrypoint is not.
 
-The producer **records checker inputs and the resulting verdict identity**. It
-does not duplicate or reinterpret checker mathematics: a second implementation
-of a rule is a second rule that can disagree (§13i J.3's reasoning, in the other
-direction).
+#### L.1a An annotation is not a gate
+
+*Corrected in review. The first text said the parameter's **type** refuses a
+buffer before any check runs. In Python it does not.*
+
+```python
+def record_walk_step(before: WalkSignature, after: WalkSignature) -> None:
+    ...
+```
+
+That signature refuses nothing at the call boundary. Annotations are metadata
+unless a runtime validator or an enforced static checker supplies the refusal,
+and a bytes-like object, a mock, or a structurally compatible impostor passes it
+unremarked. **Writing the annotation and believing it is the whole guard is the
+failure this correction exists to name.**
+
+So the boundary is stated at the strength it has, in four parts:
+
+1. **Typed family-specific entrypoints constrain the API** and make misuse
+   visible to static analysis.
+2. **Runtime nominal-type validation is authoritative.** It is what actually
+   refuses.
+3. **Validation happens before any artefact file is opened or created.** A
+   refusal after a descriptor exists is a refusal that has already touched the
+   filesystem.
+4. **Static typing is defence in depth, not an execution boundary** — the same
+   asymmetry L.4 draws between the producer's checks and the reader's.
+
+#### L.1b What the runtime gate rejects
+
+Generic mappings and sequences; bytes-like and buffer-protocol objects;
+**subclasses and proxies with uncontrolled accessors**; and duck-typed
+substitutes. **Only the exact accepted immutable coordinate and signature types
+enter serialization.**
+
+The subclass clause is the one that is easy to get wrong. `isinstance` admits a
+subclass, and a subclass may override `__getitem__`, `keys`, or `__iter__` to
+return whatever it likes at the moment the serializer asks — so the check is
+**nominal**: the type *is* the accepted type, not merely compatible with it.
+Duck typing is precisely what must not be honoured here, because the property
+being protected is what the object *is* rather than what it can do.
+
+#### L.1c What the producer records
+
+Checker inputs and the resulting verdict identity. It does not duplicate or
+reinterpret checker mathematics: a second implementation of a rule is a second
+rule that can disagree (§13i J.3's reasoning, in the other direction).
 
 ### L.2 Provenance is attested upstream, never verified here
 
@@ -2867,8 +2906,16 @@ already written down. Introduced by Amendment B, noticed by Amendment C.*
 
 36a. The producer's entrypoints are family-specific: AST — no public function
     takes a bare mapping, and none accepts bytes, an array or a handle.
-36b. A capture handle, socket, SDR object or byte stream cannot be passed:
-    the type refuses before any check runs.
+36b. A capture handle, socket, SDR object, byte stream, buffer-protocol object,
+    generic mapping or sequence is refused by the **runtime nominal-type gate**,
+    before any artefact file is opened or created.
+36l. A subclass or proxy of an accepted type is refused: the check is nominal,
+    not `isinstance`, so an override of `keys`, `__getitem__` or `__iter__`
+    cannot reach the serializer.
+36m. **Removing the runtime gate while leaving the annotations intact** lets a
+    bytes-like object and a structurally compatible impostor reach behaviour
+    they were previously refused from — the control that proves the annotation
+    was never the boundary.
 36c. Every provenance claim names the component that supplied it; a claim with
     no named source refuses publication.
 36d. The producer neither writes nor accepts `carries_samples` — AST and
@@ -3110,8 +3157,14 @@ produced it.
     declared timeline, and a producer can space scalars a millisecond apart or
     falsify timestamps outright.
 53f. **Family-specific entrypoints, never a generic mapping** (§13k L.1). A
-    mapping parameter is a hole shaped like anything; a typed one refuses a
-    buffer before any check runs.
+    mapping parameter is a hole shaped like anything.
+53j. **An annotation is not a gate** (§13k L.1a). In Python it refuses nothing
+    at the call boundary; runtime nominal validation is what refuses, and
+    static typing is defence in depth. Writing the annotation and believing it
+    is the whole guard is the failure the correction names.
+53k. **The type check is nominal, not `isinstance`** (§13k L.1b). A subclass may
+    override an accessor and return anything at the moment the serializer asks,
+    so what is protected is what the object *is* rather than what it can do.
 53g. **Provenance is attested upstream and names its source** (§13k L.2). A
     claim whose source is unnamed is one nobody can later question.
 53h. **Producer checks are defence in depth; the reader stays authoritative**
