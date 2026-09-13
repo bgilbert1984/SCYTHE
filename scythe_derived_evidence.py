@@ -48,7 +48,14 @@ from scythe_promotion_ledger_store import frame_of
 from scythe_promotion_policy import CapsuleIdentity
 
 SCHEMA = "scythe.derived-evidence.v1"
-ARTEFACT_SCHEMA = "scythe.derived-evidence-artefact.v1"
+ARTEFACT_SCHEMA = "scythe.derived-evidence-artefact.v2"
+#                                                       ^^
+# Bumped by §13l M.4, which made `measurement_status` and `instrument_state`
+# required. Adding a required field to a closed set changes what the old name
+# means, so the name changes with it: a v1 artefact is refused as foreign rather
+# than read with defaults. There is no compatibility path and none is needed --
+# no v1 artefact has ever been produced, and inventing a migration for a
+# population of zero would be inventing the defaults the amendment forbids.
 FRAME_VERSION = "de1"
 
 # -- record kinds, disjoint from the ledger's -----------------------------
@@ -104,10 +111,40 @@ WALK_COORDINATES: Tuple[str, ...] = (
 )
 SERIES_SCHEMA: Dict[str, Tuple[str, ...]] = {WALK_STEP_PAIR: WALK_COORDINATES}
 
+# -- what the instrument did, declared and never inferred (§13l M.4) ------
+#
+# Both sets have exactly one member, and that is the honest size. This tree can
+# produce one kind of artefact -- a walk over attested positions with the
+# receiver idle -- and a second member would be a name for a capability that
+# does not exist, readable by a reader that has never seen one. When a
+# measurement path is contracted, its amendment adds its value.
+RF_MEASUREMENT_NOT_PERFORMED = "RF_MEASUREMENT_NOT_PERFORMED"
+MEASUREMENT_STATUSES: Tuple[str, ...] = (RF_MEASUREMENT_NOT_PERFORMED,)
+
+INSTRUMENT_CONFIGURED_IDLE = "INSTRUMENT_CONFIGURED_IDLE"
+INSTRUMENT_STATES: Tuple[str, ...] = (INSTRUMENT_CONFIGURED_IDLE,)
+
+# The label every populated instrument setting must carry. Named
+# CONFIGURED_NOT_EXERCISED rather than DECLARED_NOT_EXERCISED, which is a
+# negation pair with UNDECLARED and with LEDGER_GENERATION_UNDECLARED (M.9).
+CONFIGURED_NOT_EXERCISED = "CONFIGURED_NOT_EXERCISED"
+EXERCISE_LABELS: Tuple[str, ...] = (CONFIGURED_NOT_EXERCISED,)
+
+# Settings the manifest may declare. Each is optional and each is carried flat,
+# beside its own label, rather than nested: a setting and the claim about
+# whether it was exercised are two facts, and burying the second inside a
+# structure is how it becomes something nobody reads.
+INSTRUMENT_SETTINGS: Tuple[str, ...] = ("sample_rate_hz", "gain_db")
+EXERCISE_SUFFIX = "_exercise"
+INSTRUMENT_SETTING_FIELDS = frozenset(
+    INSTRUMENT_SETTINGS + tuple(name + EXERCISE_SUFFIX
+                                for name in INSTRUMENT_SETTINGS))
+
 PROVENANCE_FIELDS = frozenset((
     "kind", "schema", "frame_version", "artifact_id", "content_digest",
     "record_count", "device_id", "signal_chain_hash", "configuration_epoch",
     "monotonic_source_id", "producer_attestation",
+    "measurement_status", "instrument_state",
 ))
 
 
@@ -199,7 +236,8 @@ def artifact_identity(provenance: Mapping[str, Any], content_digest: str) -> str
     identity depends on the content rather than the content depending on the
     identity (§13i J.7a).
     """
-    canonical = {k: provenance[k] for k in sorted(PROVENANCE_FIELDS)
+    covered = PROVENANCE_FIELDS | INSTRUMENT_SETTING_FIELDS
+    canonical = {k: provenance[k] for k in sorted(covered)
                  if k in provenance and k not in ("artifact_id", "content_digest")}
     material = json.dumps([ARTEFACT_SCHEMA, canonical, content_digest],
                           sort_keys=True, separators=(",", ":")).encode("utf-8")
@@ -216,6 +254,8 @@ class Artefact:
     provenance: Dict[str, Any]
     records: Tuple[Dict[str, Any], ...]
     assessment: str
+    measurement_status: str
+    instrument_state: str
 
     @property
     def conformant(self) -> bool:
@@ -322,9 +362,12 @@ def _admit(path: str, data: bytes) -> Artefact:
                               "schema, provenance and content")
 
     assessment = _assess(provenance, records)
-    return Artefact(path=path, artifact_id=provenance["artifact_id"],
-                    content_digest=content_digest, provenance=dict(provenance),
-                    records=records, assessment=assessment)
+    return Artefact(
+        path=path, artifact_id=provenance["artifact_id"],
+        content_digest=content_digest, provenance=dict(provenance),
+        records=records, assessment=assessment,
+        measurement_status=declared_measurement_status(provenance),
+        instrument_state=declared_instrument_state(provenance))
 
 
 def _parse(line: bytes, index: int) -> Dict[str, Any]:
@@ -367,18 +410,114 @@ def _parse_frame(line: bytes) -> Dict[str, Any]:
     return payload
 
 
+def refuse_instrument_declaration(provenance: Mapping[str, Any]) -> None:
+    """§13l M.4. What the instrument did is declared in closed values.
+
+    Exported because the producer calls this exact function rather than writing
+    its own: a second implementation is two answers waiting to disagree.
+
+    Four properties, four checks below, each breakable on its own.
+    """
+    _refuse_declared_values(provenance)
+    for setting in INSTRUMENT_SETTINGS:
+        _refuse_setting_pairing(provenance, setting)
+        if setting in provenance:
+            _refuse_setting_value(provenance, setting)
+            _refuse_setting_label(provenance, setting)
+
+
+# Four checks rather than one body, because they are four properties and each
+# has to be breakable alone. A single block would make every negative control a
+# mutation that breaks all four, which proves only that the block runs.
+
+def _refuse_declared_values(provenance: Mapping[str, Any]) -> None:
+    """The two closed sets. A value outside them is refused, never mapped."""
+    status = provenance.get("measurement_status")
+    if status not in MEASUREMENT_STATUSES:
+        raise ArtefactRefused(
+            ARTEFACT_UNREADABLE,
+            f"measurement_status {str(status)[:32]!r} is not one this reader "
+            f"declares; {sorted(MEASUREMENT_STATUSES)} are")
+    state = provenance.get("instrument_state")
+    if state not in INSTRUMENT_STATES:
+        raise ArtefactRefused(
+            ARTEFACT_UNREADABLE,
+            f"instrument_state {str(state)[:32]!r} is not one this reader "
+            f"declares; {sorted(INSTRUMENT_STATES)} are")
+
+
+def _refuse_setting_pairing(provenance: Mapping[str, Any], setting: str) -> None:
+    """A setting and its label travel together, or neither is declared.
+
+    Refused rather than repaired: a populated sample rate with no label is the
+    shape that lets a configuration imply it was exercised, and supplying the
+    label here would be this reader deciding the claim for the producer.
+    """
+    label_field = setting + EXERCISE_SUFFIX
+    has_value = setting in provenance
+    has_label = label_field in provenance
+    if has_value != has_label:
+        present, absent = ((setting, label_field) if has_value
+                           else (label_field, setting))
+        raise ArtefactRefused(
+            ARTEFACT_UNREADABLE,
+            f"{present} is present and {absent} is not; a setting and the "
+            f"claim about whether it was exercised are declared together "
+            f"or not at all")
+
+
+def _refuse_setting_value(provenance: Mapping[str, Any], setting: str) -> None:
+    """A setting is bounded like every other scalar this reader admits."""
+    refuse_scalar(f"provenance.{setting}", provenance[setting])
+
+
+def _refuse_setting_label(provenance: Mapping[str, Any], setting: str) -> None:
+    """A populated setting carries CONFIGURED_NOT_EXERCISED, or is refused."""
+    label_field = setting + EXERCISE_SUFFIX
+    if provenance[label_field] not in EXERCISE_LABELS:
+        raise ArtefactRefused(
+            ARTEFACT_UNREADABLE,
+            f"{setting} is populated and {label_field} is "
+            f"{str(provenance[label_field])[:32]!r}; a populated setting "
+            f"carries {CONFIGURED_NOT_EXERCISED} or is refused")
+
+
+def declared_measurement_status(provenance: Mapping[str, Any]) -> str:
+    """What the artefact says, never what the reader would guess.
+
+    This reads one field and looks at nothing else. Not `device_id`: an RTL2838
+    in the manifest is an instrument that was named, and naming one is not using
+    one. Not the settings: a populated sample rate and a populated gain are a
+    configuration, and §13l M.4 is precisely the rule that a declared
+    configuration must not imply it was exercised.
+
+    Both of those are plausible inferences, which is what makes them worth
+    refusing here rather than trusting nobody will write them.
+    """
+    return provenance["measurement_status"]
+
+
+def declared_instrument_state(provenance: Mapping[str, Any]) -> str:
+    """What the artefact says about the instrument. Also never derived."""
+    return provenance["instrument_state"]
+
+
 def _refuse_provenance(provenance: Mapping[str, Any], counted: int) -> None:
-    extra = set(provenance) - PROVENANCE_FIELDS
+    # Version before shape. An artefact from another schema is told that, not
+    # told which fields it is missing -- the second reads as an invitation to
+    # add them, which is the migration §13l M.4 does not have.
+    if provenance.get("schema") != ARTEFACT_SCHEMA:
+        raise ArtefactRefused(ARTEFACT_UNREADABLE, "foreign artefact schema")
+    if provenance.get("frame_version") != FRAME_VERSION:
+        raise ArtefactRefused(ARTEFACT_UNREADABLE, "unsupported frame version")
+    extra = set(provenance) - (PROVENANCE_FIELDS | INSTRUMENT_SETTING_FIELDS)
     missing = PROVENANCE_FIELDS - set(provenance)
     if extra or missing:
         raise ArtefactRefused(
             ARTEFACT_UNREADABLE,
             f"provenance field set is not the declared one; missing "
             f"{sorted(missing)}, unexpected {sorted(extra)}")
-    if provenance["schema"] != ARTEFACT_SCHEMA:
-        raise ArtefactRefused(ARTEFACT_UNREADABLE, "foreign artefact schema")
-    if provenance["frame_version"] != FRAME_VERSION:
-        raise ArtefactRefused(ARTEFACT_UNREADABLE, "unsupported frame version")
+    refuse_instrument_declaration(provenance)
     declared = provenance["record_count"]
     if isinstance(declared, bool) or not isinstance(declared, int) \
             or declared != counted:

@@ -36,9 +36,11 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from scythe_invariant_ledger import Coordinate
 from scythe_derived_evidence import (
-    ARTEFACT_PROVENANCE, ARTEFACT_SCHEMA, FRAME_VERSION, MAX_ARTEFACT_BYTES,
-    MAX_ARTEFACT_RECORDS, MAX_RECORD_BYTES, MINIMUM_RECORD_INTERVAL_NS,
-    WALK_COORDINATES, WALK_STEP_PAIR, artifact_identity, refuse_scalar,
+    ARTEFACT_PROVENANCE, ARTEFACT_SCHEMA, FRAME_VERSION, INSTRUMENT_SETTINGS,
+    INSTRUMENT_SETTING_FIELDS, MAX_ARTEFACT_BYTES, MAX_ARTEFACT_RECORDS,
+    MAX_RECORD_BYTES, MINIMUM_RECORD_INTERVAL_NS, WALK_COORDINATES,
+    WALK_STEP_PAIR, artifact_identity, refuse_instrument_declaration,
+    refuse_scalar,
 )
 from scythe_promotion_ledger_store import frame_of
 from scythe_promotion_lineage import Syscalls
@@ -165,6 +167,9 @@ class DerivedEvidenceProducer:
     monotonic_source_id: str
     claim_sources: Mapping[str, str]
     configuration_identity: str
+    measurement_status: str
+    instrument_state: str
+    instrument_settings: Mapping[str, Any] = field(default_factory=dict)
     enabled: bool = False
     syscalls: Syscalls = field(default_factory=Syscalls)
 
@@ -312,6 +317,13 @@ class DerivedEvidenceProducer:
                 ARTEFACT_PUBLICATION_REFUSED,
                 f"every provenance claim names its source; {sorted(missing)} "
                 f"name none, and an unsourced claim is one nobody can question")
+        declared = dict(self.instrument_settings)
+        unknown = sorted(set(declared) - INSTRUMENT_SETTING_FIELDS)
+        if unknown:
+            raise ProducerRefused(
+                ARTEFACT_PUBLICATION_REFUSED,
+                f"{unknown} are not declared instrument settings; the settings "
+                f"are {sorted(INSTRUMENT_SETTINGS)}, each beside its own label")
         provenance = {
             "kind": ARTEFACT_PROVENANCE,
             "schema": ARTEFACT_SCHEMA,
@@ -323,7 +335,20 @@ class DerivedEvidenceProducer:
             "producer_attestation": self._attestation(),
             "content_digest": content_digest,
             "record_count": count,
+            "measurement_status": self.measurement_status,
+            "instrument_state": self.instrument_state,
         }
+        provenance.update(declared)
+        # The reader's own function, imported rather than reimplemented. The
+        # producer states what the instrument did; it never derives it, and it
+        # never labels a setting the caller left unlabelled (§13l M.4).
+        from scythe_derived_evidence import ArtefactRefused
+        try:
+            refuse_instrument_declaration(provenance)
+        except ArtefactRefused as refused:
+            raise ProducerRefused(
+                ARTEFACT_PUBLICATION_REFUSED,
+                f"{refused.code}: {refused.detail}") from None
         provenance["artifact_id"] = artifact_identity(provenance, content_digest)
         return provenance
 
@@ -348,6 +373,8 @@ class DerivedEvidenceProducer:
             "bounds": {"records": MAX_PRODUCER_RECORDS,
                        "duration_s": MAX_PRODUCER_DURATION_S},
             "refusals": list(PRODUCER_REFUSALS),
+            "measurement_status": self.measurement_status,
+            "instrument_state": self.instrument_state,
             "writes_carries_samples": False,
             "acquires": False,
             "schedules": False,

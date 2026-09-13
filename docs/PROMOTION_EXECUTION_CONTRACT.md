@@ -3130,6 +3130,40 @@ already written down. Introduced by Amendment B, noticed by Amendment C.*
     evidence.
 37j. AST — the run opens no SDR device, starts no `rtl_tcp`, allocates no IQ
     buffer, opens no socket, starts no subprocess or thread, and names no PID.
+
+*Slice 10d implements the schema half of M.4 and is tested by 37k–37r. The
+remainder — 37b, 37d through 37j — belongs to the bounded act, which is
+separately authorized and has not been.*
+
+37k. The artefact schema name is **v2**. A v1 artefact is refused as foreign,
+    carrying the new fields or not, and receives no defaults and no migration:
+    a required field added to a closed set changes what the old name means.
+37l. An unknown `measurement_status` or `instrument_state` is refused. Both
+    value sets have exactly one member, because this tree can produce one kind
+    of artefact and a second name would describe a capability that does not
+    exist.
+37m. The status the reader reports is the status the artefact declared.
+    Populated sample rate and gain are read back unchanged **and the status
+    stays `RF_MEASUREMENT_NOT_PERFORMED`** — a labelled configuration is
+    accepted, never refused, because refusing it would push a producer toward
+    omitting the configuration instead of declaring it.
+37n. No measurement authority follows from the instrument's identity. An
+    RTL2838 in `device_id` and plausible capture values in the settings leave
+    the status unchanged.
+37o. Every populated instrument setting carries its own `CONFIGURED_NOT_EXERCISED`
+    label. A setting without its label, a label without its setting, and a
+    setting labelled anything else are each refused; the reader never supplies
+    the missing label, and neither does the producer.
+37p. A setting is bounded as a scalar like every other admitted value, and an
+    undeclared setting name is refused by the reader and by the producer.
+37q. The instrument settings are covered by the artefact identity.
+37r. Negative controls — inference from populated settings, inference from
+    device identity, the value sets opened, the fields defaulted, the pairing
+    dropped, the label unchecked, the scalar bound removed, an undeclared name
+    admitted, the version left at v1, the identity narrowed, the rejected name
+    minted, the producer labelling on the caller's behalf, the producer's
+    declarations defaulted, and the producer reimplementing the reader's
+    check — each breaks its own tests and no others.
 36c. Every provenance claim names the component that supplied it; a claim with
     no named source refuses publication.
 36d. The producer neither writes nor accepts `carries_samples` — AST and
@@ -3398,6 +3432,20 @@ produced it.
 53o. **An induced ceiling demonstrates nothing** (§13l M.5). A run producing no
     violation is complete; baiting the invariant proves only that its conditions
     can be arranged.
+53q. **A closed set with one member is the honest size** (§13l M.4, 37l). A
+    second measurement status would name a capability this tree does not have,
+    read by a reader that has never seen one produce anything. The amendment
+    that contracts a measurement path adds its value; until then the field is
+    a declaration that can be wrong rather than a switch with two positions.
+53r. **A population of zero needs no migration** (§13l M.4, 37k). Adding a
+    required field to a closed set changes what the old schema name means, so
+    the name changes with it — and because no v1 artefact was ever produced,
+    a compatibility path would be inventing exactly the defaults the amendment
+    forbids for a reader that would never meet one.
+53s. **A labelled configuration is accepted, not refused** (§13l M.4, 37m). The
+    alternative teaches a producer to omit the configuration, after which the
+    reader knows less about what was attached than it does now — the refusal
+    that makes the record worse.
 53p. **Merge is not acceptance** (§13l preamble). Three amendments (H, L, M)
     merged while self-described as `PROPOSED`, and each was repaired forward. The
     correction is an explicit gate — an acceptance decision and an acceptance
@@ -3467,7 +3515,11 @@ amendment is accepted:
    a deterministic fake GraphOps for conformance tests.
 10. Live SHADOW observation of the **apparatus** (§13h), bounded, foreground,
     in-process, initiating no capture, and writing one record outside the
-    lineage.
+    lineage. Split as it was built: **10a** the pure policy core and the
+    observer; **10b** the derived-evidence reader (§13i, §13j); **10c** the
+    producer (§13k); **10d** the measurement and instrument declarations
+    (§13l M.4), code only. The bounded act M.8 describes is **not** a slice and
+    is separately authorized.
 11. Separate explicit authorization before any ARMED graph mutation.
 
 **Slices 4 and 5 stay separate**, and this is the boundary to protect if anything
