@@ -27,6 +27,8 @@ Amendment L:            §13k the producer — ACCEPTED 2026-09-12, after
                         review corrected L.1
 Amendment M:            §13l the run that is not a capture — ACCEPTED
                         2026-09-12
+Amendment N:            §13m the act, and the identities it must not invent —
+                        PROPOSED 2026-09-13
 Authority:              NORMATIVE
 Constrains:             Step 4 of the promotion sequence (execution adapter)
 Depends on:             SCYTHE_VERDICT_VOCABULARIES.md  (ACCEPTED — §5 declares
@@ -2759,6 +2761,159 @@ Seven candidates. Five clear; **two rejected rather than judged** —
 against the `OPERATOR` promotion authority. No new position authority was minted:
 `OPERATOR_DECLARED` already said the needed thing, and a fourth value would have
 been a second name for it.
+
+---
+
+## 13m. Amendment N — the act, and the identities it must not invent
+
+*Proposed 2026-09-13. **Not yet accepted.** No implementation may land against
+it until an explicit acceptance decision and an acceptance commit exist
+(§13l).*
+
+*Written because slice 10h landed its behavioural declarations in the same
+commit as the code implementing them — the failure §13l's gate names, repeated
+one slice after it was written. The declarations are withdrawn from that branch
+and proposed here instead. Touches §13i, §13k, §13l and §17.*
+
+> **A digest that was typed is not a digest. It is a string that looks like
+> one, and it agrees with nothing.**
+
+### N.1 Two operations, and the default is the one that does nothing
+
+The act has an entrypoint. Its default operation is a **preflight**: resolve
+every path, check every mode, snapshot the lineage, validate the declarations,
+predict the filenames, report, exit. It opens no terminal, accepts no fix,
+creates no file, and constructs no producer.
+
+A live run requires **two** switches, one of them deliberately awkward. One
+switch alone refuses; the confirmation alone is still a preflight.
+
+*An act whose default is to act is one step from happening by accident. The
+second switch is not ceremony: it is the difference between a typo and a
+decision.*
+
+### N.2 The interactive terminal is the sole entry for a coordinate
+
+No coordinate may enter the act through `argv`, an environment variable, a
+file, or **non-interactive** stdin. The only entry is the interactive TTY the
+runner reads.
+
+*Stated this way because the earlier wording — "no coordinate through stdin" —
+was false. The interactive terminal **is** stdin; what is refused is stdin that
+is not a terminal. A prohibition that contradicts the mechanism it describes
+teaches a reader to stop believing the prohibitions.*
+
+The TTY requirement rejects a pipe and a redirected file. **It does not prove a
+person typed.** A paste into a live terminal arrives through the same
+descriptor a typed line does, so the entry cadence is an operator's attestation
+and the artefact's recorded monotonic intervals are what a reviewer reads.
+
+### N.3 The artefact is read back before it is observed
+
+Between publication and observation the act **reads the artefact from disk**
+through the merged reader, and observes what the read returned.
+
+*The in-memory fixes are still in the runner and handing them sideways would be
+cheaper. It would also prove only that the process can talk to itself. An
+artefact nobody can read is not evidence, and the only way to know it can be
+read is to read it.*
+
+### N.4 A published artefact is never withdrawn
+
+If the artefact publishes and the observation then refuses, the act reports
+`ARTEFACT_PUBLISHED_OBSERVATION_REFUSED` and stops. The artefact is not
+deleted, not rewritten, not republished, and the act does not retry.
+
+*It is evidence of a walk that actually happened. Removing it to tidy up a
+failed second step would destroy the only record of the part that worked.*
+
+### N.5 Provenance identities are computed, never typed
+
+Every chain identity and configuration identity in the act is **computed from
+the pinned declaration by this repository's existing canonical helpers**:
+
+| value | computed by |
+| --- | --- |
+| `signal_chain_hash` | `rf_iq_retention.signal_chain_hash` over the declared chain |
+| `receiver_state_chain_hash` | `rf_receiver_state.receiver_state_chain_hash` over the declared manifest |
+| `configuration_identity` | a digest over the act's complete pinned declaration |
+
+A literal is refused. **A typed digest agrees with nothing**: it cannot be
+recomputed, it does not change when the thing it identifies changes, and two
+runs of different configurations carry the same one.
+
+The declaration passed to those helpers must be **complete**. Both manifest
+builders fall back to environment variables for an undeclared antenna,
+feedline or mast extension, so an incomplete declaration makes the identity a
+function of the shell that launched the act rather than of the act.
+
+*The device identity is declared too, and is a real sensor identity rather than
+a generic word.*
+
+A change to any declared value must change the corresponding digest, and a test
+must demonstrate it rather than assert it.
+
+### N.6 What the capability check actually proves
+
+The act reports which forbidden modules its code can reach. The claim this
+supports, and the only one it may make, is:
+
+> **statically declared first-party import reachability**
+
+It is a transitive closure over this repository's own modules, computed from
+their `import` statements. It is **not** a proof of runtime capability: a
+dynamic import, an `importlib` call, or a C extension reaching a syscall
+directly would not appear in it.
+
+Two obligations follow, and both are required:
+
+1. the claim is stated at that strength wherever it is published; and
+2. **a dynamic import anywhere in that closure is itself a finding**, because
+   the one construct that would silently void the claim must not be the one
+   the check cannot see.
+
+*`sys.modules` was tried first and was wrong in an instructive way: it reported
+`signal`, which `unittest` imports for its own interrupt handling. It measured
+the room rather than the program. The static closure measures the program and
+says so.*
+
+### N.7 Acceptance tests
+
+37aa. The default operation is the preflight, and it writes nothing: no
+    terminal opened, no fix accepted, no file created, no producer constructed.
+    Its report carries only paths, modes, closed vocabulary members, booleans
+    and counts.
+37ab. A live run requires two switches. One alone refuses; the confirmation
+    alone is still a preflight.
+37ac. No coordinate enters through `argv`, an environment variable, a file or
+    non-interactive stdin; the sole entry is the interactive TTY (N.2).
+37ad. The published artefact is read back from disk through the merged reader
+    before it is observed, and a test counts the reads.
+37ae. The observation record is published into the pinned records directory and
+    nowhere else, at the path the preflight predicted.
+37af. A refused observation after a successful publication yields
+    `ARTEFACT_PUBLISHED_OBSERVATION_REFUSED` with the artefact intact — AST
+    over the module for `unlink`, `remove`, `rmtree`, `rmdir`, `replace` and
+    `truncate`.
+37ag. The capability report is a static first-party import closure, transitive,
+    and a dynamic import inside it is a finding. A module the test harness
+    loaded is not.
+37ah. Every provenance identity is recomputed in the test from the pinned
+    declaration and compared to the value the act carries. A literal digest
+    fails.
+37ai. Changing any declared chain value changes the corresponding digest.
+37aj. The declaration passed to each helper is complete: with the relevant
+    environment variables set to any value, the computed identities are
+    unchanged.
+
+### N.8 The name check
+
+`PREFLIGHT_ONLY`, `LIVE_RUN`, `PREFLIGHT_PASSED`, `PREFLIGHT_REFUSED`,
+`ACT_COMPLETE`, `ACT_REFUSED_BEFORE_PUBLICATION` and
+`ARTEFACT_PUBLISHED_OBSERVATION_REFUSED` were checked against the discovered
+universe and are clear. `ARTEFACT_STANDS_UNOBSERVED` was a candidate for the
+last of these and was **rejected rather than judged**: it collides with
+`OBSERVED`, `RESTART_NOT_OBSERVED` and `REQUIRED_CHANGE_NOT_OBSERVED`.
 
 ---
 
