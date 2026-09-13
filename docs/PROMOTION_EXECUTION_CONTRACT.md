@@ -22,6 +22,7 @@ Amendment I:            §13h what live SHADOW can observe — ACCEPTED
                         and I.4a
 Amendment J:            §13i derived evidence — ACCEPTED 2026-09-12, after
                         review qualified J.3 and set exact bounds
+Amendment K:            §13j record-rate bound — ACCEPTED 2026-09-12
 Authority:              NORMATIVE
 Constrains:             Step 4 of the promotion sequence (execution adapter)
 Depends on:             SCYTHE_VERDICT_VOCABULARIES.md  (ACCEPTED — §5 declares
@@ -2200,6 +2201,7 @@ Every coordinate value is refused unless it passes all four:
 | `NON_SCALAR_COORDINATE` | a list or mapping, which is how samples arrive |
 | `OVERSIZED_COORDINATE` | a string beyond a declared length |
 | `SAMPLE_BEARING_FIELD_FOUND` | the recursive check, over the whole record |
+| `RECORD_INTERVAL_REFUSED` | a high-rate record stream under the declared timeline (§13j) |
 
 **The third is the one worth arguing for.** The first two are obvious, and a
 sample blob base64-encoded into one long string passes both of them. A declared
@@ -2301,6 +2303,83 @@ than judged**, each landing on ground that is already crowded:
 `DECLARED` tokens across the RF modules, `SAMPLE_FREEDOM_VERIFIED` against
 `VERIFIED` and `UNVERIFIED`, and every name containing `HEADER` against the
 ledger's record kind — which is why the provenance record is called what it is.
+
+---
+
+## 13j. Amendment K — a record-rate bound, and what it does not prove
+
+*Proposed 2026-09-12 and accepted 2026-09-12, in that order. Adds the fifth
+entry to §13i J.5's structural exclusion profile, so slice 10b's
+one-sample-per-record control has something real to break. Touches §13i only.*
+
+### K.1 Why this exists, and the control that could not be written
+
+§13i J.1 records the counterexample its own correction was built on: coordinates
+**emitted at sample cadence** pass a closed scalar schema. J.5's four refusals do
+not reach it, and the contract said so and stopped there.
+
+Slice 10b was then asked for a control breaking *one-sample-per-record rejection
+through the contract's cadence constraints* — and there were none. The control
+would have had to invent the constraint in the implementation and then break the
+thing it invented, which is the shape of a test that cannot fail. So the rule
+lands here first.
+
+### K.2 The bound
+
+```
+MINIMUM_RECORD_INTERVAL_NS = 1_000_000     # one millisecond
+```
+
+**Per independently declared evidence series**, and for each one:
+
+- every record carries `observed_monotonic_ns`;
+- values **strictly increase**;
+- consecutive values differ by **at least** `MINIMUM_RECORD_INTERVAL_NS`;
+- a missing, repeated, backward or sub-floor timestamp **refuses the artefact**
+  with `RECORD_INTERVAL_REFUSED`.
+
+**Integer monotonic values only.** No wall clock, and no floating-point
+conversion for the comparison. On this host UTC takes ~23.5 h steps, and a float
+conversion of a nanosecond count loses the low bits at exactly the magnitudes
+that matter — a comparison that rounded two records into agreement would refuse
+nothing while appearing to check.
+
+### K.3 Per series, not across the artefact
+
+The rule applies **within a series or transition family**, never globally.
+
+A walk step and a sparse decomposition may legitimately produce derived
+coordinates at the same monotonic instant: they are different observations of
+one moment, not a stream. A global floor would refuse an honest artefact for
+containing two families, which is the false positive that teaches an author to
+widen the bound until it stops meaning anything.
+
+### K.4 What this establishes, and what it does not
+
+> **The artefact does not contain a high-rate record stream under its declared
+> monotonic timeline.**
+
+That is the whole claim. It is a **plausibility and information-rate bound**, and
+it is not:
+
+- proof of honest origin;
+- proof that covert encoding is impossible;
+- a reason to relax anything else in the profile.
+
+A producer can space encoded scalars a millisecond apart, or falsify timestamps
+outright. **Producer provenance remains separately authorized and trusted**
+(§13i J.3, J.4) — the reader validates an attestation and a schema, and this
+bound narrows what an unattested artefact can be without making it safe.
+
+It is C1's shape (§11): a *this has gone wrong* bound set far from anything
+legitimate, whose firing during correct operation would mean it was set wrong.
+One millisecond is three orders of magnitude above a 1 Msps sample interval and
+two below a plausible walk step, which is the gap that makes it cheap.
+
+### K.5 The name check
+
+Six candidates against the discovered universe before any was written. All six
+clear; none required a judgement.
 
 ---
 
@@ -2620,6 +2699,19 @@ already written down. Introduced by Amendment B, noticed by Amendment C.*
     declared, and a numeric string are each refused as coordinate values.
 34r. `MAX_ARTEFACT_RECORDS`, `MAX_ARTEFACT_BYTES`, `MAX_RECORD_BYTES` and
     `MAX_STRING_BYTES` are contract-declared and not configurable — AST.
+
+**Amendment K (§13j)**
+
+35a. A series whose consecutive records differ by less than
+    `MINIMUM_RECORD_INTERVAL_NS` is `RECORD_INTERVAL_REFUSED`.
+35b. A missing, repeated or backward `observed_monotonic_ns` refuses the
+    artefact; strictly increasing is required, not merely non-decreasing.
+35c. Two series may carry records at the same monotonic instant without refusal;
+    the rule is per series and never global.
+35d. The comparison uses integers only — AST: no `float()` and no wall clock on
+    the interval path.
+35e. Lowering or removing the floor makes the sub-millisecond record-stream test
+    **stop refusing**, which is the control that replaces the unfalsifiable one.
 34g. The reader exposes no write path: AST — no write-mode `open`, no `os.write`,
     no rename, no unlink.
 34h. An artefact beyond `MAX_ARTEFACT_BYTES` or `MAX_ARTEFACT_RECORDS` is
@@ -2839,6 +2931,14 @@ produced it.
 53b. **A digest cannot cover the header that carries it** (§13i J.7a). The
     content digest excludes provenance, and the artefact identity is derived
     from it rather than the reverse.
+53d. **A cadence floor bounds information rate, not honesty** (§13j K.4). It
+    establishes that the artefact holds no high-rate record stream under its
+    declared timeline, and a producer can space scalars a millisecond apart or
+    falsify timestamps outright.
+53e. **The rate rule is per series, never global** (§13j K.3). Two families may
+    legitimately observe one moment, and a global floor would refuse an honest
+    artefact — the false positive that teaches an author to widen a bound until
+    it means nothing.
 53c. **Attest the descriptor, not the path** (§13i J.7). A path is a name and
     can be repointed between opens; a digest from a second open attests bytes
     the verdicts did not come from.
