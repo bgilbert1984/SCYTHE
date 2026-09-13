@@ -2770,10 +2770,12 @@ been a second name for it.
 it until an explicit acceptance decision and an acceptance commit exist
 (§13l).*
 
-*Written because slice 10h landed its behavioural declarations in the same
-commit as the code implementing them — the failure §13l's gate names, repeated
-one slice after it was written. The declarations are withdrawn from that branch
-and proposed here instead. Touches §13i, §13k, §13l and §17.*
+*Written because slice 10h was **drafted and carried on its own branch** with
+its behavioural declarations in the same commit as the code implementing them
+— the failure §13l's gate names, repeated one slice after it was written. **It
+has not landed on `main`.** The declarations are withdrawn from that branch and
+proposed here instead, and the branch will be rebuilt code-only atop this
+amendment's acceptance. Touches §13i, §13k, §13l, §15, §16 and §17.*
 
 > **A digest that was typed is not a digest. It is a string that looks like
 > one, and it agrees with nothing.**
@@ -2836,22 +2838,82 @@ the pinned declaration by this repository's existing canonical helpers**:
 | --- | --- |
 | `signal_chain_hash` | `rf_iq_retention.signal_chain_hash` over the declared chain |
 | `receiver_state_chain_hash` | `rf_receiver_state.receiver_state_chain_hash` over the declared manifest |
-| `configuration_identity` | a digest over the act's complete pinned declaration |
+| `configuration_identity` | `act_configuration_identity`, defined in N.5a — **no canonical helper for this exists today** |
 
 A literal is refused. **A typed digest agrees with nothing**: it cannot be
 recomputed, it does not change when the thing it identifies changes, and two
 runs of different configurations carry the same one.
 
-The declaration passed to those helpers must be **complete**. Both manifest
-builders fall back to environment variables for an undeclared antenna,
-feedline or mast extension, so an incomplete declaration makes the identity a
-function of the shell that launched the act rather than of the act.
-
-*The device identity is declared too, and is a real sensor identity rather than
-a generic word.*
-
 A change to any declared value must change the corresponding digest, and a test
 must demonstrate it rather than assert it.
+
+#### N.5a `act_configuration_identity`
+
+The third row has no existing helper, and "a digest over the complete pinned
+declaration" is not mechanically decidable without saying which fields. A
+separately named helper is introduced under these rules:
+
+```
+schema        scythe.position-act-configuration.v1
+serialization json.dumps(manifest, sort_keys=True, separators=(",", ":"),
+                         ensure_ascii=False).encode("utf-8")
+algorithm     blake2s, digest_size=16
+prefix        "blake2s:"
+```
+
+Matching `rf_receiver_state.canonical_bytes` and
+`rf_iq_retention.canonical_signal_chain_bytes` exactly, so a reader who has
+verified one has verified all three.
+
+The manifest is a **closed** field set. A field not on this list is not hashed,
+and a field on it that is missing is a refusal rather than an omission:
+
+```
+schema                      device_id
+signal_chain_hash           receiver_state_chain_hash
+configuration_epoch         monotonic_source_id
+pose_uncertainty_m          measurement_status
+instrument_state            instrument_settings
+required_fixes              max_run_monotonic_s
+artefact_schema
+```
+
+`instrument_settings` is the complete labelled mapping, sorted by the
+serializer. Paths are **not** in it: where an artefact is written is not part of
+what the instrument was configured as, and folding a directory into the
+identity would make a relocated output look like a different instrument.
+
+#### N.5b The declaration must be complete, and one helper is why
+
+`rf_iq_retention.signal_chain_manifest` falls back to the environment for three
+undeclared values:
+
+```
+antenna       SDRPP_ANTENNA_ID
+feedline      SDRPP_FEEDLINE_ID
+extension_mm  SDRPP_ANTENNA_EXTENSION_MM
+```
+
+An incomplete declaration therefore makes `signal_chain_hash` a function of the
+shell that launched the act rather than of the act. All three are passed
+explicitly.
+
+**`rf_receiver_state.receiver_state_chain_manifest` reads no environment
+variable**, and an earlier draft of this amendment said both builders did. The
+distinction is kept because a reader checking one claim and finding it loose
+has no reason to trust the next.
+
+#### N.5c The device identity is a class, not a sensor
+
+The declared device identity is a **VID/PID class identity, operator-declared,
+with a non-unique collision domain**. No serial is attested and no device is
+opened, so nothing here distinguishes this receiver from any other of the same
+model — every `0bda:2838` on earth shares it.
+
+*Recorded rather than dressed up. Calling it a sensor identity would claim a
+uniqueness the act deliberately did not go and get: obtaining a serial means
+opening the device, which §13l M.1 forbids. The honest identity is the one a
+declaration can support.*
 
 ### N.6 What the capability check actually proves
 
@@ -2868,43 +2930,45 @@ directly would not appear in it.
 Two obligations follow, and both are required:
 
 1. the claim is stated at that strength wherever it is published; and
-2. **a dynamic import anywhere in that closure is itself a finding**, because
-   the one construct that would silently void the claim must not be the one
-   the check cannot see.
+2. **the dynamic-import constructs in N.6a are findings** wherever they appear
+   in that closure, because the constructs that would silently void the claim
+   must not be the ones the check cannot see.
+
+#### N.6a The closed construct set
+
+"Any dynamic import" is wider than an AST checker can establish, so the checker
+detects a **named, closed set** and the report says so:
+
+```
+__import__          the builtin, called by name
+importlib           any attribute of it, import_module and __import__ included
+runpy               run_module, run_path
+eval / exec         import-capable evaluation of a constructed string
+```
+
+Published as *detection of that closed set*, never as "no dynamic import". A
+construct outside the set — an attribute reached through `getattr`, a C
+extension calling back into the import machinery — is not detected and the
+claim does not cover it.
+
+*The set is small and named so a reader can check whether their concern is in
+it. A claim of completeness would be the second thing in this amendment that
+sounds stronger than it is.*
 
 *`sys.modules` was tried first and was wrong in an instructive way: it reported
 `signal`, which `unittest` imports for its own interrupt handling. It measured
 the room rather than the program. The static closure measures the program and
 says so.*
 
-### N.7 Acceptance tests
+### N.7 Where this amendment's declarations live
 
-37aa. The default operation is the preflight, and it writes nothing: no
-    terminal opened, no fix accepted, no file created, no producer constructed.
-    Its report carries only paths, modes, closed vocabulary members, booleans
-    and counts.
-37ab. A live run requires two switches. One alone refuses; the confirmation
-    alone is still a preflight.
-37ac. No coordinate enters through `argv`, an environment variable, a file or
-    non-interactive stdin; the sole entry is the interactive TTY (N.2).
-37ad. The published artefact is read back from disk through the merged reader
-    before it is observed, and a test counts the reads.
-37ae. The observation record is published into the pinned records directory and
-    nowhere else, at the path the preflight predicted.
-37af. A refused observation after a successful publication yields
-    `ARTEFACT_PUBLISHED_OBSERVATION_REFUSED` with the artefact intact — AST
-    over the module for `unlink`, `remove`, `rmtree`, `rmdir`, `replace` and
-    `truncate`.
-37ag. The capability report is a static first-party import closure, transitive,
-    and a dynamic import inside it is a finding. A module the test harness
-    loaded is not.
-37ah. Every provenance identity is recomputed in the test from the pinned
-    declaration and compared to the value the act carries. A literal digest
-    fails.
-37ai. Changing any declared chain value changes the corresponding digest.
-37aj. The declaration passed to each helper is complete: with the relevant
-    environment variables set to any value, the computed identities are
-    unchanged.
+The acceptance tests are **§15's 37aa–37ak** and the decisions are **§16's
+53ab–53ah**, added by this amendment rather than restated here.
+
+*Not duplicated on purpose. A second copy in this section is a second answer
+that can disagree with the first, and §16.53x already says what that costs:
+a reader has no way to tell which one the author meant. The governing
+locations govern.*
 
 ### N.8 The name check
 
@@ -3343,6 +3407,42 @@ authorized and has not been.*
 37z. A listing that fails for any reason other than a missing namespace raises
     `LINEAGE_INSPECTION_REFUSED` and publishes no record. `{}` would be the
     observer deciding that what it could not read was not there.
+**Amendment N (§13m)**
+
+37aa. The act's default operation is the preflight, and it writes nothing: no
+    terminal opened, no fix accepted, no file created, no producer constructed.
+    Its report carries only paths, modes, closed vocabulary members, booleans
+    and counts.
+37ab. A live run requires two switches. One alone refuses; the confirmation
+    alone is still a preflight.
+37ac. No coordinate enters through `argv`, an environment variable, a file or
+    **non-interactive** stdin. The sole entry is the interactive TTY, which is
+    stdin — what is refused is stdin that is not a terminal (§13m N.2).
+37ad. The published artefact is read back from disk through the merged reader
+    before it is observed, and a test counts the reads.
+37ae. The observation record is published into the pinned records directory and
+    nowhere else, at the path the preflight predicted.
+37af. A refusal injected **after** a successful publication yields
+    `ARTEFACT_PUBLISHED_OBSERVATION_REFUSED`, and the artefact's bytes are
+    identical to those captured immediately after publication, exactly one file
+    exists in the derived directory, and the producer published once — counted
+    at the writer, not inferred from the directory. The AST name scan is a
+    supplement and proves only the absence of six names.
+37ag. The capability report is a static, transitive first-party import closure.
+    Every construct in §13m N.6a is a finding wherever it appears in that
+    closure; a module the test harness loaded is not; and the report names the
+    closed set it detected.
+37ah. Every provenance identity is recomputed from the pinned declaration and
+    compared to the value the act carries. A literal digest fails.
+37ai. Changing any declared value changes the corresponding digest, for each of
+    the three identities.
+37aj. `signal_chain_hash` is unchanged with `SDRPP_ANTENNA_ID`,
+    `SDRPP_FEEDLINE_ID` and `SDRPP_ANTENNA_EXTENSION_MM` set to arbitrary
+    values (§13m N.5b).
+37ak. `act_configuration_identity` covers exactly §13m N.5a's field set:
+    removing any one refuses, adding an undeclared one refuses, and changing
+    any one changes the digest.
+
 37r. Negative controls — inference from populated settings, inference from
     device identity, the value sets opened, the fields defaulted, the pairing
     dropped, the label unchecked, the scalar bound removed, an undeclared name
@@ -3645,6 +3745,29 @@ produced it.
 53x. **A stored convenience is a second answer** (37y). A serialized boolean can
     disagree with the enum beside it, and a reader has no way to tell which one
     the writer meant. Derived, or absent.
+53ab. **The default operation is the one that does nothing** (§13m N.1). An
+    act whose default is to act is one step from happening by accident, so a
+    live run needs two switches: one is a typo and two are a decision.
+53ac. **A published artefact is evidence of what happened** (§13m N.4). If the
+    observation then refuses, deleting the artefact to tidy up would destroy
+    the only record of the walk that did occur.
+53ad. **Measure the program, not the room** (§13m N.6). A `sys.modules`
+    capability check reports whatever the harness imported — `unittest` loads
+    `signal` — so the answerable question is what this act's own import graph
+    can reach.
+53ae. **A typed digest agrees with nothing** (§13m N.5). It cannot be
+    recomputed, it does not change when its subject changes, and two different
+    configurations carry the same one.
+53af. **An incomplete declaration is a digest over the shell** (§13m N.5b).
+    `signal_chain_manifest` reads three environment variables for values nobody
+    declared, so an identity built from a partial declaration identifies the
+    launching environment as much as the instrument.
+53ag. **A class is not a sensor** (§13m N.5c). Every `0bda:2838` shares the
+    declared identity; the serial that would distinguish this one is behind an
+    open the act must not perform.
+53ah. **A named absence beats a claim of completeness** (§13m N.6a). The
+    checker detects four constructs and says which four, because "no dynamic
+    import" is a claim an AST cannot support and a reader cannot check.
 53t. **The party that touched nothing states nothing** (37s, 37t). The observer
     never met an instrument and neither did the producer; the only party with a
     claim to make is the artefact, which makes it in writing. So the record
@@ -3741,8 +3864,12 @@ amendment is accepted:
     observer; **10b** the derived-evidence reader (§13i, §13j); **10c** the
     producer (§13k); **10d** the measurement and instrument declarations
     (§13l M.4); **10e** the observer carrying them into the record (37b);
-    **10f** the lineage's source state, stated rather than inferred (37x). All
-    code only. The bounded act M.8 describes is **not** a slice and is
+    **10f** the lineage's source state, stated rather than inferred (37x);
+    **10g** the bounded foreground position-entry runner, **merged**;
+    **10h** the act entrypoint and the fix-to-record wiring (§13m, 37aa–37ak),
+    **not merged** — drafted and carried on its branch with its contract
+    declarations in the same commit, which is why those declarations are here
+    instead. All code only. The bounded act M.8 describes is **not** a slice and is
     separately authorized.
 11. Separate explicit authorization before any ARMED graph mutation.
 
