@@ -168,11 +168,22 @@ class Lineage:
         generation either (§13c D.3), so a crash before the header leaves the
         predecessor untouched in every sense that matters.
         """
-        found: List[Generation] = []
         try:
             entries = sorted(os.listdir(self.directory))
         except OSError:
-            return found
+            return []
+        return self.generations_of(entries)
+
+    def generations_of(self, entries: Sequence[str]) -> List[Generation]:
+        """The generations among directory entries already listed.
+
+        Split from `published` by §17 slice 10f so a caller that needs both the
+        generations and the fact that the listing *succeeded* can do one
+        traversal. Two listings can describe two filesystem instants, and a
+        presence answered by one while the digests came from the other is a
+        record about no single moment.
+        """
+        found: List[Generation] = []
         base = os.path.basename(self.root)
         for entry in entries:
             if not entry.startswith(base + ".") or not entry.endswith(GENERATION_SUFFIX):

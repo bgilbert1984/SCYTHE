@@ -755,22 +755,20 @@ class LineagePresenceTests(ObservationTestCase):
             constructed_walk_verdicts(3))
         self.assertEqual(record["lineage_presence_before"], NO_LINEAGE_NAMESPACE)
         self.assertEqual(record["lineage_presence_after"], NO_LINEAGE_NAMESPACE)
-        self.assertFalse(record["lineage_present"])
         self.assertEqual(record["lineage_digest_before"], {})
         self.assertEqual(record["quiescence"], LINEAGE_QUIESCENT)
+        self.assertNotIn("lineage_present", record)
 
     def test_an_empty_namespace_is_not_a_missing_one(self):
         record = self._observer().run(constructed_walk_verdicts(3))
         self.assertEqual(record["lineage_presence_before"],
                          LINEAGE_HOLDS_NO_GENERATION)
-        self.assertFalse(record["lineage_present"])
         self.assertEqual(record["lineage_digest_before"], {})
 
     def test_a_populated_lineage_is_reported_present(self):
         self._ledger()
         record = self._observer().run(constructed_walk_verdicts(3))
         self.assertEqual(record["lineage_presence_before"], LINEAGE_PRESENT)
-        self.assertTrue(record["lineage_present"])
         self.assertTrue(record["lineage_digest_before"])
 
     def test_quiescence_alone_cannot_be_read_as_a_generation(self):
@@ -796,17 +794,66 @@ class LineagePresenceTests(ObservationTestCase):
                           observation_module.LINEAGE_PRESENCES)
             os.remove(self.record)
 
-    def test_the_record_says_an_empty_map_is_not_a_generation(self):
+    def test_the_record_stores_no_second_answer(self):
+        """A serialized boolean beside the enum is a second answer that can
+        disagree with it. The convenience exists on the snapshot, derived."""
         record = self._observer().run(constructed_walk_verdicts(1))
-        self.assertIn(NO_LINEAGE_NAMESPACE, record["presence_note"])
-        self.assertIn(LINEAGE_HOLDS_NO_GENERATION, record["presence_note"])
+        self.assertNotIn("lineage_present", record)
+        self.assertNotIn("presence_note", record)
+        snapshot = observation_module.lineage_snapshot(self.root)
+        self.assertIs(snapshot.present, snapshot.presence == LINEAGE_PRESENT)
+        self.assertFalse(dataclasses.fields(observation_module.LineageSnapshot)[0]
+                         .name == "present")
+
+    def test_an_unlistable_namespace_refuses_rather_than_reads_empty(self):
+        """`{}` would be this observer deciding that what it could not read was
+        not there."""
+        blocked = os.path.join(self._dir.name, "blocked")
+        os.makedirs(blocked)
+        os.chmod(blocked, 0o000)
+        self.addCleanup(os.chmod, blocked, 0o700)
+        if os.access(blocked, os.R_OK):
+            self.skipTest("this user can list an unreadable directory")
+        with self.assertRaises(ObservationRefused) as caught:
+            observation_module.lineage_snapshot(os.path.join(blocked, "promotion"))
+        self.assertEqual(caught.exception.code,
+                         observation_module.LINEAGE_INSPECTION_REFUSED)
+
+    def test_an_unlistable_namespace_publishes_no_record(self):
+        blocked = os.path.join(self._dir.name, "blocked2")
+        os.makedirs(blocked)
+        os.chmod(blocked, 0o000)
+        self.addCleanup(os.chmod, blocked, 0o700)
+        if os.access(blocked, os.R_OK):
+            self.skipTest("this user can list an unreadable directory")
+        with self.assertRaises(ObservationRefused):
+            self._observer(lineage_root=os.path.join(blocked, "promotion")).run(
+                constructed_walk_verdicts(1))
+        self.assertFalse(os.path.exists(self.record))
+
+    def test_the_snapshot_lists_the_namespace_once(self):
+        """Two listings can describe two filesystem instants."""
+        listed = []
+        real = observation_module.os.listdir
+
+        def counting(path):
+            listed.append(path)
+            return real(path)
+
+        observation_module.os.listdir = counting
+        self.addCleanup(setattr, observation_module.os, "listdir", real)
+        self._ledger()
+        listed.clear()
+        observation_module.lineage_snapshot(self.root)
+        self.assertEqual(len(listed), 1)
 
     def test_the_presence_names_collide_with_nothing_unjudged(self):
         from test_scythe_verdict_vocabularies import (
             cross_set_collisions, discovered_tokens, judged,
         )
         tokens = discovered_tokens()
-        for candidate in observation_module.LINEAGE_PRESENCES:
+        for candidate in observation_module.LINEAGE_PRESENCES + (
+                observation_module.LINEAGE_INSPECTION_REFUSED,):
             with self.subTest(candidate=candidate):
                 self.assertIn(candidate, tokens)
                 unjudged = [hit for hit in cross_set_collisions(candidate, tokens)
@@ -817,5 +864,10 @@ class LineagePresenceTests(ObservationTestCase):
         """LINEAGE_ABSENT was checked against the universe and rejected: it
         collides with the ledger's ABSENT coordinate kind."""
         from test_scythe_verdict_vocabularies import collisions, discovered_tokens
-        self.assertIn("ABSENT", collisions("LINEAGE_ABSENT",
-                                           set(discovered_tokens())))
+        universe = set(discovered_tokens())
+        self.assertIn("ABSENT", collisions("LINEAGE_ABSENT", universe))
+        # And LINEAGE_INSPECTION_FAILED, which is a substring root of FAILED.
+        self.assertIn("FAILED", collisions("LINEAGE_INSPECTION_FAILED", universe))
+        self.assertEqual(
+            collisions(observation_module.LINEAGE_INSPECTION_REFUSED, universe),
+            [observation_module.LINEAGE_INSPECTION_REFUSED])
