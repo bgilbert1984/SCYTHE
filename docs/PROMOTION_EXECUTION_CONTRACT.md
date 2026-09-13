@@ -23,7 +23,7 @@ Amendment I:            §13h what live SHADOW can observe — ACCEPTED
 Amendment J:            §13i derived evidence — ACCEPTED 2026-09-12, after
                         review qualified J.3 and set exact bounds
 Amendment K:            §13j record-rate bound — ACCEPTED 2026-09-12
-Amendment L:            §13k the producer — PROPOSED 2026-09-12
+Amendment L:            §13k the producer — ACCEPTED 2026-09-12
 Authority:              NORMATIVE
 Constrains:             Step 4 of the promotion sequence (execution adapter)
 Depends on:             SCYTHE_VERDICT_VOCABULARIES.md  (ACCEPTED — §5 declares
@@ -2386,9 +2386,16 @@ clear; none required a judgement.
 
 ## 13k. Amendment L — the producer, and how far it is kept from a capture
 
-*Proposed 2026-09-12. **Not yet accepted.** Defines the separately authorized
-producer §13i J.4 deferred, so `PENDING_AMENDMENTS.md` entry 7 can eventually
-drain. Touches §13i, §13j and §17.*
+*Proposed 2026-09-12 and accepted 2026-09-12 — the proposal merged first, as
+Amendment H's did, and the acceptance follows forward rather than by rewriting
+the merge. The second occurrence of that order, which is why it is recorded here
+as a pattern rather than an accident: an amendment approved for merge is
+approved on its substance, and the document has to say so before any slice
+begins. Nothing in L changed between the two.*
+
+*Defines the separately authorized producer §13i J.4 deferred, so
+`PENDING_AMENDMENTS.md` entry 7 can eventually drain. Touches §13i, §13j and
+§17.*
 
 **A durable writer aimed near the capture path must not appear as one
 conversational shrug.** That is why this is a contract before it is a slice, and
