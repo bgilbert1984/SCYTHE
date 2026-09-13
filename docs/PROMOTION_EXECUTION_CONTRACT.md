@@ -25,6 +25,8 @@ Amendment J:            §13i derived evidence — ACCEPTED 2026-09-12, after
 Amendment K:            §13j record-rate bound — ACCEPTED 2026-09-12
 Amendment L:            §13k the producer — ACCEPTED 2026-09-12, after
                         review corrected L.1
+Amendment M:            §13l the run that is not a capture — PROPOSED
+                        2026-09-12
 Authority:              NORMATIVE
 Constrains:             Step 4 of the promotion sequence (execution adapter)
 Depends on:             SCYTHE_VERDICT_VOCABULARIES.md  (ACCEPTED — §5 declares
@@ -2573,6 +2575,175 @@ against `UNATTESTED` and the two filesystem attestation codes.
 
 ---
 
+## 13l. Amendment M — the run that is not a capture
+
+*Proposed 2026-09-12. **Not yet accepted.** Scopes the single bounded act §13k
+L.6 step 5 requires, so `PENDING_AMENDMENTS.md` entry 7 can drain. Touches §13i,
+§13k and §17.*
+
+### M.1 What this run is, and the finding that made it small
+
+A walk signature needs no IQ. `signal_chain_hash` takes **declared
+configuration** — sensor identity, sample type, rate, antenna, feedline,
+extension, gain — and `receiver_state_chain_hash` hashes a manifest of position,
+speed and orientation authorities. **Neither touches a sample**, and
+`check_walk_step` never sees one either. A walk verdict is about displacement
+against a kinematic budget.
+
+So the act is classified:
+
+```
+LIVE_POSITION_ATTESTATION       real bounded observation over real attested positions
+INSTRUMENT_CONFIGURED_IDLE      the instrument is declared, and idle
+RF_MEASUREMENT_NOT_PERFORMED    no sample was taken, and none was needed
+```
+
+It is **not** an RF measurement, a capture run, a receiver-performance test, or a
+prediction of future ARMED behaviour.
+
+**A capture was considered and refused.** It would have activated the whole Q1
+surface — the volatile buffer, `rtl_tcp`'s binding, the ring's invalidation
+rules, recovery's posture — and changed **no verdict input**, because the checker
+never sees a sample either way. A live observation does not become more
+meaningful because an SDR was consuming samples nobody looks at.
+
+The RTL2838's presence **may be declared**. The run must not open, tune, reset,
+claim, or otherwise communicate with it.
+
+### M.2 Position authority, recorded as a chain
+
+The positions are real, observed during the walk, and entered by the operator.
+`rf_receiver_state.POSITION_AUTHORITIES` already carries the conservative value
+this needs:
+
+> `OPERATOR_DECLARED` — **typed or placed by a person, not measured**
+
+That is the accepted authority, and it is not elevated because a phone displayed
+the number first. **A fix read off a screen and typed in is a typed fix.**
+
+The chain is recorded structurally, in bounded codes and never as prose:
+
+| | |
+| --- | --- |
+| position source | `PHONE_DISPLAYED_FIX` |
+| transfer | `HAND_TRANSCRIPTION` |
+| accepted authority | `OPERATOR_DECLARED` |
+
+Three fields rather than one, because collapsing them would lose the step where
+the authority actually degrades. The phone may hold a genuine GNSS fix; what
+reaches the artefact is what a person read and retyped, and the record should
+say where the measurement stopped.
+
+### M.3 Time authority, and the join that is refused
+
+Each accepted fix is stamped with the **observation process's** `monotonic_ns`,
+and the monotonic source is identified.
+
+**That is the host's ingestion time, not the phone receiver's fix time**, and the
+artefact says so. The two differ by however long the transcription took.
+
+**Phone wall-clock timestamps are not combined with host monotonic values, and
+no elapsed time is inferred across the two authorities.** This is §6's rule
+arriving in a new place: a duration computed across two clocks whose relationship
+nobody established is a number that looks like a duration and is not one.
+
+### M.4 A declared configuration must not imply it was exercised
+
+The manifest may carry intended values — sample rate, gain — **only when each is
+labelled**:
+
+```
+CONFIGURED_NOT_EXERCISED
+```
+
+*Named `CONFIGURED_NOT_EXERCISED` rather than `DECLARED_NOT_EXERCISED`: the
+latter is a negation pair with `UNDECLARED` and with
+`LEDGER_GENERATION_UNDECLARED`. The name is changed rather than argued for.*
+
+The signal-chain hash then identifies **the declared idle configuration**, not a
+measured chain state. The artefact and the observation record both carry
+`RF_MEASUREMENT_NOT_PERFORMED`.
+
+**The current schema cannot express this, so this amendment adds it.**
+`PROVENANCE_FIELDS` in `scythe_derived_evidence` is closed and carries no
+measurement status; the artefact provenance gains `measurement_status` and
+`instrument_state`, and the reader refuses an artefact whose provenance omits
+them. Adding a field to a closed set is a schema change, and it lands here
+rather than in the run.
+
+### M.5 Bounds
+
+```
+12 accepted fixes
+15 second target spacing
+240 monotonic seconds maximum
+```
+
+Both active; whichever arrives first ends the run normally.
+
+**Ordinary walking. No displacement violation is to be manufactured.** A live run
+that produces no `NUMERIC_BALANCE_EXCEEDED` is valid and complete: the purpose is
+to observe the apparatus honestly, not to bait an invariant until it fires for
+the record. A ceiling induced on purpose demonstrates that the author can arrange
+its conditions, which was never in doubt.
+
+### M.6 Location minimization, and a tension the schema cannot resolve
+
+Only what the checker genuinely requires is persisted.
+
+**That requirement includes the coordinates.** `with_step_measures` computes
+displacement from latitude and longitude, and §13k L.1 forbids the producer
+recording checker mathematics — so the artefact must carry the fixes and must
+not carry the displacement. **The sensitive datum is exactly the one the design
+requires.**
+
+This cannot be resolved in the schema. Storing displacement instead would
+duplicate checker mathematics; storing offsets from a discarded origin would
+make the signature a claim about positions that were not the real ones. So it is
+resolved by **decision at authorization time**, and the authorizing act must pin:
+
+- the exact output directory;
+- whether absolute coordinates are retained after the observation;
+- the artefact retention policy;
+- the observation record's destination.
+
+A retention choice made in the open is the honest form of a trade that has no
+technical answer.
+
+### M.7 Prohibitions
+
+The run must not open any SDR device; start or connect to `rtl_tcp`; allocate or
+persist an IQ buffer; open a socket; invoke the GraphOps adapter; construct
+ARMED; touch PID 315535; start a subprocess, thread, daemon or scheduled task;
+or **fall back to constructed evidence if a real fix is unavailable**.
+
+The last one is the one that would be tempting at the moment it mattered. A run
+short of fixes ends on its bounds with what it has, or does not run.
+
+### M.8 The sequence
+
+1. propose and accept this amendment, and **merge it before any live act**;
+2. verify the producer and observer can represent the idle and non-measurement
+   declarations;
+3. pin the paths and the retention choice;
+4. **separately authorize one bounded foreground run**;
+5. produce, read, and observe the artefact;
+6. verify `EVIDENCE_DERIVED_ARTEFACT`, `LIVE_OBSERVATION` and
+   `RF_MEASUREMENT_NOT_PERFORMED`.
+
+**Entry 7 drains only when those facts exist in the published record.** Slice 11
+remains unreachable until that completed record is reviewed.
+
+### M.9 The name check
+
+Seven candidates. Five clear; **two rejected rather than judged** —
+`DECLARED_NOT_EXERCISED` against `UNDECLARED`, and `OPERATOR_TRANSCRIPTION`
+against the `OPERATOR` promotion authority. No new position authority was minted:
+`OPERATOR_DECLARED` already said the needed thing, and a fourth value would have
+been a second name for it.
+
+---
+
 ## 14. What this does not do
 
 - It does **not** make the graph write idempotent. It prevents *this coordinator*
@@ -2917,6 +3088,30 @@ already written down. Introduced by Amendment B, noticed by Amendment C.*
     bytes-like object and a structurally compatible impostor reach behaviour
     they were previously refused from — the control that proves the annotation
     was never the boundary.
+
+**Amendment M (§13l)**
+
+37a. An artefact provenance omitting `measurement_status` or `instrument_state`
+    is refused by the reader; the fields are required, not optional.
+37b. The run's artefact and its observation record both carry
+    `RF_MEASUREMENT_NOT_PERFORMED` and `INSTRUMENT_CONFIGURED_IDLE`.
+37c. A manifest value labelled `CONFIGURED_NOT_EXERCISED` does not imply a
+    measurement: the signal-chain hash identifies the declared idle
+    configuration.
+37d. The accepted position authority is `OPERATOR_DECLARED`, and the record
+    carries the source and transfer separately — `PHONE_DISPLAYED_FIX` and
+    `HAND_TRANSCRIPTION`.
+37e. A phone-displayed fix is never recorded as `DEVICE_GNSS` or `DEVICE_FUSED`.
+37f. Each fix is stamped with the observation process's `monotonic_ns` and names
+    its monotonic source; no elapsed time is computed across a phone wall clock
+    and a host monotonic value — AST.
+37g. The run ends on 12 accepted fixes or 240 monotonic seconds, whichever is
+    first, and both endings are normal.
+37h. A run that produces no `NUMERIC_BALANCE_EXCEEDED` is valid and complete.
+37i. A missing fix ends the run on its bounds and never substitutes constructed
+    evidence.
+37j. AST — the run opens no SDR device, starts no `rtl_tcp`, allocates no IQ
+    buffer, opens no socket, starts no subprocess or thread, and names no PID.
 36c. Every provenance claim names the component that supplied it; a claim with
     no named source refuses publication.
 36d. The producer neither writes nor accepts `carries_samples` — AST and
@@ -3171,6 +3366,20 @@ produced it.
 53h. **Producer checks are defence in depth; the reader stays authoritative**
     (§13k L.4). A check the reader did not repeat would be a guarantee held by
     the party with the most reason to be wrong about it.
+53l. **A capture would have changed no verdict input** (§13l M.1). The checker
+    never sees a sample, so activating the Q1 surface would have bought a
+    signal chain that measured and an artefact identical in every field the
+    verdict depends on.
+53m. **A fix read off a screen and typed in is a typed fix** (§13l M.2). The
+    authority degrades at transcription, and the record names the step where it
+    did rather than reporting where the number was born.
+53n. **The sensitive datum is the one the design requires** (§13l M.6). The
+    artefact must carry the coordinates and must not carry the displacement, so
+    minimization is a retention decision made in the open rather than a schema
+    problem with a solution.
+53o. **An induced ceiling demonstrates nothing** (§13l M.5). A run producing no
+    violation is complete; baiting the invariant proves only that its conditions
+    can be arranged.
 53i. **Disabled by default carries the other reachability rules** (§13k L.5). A
     producer that does nothing until someone turns it on cannot be reached by an
     accident, a default, or a test that forgot where it was running.
