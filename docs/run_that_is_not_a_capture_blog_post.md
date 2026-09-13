@@ -267,8 +267,8 @@ watching anything. SCYTHE's answer is a negative control per property: a
 deliberate mutation that must make **exactly** that property's tests fail and no
 others.
 
-The last three slices added 36, on a set that now numbers 115. A representative
-sample:
+The last four slices added 53, on a set that numbers 132 at the time of
+writing. A representative sample:
 
 ```text
 status inferred from populated sample rate and gain    -> 4/4 broken
@@ -320,10 +320,13 @@ require. A proposal may be merged precisely to preserve it as a proposal
 
 ```text
 Promotion Execution Contract    3,596 lines, amendments A-M
-Test suite                      1,445 tests, OK (skipped=1)
-Negative controls               115, all discriminating
-Slices landed                   3, 4, 6, 6b, 7, 8, 9, 10a-10f
+Test suite                      1,493 tests, OK (skipped=1)
+Negative controls               132, all discriminating
+Slices landed                   3, 4, 6, 6b, 7, 8, 9, 10a-10g
 ```
+
+*Counts as of merge `f6bdf69`. They move every slice; the contract line count
+and the vocabulary figures move more slowly.*
 
 The directories for the bounded run are pinned, resolved against the host, and
 created at mode `0700`:
@@ -368,13 +371,31 @@ fix**, and it is not elevated to device-attested GNSS merely because a phone
 displayed it.
 
 So the run waits. Not on a missing feature, and not on a device — on somebody
-walking. The code will not interpolate the gap, will not accept a batch of
-coordinates entered at once (that would stamp them nearly simultaneously and
-falsely represent the cadence), and will not substitute constructed evidence if
-a fix is unavailable. A run short of fixes ends on its bounds with what it has,
-or does not run.
+walking.
 
-That last prohibition is the one that would be tempting at the moment it
+It is worth being exact about what the code enforces here, because the
+temptation is to describe the intent and let a reader hear a guarantee.
+
+**The cadence is attested, not enforced.** The runner requires an interactive
+terminal, which rejects a pipe or a redirected file. It cannot prove a person
+was not pasting a buffer they prepared earlier: a paste into a live terminal
+arrives through the same descriptor a typed line does. So the fifteen-second
+spacing is an operator's attestation and a target, never a refusal — M.5
+declares only the count and the duration as active bounds. What the artefact
+carries is the *actual* monotonic interval between accepted fixes, which means a
+reviewer can see a cadence that does not look like walking even though nothing
+refused it at the time.
+
+**A short run publishes nothing.** The runner will not interpolate a missing
+fix, will not repeat one to make the count, and will not substitute constructed
+evidence. What it does with an incomplete set is refuse: on the 240-second
+deadline it raises `ENTRY_DEADLINE_REACHED` and no artefact is written at all.
+An earlier draft of this post said such a run "ends on its bounds with what it
+has" — that describes the amendment's intent for a run and not the code's
+behaviour, which has no notion of a partial artefact. Eleven fixes produce
+nothing.
+
+The no-fallback prohibition is the one that would be tempting at the moment it
 mattered, which is exactly why it is written down.
 
 ---
