@@ -23,8 +23,8 @@ Amendment I:            §13h what live SHADOW can observe — ACCEPTED
 Amendment J:            §13i derived evidence — ACCEPTED 2026-09-12, after
                         review qualified J.3 and set exact bounds
 Amendment K:            §13j record-rate bound — ACCEPTED 2026-09-12
-Amendment L:            §13k the producer — PROPOSED 2026-09-12,
-                        corrected after review
+Amendment L:            §13k the producer — ACCEPTED 2026-09-12, after
+                        review corrected L.1
 Authority:              NORMATIVE
 Constrains:             Step 4 of the promotion sequence (execution adapter)
 Depends on:             SCYTHE_VERDICT_VOCABULARIES.md  (ACCEPTED — §5 declares
@@ -2387,11 +2387,12 @@ clear; none required a judgement.
 
 ## 13k. Amendment L — the producer, and how far it is kept from a capture
 
-*Proposed 2026-09-12; the proposal merged before acceptance, as Amendment H's
-did; the premature status flip was prepared; review then found L.1 overclaiming
-what a Python annotation guarantees; the corrected text is what is accepted. The
-order is recorded rather than tidied, because the correction is the reason the
-flip should not have been taken at face value.*
+*Proposed 2026-09-12 and accepted 2026-09-12, in this order and recorded rather
+than tidied: the proposal merged before acceptance, as Amendment H's did; a
+status flip was prepared; review then found L.1 overclaiming what a Python
+annotation guarantees; the corrected text is what is accepted. The correction is
+the reason the flip should not have been taken at face value, which is why the
+order is kept.*
 
 *Defines the separately authorized producer §13i J.4 deferred, so
 `PENDING_AMENDMENTS.md` entry 7 can eventually drain. Touches §13i, §13j and
