@@ -108,6 +108,7 @@ from typing import Any, Dict, Optional
 
 import numpy as np
 
+import rf_signal_chain_identity as _identity
 from rf_channelizer import (ChannelRequest, ChannelizedProduct, channelize,
                             channelizer_status)
 from rf_detector_contract import contract_status
@@ -253,18 +254,13 @@ UNWIRED_NOTE = (
 )
 
 
-SIGNAL_CHAIN_SCHEMA = "scythe.rf-signal-chain.v2"
-SIGNAL_CHAIN_REVISION = "v3"
-# v1 was a positional hash over sensor, antenna, sample type and rate, with no
-# feedline. v2 added the feedline. v3 adds the telescopic mast extension, which
-# was the last instrument-defining field the chain identity could not see: the
-# same mast at 730 mm and at 165 mm is a quarter wave at 102.7 MHz and at
-# 454.2 MHz, and until now both produced the same chain hash. No revision is
-# rescalable into another and nothing attempts to reinterpret one.
-PRIOR_SIGNAL_CHAIN_REVISION_COMPARABLE = False
-# Vendor figure for the SMArt v5, carried as a declaration rather than a
-# measurement: nothing here has disciplined this oscillator against a reference.
-CLOCK_QUALITY = "MODEL_DECLARED_0_5_PPM_TCXO"
+# Re-exported from the identity module, which owns them (§13n O.2). Named here
+# rather than redefined: a second copy of a schema string is a second answer.
+SIGNAL_CHAIN_SCHEMA = _identity.SIGNAL_CHAIN_SCHEMA
+SIGNAL_CHAIN_REVISION = _identity.SIGNAL_CHAIN_REVISION
+PRIOR_SIGNAL_CHAIN_REVISION_COMPARABLE = \
+    _identity.PRIOR_SIGNAL_CHAIN_REVISION_COMPARABLE
+CLOCK_QUALITY = _identity.CLOCK_QUALITY
 
 
 # --- clock continuity ------------------------------------------------------
@@ -460,67 +456,55 @@ def _feedline_length_m(identifier: str) -> Optional[float]:
     return None if entry is None else entry.get("length_m")
 
 
+def _resolved_chain_inputs(antenna: Optional[str], feedline: Optional[str],
+                           extension_mm: Any) -> Dict[str, Any]:
+    """This module's resolvers, which stay here because the inputs do.
+
+    `SDRPP_ANTENNA_ID`, `SDRPP_FEEDLINE_ID`, `SDRPP_ANTENNA_EXTENSION_MM` and
+    the `graphops_rf_antenna` feedline catalogue are read **here** and nowhere
+    else (§13n O.3). The identity module takes what this resolves and looks
+    nothing up.
+    """
+    antenna_identifier = antenna if antenna is not None else antenna_id()
+    feedline_identifier = feedline if feedline is not None else feedline_id()
+    extension = antenna_extension_mm() if extension_mm is None else extension_mm
+    declared_feedline = feedline_identifier not in ("UNDECLARED", "undeclared")
+    return {
+        "antenna": antenna_identifier,
+        "feedline": feedline_identifier,
+        "extension_mm": extension,
+        "feedline_length_m": (_feedline_length_m(feedline_identifier)
+                              if declared_feedline else None),
+    }
+
+
 def signal_chain_manifest(*, sensor_id: str, sample_type: str, sample_rate_hz: float,
                           antenna: Optional[str] = None,
                           feedline: Optional[str] = None,
                           extension_mm: Any = None,
                           gain_db: Optional[float] = None) -> Dict[str, Any]:
-    """Everything the physical and decode path is made of, declared or not.
+    """Resolve what this module owns, then delegate (§13n O.3).
 
-    A manifest rather than an argument list: the chain grew a feedline the moment
-    someone asked what the antenna was plugged into, and it will grow a gain and a
-    direct-sampling state when those are wired.  An expanding positional hash
-    input makes every such addition a silent rewrite of what a hash meant, whereas
-    a manifest is retained beside its hash and can simply be read.
+    The public signature is unchanged and every digest is preserved
+    byte-for-byte. What moved is the construction itself, to
+    `rf_signal_chain_identity`, because a caller wanting only the identity had
+    to import this module to reach it -- and importing this module starts the
+    ring owner, `threading`, NumPy and the channelizer.
 
-    Every absence is named.  ``UNDECLARED`` is a metadata omission and says so; it
-    is never ``UNKNOWN``, which would suggest the system looked and was puzzled.
+    **There is no second implementation here**, and §13n O.5 requires a test to
+    establish that mechanically: two hashing paths are two answers waiting to
+    disagree, and a digest is exactly the kind of thing that disagrees
+    silently.
     """
-    antenna_identifier = antenna if antenna is not None else antenna_id()
-    feedline_identifier = feedline if feedline is not None else feedline_id()
-    declared_feedline = feedline_identifier not in ("UNDECLARED", "undeclared")
-    extension = antenna_extension_mm() if extension_mm is None else extension_mm
-    declared_extension = isinstance(extension, (int, float))
-    return {
-        "schema": SIGNAL_CHAIN_SCHEMA,
-        "sensor_id": sensor_id,
-        "sample_type": sample_type,
-        "sample_rate_hz": float(sample_rate_hz),
-        "antenna": {
-            "id": antenna_identifier if antenna_identifier != "UNDECLARED" else None,
-            "authority": ("OPERATOR_DECLARED" if antenna_identifier != "UNDECLARED"
-                          else "UNDECLARED"),
-            # A telescopic mast is not one instrument. Its extension sets which
-            # frequencies it receives efficiently, so it belongs in the identity
-            # of the chain rather than only in the declaration receipt.
-            "extension_mm": float(extension) if declared_extension else None,
-            "extension_authority": ("OPERATOR_DECLARED" if declared_extension
-                                    else str(extension)),
-        },
-        "feedline": {
-            "id": feedline_identifier if declared_feedline else None,
-            "length_m": _feedline_length_m(feedline_identifier) if declared_feedline else None,
-            "authority": "OPERATOR_DECLARED" if declared_feedline else "UNDECLARED",
-        },
-        # Declared only once something has actually set it. An automatic-gain
-        # receiver has a gain, but not one this process knows, and reporting a
-        # number for it would be inventing the instrument's own state.
-        "gain": ({"value_db": float(gain_db), "authority": "OPERATOR_DECLARED"}
-                 if gain_db is not None else
-                 {"value_db": None, "authority": "UNDECLARED"}),
-        "direct_sampling": "UNDECLARED",
-        # Not a control and not a measurement: this receiver has no bias tee, so
-        # there is nothing to switch and nothing to sense.
-        "bias_tee": "NOT_FITTED",
-        "clock_quality": CLOCK_QUALITY,
-    }
+    resolved = _resolved_chain_inputs(antenna, feedline, extension_mm)
+    return _identity.signal_chain_manifest(
+        sensor_id=sensor_id, sample_type=sample_type,
+        sample_rate_hz=sample_rate_hz, gain_db=gain_db, **resolved)
 
 
 def canonical_signal_chain_bytes(manifest: Dict[str, Any]) -> bytes:
-    """The bytes that are hashed. Sorted keys and no incidental whitespace, so a
-    reordered or reformatted manifest is the same chain and hashes the same."""
-    return json.dumps(manifest, sort_keys=True, separators=(",", ":"),
-                      ensure_ascii=False).encode("utf-8")
+    """The bytes that are hashed. Delegated, for O.5's reason."""
+    return _identity.canonical_signal_chain_bytes(manifest)
 
 
 def signal_chain_hash(*, sensor_id: str, sample_type: str, sample_rate_hz: float,
@@ -542,13 +526,10 @@ def signal_chain_hash(*, sensor_id: str, sample_type: str, sample_rate_hz: float
     product.  Earlier revisions are not comparable with these and are not
     reinterpreted: ``prior_revision_comparable`` is false.
     """
-    manifest = signal_chain_manifest(sensor_id=sensor_id, sample_type=sample_type,
-                                     sample_rate_hz=sample_rate_hz, antenna=antenna,
-                                     feedline=feedline, extension_mm=extension_mm,
-                                     gain_db=gain_db)
-    digest = hashlib.blake2s(canonical_signal_chain_bytes(manifest),
-                             digest_size=16).hexdigest()
-    return f"blake2s:{digest}"
+    resolved = _resolved_chain_inputs(antenna, feedline, extension_mm)
+    return _identity.signal_chain_hash(
+        sensor_id=sensor_id, sample_type=sample_type,
+        sample_rate_hz=sample_rate_hz, gain_db=gain_db, **resolved)
 
 
 class IQRetentionOwner:

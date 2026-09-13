@@ -267,6 +267,13 @@ ONE_CONCEPT = "ONE_CONCEPT"
 TWO_CONCEPTS = "TWO_CONCEPTS"
 
 DUPLICATE_DECLARATIONS = {
+    # The named absence, which the signal chain writes into several fields and
+    # `rf_iq_retention` also happens to declare as its direct-sampling state.
+    # One concept in both places: nothing looked, and the record says so.
+    "UNDECLARED": (ONE_CONCEPT,
+                   "the named metadata absence: a field nobody declared, and "
+                   "the direct-sampling state nobody set. Never UNKNOWN, which "
+                   "would claim the system looked and was puzzled"),
     # One concept, declared where it is produced and where it is recorded.
     "AUTHORIZATION_EXPIRED": (ONE_CONCEPT, "a recovery outcome, also declared as the audit event that records it"),
     "AUTHORIZATION_INVALIDATED": (ONE_CONCEPT, "a recovery outcome, also declared as the audit event that records it"),
