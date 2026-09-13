@@ -116,6 +116,12 @@ record carries `run_class: APPARATUS_CERTIFICATION`, a caller may demand
 `require_live` and receive `DERIVED_EVIDENCE_UNAVAILABLE` instead of a
 substitution, and a test asserts no derived-evidence source exists here.
 
+**Amendment L (§13k) defines the producer, proposed 2026-09-12**, and its L.6
+sequence is what this entry now waits on: the amendment, then slice 10c with no
+live execution, then a separately authorized run, then one real artefact. The
+entry drains at the artefact and at nothing earlier. A producer that has never
+been run has produced nothing.
+
 **Amendment J (§13i) defines the interface, proposed 2026-09-12.** It settles
 the artefact class, makes `carries_samples` a finding rather than a claim, and
 keeps the interface read-only so *no acquisition* stays untouched. It does not

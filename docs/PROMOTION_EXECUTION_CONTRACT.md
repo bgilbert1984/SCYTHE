@@ -23,6 +23,7 @@ Amendment I:            §13h what live SHADOW can observe — ACCEPTED
 Amendment J:            §13i derived evidence — ACCEPTED 2026-09-12, after
                         review qualified J.3 and set exact bounds
 Amendment K:            §13j record-rate bound — ACCEPTED 2026-09-12
+Amendment L:            §13k the producer — PROPOSED 2026-09-12
 Authority:              NORMATIVE
 Constrains:             Step 4 of the promotion sequence (execution adapter)
 Depends on:             SCYTHE_VERDICT_VOCABULARIES.md  (ACCEPTED — §5 declares
@@ -2383,6 +2384,148 @@ clear; none required a judgement.
 
 ---
 
+## 13k. Amendment L — the producer, and how far it is kept from a capture
+
+*Proposed 2026-09-12. **Not yet accepted.** Defines the separately authorized
+producer §13i J.4 deferred, so `PENDING_AMENDMENTS.md` entry 7 can eventually
+drain. Touches §13i, §13j and §17.*
+
+**A durable writer aimed near the capture path must not appear as one
+conversational shrug.** That is why this is a contract before it is a slice, and
+why the slice is before the run. Three separate acts, each refusable on its own.
+
+### L.1 The producer consumes typed checker inputs, and nothing else
+
+The producer receives **exactly what the existing checkers receive**:
+
+- walk signatures, as passed to `check_walk_step`;
+- sparse-energy coordinates, as passed to `check_decomposition`.
+
+It must **never** receive an IQ buffer, a byte stream, a sample array, a capture
+handle, an SDR object, a socket, or a generic mapping.
+
+**Family-specific entrypoints, never `write_record(dict)`.** A generic mapping
+parameter is a hole shaped like anything, and the point of this boundary is that
+the parameter's *type* refuses what the schema would only catch afterwards.
+`record_walk_step(before, after)` can be handed a signature or nothing;
+`write_record(payload)` can be handed a buffer, and then the only thing standing
+between that buffer and a file is a check somebody remembered to write.
+
+The producer **records checker inputs and the resulting verdict identity**. It
+does not duplicate or reinterpret checker mathematics: a second implementation
+of a rule is a second rule that can disagree (§13i J.3's reasoning, in the other
+direction).
+
+### L.2 Provenance is attested upstream, never verified here
+
+Each artefact declares: producer schema and version, transition family, device
+identity, signal-chain hash, configuration epoch, monotonic-source identity,
+contract and configuration identity, a bounded run identity, and the exact
+content digest.
+
+**These are upstream attestations, not facts the producer established.** It
+cannot verify a device identity or a signal-chain hash; it can only record what
+a component told it. So the artefact records **which component supplied each
+claim** — a claim whose source is unnamed is a claim nobody can later question,
+and an artefact full of those is a provenance record that proves only that
+someone typed something.
+
+This is §13g H.7's rule reaching a third party: some properties can only be
+declared by whoever has them, and a recorder that presented them as its own
+findings would be manufacturing authority it does not hold.
+
+**`carries_samples` stays reader-derived (§13i J.3). The producer never writes
+that boolean and never accepts it as input.** The one flag the reader must
+establish for itself is the one the writer has no way to touch.
+
+### L.3 Publication, by the accepted protocol
+
+§13e F.6's five steps, unchanged: exclusive temporary sibling, complete bounded
+write, file `fsync`, atomic rename to a deterministic final name, directory
+`fsync`.
+
+**No overwrite, no append, no mutable *current artefact* pointer**, and **no
+cleanup of foreign temporaries** — a temporary this run did not create may be
+another run's evidence, which is §13e F.6's rule about leftovers arriving where
+it applies a second time.
+
+Repeating a run identity **rediscovers** the existing artefact; a digest conflict
+under one identity is `REQUEST_DIGEST_CONFLICT` and refuses. **No ownership lock
+is required**: artefacts are immutable and request-addressed, so there is no
+second writer to exclude from one name.
+
+### L.4 Fail-closed, and the reader stays authoritative
+
+Before publication the producer applies the **same structural exclusions the
+reader applies** (§13i J.5, §13j K.2): closed coordinate names, scalar-only
+values, string and numeric-precision bounds, record, frame and total-size
+bounds, the recursive sample-bearing scan, and the per-series cadence floor.
+
+**These are defence in depth and nothing more. The reader repeats every one and
+remains authoritative for admission.** A producer check that the reader did not
+repeat would be a guarantee held by the party with the most reason to be wrong
+about it.
+
+Any forbidden value **aborts publication**. **No truncated artefact receives a
+final name** — that is what the temporary sibling is for. A failed temporary is
+preserved as bounded diagnostic evidence and is **never readable as evidence**:
+it has no final name, and the reader only reads final names.
+
+### L.5 Reachability
+
+The producer implementation is:
+
+- **disabled by default**, and refusing with `PRODUCER_NOT_ENABLED`;
+- foreground, in-process, explicitly invoked;
+- bounded by **1,000 records** and **900 monotonic seconds**;
+- incapable of initiating capture;
+- incapable of starting `rtl_tcp`;
+- incapable of invoking the adapter;
+- unscheduled and non-daemonized.
+
+**It must not attach to, signal, inspect through `/proc`, restart, or otherwise
+touch PID 315535.**
+
+Disabled-by-default is the one that carries the others. Everything above is a
+property of code that has to be reachable to matter, and a producer that does
+nothing until someone turns it on cannot be reached by an accident, a default, or
+a test that forgot where it was running.
+
+### L.6 The required sequence
+
+Each step is separately refusable, and the ordering is the point:
+
+1. accept and merge this amendment;
+2. implement the producer as **slice 10c**, with **no live execution**;
+3. validate it entirely against controlled typed inputs and negative controls;
+4. **separately authorize one bounded foreground production run**;
+5. produce one real derived artefact;
+6. read it through the merged 10b reader;
+7. run the bounded observation and publish its record;
+8. verify `EVIDENCE_DERIVED_ARTEFACT`, `LIVE_OBSERVATION`, and a lineage
+   correctly reported as quiescent or not — and **unattributed either way**
+   (§13h I.4a).
+
+Only then is stage five assessable.
+
+**Entry 7 drains when a real conforming artefact exists** — not when this
+amendment lands, and not when slice 10c does. A producer that has never been run
+has produced nothing, and the entry has always been about evidence rather than
+about the means to make it.
+
+**Slice 11 remains unreachable throughout.** No authorization for ARMED or any
+GraphOps mutation can rest on constructed evidence, and none of the work above
+changes that until step 8 answers.
+
+### L.7 The name check
+
+Ten candidates against the discovered universe. Eight clear; **two rejected
+rather than judged**: `PRODUCER_DISABLED` against `DISABLED`, which is one of
+the three postures shared by recovery and promotion, and `ATTESTED_UPSTREAM`
+against `UNATTESTED` and the two filesystem attestation codes.
+
+---
+
 ## 14. What this does not do
 
 - It does **not** make the graph write idempotent. It prevents *this coordinator*
@@ -2712,6 +2855,30 @@ already written down. Introduced by Amendment B, noticed by Amendment C.*
     the interval path.
 35e. Lowering or removing the floor makes the sub-millisecond record-stream test
     **stop refusing**, which is the control that replaces the unfalsifiable one.
+
+**Amendment L (§13k)**
+
+36a. The producer's entrypoints are family-specific: AST — no public function
+    takes a bare mapping, and none accepts bytes, an array or a handle.
+36b. A capture handle, socket, SDR object or byte stream cannot be passed:
+    the type refuses before any check runs.
+36c. Every provenance claim names the component that supplied it; a claim with
+    no named source refuses publication.
+36d. The producer neither writes nor accepts `carries_samples` — AST and
+    signature.
+36e. Publication follows §13e F.6's five steps in order, through the same
+    syscall seam.
+36f. A forbidden value aborts publication and **no file receives the final
+    name**; the temporary is preserved and is not readable as evidence.
+36g. A foreign temporary is never removed by a later run.
+36h. Repeating a run identity rediscovers the existing artefact; a differing
+    digest under one identity is `REQUEST_DIGEST_CONFLICT`.
+36i. The producer is disabled by default and refuses with
+    `PRODUCER_NOT_ENABLED`.
+36j. AST — the producer imports no socket, no subprocess, no threading, no
+    bridge, no ring, no adapter, and names no PID.
+36k. Every structural exclusion the producer applies is also applied by the
+    reader, and the reader's refusal is what admission depends on.
 34g. The reader exposes no write path: AST — no write-mode `open`, no `os.write`,
     no rename, no unlink.
 34h. An artefact beyond `MAX_ARTEFACT_BYTES` or `MAX_ARTEFACT_RECORDS` is
@@ -2935,6 +3102,17 @@ produced it.
     establishes that the artefact holds no high-rate record stream under its
     declared timeline, and a producer can space scalars a millisecond apart or
     falsify timestamps outright.
+53f. **Family-specific entrypoints, never a generic mapping** (§13k L.1). A
+    mapping parameter is a hole shaped like anything; a typed one refuses a
+    buffer before any check runs.
+53g. **Provenance is attested upstream and names its source** (§13k L.2). A
+    claim whose source is unnamed is one nobody can later question.
+53h. **Producer checks are defence in depth; the reader stays authoritative**
+    (§13k L.4). A check the reader did not repeat would be a guarantee held by
+    the party with the most reason to be wrong about it.
+53i. **Disabled by default carries the other reachability rules** (§13k L.5). A
+    producer that does nothing until someone turns it on cannot be reached by an
+    accident, a default, or a test that forgot where it was running.
 53e. **The rate rule is per series, never global** (§13j K.3). Two families may
     legitimately observe one moment, and a global floor would refuse an honest
     artefact — the false positive that teaches an author to widen a bound until
