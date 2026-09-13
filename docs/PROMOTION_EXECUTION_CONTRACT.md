@@ -25,7 +25,7 @@ Amendment J:            §13i derived evidence — ACCEPTED 2026-09-12, after
 Amendment K:            §13j record-rate bound — ACCEPTED 2026-09-12
 Amendment L:            §13k the producer — ACCEPTED 2026-09-12, after
                         review corrected L.1
-Amendment M:            §13l the run that is not a capture — PROPOSED
+Amendment M:            §13l the run that is not a capture — ACCEPTED
                         2026-09-12
 Authority:              NORMATIVE
 Constrains:             Step 4 of the promotion sequence (execution adapter)
@@ -2577,9 +2577,15 @@ against `UNATTESTED` and the two filesystem attestation codes.
 
 ## 13l. Amendment M — the run that is not a capture
 
-*Proposed 2026-09-12. **Not yet accepted.** Scopes the single bounded act §13k
-L.6 step 5 requires, so `PENDING_AMENDMENTS.md` entry 7 can drain. Touches §13i,
-§13k and §17.*
+*Proposed 2026-09-12 and accepted 2026-09-12, the acceptance following the
+proposal's merge rather than preceding it. **The third amendment to land in that
+order** (H, L, M), which is now a pattern rather than three accidents: a merge
+instruction on a proposed amendment is an acceptance of its substance, and the
+document has to say so before any act. Recorded here so the next one is caught
+at the instruction rather than after it. Nothing in M changed between the two.*
+
+*Scopes the single bounded act §13k L.6 step 5 requires, so
+`PENDING_AMENDMENTS.md` entry 7 can drain. Touches §13i, §13k and §17.*
 
 ### M.1 What this run is, and the finding that made it small
 
