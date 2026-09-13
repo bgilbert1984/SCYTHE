@@ -30,7 +30,7 @@ Amendment M:            §13l the run that is not a capture — ACCEPTED
 Amendment N:            §13m the act, and the identities it must not invent —
                         ACCEPTED 2026-09-13, after review corrected N.5 twice
 Amendment O:            §13n the identity, extracted from the instrument —
-                        PROPOSED 2026-09-13
+                        ACCEPTED 2026-09-13
 Authority:              NORMATIVE
 Constrains:             Step 4 of the promotion sequence (execution adapter)
 Depends on:             SCYTHE_VERDICT_VOCABULARIES.md  (ACCEPTED — §5 declares
@@ -3014,9 +3014,8 @@ last of these and was **rejected rather than judged**: it collides with
 
 ## 13n. Amendment O — the identity, extracted from the instrument
 
-*Proposed 2026-09-13. **Not yet accepted.** No implementation may land against
-it until an explicit acceptance decision and an acceptance commit exist
-(§13l).*
+*Proposed 2026-09-13 and accepted 2026-09-13, with the acceptance commit
+before the merge. The second amendment to manage that order, after N.*
 
 *Amendment N required the act compute its chain identity through
 `rf_iq_retention.signal_chain_hash`. Importing that module executes its graph,
