@@ -25,7 +25,7 @@ Amendment J:            §13i derived evidence — ACCEPTED 2026-09-12, after
 Amendment K:            §13j record-rate bound — ACCEPTED 2026-09-12
 Amendment L:            §13k the producer — ACCEPTED 2026-09-12, after
                         review corrected L.1
-Amendment M:            §13l the run that is not a capture — PROPOSED
+Amendment M:            §13l the run that is not a capture — ACCEPTED
                         2026-09-12
 Authority:              NORMATIVE
 Constrains:             Step 4 of the promotion sequence (execution adapter)
@@ -2577,9 +2577,27 @@ against `UNATTESTED` and the two filesystem attestation codes.
 
 ## 13l. Amendment M — the run that is not a capture
 
-*Proposed 2026-09-12. **Not yet accepted.** Scopes the single bounded act §13k
-L.6 step 5 requires, so `PENDING_AMENDMENTS.md` entry 7 can drain. Touches §13i,
-§13k and §17.*
+*History, in the order it happened: M was proposed; the proposal was merged
+while still self-described as `PROPOSED`; the inconsistency was detected on
+`main`; M was then explicitly accepted on its substance; the accepted status was
+recorded by a forward commit. Nothing in M changed across those five steps.*
+
+*The **third** amendment to take that route (H, L, M). Three instances of one
+process failure, and the rule they motivate is a gate, not an inference:*
+
+> **A proposed amendment requires an explicit acceptance decision and an
+> acceptance commit before implementation or execution. Merge approval alone
+> does not supply acceptance unless it expressly says that the amendment's
+> substance is accepted. A proposed amendment should ordinarily receive its
+> acceptance commit before merge.**
+
+*Merging and accepting are separate decisions. A proposal may be merged
+precisely to preserve it as a proposal without authorizing what it describes, so
+reading a merge instruction as acceptance would remove a decision the contract
+exists to require.*
+
+*Scopes the single bounded act §13k L.6 step 5 requires, so
+`PENDING_AMENDMENTS.md` entry 7 can drain. Touches §13i, §13k and §17.*
 
 ### M.1 What this run is, and the finding that made it small
 
@@ -3380,6 +3398,12 @@ produced it.
 53o. **An induced ceiling demonstrates nothing** (§13l M.5). A run producing no
     violation is complete; baiting the invariant proves only that its conditions
     can be arranged.
+53p. **Merge is not acceptance** (§13l preamble). Three amendments (H, L, M)
+    merged while self-described as `PROPOSED`, and each was repaired forward. The
+    correction is an explicit gate — an acceptance decision and an acceptance
+    commit, ordinarily before merge — rather than a rule inferring acceptance
+    from a merge instruction, which would delete the separate decision instead of
+    enforcing it.
 53i. **Disabled by default carries the other reachability rules** (§13k L.5). A
     producer that does nothing until someone turns it on cannot be reached by an
     accident, a default, or a test that forgot where it was running.
