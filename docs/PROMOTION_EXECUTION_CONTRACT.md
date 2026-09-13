@@ -29,6 +29,8 @@ Amendment M:            §13l the run that is not a capture — ACCEPTED
                         2026-09-12
 Amendment N:            §13m the act, and the identities it must not invent —
                         ACCEPTED 2026-09-13, after review corrected N.5 twice
+Amendment O:            §13n the identity, extracted from the instrument —
+                        ACCEPTED 2026-09-13
 Authority:              NORMATIVE
 Constrains:             Step 4 of the promotion sequence (execution adapter)
 Depends on:             SCYTHE_VERDICT_VOCABULARIES.md  (ACCEPTED — §5 declares
@@ -3010,6 +3012,96 @@ last of these and was **rejected rather than judged**: it collides with
 
 ---
 
+## 13n. Amendment O — the identity, extracted from the instrument
+
+*Proposed 2026-09-13 and accepted 2026-09-13, with the acceptance commit
+before the merge. The second amendment to manage that order, after N.*
+
+*Amendment N required the act compute its chain identity through
+`rf_iq_retention.signal_chain_hash`. Importing that module executes its graph,
+and the graph holds the IQ ring owner: `threading`, NumPy, the channelizer and
+the antenna catalogue all arrive with the hash. The act's forbidden-capability
+report is therefore correct to refuse, and §13l M.7 forbids what it names.
+Touches §13m N.5, §15, §16 and §17.*
+
+> **A pure function reached through an impure module is not a pure function.
+> It is the whole module, with a convenient name on one of its exports.**
+
+### O.1 What was rejected, and why
+
+Two repairs were available and both dissolve something:
+
+**Narrowing the closure** — counting only the names a module actually uses
+rather than what it imports — contradicts N.6, which was written after
+`sys.modules` proved to measure the room. It would also be false: `import
+rf_iq_retention` really does start `threading`'s machinery in this process, so
+a check that stopped reporting it would have stopped describing what happens.
+
+**Allowlisting `threading`** dissolves the boundary at the first moment it costs
+anything. A forbidden list amended whenever it refuses is a list of things
+nobody happened to need.
+
+*The finding is not a false positive. It is the check reporting a real
+dependency that the design did not intend to acquire, which is what it was
+built to do.*
+
+### O.2 A dependency-light module owns the identity
+
+A new module owns **signal-chain manifest construction, canonical
+serialization, and hashing**. It accepts a **complete explicit declaration**
+and resolves nothing.
+
+It must read no environment variable, no catalogue, no device, no socket, and
+no mutable runtime state, and its static imports must exclude `threading`,
+`rf_iq_ring`, `graphops_rf_antenna`, NumPy, and every acquisition module.
+
+*Everything the old manifest reached for when a value was absent is now a
+parameter. The feedline length in particular came from the antenna catalogue,
+and a length the caller supplies is a length the caller can be held to.*
+
+### O.3 `rf_iq_retention` resolves, and delegates
+
+`rf_iq_retention` keeps its public API unchanged and keeps its resolvers:
+`SDRPP_ANTENNA_ID`, `SDRPP_FEEDLINE_ID`, `SDRPP_ANTENNA_EXTENSION_MM` and the
+`graphops_rf_antenna` feedline catalogue are still read **there**. Having
+resolved them it calls the pure module, which is the **only** implementation.
+
+**Every existing digest is preserved byte-for-byte.** This is a move, not a
+revision: `SIGNAL_CHAIN_REVISION` does not advance, and an artefact hashed
+before this amendment hashes the same after it.
+
+### O.4 The act imports the pure module directly
+
+`scythe_position_act` imports the pure module and not `rf_iq_retention`, so the
+act's closure no longer reaches the acquisition graph. N.5's table is amended:
+the named helper for `signal_chain_hash` becomes the pure module's.
+
+**The three `SDRPP_*` variables keep affecting the retention-side resolver and
+cannot affect the act**, whose declaration is complete and passes every value.
+
+### O.5 One implementation, structurally
+
+There must be no second hashing path. `rf_iq_retention` must not retain its own
+copy of the manifest construction, the canonical bytes, or the digest, and a
+test must establish that mechanically rather than by inspection — two
+implementations are two answers waiting to disagree, and a digest is exactly
+the kind of thing that disagrees silently.
+
+### O.6 Where this amendment's declarations live
+
+The acceptance tests are **§15's 37al–37at** and the decisions are **§16's
+53ai–53am**, added by this amendment rather than restated here (§13m N.7's
+reason: a second copy is a second answer that can disagree).
+
+### O.7 What this does not claim
+
+The act's capability report still says what §13m N.6 says it says: static
+first-party import reachability plus detection of N.6a's named construct set.
+Extracting the identity removes a real dependency; it does not turn that report
+into a proof of runtime capability.
+
+---
+
 ## 14. What this does not do
 
 - It does **not** make the graph write idempotent. It prevents *this coordinator*
@@ -3478,6 +3570,34 @@ authorized and has not been.*
     changing any one changes the digest. Relocating the output directories
     leaves the identity unchanged.
 
+**Amendment O (§13n)**
+
+37al. Both verified digests are unchanged byte-for-byte across the extraction:
+    `signal_chain_hash` remains `blake2s:6809e50b8cb9a4a50b1ce4afcdbfa232` and
+    `receiver_state_chain_hash` remains
+    `blake2s:e0fcdd0101c4f04257a1c4df23012975` for the act's declaration.
+37am. Every existing `rf_iq_retention.signal_chain_hash` fixture produces the
+    value it produced before, and `SIGNAL_CHAIN_REVISION` does not advance.
+37an. The pure module's static imports exclude `threading`, `rf_iq_ring`,
+    `graphops_rf_antenna`, NumPy and every acquisition module — AST over its
+    own source and over its transitive first-party closure.
+37ao. The pure module reads no environment variable, no catalogue and no
+    mutable runtime state: AST for `environ`, `getenv`, `open`, and for any
+    import of the catalogue, plus a behavioural test that setting the three
+    `SDRPP_*` variables to arbitrary values changes nothing it returns.
+37ap. There is exactly one hashing implementation. `rf_iq_retention` retains no
+    copy of the manifest construction, the canonical bytes or the digest, and
+    delegates — established mechanically, not by inspection.
+37aq. The three `SDRPP_*` variables still affect `rf_iq_retention`'s resolver,
+    proved by a test that changes one and observes a different digest **on the
+    retention side**, while the act's identity is unchanged (§13m N.5b).
+37ar. `scythe_position_act` imports the pure module and not `rf_iq_retention`.
+37as. **The real preflight passes**, on the pinned paths, with
+    `forbidden_modules_reachable` empty.
+37at. Negative controls: removing the delegation so `rf_iq_retention` hashes
+    independently, and restoring the act's old import of `rf_iq_retention`,
+    each make their own tests fail — 37ap and 37as respectively.
+
 37r. Negative controls — inference from populated settings, inference from
     device identity, the value sets opened, the fields defaulted, the pairing
     dropped, the label unchecked, the scalar bound removed, an undeclared name
@@ -3780,6 +3900,24 @@ produced it.
 53x. **A stored convenience is a second answer** (37y). A serialized boolean can
     disagree with the enum beside it, and a reader has no way to tell which one
     the writer meant. Derived, or absent.
+53ai. **A pure function reached through an impure module is not a pure
+    function** (§13n). `import rf_iq_retention` starts `threading`'s machinery
+    in this process whatever the caller wanted from it, so the capability
+    report was describing what happens rather than crying wolf.
+53aj. **A forbidden list amended when it refuses is a list of things nobody
+    needed** (§13n O.1). Allowlisting `threading` at the first moment the
+    boundary cost something would have dissolved it exactly then.
+53ak. **Narrowing a check because it found something is the `sys.modules`
+    mistake again** (§13n O.1). Counting only the names a module uses would
+    have stopped describing what the import does, which is what §16.53ad
+    already rejected once.
+53al. **A move is not a revision** (§13n O.3). Every existing digest survives
+    byte-for-byte and `SIGNAL_CHAIN_REVISION` does not advance, because nothing
+    about the instrument changed — only where the arithmetic lives.
+53am. **Resolution belongs where the inputs live** (§13n O.2, O.3). The
+    environment and the catalogue are read on the retention side, which owns
+    them; the pure module takes a complete declaration, and a length the caller
+    supplies is a length the caller can be held to.
 53ab. **The default operation is the one that does nothing** (§13m N.1). An
     act whose default is to act is one step from happening by accident, so a
     live run needs two switches: one is a typo and two are a decision.
@@ -3904,7 +4042,8 @@ amendment is accepted:
     (§13l M.4); **10e** the observer carrying them into the record (37b);
     **10f** the lineage's source state, stated rather than inferred (37x);
     **10g** the bounded foreground position-entry runner, **merged**;
-    **10h** the act entrypoint and the fix-to-record wiring (§13m, 37aa–37ak),
+    **10h** the act entrypoint and the fix-to-record wiring (§13m, 37aa–37ak)
+    and, once §13n is accepted, the identity extraction (37al–37at),
     **not merged** — drafted and carried on its branch with its contract
     declarations in the same commit, which is why those declarations are here
     instead. All code only. The bounded act M.8 describes is **not** a slice and is
