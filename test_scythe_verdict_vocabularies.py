@@ -58,6 +58,7 @@ EXECUTABILITY_SOURCES = (
     ("scythe_shadow_observation", "OBSERVATION_REFUSALS"),
     ("scythe_derived_evidence", "ARTEFACT_REFUSALS"),
     ("scythe_derived_evidence", "SAMPLE_ASSESSMENTS"),
+    ("scythe_derived_evidence_producer", "PRODUCER_REFUSALS"),
 )
 
 
