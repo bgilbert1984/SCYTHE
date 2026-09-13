@@ -8,8 +8,10 @@ import unittest
 import scythe_derived_evidence_producer as producer_module
 from rf_walk_transitions import walk_signature
 from scythe_derived_evidence import (
-    DERIVED_SCHEMA_CONFORMANT, MINIMUM_RECORD_INTERVAL_NS, WALK_COORDINATES,
-    derived_walk_verdicts, read_artefact,
+    CONFIGURED_NOT_EXERCISED, DERIVED_SCHEMA_CONFORMANT,
+    INSTRUMENT_CONFIGURED_IDLE, MINIMUM_RECORD_INTERVAL_NS,
+    RF_MEASUREMENT_NOT_PERFORMED, WALK_COORDINATES, derived_walk_verdicts,
+    read_artefact,
 )
 from scythe_invariant_ledger import Coordinate
 from scythe_derived_evidence_producer import (
@@ -44,7 +46,10 @@ class ProducerTestCase(unittest.TestCase):
         fields = dict(directory=self.dir, run_id="run-1", device_id="dev-1",
                       signal_chain_hash="chain-1", configuration_epoch=1,
                       monotonic_source_id="mono-1", claim_sources=dict(SOURCES),
-                      configuration_identity="sha256:cfg", enabled=True)
+                      configuration_identity="sha256:cfg",
+                      measurement_status=RF_MEASUREMENT_NOT_PERFORMED,
+                      instrument_state=INSTRUMENT_CONFIGURED_IDLE,
+                      enabled=True)
         fields.update(kw)
         return DerivedEvidenceProducer(**fields)
 
@@ -62,7 +67,9 @@ class ReachabilityTests(ProducerTestCase):
         fields = dict(directory=self.dir, run_id="r", device_id="d",
                       signal_chain_hash="c", configuration_epoch=1,
                       monotonic_source_id="m", claim_sources=dict(SOURCES),
-                      configuration_identity="sha256:cfg")
+                      configuration_identity="sha256:cfg",
+                      measurement_status=RF_MEASUREMENT_NOT_PERFORMED,
+                      instrument_state=INSTRUMENT_CONFIGURED_IDLE)
         producer = DerivedEvidenceProducer(**fields)
         self.assertFalse(producer.enabled)
         with self.assertRaises(ProducerRefused) as caught:
@@ -420,3 +427,77 @@ class RoundTripTests(ProducerTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DeclarationTests(ProducerTestCase):
+    """Slice 10d, §13l M.4: the producer states, and never derives."""
+
+    def _published(self, **kw):
+        producer = self._filled(**kw)
+        return read_artefact(producer.publish()["path"])
+
+    def test_the_declarations_reach_the_artefact(self):
+        artefact = self._published()
+        self.assertEqual(artefact.measurement_status, RF_MEASUREMENT_NOT_PERFORMED)
+        self.assertEqual(artefact.instrument_state, INSTRUMENT_CONFIGURED_IDLE)
+
+    def test_a_labelled_configuration_is_carried_and_stays_unexercised(self):
+        artefact = self._published(
+            device_id="rtl2838-0bda:2838",
+            instrument_settings={"sample_rate_hz": 2_400_000,
+                                 "sample_rate_hz_exercise": CONFIGURED_NOT_EXERCISED,
+                                 "gain_db": 40.2,
+                                 "gain_db_exercise": CONFIGURED_NOT_EXERCISED})
+        self.assertEqual(artefact.provenance["sample_rate_hz"], 2_400_000)
+        self.assertEqual(artefact.provenance["gain_db_exercise"],
+                         CONFIGURED_NOT_EXERCISED)
+        self.assertEqual(artefact.measurement_status, RF_MEASUREMENT_NOT_PERFORMED)
+
+    def test_an_unlabelled_setting_is_refused_rather_than_labelled(self):
+        """The producer does not supply the missing claim. Labelling on the
+        caller's behalf would make the label unable to be wrong."""
+        producer = self._filled(instrument_settings={"gain_db": 40.2})
+        with self.assertRaises(ProducerRefused) as caught:
+            producer.publish()
+        self.assertEqual(caught.exception.code, ARTEFACT_PUBLICATION_REFUSED)
+        self.assertEqual(os.listdir(self.dir), [])
+
+    def test_an_undeclared_setting_name_is_refused(self):
+        producer = self._filled(instrument_settings={"if_frequency_hz": 0})
+        with self.assertRaises(ProducerRefused) as caught:
+            producer.publish()
+        self.assertEqual(caught.exception.code, ARTEFACT_PUBLICATION_REFUSED)
+
+    def test_an_unknown_declaration_never_reaches_the_filesystem(self):
+        for kw in ({"measurement_status": "RF_MEASUREMENT_PERFORMED"},
+                   {"instrument_state": "INSTRUMENT_STREAMING"}):
+            with self.subTest(**kw):
+                producer = self._filled(run_id=str(kw), **kw)
+                with self.assertRaises(ProducerRefused):
+                    producer.publish()
+                self.assertEqual(os.listdir(self.dir), [])
+
+    def test_the_declarations_have_no_defaults(self):
+        """A default would be the claim made silently, which is the shape M.4
+        exists to prevent."""
+        import dataclasses
+        fields = {f.name: f for f in dataclasses.fields(DerivedEvidenceProducer)}
+        for name in ("measurement_status", "instrument_state"):
+            with self.subTest(name=name):
+                self.assertIs(fields[name].default, dataclasses.MISSING)
+                self.assertIs(fields[name].default_factory, dataclasses.MISSING)
+
+    def test_status_reports_what_was_declared(self):
+        self.assertEqual(self._producer().status()["measurement_status"],
+                         RF_MEASUREMENT_NOT_PERFORMED)
+        self.assertEqual(self._producer().status()["instrument_state"],
+                         INSTRUMENT_CONFIGURED_IDLE)
+
+    def test_the_producer_repeats_the_readers_check_rather_than_its_own(self):
+        """Defence in depth means the *same* check. Two implementations are two
+        answers waiting to disagree."""
+        with open("scythe_derived_evidence_producer.py") as handle:
+            source = ast.parse(handle.read())
+        called = {node.func.id for node in ast.walk(source)
+                  if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)}
+        self.assertIn("refuse_instrument_declaration", called)

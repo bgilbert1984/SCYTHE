@@ -8,12 +8,16 @@ import unittest
 import scythe_derived_evidence as reader_module
 from scythe_derived_evidence import (
     ARTEFACT_PROVENANCE, ARTEFACT_SCHEMA, ARTEFACT_TOO_LARGE,
-    ARTEFACT_UNREADABLE, CONTENT_DIGEST_MISMATCH, COORDINATE_NOT_IN_SCHEMA,
-    DERIVED_SCHEMA_CONFORMANT, FRAME_VERSION, MAX_ARTEFACT_RECORDS,
+    ARTEFACT_UNREADABLE, CONFIGURED_NOT_EXERCISED, CONTENT_DIGEST_MISMATCH,
+    COORDINATE_NOT_IN_SCHEMA, DERIVED_SCHEMA_CONFORMANT, EXERCISE_SUFFIX,
+    FRAME_VERSION, INSTRUMENT_CONFIGURED_IDLE, INSTRUMENT_SETTINGS,
+    INSTRUMENT_STATES, MEASUREMENT_STATUSES, RF_MEASUREMENT_NOT_PERFORMED,
+    MAX_ARTEFACT_RECORDS,
     MAX_RECORD_BYTES, MAX_STRING_BYTES, MINIMUM_RECORD_INTERVAL_NS,
     NON_SCALAR_COORDINATE, OVERSIZED_COORDINATE, RECORD_INTERVAL_REFUSED,
     SAMPLE_BEARING_DETECTED, SAMPLE_STATUS_UNVERIFIABLE, WALK_STEP_PAIR,
-    ArtefactRefused, artifact_identity, derived_walk_verdicts, encode_for_test,
+    ArtefactRefused, artifact_identity, declared_instrument_state,
+    declared_measurement_status, derived_walk_verdicts, encode_for_test,
     read_artefact, refuse_scalar,
 )
 
@@ -26,7 +30,16 @@ PROVENANCE = {"kind": ARTEFACT_PROVENANCE, "schema": ARTEFACT_SCHEMA,
               "frame_version": FRAME_VERSION, "device_id": "dev-1",
               "signal_chain_hash": "chain-1", "configuration_epoch": 1,
               "monotonic_source_id": "mono-1",
-              "producer_attestation": "walk-aggregation-v1"}
+              "producer_attestation": "walk-aggregation-v1",
+              "measurement_status": RF_MEASUREMENT_NOT_PERFORMED,
+              "instrument_state": INSTRUMENT_CONFIGURED_IDLE}
+
+# The shape M.4 exists for: an instrument named and configured, and idle. Every
+# populated setting carries its own label.
+CONFIGURED = dict(PROVENANCE, device_id="rtl2838-0bda:2838",
+                  sample_rate_hz=2_400_000,
+                  sample_rate_hz_exercise=CONFIGURED_NOT_EXERCISED,
+                  gain_db=40.2, gain_db_exercise=CONFIGURED_NOT_EXERCISED)
 
 
 def walk_record(index, *, step_ns=500_000_000, **overrides):
@@ -418,3 +431,206 @@ class ScopeTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MeasurementDeclarationTests(ReaderTestCase):
+    """Slice 10d, §13l M.4: what the instrument did is declared, never inferred.
+
+    The whole class exists because every fact the amendment cares about is one a
+    reader could plausibly have guessed instead. An RTL2838 in the manifest, a
+    sample rate that looks like a real sample rate and a gain that looks like a
+    real gain are exactly the evidence a well-meaning classifier would use, and
+    the artefact still says no measurement was taken.
+    """
+
+    def test_a_configured_idle_artefact_is_read_with_its_status_preserved(self):
+        """The shape M.4 exists for, and the one that must not be refused.
+
+        Populated settings are legitimate: the run declares the configuration it
+        did not exercise. Refusing this artefact would push the producer toward
+        omitting the configuration, which is worse -- the reader would then have
+        no idea what was attached.
+        """
+        artefact = read_artefact(
+            self._write([walk_record(i) for i in range(3)], provenance=CONFIGURED))
+        self.assertEqual(artefact.measurement_status, RF_MEASUREMENT_NOT_PERFORMED)
+        self.assertEqual(artefact.instrument_state, INSTRUMENT_CONFIGURED_IDLE)
+        self.assertEqual(artefact.assessment, DERIVED_SCHEMA_CONFORMANT)
+        self.assertEqual(artefact.provenance["sample_rate_hz"], 2_400_000)
+        self.assertEqual(artefact.provenance["gain_db"], 40.2)
+
+    def test_a_named_sdr_grants_no_measurement_authority(self):
+        """Naming an instrument is not using one."""
+        for device in ("rtl2838-0bda:2838", "RTL2838 DVB-T", "rtl_tcp:1234"):
+            with self.subTest(device=device):
+                artefact = read_artefact(self._write(
+                    [walk_record(0)], provenance=dict(CONFIGURED, device_id=device)))
+                self.assertEqual(artefact.measurement_status,
+                                 RF_MEASUREMENT_NOT_PERFORMED)
+
+    def test_plausible_settings_grant_no_measurement_authority(self):
+        """Values a real capture would use, on a run that captured nothing."""
+        for rate, gain in ((2_400_000, 40.2), (1_024_000, 0.0), (3_200_000, 49.6)):
+            with self.subTest(rate=rate):
+                artefact = read_artefact(self._write(
+                    [walk_record(0)],
+                    provenance=dict(CONFIGURED, sample_rate_hz=rate, gain_db=gain)))
+                self.assertEqual(artefact.measurement_status,
+                                 RF_MEASUREMENT_NOT_PERFORMED)
+                self.assertEqual(artefact.instrument_state,
+                                 INSTRUMENT_CONFIGURED_IDLE)
+
+    def test_the_status_is_read_from_one_field_and_nothing_else(self):
+        """`declared_measurement_status` given only the declaration still
+        answers, which is the direct statement that nothing else feeds it."""
+        self.assertEqual(
+            declared_measurement_status({"measurement_status":
+                                         RF_MEASUREMENT_NOT_PERFORMED}),
+            RF_MEASUREMENT_NOT_PERFORMED)
+        self.assertEqual(
+            declared_instrument_state({"instrument_state":
+                                       INSTRUMENT_CONFIGURED_IDLE}),
+            INSTRUMENT_CONFIGURED_IDLE)
+
+    # -- the fields are required ------------------------------------------
+
+    def test_a_missing_declaration_is_refused(self):
+        for field in ("measurement_status", "instrument_state"):
+            with self.subTest(field=field):
+                incomplete = {k: v for k, v in PROVENANCE.items() if k != field}
+                refused = self._refused(ARTEFACT_UNREADABLE, [walk_record(0)],
+                                        provenance=incomplete)
+                self.assertIn(field, refused.detail)
+
+    def test_a_missing_declaration_receives_no_default(self):
+        """The refusal is the whole behaviour: nothing is filled in."""
+        incomplete = {k: v for k, v in PROVENANCE.items()
+                      if k != "measurement_status"}
+        path = self._write([walk_record(0)], provenance=incomplete)
+        with self.assertRaises(ArtefactRefused):
+            read_artefact(path)
+
+    # -- the values are closed --------------------------------------------
+
+    def test_an_unknown_measurement_status_is_refused(self):
+        for value in ("RF_MEASUREMENT_PERFORMED", "MEASURED", "", None, True, 1):
+            with self.subTest(value=value):
+                self._refused(ARTEFACT_UNREADABLE, [walk_record(0)],
+                              provenance=dict(PROVENANCE,
+                                              measurement_status=value))
+
+    def test_an_unknown_instrument_state_is_refused(self):
+        for value in ("INSTRUMENT_STREAMING", "IDLE", "", None, 0):
+            with self.subTest(value=value):
+                self._refused(ARTEFACT_UNREADABLE, [walk_record(0)],
+                              provenance=dict(PROVENANCE, instrument_state=value))
+
+    def test_the_declared_sets_have_exactly_the_contracted_members(self):
+        """A second member would be a name for a capability that does not
+        exist, readable by a reader that has never seen one."""
+        self.assertEqual(reader_module.MEASUREMENT_STATUSES,
+                         (RF_MEASUREMENT_NOT_PERFORMED,))
+        self.assertEqual(reader_module.INSTRUMENT_STATES,
+                         (INSTRUMENT_CONFIGURED_IDLE,))
+
+    # -- every populated setting carries its own label ---------------------
+
+    def test_a_populated_setting_without_its_label_is_refused(self):
+        for setting in INSTRUMENT_SETTINGS:
+            with self.subTest(setting=setting):
+                unlabelled = {k: v for k, v in CONFIGURED.items()
+                              if k != setting + EXERCISE_SUFFIX}
+                refused = self._refused(ARTEFACT_UNREADABLE, [walk_record(0)],
+                                        provenance=unlabelled)
+                self.assertIn(setting + EXERCISE_SUFFIX, refused.detail)
+
+    def test_a_label_without_its_setting_is_refused(self):
+        for setting in INSTRUMENT_SETTINGS:
+            with self.subTest(setting=setting):
+                orphan = {k: v for k, v in CONFIGURED.items() if k != setting}
+                self._refused(ARTEFACT_UNREADABLE, [walk_record(0)],
+                              provenance=orphan)
+
+    def test_a_setting_labelled_anything_else_is_refused(self):
+        for label in ("EXERCISED", "CONFIGURED", "", None, True):
+            with self.subTest(label=label):
+                self._refused(ARTEFACT_UNREADABLE, [walk_record(0)],
+                              provenance=dict(CONFIGURED,
+                                              sample_rate_hz_exercise=label))
+
+    def test_a_setting_is_bounded_like_every_other_scalar(self):
+        self._refused(NON_SCALAR_COORDINATE, [walk_record(0)],
+                      provenance=dict(CONFIGURED, gain_db=[40.2]))
+
+    def test_an_undeclared_setting_is_refused(self):
+        self._refused(ARTEFACT_UNREADABLE, [walk_record(0)],
+                      provenance=dict(CONFIGURED, if_frequency_hz=0))
+
+    def test_settings_are_optional_and_absent_is_not_unlabelled(self):
+        """PROVENANCE declares no settings at all, and is read."""
+        artefact = read_artefact(self._write([walk_record(0)]))
+        self.assertEqual(artefact.measurement_status, RF_MEASUREMENT_NOT_PERFORMED)
+        for setting in INSTRUMENT_SETTINGS:
+            self.assertNotIn(setting, artefact.provenance)
+
+    def test_a_setting_is_covered_by_the_artefact_identity(self):
+        """Otherwise a configuration could be edited without disturbing the
+        identity that is supposed to name this artefact's contents."""
+        one = artifact_identity(CONFIGURED, "sha256:x")
+        other = artifact_identity(dict(CONFIGURED, gain_db=0.0), "sha256:x")
+        self.assertNotEqual(one, other)
+
+
+class SchemaVersionTests(ReaderTestCase):
+    """Slice 10d: the closed set gained required fields, so the name changed."""
+
+    def test_the_artefact_schema_is_v2(self):
+        self.assertEqual(ARTEFACT_SCHEMA, "scythe.derived-evidence-artefact.v2")
+
+    def test_a_v1_artefact_is_refused_as_foreign(self):
+        """No migration and no defaults. A v1 artefact would be one whose
+        provenance says nothing about measurement, and reading it would mean
+        deciding on its author's behalf what it did not say."""
+        old = {k: v for k, v in PROVENANCE.items()
+               if k not in ("measurement_status", "instrument_state")}
+        old["schema"] = "scythe.derived-evidence-artefact.v1"
+        refused = self._refused(ARTEFACT_UNREADABLE, [walk_record(0)],
+                                provenance=old)
+        self.assertIn("foreign artefact schema", refused.detail)
+
+    def test_a_v1_artefact_is_refused_even_carrying_the_new_fields(self):
+        """The version is not a hint to be overridden by what is present."""
+        self._refused(ARTEFACT_UNREADABLE, [walk_record(0)],
+                      provenance=dict(PROVENANCE,
+                                      schema="scythe.derived-evidence-artefact.v1"))
+
+
+class DeclarationNameCheckTests(unittest.TestCase):
+    """SCYTHE_VERDICT_VOCABULARIES.md §3, applied to the three new names.
+
+    Mechanical and against the discovered universe, not against the names the
+    author happened to remember.
+    """
+
+    def test_no_new_declaration_collides_unjudged(self):
+        from test_scythe_verdict_vocabularies import (
+            cross_set_collisions, discovered_tokens, judged,
+        )
+        tokens = discovered_tokens()
+        for candidate in (RF_MEASUREMENT_NOT_PERFORMED, INSTRUMENT_CONFIGURED_IDLE,
+                          CONFIGURED_NOT_EXERCISED):
+            with self.subTest(candidate=candidate):
+                self.assertIn(candidate, tokens)
+                unjudged = [hit for hit in cross_set_collisions(candidate, tokens)
+                            if not judged(candidate, hit)]
+                self.assertEqual(unjudged, [])
+
+    def test_the_rejected_candidate_would_have_collided(self):
+        """M.9 rejected DECLARED_NOT_EXERCISED rather than judging it. This is
+        the mechanical statement of why, so the reason survives the prose."""
+        from test_scythe_verdict_vocabularies import collisions, discovered_tokens
+        hits = collisions("DECLARED_NOT_EXERCISED", set(discovered_tokens()))
+        self.assertIn("LEDGER_GENERATION_UNDECLARED", hits)
+        self.assertEqual(collisions(CONFIGURED_NOT_EXERCISED,
+                                    set(discovered_tokens())),
+                         [CONFIGURED_NOT_EXERCISED])
