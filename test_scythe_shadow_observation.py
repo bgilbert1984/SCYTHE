@@ -121,17 +121,27 @@ class LiveClassTests(ObservationTestCase):
         self.assertEqual(observer.run_class, LIVE_OBSERVATION)
         self.assertEqual(self._observer().run_class, APPARATUS_CERTIFICATION)
 
-    def test_no_derived_artefact_source_exists_in_this_repository(self):
-        """The honest state of slice 10, asserted rather than described.
+    def test_a_reader_exists_and_no_artefact_does(self):
+        """The honest state of slice 10, narrowed by slice 10b.
 
-        The declared class `EVIDENCE_DERIVED_ARTEFACT` exists; a *source* that
-        produces such evidence does not. When a derived-evidence interface
-        arrives, this test is what has to change -- which is the point of
-        writing it as an assertion rather than a sentence in a PR.
+        The previous version asserted that no derived source existed at all,
+        and said that when a derived-evidence interface arrived this test was
+        what would have to change. It arrived, and this is the change.
+
+        What exists now is a *reader*. What still does not exist is **evidence**:
+        no artefact ships in this repository, and none can be produced here,
+        because the writer is a separately authorized act (§13i J.4). Entry 7
+        waits on the second thing, not the first.
         """
-        sources = [name for name, value in vars(observation_module).items()
-                   if callable(value) and name.endswith("_verdicts")]
-        self.assertEqual(sources, ["constructed_walk_verdicts"])
+        sources = sorted(name for name, value in vars(observation_module).items()
+                         if callable(value) and name.endswith("_verdicts"))
+        self.assertEqual(sources, ["constructed_walk_verdicts",
+                                   "derived_walk_verdicts"])
+
+        root = os.path.dirname(os.path.abspath(observation_module.__file__))
+        bundled = [name for name in os.listdir(root)
+                   if name.endswith(".jsonl") or name.endswith(".artefact")]
+        self.assertEqual(bundled, [], "an artefact would complete slice 10")
 
 
 class PureCoreTests(unittest.TestCase):
