@@ -18,8 +18,18 @@ from scythe_shadow_observation import (
     OBSERVATION_DURATION_REACHED, OBSERVATION_INTERRUPTED,
     OBSERVATION_LIMIT_INVALID, OBSERVATION_PATH_REFUSED,
     OBSERVATION_PUBLICATION_REFUSED, SYNTHETIC_REQUEST, VERDICT_COUNT_REACHED,
+    CARRIED_FROM_ARTEFACT, DECLARATION_AUTHORITIES, NO_DECLARATION,
+    NO_INSTRUMENT_DECLARATION, VERDICT_SOURCE_REFUSED, InstrumentDeclaration,
     ObservationOutcome, ObservationRefused, ObservationSubject,
-    ShadowObservation, constructed_walk_verdicts,
+    ShadowObservation, VerdictSource, constructed_walk_verdicts,
+    derived_walk_verdicts,
+)
+import dataclasses
+
+import scythe_derived_evidence as reader_module
+import test_scythe_derived_evidence as test_reader
+from scythe_derived_evidence import (
+    INSTRUMENT_CONFIGURED_IDLE, RF_MEASUREMENT_NOT_PERFORMED,
 )
 
 OWNER = {"boot_id": "boot-a", "pid": 4242, "start_ticks": 99}
@@ -77,7 +87,7 @@ class ClaimTests(ObservationTestCase):
         self.assertEqual(record["evidence_source"], EVIDENCE_CONSTRUCTED)
 
     def test_the_verdicts_come_from_the_production_checker(self):
-        verdicts = [v for v, _s, _c in constructed_walk_verdicts(40)]
+        verdicts = [v for v, _s, _c in constructed_walk_verdicts(40).verdicts]
         self.assertGreater(len({v.verdict for v in verdicts}), 1,
                            "a source with one outcome observes nothing")
 
@@ -134,7 +144,8 @@ class LiveClassTests(ObservationTestCase):
         waits on the second thing, not the first.
         """
         sources = sorted(name for name, value in vars(observation_module).items()
-                         if callable(value) and name.endswith("_verdicts"))
+                         if callable(value) and name.endswith("_verdicts")
+                         and not name.startswith("_"))
         self.assertEqual(sources, ["constructed_walk_verdicts",
                                    "derived_walk_verdicts"])
 
@@ -362,12 +373,13 @@ class QuiescenceTests(ObservationTestCase):
         owner, writer = self._ledger()
 
         def writing_source():
-            for item in constructed_walk_verdicts(5):
+            for item in constructed_walk_verdicts(5).verdicts:
                 with writer.owned() as session:
                     session.append_reserved({"identity": "promotion:other"})
                 yield item
 
-        record = self._observer().run(writing_source())
+        record = self._observer().run(
+            VerdictSource(declaration=NO_DECLARATION, verdicts=writing_source()))
         self.assertEqual(record["quiescence"], LINEAGE_NOT_QUIESCENT)
         self.assertNotEqual(record["lineage_digest_before"],
                             record["lineage_digest_after"])
@@ -398,12 +410,13 @@ class InterruptionTests(ObservationTestCase):
 
     def test_a_failing_source_still_publishes(self):
         def breaks():
-            for index, item in enumerate(constructed_walk_verdicts(50)):
+            for index, item in enumerate(constructed_walk_verdicts(50).verdicts):
                 if index == 3:
                     raise RuntimeError("the source gave out")
                 yield item
 
-        record = self._observer().run(breaks())
+        record = self._observer().run(
+            VerdictSource(declaration=NO_DECLARATION, verdicts=breaks()))
         self.assertEqual(record["ending"], OBSERVATION_INTERRUPTED)
         self.assertEqual(record["interrupted_by"], "RuntimeError")
         self.assertEqual(record["verdicts_observed"], 3)
@@ -416,7 +429,8 @@ class InterruptionTests(ObservationTestCase):
             raise ConnectionError(secret)
             yield
 
-        record = self._observer().run(breaks())
+        record = self._observer().run(
+            VerdictSource(declaration=NO_DECLARATION, verdicts=breaks()))
         blob = json.dumps(record)
         self.assertNotIn("hunter2", blob)
         self.assertNotIn("internal", blob)
@@ -496,3 +510,227 @@ class NonExecutableTests(ObservationTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class InstrumentDeclarationTests(ObservationTestCase):
+    """Slice 10e, §13l M.4 and 37b: the observer carries, and never states.
+
+    The property under test is an absence. Nowhere in this module can a caller,
+    or the module itself, put a measurement status into a record -- the only
+    route is an `Artefact` a reader admitted from bytes on disk.
+    """
+
+    def _artefact(self, **overrides):
+        from scythe_derived_evidence import encode_for_test
+        provenance = dict(test_reader.CONFIGURED, **overrides)
+        data = encode_for_test(provenance,
+                               [test_reader.walk_record(i) for i in range(3)])
+        path = os.path.join(self.out, "artefact.jsonl")
+        with open(path, "wb") as handle:
+            handle.write(data)
+        return path
+
+    # -- a constructed run has no instrument at all ------------------------
+
+    def test_a_constructed_run_declares_no_instrument(self):
+        record = self._observer().run(constructed_walk_verdicts(5))
+        declaration = record["instrument_declaration"]
+        self.assertEqual(declaration["authority"], NO_INSTRUMENT_DECLARATION)
+        self.assertEqual(declaration["measurement_status"],
+                         NO_INSTRUMENT_DECLARATION)
+        self.assertEqual(declaration["instrument_state"],
+                         NO_INSTRUMENT_DECLARATION)
+
+    def test_a_constructed_run_may_not_carry_an_instrument_status(self):
+        """The record would then describe an instrument that was never there."""
+        carried = InstrumentDeclaration(
+            authority=CARRIED_FROM_ARTEFACT,
+            measurement_status=RF_MEASUREMENT_NOT_PERFORMED,
+            instrument_state=INSTRUMENT_CONFIGURED_IDLE)
+        with self.assertRaises(ObservationRefused) as caught:
+            self._observer().run(VerdictSource(
+                declaration=carried,
+                verdicts=constructed_walk_verdicts(3).verdicts))
+        self.assertEqual(caught.exception.code, VERDICT_SOURCE_REFUSED)
+        self.assertFalse(os.path.exists(self.record))
+
+    # -- a live run carries the artefact's declaration ---------------------
+
+    def test_a_live_run_carries_the_artefacts_declaration(self):
+        """37b: the artefact and the observation record say the same thing,
+        because the second copied the first."""
+        source = derived_walk_verdicts(self._artefact())
+        record = self._observer(evidence_source=EVIDENCE_DERIVED_ARTEFACT,
+                                require_live=True).run(source)
+        self.assertEqual(record["run_class"], LIVE_OBSERVATION)
+        self.assertEqual(record["instrument_declaration"], {
+            "authority": CARRIED_FROM_ARTEFACT,
+            "measurement_status": RF_MEASUREMENT_NOT_PERFORMED,
+            "instrument_state": INSTRUMENT_CONFIGURED_IDLE})
+
+    def test_a_live_run_refuses_a_declaration_from_nowhere(self):
+        with self.assertRaises(ObservationRefused) as caught:
+            self._observer(evidence_source=EVIDENCE_DERIVED_ARTEFACT,
+                           require_live=True).run(constructed_walk_verdicts(3))
+        self.assertEqual(caught.exception.code, VERDICT_SOURCE_REFUSED)
+        self.assertFalse(os.path.exists(self.record))
+
+    def test_the_declaration_and_the_verdicts_come_from_one_read(self):
+        """§13i J.7. Two opens would let the record describe an instrument
+        belonging to a different file than the verdicts came from."""
+        opened = []
+        real = reader_module.read_artefact
+
+        def counting(path):
+            opened.append(path)
+            return real(path)
+
+        reader_module.read_artefact = counting
+        self.addCleanup(setattr, reader_module, "read_artefact", real)
+        source = derived_walk_verdicts(self._artefact())
+        list(source.verdicts)
+        self.assertEqual(len(opened), 1)
+
+    # -- the observer cannot state a status --------------------------------
+
+    def test_the_module_never_names_a_measurement_value(self):
+        """AST over the whole module: neither value appears as a literal or a
+        name. They can only arrive on an Artefact."""
+        with open(observation_module.__file__) as handle:
+            tree = ast.parse(handle.read())
+        strings = {node.value for node in ast.walk(tree)
+                   if isinstance(node, ast.Constant) and isinstance(node.value, str)}
+        names = {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)}
+        names |= {node.attr for node in ast.walk(tree)
+                  if isinstance(node, ast.Attribute)}
+        for token in (RF_MEASUREMENT_NOT_PERFORMED, INSTRUMENT_CONFIGURED_IDLE):
+            # Containment, not equality: a token spliced into a longer string
+            # would reach a record just as surely as one standing alone.
+            self.assertEqual([text for text in strings if token in text], [],
+                             token)
+            self.assertNotIn(token, names, token)
+
+    def test_there_is_no_declaration_field_on_the_observer(self):
+        """A constructor argument would be the observer stating it."""
+        fields = {f.name for f in dataclasses.fields(ShadowObservation)}
+        self.assertNotIn("measurement_status", fields)
+        self.assertNotIn("instrument_state", fields)
+        self.assertNotIn("instrument_declaration", fields)
+        self.assertNotIn("declaration", fields)
+
+    def test_from_artefact_is_the_only_route_to_a_carried_status(self):
+        """Every CARRIED_FROM_ARTEFACT declaration in this module is built by
+        `from_artefact`, and that classmethod takes an Artefact nominally."""
+        with open(observation_module.__file__) as handle:
+            tree = ast.parse(handle.read())
+        built = [node for node in ast.walk(tree)
+                 if isinstance(node, ast.Call)
+                 and isinstance(node.func, ast.Name)
+                 and node.func.id == "InstrumentDeclaration"]
+        for call in built:
+            authorities = [kw.value.id for kw in call.keywords
+                           if kw.arg == "authority" and isinstance(kw.value, ast.Name)]
+            self.assertEqual(authorities, [NO_INSTRUMENT_DECLARATION], ast.dump(call))
+
+    def test_from_artefact_refuses_anything_that_is_not_one(self):
+        class Lookalike:
+            measurement_status = RF_MEASUREMENT_NOT_PERFORMED
+            instrument_state = INSTRUMENT_CONFIGURED_IDLE
+
+        for impostor in (Lookalike(), {"measurement_status": "x"}, None, "art"):
+            with self.subTest(impostor=type(impostor).__name__):
+                with self.assertRaises(ObservationRefused) as caught:
+                    InstrumentDeclaration.from_artefact(impostor)
+                self.assertEqual(caught.exception.code, VERDICT_SOURCE_REFUSED)
+
+    # -- an inconsistent declaration cannot be built ------------------------
+
+    def test_an_unknown_authority_is_refused(self):
+        for authority in ("ARTEFACT_DECLARED", "", None, True):
+            with self.subTest(authority=authority):
+                with self.assertRaises(ObservationRefused):
+                    InstrumentDeclaration(authority=authority,
+                                          measurement_status=NO_INSTRUMENT_DECLARATION,
+                                          instrument_state=NO_INSTRUMENT_DECLARATION)
+
+    def test_a_carried_declaration_takes_only_declared_values(self):
+        for status, state in (("RF_MEASUREMENT_PERFORMED", INSTRUMENT_CONFIGURED_IDLE),
+                              (RF_MEASUREMENT_NOT_PERFORMED, "INSTRUMENT_STREAMING"),
+                              (NO_INSTRUMENT_DECLARATION, INSTRUMENT_CONFIGURED_IDLE)):
+            with self.subTest(status=status, state=state):
+                with self.assertRaises(ObservationRefused):
+                    InstrumentDeclaration(authority=CARRIED_FROM_ARTEFACT,
+                                          measurement_status=status,
+                                          instrument_state=state)
+
+    def test_a_declaration_from_nowhere_carries_nothing(self):
+        with self.assertRaises(ObservationRefused) as caught:
+            InstrumentDeclaration(authority=NO_INSTRUMENT_DECLARATION,
+                                  measurement_status=RF_MEASUREMENT_NOT_PERFORMED,
+                                  instrument_state=INSTRUMENT_CONFIGURED_IDLE)
+        self.assertEqual(caught.exception.code, VERDICT_SOURCE_REFUSED)
+
+    # -- the source is a type, not an iterable ------------------------------
+
+    def test_a_bare_iterable_is_refused(self):
+        """A bare iterable carries no declaration, and a record that simply
+        omitted the instrument would be the silence 10e exists to end."""
+        for source in ([], iter([]), constructed_walk_verdicts(3).verdicts):
+            with self.subTest(source=type(source).__name__):
+                with self.assertRaises(ObservationRefused) as caught:
+                    self._observer().run(source)
+                self.assertEqual(caught.exception.code, VERDICT_SOURCE_REFUSED)
+                self.assertFalse(os.path.exists(self.record))
+
+    def test_a_lookalike_source_is_refused_nominally(self):
+        class Lookalike:
+            declaration = NO_DECLARATION
+            verdicts = ()
+
+        with self.assertRaises(ObservationRefused):
+            self._observer().run(Lookalike())
+
+    def test_a_source_carrying_a_lookalike_declaration_is_refused(self):
+        class Lookalike:
+            authority = NO_INSTRUMENT_DECLARATION
+            measurement_status = NO_INSTRUMENT_DECLARATION
+            instrument_state = NO_INSTRUMENT_DECLARATION
+
+        with self.assertRaises(ObservationRefused):
+            VerdictSource(declaration=Lookalike(), verdicts=())
+
+    # -- the vocabulary -----------------------------------------------------
+
+    def test_the_authorities_are_closed_and_disjoint_from_the_readers(self):
+        from scythe_derived_evidence import INSTRUMENT_STATES, MEASUREMENT_STATUSES
+        self.assertEqual(observation_module.DECLARATION_AUTHORITIES,
+                         (CARRIED_FROM_ARTEFACT, NO_INSTRUMENT_DECLARATION))
+        overlap = set(DECLARATION_AUTHORITIES) & (set(MEASUREMENT_STATUSES)
+                                                  | set(INSTRUMENT_STATES))
+        self.assertEqual(overlap, set())
+
+    def test_the_new_names_collide_with_nothing_unjudged(self):
+        from test_scythe_verdict_vocabularies import (
+            cross_set_collisions, discovered_tokens, judged,
+        )
+        tokens = discovered_tokens()
+        for candidate in (CARRIED_FROM_ARTEFACT, NO_INSTRUMENT_DECLARATION,
+                          VERDICT_SOURCE_REFUSED):
+            with self.subTest(candidate=candidate):
+                self.assertIn(candidate, tokens)
+                unjudged = [hit for hit in cross_set_collisions(candidate, tokens)
+                            if not judged(candidate, hit)]
+                self.assertEqual(unjudged, [])
+
+    def test_the_rejected_authority_names_would_have_collided(self):
+        """CARRIED_FROM_ARTEFACT was chosen after ARTEFACT_DECLARED and
+        ARTEFACT_ATTESTED were checked and rejected, not after they were
+        argued about."""
+        from test_scythe_verdict_vocabularies import collisions, discovered_tokens
+        universe = set(discovered_tokens())
+        self.assertIn("LEDGER_GENERATION_UNDECLARED",
+                      collisions("ARTEFACT_DECLARED", universe))
+        self.assertIn("LOCK_EXCLUSION_UNATTESTED",
+                      collisions("ARTEFACT_ATTESTED", universe))
+        self.assertEqual(collisions(CARRIED_FROM_ARTEFACT, universe),
+                         [CARRIED_FROM_ARTEFACT])

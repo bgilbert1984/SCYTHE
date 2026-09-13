@@ -100,7 +100,25 @@ DERIVED_EVIDENCE_UNAVAILABLE = "DERIVED_EVIDENCE_UNAVAILABLE"
 # Only one source is eligible to be live, and it is not the one available today.
 _LIVE_ELIGIBLE: Tuple[str, ...] = (EVIDENCE_DERIVED_ARTEFACT,)
 
-OBSERVATION_REFUSALS = OBSERVATION_REFUSALS + (DERIVED_EVIDENCE_UNAVAILABLE,)
+# -- where the instrument declaration came from (§13l M.4, 37b) -----------
+#
+# The observer cannot state what the instrument did. It never touched one, and
+# neither did the producer -- the only party with a claim to make is the
+# artefact, and the artefact makes it in writing. So the record **carries** a
+# declaration or says it has none, and there is no third way for one to arrive.
+#
+# Named CARRIED_FROM_ARTEFACT rather than ARTEFACT_DECLARED or ARTEFACT_ATTESTED:
+# both of those are negation pairs against LEDGER_GENERATION_UNDECLARED and
+# LOCK_EXCLUSION_UNATTESTED, checked mechanically rather than by eye.
+CARRIED_FROM_ARTEFACT = "CARRIED_FROM_ARTEFACT"
+NO_INSTRUMENT_DECLARATION = "NO_INSTRUMENT_DECLARATION"
+DECLARATION_AUTHORITIES: Tuple[str, ...] = (CARRIED_FROM_ARTEFACT,
+                                            NO_INSTRUMENT_DECLARATION)
+
+VERDICT_SOURCE_REFUSED = "VERDICT_SOURCE_REFUSED"
+
+OBSERVATION_REFUSALS = OBSERVATION_REFUSALS + (DERIVED_EVIDENCE_UNAVAILABLE,
+                                               VERDICT_SOURCE_REFUSED)
 
 # -- contract-declared maxima (§13h I.5) ----------------------------------
 #
@@ -150,6 +168,98 @@ class ObservationOutcome:
     merit_refusals: Tuple[str, ...]
     executability_refusals: Tuple[str, ...]
     origin: str = SYNTHETIC_REQUEST
+
+
+@dataclass(frozen=True)
+class InstrumentDeclaration:
+    """What the instrument did, and who said so (§13l M.4).
+
+    Unconstructable in an inconsistent state: an authority of
+    CARRIED_FROM_ARTEFACT with values the reader does not declare, or
+    NO_INSTRUMENT_DECLARATION with any value at all, raises here rather than
+    reaching a record where nobody would look again.
+
+    There is no constructor taking a status directly. `from_artefact` is the
+    only way to build one carrying a status, and it takes an `Artefact` -- so
+    the values in the record are the ones a reader admitted from bytes on disk,
+    not ones an observer typed.
+    """
+
+    authority: str
+    measurement_status: str
+    instrument_state: str
+
+    def __post_init__(self) -> None:
+        from scythe_derived_evidence import INSTRUMENT_STATES, MEASUREMENT_STATUSES
+
+        if self.authority not in DECLARATION_AUTHORITIES:
+            raise ObservationRefused(
+                VERDICT_SOURCE_REFUSED,
+                f"{str(self.authority)[:32]!r} is not a declaration authority")
+        if self.authority == NO_INSTRUMENT_DECLARATION:
+            if (self.measurement_status, self.instrument_state) != \
+                    (NO_INSTRUMENT_DECLARATION, NO_INSTRUMENT_DECLARATION):
+                raise ObservationRefused(
+                    VERDICT_SOURCE_REFUSED,
+                    "a run with no artefact carries no instrument status; a "
+                    "value here would be the observer making the claim")
+            return
+        if self.measurement_status not in MEASUREMENT_STATUSES:
+            raise ObservationRefused(
+                VERDICT_SOURCE_REFUSED,
+                f"measurement status {str(self.measurement_status)[:32]!r} is "
+                f"not one the reader declares")
+        if self.instrument_state not in INSTRUMENT_STATES:
+            raise ObservationRefused(
+                VERDICT_SOURCE_REFUSED,
+                f"instrument state {str(self.instrument_state)[:32]!r} is not "
+                f"one the reader declares")
+
+    @classmethod
+    def from_artefact(cls, artefact: Any) -> "InstrumentDeclaration":
+        """The only way a status reaches a record. Nominal, never `isinstance`.
+
+        A mapping with the right attributes is exactly the impostor this
+        refuses: what is carried has to have come from an artefact a reader
+        admitted, not from something shaped like one.
+        """
+        from scythe_derived_evidence import Artefact
+
+        if type(artefact) is not Artefact:
+            raise ObservationRefused(
+                VERDICT_SOURCE_REFUSED,
+                f"{type(artefact).__name__} is not an Artefact; a declaration "
+                f"is carried from one or is not carried")
+        return cls(authority=CARRIED_FROM_ARTEFACT,
+                   measurement_status=artefact.measurement_status,
+                   instrument_state=artefact.instrument_state)
+
+
+NO_DECLARATION = InstrumentDeclaration(
+    authority=NO_INSTRUMENT_DECLARATION,
+    measurement_status=NO_INSTRUMENT_DECLARATION,
+    instrument_state=NO_INSTRUMENT_DECLARATION)
+
+
+@dataclass(frozen=True)
+class VerdictSource:
+    """Verdicts and the declaration of the instrument that did not measure them.
+
+    One type rather than two arguments, because the two must come from the same
+    read: a declaration passed beside an iterator is a declaration about
+    whatever the caller says, and §13i J.7's lesson is that the second look is
+    where the substitution fits.
+    """
+
+    declaration: InstrumentDeclaration
+    verdicts: Iterable[Tuple[InvariantVerdict, ObservationSubject, Any]]
+
+    def __post_init__(self) -> None:
+        if type(self.declaration) is not InstrumentDeclaration:
+            raise ObservationRefused(
+                VERDICT_SOURCE_REFUSED,
+                f"{type(self.declaration).__name__} is not an "
+                f"InstrumentDeclaration")
 
 
 def _facts_of(subject: ObservationSubject) -> PolicyFacts:
@@ -302,16 +412,22 @@ class ShadowObservation:
                 "certifies the apparatus and is not a live observation")
         refuse_record_path(self.record_path, self.lineage_root)
 
-    def run(self, verdicts: Iterable[Tuple[InvariantVerdict, ObservationSubject, Any]]
-            ) -> Dict[str, Any]:
+    def run(self, source: "VerdictSource") -> Dict[str, Any]:
         """Observe until a bound, then publish once.
 
         Both bounds stay active and the first reached ends the run. An exception
         still publishes (§13h I.7): an observation that produces nothing when it
         fails cannot be told from one that never started, and that difference is
         what the record was for.
+
+        The source carries its own instrument declaration. There is no
+        parameter for one here and no field on this class, which is the whole
+        of slice 10e: the observer has no way to say what the instrument did.
         """
         self._validate()
+        self._require_source(source)
+        verdicts = source.verdicts
+        declaration = source.declaration
 
         started = self.clock()
         before = lineage_digest(self.lineage_root)
@@ -340,12 +456,40 @@ class ShadowObservation:
 
         after = lineage_digest(self.lineage_root)
         record = self._record(started, observed, promoted, merit, before, after,
-                              ending, interrupted_by)
+                              ending, interrupted_by, declaration)
         publish_record(self.record_path, record, self.syscalls)
         return record
 
+    def _require_source(self, source: Any) -> None:
+        """Nominal, and consistent with what this run claims to be.
+
+        A live observation whose declaration came from nowhere, or a
+        constructed run carrying an instrument status, publishes nothing at
+        all: the mismatch is refused before the first verdict rather than
+        recorded beside the numbers it would undermine.
+        """
+        if type(source) is not VerdictSource:
+            raise ObservationRefused(
+                VERDICT_SOURCE_REFUSED,
+                f"{type(source).__name__} is not a VerdictSource; a bare "
+                f"iterable carries no declaration and would leave the record "
+                f"silent about the instrument")
+        authority = source.declaration.authority
+        if self.run_class == LIVE_OBSERVATION and \
+                authority != CARRIED_FROM_ARTEFACT:
+            raise ObservationRefused(
+                VERDICT_SOURCE_REFUSED,
+                "a live observation carries its instrument declaration from "
+                "the artefact its verdicts came from")
+        if self.evidence_source == EVIDENCE_CONSTRUCTED and \
+                authority != NO_INSTRUMENT_DECLARATION:
+            raise ObservationRefused(
+                VERDICT_SOURCE_REFUSED,
+                "constructed evidence has no instrument, so it has no "
+                "instrument status to carry")
+
     def _record(self, started, observed, promoted, merit, before, after,
-                ending, interrupted_by) -> Dict[str, Any]:
+                ending, interrupted_by, declaration) -> Dict[str, Any]:
         quiescent = before == after
         return {
             "schema": SCHEMA,
@@ -366,6 +510,15 @@ class ShadowObservation:
                 "THAT DOES NOT EXIST, AND IS UNDEFINED RATHER THAN UNOBSERVED"),
             "request_origin": SYNTHETIC_REQUEST,
             "evidence_source": self.evidence_source,
+            "instrument_declaration": {
+                "authority": declaration.authority,
+                "measurement_status": declaration.measurement_status,
+                "instrument_state": declaration.instrument_state,
+            },
+            "instrument_note": (
+                "WHAT THE INSTRUMENT DID IS CARRIED FROM THE ARTEFACT THAT "
+                "SAID SO. THIS OBSERVER NEVER TOUCHED AN INSTRUMENT AND HAS NO "
+                "WAY TO STATE ONE'S STATUS"),
             "ending": ending,
             "interrupted_by": interrupted_by,
             "bounds": {"verdict_limit": self.verdict_limit,
@@ -405,8 +558,7 @@ class ShadowObservation:
 
 # -- a verdict source that uses the real checkers -------------------------
 
-def derived_walk_verdicts(artefact_path: str) -> Iterator[
-        Tuple[InvariantVerdict, ObservationSubject, Any]]:
+def derived_walk_verdicts(artefact_path: str) -> VerdictSource:
     """Verdicts from a derived artefact, the only source eligible to be live.
 
     Delegates to the reader, which refuses before either checker runs if the
@@ -414,21 +566,36 @@ def derived_walk_verdicts(artefact_path: str) -> Iterator[
     a missing or refused artefact raises rather than quietly becoming a
     constructed run, because the substitution would be invisible in the record
     that exists to prevent it (§13h I.2, §13i J.9).
+
+    **One read.** The declaration and the verdicts come from the same admitted
+    artefact, so the record cannot describe an instrument belonging to a
+    different file than the verdicts do (§13i J.7).
     """
-    from scythe_derived_evidence import derived_walk_verdicts as _read
+    from scythe_derived_evidence import read_artefact, walk_verdicts_of
 
-    return _read(artefact_path)
+    artefact = read_artefact(artefact_path)
+    return VerdictSource(declaration=InstrumentDeclaration.from_artefact(artefact),
+                         verdicts=walk_verdicts_of(artefact))
 
 
-def constructed_walk_verdicts(count: int) -> Iterator[
-        Tuple[InvariantVerdict, ObservationSubject, Any]]:
+def constructed_walk_verdicts(count: int) -> VerdictSource:
     """Real `check_walk_step`, over inputs this repository does not store.
 
     The checker is production code and the verdicts are genuine; the evidence is
     constructed, which is why the record says EVIDENCE_CONSTRUCTED. A run that
     called this a live observation of captured data would be a test with a
     record attached.
+
+    It carries NO_DECLARATION, because there was no instrument: not an idle
+    one, not a configured one, none. A status here would be the observer
+    inventing the very claim §13l M.4 exists to keep it from making.
     """
+    return VerdictSource(declaration=NO_DECLARATION,
+                         verdicts=_constructed_walk_verdicts(count))
+
+
+def _constructed_walk_verdicts(count: int) -> Iterator[
+        Tuple[InvariantVerdict, ObservationSubject, Any]]:
     from rf_walk_transitions import check_walk_step, walk_signature, with_step_measures
     from scythe_promotion_policy import CapsuleIdentity
 

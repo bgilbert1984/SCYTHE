@@ -612,15 +612,40 @@ def derived_walk_verdicts(path: str) -> Iterator[Tuple[Any, Any, CapsuleIdentity
     DERIVED_EVIDENCE_UNAVAILABLE exists so absence is reported rather than
     filled.
     """
-    from rf_walk_transitions import check_walk_step, walk_signature, with_step_measures
-    from scythe_shadow_observation import ObservationSubject
+    return walk_verdicts_of(read_artefact(path))
 
-    artefact = read_artefact(path)
+
+def walk_verdicts_of(artefact: "Artefact") -> Iterator[
+        Tuple[Any, Any, CapsuleIdentity]]:
+    """The same verdicts, from an artefact already read.
+
+    Split from the path form by §17 slice 10e, so a caller that also needs the
+    artefact's instrument declaration gets both from **one** read. The path form
+    would have meant opening twice, and §13i J.7 is the rule that a second open
+    attests bytes the verdicts did not come from.
+
+    Not a generator: the conformance refusal happens when this is called, not at
+    the first `next()`, so "refusal precedes both checkers" is true of the call
+    as well as of the iteration.
+    """
+    if type(artefact) is not Artefact:
+        raise ArtefactRefused(
+            ARTEFACT_UNREADABLE,
+            f"{type(artefact).__name__} is not an Artefact; the check is "
+            f"nominal, so a structurally compatible substitute is refused")
     if not artefact.conformant:
         raise ArtefactRefused(
             artefact.assessment,
             "no verdict is derived from an artefact whose sample status is not "
             "schema-conformant")
+    return _walk_verdicts(artefact)
+
+
+def _walk_verdicts(artefact: "Artefact") -> Iterator[
+        Tuple[Any, Any, CapsuleIdentity]]:
+    from rf_walk_transitions import check_walk_step, walk_signature, with_step_measures
+    from scythe_shadow_observation import ObservationSubject
+
     capsule = artefact.capsule()
     subject = ObservationSubject(requested_by="OPERATOR",
                                  target_graph="scythe.graphops.evidence",

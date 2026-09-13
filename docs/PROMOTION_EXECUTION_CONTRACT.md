@@ -3131,9 +3131,10 @@ already written down. Introduced by Amendment B, noticed by Amendment C.*
 37j. AST — the run opens no SDR device, starts no `rtl_tcp`, allocates no IQ
     buffer, opens no socket, starts no subprocess or thread, and names no PID.
 
-*Slice 10d implements the schema half of M.4 and is tested by 37k–37r. The
-remainder — 37b, 37d through 37j — belongs to the bounded act, which is
-separately authorized and has not been.*
+*Slice 10d implements the schema half of M.4 and is tested by 37k–37r; slice
+10e carries the declaration into the observation record, 37s–37w. The
+remainder — 37d through 37j — belongs to the bounded act, which is separately
+authorized and has not been.*
 
 37k. The artefact schema name is **v2**. A v1 artefact is refused as foreign,
     carrying the new fields or not, and receives no defaults and no migration:
@@ -3157,13 +3158,39 @@ separately authorized and has not been.*
 37p. A setting is bounded as a scalar like every other admitted value, and an
     undeclared setting name is refused by the reader and by the producer.
 37q. The instrument settings are covered by the artefact identity.
+37s. The observation record carries an instrument declaration whose authority
+    is `CARRIED_FROM_ARTEFACT` or `NO_INSTRUMENT_DECLARATION`, and nothing else.
+    Where it is carried, the values are the artefact's own — 37b is satisfied
+    by copying, not by agreement.
+37t. The observer has **no way to state** a measurement status: no constructor
+    field, no `run` parameter, and — AST over the whole module — neither
+    `RF_MEASUREMENT_NOT_PERFORMED` nor `INSTRUMENT_CONFIGURED_IDLE` appearing as
+    a name or inside any string. The only route is an `Artefact`, taken
+    nominally by `InstrumentDeclaration.from_artefact`.
+37u. A constructed run declares no instrument, and one carrying an instrument
+    status publishes **no record at all**; a live run whose declaration came
+    from nowhere does the same. The mismatch is refused before the first
+    verdict rather than recorded beside the numbers it would undermine.
+37v. The declaration and the verdicts come from **one** read of one descriptor
+    (§13i J.7). A test counts the opens.
+37w. An inconsistent declaration is unconstructable: an unknown authority, a
+    carried declaration holding a value the reader does not declare, and a
+    no-artefact declaration holding any value are each refused in
+    `__post_init__`.
 37r. Negative controls — inference from populated settings, inference from
     device identity, the value sets opened, the fields defaulted, the pairing
     dropped, the label unchecked, the scalar bound removed, an undeclared name
     admitted, the version left at v1, the identity narrowed, the rejected name
     minted, the producer labelling on the caller's behalf, the producer's
     declarations defaulted, and the producer reimplementing the reader's
-    check — each breaks its own tests and no others.
+    check — each breaks its own tests and no others. Slice 10e adds twelve
+    more: the source gate removed and the same gate weakened to duck typing,
+    the run-class consistency check dropped, `from_artefact` weakened, the
+    declaration's own check removed, the `VerdictSource` check removed, the
+    artefact opened twice, the observer writing the status itself, a
+    measurement value spliced into the observer's source, a declaration field
+    added to the observer, the authority set opened onto the reader's values,
+    and the rejected authority name minted.
 36c. Every provenance claim names the component that supplied it; a claim with
     no named source refuses publication.
 36d. The producer neither writes nor accepts `carries_samples` — AST and
@@ -3432,6 +3459,15 @@ produced it.
 53o. **An induced ceiling demonstrates nothing** (§13l M.5). A run producing no
     violation is complete; baiting the invariant proves only that its conditions
     can be arranged.
+53t. **The party that touched nothing states nothing** (37s, 37t). The observer
+    never met an instrument and neither did the producer; the only party with a
+    claim to make is the artefact, which makes it in writing. So the record
+    carries a declaration or says it has none, and `from_artefact` taking an
+    `Artefact` nominally is what leaves no third way for one to arrive.
+53u. **One read, or the record describes a different file** (37v). Reading the
+    path once for the verdicts and again for the declaration would attest an
+    instrument belonging to whatever the second open found — §13i J.7's rule
+    arriving where the consequence is a record rather than a digest.
 53q. **A closed set with one member is the honest size** (§13l M.4, 37l). A
     second measurement status would name a capability this tree does not have,
     read by a reader that has never seen one produce anything. The amendment
@@ -3518,8 +3554,9 @@ amendment is accepted:
     lineage. Split as it was built: **10a** the pure policy core and the
     observer; **10b** the derived-evidence reader (§13i, §13j); **10c** the
     producer (§13k); **10d** the measurement and instrument declarations
-    (§13l M.4), code only. The bounded act M.8 describes is **not** a slice and
-    is separately authorized.
+    (§13l M.4); **10e** the observer carrying them into the record (37b). All
+    code only. The bounded act M.8 describes is **not** a slice and is
+    separately authorized.
 11. Separate explicit authorization before any ARMED graph mutation.
 
 **Slices 4 and 5 stay separate**, and this is the boundary to protect if anything
