@@ -12,7 +12,7 @@ import io
 import json
 import os
 import unittest
-from contextlib import redirect_stdout
+from contextlib import contextmanager, redirect_stdout
 
 import scythe_position_act as act_module
 import scythe_position_entry as entry_module
@@ -79,6 +79,66 @@ class ExtractionTests(unittest.TestCase):
     VERIFIED_SIGNAL = "blake2s:6809e50b8cb9a4a50b1ce4afcdbfa232"
     VERIFIED_RECEIVER = "blake2s:e0fcdd0101c4f04257a1c4df23012975"
 
+    SDRPP = ("SDRPP_ANTENNA_ID", "SDRPP_FEEDLINE_ID",
+             "SDRPP_ANTENNA_EXTENSION_MM")
+
+    @contextmanager
+    def _sdrpp_set_to(self, value, only=None):
+        """Set, then put back exactly what was there.
+
+        An unconditional `os.environ.pop` on cleanup deletes a value the caller
+        had set, which is a test changing its caller's world -- the same
+        standard the synthetic source tree was introduced to meet.
+        """
+        names = self.SDRPP if only is None else only
+        saved = {name: os.environ.get(name) for name in names}
+        for name in names:
+            os.environ[name] = value
+        try:
+            yield
+        finally:
+            for name, previous in saved.items():
+                if previous is None:
+                    os.environ.pop(name, None)
+                else:
+                    os.environ[name] = previous
+
+    def test_a_boolean_extension_keeps_its_historical_meaning(self):
+        """The regression fixture for a digest this extraction nearly changed.
+
+        `isinstance(True, (int, float))` is True, so a boolean mast extension
+        has always been a declared 1.0 or 0.0. The first version of the pure
+        module excluded `bool` -- defensible as a refusal, and a different
+        digest, which §13n O.3 does not permit a move to produce. Refusing it
+        is a behaviour change and needs its own amendment.
+        """
+        import rf_iq_retention
+        import rf_signal_chain_identity
+
+        base = dict(sensor_id="S", sample_type="uint8",
+                    sample_rate_hz=2_048_000.0, antenna="UNDECLARED",
+                    feedline="UNDECLARED", gain_db=None, feedline_length_m=None)
+        for value, expected in ((True, 1.0), (False, 0.0), (730, 730.0),
+                                (730.5, 730.5)):
+            with self.subTest(value=value):
+                antenna = rf_signal_chain_identity.signal_chain_manifest(
+                    extension_mm=value, **base)["antenna"]
+                self.assertEqual(antenna["extension_mm"], expected)
+                self.assertEqual(antenna["extension_authority"],
+                                 "OPERATOR_DECLARED")
+        undeclared = rf_signal_chain_identity.signal_chain_manifest(
+            extension_mm="UNDECLARED", **base)["antenna"]
+        self.assertIsNone(undeclared["extension_mm"])
+        self.assertEqual(undeclared["extension_authority"], "UNDECLARED")
+
+        # And the two paths agree on it, which is what O.5 is for.
+        self.assertEqual(
+            rf_iq_retention.signal_chain_hash(
+                sensor_id="S", sample_type="uint8", sample_rate_hz=2_048_000.0,
+                antenna="UNDECLARED", feedline="UNDECLARED", extension_mm=True,
+                gain_db=None),
+            rf_signal_chain_identity.signal_chain_hash(extension_mm=True, **base))
+
     def test_both_verified_digests_are_unchanged(self):
         """37al. Byte-for-byte, against the values reproduced independently
         before the extraction."""
@@ -136,13 +196,12 @@ class ExtractionTests(unittest.TestCase):
             self.assertNotIn(forbidden, called, forbidden)
 
         declaration = dict(act_module.SIGNAL_CHAIN_DECLARATION)
-        before = rf_signal_chain_identity.signal_chain_hash(**declaration)
-        for name in ("SDRPP_ANTENNA_ID", "SDRPP_FEEDLINE_ID",
-                     "SDRPP_ANTENNA_EXTENSION_MM"):
-            os.environ[name] = "ARBITRARY"
-            self.addCleanup(os.environ.pop, name, None)
-        self.assertEqual(rf_signal_chain_identity.signal_chain_hash(**declaration),
-                         before)
+        before = (rf_signal_chain_identity.signal_chain_hash(**declaration),
+                  act_module.act_configuration_identity())
+        with self._sdrpp_set_to("ARBITRARY"):
+            after = (rf_signal_chain_identity.signal_chain_hash(**declaration),
+                     act_module.act_configuration_identity())
+        self.assertEqual(after, before)
 
     def test_there_is_exactly_one_hashing_implementation(self):
         """37ap. Mechanically: `rf_iq_retention` keeps no copy of the
@@ -164,8 +223,37 @@ class ExtractionTests(unittest.TestCase):
                          and inner.attr == "blake2s"
                          for inner in ast.walk(function))
             self.assertFalse(hashes, f"{name} hashes on its own")
-        self.assertIs(rf_iq_retention.canonical_signal_chain_bytes.__module__
-                      and True, True)
+    def test_the_retention_wrapper_actually_calls_the_pure_one(self):
+        """37ap, behaviourally. The AST test above says the source delegates;
+        this says the running code does."""
+        import rf_iq_retention
+        import rf_signal_chain_identity
+
+        calls = []
+        real_bytes = rf_signal_chain_identity.canonical_signal_chain_bytes
+        real_hash = rf_signal_chain_identity.signal_chain_hash
+
+        def watched_bytes(manifest):
+            calls.append("bytes")
+            return real_bytes(manifest)
+
+        def watched_hash(**kw):
+            calls.append("hash")
+            return real_hash(**kw)
+
+        rf_signal_chain_identity.canonical_signal_chain_bytes = watched_bytes
+        rf_signal_chain_identity.signal_chain_hash = watched_hash
+        self.addCleanup(setattr, rf_signal_chain_identity,
+                        "canonical_signal_chain_bytes", real_bytes)
+        self.addCleanup(setattr, rf_signal_chain_identity, "signal_chain_hash",
+                        real_hash)
+
+        rf_iq_retention.signal_chain_hash(
+            sensor_id="S", sample_type="uint8", sample_rate_hz=2_048_000.0,
+            gain_db=None)
+        self.assertIn("hash", calls)
+        rf_iq_retention.canonical_signal_chain_bytes({"schema": "x"})
+        self.assertIn("bytes", calls)
 
     def test_the_environment_still_moves_the_retention_side_digest(self):
         """37aq. The resolvers did not vanish -- they moved nowhere."""
@@ -173,15 +261,14 @@ class ExtractionTests(unittest.TestCase):
         before = rf_iq_retention.signal_chain_hash(
             sensor_id="S", sample_type="uint8", sample_rate_hz=2_048_000.0,
             gain_db=None)
-        os.environ["SDRPP_ANTENNA_ID"] = "WHIP-TEST-ONLY"
-        self.addCleanup(os.environ.pop, "SDRPP_ANTENNA_ID", None)
-        after = rf_iq_retention.signal_chain_hash(
-            sensor_id="S", sample_type="uint8", sample_rate_hz=2_048_000.0,
-            gain_db=None)
+        with self._sdrpp_set_to("WHIP-TEST-ONLY", only=("SDRPP_ANTENNA_ID",)):
+            after = rf_iq_retention.signal_chain_hash(
+                sensor_id="S", sample_type="uint8", sample_rate_hz=2_048_000.0,
+                gain_db=None)
+            # And the act, whose declaration is complete, does not move.
+            self.assertEqual(act_module.declared_signal_chain_hash(),
+                             self.VERIFIED_SIGNAL)
         self.assertNotEqual(before, after)
-        # And the act, whose declaration is complete, does not move.
-        self.assertEqual(act_module.declared_signal_chain_hash(),
-                         self.VERIFIED_SIGNAL)
 
     def test_an_incomplete_declaration_raises_rather_than_resolves(self):
         """The structural half of 37aj.
@@ -813,17 +900,33 @@ class ComputedIdentityTests(ActTestCase):
                 self.assertNotEqual(before[2], after[2])
 
     def test_the_environment_cannot_change_an_identity(self):
-        """37aj. `signal_chain_manifest` falls back to these three when a value
-        is not declared, so a complete declaration is what keeps the identity
-        about the instrument rather than about the shell."""
-        before = act_module.declared_signal_chain_hash()
-        for name in ("SDRPP_ANTENNA_ID", "SDRPP_FEEDLINE_ID",
-                     "SDRPP_ANTENNA_EXTENSION_MM"):
+        """37aj. `rf_iq_retention.signal_chain_manifest` falls back to these
+        three when a value is not declared, so a complete declaration is what
+        keeps the identity about the instrument rather than about the shell.
+
+        Both identities are captured before and compared after. An earlier
+        version compared the configuration identity to itself, which is true of
+        any function and says nothing about the environment.
+        """
+        names = ("SDRPP_ANTENNA_ID", "SDRPP_FEEDLINE_ID",
+                 "SDRPP_ANTENNA_EXTENSION_MM")
+        before = (act_module.declared_signal_chain_hash(),
+                  act_module.act_configuration_identity())
+        saved = {name: os.environ.get(name) for name in names}
+        for name in names:
             os.environ[name] = "SOMETHING-ELSE-ENTIRELY"
-            self.addCleanup(os.environ.pop, name, None)
-        self.assertEqual(act_module.declared_signal_chain_hash(), before)
-        self.assertEqual(act_module.act_configuration_identity(),
-                         act_module.act_configuration_identity())
+        try:
+            after = (act_module.declared_signal_chain_hash(),
+                     act_module.act_configuration_identity())
+        finally:
+            # Restored, not popped: an unconditional pop deletes a value the
+            # caller set.
+            for name, previous in saved.items():
+                if previous is None:
+                    os.environ.pop(name, None)
+                else:
+                    os.environ[name] = previous
+        self.assertEqual(after, before)
 
     def test_the_configuration_manifest_is_the_closed_field_set(self):
         manifest = act_module.act_configuration_manifest()

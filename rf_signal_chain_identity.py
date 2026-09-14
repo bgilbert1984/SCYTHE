@@ -70,8 +70,13 @@ def signal_chain_manifest(*, sensor_id: str, sample_type: str,
     imports §13n O.2 excludes.
     """
     declared_feedline = feedline not in (UNDECLARED, "undeclared")
-    declared_extension = isinstance(extension_mm, (int, float)) \
-        and not isinstance(extension_mm, bool)
+    # `isinstance(True, (int, float))` is True, so a boolean extension has
+    # always been a declared 1.0 or 0.0. That is almost certainly not what an
+    # operator meant, and refusing it may well be right -- but §13n O.3 says
+    # every existing digest is preserved byte-for-byte, and excluding `bool`
+    # here changes one. A refusal is a behaviour change and needs its own
+    # amendment; this move does not get to smuggle one in.
+    declared_extension = isinstance(extension_mm, (int, float))
     return {
         "schema": SIGNAL_CHAIN_SCHEMA,
         "sensor_id": sensor_id,
