@@ -46,7 +46,10 @@ MANIFEST_REVISION = "false-digital-gate.v1"
 # Approved by the operator, 2026-09-02.
 MAX_FALSE_DIGITAL_RATE = 0.001
 CONFIDENCE = 0.95
-TARGET_TOTAL_NULL_WINDOWS = 10_000
+# Derived below from STRATA, never transcribed (§5.18). A second constant beside
+# the strata table is two answers that drift, and the one nobody re-derives is
+# the one a harness would read.
+TARGET_TOTAL_NULL_WINDOWS: int
 
 # Simultaneous coverage, added 2026-09-03.
 #
@@ -251,44 +254,66 @@ class Stratum:
 
 # The twelve approved strata. `minimum_windows` sums past TARGET_TOTAL_NULL_WINDOWS
 # on purpose: a stratum minimum is a floor for that stratum, not a share of a quota.
+# §5.18, accepted 2026-09-14 as option C. Every stratum carries its own bound at
+# the family-corrected confidence, so every stratum needs the same number of
+# zero-failure trials to reach the approved rate. The minima this replaces were
+# arithmetic that had fallen behind §5.12's correction, not a judgement about how
+# much validation each condition deserves.
+#
+# The old column ran 500..2_000, where the exact upper bound at zero failures is
+# 0.011060 down to 0.002776: **every stratum failed its own gate, all twelve**,
+# while the aggregate cleared comfortably at 0.000473 -- the purchase-with-
+# thermal-noise §5.8 was written to prevent, arriving through the column §5.8 did
+# not update.
+#
+# Derived rather than typed. 5_561 is what the correction requires, and writing
+# it as a literal here would be a number that stops tracking the alpha it came
+# from the moment TESTED_BOUND_COUNT moves.
+MINIMUM_WINDOWS_PER_STRATUM = MINIMUM_TRIALS_FOR_ZERO_FAILURES_CORRECTED
+
 STRATA: Tuple[Stratum, ...] = (
     Stratum("THERMAL_NO_INPUT", "Terminated or disconnected input: thermal noise only",
-            2_000, safety_critical=False),
+            MINIMUM_WINDOWS_PER_STRATUM, safety_critical=False),
     Stratum("STATIONARY_ANALOGUE_FM", "Steady analogue FM voice or tone",
-            1_500, safety_critical=True),
-    Stratum("AM", "Amplitude-modulated analogue carrier", 1_000, safety_critical=True),
+            MINIMUM_WINDOWS_PER_STRATUM, safety_critical=True),
+    Stratum("AM", "Amplitude-modulated analogue carrier", MINIMUM_WINDOWS_PER_STRATUM, safety_critical=True),
     # The trap this whole ontology exists for: constant-envelope digital is
     # invisible to an envelope test, so it belongs in the NULL corpus for an
     # ANALOGUE detector and in the POSITIVE corpus for a symbol-clock detector.
     # Here it is null for false-DIGITAL only in the sense that a *wrong* family
     # call on it is the most expensive error the system can make.
     Stratum("CONSTANT_ENVELOPE_DIGITAL", "P25 C4FM, DMR and similar: no envelope cue",
-            1_000, safety_critical=True),
+            MINIMUM_WINDOWS_PER_STRATUM, safety_critical=True),
     Stratum("ADJACENT_CHANNEL_INTERFERENCE", "A strong neighbour inside the analysis span",
-            1_000, safety_critical=True),
+            MINIMUM_WINDOWS_PER_STRATUM, safety_critical=True),
     Stratum("DC_CONTAMINATION", "Zero-IF DC artefact at or near the channel",
-            750, safety_critical=False),
+            MINIMUM_WINDOWS_PER_STRATUM, safety_critical=False),
     # Buildable as of 2026-09-03: SDRPPBridge.set_gain drives the tuner through
     # rtl_tcp's control channel, restricted to the gains the device reports, and
     # IQRetentionOwner.set_gain_db raises GAIN_CHANGE. A corpus can produce a gain
     # step rather than assert one.
     Stratum("GAIN_STEPS", "A gain change part-way through the window",
-            750, safety_critical=True),
+            MINIMUM_WINDOWS_PER_STRATUM, safety_critical=True),
     Stratum("RETUNE_TRANSIENTS", "Samples spanning or adjacent to a retune",
-            750, safety_critical=True),
+            MINIMUM_WINDOWS_PER_STRATUM, safety_critical=True),
     # Buildable as of 2026-09-03: ClockContinuityMonitor compares the decoded
     # sample count against elapsed time on every append and separates a transport
     # GAP from a rate DRIFT, so a gap is observed rather than assumed.
     Stratum("DROPPED_FRAMES_TIMING_GAPS", "Lost samples and discontinuous timestamps",
-            750, safety_critical=True),
-    Stratum("OVERLOADED_CLIPPED", "Converter saturation", 750, safety_critical=True),
-    Stratum("RECEIVER_SPURS", "Internal spurious products and images", 500,
+            MINIMUM_WINDOWS_PER_STRATUM, safety_critical=True),
+    Stratum("OVERLOADED_CLIPPED", "Converter saturation", MINIMUM_WINDOWS_PER_STRATUM, safety_critical=True),
+    Stratum("RECEIVER_SPURS", "Internal spurious products and images", MINIMUM_WINDOWS_PER_STRATUM,
             safety_critical=False),
     Stratum("TWO_SIGNAL_COLLISIONS", "Two emitters sharing the analysed span",
-            1_000, safety_critical=True),
+            MINIMUM_WINDOWS_PER_STRATUM, safety_critical=True),
 )
 
 STRATUM_KEYS: Tuple[str, ...] = tuple(stratum.key for stratum in STRATA)
+
+# The corpus target is the sum of what the strata require: 66_732 today. It moves
+# only when the strata set or the correction moves, and then it moves by itself.
+# The aggregate remains the thirteenth bound and never substitutes for a stratum.
+TARGET_TOTAL_NULL_WINDOWS = sum(stratum.minimum_windows for stratum in STRATA)
 
 
 def clopper_pearson_upper(failures: int, trials: int,
