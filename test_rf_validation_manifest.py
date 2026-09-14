@@ -6,7 +6,8 @@ from dataclasses import replace
 import rf_symbol_clock
 from rf_validation_manifest import (
     CONFIDENCE, MAX_FALSE_DIGITAL_RATE, MINIMUM_TRIALS_FOR_ZERO_FAILURES,
-    MINIMUM_TRIALS_FOR_ZERO_FAILURES_CORRECTED, PER_BOUND_ALPHA,
+    MINIMUM_TRIALS_FOR_ZERO_FAILURES_CORRECTED, MINIMUM_WINDOWS_PER_STRATUM,
+    PER_BOUND_ALPHA,
     PER_BOUND_CONFIDENCE, STRATA, STRATUM_KEYS, TARGET_TOTAL_NULL_WINDOWS,
     TESTED_BOUND_COUNT, clopper_pearson_upper, evaluate, family_manifest,
     freeze_promotion_corpus, manifest_status, wilson_upper,
@@ -79,10 +80,18 @@ class StratificationTests(unittest.TestCase):
             self.assertIn(key, STRATUM_KEYS)
 
     def test_thermal_noise_cannot_carry_a_failing_stratum(self):
-        """The aggregate passes comfortably; one safety-critical stratum does not."""
-        observations = {key: (1_000, 0) for key in STRATUM_KEYS}
-        observations["THERMAL_NO_INPUT"] = (50_000, 0)
-        observations["CONSTANT_ENVELOPE_DIGITAL"] = (1_000, 5)
+        """The aggregate passes comfortably; one safety-critical stratum does not.
+
+        Sized from the declared minimum rather than a round number, so §5.18's
+        revision moved this fixture without anyone editing it. The point is the
+        shape -- a vast easy stratum beside a small failing one -- and the shape
+        is what the numbers below preserve.
+        """
+        observations = {key: (MINIMUM_WINDOWS_PER_STRATUM, 0)
+                        for key in STRATUM_KEYS}
+        observations["THERMAL_NO_INPUT"] = (50 * MINIMUM_WINDOWS_PER_STRATUM, 0)
+        observations["CONSTANT_ENVELOPE_DIGITAL"] = (
+            MINIMUM_WINDOWS_PER_STRATUM, 5)
         report = evaluate(observations)
         self.assertTrue(report["aggregate"]["passes"])
         self.assertIn("CONSTANT_ENVELOPE_DIGITAL", report["failing_strata"])
@@ -164,10 +173,52 @@ class StratificationTests(unittest.TestCase):
         self.assertIn("RETUNE_TRANSIENTS", report["failing_strata"])
         self.assertFalse(report["promotes"])
 
-    def test_the_target_corpus_size_is_declared_and_enforced(self):
-        self.assertEqual(TARGET_TOTAL_NULL_WINDOWS, 10_000)
+    def test_the_target_corpus_size_is_derived_not_transcribed(self):
+        """§5.18. The target is the sum of what the strata require.
+
+        Asserted as a relationship rather than as `66_732`: a literal here would
+        be the second copy §5.18 warned about, and it would keep passing after
+        the strata set or the Bonferroni denominator moved underneath it.
+        """
+        self.assertEqual(TARGET_TOTAL_NULL_WINDOWS,
+                         sum(s.minimum_windows for s in STRATA))
+        self.assertEqual(TARGET_TOTAL_NULL_WINDOWS,
+                         len(STRATA) * MINIMUM_WINDOWS_PER_STRATUM)
         small = evaluate({key: (100, 0) for key in STRATUM_KEYS})
         self.assertFalse(small["aggregate"]["passes"])
+
+    def test_every_stratum_can_meet_its_own_bound_at_its_own_minimum(self):
+        """The §5.18 regression, stated as the thing that was false.
+
+        Before 2026-09-14 every one of the twelve failed here, with zero
+        observed failures, while the aggregate cleared at 0.000473.
+        """
+        report = evaluate({s.key: (s.minimum_windows, 0) for s in STRATA})
+        self.assertEqual(report["failing_strata"], [])
+        self.assertTrue(report["aggregate"]["passes"])
+        for entry in report["strata"]:
+            self.assertLessEqual(entry["upper_bound_95"],
+                                 MAX_FALSE_DIGITAL_RATE, entry["stratum"])
+
+    def test_the_declared_minimum_is_conservative_against_the_exact_bound(self):
+        """The rule of three is asymptotic; the exact inversion clears earlier.
+
+        `-ln(alpha)/rate` gives 5_561, while the exact Clopper-Pearson bound
+        first reaches 0.001 at 5_558 — the declared minimum is three windows
+        more than strictly required. Conservative in the safe direction, and
+        recorded rather than trimmed: an approximation that errs toward more
+        evidence is the right way for it to err, and inverting the exact bound
+        to save three windows would be optimising the wrong quantity.
+        """
+        exact = next(n for n in range(1, 20_000)
+                     if clopper_pearson_upper(0, n) <= MAX_FALSE_DIGITAL_RATE)
+        self.assertEqual(exact, 5_558)
+        self.assertGreater(clopper_pearson_upper(0, exact - 1),
+                           MAX_FALSE_DIGITAL_RATE)
+        self.assertGreaterEqual(MINIMUM_WINDOWS_PER_STRATUM, exact)
+        self.assertLessEqual(
+            clopper_pearson_upper(0, MINIMUM_WINDOWS_PER_STRATUM),
+            MAX_FALSE_DIGITAL_RATE)
 
     def test_unknown_or_impossible_observations_are_refused(self):
         with self.assertRaises(ValueError):
