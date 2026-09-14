@@ -1,6 +1,7 @@
 # RF Signal Family Classifier — Scope
 
-**Status:** Phase 0 implemented 2026-09-01 · Phases 1–4 proposed, not implemented
+**Status:** Phases 0, 1a–1d and 2 implemented · Phase 3 (validation) is next and
+is **blocked on §5.18** · Phase 4 deferred
 **Consumes:** `signal_classification` at `rf_bridge.py:181` (gate already exists and is strict)
 **Governs:** `RF DETECTIONS // DIGITAL n · ANALOGUE n · UNCLASSIFIED n`
 
@@ -428,18 +429,25 @@ held named the missing half rather than the whole thing — `NOT_IMPLEMENTED`
 understated a tested module, `AVAILABLE_NOT_INTEGRATED` understated a wired one,
 and `INTEGRATED` alone would overstate products that nothing believes.
 
-### Phase 2 — Symbol-clock detector *(not started)*
-Gated on Q4, which is now a validation manifest rather than a threshold — see
-§5.8. The capture wiring is done as of Phase 1d.
+### Phase 2 — Symbol-clock detector — **DONE** *(`rf_symbol_clock.py`)*
 
-### Phase 2 — Symbol-clock detector *(~2–3 days)*
+**Cleared 2026-09-03**, and recorded in §5.12. This heading said *"not started"*
+until 2026-09-14, alongside a second copy of itself — the duplicate is why the
+staleness survived: a reader correcting one would leave the other. Only the
+entry conditions were gated on Q4; the detector itself ships in shadow as
+`squared-envelope-cyclic.v1`, `REGISTERED_NOT_VALIDATED`, `SHADOW_NO_PROMOTION`,
+`digital_reachable: false`.
+
+What it computes:
 Squared-envelope cyclic spectrum on the isolated channel. Significance test
 against a noise null (CFAR-style threshold on peak-to-sidelobe). Emits symbol-rate
 estimate + detection statistic. Declares `CONSTANT_ENVELOPE` when envelope
 variance is below the floor.
 
-### Phase 3 — Validation *(~2–3 days; the corpus is the work)*
-Required before DIGITAL ships at all.
+### Phase 3 — Validation — **next, blocked on §5.18**
+Required before DIGITAL ships at all. The estimate below predates the Bonferroni
+correction in §5.12 and the finding in §5.18; the corpus size is undecided
+between ~11 750 and 66 732 null windows, so no duration is quoted here.
 
 - **Synthetic labelled corpus:** BPSK/QPSK/QAM/FSK at controlled SNR and symbol
   rates, vs AM/FM/SSB, vs constant-envelope digital, vs **noise-only controls**.
@@ -652,8 +660,14 @@ realisation, not of the emitter.
 
 ### 5.8 Q4 resolved — the false-DIGITAL gate is a manifest, not a decimal
 
-**Approved 2026-09-02.** Maximum false-DIGITAL rate `0.001`, but the promotion
-rule is the *bound*, not the observation:
+**Approved 2026-09-02.** *Two numbers below were superseded on 2026-09-03 by
+§5.12's simultaneous-confidence accounting: the confidence is per-bound
+99.61538%, not 95%, and zero-failure n is 5,561, not 3,000. They are left as
+written because §5.12 is the record of the change, and because the consequence
+for the strata minima is still undecided — see §5.18.*
+
+Maximum false-DIGITAL rate `0.001`, but the promotion rule is the *bound*, not
+the observation:
 
 ```text
 one-sided 95% upper confidence bound  <=  0.001        PROMOTES
@@ -1699,18 +1713,95 @@ invisible substitution. The authority does not change: configuration is still th
 operator speaking, and `OPERATOR_DECLARED` is what it records. Nothing here is
 measured, and no amount of environment file makes it so.
 
+### 5.18 The strata minima cannot meet the bound they are gated on — **PROPOSED, undecided**
+
+*Found 2026-09-14 while scoping the Phase 3 null harness. **Not resolved here.**
+Three readings are set out below; they imply between 11,750 and 66,732 null
+windows, so the harness is held until one is chosen.*
+
+**Every stratum fails its own bound at its declared minimum, with zero observed
+false positives.** Not some — all twelve:
+
+```text
+obs = {stratum: (minimum_windows, 0) for stratum in STRATA}
+evaluate(obs) -> every stratum bound above 0.001
+```
+
+The arithmetic is not in dispute. §5.12 corrected the zero-failure requirement
+from 3,000 to **5,561** trials when the Bonferroni split took per-bound
+confidence to 99.61538%. The `minimum_windows` column was never raised to match:
+
+| trials, zero failures | exact upper bound | vs `MAX_FALSE_DIGITAL_RATE` |
+| --- | --- | --- |
+| 500 (`RECEIVER_SPURS`) | 0.011060 | 11× over |
+| 750 | 0.007387 | 7× over |
+| 1 000 | 0.005545 | 5× over |
+| 1 500 | 0.003700 | 3.7× over |
+| 2 000 (`THERMAL_NO_INPUT`, the largest) | 0.002776 | 2.8× over |
+| **5 561** | **0.000999** | first *n* that clears |
+
+`TARGET_TOTAL_NULL_WINDOWS` is 10 000 and the minima sum to 11 750, so the
+aggregate clears comfortably — `0.000473` at zero failures. **The aggregate was
+never the problem.** §5.8's own reasoning is why: *"an aggregate rate can be
+bought with thermal noise"*, which is exactly what 11 750 windows dominated by
+easy strata would do.
+
+*This is the failure mode §5.8 was written to prevent, arriving through the
+column §5.8 did not update. The gate refuses correctly today — `evaluate` marks
+every stratum failed — so nothing has been promoted on a bad bound. What is
+unresolved is what the gate is asking for.*
+
+#### The three readings
+
+**A — the minima are a construction floor, not the promotion condition.**
+`minimum_windows` says how small a stratum may be and still be worth building;
+promotion is decided by the aggregate bound. Corpus target stays ~11 750.
+*Cost:* the per-stratum bounds become advisory, and §5.8's central argument —
+that an aggregate can be bought — loses its teeth. The thirteenth bound would be
+the only one that gates, making `TESTED_BOUND_COUNT = 13` and the Bonferroni
+denominator wrong as well.
+
+**B — per-stratum bounds gate, but at a rate above 0.001.**
+Each stratum must clear some declared per-stratum ceiling, looser than the
+aggregate's. Corpus target stays ~11 750; the strata table is already sized for
+roughly 0.003–0.011 depending on the stratum.
+*Cost:* a second rate has to be chosen and defended, and "the false-DIGITAL rate
+is 0.001" stops being true of any individual condition — only of the mixture.
+A reader would have to be told which number applies where.
+
+**C — the minima are stale and every stratum needs 5 561.**
+The literal reading of §5.12. Corpus target becomes **66 732** windows, twelve
+strata at 5 561.
+*Cost:* between five and six times the corpus, and several strata are expensive
+per window — `RETUNE_TRANSIENTS` and `GAIN_STEPS` each need a real tuner
+operation, not a synthesised buffer.
+
+#### What is not in question
+
+The detector stays `REGISTERED_NOT_VALIDATED` under every reading. No option
+changes `MAX_FALSE_DIGITAL_RATE`, the exactness of Clopper–Pearson, or
+`PromotionCorpusLock`. Whichever is chosen, the strata set is inside the lock —
+so changing `minimum_windows` after a freeze yields
+`STRATA_CHANGED_AFTER_FREEZE`, and this decision therefore belongs **before** a
+corpus is frozen rather than after.
+
+---
+
 ## 6. Open questions for the operator
 
 1. **Approve the bounded IQ ring** (§2.2)? First retention of raw IQ beyond one block.
 2. **256 ms default window** — accept 4.19 MB and 3.9 Hz α resolution?
 3. ~~**Ship Phase 0 alone first?**~~ **Done 2026-09-01.**
 4. ~~**False-DIGITAL gate at <0.1% on noise**~~ **Resolved 2026-09-02**: rate
-   `0.001` as a one-sided 95% upper confidence bound over ≥10,000 stratified
-   null windows, per-stratum. See §5.8.
+   `0.001` as a one-sided upper confidence bound over stratified null windows,
+   per-stratum. See §5.8, as corrected by §5.12 (per-bound 99.61538%, n 5,561).
+   **The corpus size this implies is reopened by §5.18 and is undecided.**
 5. ~~**Split the DIGITAL/ANALOGUE axis** (§5.2)?~~ **Approved and done
    2026-09-02**, before Phase 1.
 
-All five are now resolved. Q1 and Q2 were approved 2026-09-02; see §5.5 for the
+All five were resolved; **§5.18 reopens the sizing consequence of Q4's
+resolution**, which is a question about the corpus rather than about the rate. Q1 and Q2 were approved 2026-09-02; see §5.5 for the
 terms of that approval, which are narrower than "raw IQ retention is now
 allowed". Q4's resolution (§5.8) converts Phase 3's gate from a threshold into a
-validation corpus that has to be built before a detector can be promoted.
+validation corpus that has to be built before a detector can be promoted — and
+whose size §5.18 shows was never settled.
