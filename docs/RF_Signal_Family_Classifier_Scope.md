@@ -1,7 +1,7 @@
 # RF Signal Family Classifier — Scope
 
-**Status:** Phases 0, 1a–1d and 2 implemented · Phase 3 (validation) is next and
-is **blocked on §5.18** · Phase 4 deferred
+**Status:** Phases 0, 1a–1d and 2 implemented · Phase 3 (validation) is next,
+sized by §5.18 at 66 732 null windows · Phase 4 deferred
 **Consumes:** `signal_classification` at `rf_bridge.py:181` (gate already exists and is strict)
 **Governs:** `RF DETECTIONS // DIGITAL n · ANALOGUE n · UNCLASSIFIED n`
 
@@ -444,10 +444,10 @@ against a noise null (CFAR-style threshold on peak-to-sidelobe). Emits symbol-ra
 estimate + detection statistic. Declares `CONSTANT_ENVELOPE` when envelope
 variance is below the floor.
 
-### Phase 3 — Validation — **next, blocked on §5.18**
+### Phase 3 — Validation — **next; sized by §5.18 at 66 732 null windows**
 Required before DIGITAL ships at all. The estimate below predates the Bonferroni
-correction in §5.12 and the finding in §5.18; the corpus size is undecided
-between ~11 750 and 66 732 null windows, so no duration is quoted here.
+correction in §5.12 and the finding in §5.18; no duration is quoted, because the
+corpus is the work and most of it is now known to be larger than first written.
 
 - **Synthetic labelled corpus:** BPSK/QPSK/QAM/FSK at controlled SNR and symbol
   rates, vs AM/FM/SSB, vs constant-envelope digital, vs **noise-only controls**.
@@ -1713,11 +1713,28 @@ invisible substitution. The authority does not change: configuration is still th
 operator speaking, and `OPERATOR_DECLARED` is what it records. Nothing here is
 measured, and no amount of environment file makes it so.
 
-### 5.18 The strata minima cannot meet the bound they are gated on — **PROPOSED, undecided**
+### 5.18 The strata minima cannot meet the bound they are gated on — **RESOLVED: C**
 
-*Found 2026-09-14 while scoping the Phase 3 null harness. **Not resolved here.**
-Three readings are set out below; they imply between 11,750 and 66,732 null
-windows, so the harness is held until one is chosen.*
+*Found 2026-09-14 while scoping the Phase 3 null harness, and **accepted the same
+day as option C**: every stratum needs 5,561 windows, and the corpus target
+becomes 66,732.*
+
+> **Cost does not resolve a contradiction in favour of the cheaper
+> interpretation.**
+
+*The accepted gate makes four claims at once — per-stratum, `0.001`, thirteen
+simultaneous bounds, Bonferroni-adjusted confidence — and only C preserves all
+four. **A** silently turns thirteen gates into one. **B** changes the meaning of
+the published rate. Both were cheaper, and cheapness was not the question: the
+minima were arithmetic that had fallen behind a correction, not a second opinion
+about how much validation is enough.*
+
+*The expensive physical strata stay expensive. **Their inconvenience is evidence
+about the validation burden, not permission to weaken it** — a gate that relaxes
+whenever meeting it is tedious is a gate that measures tedium.*
+
+*The three readings are kept below rather than deleted, because the two that were
+rejected are why C is right.*
 
 **Every stratum fails its own bound at its declared minimum, with zero observed
 false positives.** Not some — all twelve:
@@ -1769,12 +1786,23 @@ roughly 0.003–0.011 depending on the stratum.
 is 0.001" stops being true of any individual condition — only of the mixture.
 A reader would have to be told which number applies where.
 
-**C — the minima are stale and every stratum needs 5 561.**
+**C — the minima are stale and every stratum needs 5 561. — ACCEPTED**
 The literal reading of §5.12. Corpus target becomes **66 732** windows, twelve
 strata at 5 561.
 *Cost:* between five and six times the corpus, and several strata are expensive
 per window — `RETUNE_TRANSIENTS` and `GAIN_STEPS` each need a real tuner
 operation, not a synthesised buffer.
+
+#### What C settles
+
+```text
+minimum_windows             5_561   for each of the twelve strata
+TARGET_TOTAL_NULL_WINDOWS   66_732
+```
+
+**The aggregate remains the thirteenth bound and does not substitute for any
+stratum.** It is an additional condition, never an alternative one — which is the
+distinction A would have erased and the reason `TESTED_BOUND_COUNT` stays 13.
 
 #### What is not in question
 
@@ -1787,6 +1815,63 @@ corpus is frozen rather than after.
 
 ---
 
+### 5.19 The synthetic harness, and the boundary it must not blur — **ACCEPTED**
+
+**Approved 2026-09-14**, alongside §5.18. The synthetic-only half of the Phase 3
+corpus may proceed while captured-window persistence is still unauthorised.
+
+> **A generator and a receiver are two sources of windows, and a corpus that
+> cannot tell them apart is a corpus that cannot be audited.**
+
+#### What the harness may do
+
+Generate and label synthetic windows. Nothing else: **no live acquisition and no
+captured-IQ persistence.**
+
+Window counts come from the **declared stratum plan** — `STRATA` and the
+`minimum_windows` §5.18 set — never from a second constant transcribed beside
+it. A duplicated target is two answers that drift, and the one in the harness
+would be the one nobody re-derived. Tests may inject smaller plans, which is the
+seam that keeps a suite from generating 66 732 windows to assert a shape.
+
+#### What every synthetic record must say
+
+Each identifies itself as **synthetic** and names its **generator configuration
+and seed**. Not a flag added beside the data: an unreproducible synthetic window
+is indistinguishable from a captured one that lost its provenance, and the seed
+is what makes the claim checkable rather than decorative.
+
+#### Four refusals
+
+**No fallback from a missing captured stratum to synthetic data.** A stratum
+that needs a tuner and has none is absent, and reports absent. Filling it is the
+substitution every other refusal in this repository exists to prevent.
+
+**No `PromotionCorpusLock` freeze and no claim of corpus completion** while
+tuner-dependent strata are absent. A freeze over a partial corpus would record a
+strata set nobody had built.
+
+**No generic payload writer.** The interface keeps future real-window ingestion
+structurally separate from synthetic generation. One `write(payload)` accepting
+both is exactly the hole that blurs the authority boundary — the same shape
+§13k L.1 refused in the derived-evidence producer, for the same reason.
+
+**No captured byte reaches disk under this section.** `RETUNE_TRANSIENTS`,
+`GAIN_STEPS` and `RECEIVER_SPURS` are out of scope until §5.20 exists.
+
+#### 5.20 — captured-corpus persistence *(not written)*
+
+Before the first tuner-derived byte is written, its own authority must define:
+exact retained representation · directory · permissions · encryption if any ·
+retention period · deletion method · access surface · and explicit exclusion
+from logs, APIs, model context and ordinary repository artefacts.
+
+*§5.5 granted a DSP working buffer — process-local, volatile, fixed-capacity,
+non-persistent. A validation corpus is persisted labelled data by definition, so
+it is a different permission and not an extension of that one.*
+
+---
+
 ## 6. Open questions for the operator
 
 1. **Approve the bounded IQ ring** (§2.2)? First retention of raw IQ beyond one block.
@@ -1795,13 +1880,14 @@ corpus is frozen rather than after.
 4. ~~**False-DIGITAL gate at <0.1% on noise**~~ **Resolved 2026-09-02**: rate
    `0.001` as a one-sided upper confidence bound over stratified null windows,
    per-stratum. See §5.8, as corrected by §5.12 (per-bound 99.61538%, n 5,561).
-   **The corpus size this implies is reopened by §5.18 and is undecided.**
+   **The corpus size this implies was reopened by §5.18 and resolved as 66 732.**
 5. ~~**Split the DIGITAL/ANALOGUE axis** (§5.2)?~~ **Approved and done
    2026-09-02**, before Phase 1.
 
-All five were resolved; **§5.18 reopens the sizing consequence of Q4's
-resolution**, which is a question about the corpus rather than about the rate. Q1 and Q2 were approved 2026-09-02; see §5.5 for the
+All five were resolved; **§5.18 reopened the sizing consequence of Q4's
+resolution and settled it at 66 732 windows**, which was a question about the
+corpus rather than about the rate. Q1 and Q2 were approved 2026-09-02; see §5.5 for the
 terms of that approval, which are narrower than "raw IQ retention is now
 allowed". Q4's resolution (§5.8) converts Phase 3's gate from a threshold into a
-validation corpus that has to be built before a detector can be promoted — and
-whose size §5.18 shows was never settled.
+validation corpus that has to be built before a detector can be promoted — whose
+size §5.18 found was never settled, and settled.
