@@ -493,8 +493,15 @@ def plan_state(plan: Optional[Mapping[str, int]] = None) -> Dict[str, Any]:
                                         "AWAITING CAPTURE"),
         "persists": False,
         "acquires": False,
+        # A claim about **this module**, which a test can check, rather than
+        # about the status of a document, which it cannot. "AWAITS §5.20" was
+        # true when written and false from the moment §5.20 was accepted, while
+        # the test guarding it only asserted that the note cited "5.20" -- so it
+        # passed throughout and guarded the citation instead of the claim.
         "persistence_note": ("SYNTHETIC WINDOWS ARE REGENERATED, NEVER STORED. "
-                             "CAPTURED-WINDOW PERSISTENCE AWAITS §5.20"),
+                             "THIS MODULE HAS NO WRITER. CAPTURED-WINDOW "
+                             "PERSISTENCE IS GOVERNED BY §5.20 AND IS "
+                             "UNIMPLEMENTED"),
     }
 
 

@@ -433,10 +433,23 @@ class BoundaryTests(unittest.TestCase):
                          sorted(TUNER_REQUIRED))
 
     def test_the_plan_state_declares_the_same(self):
+        """The note must claim a property of this module, not a document's status.
+
+        It used to say captured-window persistence "AWAITS §5.20", and this test
+        asserted only that the note mentioned "5.20". So the assertion passed
+        unchanged through §5.20 being written, corrected, accepted and
+        re-accepted, while the sentence it guarded became false — it was
+        checking the citation rather than the claim.
+
+        `NO WRITER` is a claim about the module, and
+        `test_the_module_writes_nothing` is what makes it true: add a writer and
+        that test fails, which is what a self-maintaining note looks like.
+        """
         state = plan_state(small_plan())
         self.assertFalse(state["persists"])
         self.assertFalse(state["acquires"])
-        self.assertIn("5.20", state["persistence_note"])
+        self.assertIn("NO WRITER", state["persistence_note"])
+        self.assertNotIn("AWAITS", state["persistence_note"])
 
 
 class NullQualityTests(unittest.TestCase):
