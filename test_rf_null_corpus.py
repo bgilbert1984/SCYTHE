@@ -13,10 +13,11 @@ import rf_null_corpus as corpus_module
 from rf_null_corpus import (
     CAPTURED, CORPUS_INCOMPLETE_AWAITING_CAPTURE, GENERATOR_CONFIG_REFUSED,
     STRATUM_AWAITING_CAPTURE, STRATUM_NOT_DECLARED, STRATUM_NOT_SYNTHESISABLE,
-    STRATUM_SYNTHESISED, SYNTHESISABLE, SYNTHETIC, TUNER_REQUIRED,
+    SYNTHESIS_PLANNED, SYNTHESISABLE, SYNTHETIC, TUNER_REQUIRED,
+    CORPUS_INCOMPLETE_STRATA_MISSING, PROVENANCE_DIGEST_MISMATCH,
     CorpusRefused, GeneratorConfig, SyntheticWindow, declared_plan,
     generate_stratum, generate_synthetic_corpus, generate_window, plan_state,
-    status,
+    regenerate, status,
 )
 from rf_validation_manifest import STRATA, STRATUM_KEYS
 
@@ -104,13 +105,15 @@ class ReproducibilityTests(unittest.TestCase):
         one = generate_window("THERMAL_NO_INPUT", 5, config(seed=9))
         other = generate_window("THERMAL_NO_INPUT", 5, config(seed=9))
         np.testing.assert_array_equal(one.samples, other.samples)
-        self.assertEqual(one.config_identity, other.config_identity)
+        self.assertEqual(one.provenance()["config_identity"],
+                         other.provenance()["config_identity"])
 
     def test_a_different_seed_gives_different_samples(self):
         one = generate_window("THERMAL_NO_INPUT", 5, config(seed=9))
         other = generate_window("THERMAL_NO_INPUT", 5, config(seed=10))
         self.assertFalse(np.array_equal(one.samples, other.samples))
-        self.assertNotEqual(one.config_identity, other.config_identity)
+        self.assertNotEqual(one.provenance()["config_identity"],
+                            other.provenance()["config_identity"])
 
     def test_a_window_does_not_depend_on_how_many_preceded_it(self):
         """Derived streams, not a sequential one.
@@ -177,18 +180,20 @@ class LabellingTests(unittest.TestCase):
                 self.assertEqual(window.provenance()["source"], SYNTHETIC)
 
     def test_nothing_in_the_module_produces_a_captured_window(self):
-        """AST: `CAPTURED` is declared so a window can *say* it is not one, and
-        is never assigned to a source."""
+        """AST: no call anywhere passes a `source`.
+
+        Stronger than the earlier version, which checked that every `source=`
+        keyword was `SYNTHETIC`. Since the field became `init=False` there are
+        no such keywords at all, and a test asserting a property of an empty
+        set passes for the wrong reason.
+        """
         with open(corpus_module.__file__) as handle:
             tree = ast.parse(handle.read())
-        assigned = [node for node in ast.walk(tree)
+        supplied = [node for node in ast.walk(tree)
                     if isinstance(node, ast.keyword) and node.arg == "source"]
-        self.assertTrue(assigned)
-        for node in assigned:
-            self.assertTrue(isinstance(node.value, ast.Name)
-                            and node.value.id == "SYNTHETIC",
-                            ast.dump(node))
+        self.assertEqual(supplied, [])
         self.assertEqual(CAPTURED, "CAPTURED")
+        self.assertIn(CAPTURED, corpus_module.WINDOW_SOURCES)
 
     def test_the_provenance_says_it_is_not_a_substitute(self):
         note = generate_window("AM", 0, config()).provenance()["note"]
@@ -243,7 +248,7 @@ class PlanStateTests(unittest.TestCase):
         for entry in state["strata"]:
             expected = (STRATUM_AWAITING_CAPTURE
                         if entry["stratum"] in TUNER_REQUIRED
-                        else STRATUM_SYNTHESISED)
+                        else SYNTHESIS_PLANNED)
             self.assertEqual(entry["state"], expected, entry["stratum"])
 
     def test_a_tuner_stratum_keeps_its_full_count(self):
@@ -279,15 +284,17 @@ class PlanStateTests(unittest.TestCase):
         plan = small_plan(count=5)
         state = plan_state(plan)
         self.assertEqual(
-            state["windows_synthesisable"] + state["windows_awaiting_capture"],
+            state["windows_synthesis_planned"] + state["windows_awaiting_capture"],
             sum(plan.values()))
 
     def test_a_plan_of_only_synthesisable_strata_is_still_incomplete(self):
         """The gate wants twelve. Nine is nine, however complete they are."""
         state = plan_state({key: 2 for key in SYNTHESISABLE})
-        self.assertTrue(state["complete"])
-        # ...but the declared plan is what the gate reads, and it is not this.
-        self.assertFalse(plan_state()["complete"])
+        self.assertFalse(state["complete"])
+        self.assertEqual(state["completion_state"],
+                         CORPUS_INCOMPLETE_STRATA_MISSING)
+        self.assertEqual(sorted(state["missing_from_plan"]),
+                         sorted(TUNER_REQUIRED))
 
 
 class CorpusGenerationTests(unittest.TestCase):
@@ -441,3 +448,171 @@ class NotACorpusTests(unittest.TestCase):
     def test_the_declared_plan_is_far_larger_than_anything_tested_here(self):
         """Every test injects a small plan; the real one is 66 732."""
         self.assertGreater(sum(declared_plan().values()), 60_000)
+
+
+class PlanIsNotACorpusTests(unittest.TestCase):
+    """§5.19 correction: a capability is not evidence that windows exist."""
+
+    def test_the_planned_state_does_not_claim_synthesis_happened(self):
+        """`SYNTHESIS_PLANNED`, not `STRATUM_SYNTHESISED`.
+
+        `plan_state` generates nothing. An earlier name said the windows had
+        been made, which would have been a claim about 50 049 windows that do
+        not exist.
+        """
+        self.assertEqual(SYNTHESIS_PLANNED, "SYNTHESIS_PLANNED")
+        self.assertNotIn("SYNTHESISED", SYNTHESIS_PLANNED)
+        blob = str(plan_state(small_plan()))
+        self.assertNotIn("STRATUM_SYNTHESISED", blob)
+
+    def test_plan_state_generates_nothing(self):
+        """AST: it calls no synthesiser and no generator."""
+        with open(corpus_module.__file__) as handle:
+            tree = ast.parse(handle.read())
+        function = next(node for node in ast.walk(tree)
+                        if isinstance(node, ast.FunctionDef)
+                        and node.name == "plan_state")
+        called = {node.func.id for node in ast.walk(function)
+                  if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)}
+        for name in ("generate_window", "generate_stratum",
+                     "generate_synthetic_corpus"):
+            self.assertNotIn(name, called)
+
+    def test_the_declared_plan_can_never_be_complete_here(self):
+        """While any stratum needs a receiver, this module cannot finish one."""
+        state = plan_state()
+        self.assertFalse(state["complete"])
+        self.assertEqual(state["completion_state"],
+                         CORPUS_INCOMPLETE_AWAITING_CAPTURE)
+        self.assertEqual(state["missing_from_plan"], [])
+
+    def test_a_plan_missing_a_synthesisable_stratum_is_incomplete(self):
+        """Not only the tuner ones: any absent key blocks completion."""
+        plan = {key: 2 for key in STRATUM_KEYS if key != "AM"}
+        state = plan_state(plan)
+        self.assertFalse(state["complete"])
+        self.assertEqual(state["completion_state"],
+                         CORPUS_INCOMPLETE_STRATA_MISSING)
+        self.assertEqual(state["missing_from_plan"], ["AM"])
+
+    def test_completion_needs_both_conditions(self):
+        """Every declared stratum present, and none awaiting capture."""
+        everything = plan_state(small_plan())
+        self.assertEqual(everything["missing_from_plan"], [])
+        self.assertTrue(everything["awaiting_capture"])
+        self.assertFalse(everything["complete"])
+
+        subset = plan_state({key: 2 for key in SYNTHESISABLE})
+        self.assertTrue(subset["missing_from_plan"])
+        self.assertFalse(subset["awaiting_capture"])
+        self.assertFalse(subset["complete"])
+
+    def test_the_note_says_a_plan_is_not_a_corpus(self):
+        note = plan_state(small_plan())["completion_note"]
+        self.assertIn("A PLAN IS NOT A CORPUS", note)
+
+
+class RegenerabilityTests(unittest.TestCase):
+    """A digest commits to a configuration; it does not reveal one."""
+
+    def test_the_provenance_carries_the_whole_generator_declaration(self):
+        window = generate_window("AM", 7, config(seed=21))
+        provenance = window.provenance()
+        for field_name in ("schema", "generator_revision", "source", "stratum",
+                           "index", "seed", "sample_rate_hz", "window_samples",
+                           "noise_power", "config_identity"):
+            self.assertIn(field_name, provenance, field_name)
+        self.assertEqual(provenance["window_samples"], SMALL)
+        self.assertEqual(provenance["noise_power"], 1.0)
+
+    def test_a_window_is_rebuilt_from_its_provenance_alone(self):
+        """The property, not the claim: hand back the record, get the samples."""
+        for stratum in SYNTHESISABLE:
+            with self.subTest(stratum=stratum):
+                original = generate_window(stratum, 3, config(seed=17))
+                rebuilt = regenerate(original.provenance())
+                np.testing.assert_array_equal(original.samples, rebuilt.samples)
+                self.assertEqual(rebuilt.provenance(), original.provenance())
+
+    def test_an_edited_declaration_refuses_against_its_digest(self):
+        provenance = dict(generate_window("AM", 1, config(seed=8)).provenance())
+        provenance["noise_power"] = 2.0
+        with self.assertRaises(CorpusRefused) as caught:
+            regenerate(provenance)
+        self.assertEqual(caught.exception.code, PROVENANCE_DIGEST_MISMATCH)
+
+    def test_an_edited_digest_refuses_against_its_declaration(self):
+        provenance = dict(generate_window("AM", 1, config(seed=8)).provenance())
+        provenance["config_identity"] = "blake2s:" + "0" * 32
+        with self.assertRaises(CorpusRefused) as caught:
+            regenerate(provenance)
+        self.assertEqual(caught.exception.code, PROVENANCE_DIGEST_MISMATCH)
+
+    def test_an_incomplete_declaration_refuses(self):
+        full = generate_window("AM", 1, config(seed=8)).provenance()
+        for field_name in ("stratum", "index", "seed", "sample_rate_hz",
+                           "window_samples", "noise_power", "config_identity"):
+            with self.subTest(missing=field_name):
+                short = {k: v for k, v in full.items() if k != field_name}
+                with self.assertRaises(CorpusRefused):
+                    regenerate(short)
+
+    def test_the_digest_alone_would_not_be_enough(self):
+        """Stated as a property of the record: the declaration is recoverable.
+
+        A record carrying only `config_identity` could be *checked* by someone
+        who already had the configuration and *regenerated* by nobody.
+        """
+        provenance = generate_window("AM", 1, config(seed=8)).provenance()
+        rebuilt = GeneratorConfig(seed=provenance["seed"],
+                                  sample_rate_hz=provenance["sample_rate_hz"],
+                                  window_samples=provenance["window_samples"],
+                                  noise_power=provenance["noise_power"])
+        self.assertEqual(rebuilt.identity(), provenance["config_identity"])
+
+
+class SourceAuthorityTests(unittest.TestCase):
+    """A caller has no authority to say where a window came from."""
+
+    def test_a_caller_cannot_supply_the_source(self):
+        with self.assertRaises(TypeError):
+            SyntheticWindow(stratum="AM", index=0, samples=np.zeros(4),
+                            seed=1, sample_rate_hz=1_000.0, window_samples=1024,
+                            noise_power=1.0, source=CAPTURED)
+
+    def test_a_caller_cannot_supply_the_generator_revision(self):
+        with self.assertRaises(TypeError):
+            SyntheticWindow(stratum="AM", index=0, samples=np.zeros(4),
+                            seed=1, sample_rate_hz=1_000.0, window_samples=1024,
+                            noise_power=1.0, generator_revision="forged.v9")
+
+    def test_a_caller_cannot_supply_the_schema(self):
+        with self.assertRaises(TypeError):
+            SyntheticWindow(stratum="AM", index=0, samples=np.zeros(4),
+                            seed=1, sample_rate_hz=1_000.0, window_samples=1024,
+                            noise_power=1.0, schema="something.else.v1")
+
+    def test_the_sealed_fields_are_declared_non_init(self):
+        import dataclasses
+        fields = {f.name: f for f in dataclasses.fields(SyntheticWindow)}
+        for name, expected in (("source", SYNTHETIC),
+                               ("generator_revision",
+                                corpus_module.GENERATOR_REVISION),
+                               ("schema", corpus_module.SCHEMA)):
+            with self.subTest(field=name):
+                self.assertFalse(fields[name].init, name)
+                self.assertEqual(fields[name].default, expected)
+
+    def test_a_constructed_window_is_synthetic_whatever_was_intended(self):
+        window = SyntheticWindow(stratum="AM", index=0, samples=np.zeros(4),
+                                 seed=1, sample_rate_hz=1_000.0,
+                                 window_samples=1024, noise_power=1.0)
+        self.assertEqual(window.source, SYNTHETIC)
+        self.assertEqual(window.generator_revision,
+                         corpus_module.GENERATOR_REVISION)
+
+    def test_a_frozen_window_cannot_be_relabelled_after_construction(self):
+        window = generate_window("AM", 0, config())
+        with self.assertRaises(Exception):
+            window.source = CAPTURED
+        self.assertEqual(window.source, SYNTHETIC)

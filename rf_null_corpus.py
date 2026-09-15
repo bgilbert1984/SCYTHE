@@ -85,14 +85,21 @@ STRATUM_NOT_DECLARED = "STRATUM_NOT_DECLARED"
 GENERATOR_CONFIG_REFUSED = "GENERATOR_CONFIG_REFUSED"
 CORPUS_REFUSALS: Tuple[str, ...] = (
     STRATUM_NOT_SYNTHESISABLE, STRATUM_NOT_DECLARED, GENERATOR_CONFIG_REFUSED,
+    "PROVENANCE_DIGEST_MISMATCH",
 )
 
 # -- plan states ------------------------------------------------------------
-STRATUM_SYNTHESISED = "STRATUM_SYNTHESISED"
+#
+# `SYNTHESIS_PLANNED`, not `STRATUM_SYNTHESISED`. `plan_state` has generated
+# nothing: it reports what this module *could* build if asked, and a capability
+# is not evidence that 5 561 windows exist.
+SYNTHESIS_PLANNED = "SYNTHESIS_PLANNED"
 STRATUM_AWAITING_CAPTURE = "STRATUM_AWAITING_CAPTURE"
-PLAN_STATES: Tuple[str, ...] = (STRATUM_SYNTHESISED, STRATUM_AWAITING_CAPTURE)
+PLAN_STATES: Tuple[str, ...] = (SYNTHESIS_PLANNED, STRATUM_AWAITING_CAPTURE)
 
 CORPUS_INCOMPLETE_AWAITING_CAPTURE = "CORPUS_INCOMPLETE_AWAITING_CAPTURE"
+CORPUS_INCOMPLETE_STRATA_MISSING = "CORPUS_INCOMPLETE_STRATA_MISSING"
+PROVENANCE_DIGEST_MISMATCH = "PROVENANCE_DIGEST_MISMATCH"
 
 
 class CorpusRefused(RuntimeError):
@@ -145,37 +152,89 @@ class GeneratorConfig:
 
 @dataclass(frozen=True)
 class SyntheticWindow:
-    """One labelled window, and the means to rebuild it.
+    """One labelled window, carrying everything needed to rebuild it.
 
-    `source` is `SYNTHETIC` and there is no path here that sets it otherwise.
-    `seed` and `config_identity` are what make the label checkable: given both,
-    anyone can regenerate these samples and compare.
+    The generator declaration is on the window itself -- seed, rate, length,
+    noise power, stratum, index -- because that is what `regenerate()` needs. A
+    digest alone would not do: it commits to a configuration and does not reveal
+    one, so a record carrying only `config_identity` is checkable by someone who
+    already has the configuration and regenerable by nobody.
     """
 
     stratum: str
     index: int
     samples: np.ndarray
-    sample_rate_hz: float
-    source: str
-    generator_revision: str
-    config_identity: str
     seed: int
+    sample_rate_hz: float
+    window_samples: int
+    noise_power: float
+    # Not parameters. A caller has no authority to say where a window came
+    # from or which generator made it, so neither is suppliable: `init=False`
+    # means `SyntheticWindow(source=CAPTURED, ...)` is a TypeError rather than
+    # a lie this module would then carry.
+    source: str = field(init=False, default=SYNTHETIC)
+    generator_revision: str = field(init=False, default=GENERATOR_REVISION)
+    schema: str = field(init=False, default=SCHEMA)
+
+    def config(self) -> "GeneratorConfig":
+        """The configuration that made this window, rebuilt from its own fields."""
+        return GeneratorConfig(seed=self.seed,
+                               sample_rate_hz=self.sample_rate_hz,
+                               window_samples=self.window_samples,
+                               noise_power=self.noise_power)
 
     def provenance(self) -> Dict[str, Any]:
-        """What this window says about itself, without the samples."""
+        """The **complete generator declaration**, without the samples.
+
+        Every field `GeneratorConfig` takes, plus the stratum and index. Not a
+        digest alone: a digest **commits** to a configuration and does not
+        reveal one, so a record carrying only `config_identity` could be
+        checked against a configuration someone already had and regenerated
+        from nothing. `regenerate()` takes this dictionary and returns the same
+        samples, which is what makes the word reproducible mean something.
+        """
         return {
-            "schema": SCHEMA,
+            "schema": self.schema,
+            "generator_revision": self.generator_revision,
+            "source": self.source,
             "stratum": self.stratum,
             "index": self.index,
-            "source": self.source,
-            "generator_revision": self.generator_revision,
-            "config_identity": self.config_identity,
             "seed": self.seed,
             "sample_rate_hz": self.sample_rate_hz,
+            "window_samples": self.window_samples,
+            "noise_power": self.noise_power,
+            "config_identity": self.config().identity(),
             "samples": int(self.samples.size),
-            "note": ("SYNTHETIC. REGENERABLE FROM seed AND config_identity. "
-                     "NOT A CAPTURE AND NEVER A SUBSTITUTE FOR ONE"),
+            "note": ("SYNTHETIC. REGENERABLE FROM THE FIELDS ABOVE VIA "
+                     "regenerate(). NOT A CAPTURE AND NEVER A SUBSTITUTE"),
         }
+
+
+def regenerate(provenance: Mapping[str, Any]) -> SyntheticWindow:
+    """Rebuild a window from its declaration, verifying the digest first.
+
+    This is the function that makes "regenerable" a property rather than a
+    claim: hand it a provenance record and it returns the same samples, or it
+    refuses. `PROVENANCE_DIGEST_MISMATCH` means the declaration and the digest
+    disagree -- one of them was edited, and this module will not guess which.
+    """
+    required = ("stratum", "index", "seed", "sample_rate_hz", "window_samples",
+                "noise_power", "config_identity")
+    missing = [name for name in required if name not in provenance]
+    if missing:
+        raise CorpusRefused(
+            STRATUM_NOT_DECLARED,
+            f"the provenance is not a complete generator declaration; "
+            f"{sorted(missing)} are absent")
+    config = GeneratorConfig(seed=provenance["seed"],
+                             sample_rate_hz=provenance["sample_rate_hz"],
+                             window_samples=provenance["window_samples"],
+                             noise_power=provenance["noise_power"])
+    if config.identity() != provenance["config_identity"]:
+        raise CorpusRefused(
+            PROVENANCE_DIGEST_MISMATCH,
+            "the declaration does not hash to the digest beside it")
+    return generate_window(provenance["stratum"], provenance["index"], config)
 
 
 # -- the plan ---------------------------------------------------------------
@@ -209,26 +268,42 @@ def plan_state(plan: Optional[Mapping[str, int]] = None) -> Dict[str, Any]:
         strata.append({
             "stratum": key,
             "windows_required": plan[key],
-            "state": STRATUM_SYNTHESISED if synthesisable
+            "state": SYNTHESIS_PLANNED if synthesisable
             else STRATUM_AWAITING_CAPTURE,
             "source": SYNTHETIC if synthesisable else CAPTURED,
         })
     awaiting = [s["stratum"] for s in strata
                 if s["state"] == STRATUM_AWAITING_CAPTURE]
-    return {
+    # Completion needs both: every declared stratum present, and none of them
+    # waiting on a receiver. A plan of only the nine this module can build is
+    # not a complete corpus -- it is a complete *subset*, and calling it
+    # complete is the claim §5.19 forbids. In this module the declared plan can
+    # therefore never be complete, which is the honest state of affairs.
+    missing = [key for key in STRATUM_KEYS if key not in plan]
+    complete = not awaiting and not missing
+    if missing:
+        completion_state = CORPUS_INCOMPLETE_STRATA_MISSING
+    elif awaiting:
+        completion_state = CORPUS_INCOMPLETE_AWAITING_CAPTURE
+    else:                                        # pragma: no cover - unreachable
+        completion_state = None                  # here while TUNER_REQUIRED is
+    return {                                     # non-empty
         "schema": SCHEMA,
         "generator_revision": GENERATOR_REVISION,
         "strata": strata,
-        "synthesisable": [s["stratum"] for s in strata
-                          if s["state"] == STRATUM_SYNTHESISED],
+        "synthesis_planned": [s["stratum"] for s in strata
+                              if s["state"] == SYNTHESIS_PLANNED],
         "awaiting_capture": awaiting,
-        "windows_synthesisable": sum(s["windows_required"] for s in strata
-                                     if s["state"] == STRATUM_SYNTHESISED),
+        "missing_from_plan": missing,
+        "windows_synthesis_planned": sum(s["windows_required"] for s in strata
+                                         if s["state"] == SYNTHESIS_PLANNED),
         "windows_awaiting_capture": sum(s["windows_required"] for s in strata
                                         if s["state"] == STRATUM_AWAITING_CAPTURE),
-        "complete": not awaiting,
-        "completion_state": (None if not awaiting
-                             else CORPUS_INCOMPLETE_AWAITING_CAPTURE),
+        "complete": complete,
+        "completion_state": completion_state,
+        "completion_note": ("COMPLETION REQUIRES EVERY DECLARED STRATUM "
+                            "PRESENT AND NONE AWAITING CAPTURE. NOTHING HERE "
+                            "HAS GENERATED A WINDOW: A PLAN IS NOT A CORPUS"),
         "may_freeze": False,
         "freeze_note": ("NO PromotionCorpusLock WHILE ANY STRATUM AWAITS "
                         "CAPTURE. A FREEZE OVER A PARTIAL CORPUS WOULD RECORD "
@@ -279,10 +354,10 @@ def generate_window(stratum: str, index: int,
     rng = _rng(config, stratum, index)
     samples = _SYNTHESISERS[stratum](rng, config)
     return SyntheticWindow(
-        stratum=stratum, index=index, samples=samples,
-        sample_rate_hz=float(config.sample_rate_hz), source=SYNTHETIC,
-        generator_revision=GENERATOR_REVISION,
-        config_identity=config.identity(), seed=config.seed)
+        stratum=stratum, index=index, samples=samples, seed=config.seed,
+        sample_rate_hz=float(config.sample_rate_hz),
+        window_samples=config.window_samples,
+        noise_power=float(config.noise_power))
 
 
 def generate_stratum(stratum: str, config: GeneratorConfig, *,
