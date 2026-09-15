@@ -18,6 +18,11 @@ from rf_validation_manifest import (
     COMPLETION_COUNT_UNCOUNTABLE, COMPLETION_LOCK_ABSENT,
     COMPLETION_LOCK_STRATA_MOVED, COMPLETION_STRATUM_MISSING,
     COMPLETION_LOCK_DECLARATION_MOVED, COMPLETION_STRATUM_UNKNOWN,
+    ENVELOPE_ADMITS_NOTHING, ENVELOPE_GEOMETRY_REFUSED, ENVELOPE_NOT_DECLARED,
+    EnvelopeDeclaration, EnvelopeRefused, FrontEnd, declare_envelope,
+)
+from rf_signal_chain_identity import signal_chain_hash
+from rf_validation_manifest import (
     LOCK_DECLARATION_FIELDS, LOCK_FIELDS_COVERED_BY_DIGEST,
     LOCK_FIELDS_NOT_DECLARATIONS, STRATA_DEFINITION_REVISION,
     CompletionRefused, CorpusCompletionReceipt, PromotionCorpusLock,
@@ -25,9 +30,24 @@ from rf_validation_manifest import (
 )
 
 
-def _lock(corpus_id="corpus-a"):
+FRONT_END = FrontEnd(antenna="telescopic-a", extension_mm=730.0,
+                     feedline="rg316-1m", feedline_length_m=1.0)
+TERMINATION = FrontEnd(antenna="TERMINATION_50R", extension_mm="NOT_FITTED",
+                       feedline="rg316-1m", feedline_length_m=1.0)
+
+
+def _envelope(sensor_id="rtl2838-1", gains=(20.0, 30.0),
+              front_ends=(FRONT_END, TERMINATION)):
+    return declare_envelope(sensor_id=sensor_id, sample_type="cs8",
+                            sample_rate_hz=2_048_000.0, gains_db=gains,
+                            front_ends=front_ends)
+
+
+def _lock(corpus_id="corpus-a", envelope=None):
     return freeze_promotion_corpus(
-        corpus_id=corpus_id, method_revision="squared-envelope-cyclic.v1",
+        corpus_id=corpus_id,
+        envelope=_envelope() if envelope is None else envelope,
+        method_revision="squared-envelope-cyclic.v1",
         decision_threshold=6.0, preprocessing_revision="pre.v1",
         opened_at=1_000.0)
 
@@ -152,7 +172,8 @@ class StratificationTests(unittest.TestCase):
     def test_a_full_corpus_with_a_frozen_lock_promotes(self):
         """The whole gate, passing, so a failure elsewhere is not mistaken for it."""
         lock = freeze_promotion_corpus(
-            corpus_id="phase3-a", method_revision="squared-envelope-cyclic.v1",
+            corpus_id="phase3-a", envelope=_envelope(),
+            method_revision="squared-envelope-cyclic.v1",
             decision_threshold=8.4, preprocessing_revision="passband-local-excess-power.v1")
         configuration = {"method_revision": "squared-envelope-cyclic.v1",
                          "decision_threshold": 8.4,
@@ -173,7 +194,8 @@ class StratificationTests(unittest.TestCase):
     def test_tuning_the_threshold_after_opening_the_corpus_voids_promotion(self):
         """Otherwise repeated tuning turns validation into training."""
         lock = freeze_promotion_corpus(
-            corpus_id="phase3-a", method_revision="squared-envelope-cyclic.v1",
+            corpus_id="phase3-a", envelope=_envelope(),
+            method_revision="squared-envelope-cyclic.v1",
             decision_threshold=8.4, preprocessing_revision="p.v1")
         observations = {key: (10_000, 0) for key in STRATUM_KEYS}
         tuned = {"method_revision": "squared-envelope-cyclic.v1",
@@ -324,7 +346,8 @@ class FamilyLockTests(unittest.TestCase):
 
     def _lock(self, **overrides):
         lock = freeze_promotion_corpus(
-            corpus_id="c-1", method_revision="squared-envelope-cyclic.v1",
+            corpus_id="c-1", envelope=_envelope(),
+            method_revision="squared-envelope-cyclic.v1",
             decision_threshold=2.5, preprocessing_revision="rf-channelizer-fir.v1",
             opened_at=1000.0)
         return replace(lock, **overrides) if overrides else lock
@@ -651,6 +674,148 @@ class BuildabilityClaimTests(unittest.TestCase):
             with self.subTest(key=key):
                 self.assertTrue(
                     next(s for s in STRATA if s.key == key).buildable)
+
+
+class EnvelopeTests(unittest.TestCase):
+    """Entry 11: the lock froze the method and not the instrument.
+
+    And the repair the entry proposed — freeze a `signal_chain_hash` — would
+    have made the corpus unbuildable. These tests are mostly about why.
+    """
+
+    def test_the_envelope_admits_exactly_its_cross_product(self):
+        envelope = _envelope(gains=(20.0, 30.0, 40.0),
+                             front_ends=(FRONT_END, TERMINATION))
+        self.assertEqual(len(envelope.admissible_chain_hashes()), 6)
+
+    def test_a_single_frozen_chain_hash_would_forbid_GAIN_STEPS(self):
+        """The reason entry 11's proposed repair is not the repair.
+
+        `gain_db` is inside the signal-chain identity, and `set_gain_db`
+        rebuilds the chain before raising `GAIN_CHANGE`. So the two windows a
+        `GAIN_STEPS` observation is made of carry **different chain hashes** by
+        construction. Freezing one would refuse the second — the stratum would
+        be unbuildable under its own lock.
+        """
+        envelope = _envelope(gains=(20.0, 30.0), front_ends=(FRONT_END,))
+        before = signal_chain_hash(
+            sensor_id="rtl2838-1", sample_type="cs8", sample_rate_hz=2_048_000.0,
+            antenna=FRONT_END.antenna, feedline=FRONT_END.feedline,
+            extension_mm=FRONT_END.extension_mm, gain_db=20.0,
+            feedline_length_m=FRONT_END.feedline_length_m)
+        after = signal_chain_hash(
+            sensor_id="rtl2838-1", sample_type="cs8", sample_rate_hz=2_048_000.0,
+            antenna=FRONT_END.antenna, feedline=FRONT_END.feedline,
+            extension_mm=FRONT_END.extension_mm, gain_db=30.0,
+            feedline_length_m=FRONT_END.feedline_length_m)
+        self.assertNotEqual(before, after)
+        self.assertTrue(envelope.admits(before))
+        self.assertTrue(envelope.admits(after))
+
+    def test_a_single_frozen_chain_hash_would_forbid_RECEIVER_SPURS(self):
+        """The same, for the front end §5.21's termination replaces."""
+        envelope = _envelope(gains=(20.0,),
+                             front_ends=(FRONT_END, TERMINATION))
+        antenna_chain, terminated_chain = (
+            signal_chain_hash(
+                sensor_id="rtl2838-1", sample_type="cs8",
+                sample_rate_hz=2_048_000.0, antenna=front.antenna,
+                feedline=front.feedline, extension_mm=front.extension_mm,
+                gain_db=20.0, feedline_length_m=front.feedline_length_m)
+            for front in (FRONT_END, TERMINATION))
+        self.assertNotEqual(antenna_chain, terminated_chain)
+        self.assertTrue(envelope.admits(antenna_chain))
+        self.assertTrue(envelope.admits(terminated_chain))
+
+    def test_an_undeclared_gain_is_not_admitted(self):
+        envelope = _envelope(gains=(20.0, 30.0), front_ends=(FRONT_END,))
+        undeclared = signal_chain_hash(
+            sensor_id="rtl2838-1", sample_type="cs8", sample_rate_hz=2_048_000.0,
+            antenna=FRONT_END.antenna, feedline=FRONT_END.feedline,
+            extension_mm=FRONT_END.extension_mm, gain_db=44.5,
+            feedline_length_m=FRONT_END.feedline_length_m)
+        self.assertFalse(envelope.admits(undeclared))
+
+    def test_a_different_receiver_is_not_admitted(self):
+        mine = _envelope(sensor_id="rtl2838-1")
+        theirs = _envelope(sensor_id="rtl2838-2")
+        self.assertEqual(
+            mine.admissible_chain_hashes() & theirs.admissible_chain_hashes(),
+            frozenset(),
+            "two receivers must share no admissible chain")
+
+    def test_admission_is_membership_and_never_a_shape(self):
+        envelope = _envelope()
+        self.assertFalse(envelope.admits("blake2s:" + "0" * 32))
+        self.assertFalse(envelope.admits(""))
+        self.assertFalse(envelope.admits(None))
+
+    def test_the_digest_moves_with_every_declared_field(self):
+        base = _envelope()
+        for other in (_envelope(sensor_id="rtl2838-9"),
+                      _envelope(gains=(20.0,)),
+                      _envelope(front_ends=(FRONT_END,))):
+            with self.subTest(other=other.sensor_id):
+                self.assertNotEqual(other.digest(), base.digest())
+
+    def test_an_envelope_that_admits_nothing_refuses(self):
+        for kwargs in ({"gains": ()}, {"front_ends": ()}):
+            with self.subTest(**kwargs):
+                with self.assertRaises(EnvelopeRefused) as caught:
+                    _envelope(**kwargs)
+                self.assertEqual(caught.exception.code, ENVELOPE_ADMITS_NOTHING)
+
+    def test_a_duck_typed_front_end_refuses_nominally(self):
+        class LooksLikeOne:
+            antenna, extension_mm = "a", 730.0
+            feedline, feedline_length_m = "f", 1.0
+        with self.assertRaises(EnvelopeRefused) as caught:
+            declare_envelope(sensor_id="s", sample_type="cs8",
+                             sample_rate_hz=2_048_000.0, gains_db=(20.0,),
+                             front_ends=(LooksLikeOne(),))
+        self.assertEqual(caught.exception.code, ENVELOPE_NOT_DECLARED)
+
+    def test_an_envelope_off_the_promotion_geometry_refuses(self):
+        with self.assertRaises(EnvelopeRefused) as caught:
+            declare_envelope(sensor_id="s", sample_type="cs8",
+                             sample_rate_hz=1_024_000.0, gains_db=(20.0,),
+                             front_ends=(FRONT_END,))
+        self.assertEqual(caught.exception.code, ENVELOPE_GEOMETRY_REFUSED)
+
+    def test_a_lock_cannot_be_opened_without_an_envelope(self):
+        with self.assertRaises(TypeError):
+            freeze_promotion_corpus(
+                corpus_id="c", method_revision="m",
+                decision_threshold=6.0, preprocessing_revision="p")
+        for absent in (None, "rtl2838-1", object()):
+            with self.subTest(envelope=type(absent).__name__):
+                with self.assertRaises(EnvelopeRefused) as caught:
+                    freeze_promotion_corpus(
+                        corpus_id="c", envelope=absent, method_revision="m",
+                        decision_threshold=6.0, preprocessing_revision="p")
+                self.assertEqual(caught.exception.code, ENVELOPE_NOT_DECLARED)
+
+    def test_the_lock_carries_the_envelope_and_its_digest(self):
+        envelope = _envelope()
+        lock = _lock(envelope=envelope)
+        self.assertIs(lock.envelope, envelope)
+        self.assertEqual(lock.envelope_digest, envelope.digest())
+
+    def test_a_substituted_envelope_refuses_at_the_receipt(self):
+        """Internal coherence: the digest is recomputed from the lock's own
+        envelope, so `replace(lock, envelope=...)` leaves them disagreeing."""
+        lock = _lock()
+        impostor = replace(lock, envelope=_envelope(sensor_id="rtl2838-9"))
+        self.assertIs(type(impostor), PromotionCorpusLock)
+        with self.assertRaises(CompletionRefused) as caught:
+            issue_completion_receipt(lock=impostor, counted=_full_counts())
+        self.assertEqual(caught.exception.code, COMPLETION_LOCK_DECLARATION_MOVED)
+        self.assertIn("envelope_digest", caught.exception.detail)
+
+    def test_the_receipt_carries_the_instrument_it_was_built_on(self):
+        receipt = issue_completion_receipt(lock=_lock(), counted=_full_counts(),
+                                           issued_at=2_000.0)
+        self.assertEqual(receipt.envelope_digest, _envelope().digest())
 
 
 if __name__ == "__main__":

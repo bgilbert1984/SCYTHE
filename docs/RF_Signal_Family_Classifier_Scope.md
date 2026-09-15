@@ -2914,10 +2914,37 @@ from a different chain, and nothing in the lock would notice. Phase 3a's
 partition test would not catch it either — it checks that every field is
 covered, not that every necessary field exists.
 
-The repair is a lock field: the frozen `signal_chain_hash`, or a declared
-envelope digest when the envelope legitimately spans more than one chain. It is
-an amendment to §5.20 and to `rf_validation_manifest`, it must land **before the
-first `PromotionCorpusLock` exists**, and it is recorded rather than made here.
+**Resolved 2026-09-15 as the lock envelope amendment** (`PENDING_AMENDMENTS`
+entry 11), and the resolution is not the repair this paragraph first proposed.
+
+> The repair suggested here was "the frozen `signal_chain_hash`, or a declared
+> envelope digest when the envelope legitimately spans more than one chain".
+> **The first alternative would make the corpus unbuildable, and the second is
+> not a special case.**
+
+`gain_db` is inside the signal-chain identity, and `IQRetentionOwner.set_gain_db`
+rebuilds the chain *before* raising `GAIN_CHANGE`. So the two windows a
+`GAIN_STEPS` observation is made of carry different chain hashes **by
+construction** — §5.21's own corrected table says so — and §5.21's spur protocol
+replaces the front end, which is two more. **A promotion corpus never has one
+chain hash.** It has a set of them, and the set is the thing to freeze.
+
+So the lock freezes an `EnvelopeDeclaration`: the receiver, sample type and rate
+**fixed**, the gain and the front end **varying within declared sets**. The
+centre frequency does not appear, because `signal_chain_hash` excludes it.
+Admission is **membership in the enumerated cross product** of declared gains and
+front ends — computed with the same pure hash the ring uses, never inferred from
+a digest's shape, because a digest has no shape to infer from.
+
+| in the lock | checked how |
+| --- | --- |
+| `envelope` | recomputed into `envelope_digest`; a substituted envelope disagrees with its own digest |
+| `envelope_digest` | against `lock.envelope.digest()`, the same internal-coherence check `configuration_digest` gets |
+
+`freeze_promotion_corpus` takes `envelope` with **no default** — a lock openable
+without an instrument is the hole itself, and a default would have been the
+version of it that looks like a convenience. A termination is a front end like
+any other, so §5.21's protocol needs no special case for "no antenna".
 
 #### Finding B — the aggregate bound is design-weighted, not operational
 

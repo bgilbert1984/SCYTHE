@@ -49,9 +49,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import hashlib
+import json
 import math
 import time
 from typing import Any, Dict, List, Mapping, Optional, Tuple
+
+from rf_promotion_geometry import (
+    PROMOTION_WINDOW_SAMPLES, promotion_geometry_deviations,
+)
+from rf_signal_chain_identity import signal_chain_hash
 
 
 SCHEMA = "scythe.rf-validation-manifest.v1"
@@ -203,6 +209,144 @@ def family_manifest() -> Dict[str, Any]:
     }
 
 
+# -- the instrument the corpus was built on ---------------------------------
+#
+# `PENDING_AMENDMENTS` entry 11, authorised 2026-09-15. The lock froze the
+# method and not the instrument, which was harmless while §5.22's estimand was
+# unnamed and a hole the moment it was named: the claim is **instrument-scoped**,
+# so a corpus validated on one dongle and one antenna would license the same
+# promoted verdict from a different chain and nothing would notice.
+#
+# **The entry proposed freezing a `signal_chain_hash`. That would make the
+# corpus unbuildable**, and the reason is in §5.21's own table: `gain_db` is
+# inside the chain identity, so `GAIN_STEPS` spans two chain identities *by
+# construction*, and `RECEIVER_SPURS` spans two more because termination
+# replaces the front end. A promotion corpus never has one chain hash. It has a
+# set of them, and the set is the thing to freeze.
+#
+# So an envelope: what is **fixed** for the whole corpus, and what may **vary**
+# within declared sets. Admission is decided by membership in the enumerated set
+# of admissible chain hashes -- computed, never inferred from a hash's shape.
+ENVELOPE_SCHEMA = "scythe.rf-promotion-envelope.v1"
+
+ENVELOPE_NOT_DECLARED = "ENVELOPE_NOT_DECLARED"
+ENVELOPE_ADMITS_NOTHING = "ENVELOPE_ADMITS_NOTHING"
+ENVELOPE_GEOMETRY_REFUSED = "ENVELOPE_GEOMETRY_REFUSED"
+ENVELOPE_REFUSALS: Tuple[str, ...] = (
+    ENVELOPE_NOT_DECLARED, ENVELOPE_ADMITS_NOTHING, ENVELOPE_GEOMETRY_REFUSED,
+)
+
+
+class EnvelopeRefused(RuntimeError):
+    """An envelope that was not declared. A code, never a repair."""
+
+    def __init__(self, code: str, detail: str = "") -> None:
+        super().__init__(f"{code}: {detail}" if detail else code)
+        self.code = code
+        self.detail = detail
+
+
+@dataclass(frozen=True)
+class FrontEnd:
+    """One antenna path, as the signal-chain identity sees it.
+
+    A 50 Ω termination is a front end like any other -- `antenna` names it and
+    `extension_mm` says it has no extension. That is the point: §5.21's spur
+    protocol swaps the front end, and the envelope has to be able to say so
+    without a special case for "no antenna".
+    """
+
+    antenna: str
+    extension_mm: Any
+    feedline: str
+    feedline_length_m: Optional[float]
+
+    def as_tuple(self) -> Tuple[Any, ...]:
+        return (self.antenna, self.extension_mm, self.feedline,
+                self.feedline_length_m)
+
+
+@dataclass(frozen=True)
+class EnvelopeDeclaration:
+    """What may vary inside one promotion corpus, and what may not.
+
+    Fixed: the receiver, the sample type and the rate. Varying, within declared
+    sets: the gain and the front end. The centre frequency is absent because
+    `signal_chain_hash` deliberately excludes it -- retuning is its own
+    invalidation reason and does not change the chain.
+    """
+
+    sensor_id: str
+    sample_type: str
+    sample_rate_hz: float
+    gains_db: Tuple[Optional[float], ...]
+    front_ends: Tuple[FrontEnd, ...]
+
+    def admissible_chain_hashes(self) -> frozenset:
+        """Every chain identity this envelope admits, enumerated.
+
+        The cross product of the declared gains and front ends, each hashed by
+        the same pure function the ring uses. Enumerated rather than
+        pattern-matched: a hash has no structure to match against, and deciding
+        admission by anything other than membership would be inferring the chain
+        from its digest.
+        """
+        return frozenset(
+            signal_chain_hash(
+                sensor_id=self.sensor_id, sample_type=self.sample_type,
+                sample_rate_hz=self.sample_rate_hz, antenna=front_end.antenna,
+                feedline=front_end.feedline,
+                extension_mm=front_end.extension_mm, gain_db=gain,
+                feedline_length_m=front_end.feedline_length_m)
+            for front_end in self.front_ends for gain in self.gains_db)
+
+    def admits(self, chain_hash: str) -> bool:
+        """Is a window from this instrument, inside this envelope?"""
+        return chain_hash in self.admissible_chain_hashes()
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "schema": ENVELOPE_SCHEMA,
+            "sensor_id": self.sensor_id,
+            "sample_type": self.sample_type,
+            "sample_rate_hz": float(self.sample_rate_hz),
+            "gains_db": [None if g is None else float(g) for g in self.gains_db],
+            "front_ends": [list(f.as_tuple()) for f in self.front_ends],
+            "admissible_chain_count": len(self.admissible_chain_hashes()),
+        }
+
+    def digest(self) -> str:
+        material = json.dumps(self.to_dict(), sort_keys=True,
+                              separators=(",", ":"), default=str).encode("utf-8")
+        return f"blake2s:{hashlib.blake2s(material, digest_size=16).hexdigest()}"
+
+
+def declare_envelope(*, sensor_id: str, sample_type: str, sample_rate_hz: float,
+                     gains_db: Any, front_ends: Any) -> EnvelopeDeclaration:
+    """Declare an envelope, or refuse and say which part is not one."""
+    if not gains_db or not front_ends:
+        raise EnvelopeRefused(
+            ENVELOPE_ADMITS_NOTHING,
+            "an envelope with no gains or no front ends admits no window, and "
+            "a corpus under it could never contain one")
+    for front_end in front_ends:
+        if type(front_end) is not FrontEnd:
+            raise EnvelopeRefused(
+                ENVELOPE_NOT_DECLARED,
+                f"front ends are FrontEnd; got {type(front_end).__name__}")
+    deviations = promotion_geometry_deviations(
+        sample_rate_hz=sample_rate_hz,
+        window_samples=PROMOTION_WINDOW_SAMPLES)
+    if deviations:
+        raise EnvelopeRefused(
+            ENVELOPE_GEOMETRY_REFUSED,
+            f"{list(deviations)} deviate from the promotion geometry")
+    return EnvelopeDeclaration(
+        sensor_id=sensor_id, sample_type=sample_type,
+        sample_rate_hz=float(sample_rate_hz),
+        gains_db=tuple(gains_db), front_ends=tuple(front_ends))
+
+
 @dataclass(frozen=True)
 class PromotionCorpusLock:
     """A promotion corpus, frozen against one detector configuration.
@@ -222,6 +366,13 @@ class PromotionCorpusLock:
 
     corpus_id: str
     opened_at: float
+    # The instrument, as a set of admissible chains rather than one hash.
+    # Stored beside its digest rather than only as a digest, for the reason
+    # §5.19 gave about provenance: a digest commits to a declaration and does
+    # not reveal one, so a lock carrying only a digest could be checked by
+    # someone who already had the envelope and read by nobody.
+    envelope: "EnvelopeDeclaration"
+    envelope_digest: str
     method_revision: str
     decision_threshold: float
     preprocessing_revision: str
@@ -266,13 +417,26 @@ def _strata_digest() -> str:
     return f"blake2s:{hashlib.blake2s(payload.encode(), digest_size=16).hexdigest()}"
 
 
-def freeze_promotion_corpus(*, corpus_id: str, method_revision: str,
+def freeze_promotion_corpus(*, corpus_id: str, envelope: Any,
+                            method_revision: str,
                             decision_threshold: float, preprocessing_revision: str,
                             opened_at: Optional[float] = None) -> PromotionCorpusLock:
-    """Open a promotion corpus. What is frozen here cannot move without a new one."""
+    """Open a promotion corpus. What is frozen here cannot move without a new one.
+
+    `envelope` has no default. A lock that could be opened without declaring an
+    instrument is the hole entry 11 records, and a default would have been the
+    version of it that looks like a convenience.
+    """
+    if type(envelope) is not EnvelopeDeclaration:
+        raise EnvelopeRefused(
+            ENVELOPE_NOT_DECLARED,
+            "a promotion corpus is opened against a declared envelope; got "
+            f"{type(envelope).__name__}")
     return PromotionCorpusLock(
         corpus_id=corpus_id,
         opened_at=time.time() if opened_at is None else float(opened_at),
+        envelope=envelope,
+        envelope_digest=envelope.digest(),
         method_revision=method_revision,
         decision_threshold=float(decision_threshold),
         preprocessing_revision=preprocessing_revision,
@@ -351,6 +515,9 @@ _DECLARATION_SOURCES = {
     "configuration_digest": lambda lock: _configuration_digest(
         lock.method_revision, lock.decision_threshold,
         lock.preprocessing_revision),
+    # Internal coherence again: recomputed from the lock's own envelope, so a
+    # substituted envelope leaves a digest that no longer describes it.
+    "envelope_digest": lambda lock: lock.envelope.digest(),
 }
 LOCK_DECLARATION_FIELDS: Tuple[str, ...] = tuple(_DECLARATION_SOURCES)
 # Not module constants -- they are this corpus's own choices -- but the lock's
@@ -358,6 +525,7 @@ LOCK_DECLARATION_FIELDS: Tuple[str, ...] = tuple(_DECLARATION_SOURCES)
 # the lock's own fields catches a substitution in any of the three.
 LOCK_FIELDS_COVERED_BY_DIGEST: Tuple[str, ...] = (
     "method_revision", "decision_threshold", "preprocessing_revision",
+    "envelope",
 )
 # Not declarations at all: one names the corpus, the other times it, and neither
 # has an answer anywhere to be checked against.
@@ -404,6 +572,7 @@ class CorpusCompletionReceipt:
     corpus_id: str
     issued_at: float
     configuration_digest: str
+    envelope_digest: str
     strata_digest: str
     strata_definition_revision: str
     validation_family_revision: str
@@ -488,6 +657,7 @@ def issue_completion_receipt(*, lock: Any, counted: Mapping[str, Any],
         corpus_id=lock.corpus_id,
         issued_at=time.time() if issued_at is None else float(issued_at),
         configuration_digest=lock.configuration_digest,
+        envelope_digest=lock.envelope_digest,
         strata_digest=lock.strata_digest,
         strata_definition_revision=lock.strata_definition_revision,
         validation_family_revision=lock.validation_family_revision,
