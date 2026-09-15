@@ -23,6 +23,10 @@ from rf_validation_manifest import STRATA, STRATUM_KEYS
 
 SMALL = 4096
 
+# The one function permitted a `source` parameter: the digest, which must cover
+# it. Everything else taking one would be a caller choosing a window's origin.
+SOURCE_PARAMETER_ALLOWED = {"window_identity"}
+
 
 def config(seed=3):
     return GeneratorConfig(seed=seed, window_samples=SMALL)
@@ -179,19 +183,25 @@ class LabellingTests(unittest.TestCase):
                 self.assertEqual(window.source, SYNTHETIC)
                 self.assertEqual(window.provenance()["source"], SYNTHETIC)
 
-    def test_nothing_in_the_module_produces_a_captured_window(self):
-        """AST: no call anywhere passes a `source`.
+    def test_no_window_is_ever_constructed_with_a_source(self):
+        """AST: no `SyntheticWindow(...)` call passes a `source`.
 
-        Stronger than the earlier version, which checked that every `source=`
-        keyword was `SYNTHETIC`. Since the field became `init=False` there are
-        no such keywords at all, and a test asserting a property of an empty
-        set passes for the wrong reason.
+        Narrowed from "no `source=` keyword anywhere", which was true until
+        `window_identity` needed one to hash — a digest that did not cover the
+        source would be the hole this whole correction is about. The property
+        that matters is about constructing windows, not about hashing.
         """
         with open(corpus_module.__file__) as handle:
             tree = ast.parse(handle.read())
-        supplied = [node for node in ast.walk(tree)
-                    if isinstance(node, ast.keyword) and node.arg == "source"]
-        self.assertEqual(supplied, [])
+        constructions = [node for node in ast.walk(tree)
+                         if isinstance(node, ast.Call)
+                         and isinstance(node.func, ast.Name)
+                         and node.func.id == "SyntheticWindow"]
+        self.assertTrue(constructions)
+        for call in constructions:
+            supplied = {kw.arg for kw in call.keywords}
+            for sealed in ("source", "generator_revision", "schema"):
+                self.assertNotIn(sealed, supplied, ast.dump(call))
         self.assertEqual(CAPTURED, "CAPTURED")
         self.assertIn(CAPTURED, corpus_module.WINDOW_SOURCES)
 
@@ -364,7 +374,34 @@ class BoundaryTests(unittest.TestCase):
             if isinstance(node, ast.FunctionDef) and not node.name.startswith("_"):
                 arguments = {a.arg for a in node.args.args + node.args.kwonlyargs}
                 self.assertNotIn("payload", arguments, node.name)
-                self.assertNotIn("source", arguments, node.name)
+                if node.name not in SOURCE_PARAMETER_ALLOWED:
+                    self.assertNotIn("source", arguments, node.name)
+
+    def test_only_the_digest_may_take_a_source(self):
+        """The exemption list is exactly one name, and it returns a string.
+
+        `window_identity` must take a `source` because the digest has to cover
+        it. Nothing else may, because a `source` parameter on anything that
+        produces a window is the caller choosing where it came from.
+        """
+        self.assertEqual(SOURCE_PARAMETER_ALLOWED, {"window_identity"})
+        digest = corpus_module.window_identity(
+            schema=corpus_module.SCHEMA,
+            generator_revision=corpus_module.GENERATOR_REVISION,
+            source=SYNTHETIC, stratum="AM", index=0, seed=1,
+            sample_rate_hz=1_000.0, window_samples=1024, noise_power=1.0)
+        self.assertIsInstance(digest, str)
+        self.assertTrue(digest.startswith("blake2s:"))
+
+    def test_the_digest_changes_with_the_source_it_covers(self):
+        """Which is why it needs the parameter at all."""
+        common = dict(schema=corpus_module.SCHEMA,
+                      generator_revision=corpus_module.GENERATOR_REVISION,
+                      stratum="AM", index=0, seed=1, sample_rate_hz=1_000.0,
+                      window_samples=1024, noise_power=1.0)
+        self.assertNotEqual(
+            corpus_module.window_identity(source=SYNTHETIC, **common),
+            corpus_module.window_identity(source=CAPTURED, **common))
 
     def test_the_status_declares_what_it_does_not_do(self):
         declared = status()
@@ -534,28 +571,105 @@ class RegenerabilityTests(unittest.TestCase):
                 np.testing.assert_array_equal(original.samples, rebuilt.samples)
                 self.assertEqual(rebuilt.provenance(), original.provenance())
 
-    def test_an_edited_declaration_refuses_against_its_digest(self):
-        provenance = dict(generate_window("AM", 1, config(seed=8)).provenance())
-        provenance["noise_power"] = 2.0
-        with self.assertRaises(CorpusRefused) as caught:
-            regenerate(provenance)
-        self.assertEqual(caught.exception.code, PROVENANCE_DIGEST_MISMATCH)
+    def test_every_declared_field_refuses_when_edited(self):
+        """`regenerate` is a second constructor, and every field it reads must
+        be covered.
 
-    def test_an_edited_digest_refuses_against_its_declaration(self):
-        provenance = dict(generate_window("AM", 1, config(seed=8)).provenance())
-        provenance["config_identity"] = "blake2s:" + "0" * 32
-        with self.assertRaises(CorpusRefused) as caught:
-            regenerate(provenance)
-        self.assertEqual(caught.exception.code, PROVENANCE_DIGEST_MISMATCH)
+        Before `window_identity` existed, `config_identity` covered only the
+        four configuration fields — so changing `source` to `CAPTURED`, or the
+        schema, or the revision, or the stratum, or the index all verified and
+        returned a valid `SyntheticWindow`. Two of those changed the samples.
+        """
+        original = generate_window("AM", 1, config(seed=8))
+        base = dict(original.provenance())
+        mutations = {
+            "source": CAPTURED,
+            "schema": "forged.v1",
+            "generator_revision": "forged.v9",
+            "stratum": "THERMAL_NO_INPUT",
+            "index": 99,
+            "seed": 9,
+            "sample_rate_hz": 1_024_000.0,
+            "window_samples": SMALL * 2,
+            "noise_power": 2.0,
+            "config_identity": "blake2s:" + "0" * 32,
+            "window_identity": "blake2s:" + "0" * 32,
+            "samples": 1,
+        }
+        self.assertEqual(sorted(mutations),
+                         sorted(corpus_module.DECLARATION_FIELDS))
+        for field_name, value in mutations.items():
+            with self.subTest(field=field_name):
+                edited = dict(base, **{field_name: value})
+                with self.assertRaises(CorpusRefused) as caught:
+                    regenerate(edited)
+                self.assertEqual(caught.exception.code,
+                                 PROVENANCE_DIGEST_MISMATCH, field_name)
 
     def test_an_incomplete_declaration_refuses(self):
         full = generate_window("AM", 1, config(seed=8)).provenance()
-        for field_name in ("stratum", "index", "seed", "sample_rate_hz",
-                           "window_samples", "noise_power", "config_identity"):
+        for field_name in corpus_module.DECLARATION_FIELDS:
             with self.subTest(missing=field_name):
                 short = {k: v for k, v in full.items() if k != field_name}
                 with self.assertRaises(CorpusRefused):
                     regenerate(short)
+
+    def test_the_sealed_constants_are_checked_by_value_not_only_by_digest(self):
+        """Both layers. A record with a forged `source` and a `window_identity`
+        recomputed to match it still refuses, because `SYNTHETIC` is asserted
+        against the constant rather than against whatever the record claims.
+        """
+        base = dict(generate_window("AM", 1, config(seed=8)).provenance())
+        forged = dict(base, source=CAPTURED)
+        forged["window_identity"] = corpus_module.window_identity(
+            schema=forged["schema"],
+            generator_revision=forged["generator_revision"],
+            source=forged["source"], stratum=forged["stratum"],
+            index=forged["index"], seed=forged["seed"],
+            sample_rate_hz=forged["sample_rate_hz"],
+            window_samples=forged["window_samples"],
+            noise_power=forged["noise_power"])
+        with self.assertRaises(CorpusRefused) as caught:
+            regenerate(forged)
+        self.assertEqual(caught.exception.code, PROVENANCE_DIGEST_MISMATCH)
+
+    def test_a_consistently_forged_record_still_refuses(self):
+        """The same, for the schema and the revision."""
+        base = dict(generate_window("AM", 1, config(seed=8)).provenance())
+        for field_name, value in (("schema", "forged.v1"),
+                                  ("generator_revision", "forged.v9")):
+            with self.subTest(field=field_name):
+                forged = dict(base, **{field_name: value})
+                forged["window_identity"] = corpus_module.window_identity(
+                    schema=forged["schema"],
+                    generator_revision=forged["generator_revision"],
+                    source=forged["source"], stratum=forged["stratum"],
+                    index=forged["index"], seed=forged["seed"],
+                    sample_rate_hz=forged["sample_rate_hz"],
+                    window_samples=forged["window_samples"],
+                    noise_power=forged["noise_power"])
+                with self.assertRaises(CorpusRefused):
+                    regenerate(forged)
+
+    def test_the_two_identities_cover_different_things(self):
+        """`config_identity` is not stretched to mean `window_identity`.
+
+        Two windows of one configuration share a config identity and must not
+        share a window identity — which is the gap that let the stratum and the
+        index be edited.
+        """
+        one = generate_window("AM", 1, config(seed=8)).provenance()
+        other = generate_window("AM", 2, config(seed=8)).provenance()
+        elsewhere = generate_window("THERMAL_NO_INPUT", 1,
+                                    config(seed=8)).provenance()
+        self.assertEqual(one["config_identity"], other["config_identity"])
+        self.assertEqual(one["config_identity"], elsewhere["config_identity"])
+        self.assertNotEqual(one["window_identity"], other["window_identity"])
+        self.assertNotEqual(one["window_identity"], elsewhere["window_identity"])
+
+    def test_the_declared_sample_count_matches_the_window_length(self):
+        provenance = generate_window("AM", 0, config()).provenance()
+        self.assertEqual(provenance["samples"], provenance["window_samples"])
 
     def test_the_digest_alone_would_not_be_enough(self):
         """Stated as a property of the record: the declaration is recoverable.

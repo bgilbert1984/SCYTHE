@@ -140,7 +140,13 @@ class GeneratorConfig:
             raise CorpusRefused(GENERATOR_CONFIG_REFUSED, "noise power unusable")
 
     def identity(self) -> str:
-        """A digest over the configuration, carried by every window it makes."""
+        """A digest over **this configuration**, and nothing wider.
+
+        Deliberately not stretched to cover the stratum or the index: it is the
+        identity of a `GeneratorConfig`, one configuration serves every stratum,
+        and a name that quietly covered more than it says would be the next
+        thing to be wrong about. `window_identity` is what covers a window.
+        """
         material = json.dumps(
             {"schema": SCHEMA, "generator_revision": GENERATOR_REVISION,
              "seed": self.seed, "sample_rate_hz": float(self.sample_rate_hz),
@@ -148,6 +154,25 @@ class GeneratorConfig:
              "noise_power": float(self.noise_power)},
             sort_keys=True, separators=(",", ":")).encode("utf-8")
         return "blake2s:" + hashlib.blake2s(material, digest_size=16).hexdigest()
+
+
+def window_identity(*, schema: str, generator_revision: str, source: str,
+                    stratum: str, index: int, seed: int, sample_rate_hz: float,
+                    window_samples: int, noise_power: float) -> str:
+    """The digest over a window's complete canonical declaration.
+
+    Keyword-only and exhaustive, so adding a declared field without extending
+    this is a `TypeError` at the call rather than a quietly narrower digest --
+    which is the failure mode `config_identity` had when it was asked to stand
+    in for this.
+    """
+    material = json.dumps(
+        {"schema": schema, "generator_revision": generator_revision,
+         "source": source, "stratum": stratum, "index": index, "seed": seed,
+         "sample_rate_hz": float(sample_rate_hz),
+         "window_samples": window_samples, "noise_power": float(noise_power)},
+        sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return "blake2s:" + hashlib.blake2s(material, digest_size=16).hexdigest()
 
 
 @dataclass(frozen=True)
@@ -175,6 +200,21 @@ class SyntheticWindow:
     source: str = field(init=False, default=SYNTHETIC)
     generator_revision: str = field(init=False, default=GENERATOR_REVISION)
     schema: str = field(init=False, default=SCHEMA)
+
+    def identity(self) -> str:
+        """A digest over the **complete canonical declaration** of this window.
+
+        Everything `regenerate` needs and everything it must not be free to
+        change: the sealed constants, the stratum, the index, and the four
+        configuration fields. `config_identity` covers only the configuration,
+        so a record could previously be edited in the fields it did not reach
+        -- source, schema, revision, stratum, index -- and still verify.
+        """
+        return window_identity(
+            schema=SCHEMA, generator_revision=GENERATOR_REVISION,
+            source=SYNTHETIC, stratum=self.stratum, index=self.index,
+            seed=self.seed, sample_rate_hz=self.sample_rate_hz,
+            window_samples=self.window_samples, noise_power=self.noise_power)
 
     def config(self) -> "GeneratorConfig":
         """The configuration that made this window, rebuilt from its own fields."""
@@ -204,28 +244,71 @@ class SyntheticWindow:
             "window_samples": self.window_samples,
             "noise_power": self.noise_power,
             "config_identity": self.config().identity(),
+            "window_identity": self.identity(),
             "samples": int(self.samples.size),
             "note": ("SYNTHETIC. REGENERABLE FROM THE FIELDS ABOVE VIA "
                      "regenerate(). NOT A CAPTURE AND NEVER A SUBSTITUTE"),
         }
 
 
-def regenerate(provenance: Mapping[str, Any]) -> SyntheticWindow:
-    """Rebuild a window from its declaration, verifying the digest first.
+# Every field a complete declaration carries. `regenerate` requires all of
+# them, and `window_identity` covers all but `samples` -- which is checked
+# against `window_samples` instead, being a second name for one length.
+DECLARATION_FIELDS: Tuple[str, ...] = (
+    "schema", "generator_revision", "source", "stratum", "index", "seed",
+    "sample_rate_hz", "window_samples", "noise_power", "config_identity",
+    "window_identity", "samples",
+)
 
-    This is the function that makes "regenerable" a property rather than a
-    claim: hand it a provenance record and it returns the same samples, or it
-    refuses. `PROVENANCE_DIGEST_MISMATCH` means the declaration and the digest
-    disagree -- one of them was edited, and this module will not guess which.
+
+def regenerate(provenance: Mapping[str, Any]) -> SyntheticWindow:
+    """Rebuild a window from its declaration, verifying everything first.
+
+    **This is a second constructor**, and the dataclass being sealed does not
+    seal it. Without the checks below it would take a record whose `source` had
+    been changed to `CAPTURED` and hand back a valid `SyntheticWindow` -- the
+    laundering the sealing was meant to prevent, through a different door.
+
+    Every field in `DECLARATION_FIELDS` is required and every one is checked.
+    `PROVENANCE_DIGEST_MISMATCH` means the record and its digests disagree;
+    this module will not guess which side was edited.
     """
-    required = ("stratum", "index", "seed", "sample_rate_hz", "window_samples",
-                "noise_power", "config_identity")
-    missing = [name for name in required if name not in provenance]
+    missing = [name for name in DECLARATION_FIELDS if name not in provenance]
     if missing:
         raise CorpusRefused(
             STRATUM_NOT_DECLARED,
             f"the provenance is not a complete generator declaration; "
             f"{sorted(missing)} are absent")
+
+    # The sealed constants are not a caller's to supply here either. The
+    # dataclass refuses them at construction; this is the other constructor,
+    # and without these three it would launder an altered record into a valid
+    # synthetic object -- source: CAPTURED going in, SYNTHETIC coming out.
+    for name, expected in (("schema", SCHEMA),
+                           ("generator_revision", GENERATOR_REVISION),
+                           ("source", SYNTHETIC)):
+        if provenance[name] != expected:
+            raise CorpusRefused(
+                PROVENANCE_DIGEST_MISMATCH,
+                f"{name} is {str(provenance[name])[:32]!r} and this module "
+                f"only ever produces {expected!r}")
+
+    # Verified **before** generation, over everything: the stratum and the index
+    # are in here because `config_identity` does not reach them, and editing
+    # either produces different samples under a digest that still matched.
+    declared = window_identity(
+        schema=provenance["schema"],
+        generator_revision=provenance["generator_revision"],
+        source=provenance["source"], stratum=provenance["stratum"],
+        index=provenance["index"], seed=provenance["seed"],
+        sample_rate_hz=provenance["sample_rate_hz"],
+        window_samples=provenance["window_samples"],
+        noise_power=provenance["noise_power"])
+    if declared != provenance["window_identity"]:
+        raise CorpusRefused(
+            PROVENANCE_DIGEST_MISMATCH,
+            "the complete declaration does not hash to its window_identity")
+
     config = GeneratorConfig(seed=provenance["seed"],
                              sample_rate_hz=provenance["sample_rate_hz"],
                              window_samples=provenance["window_samples"],
@@ -233,7 +316,17 @@ def regenerate(provenance: Mapping[str, Any]) -> SyntheticWindow:
     if config.identity() != provenance["config_identity"]:
         raise CorpusRefused(
             PROVENANCE_DIGEST_MISMATCH,
-            "the declaration does not hash to the digest beside it")
+            "the configuration does not hash to its config_identity")
+
+    # Two names for one length drift. `samples` is kept because a reader wants
+    # the count without rebuilding the window, and checked because an unchecked
+    # duplicate is worse than no duplicate.
+    if provenance["samples"] != provenance["window_samples"]:
+        raise CorpusRefused(
+            PROVENANCE_DIGEST_MISMATCH,
+            f"samples {provenance['samples']} and window_samples "
+            f"{provenance['window_samples']} disagree about one length")
+
     return generate_window(provenance["stratum"], provenance["index"], config)
 
 
