@@ -1847,9 +1847,23 @@ is what makes the claim checkable rather than decorative.
 that needs a tuner and has none is absent, and reports absent. Filling it is the
 substitution every other refusal in this repository exists to prevent.
 
-**No `PromotionCorpusLock` freeze and no claim of corpus completion** while
-tuner-dependent strata are absent. A freeze over a partial corpus would record a
-strata set nobody had built.
+**A `PromotionCorpusLock` freezes configuration before the first promotion
+window. No `CorpusCompletionReceipt` and no claim of corpus completion** are
+permitted while any declared stratum is missing or awaiting capture.
+
+This refusal originally read "no `PromotionCorpusLock` freeze … while
+tuner-dependent strata are absent", which forbade the precommitment until after
+the thing it precommits to. It is **corrected here rather than superseded
+elsewhere**: an accepted section that says one thing and a later accepted
+section that says another leaves two accepted answers, whichever one is labelled
+superseded. What the original protected — that nothing may claim a corpus is
+complete while a stratum is missing — is the second sentence, and is unchanged.
+
+*`rf_null_corpus.py` still implements the original rule: `may_freeze` is `False`
+and `freeze_note` names `PromotionCorpusLock`. That is §5.20 correction **C**,
+which lands as code with its own controls before the first lock exists. The
+document is ahead of the code here, and says so rather than letting a reader
+assume they agree.*
 
 **No generic payload writer.** The interface keeps future real-window ingestion
 structurally separate from synthetic generation. One `write(payload)` accepting
@@ -1859,16 +1873,545 @@ both is exactly the hole that blurs the authority boundary — the same shape
 **No captured byte reaches disk under this section.** `RETUNE_TRANSIENTS`,
 `GAIN_STEPS` and `RECEIVER_SPURS` are out of scope until §5.20 is accepted.
 
-#### 5.20 — captured-corpus persistence *(not written)*
+### 5.20 — captured-corpus persistence — **ACCEPTED**
 
-Before the first tuner-derived byte is written, its own authority must define:
-exact retained representation · directory · permissions · encryption if any ·
-retention period · deletion method · access surface · and explicit exclusion
-from logs, APIs, model context and ordinary repository artefacts.
+```text
+Status:     ACCEPTED 2026-09-14. The authority text is in force.
+Authority:  §5.20 is accepted. It authorises no persistence code and no live capture.
+            Both require corrections A-D and the controls below landed as code,
+            under their own slice authorisation.
+Opens:      GAIN_STEPS and RETUNE_TRANSIENTS become reachable in principle --
+            two strata, 11 122 windows. RECEIVER_SPURS does not, and the corpus
+            stays unfreezable. See *What acceptance does not unblock*.
+Creates:    Nothing. No directory exists and no byte is written by acceptance.
+```
+
+*Proposed 2026-09-14 at `fd536cd`, with three contradictions the operator named
+and a fourth found while checking them. Revised at `d4a35c7` after review found
+seven details open — one of which, "drains the entire ring", described behaviour
+`acquire_window` does not have and was concealing an obligation. Revised again
+at `cf4d627` after review found five more, including a digest claim that was
+simply wrong and an attestation field that would have forced `RECEIVER_SPURS` to
+fabricate two declarations to satisfy a schema. Accepted on the corrected
+substance at `f777847`.
+
+Review of that acceptance found three contradictions **in the resulting
+document** — one substantive: §5.19's refusal and accepted §5.20 gave opposite
+answers about `PromotionCorpusLock`, and calling the older one superseded left
+two accepted answers rather than one. Corrected at `8e290ac`. **This is the
+acceptance commit, and it covers the corrected text**, including the amendment
+to §5.19, which is itself accepted text and could not be changed without one.*
+
+*Two acceptance commits, in order, because the first was accurate when it was
+made and the text moved under it. Amending it to pretend otherwise would have
+produced a cleaner history and a false one.*
+
+*Those three SHAs are the heads that were **reviewed**, not ancestors of this
+one: the branch was rebased onto `084b1d2` so that §5.19's corrected wording and
+entry 8's drain could not be lost, and a rebase rewrites. `fd536cd` and
+`d4a35c7` are reachable through PR #74's timeline and nowhere in `main`'s
+history. Recorded because a SHA in a document that resolves to nothing is worse
+than no SHA.*
+
+*Three readings are pinned here so they are not recovered later by inference.
+§5.19's "out of scope until §5.20 is accepted" is now satisfied — but
+`RECEIVER_SPURS` remains unreachable behind a **second** gate, the missing
+identification protocol, which §5.20 does not supply. And acceptance of an
+authority is not authorisation of a slice: no persistence code and no live
+capture are authorised by this commit. And the document is **ahead of the
+code**: §5.19 now states the lock split that `rf_null_corpus.py` does not yet
+implement, which is §5.20 correction **C** and is recorded in both places rather
+than in neither.*
 
 *§5.5 granted a DSP working buffer — process-local, volatile, fixed-capacity,
 non-persistent. A validation corpus is persisted labelled data by definition, so
 it is a different permission and not an extension of that one.*
+
+#### What is granted
+
+> SCYTHE may atomically publish verified, ring-issued validation windows for
+> exactly `GAIN_STEPS`, `RETUNE_TRANSIENTS` and `RECEIVER_SPURS`, within one
+> explicitly opened Phase 3 corpus. It grants no general recording, replay,
+> export, capture or archive authority.
+
+The narrowness is the point. "SCYTHE may save IQ" is a different permission and
+is not requested here.
+
+#### Three contradictions this must correct first — and a fourth
+
+An authority written over code that contradicts it authorises the contradiction.
+These are corrections to the *present* repository, verified against it on
+2026-09-14 at `1c4ce23`, not predictions.
+
+**A. The promotion geometry, and what actually registers it.** The window a
+captured corpus is drawn from is **524 288 samples — 256 ms at 2.048 MS/s,
+4 194 304 payload bytes** as `complex64`. That figure is `DEFAULT_CAPACITY_SAMPLES`
+in `rf_iq_ring.py:79` — the **ring's fixed capacity** — and it is the window §6
+Q2 approved at 4.19 MB. `rf_null_corpus.py:125` presently defaults
+`GeneratorConfig.window_samples` to `262_144`.
+
+The correction stands, but its stated reason must not: **262 144 and 524 288 are
+not competing registered detector geometries.** The registered detector's
+`minimum_sample_count` is **32 768** (`rf_signal_family.py:303`), and 262 144 is
+recorded in `rf_symbol_clock.py:579` as a *superseded* minimum — "registered
+against no implementation and unreachable through this channelizer". Calling
+524 288 "the registered detector geometry" would restate a number the detector
+contract does not hold.
+
+So: 262 144 may remain a development and test seam for synthetic work, where a
+shorter window costs half the arithmetic and proves the same properties.
+**Promotion-corpus generation and capture must refuse any geometry but 256 ms**,
+because that is the ring the windows come out of and the window the corpus was
+sized against — not because a detector registered it.
+
+Two consequences follow from the ring, and both belong in the capture rules.
+
+A 524 288-sample acquisition **spans the entire ring capacity**, and that is all
+it does: `acquire_window` **copies** the retained tail
+(`_ordered_tail_locked`) and removes nothing — the held count is unchanged.
+Nothing here drains anything. Which matters, because two back-to-back
+acquisitions return **the same samples twice**, under two different `window_id`s
+and with two different issue times. `WINDOW_OVERLAP = "NONE"` is therefore not a
+property the ring confers by handing a window out.
+
+**And it must not become a promise the caller makes.** "Wait for a full capacity
+of new samples" is unfalsifiable from the corpus afterwards, which is the shape
+every other refusal here exists to remove. Make it mechanical:
+
+> `current.first_sample_index >= previous.first_sample_index + 524_288`
+
+The ring already computes exactly this number — `first_index = self._total_appended
+- requested` (`rf_iq_ring.py:468`) — and records it in `_WindowRecord` while
+**`IQWindow` does not expose it**. Exposing it as `first_sample_index` is the
+whole change; it is an index, not samples, so it carries into `to_dict()` without
+touching `raw_iq_exposed`.
+
+The index is comparable across invalidations, which is the property the rule
+depends on and is worth stating because it is not obvious:
+`_invalidate_locked` zeroes the buffer, the write index, the held count and the
+newest-sample time and bumps the epoch, but **`_total_appended` is set to zero
+only in `__init__` and incremented only in `append`**. It is monotonic for the
+ring's lifetime.
+
+The header records `first_sample_index`, the `previous_window_id`, and the
+interval between them, so non-overlap is **auditable from the files alone**
+rather than from the process that wrote them. The first accepted window in a
+stratum has no predecessor: it records `previous_window_id: null` and no
+interval, and that path needs its own control rather than a special case nobody
+tests.
+
+Two freshly issued window IDs over identical retained samples **refuse as
+overlap** — which is the back-to-back case, caught because the rule is over
+indices rather than over IDs, timestamps or digests, all three of which differ
+while the samples are the same.
+
+And after any invalidation the ring must **refill completely — 256 ms of
+continuous stream** — before a complete window exists at all; `acquire_window`
+reports `INSUFFICIENT_WINDOW` until it does.
+
+**B. Two stratum descriptions describe windows the ring cannot issue.**
+`rf_validation_manifest.py:295` defines `GAIN_STEPS` as "A gain change part-way
+through the window". `GAIN_CHANGE` is in `INVALIDATION_REASONS`
+(`rf_iq_ring.py:96`) and `IQRetentionOwner.set_gain_db` calls it
+(`rf_iq_retention.py:786`), so the ring is cleared at the gain change and no
+window can straddle it. The same holds for `RETUNE`. Redefine both as the
+**first complete post-invalidation window**:
+
+- `GAIN_STEPS` — first complete window after `GAIN_CHANGE`, linked to the
+  before and after gain declarations.
+- `RETUNE_TRANSIENTS` — first complete window after `RETUNE`, linked to the
+  before and after tuning declarations.
+
+Neither contains samples from both regimes. What each stratum tests is therefore
+**settling behaviour in the first window of a new configuration**, which is the
+honest version of the thing the old wording gestured at.
+
+**D. The lock cannot see a stratum being redefined.** `_strata_digest()`
+(`rf_validation_manifest.py:219`) hashes `key:minimum_windows:buildable` and
+**not `description`**. So correction B — which changes what two strata *mean*
+without changing their names, counts or buildability — is invisible to
+`PromotionCorpusLock`. That is the identical gap `validation_family_revision`
+was added to close: "the bound count alone would not notice a family whose
+membership was rewritten while its size stayed the same."
+
+Doing B now, before any lock exists, is free. Doing it after a corpus opened
+would silently change what 5 561 recorded trials were trials *of*.
+
+The resolution is a revision constant, **not** a hash over prose:
+
+```python
+STRATA_DEFINITION_REVISION = "rf-null-strata.v2"
+```
+
+frozen in `PromotionCorpusLock` and included in `_strata_digest()`.
+
+**Descriptions are not hashed.** Editorial punctuation must not redefine a
+population, and a digest over sentences fails in both directions at once: a
+comma becomes a strata change, while a genuine redefinition that reuses the same
+words stays invisible. The revision advances when the **operational meaning**
+changes. B is such a change, which is why v2 exists and why the constant is
+declared at the same time as the redefinition.
+
+The redefinition and the revision must land **before** the first
+`PromotionCorpusLock` is created.
+
+**C. §5.19's freeze refusal creates a selection-lock catch-22.** §5.19 refuses
+"`PromotionCorpusLock` freeze … while tuner-dependent strata are absent", and
+`rf_null_corpus.py:401` says so at runtime. But the detector configuration must
+be frozen **before** the promotion corpus sees its first window — otherwise
+thresholds are tuned against the same windows that validate them, which is the
+failure `PromotionCorpusLock` exists to prevent. The refusal as written forbids
+the precommitment until after the thing it precommits to.
+
+The implemented object already supports the correct reading: `PromotionCorpusLock`
+holds `method_revision`, `decision_threshold`, `preprocessing_revision`, the
+digests, the bound count and the per-bound alpha — **no window counts at all**.
+It is a configuration precommitment and never was a completion certificate.
+§5.19's refusal describes an object the code does not implement.
+
+Split the two states explicitly:
+
+| State | Created | Means |
+|---|---|---|
+| `PromotionCorpusLock` | **before** the first generated or captured promotion window | configuration precommitment |
+| `CorpusCompletionReceipt` | only after all twelve strata satisfy their declared counts | the corpus is complete |
+
+An incomplete corpus may be **configuration-frozen** but can never be
+completion-certified or promotion-eligible.
+
+§5.19's refusal now states this split directly — it was **corrected in place**
+rather than superseded from here, because a superseded accepted rule is still an
+accepted rule and two of them is one too many. What remains for **C** is the
+code: `rf_null_corpus.py`'s `may_freeze` and `freeze_note` still implement the
+original rule.
+
+#### The eight required definitions
+
+| Decision | Proposed authority |
+|---|---|
+| **Representation** | One immutable `.iqc` file per `IQWindow`, in the exact framing declared below — magic, fixed format version, fixed-width header length, canonical UTF-8 JSON header, payload, EOF. Little-endian `complex64`, exactly 524 288 samples and 4 194 304 payload bytes. No compression, no pickle, no NumPy object arrays, no native-byte-order ambiguity. |
+| **Directory** | `/home/spectrcyde/scythe-validation-corpus/captured-v1`, resolved before use and disjoint from the repository, ledger, derived-evidence and observation namespaces. Subdirectories derive only from `corpus_id` and the three closed stratum names. |
+| **Permissions** | Corpus directories `0700`; files and manifests `0600`; owner must match the process UID. Local ext4 only for v1. Symlinks, unexpected hard links, wrong ownership, permissive modes, network filesystems and mount or device changes refuse **before** publication. |
+| **Encryption** | **NONE in v1**, stated explicitly. Permissions and namespace isolation are access controls, not encryption. No status field or receipt may imply encrypted storage. Moving or copying the corpus to another medium is unauthorised. |
+| **Retention** | An absolute `delete_not_after`, supplied **before** the corpus opens and bounded by `delete_not_after ≤ PromotionCorpusLock.opened_at + 90 days`. After a Phase 3 decision or an abandonment, deletion is due at the **earlier** of that fixed deadline or 30 days after the decision. An absent, unbounded or already-expired deadline refuses capture. |
+| **Deletion** | Enumerate the **recognised** final files and their derived temporary names, `unlinkat` exactly those targets, and `fsync` each affected directory. **Never a recursive delete.** An unrecognised entry yields `NAMESPACE_NOT_EMPTY_UNEXPECTED_ENTRY`, is **preserved**, and withholds the empty-namespace receipt. On a namespace holding nothing else, report `NAMESPACE_REMOVED_BYTES_NOT_ATTESTED_DESTROYED`. **No claim of secure erasure**: ext4 journalling, SSD block remapping, snapshots and backups each defeat that conclusion. |
+| **Access surface** | One orchestrator-owned writer and one offline Phase 3 reader. No HTTP route, no MCP method, no browser surface, no GraphOps message, no generic download, no arbitrary-path reader. Status exposes counts, digests, deadlines and refusal codes only. |
+| **Exclusions** | Samples never enter logs, exceptions, `repr`, diagnostics, APIs, model context, observation records, Git history, CI artefacts, crash reports, swap-oriented fallback, cloud sync or ordinary backups. The repository must **reject** `.iqc` content rather than ignore it silently — an ignore rule hides the mistake it is meant to prevent. |
+
+#### Why two of the eight rows are not what was first asked for
+
+**The retention anchor had to move.** "No later than 90 days after the first
+captured window" cannot be checked at the moment it is supplied: the first
+capture has not happened, so the check defers to a future event. That is a
+promise, not a bound. `PromotionCorpusLock.opened_at` **exists** when the
+deadline is supplied and is already frozen in the lock, so
+`delete_not_after ≤ opened_at + 90 days` is verifiable at the moment of the
+decision it governs. The 30-day figure keeps its meaning as the normal case
+rather than the limit: after a Phase 3 decision or an abandonment, deletion is
+due at the earlier of the two.
+
+**Deletion's authority is over files this corpus created**, identified from the
+corpus's own records — not over everything in a directory. A routine that
+removes what it does not recognise is a recursive delete with extra steps, and
+it would be at its most destructive precisely when something unexpected has
+happened, which is when it is least entitled to act. So an unrecognised entry
+stops the deletion, is preserved, and withholds the receipt: the namespace is
+not empty, and no receipt may say it is.
+
+*The refusal codes named here — `NAMESPACE_NOT_EMPTY_UNEXPECTED_ENTRY` and
+`NAMESPACE_REMOVED_BYTES_NOT_ATTESTED_DESTROYED` — are **provisional names**.
+The mechanical check in `test_scythe_verdict_vocabularies.py` runs over declared
+token tuples in code, so it has not seen these and cannot have passed them. They
+are subject to it at declaration, and to renaming rather than to argument.*
+
+#### The sample is fixed before it is collected
+
+**Exactly 5 561 accepted files per captured stratum. Exactly 16 683 in total.**
+The 5 562nd is refused **before anything is written** — not trimmed afterwards,
+not accepted and excluded at analysis time.
+
+The bound is a **zero-failure** bound. A corpus that observes a false DIGITAL
+**fails**; it does not keep collecting until its bound improves. Continuing
+after looking is optional stopping, and an upper bound computed on a sample
+whose size depended on the results it saw is not the bound that was published —
+it is a description of how long someone was willing to keep going, which is the
+same failure `PromotionCorpusLock` exists to prevent one layer up.
+
+It is also what makes the storage figure below a **boundary** rather than an
+estimate. An uncapped corpus has no stated size, and "at least 80 GiB free"
+would be a guess about someone's stopping behaviour.
+
+*A naming note, recorded rather than fixed here.* `Stratum.minimum_windows` is
+documented as "a floor for that stratum, not a share of a quota". For the three
+captured strata the floor and the ceiling **coincide at 5 561, for unrelated
+reasons**: the floor is what the bound requires, the ceiling is what optional
+stopping forbids. The field name describes only the first of those, and a reader
+who trusts the name would not find the second.
+
+#### What it costs on disk
+
+At exactly 16 683 captured windows the payload alone is **69 973 573 632 bytes — 65.17
+GiB**, before headers, manifests and the temporary sibling each publication
+creates. Preflight requires **at least 80 GiB free**, so filesystem overhead and
+in-flight publication do not turn the last stratum into a disk-pressure
+experiment.
+
+The figure is the **declared total of the strata the corpus was opened for**,
+not of what is reachable today. With `RECEIVER_SPURS` unreachable only 43.45 GiB
+of it can currently be written — but a corpus sized against what happens to be
+buildable this month would need re-preflighting the moment the twelfth stratum
+arrived, and a check that passes because a stratum is missing is not a check.
+
+*Recorded as an observation, not a guarantee: the pinned host reported 922 GiB
+available on 2026-09-14. Preflight still checks, because a figure written in a
+document is not a measurement of the filesystem at capture time.*
+
+#### The `.iqc` framing
+
+"A header and a payload" is a shape, not a representation. The exact framing:
+
+```
+offset            field
+0                 magic             8 bytes, fixed
+8                 format_version    uint16, little-endian, fixed
+10                header_length     uint32, little-endian
+14                header            header_length bytes, canonical UTF-8 JSON
+14 + header_length payload          sample_count × 8 bytes, little-endian complex64
+                  EOF               immediately after the payload
+```
+
+The fixed values, declared rather than described:
+
+```python
+IQC_MAGIC            = b"\x89SCYIQ\r\n"            # exactly 8 bytes
+IQC_FORMAT_VERSION   = 1                            # uint16, little-endian
+IQC_HEADER_SCHEMA    = "scythe.iq-capture-window.v1" # the JSON `schema` token
+IQC_MAX_HEADER_BYTES = 65_536
+```
+
+The magic borrows PNG's construction for PNG's reasons: **byte 0 has its high
+bit set**, so a seven-bit-clean transfer path corrupts it detectably, and the
+trailing **`\r\n`** catches line-ending translation. A file that survived a
+text-mode copy is not a corpus member and should not be readable as one.
+
+`IQC_MAGIC` and `IQC_FORMAT_VERSION` are **not** the JSON `schema` string: a
+reader must be able to reject a file it cannot parse **without parsing it**.
+`header_length` is fixed-width, unsigned and little-endian for the same reason —
+the header is located before it is read, never discovered by scanning.
+
+`IQC_MAX_HEADER_BYTES` is checked **before allocating**. A `uint32` length field
+can claim four gibibytes; a corrupt or hostile one must become a refusal, not an
+allocation. The real header is on the order of a kilobyte.
+
+Canonical header bytes:
+
+```python
+json.dumps(header, sort_keys=True, separators=(",", ":"),
+           ensure_ascii=False, allow_nan=False).encode("utf-8")
+```
+
+`allow_nan=False` is load-bearing rather than tidy. Python's `json` emits bare
+`NaN` and `Infinity` by default, which **no conforming parser accepts** — and a
+`NaN` that reached the header would compare unequal to itself, so every digest
+over it would verify correctly while the value it named meant nothing. Rejected
+at serialisation **and** at parse. (`allow_nan=False` already appears in
+`graphops_graph_resolver.py` and `graphops/evidence_fabric.py`, for this.)
+
+The reader **re-serialises the parsed header and requires byte equality** with
+what it read. Without that, two files with identical meaning and different
+spacing are two different `file_sha256` values and two different filenames for
+one window.
+
+**EOF falls immediately after the payload.** A file with trailing bytes is
+**refused, not truncated** — a reader that ignores what it did not expect is a
+reader that can be appended to.
+
+The header carries: schema and format revision · corpus and configuration-lock
+identities · `STRATA_DEFINITION_REVISION` · `source` fixed to `CAPTURED` ·
+stratum · ring-issued `window_id` and ring digest · signal-chain hash and
+configuration epoch · sample count, sample rate, dtype, byte order and overlap
+declaration · `first_sample_index`, `previous_window_id` and the sample interval
+between them · capture times and the named clock authority · **the
+stratum-specific attestation** (below) · `payload_sha256` · retention deadline.
+
+#### The identity does not contain itself
+
+```
+payload_sha256 = SHA-256( the payload bytes )
+file_sha256    = SHA-256( magic ‖ format_version ‖ header_length ‖ header ‖ payload )
+```
+
+The header carries `payload_sha256` and **never** `file_sha256`; the **filename
+derives from `file_sha256`**. A digest cannot cover the header that carries it,
+which is the non-recursion §13i J.7a already established for evidence records
+and §16.53b records as a decision: *"a digest cannot cover the header that
+carries it."* The same mistake in a new file format is still the same mistake.
+
+Three digests, three jobs, none replacing another:
+
+| digest | what it identifies | what it does **not** do |
+| --- | --- | --- |
+| ring BLAKE2s | the live source, at issue time | survive the ring moving on |
+| `payload_sha256` | **the payload bytes, and nothing else** | bind the payload to the header |
+| `file_sha256` | **the complete file** — it is what binds the canonical header and the payload together | exist inside the header |
+
+The middle row was wrong in the previous revision, which claimed
+`payload_sha256` bound samples to header. It does not: it is a digest over the
+payload alone, and a payload could be moved under a different header without
+disturbing it. **`file_sha256` is the binding**, because it is computed over the
+canonical header and the payload as one span — which is also why it cannot live
+inside the header, and why the filename is where it goes.
+
+A file whose name does not match its own framed bytes is not a corpus member.
+
+Publication protocol — a failure at any step leaves **no partial final file**:
+
+1. Hold the corpus ownership scope and verify the `IQWindow` against the live ring.
+2. Recheck descriptor, mount, directory ownership, mode, corpus limits and retention deadline.
+3. Exclusively create a `0600` temporary sibling.
+4. Write the canonical header and the exact payload.
+5. `fsync` the file.
+6. Publish **without replacement**.
+7. `fsync` the directory.
+8. Read the final file back and verify `payload_sha256` **and** `file_sha256` before counting it.
+
+The ring binding is verified at step 1 and recorded in the header, because by
+step 8 the ring may have moved on and can no longer confirm it — `verify_window`
+would report `WINDOW_EVICTED` or `EPOCH_CHANGED` for a window that was entirely
+genuine when it was taken.
+
+Orphan temporaries are never corpus members and remain subject to the same
+retention deadline.
+
+#### The typed capture boundary
+
+**Do not expose `write_window(window, stratum)`.** A generic writer with a label
+argument is the hole §13k L.1 refused in the derived-evidence producer, for the
+same reason: the label becomes a caller's claim rather than a control path's
+attestation.
+
+Three nominal entrypoints instead, each taking its event attestation from the
+control path that produced it:
+
+```
+record_gain_step(window, gain_event, scope)
+record_retune_transient(window, retune_event, scope)
+record_receiver_spur(window, spur_attestation, scope)
+```
+
+Each accepts an exact `IQWindow`, verifies it against the ring, and refuses a
+caller-supplied `source` label outright.
+
+**The attestation is a closed union selected by stratum, not a universal
+before/after field.** A gain change and a retune each have a control action with
+a before and an after; a spur has neither, and a header that required them would
+force `RECEIVER_SPURS` to fabricate two declarations to satisfy a schema:
+
+| stratum | attestation | members |
+| --- | --- | --- |
+| `GAIN_STEPS` | `GainStepAttestation` | `event_id`, `gain_db_before`, `gain_db_after`, `invalidation_epoch` |
+| `RETUNE_TRANSIENTS` | `RetuneAttestation` | `event_id`, `centre_hz_before`, `centre_hz_after`, `invalidation_epoch` |
+| `RECEIVER_SPURS` | **no constructible member** | — |
+
+Nominal types, `type(x) is T`, no generic mapping. The union is closed: a
+stratum with no member has no way to produce a header, so
+`record_receiver_spur` **refuses by construction** rather than by a check
+someone could relax.
+
+A tuner operation is evidence for a gain or retune event. **Having an RTL2838
+attached is not evidence that a feature is an internal receiver spur** — that is
+an identification, and it needs a protocol that says how a candidate is
+established as internal rather than received.
+
+#### What acceptance does not unblock
+
+This follows from the union and is the most important consequence in the
+section, so it is stated rather than left to be derived.
+
+**Accepting §5.20 does not make the corpus buildable.** It makes **two** strata
+reachable in principle:
+
+| | windows | payload |
+| --- | ---: | ---: |
+| `GAIN_STEPS` + `RETUNE_TRANSIENTS` | 11 122 | 43.45 GiB |
+| `RECEIVER_SPURS` — still unreachable | 5 561 | 21.72 GiB |
+| declared total | 16 683 | 65.17 GiB |
+
+`RECEIVER_SPURS` has no identification protocol, so it has no attestation, so it
+has no windows. `plan_state()` continues to report `CORPUS_INCOMPLETE_AWAITING_CAPTURE`,
+`may_freeze` stays `False`, and **no `CorpusCompletionReceipt` can be issued**.
+The twelfth stratum needs a section of its own, and §5.20 must not be read as
+having supplied it.
+
+#### The observation boundary
+
+**The capture writer must not import or invoke the detector**, enforced by a
+static import-closure check — the instrument Amendment O already uses
+(`_first_party_closure()`, `_dynamic_imports()`), which exists because importing
+a module *executes its graph* and a pure function reached through an impure
+module is not a pure function.
+
+The sequence is fixed:
+
+1. Collect the fixed sample **without reading any outcome**.
+2. Issue the `CorpusCompletionReceipt`.
+3. Evaluate **once**, offline.
+
+A false DIGITAL then **fails that frozen corpus**. It cannot cause replacement
+captures, additional trials, or a revised threshold.
+
+The cap above forbids **continuing after looking**. This forbids **being able to
+look** — which is the stronger of the two, and the only one that survives
+someone deciding the first is inconvenient at 5 200 windows with a deadline. It
+is the same move as §13i J's governing claim: a prohibition stops being a rule
+someone must obey and becomes a shape the code cannot take.
+
+#### The statistical boundary
+
+§5.20 would authorise **retaining bytes**. It does not make trials independent
+and it does not make labels true.
+
+A subsequent capture-plan section must define how the 5 561 events per tuner
+stratum are distributed across time, tuning, gain and receiver conditions.
+Reusing overlapping windows, or drawing thousands of windows from one tuner
+event, must not be counted as thousands of independent trials — the Clopper–Pearson
+bound assumes independence it cannot check, and 5 561 windows from a handful of
+events would produce a number with the right shape and no meaning.
+
+#### What this section does not authorise
+
+No directory is created and no byte is written by this text. It authorises no
+live acquisition, no `rtl_tcp` connection, no capture session, and no change to
+the position-attestation act: entry 7 of `PENDING_AMENDMENTS.md` and §17 slice 11
+remain exactly as blocked as before.
+
+#### What acceptance started, and what it did not
+
+The acceptance decision and this commit are the whole of what has happened. No
+directory exists, no byte has been written, and the three strata remain
+uncaptured.
+
+Corrections **A**, **B**, **C** and **D** land as code with their own negative
+controls **before the first `PromotionCorpusLock` exists** — **D** especially,
+because it is the one that stops being free afterwards.
+
+Every rule here needs a control that fails when it is removed:
+
+| control | what must break |
+| --- | --- |
+| capture cap | the 5 562nd window is accepted |
+| framing | a trailing byte is not refused; a header over `IQC_MAX_HEADER_BYTES` is allocated; a bare `NaN` serialises |
+| canonicality | a re-spaced header yields a second filename for one window |
+| identity | a header quietly accepts a `file_sha256` field |
+| non-overlap | two window IDs over identical retained samples are both accepted |
+| first-in-stratum | the no-predecessor path is never exercised |
+| retention | a deadline one second past `opened_at + 90 days` is accepted |
+| deletion | an unrecognised entry survives a deletion pass, or a receipt is issued over a non-empty namespace |
+| attestation union | `record_receiver_spur` constructs a header |
+| observation boundary | the writer's import closure reaches the detector |
+
+Each needs the collateral scan as well: a mutation that makes exactly its own
+tests fail and no others.
 
 ---
 
