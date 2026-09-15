@@ -2413,22 +2413,48 @@ Every rule here needs a control that fails when it is removed:
 Each needs the collateral scan as well: a mutation that makes exactly its own
 tests fail and no others.
 
-### 5.21 — receiver-spur identification — **PROPOSED, NOT ACCEPTED**
+### 5.21 — receiver-spur identification — **ACCEPTED**
 
 ```text
-Status:     PROPOSED. Nothing here is in force.
-Authority:  NONE until an explicit acceptance decision and an acceptance commit.
-Opens:      Nothing. No capture, no termination, no catalogue, no byte.
-Answers:    How a spectral feature is discriminated as consistent with an
-            internal origin rather than a received one — the gate §5.20 named
-            and did not supply. A method, not an executable procedure: K, R,
-            retune deltas, tolerances, margins and the accepted termination
-            confidence are all pinned to §5.22 and none is set here.
+Status:     ACCEPTED 2026-09-14. The discrimination method is in force.
+Authority:  §5.21 is accepted. It authorises no capture, no termination, no
+            catalogue and no byte. It is a method, not a procedure: every
+            decisive parameter lives in §5.22.
+Opens:      Nothing on its own. It removes the gate §5.20 named — RECEIVER_SPURS
+            now has a way to be identified — and removes no other obstacle.
 Does not:   Make RECEIVER_SPURS achievable, or prove any feature internal.
-            See *The part that may have no answer*, which is the most important
-            paragraph in this section, and which turns on an estimand §5.22
-            must name before a trial unit can be chosen.
+            Every usable class is CONSISTENT_WITH_ something, at a governed
+            confidence, under an OPERATOR_DECLARED termination that no software
+            here can verify.
 ```
+
+*Proposed 2026-09-14 at `695fb5a`. Review found four claims wrong and they were
+corrected at `91e7369`: the retune partition was three cases where the mixing
+family is affine with integer and rational slopes; the independence argument was
+categorical where the real defect is unrepresentativeness; the labels claimed
+internality where they can only claim consistency; and the signal-chain
+asymmetry was **backwards** — `gain_db` is hashed into the manifest and
+`set_gain_db` rebuilds the chain before invalidating, so `GAIN_STEPS` spans two
+identities and `RETUNE_TRANSIENTS` spans one.
+
+Review then found four more, corrected at `6d1cbf7`: "the same instrument turned
+down" contradicted this repository's own semantics, where gain is inside the
+identity; termination was simultaneously "the only test that decides" and an
+observation that proves nothing; a monotonic sweep confounds tuner frequency
+with time, so "no received emission behaves this way" was true of a *static*
+emitter and asserted of every emitter; and the reconnect rule excluded
+session-scoped features as "not a property of the receiver" when USB seams, PLL
+settling and initialisation transients are receiver-system behaviour — and are
+periodic and narrow, which makes them close to the exact population this stratum
+exists to test. **Accepted on the corrected substance**; this is the acceptance
+commit.*
+
+*Two readings are pinned so they are not recovered later by inference. Accepting
+a **method** is not accepting a **procedure**: K, R, the retune deltas, the
+tolerances, the margins, the order, the coordinates and both accepted
+termination confidences are §5.22's, and §5.21 sets none of them. And acceptance
+proves nothing internal — it establishes how the question is asked, not what the
+answer is for any feature.*
 
 §5.20 left one sentence deliberately unresolved:
 
