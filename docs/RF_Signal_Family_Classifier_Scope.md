@@ -1857,7 +1857,7 @@ both is exactly the hole that blurs the authority boundary — the same shape
 §13k L.1 refused in the derived-evidence producer, for the same reason.
 
 **No captured byte reaches disk under this section.** `RETUNE_TRANSIENTS`,
-`GAIN_STEPS` and `RECEIVER_SPURS` are out of scope until §5.20 exists.
+`GAIN_STEPS` and `RECEIVER_SPURS` are out of scope until §5.20 is accepted.
 
 #### 5.20 — captured-corpus persistence *(not written)*
 
