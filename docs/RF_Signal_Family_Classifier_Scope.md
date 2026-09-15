@@ -2806,17 +2806,36 @@ question above rather than inherit it; and only then the persistence mechanism,
 with `PENDING_AMENDMENTS` entry 9 landed first, since §5.20's publication step 1
 still asks for an attestation that does not exist.
 
-### 5.22 — the capture plan — **PROPOSED, NOT ACCEPTED**
+### 5.22 — the capture plan — **ACCEPTED**
 
 ```text
-Status:     PROPOSED. Nothing here is in force.
-Authority:  NONE until an explicit acceptance decision and an acceptance commit.
-Opens:      Nothing. No capture, no tuner operation, no catalogue, no byte.
-Order:      Estimand, then trial unit, then parameters. Reversing that order is
-            how a corpus ends up measuring its own convenience.
-Exposes:    Two properties of the existing design that naming the estimand makes
-            visible. Both are recorded as findings and neither is repaired here.
+Status:     ACCEPTED 2026-09-14. The estimand, the trial unit and the eleven
+            parameters are in force.
+Authority:  §5.22 is accepted. It authorises no capture, no tuner operation, no
+            catalogue, no persistence and no byte.
+Order:      Estimand, then trial unit, then parameters — now settled in that
+            order rather than proposed in it.
+Binds:      The promotion claim is instrument-, envelope- and
+            distribution-scoped, and the promotion record must carry all three.
+            The aggregate bound is design-weighted and must be described as
+            such. Finding A must land before the first PromotionCorpusLock, and
+            option 4 expires at that same moment.
 ```
+
+*Proposed 2026-09-14 at `c216ef4` and accepted on that substance; this is the
+acceptance commit. Naming the estimand was the whole of the work and it ruled
+out the answer a reader would assume: nine of twelve strata are synthetic, so
+the corpus cannot estimate an operational rate, and the claim promotion would
+license is narrower than "the detector's false-DIGITAL rate".*
+
+*Three readings are pinned. **The scope limits travel with the claim** — a
+promoted DIGITAL verdict is covered for this chain, inside the declared
+envelope, against the validation distribution, and nowhere else. **The aggregate
+is design-weighted**; describing it as an operational rate needs an amendment,
+not a rewording. And **`RECEIVER_SPURS` is retained under option 1** because the
+estimand is a rate over a distribution that genuinely contains those spurs
+repeatedly — never because the multiplication reaches 5 561. Option 4 remains
+available until a lock exists and is unavailable after it.*
 
 §5.20 deferred this and said why: *"retaining bytes does not make trials
 independent and does not make labels true."* §5.21 refused to choose a trial
