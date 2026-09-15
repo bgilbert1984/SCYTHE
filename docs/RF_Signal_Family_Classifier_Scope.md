@@ -2780,6 +2780,268 @@ question above rather than inherit it; and only then the persistence mechanism,
 with `PENDING_AMENDMENTS` entry 9 landed first, since §5.20's publication step 1
 still asks for an attestation that does not exist.
 
+### 5.22 — the capture plan — **PROPOSED, NOT ACCEPTED**
+
+```text
+Status:     PROPOSED. Nothing here is in force.
+Authority:  NONE until an explicit acceptance decision and an acceptance commit.
+Opens:      Nothing. No capture, no tuner operation, no catalogue, no byte.
+Order:      Estimand, then trial unit, then parameters. Reversing that order is
+            how a corpus ends up measuring its own convenience.
+Exposes:    Two properties of the existing design that naming the estimand makes
+            visible. Both are recorded as findings and neither is repaired here.
+```
+
+§5.20 deferred this and said why: *"retaining bytes does not make trials
+independent and does not make labels true."* §5.21 refused to choose a trial
+unit before an estimand existed. This names the estimand.
+
+#### The estimand, and what naming it costs
+
+The promotion rule is a bound on **the false-DIGITAL rate**. A rate is a rate
+over *some distribution of windows*, and the corpus has never said which.
+
+The attractive answer — *the rate over windows the deployed system will see* —
+**is not available**, and the reason is structural rather than fixable by
+wording:
+
+> **Nine of the twelve strata are synthetic.** A synthesised window samples a
+> generator's model of a condition. It does not sample operation. §5.19
+> authorised that on purpose and was right to; but a corpus three-quarters
+> synthesised cannot estimate an operational rate, and saying it does would be
+> the substitution every refusal in this repository exists to prevent.
+
+So the proposed estimand is narrower and says so:
+
+> **The false-DIGITAL rate over the declared validation distribution**: this
+> signal chain, inside a declared operating envelope, over a corpus that is
+> explicitly part synthetic and part captured, with each stratum's rate
+> conditional on that stratum.
+
+Three scope limits follow, and the promotion record must carry all three rather
+than leave them to be inferred:
+
+1. **Instrument-scoped.** The claim is about this receiver and this chain.
+2. **Envelope-scoped.** Bands, gains and conditions outside the declared
+   envelope are not covered.
+3. **Distribution-scoped.** It is a rate over the validation distribution, not
+   over operation. An operational-rate claim needs a differently built corpus
+   and is not what promotion would license.
+
+The synthetic strata are plausibly *adversarial* — harder than the conditions
+they stand for. "Plausibly" is doing real work in that sentence, and nobody has
+validated it, so it buys a conjecture and not a scope extension.
+
+#### Finding A — the lock freezes the method and not the instrument
+
+`PromotionCorpusLock` carries `corpus_id`, `opened_at`, `method_revision`,
+`decision_threshold`, `preprocessing_revision`, two digests, the bound count,
+the per-bound alpha, the family revision, the strata-definition revision and the
+eligible channel purpose. **There is no signal-chain field, no sensor, no
+envelope.**
+
+Under an instrument-scoped estimand that is a hole, not a nuance: a corpus
+validated on one dongle and one antenna would license the same promoted claim
+from a different chain, and nothing in the lock would notice. Phase 3a's
+partition test would not catch it either — it checks that every field is
+covered, not that every necessary field exists.
+
+The repair is a lock field: the frozen `signal_chain_hash`, or a declared
+envelope digest when the envelope legitimately spans more than one chain. It is
+an amendment to §5.20 and to `rf_validation_manifest`, it must land **before the
+first `PromotionCorpusLock` exists**, and it is recorded rather than made here.
+
+#### Finding B — the aggregate bound is design-weighted, not operational
+
+The thirteenth bound is the aggregate over all strata. With **equal** counts —
+5 561 each, by §5.18 option C — the aggregate estimates the rate under a
+**uniform mixture over the twelve strata**.
+
+Nothing is uniform about operation. Thermal-no-input is most of real running
+time; a gain step is rare; two-signal collisions depend on where the antenna is.
+The aggregate is therefore a **design-weighted** quantity: a real, checkable
+number about a distribution the designers chose, and not the number a reader
+will assume it is.
+
+Reweighting to operational prevalence would need prevalence measurements that
+**do not exist**, and inventing weights would put a fabricated distribution
+underneath a published bound. So the proposal is to **declare it
+design-weighted** and name the mixture, rather than to improve it with numbers
+nobody measured.
+
+#### The trial unit, chosen second
+
+**One window**, and the conditions under which windows count:
+
+| requirement | why | already enforced? |
+| --- | --- | --- |
+| non-overlapping intervals | two acquisitions over one span are one observation under two IDs | **yes** — Phase 3a's `first_sample_index` rule |
+| drawn under a declared allocation | an undeclared allocation is a distribution chosen after seeing results | no |
+| temporally blocked | 5 561 consecutive windows measure one afternoon | no |
+| randomised over conditions, from a declared seed | order and condition must not be the same variable (§5.21) | no |
+| dependence diagnostics reported | the bound assumes what it cannot check | no |
+
+Twelve conditional rates and one design-weighted aggregate. Each stratum's bound
+is a statement about windows **given** that stratum, which is what a stratified
+corpus measures and is weaker and more honest than a rate about windows.
+
+#### Dependence diagnostics at zero failures
+
+The design expects **zero failures**, and that is exactly the case where the
+obvious diagnostics are worthless:
+
+> With zero failures the outcome sequence is 5 561 zeros. It has no variance, no
+> runs structure and no autocorrelation. **Every outcome-based test for
+> dependence passes trivially and proves nothing.**
+
+So the diagnostics must be defined on the **continuous detector statistic** —
+the cyclic peak-to-median sidelobe ratio the registered method already
+computes — rather than on the binary verdict:
+
+- its autocorrelation across consecutive windows within a block;
+- its between-block versus within-block variance, which is where blocking either
+  worked or did not;
+- its distribution against the declared null model, since a statistic whose
+  whole distribution has shifted is the interesting failure even at zero
+  crossings of the threshold.
+
+These are **reported**, not gated on. A diagnostic that silently passed would be
+the zero-failure sequence's problem again, one level up.
+
+#### `RECEIVER_SPURS` — retain, and say what the retention costs
+
+§5.21 set out four ways forward and chose none. Under the estimand named above,
+**option 1 is defensible** — the trial unit being `(spur, tuning, epoch)` with
+repeated observation of catalogued spurs.
+
+It is defensible **because the estimand is a rate over windows from a
+distribution that genuinely contains those spurs repeatedly**, not because the
+multiplication reaches 5 561. A deployed receiver meets its own spurious
+products constantly; that recurrence is a fact about the distribution, not an
+artefact of the sampling.
+
+What it does not buy, stated in the promotion record rather than discovered
+later:
+
+> The `RECEIVER_SPURS` bound does **not** generalise across spur types or across
+> receiver units. With **S** catalogued products it is a statement about those S,
+> observed under the declared allocation.
+
+Two hard requirements follow:
+
+- **Feasibility is checked before the corpus opens.** Distinct
+  `(spur, tuning, epoch)` combinations must reach 5 561 given the actual S, K and
+  E. If the catalogue comes back small, that is discovered before a lock exists,
+  not after 4 000 windows.
+- **The allocation over spurs is declared**, including how many windows come
+  from each stability class. `SESSION_SCOPED` products are the periodic ones —
+  the `PERIODIC_TRANSPORT_ARTEFACT` population — and an allocation that
+  happened to under-sample them would test the stratum where it is easiest.
+
+**Option 4 stays open until the lock exists**, and not one moment past it.
+Dropping the stratum moves `TESTED_BOUND_COUNT` 13 → 12, the per-bound alpha to
+0.0041666667 and every stratum's exact minimum from 5 558 to 5 478. After a
+freeze it is `STRATA_CHANGED_AFTER_FREEZE` and invalidates every bound already
+read.
+
+#### The eleven parameters, derived rather than asserted
+
+§5.21 pinned these here. Each is proposed with the arithmetic that produced it,
+so the argument is with the derivation and not with the number.
+
+**Retune deltas.** A modelled product moves `|s|·Δf`. To keep `|s| ≤ 3` inside
+the half-span of 1.024 MHz, `Δf ≤ 341 kHz`. Proposed: **Δf ∈ {50, 100, 200} kHz**,
+each used in both directions.
+
+**Slope tolerance.** Slope resolution is `2·bin/Δf`; at the 3.90625 Hz bin and
+the smallest delta that is **1.6 × 10⁻⁴**. Proposed tolerance **0.01** — about
+sixty times the resolution, generous enough to admit a real integer slope and far
+too tight to admit a neighbouring one.
+
+**K, the tuning count and spacing.** Proposed **K = 64** across the declared
+envelope, at **pseudo-random spacing from a declared seed** — never uniform.
+Uniform spacing at a divisor of the reference interval would systematically hit
+or systematically miss the comb, and either way the catalogue would be an
+artefact of the grid.
+
+**R, repeats per tuning.** Proposed **R = 8**, with a feature required in **≥ 7
+of 8** to count as persistent.
+
+**Persistence margin.** Proposed **≥ 10 dB above the local median** of the
+surrounding bins, measured per tuning rather than globally, since the noise floor
+is not flat across the envelope.
+
+**Reference-match tolerance — and the cap it forces.** The match window is
+`n · f_ref · ppm`, so it **grows with the harmonic**. Requiring the window to stay
+under 0.5 % of the span gives a usable harmonic range that depends entirely on
+how well the reference is known:
+
+| reference known to | usable harmonic `n` ≤ |
+| --- | ---: |
+| ±100 ppm (an uncalibrated dongle) | **3** |
+| ±10 ppm | 35 |
+| ±1 ppm (disciplined against a reference) | 355 |
+
+At ±100 ppm and `n = 50` the match window is **7 % of the entire analysis span**,
+at which point "it matches the comb" is barely a claim at all. So: the crystal's
+ppm is **declared and justified**, the harmonic cap follows from it, and
+`CONSISTENT_WITH_INTERNAL_REFERENCE` is unavailable above the cap. An
+uncalibrated receiver earns almost no reference matches, which is the correct
+outcome rather than an inconvenience.
+
+**Retune order.** Randomised from a declared seed **and counterbalanced**: every
+tuning appears in both halves of the session sequence.
+
+**Repeated visits.** Each LO setting visited **≥ 3 times**, separated by **≥ 10**
+other settings, so a non-stationary emitter is caught between visits rather than
+fitted through them.
+
+**Signed coordinates and folding.** Baseband offsets are **signed**, on
+`[−f_s/2, +f_s/2)`. Features within **5 %** of either edge are excluded from
+slope estimation: a folded feature reverses its apparent direction of travel, and
+an unsigned magnitude cannot tell `+1` from `−1` at all.
+
+**Accepted termination/ingress confidences.** Two levels, because §5.21 gives the
+two usable classes different amounts of evidence. `CONSISTENT_WITH_INTERNAL_MIXING`
+— two independent discriminators — is accepted at **declared termination plus a
+repeat at a second time of day**. `CONSISTENT_WITH_INTERNAL_REFERENCE` — one
+discriminator and a model match that is not a second — is accepted only at
+**declared termination plus a second physical site or a shielded enclosure**.
+Neither level is reachable by asserting it.
+
+**Required stability per attesting spur.** Any class may attest, and the
+allocation must draw from **every class the catalogue contains**, with the
+per-class counts declared in advance.
+
+#### What it costs in time
+
+16 683 captured windows at 256 ms, non-overlapping, is **4 271 s — 71 minutes**
+of sample time and nothing else. Every real cost is above that floor: refill
+after each invalidation, retune settling, the repeated visits, the blocking
+across sessions and power cycles, and the catalogue sweep before any stratum
+window exists at all. The plan should state expected wall-clock in **days**, and
+a plan that claims to finish in an afternoon has quietly dropped the blocking.
+
+#### What this section does not authorise
+
+No capture. No tuner operation, no `rtl_tcp`, no catalogue, no termination, no
+persistence, no byte, no directory. It chooses an estimand and proposes a design;
+it grants nothing, and `RECEIVER_SPURS` remains unreachable until §5.21's method
+is accepted and a catalogue exists.
+
+#### What acceptance would require
+
+An explicit acceptance decision and an acceptance commit. Then, in order:
+
+1. **Finding A as an amendment** — the lock must freeze the instrument or the
+   envelope, before any lock exists.
+2. **`PENDING_AMENDMENTS` entry 9** — the full-object ring attestation §5.20's
+   publication step 1 already assumes and no operation performs.
+3. Only then the persistence mechanism, and only then capture.
+
+Finding B needs no amendment if the aggregate is *described* correctly; it needs
+one the moment anything claims the aggregate is an operational rate.
+
 ---
 
 ## 6. Open questions for the operator

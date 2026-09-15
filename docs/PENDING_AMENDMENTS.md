@@ -213,6 +213,37 @@ that section being **rejected**: however spurs come to be identified,
 
 ---
 
+## 11. `PromotionCorpusLock` freezes the method and not the instrument
+
+**Trigger:** before the first `PromotionCorpusLock` is created. Not before the
+first capture — before the first **lock**, which comes earlier.
+
+The lock carries `corpus_id`, `opened_at`, `method_revision`,
+`decision_threshold`, `preprocessing_revision`, `strata_digest`,
+`configuration_digest`, `tested_bound_count`, `per_bound_alpha`,
+`validation_family_revision`, `strata_definition_revision` and
+`eligible_channel_purpose`. **There is no signal-chain field, no sensor and no
+envelope.**
+
+That was harmless while the estimand was unnamed. §5.22 names it as
+instrument-scoped — the false-DIGITAL rate over *this* signal chain inside a
+declared envelope — and under that estimand the absence is a hole: a corpus
+validated on one dongle and one antenna would license the same promoted claim
+from a different chain, and nothing in the lock would notice.
+
+Phase 3a's partition test does not catch this. It asserts that every field the
+lock **has** is checked or declared unchecked; it cannot assert that a field the
+lock **needs** exists. A test over a set is silent about what is missing from the
+set, which is the same shape as the hand-listed vocabulary universe
+`SCYTHE_VERDICT_VOCABULARIES.md` §3 replaced with a discovered one.
+
+The repair is a frozen `signal_chain_hash`, or a declared envelope digest where
+the envelope legitimately spans more than one chain. It amends §5.20 and
+`rf_validation_manifest`, and it must land before a lock exists, because a lock
+is precisely the thing that cannot be amended afterwards.
+
+---
+
 ## Drain record
 
 A landed entry leaves the list above. It is recorded here in one line, because
