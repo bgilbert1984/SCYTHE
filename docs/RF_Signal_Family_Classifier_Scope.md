@@ -1847,9 +1847,23 @@ is what makes the claim checkable rather than decorative.
 that needs a tuner and has none is absent, and reports absent. Filling it is the
 substitution every other refusal in this repository exists to prevent.
 
-**No `PromotionCorpusLock` freeze and no claim of corpus completion** while
-tuner-dependent strata are absent. A freeze over a partial corpus would record a
-strata set nobody had built.
+**A `PromotionCorpusLock` freezes configuration before the first promotion
+window. No `CorpusCompletionReceipt` and no claim of corpus completion** are
+permitted while any declared stratum is missing or awaiting capture.
+
+This refusal originally read "no `PromotionCorpusLock` freeze … while
+tuner-dependent strata are absent", which forbade the precommitment until after
+the thing it precommits to. It is **corrected here rather than superseded
+elsewhere**: an accepted section that says one thing and a later accepted
+section that says another leaves two accepted answers, whichever one is labelled
+superseded. What the original protected — that nothing may claim a corpus is
+complete while a stratum is missing — is the second sentence, and is unchanged.
+
+*`rf_null_corpus.py` still implements the original rule: `may_freeze` is `False`
+and `freeze_note` names `PromotionCorpusLock`. That is §5.20 correction **C**,
+which lands as code with its own controls before the first lock exists. The
+document is ahead of the code here, and says so rather than letting a reader
+assume they agree.*
 
 **No generic payload writer.** The interface keeps future real-window ingestion
 structurally separate from synthetic generation. One `write(payload)` accepting
@@ -1863,7 +1877,7 @@ both is exactly the hole that blurs the authority boundary — the same shape
 
 ```text
 Status:     ACCEPTED 2026-09-14. The authority text is in force.
-Authority:  §5.20 exists. It authorises no persistence code and no live capture.
+Authority:  §5.20 is accepted. It authorises no persistence code and no live capture.
             Both require corrections A-D and the controls below landed as code,
             under their own slice authorisation.
 Opens:      GAIN_STEPS and RETUNE_TRANSIENTS become reachable in principle --
@@ -1881,6 +1895,13 @@ simply wrong and an attestation field that would have forced `RECEIVER_SPURS` to
 fabricate two declarations to satisfy a schema. **Accepted on the corrected
 substance**; this is the acceptance commit.*
 
+*Those three SHAs are the heads that were **reviewed**, not ancestors of this
+one: the branch was rebased onto `084b1d2` so that §5.19's corrected wording and
+entry 8's drain could not be lost, and a rebase rewrites. `fd536cd` and
+`d4a35c7` are reachable through PR #74's timeline and nowhere in `main`'s
+history. Recorded because a SHA in a document that resolves to nothing is worse
+than no SHA.*
+
 *Two readings are pinned here so they are not recovered later by inference.
 §5.19's "out of scope until §5.20 is accepted" is now satisfied — but
 `RECEIVER_SPURS` remains unreachable behind a **second** gate, the missing
@@ -1892,7 +1913,7 @@ capture are authorised by this commit.*
 non-persistent. A validation corpus is persisted labelled data by definition, so
 it is a different permission and not an extension of that one.*
 
-#### What would be granted
+#### What is granted
 
 > SCYTHE may atomically publish verified, ring-issued validation windows for
 > exactly `GAIN_STEPS`, `RETUNE_TRANSIENTS` and `RECEIVER_SPURS`, within one
@@ -2042,8 +2063,13 @@ Split the two states explicitly:
 | `CorpusCompletionReceipt` | only after all twelve strata satisfy their declared counts | the corpus is complete |
 
 An incomplete corpus may be **configuration-frozen** but can never be
-completion-certified or promotion-eligible. §5.19's refusal text is superseded
-on acceptance of this section, and not before.
+completion-certified or promotion-eligible.
+
+§5.19's refusal now states this split directly — it was **corrected in place**
+rather than superseded from here, because a superseded accepted rule is still an
+accepted rule and two of them is one too many. What remains for **C** is the
+code: `rf_null_corpus.py`'s `may_freeze` and `freeze_note` still implement the
+original rule.
 
 #### The eight required definitions
 
