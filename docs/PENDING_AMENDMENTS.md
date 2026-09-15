@@ -180,6 +180,39 @@ Recorded here rather than corrected in place because §5.20 is accepted text.
 
 ---
 
+## 10. `THERMAL_NO_INPUT` and `RECEIVER_SPURS` may be one population counted twice
+
+**Trigger:** before **either** stratum is captured — not before whichever is
+captured second. It is a property of the pair.
+
+Nothing has ever checked that `THERMAL_NO_INPUT`'s tunings are free of the
+receiver's own spurious products. An internal product whose baseband offset does
+not move with the tuner — slope 0 in §5.21's terms, ``m = 1`` in the mixing
+family — is in the analysis span at **every** tuning. If the receiver has one,
+then a window captured as "terminated input, thermal noise only" contains it.
+
+**The defect is not that Bonferroni breaks.** Bonferroni is valid under
+arbitrary dependence, so two bounds over one population does not invalidate it.
+The defects are three, and each is real on its own:
+
+1. **Mislabelling.** `THERMAL_NO_INPUT` windows would carry a label that is
+   false of their contents.
+2. **Redundant alpha expenditure.** The family pays a thirteen-bound correction
+   while two of the bounds test one population, so the procedure is more
+   conservative than the coverage it actually buys — and every stratum's
+   required n is larger for it.
+3. **A population never covered.** The spur-free thermal case the stratum exists
+   to test would not appear in the corpus at all, which is the one that cannot
+   be repaired by re-labelling afterwards.
+
+The check requires a spur catalogue, which is what §5.21 proposes and which does
+not yet exist. Recorded separately from §5.21 because the obligation survives
+that section being **rejected**: however spurs come to be identified,
+`THERMAL_NO_INPUT` still has to be shown free of them, and that was true before
+§5.21 was drafted.
+
+---
+
 ## Drain record
 
 A landed entry leaves the list above. It is recorded here in one line, because

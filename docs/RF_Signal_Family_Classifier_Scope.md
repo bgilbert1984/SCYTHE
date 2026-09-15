@@ -2413,6 +2413,373 @@ Every rule here needs a control that fails when it is removed:
 Each needs the collateral scan as well: a mutation that makes exactly its own
 tests fail and no others.
 
+### 5.21 — receiver-spur identification — **PROPOSED, NOT ACCEPTED**
+
+```text
+Status:     PROPOSED. Nothing here is in force.
+Authority:  NONE until an explicit acceptance decision and an acceptance commit.
+Opens:      Nothing. No capture, no termination, no catalogue, no byte.
+Answers:    How a spectral feature is discriminated as consistent with an
+            internal origin rather than a received one — the gate §5.20 named
+            and did not supply. A method, not an executable procedure: K, R,
+            retune deltas, tolerances, margins and the accepted termination
+            confidence are all pinned to §5.22 and none is set here.
+Does not:   Make RECEIVER_SPURS achievable, or prove any feature internal.
+            See *The part that may have no answer*, which is the most important
+            paragraph in this section, and which turns on an estimand §5.22
+            must name before a trial unit can be chosen.
+```
+
+§5.20 left one sentence deliberately unresolved:
+
+> Having an RTL2838 attached is not evidence that a feature is an internal
+> receiver spur — that is an identification, and it needs a protocol that says
+> how a candidate is established as internal rather than received.
+
+This is that protocol. It is also the section that says plainly what the
+protocol cannot buy.
+
+#### What the stratum actually needs
+
+**Not a catalogue of every spur.** `RECEIVER_SPURS` is a *null* population: a
+set of windows a validated detector must not call DIGITAL. The claim each window
+carries is **"this window contains at least one internal spurious product"** —
+not "this feature is spur number seven". That is a much weaker claim, and it is
+the one the protocol has to earn.
+
+It is not a decorative stratum. `rf_symbol_clock` already registers
+`PERIODIC_TRANSPORT_ARTEFACT` as a known false-positive mode — *"a periodic
+buffer or USB seam is a genuine cyclic feature"* — and internal artefacts are
+precisely the population most able to fool a symbol-clock detector, because
+many of them **are** periodic and narrow. This stratum tests the detector where
+it is weakest.
+
+#### Two observable behaviours, and exactly what each can decide
+
+**Retune.** Move the tuner and measure the **slope** — not the two cases an
+earlier draft of this section named.
+
+An internal mixing product appears at RF at ``m·f_LO + n·f_ref`` for integers
+``m`` and ``n``, so after downconversion it sits at
+
+```
+f_bb = (m − 1)·f_LO + n·f_ref          slope s = Δf_bb / Δf_LO = m − 1
+```
+
+The family is **affine in both oscillators**, and its slopes are integers — or
+rationals, where a divider chain puts ``f_VCO = 2^k · f_LO`` into the product.
+Slope 0 (``m = 1``) and slope −1 (``m = 0``) are two members of it, not the
+whole partition, and the earlier framing overstated what retune decides.
+
+What retune actually settles is sharper than that framing and in one direction
+stronger:
+
+> **A received emission has slope exactly −1.** Nothing else about it is
+> negotiable: its absolute frequency is fixed, so its baseband offset moves by
+> −Δf and by nothing else.
+
+| measured slope | what it can be |
+| --- | --- |
+| −1 (within tolerance) | a received emission **or** the ``m = 0`` internal product — retune cannot separate them |
+| any other slope in the modelled family | **no received emission behaves this way**; consistent with internal mixing at ``m = s + 1`` |
+| a slope outside the modelled family | `SPUR_CANDIDATE_UNRESOLVED` — refused, not rationalised |
+
+So the undecidable set is exactly ``s = −1``, and termination is what decides
+it. Every other slope is *consistent with* internal mixing — which is a
+different claim from *proven internal*, and §5.21 keeps them different.
+
+The slope is measured over **at least three declared retunes**, because two
+points fit any line and a two-point slope is an assumption wearing a
+measurement's clothes.
+
+**And a monotonic sweep confounds tuner frequency with time.** If LO settings
+are visited in order, an external signal that drifts, hops, or is itself being
+retuned traces a baseband path that can fit any slope at all, including slopes
+no receiver product could produce. The claim "no received emission behaves this
+way" is then stronger than the experiment that produced it — true of a *static*
+emitter and asserted of every emitter.
+
+Three requirements follow, and all three are pinned to §5.22 rather than set
+here:
+
+- **Randomised or counterbalanced retune order**, so frequency and time are not
+  the same variable.
+- **Repeated visits to the same LO settings**, so a feature that moved between
+  two visits to one setting is caught as non-stationary rather than fitted.
+- **Signed baseband coordinates**, with wrap and folding at band edges handled
+  explicitly. A magnitude loses the sign that distinguishes slope +1 from −1,
+  and a feature folded at an edge reverses its apparent direction of travel —
+  either one manufactures a slope out of bookkeeping.
+
+*(The reference is 28.8 MHz on most R820T2 dongles and 24 MHz on some. The
+device's own must be **declared**, never assumed: a protocol that guessed the
+crystal would be inventing the instrument, which is the §5.15 mistake. The same
+goes for the divider family that makes rational slopes possible.)*
+
+**Termination.** Replace the antenna with a 50 Ω load.
+
+A received emission drops by tens of dB. An internal product does not.
+
+**Termination is the required discriminator for every usable class**, not an
+optional corroboration for one of them. For slope −1 it is also the *only*
+discriminator available, which is why that class carries the higher confidence
+bar rather than a different requirement. An earlier draft had it both ways —
+"the only test that decides" in one paragraph and "proves nothing, ingress
+remains possible" in the next — which is not a nuance, it is two incompatible
+statements about the same act.
+
+It costs something structural:
+
+> Terminating changes the antenna, which changes `signal_chain_manifest`, which
+> changes `signal_chain_hash`, which raises `SIGNAL_CHAIN_CHANGE` and clears the
+> ring.
+
+So a spur attestation **spans two signal-chain identities** — and an earlier
+draft of this section drew the wrong contrast from that. Corrected against the
+code:
+
+| stratum | chain identities spanned | why |
+| --- | --- | --- |
+| `RETUNE_TRANSIENTS` | **one** | `signal_chain_hash` deliberately excludes centre frequency — retuning is its own invalidation reason and folding it in would make every retune look like a different antenna |
+| `GAIN_STEPS` | **two** | `gain_db` **is** hashed into the manifest, and `IQRetentionOwner.set_gain_db` calls `_rebuild_chain_locked()` **before** `invalidate("GAIN_CHANGE")` |
+| `RECEIVER_SPURS` | **two** | the antenna is hashed too, and termination replaces it |
+
+"The other two strata span one chain" was simply false. Two of the three span
+two identities, and the spur case is distinguished not by *how many* but by
+**what moved**:
+
+| stratum | same receiver? | same front end? | what differs |
+| --- | --- | --- | --- |
+| `GAIN_STEPS` | yes | **yes** | the declared gain configuration |
+| `RECEIVER_SPURS` | yes | **no** | the front end itself |
+
+Stated that way rather than as "the same instrument turned down", which
+contradicts this repository's own semantics: gain is *inside* the signal-chain
+identity, and `set_gain_db` says in as many words that a window spanning a gain
+change "would compare two different instruments". A phrase that quietly
+redefined *instrument* to exclude gain would have undone §5.17's whole argument,
+where the same mast at two extensions is two instruments.
+
+§5.20's closed attestation union still needs a distinct spur member — for the
+front-end difference, not for a redefinition of the word.
+
+#### What software cannot establish here
+
+**The termination is a physical act.** SCYTHE cannot verify that a 50 Ω load is
+fitted. It can carry an `OPERATOR_DECLARED` claim and nothing stronger — the
+same authority class as a position fix, and it should be labelled as bluntly.
+
+**Ingress is not excluded by a load.** A poor termination, case pickup, or
+USB-borne coupling can put a strong local emission into a "terminated" capture.
+At the pinned host's venues that means broadcast FM tens of dB above everything
+else. **Without a screened enclosure this cannot be ruled out**, and a protocol
+that claimed otherwise would be asserting a property of a room nobody measured.
+
+So the catalogue carries a **confidence class, not a boolean** — and the class
+names say *consistent with*, because none of them is proof:
+
+**Every usable class requires an accepted termination/ingress confidence.** The
+two differ in how much *else* they have, and therefore in where the accepted
+level is set — not in whether termination is required:
+
+| class | established by | discriminators | usable |
+| --- | --- | --- | --- |
+| `CONSISTENT_WITH_INTERNAL_MIXING` | slope ≠ −1 inside the modelled family, **and** persists under declared termination | **two**, independent | yes, at the lower accepted confidence |
+| `CONSISTENT_WITH_INTERNAL_REFERENCE` | slope −1, persists terminated, matches a rational multiple of the **declared** reference | **one** — a model match is not a second | yes, only at the higher accepted confidence |
+| `SPUR_CANDIDATE_UNRESOLVED` | persists terminated, fits no modelled slope | — | no |
+| `VANISHES_ON_DECLARED_TERMINATION` | the feature is gone with the load fitted | — | no |
+
+The second row is the one an earlier draft got wrong by calling it
+`SPUR_INTERNAL_CLOCK_LOCKED`. **A model match is not a discriminator.** A
+broadcast carrier that happens to sit near ``n·f_ref`` is ingress that matches
+the model, and matching it cannot silently upgrade an `OPERATOR_DECLARED`
+termination into physical proof. The reference comb is dense enough across a
+wide span that coincidence is ordinary rather than remarkable.
+
+Both accepted levels are **governed rather than assumed**, and pinned to §5.22
+with the rest of the free parameters. Shielding, a second site, or a genuine
+second discriminator raises a confidence; a declaration on its own does not.
+
+**Stability is a separate axis, not a filter.** Where a feature survives to is
+recorded alongside its class rather than used to exclude it:
+
+| stability | survives |
+| --- | --- |
+| `SESSION_SCOPED` | within one capture session, not across a reconnect |
+| `RECONNECT_STABLE` | across `DISCONNECT` / `RECONNECT`, not across a power cycle |
+| `POWER_CYCLE_STABLE` | across a power cycle |
+
+An earlier draft excluded anything that did not survive a reconnect, on the
+grounds that it "is not a property of the receiver". **That was wrong and is the
+most consequential of these corrections.** A USB transport seam, a PLL settling
+artefact, an initialisation transient — these are session-scoped and they are
+receiver-system behaviour. Worse for the earlier rule: they are *periodic and
+narrow*, which makes them the population `rf_symbol_clock`'s registered
+`PERIODIC_TRANSPORT_ARTEFACT` mode describes, and therefore close to the exact
+population this stratum exists to test. A filter that discarded them would have
+thrown away the most dangerous members of the stratum for being insufficiently
+permanent.
+
+`SPUR_CANDIDATE_UNRESOLVED` is a real state and not a holding pen: a feature
+that survives termination and fits no modelled slope is the one most likely to
+be ingress, and it is refused for exactly that reason.
+
+The four names are **provisional**. The mechanical check in
+`test_scythe_verdict_vocabularies.py` runs over declared token tuples in code
+and has not seen them, so it cannot have passed them.
+
+#### The procedure
+
+**Catalogue first, under declared termination.**
+
+1. Declare the termination and record the terminated chain hash.
+2. Sweep the tuner across the band in **K** steps, declaring each tuning.
+3. At each tuning, wait for a full refill and acquire complete windows.
+4. Retain features exceeding a declared margin above the local noise floor and
+   persisting across **R** repeats at that tuning.
+5. Classify by retune behaviour into the four classes above.
+6. Repeat after a **reconnect** and after a **power cycle**, and record the
+   resulting **stability** — `SESSION_SCOPED`, `RECONNECT_STABLE`,
+   `POWER_CYCLE_STABLE`. This classifies; it does not exclude. `DISCONNECT` and
+   `RECONNECT` are already invalidation reasons, so the epochs separate cleanly
+   and a session-scoped feature is visible as such rather than as noise.
+7. Optionally repeat on a second unit of the same model. A feature common to two
+   units is a design artefact; one unique to a unit belongs to that unit, and
+   the catalogue must say which, because a corpus built on one dongle's private
+   birdie does not generalise to the model.
+
+**Then capture stratum windows — also terminated.** The window must contain
+internal products and *nothing else*, or it stops being a `RECEIVER_SPURS`
+window and starts overlapping `TWO_SIGNAL_COLLISIONS` and
+`ADJACENT_CHANNEL_INTERFERENCE`.
+
+Which makes the distinction from `THERMAL_NO_INPUT` sharp and checkable:
+
+| stratum | input | tuning |
+| --- | --- | --- |
+| `THERMAL_NO_INPUT` | terminated | where **no** catalogued spur falls in the span |
+| `RECEIVER_SPURS` | terminated | where **at least one** catalogued spur falls in the span |
+
+*Which hands `THERMAL_NO_INPUT` an obligation it does not currently have.*
+Nothing has ever checked that its tunings are spur-free. A **slope-0** product
+sits at a fixed baseband offset and is therefore in span at **every** tuning, so
+if any exists, a naively captured "thermal, no input" window contains it.
+
+The defect is not that Bonferroni breaks — it tolerates arbitrary dependence
+and stays valid. It is three other things: `THERMAL_NO_INPUT` windows would be
+**mislabelled**, two of thirteen bounds would spend **alpha on one population**
+while the correction is paid for thirteen, and the **spur-free thermal
+population the stratum was meant to cover would never be tested at all**. That
+has to be settled before either stratum is captured, and it is a finding of this
+section rather than a part of its proposal.
+
+#### The part that may have no answer
+
+**A protocol that identifies spurs perfectly does not make the stratum
+achievable.**
+
+A receiver has a *finite* number of internal spurious products. Call it **S** —
+plausibly tens, not thousands. The stratum needs **5 561 windows**.
+
+An earlier draft said flatly that five thousand observations of twenty spurs
+"is not five thousand independent trials". **That was too categorical and is
+withdrawn.** Repeated observations of one fixed spur *can* be independent
+Bernoulli trials: if the random component — thermal noise, acquisition timing,
+converter state — is independent between windows, then so are the trials. What
+repetition fails to supply is not independence. It is **distinct spur
+identity**, which makes the sample potentially *unrepresentative* rather than
+automatically *dependent*. Those are different defects and they have different
+remedies.
+
+Which means the question cannot be answered at all until the **estimand** is
+named, and naming it is the first thing §5.22 must do:
+
+| if the estimand is | then repeated spurs |
+| --- | --- |
+| the false-DIGITAL rate over windows drawn from a **frozen operational distribution** | **can contribute** — subject to non-overlap, temporal blocking, randomised allocation of tuning and epoch, and dependence diagnostics that are reported rather than assumed |
+| **generalisation across distinct internal products or receiver units** | cannot. Twenty spurs do not become 5 561 experimental units by being looked at more often |
+
+The bound cannot check independence, which is why the diagnostics have to be
+reported. But "cannot check" is not "is violated", and this section should not
+have written the second while meaning the first.
+
+Four ways out, none free, none chosen here:
+
+1. **Redefine the trial unit** as `(spur, tuning, epoch)` and require 5 561
+   distinct combinations. The multiplication reaches the number easily — a
+   slope-0 product is in span at every tuning, so K tunings × E power cycles
+   grows fast. **That is not a justification.** Reaching 5 561 by multiplying
+   available axes answers an arithmetic question, and the open question is which
+   estimand those units are units *of*. §5.22 chooses the estimand first and the
+   trial unit second; doing it the other way round is how a corpus ends up
+   measuring its own convenience.
+2. **Accept a weaker bound for this stratum alone** and publish it as weaker.
+   Honest, and it breaks the symmetry §5.18 chose option C to preserve.
+3. **Use several receivers**, which changes what the corpus is about: a claim
+   about a family of devices rather than about this instrument.
+4. **Drop the stratum from the promotion family.** Not free and not local:
+   `TESTED_BOUND_COUNT` falls 13 → 12, `PER_BOUND_ALPHA` rises to 0.0041666667,
+   and **every other stratum's requirement falls with it** — the exact
+   zero-failure minimum goes 5 558 → 5 478, and the corpus goes from twelve
+   strata to eleven. It is also **forbidden after a `PromotionCorpusLock`
+   exists**, because the lock freezes the strata set and the bound count, which
+   is precisely what that lock is for.
+
+Option 4 is why this section comes **before** the capture plan and before the
+persistence mechanism. Deciding it after a lock is not a decision, it is a
+corpus thrown away.
+
+*A note on the numbers used above, which are not the ones in the code.*
+`MINIMUM_TRIALS_FOR_ZERO_FAILURES_CORRECTED` is computed as
+`ceil(-ln(alpha) / rate)` — the rule-of-three asymptotic, honestly labelled as
+such in its comment — and yields **5 561**. Inverting the exact Clopper–Pearson
+bound gives **5 558**: at n = 5 558 the exact upper bound is 0.00099998, already
+under 0.001. The code is therefore **three windows per stratum conservative**,
+36 across the corpus. That is the safe direction and is not a defect; it is
+recorded because the constant is named a minimum and the exact minimum is a
+different number, and because this section quotes both.
+
+#### Every decisive parameter is pinned to §5.22, and none is set here
+
+This section proposes a **method of discrimination**. It does not propose an
+executable procedure, and accepting it must not be readable as accepting one.
+Each of the following is named here, deliberately left free, and belongs to
+§5.22 with the estimand:
+
+| parameter | what it decides |
+| --- | --- |
+| **K** — number of tuning steps, and their spacing | how much of the band the catalogue covers, and whether slope estimates are conditioned on one corner of it |
+| **R** — repeats per tuning | what "persists" means |
+| retune deltas | the lever arm of every slope estimate |
+| slope-matching tolerance | which slopes count as inside the modelled family |
+| frequency-matching tolerance against ``n·f_ref`` | how often coincidence passes as a model match |
+| persistence margin above the local noise floor | what counts as a feature at all |
+| **retune order** — randomised or counterbalanced | whether frequency and time are separable at all |
+| repeated visits per LO setting | whether a non-stationary emitter is caught or fitted |
+| signed baseband coordinates, wrap and folding at band edges | whether an apparent slope is physical or bookkeeping |
+| both accepted **termination/ingress confidences** | whether either `CONSISTENT_WITH_INTERNAL_*` class may attest anything |
+| stability classes required per attesting spur | whether a `SESSION_SCOPED` product may carry a stratum window |
+
+Fixed here, they would be numbers chosen before the estimand that gives them
+meaning. §5.22 is where they land, and until then this section decides how to
+tell two things apart and not how many times to look.
+
+#### What this section does not authorise
+
+No capture. No termination. No catalogue. No tuner operation, no `rtl_tcp`, no
+persistence, no byte. It answers a question and creates no permission — and it
+must be read alongside the fact that answering it may still leave
+`RECEIVER_SPURS` unreachable at 5 561 units of whichever estimand §5.22
+chooses.
+
+#### What acceptance would require
+
+An explicit acceptance decision and an acceptance commit. Then, in order and not
+together: the **capture plan** (§5.22), which must resolve the independence
+question above rather than inherit it; and only then the persistence mechanism,
+with `PENDING_AMENDMENTS` entry 9 landed first, since §5.20's publication step 1
+still asks for an attestation that does not exist.
+
 ---
 
 ## 6. Open questions for the operator
