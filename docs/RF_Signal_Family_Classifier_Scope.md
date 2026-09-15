@@ -2919,6 +2919,14 @@ envelope digest when the envelope legitimately spans more than one chain. It is
 an amendment to §5.20 and to `rf_validation_manifest`, it must land **before the
 first `PromotionCorpusLock` exists**, and it is recorded rather than made here.
 
+**That repair is rejected.** `gain_db` is inside the chain identity and
+`IQRetentionOwner.set_gain_db` rebuilds the chain *before* raising
+`GAIN_CHANGE`, so a `GAIN_STEPS` observation spans two chain hashes by
+construction and **no promotion corpus has one**. The settled ruling is an
+enumerated envelope, never a single chain hash. §5.23 proposes the amendment
+that would carry it out — but §5.23 is **PROPOSED**, and **Finding A stays open
+until an implementation lands.** A proposal satisfies no obligation.
+
 #### Finding B — the aggregate bound is design-weighted, not operational
 
 The thirteenth bound is the aggregate over all strata. With **equal** counts —
@@ -3109,6 +3117,195 @@ An explicit acceptance decision and an acceptance commit. Then, in order:
 
 Finding B needs no amendment if the aggregate is *described* correctly; it needs
 one the moment anything claims the aggregate is an operational rate.
+
+---
+
+### 5.23 — the lock envelope, in two layers — **PROPOSED**
+
+```text
+Status:     PROPOSED 2026-09-15. Nothing here is in force.
+Authority:  None. This section is documentation only. It authorises no capture,
+            no persistence, no tuner operation, no directory and no byte, and it
+            changes no behaviour.
+Order:      §13l. Acceptance decision, acceptance commit, merge, and only then
+            a code-only implementation built on that merge.
+Drains:     Nothing yet. `PENDING_AMENDMENTS` entry 11 drains when the
+            implementation lands, not when this section merges.
+```
+
+*§5.22's Finding A recorded a hole in `PromotionCorpusLock` and proposed a
+repair in one sentence. **The repair does not work**, and the replacement is
+large enough to need its own type, its own refusals, its own statement of what
+an instrument identity is worth, and two enforcement points that belong to later
+slices. That is why this is a section and not a paragraph.*
+
+#### The repair Finding A proposed would not work
+
+Finding A and entry 11 both said the same thing: *the repair is a frozen
+`signal_chain_hash`, or a declared envelope digest when the envelope legitimately
+spans more than one chain.*
+
+**The first alternative would make the corpus unbuildable, and the second is not
+a special case.**
+
+`gain_db` is inside the signal-chain identity, and `IQRetentionOwner.set_gain_db`
+calls `_rebuild_chain_locked()` *before* `invalidate("GAIN_CHANGE")`. So the two
+windows a `GAIN_STEPS` observation is made of carry **different chain hashes by
+construction** — §5.21's corrected table says so in the same words. §5.21's spur
+protocol then swaps the front end for a declared termination, which is two more.
+
+> **A promotion corpus never has one chain hash.** It has a set of them, and the
+> set is the thing to freeze. "When the envelope legitimately spans more than one
+> chain" describes every promotion corpus this family can build.
+
+#### One envelope is two declarations
+
+§5.22's estimand names three scopes, and the promotion record must carry all
+three: **instrument-scoped**, **envelope-scoped**, **distribution-scoped**.
+
+A set of admissible chain hashes covers the first. It does not cover the second,
+and the reason is deliberate: `signal_chain_hash` **excludes the centre
+frequency**, because retuning is its own invalidation reason and folding it into
+the chain would make every retune look like a different antenna. That exclusion
+is correct and this section does not touch it.
+
+But bands and tunings are precisely what define the sampled distribution, and
+§5.22 pins a great deal of it: **K = 64** tunings at pseudo-random spacing from a
+declared seed, retune deltas of 50/100/200 kHz in both directions, **R = 8**
+repeats with persistence in ≥ 7, each LO setting visited ≥ 3 times separated by
+≥ 10 others, counterbalanced order, a ≥ 10 dB persistence margin, a 0.01 slope
+tolerance, a declared crystal ppm and the harmonic cap it forces, and two
+accepted confidence levels. **None of that is instrument identity, and all of it
+is envelope.**
+
+So: two layers, and the lock binds both.
+
+| layer | freezes | deliberately not in it |
+| --- | --- | --- |
+| `InstrumentChainEnvelope` | the enumerated set of admissible `signal_chain_hash` values — receiver, sample type and rate **fixed**; gain and front end **varying within declared sets** | the centre frequency, which the chain hash excludes and must keep excluding |
+| `CapturePlanDeclaration` | the declared band or bands, the K tunings and their seed, the retune deltas and order, the repeat and revisit schedule, the per-stratum and per-spur-class allocation, the persistence margin, the slope and reference-match tolerances, the declared ppm and its harmonic cap, and the two accepted confidence levels | anything the instrument layer already fixes |
+
+`PromotionCorpusLock` carries both declarations and both digests, and **both must
+be present before the first window** — not before the first promotion. A plan
+declared after the windows exist is a plan fitted to them, which is the failure
+the lock exists to prevent, moved one layer out.
+
+**The naming is part of the repair.** Calling the instrument layer
+`EnvelopeDeclaration` would name the whole of §5.22's envelope while freezing the
+instrument half of it, and a reader checking whether the envelope is frozen would
+find a field with the right name and the wrong contents. `InstrumentChainEnvelope`
+says which half it is.
+
+#### A declaration must validate itself, not trust a factory
+
+A validating `declare_envelope()` beside a publicly constructible
+`EnvelopeDeclaration` is a locked door beside an open window. `type(x) is
+EnvelopeDeclaration` passes for a hand-built instance with no gains and no front
+ends, and `freeze_promotion_corpus` checks nothing further, so a lock can be
+opened under an envelope that admits nothing at all.
+
+The nominal type gate is not the defect. **The defect is that the type does not
+mean what the gate assumes it means.** So validation moves into `__post_init__`,
+the factory becomes a convenience over a type that is already safe, and the tests
+construct the dataclass **directly** as well as through the factory. A test that
+exercises only the factory tests the door.
+
+Six canonicalization decisions go with it:
+
+| hole | decision |
+| --- | --- |
+| a generator of front ends is consumed by validation and empty afterwards | convert the input to a tuple **once, first**, then validate the tuple. The order *is* the fix |
+| NaN or infinity as a gain or a feedline length | refused — `ENVELOPE_VALUE_NOT_FINITE`. NaN is not equal to itself, so an envelope holding one cannot reliably answer whether it admits its own declared member |
+| `default=str` in the digest | removed. It converts a value the schema did not anticipate into a string instead of raising, which silently widens what may be declared and puts the widening in the digest |
+| a member declared twice | refused — `ENVELOPE_DECLARATION_REPEATED`. A repeat admits nothing new, so it is a declaration error, and it should be read back to the operator rather than absorbed |
+| two distinct declarations that hash to one chain | refused — `ENVELOPE_DECLARATION_COLLAPSED`, on `len(admissible) != len(gains) × len(front_ends)`. The identity does not distinguish two things the operator wrote as different, and the operator should learn that from a refusal rather than from a count |
+| reordered gains or front ends | **canonically sorted before hashing.** Today `(20.0, 30.0)` and `(30.0, 20.0)` give two digests and admit one set — two identities for one declared envelope |
+
+The sort needs a total order over `Optional[float]` and over `FrontEnd`, and
+`None < 1.0` raises in Python. So it sorts on a key that makes the absence
+explicit rather than on the raw value: a sort that crashed on a legitimately
+undeclared gain would be a worse defect than the one it fixes.
+
+#### The instrument identity is a string, and the string has no authority
+
+`signal_chain_manifest` gives the antenna an `authority`, the extension an
+`extension_authority`, the feedline an `authority` and the gain an `authority`.
+**`sensor_id` has none.** It is the one field in the manifest taken on trust, and
+it is the field §5.22's first scope limit — *the claim is about this receiver* —
+rests on entirely.
+
+So the envelope declares the authority beside the identity, from a closed set:
+
+| authority | what it means | collision domain |
+| --- | --- | --- |
+| `RECEIVER_ATTESTED_UNIQUE` | a hardware identity read from the device and unique to that device | one unit |
+| `RECEIVER_OPERATOR_INSTANCE` | an operator's label for one physical unit they hold | that operator's labelling discipline, and nothing wider |
+| `RECEIVER_CLASS_NOT_UNIQUE` | a VID/PID, a model name, or a serial the vendor ships identically on every unit | every unit of that class |
+
+And the case in front of us is the third. This receiver's USB identity is
+`0bda:2838` — a **vendor and a product**, shared by every dongle of the type —
+and RTL-SDR serials are commonly left at the vendor default, so a serial read
+from the device is not evidence of uniqueness either. **Absent something better,
+the honest value is `RECEIVER_CLASS_NOT_UNIQUE`**, and a run that declares it is
+not entitled to the phrase "this receiver".
+
+The rule that follows matters more than the enumeration:
+
+> **The lock, the completion receipt and the promotion record carry the authority
+> forward unchanged.** At `RECEIVER_CLASS_NOT_UNIQUE` the promoted claim is a
+> claim about a receiver *class*, and it must say so in that word. No downstream
+> step may present a class identity as an instance identity — that upgrade is the
+> substitution this repository refuses everywhere else, applied to the instrument
+> instead of to the evidence.
+
+Whether a class-scoped estimand is worth promoting is a **separate question this
+section does not answer**. It narrows the claim; it does not decide whether the
+narrowed claim earns a promotion. That belongs to whoever accepts the first lock.
+
+#### Admission is recorded scope, and not yet enforcement
+
+An envelope in the lock makes the scope **recordable**. It prevents nothing.
+`InstrumentChainEnvelope.admits()` would be called by tests and by no production
+path, and it is worth stating plainly rather than leaving to be discovered:
+
+> **This amendment does not prevent cross-chain licensing.** It closes the
+> missing-field defect entry 11 names. Until both enforcement points below exist,
+> a lock carrying an envelope records the scope of a claim and refuses nothing.
+
+| enforcement point | where it goes | which slice |
+| --- | --- | --- |
+| **captured-window admission** | after full-object ring attestation (entry 9) and before a window is persisted — a window whose chain is not in the frozen envelope is not corpus | the persistence mechanism §5.20 governs, which is unbuilt |
+| **use-time promotion admission** | at evaluation — the chain presented with the thing being promoted must belong to the corpus's frozen envelope, or the promotion reports why it does not | the promotion path, after a corpus exists |
+
+Both are queued as `PENDING_AMENDMENTS` entries **on acceptance**, one each,
+because the queue is the list the drain rate is read from and a table inside an
+accepted document is not a queue. Entry 11 is itself the evidence: a repair
+recorded in prose waits exactly as long as the prose does.
+
+#### What this section does not do
+
+- It does **not** claim cross-chain licensing is prevented. See directly above.
+- It does not authorise capture, persistence, a tuner operation, a directory or
+  a byte, and it changes no behaviour of any module.
+- It does not amend `signal_chain_hash`. The centre frequency stays out.
+- It does not settle whether a class-scoped estimand is promotable.
+- It does not drain entry 11, and it does not resolve Finding A. A proposal
+  satisfies no obligation — the reading that produced entry 8.
+
+#### What acceptance would require
+
+An explicit acceptance decision and an acceptance commit, and then, in this
+order, because §13l makes it a gate rather than a preference:
+
+1. **The acceptance commit, before any implementation exists.**
+2. **Merge**, carrying the accepted contract to `main`.
+3. **A code-only implementation built on that merge** — the two declarations,
+   self-validating, canonicalized, with the receiver-identity authority, and both
+   bound into `PromotionCorpusLock` and the completion receipt.
+4. **Entry 11 drains when that implementation lands**, and the two enforcement
+   points enter the queue as their own entries.
+
+Finding A stays open across all four steps and closes at step 3.
 
 ---
 

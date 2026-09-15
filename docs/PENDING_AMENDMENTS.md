@@ -242,6 +242,16 @@ the envelope legitimately spans more than one chain. It amends §5.20 and
 `rf_validation_manifest`, and it must land before a lock exists, because a lock
 is precisely the thing that cannot be amended afterwards.
 
+**Correction 2026-09-15 — the repair named above is rejected.** `gain_db` is
+inside the chain identity and `set_gain_db` rebuilds the chain *before* raising
+`GAIN_CHANGE`, so a `GAIN_STEPS` observation spans two chain hashes by
+construction: **no promotion corpus has one chain hash**, and freezing one would
+make the corpus unbuildable. The settled ruling is an enumerated envelope in two
+layers — instrument chain, and capture plan — and §5.23 proposes the amendment.
+**This entry stays open.** It drains when an implementation lands, not when
+§5.23 merges: nothing in this queue is satisfied by a proposal, which is the
+reading entry 8 records.
+
 ## Drain record
 
 A landed entry leaves the list above. It is recorded here in one line, because
