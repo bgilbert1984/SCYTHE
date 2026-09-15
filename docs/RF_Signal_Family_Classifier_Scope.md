@@ -1892,8 +1892,19 @@ seven details open — one of which, "drains the entire ring", described behavio
 `acquire_window` does not have and was concealing an obligation. Revised again
 at `cf4d627` after review found five more, including a digest claim that was
 simply wrong and an attestation field that would have forced `RECEIVER_SPURS` to
-fabricate two declarations to satisfy a schema. **Accepted on the corrected
-substance**; this is the acceptance commit.*
+fabricate two declarations to satisfy a schema. Accepted on the corrected
+substance at `f777847`.
+
+Review of that acceptance found three contradictions **in the resulting
+document** — one substantive: §5.19's refusal and accepted §5.20 gave opposite
+answers about `PromotionCorpusLock`, and calling the older one superseded left
+two accepted answers rather than one. Corrected at `8e290ac`. **This is the
+acceptance commit, and it covers the corrected text**, including the amendment
+to §5.19, which is itself accepted text and could not be changed without one.*
+
+*Two acceptance commits, in order, because the first was accurate when it was
+made and the text moved under it. Amending it to pretend otherwise would have
+produced a cleaner history and a false one.*
 
 *Those three SHAs are the heads that were **reviewed**, not ancestors of this
 one: the branch was rebased onto `084b1d2` so that §5.19's corrected wording and
@@ -1902,12 +1913,15 @@ entry 8's drain could not be lost, and a rebase rewrites. `fd536cd` and
 history. Recorded because a SHA in a document that resolves to nothing is worse
 than no SHA.*
 
-*Two readings are pinned here so they are not recovered later by inference.
+*Three readings are pinned here so they are not recovered later by inference.
 §5.19's "out of scope until §5.20 is accepted" is now satisfied — but
 `RECEIVER_SPURS` remains unreachable behind a **second** gate, the missing
 identification protocol, which §5.20 does not supply. And acceptance of an
 authority is not authorisation of a slice: no persistence code and no live
-capture are authorised by this commit.*
+capture are authorised by this commit. And the document is **ahead of the
+code**: §5.19 now states the lock split that `rf_null_corpus.py` does not yet
+implement, which is §5.20 correction **C** and is recorded in both places rather
+than in neither.*
 
 *§5.5 granted a DSP working buffer — process-local, volatile, fixed-capacity,
 non-persistent. A validation corpus is persisted labelled data by definition, so
