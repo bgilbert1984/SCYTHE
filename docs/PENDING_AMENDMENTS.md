@@ -143,23 +143,6 @@ likely to go wrong here is that it looks complete: there is a module, a record, 
 green suite and a passing control. The entry exists because that appearance is
 exactly what a queue is for.
 
----
-
-## 8. `RF_Signal_Family_Classifier_Scope.md` §5.19 — "until §5.20 exists"
-
-**Trigger:** when §5.20 is accepted, or when it is rejected.
-
-§5.19's fourth refusal reads "out of scope until §5.20 exists". §5.20 now exists
-**as a proposal**, so the sentence can be read as already satisfied by a section
-that authorises nothing. The correction is one word — *accepted* rather than
-*exists* — but §5.19 is accepted text and this slice does not amend it.
-
-§5.20's own status block states the block explicitly in the meantime. If §5.20 is
-rejected, the sentence is corrected to name whatever replaces it, and this entry
-lands either way.
-
----
-
 ## Drain record
 
 A landed entry leaves the list above. It is recorded here in one line, because
@@ -178,6 +161,14 @@ what is still pending. This is a record, not a queue: nothing here is waiting.
 | 4 — no exit from a `FAILED` reservation | `PROMOTION_EXECUTION_CONTRACT.md` §13e Amendment F | Amendment F |
 | 5 — the name check needed a token source | `SCYTHE_VERDICT_VOCABULARIES.md` §3, *The mechanical step, as implemented* | slice 7 |
 | 6 — a token declared twice collapsed | `test_scythe_verdict_vocabularies.py`, `DUPLICATE_DECLARATIONS` | slice 8, before its ceiling code |
+| 8 — §5.19's "until §5.20 exists" read as satisfied by a proposal | `RF_Signal_Family_Classifier_Scope.md` §5.19 | `8469ed5` |
+
+Entry 8 was written on the §5.20 proposal branch and drained before that
+proposal was accepted: the correction it names was authorised as its own act and
+landed first. It is in this table rather than absent from it — unlike
+`RETRY_REQUIRES_OPERATOR` below — because it *did* become an obligation of the
+repository, for the length of one review. **This row is only true once `8469ed5`
+has merged**, which is why §5.20's own merge is ordered behind it.
 
 An entry for `RETRY_REQUIRES_OPERATOR` was written on the slice-4 branch and
 never merged; it is absent from this table because it was never a pending
