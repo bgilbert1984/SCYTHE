@@ -1859,11 +1859,18 @@ section that says another leaves two accepted answers, whichever one is labelled
 superseded. What the original protected — that nothing may claim a corpus is
 complete while a stratum is missing — is the second sentence, and is unchanged.
 
-*`rf_null_corpus.py` still implements the original rule: `may_freeze` is `False`
-and `freeze_note` names `PromotionCorpusLock`. That is §5.20 correction **C**,
-which lands as code with its own controls before the first lock exists. The
-document is ahead of the code here, and says so rather than letting a reader
-assume they agree.*
+*This note once read "the document is ahead of the code here", because
+`rf_null_corpus.py` still answered `may_freeze: False` with a `freeze_note`
+naming `PromotionCorpusLock`. **Phase 3a closed that gap** (§5.20 correction
+**C**, merged `d70fc4c`): both keys are gone with no alias, and `plan_state()`
+now answers two questions —
+`configuration_precommitment: CONFIGURATION_PRECOMMITMENT_AVAILABLE` and
+`completion_eligibility: COMPLETION_BLOCKED_AWAITING_CAPTURE`.*
+
+*The correction outlived its condition by five merges, which is the failure the
+note was written to prevent, one level up. It is recorded here rather than
+deleted, because a note that was true, then false, then removed leaves a reader
+no way to tell which of those a similar note is now.*
 
 **No generic payload writer.** The interface keeps future real-window ingestion
 structurally separate from synthetic generation. One `write(payload)` accepting
@@ -2081,9 +2088,13 @@ completion-certified or promotion-eligible.
 
 §5.19's refusal now states this split directly — it was **corrected in place**
 rather than superseded from here, because a superseded accepted rule is still an
-accepted rule and two of them is one too many. What remains for **C** is the
-code: `rf_null_corpus.py`'s `may_freeze` and `freeze_note` still implement the
-original rule.
+accepted rule and two of them is one too many.
+
+**Correction C is complete.** The code half landed in Phase 3a (`d70fc4c`):
+`may_freeze` and `freeze_note` are gone with no compatibility alias,
+`plan_state()` reports configuration precommitment and completion eligibility
+separately, and `CorpusCompletionReceipt` exists — pure, filesystem-free, and
+refusing any lock whose frozen declarations disagree with what is declared now.
 
 #### The eight required definitions
 
@@ -2337,11 +2348,23 @@ reachable in principle:
 | `RECEIVER_SPURS` — still unreachable | 5 561 | 21.72 GiB |
 | declared total | 16 683 | 65.17 GiB |
 
-`RECEIVER_SPURS` has no identification protocol, so it has no attestation, so it
-has no windows. `plan_state()` continues to report `CORPUS_INCOMPLETE_AWAITING_CAPTURE`,
-`may_freeze` stays `False`, and **no `CorpusCompletionReceipt` can be issued**.
-The twelfth stratum needs a section of its own, and §5.20 must not be read as
-having supplied it.
+`RECEIVER_SPURS` is **still unreachable, and no longer for this reason.** When
+this was written it had no identification protocol at all. §5.21 supplies one and
+is accepted; §5.22 supplies the parameters it deliberately left free and is
+accepted too. What is missing now is **execution**: no catalogue exists, no
+feasibility check has been run against an actual **S**, and no window has been
+captured. A method nobody has run identifies nothing.
+
+`plan_state()` continues to report `CORPUS_INCOMPLETE_AWAITING_CAPTURE` with
+`completion_eligibility: COMPLETION_BLOCKED_AWAITING_CAPTURE`, and **no
+`CorpusCompletionReceipt` can be issued**. *(This paragraph once said
+`may_freeze` stays `False`. That key no longer exists — Phase 3a removed it with
+no alias, because a key keeping the old name and the old meaning would be the
+contradiction preserved under a synonym.)*
+
+The twelfth stratum needed a section of its own and got **two** — §5.21 for how
+a feature is discriminated, §5.22 for the estimand, the trial unit and the
+eleven parameters. §5.20 must still not be read as having supplied either.
 
 #### The observation boundary
 
