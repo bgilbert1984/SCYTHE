@@ -2413,22 +2413,48 @@ Every rule here needs a control that fails when it is removed:
 Each needs the collateral scan as well: a mutation that makes exactly its own
 tests fail and no others.
 
-### 5.21 — receiver-spur identification — **PROPOSED, NOT ACCEPTED**
+### 5.21 — receiver-spur identification — **ACCEPTED**
 
 ```text
-Status:     PROPOSED. Nothing here is in force.
-Authority:  NONE until an explicit acceptance decision and an acceptance commit.
-Opens:      Nothing. No capture, no termination, no catalogue, no byte.
-Answers:    How a spectral feature is discriminated as consistent with an
-            internal origin rather than a received one — the gate §5.20 named
-            and did not supply. A method, not an executable procedure: K, R,
-            retune deltas, tolerances, margins and the accepted termination
-            confidence are all pinned to §5.22 and none is set here.
+Status:     ACCEPTED 2026-09-14. The discrimination method is in force.
+Authority:  §5.21 is accepted. It authorises no capture, no termination, no
+            catalogue and no byte. It is a method, not a procedure: every
+            decisive parameter lives in §5.22.
+Opens:      Nothing on its own. It removes the gate §5.20 named — RECEIVER_SPURS
+            now has a way to be identified — and removes no other obstacle.
 Does not:   Make RECEIVER_SPURS achievable, or prove any feature internal.
-            See *The part that may have no answer*, which is the most important
-            paragraph in this section, and which turns on an estimand §5.22
-            must name before a trial unit can be chosen.
+            Every usable class is CONSISTENT_WITH_ something, at a governed
+            confidence, under an OPERATOR_DECLARED termination that no software
+            here can verify.
 ```
+
+*Proposed 2026-09-14 at `695fb5a`. Review found four claims wrong and they were
+corrected at `91e7369`: the retune partition was three cases where the mixing
+family is affine with integer and rational slopes; the independence argument was
+categorical where the real defect is unrepresentativeness; the labels claimed
+internality where they can only claim consistency; and the signal-chain
+asymmetry was **backwards** — `gain_db` is hashed into the manifest and
+`set_gain_db` rebuilds the chain before invalidating, so `GAIN_STEPS` spans two
+identities and `RETUNE_TRANSIENTS` spans one.
+
+Review then found four more, corrected at `6d1cbf7`: "the same instrument turned
+down" contradicted this repository's own semantics, where gain is inside the
+identity; termination was simultaneously "the only test that decides" and an
+observation that proves nothing; a monotonic sweep confounds tuner frequency
+with time, so "no received emission behaves this way" was true of a *static*
+emitter and asserted of every emitter; and the reconnect rule excluded
+session-scoped features as "not a property of the receiver" when USB seams, PLL
+settling and initialisation transients are receiver-system behaviour — and are
+periodic and narrow, which makes them close to the exact population this stratum
+exists to test. **Accepted on the corrected substance**; this is the acceptance
+commit.*
+
+*Two readings are pinned so they are not recovered later by inference. Accepting
+a **method** is not accepting a **procedure**: K, R, the retune deltas, the
+tolerances, the margins, the order, the coordinates and both accepted
+termination confidences are §5.22's, and §5.21 sets none of them. And acceptance
+proves nothing internal — it establishes how the question is asked, not what the
+answer is for any feature.*
 
 §5.20 left one sentence deliberately unresolved:
 
@@ -2780,17 +2806,36 @@ question above rather than inherit it; and only then the persistence mechanism,
 with `PENDING_AMENDMENTS` entry 9 landed first, since §5.20's publication step 1
 still asks for an attestation that does not exist.
 
-### 5.22 — the capture plan — **PROPOSED, NOT ACCEPTED**
+### 5.22 — the capture plan — **ACCEPTED**
 
 ```text
-Status:     PROPOSED. Nothing here is in force.
-Authority:  NONE until an explicit acceptance decision and an acceptance commit.
-Opens:      Nothing. No capture, no tuner operation, no catalogue, no byte.
-Order:      Estimand, then trial unit, then parameters. Reversing that order is
-            how a corpus ends up measuring its own convenience.
-Exposes:    Two properties of the existing design that naming the estimand makes
-            visible. Both are recorded as findings and neither is repaired here.
+Status:     ACCEPTED 2026-09-14. The estimand, the trial unit and the eleven
+            parameters are in force.
+Authority:  §5.22 is accepted. It authorises no capture, no tuner operation, no
+            catalogue, no persistence and no byte.
+Order:      Estimand, then trial unit, then parameters — now settled in that
+            order rather than proposed in it.
+Binds:      The promotion claim is instrument-, envelope- and
+            distribution-scoped, and the promotion record must carry all three.
+            The aggregate bound is design-weighted and must be described as
+            such. Finding A must land before the first PromotionCorpusLock, and
+            option 4 expires at that same moment.
 ```
+
+*Proposed 2026-09-14 at `c216ef4` and accepted on that substance; this is the
+acceptance commit. Naming the estimand was the whole of the work and it ruled
+out the answer a reader would assume: nine of twelve strata are synthetic, so
+the corpus cannot estimate an operational rate, and the claim promotion would
+license is narrower than "the detector's false-DIGITAL rate".*
+
+*Three readings are pinned. **The scope limits travel with the claim** — a
+promoted DIGITAL verdict is covered for this chain, inside the declared
+envelope, against the validation distribution, and nowhere else. **The aggregate
+is design-weighted**; describing it as an operational rate needs an amendment,
+not a rewording. And **`RECEIVER_SPURS` is retained under option 1** because the
+estimand is a rate over a distribution that genuinely contains those spurs
+repeatedly — never because the multiplication reaches 5 561. Option 4 remains
+available until a lock exists and is unavailable after it.*
 
 §5.20 deferred this and said why: *"retaining bytes does not make trials
 independent and does not make labels true."* §5.21 refused to choose a trial

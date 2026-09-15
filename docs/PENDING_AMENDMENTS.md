@@ -244,6 +244,33 @@ is precisely the thing that cannot be amended afterwards.
 
 ---
 
+## 12. Four stale claims in accepted §5.19 and §5.20 — three of them mine, from Phase 3a
+
+**Trigger:** immediately, as its own documentation act. These are wrong now, not
+wrong at some future step.
+
+| where | claim | why it is stale |
+| --- | --- | --- |
+| §5.19 | "`rf_null_corpus.py` still implements the original rule: `may_freeze` is `False` and `freeze_note` names `PromotionCorpusLock`" | Phase 3a removed both keys with no alias, at `d70fc4c` |
+| §5.20 correction **C** | "what remains for **C** is the code: `rf_null_corpus.py`'s `may_freeze` and `freeze_note` still implement the original rule" | C's code work is **done** |
+| §5.20 | "`RECEIVER_SPURS` has no identification protocol" | §5.21 is accepted |
+| §5.20 | "`may_freeze` stays `False`" | the key does not exist |
+
+Three of the four were made stale by **Phase 3a**, not by accepting §5.21. I
+wrote "the document is ahead of the code" into three places, then landed the
+code that closed the gap and never went back to the sentences that announced it.
+The note outlived the condition it described, which is the failure the note was
+written to prevent — one level up.
+
+The fourth is an ordinary consequence of acceptance.
+
+Each is a small correction to accepted text and therefore its own act. Recorded
+here rather than folded into the acceptance commits, because an acceptance
+commit that also edited two other accepted sections would be exactly the sweep
+`SCYTHE_VERDICT_VOCABULARIES.md` §7 refuses.
+
+---
+
 ## Drain record
 
 A landed entry leaves the list above. It is recorded here in one line, because
