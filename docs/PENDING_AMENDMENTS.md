@@ -242,31 +242,6 @@ the envelope legitimately spans more than one chain. It amends §5.20 and
 `rf_validation_manifest`, and it must land before a lock exists, because a lock
 is precisely the thing that cannot be amended afterwards.
 
----
-
-## 13. Two stale claims in code, one of them in runtime output
-
-**Trigger:** immediately. Both are wrong now. Held separately from entry 12
-because that authorisation was for a *documentation* correction and these are
-code.
-
-| where | says | why it is stale |
-| --- | --- | --- |
-| `rf_validation_manifest.py` docstring | "``RECEIVER_SPURS`` needs an identification protocol that does not exist" | §5.21 is accepted |
-| `rf_null_corpus.py` `plan_state()["persistence_note"]` | "CAPTURED-WINDOW PERSISTENCE AWAITS §5.20" | §5.20 is accepted |
-
-The second is worse than a stale comment: it is **returned by `plan_state()`**,
-so a caller reading the harness's own status is told that a decision which has
-been made is still pending. What is actually awaited is the persistence *slice* —
-§5.20 grants the authority and no writer exists — and the note should say that
-rather than name a section that has already landed.
-
-The first is a docstring **I rewrote in Phase 3a to fix a different stale
-claim**, and which went stale again three merges later for a different reason.
-Correcting a sentence does not make it self-maintaining.
-
----
-
 ## Drain record
 
 A landed entry leaves the list above. It is recorded here in one line, because
@@ -287,6 +262,15 @@ what is still pending. This is a record, not a queue: nothing here is waiting.
 | 6 — a token declared twice collapsed | `test_scythe_verdict_vocabularies.py`, `DUPLICATE_DECLARATIONS` | slice 8, before its ceiling code |
 | 8 — §5.19's "until §5.20 exists" read as satisfied by a proposal | `RF_Signal_Family_Classifier_Scope.md` §5.19 | `8469ed5` |
 | 12 — six stale claims in accepted §5.19 and §5.20, four listed and two found | `RF_Signal_Family_Classifier_Scope.md` §5.19, §5.20 | `d0c030e` |
+| 13 — two stale claims in code, and a test that guarded a citation | `rf_null_corpus.py`, `rf_validation_manifest.py` | `623669d` |
+
+Entry 13 is the one worth rereading before adding a note anywhere. Its runtime
+claim survived five merges **because the test guarding it checked the citation
+rather than the claim** — `assertIn("5.20", note)` passes whatever the sentence
+around "5.20" says. A note that asserts the status of a document cannot be
+maintained by this repository; a note that asserts a property of its own module
+can, and the drained fix makes `NO WRITER` true by the same check that would
+fail if a writer appeared.
 
 Entry 8 was written on the §5.20 proposal branch and drained before that
 proposal was accepted: the correction it names was authorised as its own act and

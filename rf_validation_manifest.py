@@ -33,9 +33,16 @@ next stratum to be declared ahead of its control path should be able to say so.
 
 The block that remains is not buildability.  ``GAIN_STEPS``,
 ``RETUNE_TRANSIENTS`` and ``RECEIVER_SPURS`` need a receiver rather than a
-generator, which ``rf_null_corpus`` records as ``TUNER_REQUIRED``; and
-``RECEIVER_SPURS`` needs an identification protocol that does not exist, so it
-is unreachable even with a receiver attached.
+generator, which ``rf_null_corpus`` records as ``TUNER_REQUIRED``, and **no
+capture path exists in this repository** -- no writer, no acquisition, nothing
+that turns a tuner event into a stratum window.
+
+``RECEIVER_SPURS`` carries a second condition, and what that condition *is* has
+already changed once.  It had no identification protocol at all; §5.21 supplies
+one and §5.22 supplies the parameters it left free, both accepted 2026-09-14.
+What is missing now is **execution**: no spur catalogue exists, no feasibility
+check has been run against an actual count of internal products, and a method
+nobody has run identifies nothing.
 """
 
 from __future__ import annotations
