@@ -65,6 +65,16 @@ from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
 
+from rf_promotion_geometry import (
+    PROMOTION_BYTES_PER_SAMPLE,
+    PROMOTION_CYCLE_RESOLUTION_HZ,
+    PROMOTION_DTYPE,
+    PROMOTION_SAMPLE_RATE_HZ,
+    PROMOTION_WINDOW_MS,
+    PROMOTION_WINDOW_OVERLAP,
+    PROMOTION_WINDOW_SAMPLES,
+)
+
 
 SCHEMA = "scythe.rf-iq-ring.v1"
 
@@ -74,18 +84,29 @@ SCHEMA = "scythe.rf-iq-ring.v1"
 # later validation may authorise longer or overlapping windows, and when it does
 # it must register that as a new configuration rather than silently changing what
 # squared-envelope-cyclic.v1 was validated against.
-DEFAULT_SAMPLE_RATE_HZ = 2_048_000.0
-DEFAULT_WINDOW_MS = 256.0
-DEFAULT_CAPACITY_SAMPLES = 524_288
-STORAGE_DTYPE = "complex64"
-BYTES_PER_SAMPLE = 8
+#
+# **Re-exported, not declared.** §5.20 correction A gave the geometry one home
+# in `rf_promotion_geometry`, which imports nothing but `typing`. The names here
+# keep their spelling because every caller already uses them and a rename is not
+# a correction; what changed is that there is no longer a second place the
+# numbers could drift from.
+DEFAULT_SAMPLE_RATE_HZ = PROMOTION_SAMPLE_RATE_HZ
+DEFAULT_WINDOW_MS = PROMOTION_WINDOW_MS
+DEFAULT_CAPACITY_SAMPLES = PROMOTION_WINDOW_SAMPLES
+STORAGE_DTYPE = PROMOTION_DTYPE
+BYTES_PER_SAMPLE = PROMOTION_BYTES_PER_SAMPLE
 # 1 / 0.256 s. The finest cycle-frequency spacing a 256 ms window can resolve.
-NOMINAL_CYCLE_RESOLUTION_HZ = 3.90625
+NOMINAL_CYCLE_RESOLUTION_HZ = PROMOTION_CYCLE_RESOLUTION_HZ
 
 # Windows are non-overlapping initially: overlap multiplies computation and
 # correlates consecutive verdicts before there is any evidence it buys detection
 # performance.
-WINDOW_OVERLAP = "NONE"
+#
+# Non-overlap is a property of the **capture rule**, not of this ring:
+# `acquire_window` copies and removes nothing, so two calls with no appends
+# between them return the same samples under two window IDs. See
+# `samples_since` and §5.20 correction A.
+WINDOW_OVERLAP = PROMOTION_WINDOW_OVERLAP
 
 # Every reason a ring may be cleared. The set is closed on purpose -- an
 # unrecognised reason raises rather than clearing quietly, because a clear whose
@@ -105,6 +126,56 @@ INVALIDATION_REASONS: Tuple[str, ...] = (
 )
 
 RING_STATES: Tuple[str, ...] = ("INVALIDATED", "FILLING", "READY", "CLOSED")
+
+# What `verify_window` actually binds, stated because the name overpromises.
+#
+# It takes two strings. It proves that **this ring issued a window with that ID
+# and that digest, under the current epoch, and has not evicted it**. It does
+# not see an `IQWindow` object at all, so it cannot and does not prove that any
+# particular object in a caller's hand is the one that was issued: a caller
+# holding a genuine ID and digest can construct a different `IQWindow` carrying
+# different samples, different metadata, or a different interval, and
+# `verify_window` will return WINDOW_VERIFIED for the pair of strings it was
+# given.
+#
+# That is sufficient for its existing job -- refusing a `source_window_hash`
+# that no window ever carried. It is **not** sufficient to attest an object
+# before publishing its bytes, which is what §5.20's capture writer will need:
+# an authoritative ring operation over the exact nominal object, all of its
+# metadata, its sample interval, and a digest recomputed from the bytes being
+# published. That operation does not exist yet and this constant exists so that
+# nobody mistakes the two-string check for it.
+VERIFICATION_BINDS = "WINDOW_ID_AND_DIGEST_ONLY"
+VERIFICATION_DOES_NOT_BIND: Tuple[str, ...] = (
+    "the IQWindow object",
+    "its samples",
+    "its metadata",
+    "its sample interval",
+)
+FULL_OBJECT_ATTESTATION = "NOT_IMPLEMENTED_REQUIRED_BEFORE_PERSISTENCE"
+
+WINDOW_INTERVAL_OVERLAP = "WINDOW_INTERVAL_OVERLAP"
+
+
+def window_interval_disjoint(previous: "IQWindow", current: "IQWindow") -> bool:
+    """Do two windows hold disjoint spans of the ring's appended samples?
+
+    `current` must begin at or after `previous` ends::
+
+        current.first_sample_index >= previous.last_sample_index
+
+    Under the promotion geometry, where every window is the full 524 288
+    samples, that is exactly §5.20 correction A's rule --
+    ``current.first >= previous.first + 524_288`` -- and it stays correct for
+    the shorter windows a development configuration may take, which the
+    constant-subtraction form does not.
+
+    This is the whole reason the indices are exposed. `acquire_window` copies
+    and removes nothing, so two calls with no appends between them return **the
+    same samples** under two window IDs, two digests and two timestamps, all of
+    which differ. The indices are the only part that does not.
+    """
+    return current.first_sample_index >= previous.last_sample_index
 
 # Outcomes of a window request. Same shape as the signal-family contract: a small
 # stable vocabulary, and a refusal is a result rather than a missing value.
@@ -175,6 +246,13 @@ class IQWindow:
 
     window_id: str
     configuration_epoch: int
+    # Where this window sits in the ring's own count of appended samples --
+    # authoritative because the ring assigns it, not the consumer. §5.20
+    # correction A: non-overlap has to be checkable from two windows rather
+    # than promised by whoever acquired them, and timestamps cannot do it
+    # (two acquisitions a millisecond apart over identical samples have
+    # different times and the same content).
+    first_sample_index: int
     start_time: float
     end_time: float
     sample_count: int
@@ -188,6 +266,8 @@ class IQWindow:
         return {
             "window_id": self.window_id,
             "configuration_epoch": self.configuration_epoch,
+            "first_sample_index": self.first_sample_index,
+            "last_sample_index": self.last_sample_index,
             "start_time": self.start_time,
             "end_time": self.end_time,
             "sample_count": self.sample_count,
@@ -197,6 +277,17 @@ class IQWindow:
             "duration_s": self.duration_s,
             "raw_iq_exposed": False,
         }
+
+    @property
+    def last_sample_index(self) -> int:
+        """One past the last sample, half-open like a slice.
+
+        Derived from `first_sample_index` and `sample_count` rather than stored
+        beside them. A stored end index is a third number that can disagree with
+        the other two, and the disagreement would be invisible: every digest
+        here covers the samples, not the bookkeeping.
+        """
+        return self.first_sample_index + self.sample_count
 
     @property
     def duration_s(self) -> float:
@@ -419,6 +510,11 @@ class BoundedIQRing:
         self._write_index = 0
         self._held = 0
         self._newest_sample_time = None
+        # `_total_appended` is deliberately **not** reset. It is the ring's
+        # lifetime count of appended samples and the only monotonic quantity
+        # here; resetting it would make two windows from different epochs
+        # compare as overlapping, which is the check §5.20 correction A depends
+        # on. Eviction is tracked against it separately, by `frontier`.
         self._configuration_epoch += 1
         self._last_invalidation_reason = code
         self._last_invalidated_at = float(self._now())
@@ -470,6 +566,7 @@ class BoundedIQRing:
             window = IQWindow(
                 window_id=window_id,
                 configuration_epoch=self._configuration_epoch,
+                first_sample_index=first_index,
                 start_time=start_time,
                 end_time=end_time,
                 sample_count=requested,
@@ -527,6 +624,31 @@ class BoundedIQRing:
                                           VERIFICATION_REASONS["WINDOW_EVICTED"])
             return WindowVerification(True, "WINDOW_VERIFIED",
                                       VERIFICATION_REASONS["WINDOW_VERIFIED"])
+
+    def recorded_window(self, window_id: str) -> Optional[Dict[str, Any]]:
+        """What this ring recorded when it issued that window. Metadata only.
+
+        Exposed for §5.20's eventual full-object attestation, which must compare
+        an object against what was issued rather than compare two strings
+        against a record. Returns `None` for an ID this ring never issued, and
+        never returns samples -- there is no path here that serialises them.
+        """
+        with self._lock:
+            record = self._windows.get(_text(window_id))
+            if record is None:
+                return None
+            return {
+                "window_id": record.window_id,
+                "configuration_epoch": record.configuration_epoch,
+                "digest": record.digest,
+                "signal_chain_hash": record.signal_chain_hash,
+                "sample_count": record.sample_count,
+                "first_sample_index": record.first_index,
+                "last_sample_index": record.first_index + record.sample_count,
+                "start_time": record.start_time,
+                "end_time": record.end_time,
+                "raw_iq_exposed": False,
+            }
 
     # -- internals ----------------------------------------------------------
 

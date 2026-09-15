@@ -37,7 +37,7 @@ from dataclasses import dataclass
 import hashlib
 import math
 import time
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 
 SCHEMA = "scythe.rf-validation-manifest.v1"
@@ -95,6 +95,25 @@ MINIMUM_TRIALS_FOR_ZERO_FAILURES_CORRECTED = math.ceil(
 # prohibition is what keeps the count at thirteen.
 CHANNEL_PURPOSE_ELIGIBLE_FOR_PROMOTION = "STRUCTURE_CHANNEL"
 VALIDATION_FAMILY_REVISION = "rf-digital-q4.v1"
+
+# What the strata *mean*, by revision. §5.20 correction D.
+#
+# `_strata_digest` hashed key, minimum and buildability, and not the meaning. So
+# redefining a stratum without touching its name, its count or its buildability
+# was invisible to `PromotionCorpusLock` -- the identical gap
+# `VALIDATION_FAMILY_REVISION` exists to close one level up, where the bound
+# count alone would not notice a family whose membership was rewritten while its
+# size stayed the same.
+#
+# v2 is the redefinition of `GAIN_STEPS` and `RETUNE_TRANSIENTS` as the first
+# complete post-invalidation window. v1 described windows the ring cannot issue:
+# `GAIN_CHANGE` and `RETUNE` both clear the buffer, so nothing can span one.
+#
+# **Descriptions are not hashed.** This advances when the operational meaning
+# changes, which editorial punctuation is not. A digest over prose would fail in
+# both directions at once -- a comma would read as a strata change, and a
+# genuine redefinition that reused the same words would not.
+STRATA_DEFINITION_REVISION = "rf-null-strata.v2"
 
 # The review named its members in operator vocabulary; the corpus contract names
 # them in the vocabulary the strata are actually keyed by. Both are recorded, so
@@ -200,6 +219,10 @@ class PromotionCorpusLock:
     # alone would not notice a family whose membership was rewritten while its
     # size stayed the same.
     validation_family_revision: str = VALIDATION_FAMILY_REVISION
+    # What the strata mean, not merely which ones there are. Frozen alongside
+    # the digest rather than only inside it, so a lock can be read without
+    # recomputing a hash to find out which definitions it was opened against.
+    strata_definition_revision: str = STRATA_DEFINITION_REVISION
     # Which lineage was eligible to emit the promoted claim when the corpus
     # opened. Allowing a second one afterwards is a second hypothesis test, and
     # the thirteen-bound denominator would no longer cover it.
@@ -216,7 +239,16 @@ def _configuration_digest(method_revision: str, decision_threshold: float,
 
 
 def _strata_digest() -> str:
-    payload = "|".join(f"{s.key}:{s.minimum_windows}:{int(s.buildable)}" for s in STRATA)
+    """Key, minimum, buildability -- and the revision that says what they mean.
+
+    `STRATA_DEFINITION_REVISION` is in here because without it a stratum could
+    be redefined while its name, count and buildability stayed put, and the lock
+    would record a digest that had not moved over a population that had. §5.20
+    correction D.
+    """
+    payload = "|".join([STRATA_DEFINITION_REVISION] +
+                       [f"{s.key}:{s.minimum_windows}:{int(s.buildable)}"
+                        for s in STRATA])
     return f"blake2s:{hashlib.blake2s(payload.encode(), digest_size=16).hexdigest()}"
 
 
@@ -236,7 +268,153 @@ def freeze_promotion_corpus(*, corpus_id: str, method_revision: str,
         tested_bound_count=TESTED_BOUND_COUNT,
         per_bound_alpha=PER_BOUND_ALPHA,
         validation_family_revision=VALIDATION_FAMILY_REVISION,
+        strata_definition_revision=STRATA_DEFINITION_REVISION,
         eligible_channel_purpose=CHANNEL_PURPOSE_ELIGIBLE_FOR_PROMOTION,
+    )
+
+
+# -- completion, which is not precommitment ---------------------------------
+#
+# §5.20 correction C split one overloaded state into two. `PromotionCorpusLock`
+# is a **configuration precommitment**: it freezes the method, the threshold,
+# the preprocessing and the strata before the first promotion window exists,
+# because otherwise thresholds get tuned against the windows that validate them.
+# It holds no window counts and never did -- read its fields.
+#
+# `CorpusCompletionReceipt` is the other half: it says every declared stratum is
+# present at its fixed count. Nothing may claim a corpus is complete without
+# one, and an incomplete corpus may be configuration-frozen indefinitely.
+#
+# The old rule -- no lock while any stratum is absent -- forbade the
+# precommitment until after the thing it precommits to.
+COMPLETION_RECEIPT_SCHEMA = "scythe.rf-corpus-completion.v1"
+
+COMPLETION_LOCK_ABSENT = "COMPLETION_LOCK_ABSENT"
+COMPLETION_LOCK_STRATA_MOVED = "COMPLETION_LOCK_STRATA_MOVED"
+COMPLETION_STRATUM_MISSING = "COMPLETION_STRATUM_MISSING"
+COMPLETION_STRATUM_UNKNOWN = "COMPLETION_STRATUM_UNKNOWN"
+COMPLETION_COUNT_BELOW_REQUIRED = "COMPLETION_COUNT_BELOW_REQUIRED"
+COMPLETION_COUNT_ABOVE_REQUIRED = "COMPLETION_COUNT_ABOVE_REQUIRED"
+COMPLETION_COUNT_UNCOUNTABLE = "COMPLETION_COUNT_UNCOUNTABLE"
+COMPLETION_REFUSALS: Tuple[str, ...] = (
+    COMPLETION_LOCK_ABSENT, COMPLETION_LOCK_STRATA_MOVED,
+    COMPLETION_STRATUM_MISSING, COMPLETION_STRATUM_UNKNOWN,
+    COMPLETION_COUNT_BELOW_REQUIRED, COMPLETION_COUNT_ABOVE_REQUIRED,
+    COMPLETION_COUNT_UNCOUNTABLE,
+)
+
+
+class CompletionRefused(RuntimeError):
+    """A receipt that was not issued. A code, never a repair."""
+
+    def __init__(self, code: str, detail: str = "") -> None:
+        super().__init__(f"{code}: {detail}" if detail else code)
+        self.code = code
+        self.detail = detail
+
+
+@dataclass(frozen=True)
+class CorpusCompletionReceipt:
+    """Every declared stratum, present at its fixed count, under one lock.
+
+    **Pure and filesystem-free.** It counts nothing itself and looks at no
+    directory: a caller supplies the counts and this decides whether they are a
+    complete corpus. Whatever eventually counts files is a separate thing with
+    its own authority, and this must not become the place that grows one.
+
+    **It is not a promotion claim.** A complete corpus is a corpus that may be
+    evaluated. What the evaluation then finds is a separate result, and a single
+    false DIGITAL fails the frozen corpus rather than re-opening it.
+    """
+
+    schema: str
+    corpus_id: str
+    issued_at: float
+    configuration_digest: str
+    strata_digest: str
+    strata_definition_revision: str
+    validation_family_revision: str
+    windows_per_stratum: int
+    total_windows: int
+    counted: Tuple[Tuple[str, int], ...]
+
+    def to_dict(self) -> Dict[str, Any]:
+        data = {field: getattr(self, field) for field in self.__dataclass_fields__}
+        data["counted"] = {key: count for key, count in self.counted}
+        data["promotes"] = False
+        data["promotion_note"] = (
+            "A COMPLETE CORPUS MAY BE EVALUATED. COMPLETION IS NOT A RESULT "
+            "AND NEVER A PROMOTION"
+        )
+        return data
+
+
+def issue_completion_receipt(*, lock: Any, counted: Mapping[str, Any],
+                             issued_at: Optional[float] = None,
+                             ) -> CorpusCompletionReceipt:
+    """Issue a receipt, or refuse and say which stratum and why.
+
+    The count is **exact**, not a floor. `MINIMUM_WINDOWS_PER_STRATUM` is what
+    the zero-failure bound requires; the same number is also the ceiling,
+    because a corpus that kept collecting until its bound improved would have a
+    sample size that depended on the results it saw, and an upper bound computed
+    that way is not the bound that was published. The two numbers coincide for
+    unrelated reasons, and the field name records only the first of them.
+    """
+    if type(lock) is not PromotionCorpusLock:
+        raise CompletionRefused(
+            COMPLETION_LOCK_ABSENT,
+            "a completion receipt requires the PromotionCorpusLock the corpus "
+            f"was opened under; got {type(lock).__name__}")
+    if lock.strata_digest != _strata_digest():
+        raise CompletionRefused(
+            COMPLETION_LOCK_STRATA_MOVED,
+            "the strata set or its definition revision has moved since this "
+            f"lock was opened: {lock.strata_digest} then, {_strata_digest()} now")
+
+    supplied = dict(counted)
+    unknown = sorted(set(supplied) - set(STRATUM_KEYS))
+    if unknown:
+        raise CompletionRefused(COMPLETION_STRATUM_UNKNOWN,
+                                f"{unknown} are not declared strata")
+    missing = [key for key in STRATUM_KEYS if key not in supplied]
+    if missing:
+        raise CompletionRefused(
+            COMPLETION_STRATUM_MISSING,
+            f"{missing} have no count. A corpus missing a stratum is "
+            "incomplete, not complete with a gap")
+
+    required = MINIMUM_WINDOWS_PER_STRATUM
+    for key in STRATUM_KEYS:
+        count = supplied[key]
+        if type(count) is not int:
+            raise CompletionRefused(
+                COMPLETION_COUNT_UNCOUNTABLE,
+                f"{key} was counted as {type(count).__name__}, which is not a "
+                "number of windows")
+        if count < required:
+            raise CompletionRefused(
+                COMPLETION_COUNT_BELOW_REQUIRED,
+                f"{key} holds {count} of the {required} the bound requires")
+        if count > required:
+            raise CompletionRefused(
+                COMPLETION_COUNT_ABOVE_REQUIRED,
+                f"{key} holds {count}, above the fixed {required}. A sample "
+                "whose size depended on the results is not the sample the "
+                "published bound was computed over")
+
+    ordered = tuple((key, supplied[key]) for key in STRATUM_KEYS)
+    return CorpusCompletionReceipt(
+        schema=COMPLETION_RECEIPT_SCHEMA,
+        corpus_id=lock.corpus_id,
+        issued_at=time.time() if issued_at is None else float(issued_at),
+        configuration_digest=lock.configuration_digest,
+        strata_digest=lock.strata_digest,
+        strata_definition_revision=lock.strata_definition_revision,
+        validation_family_revision=lock.validation_family_revision,
+        windows_per_stratum=required,
+        total_windows=sum(count for _, count in ordered),
+        counted=ordered,
     )
 
 
@@ -292,9 +470,21 @@ STRATA: Tuple[Stratum, ...] = (
     # rtl_tcp's control channel, restricted to the gains the device reports, and
     # IQRetentionOwner.set_gain_db raises GAIN_CHANGE. A corpus can produce a gain
     # step rather than assert one.
-    Stratum("GAIN_STEPS", "A gain change part-way through the window",
+    # Redefined at STRATA_DEFINITION_REVISION v2 (§5.20 correction B). The v1
+    # descriptions -- "a gain change part-way through the window" and "samples
+    # spanning or adjacent to a retune" -- described windows this receiver
+    # cannot produce: `GAIN_CHANGE` and `RETUNE` are both invalidation reasons,
+    # the ring is cleared at the event, and `acquire_window` refuses with
+    # INSUFFICIENT_WINDOW until a full window of new samples has arrived. What
+    # these strata actually test is settling behaviour in the first window of a
+    # new configuration, which is the honest version of what v1 gestured at.
+    Stratum("GAIN_STEPS",
+            "First complete window after GAIN_CHANGE, linked to the gain "
+            "declarations either side",
             MINIMUM_WINDOWS_PER_STRATUM, safety_critical=True),
-    Stratum("RETUNE_TRANSIENTS", "Samples spanning or adjacent to a retune",
+    Stratum("RETUNE_TRANSIENTS",
+            "First complete window after RETUNE, linked to the tuning "
+            "declarations either side",
             MINIMUM_WINDOWS_PER_STRATUM, safety_critical=True),
     # Buildable as of 2026-09-03: ClockContinuityMonitor compares the decoded
     # sample count against elapsed time on every append and separates a transport

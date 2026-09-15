@@ -12,6 +12,26 @@ from rf_validation_manifest import (
     TESTED_BOUND_COUNT, clopper_pearson_upper, evaluate, family_manifest,
     freeze_promotion_corpus, manifest_status, wilson_upper,
 )
+import rf_validation_manifest as manifest
+from rf_validation_manifest import (
+    COMPLETION_COUNT_ABOVE_REQUIRED, COMPLETION_COUNT_BELOW_REQUIRED,
+    COMPLETION_COUNT_UNCOUNTABLE, COMPLETION_LOCK_ABSENT,
+    COMPLETION_LOCK_STRATA_MOVED, COMPLETION_STRATUM_MISSING,
+    COMPLETION_STRATUM_UNKNOWN, STRATA_DEFINITION_REVISION,
+    CompletionRefused, CorpusCompletionReceipt, PromotionCorpusLock,
+    issue_completion_receipt,
+)
+
+
+def _lock(corpus_id="corpus-a"):
+    return freeze_promotion_corpus(
+        corpus_id=corpus_id, method_revision="squared-envelope-cyclic.v1",
+        decision_threshold=6.0, preprocessing_revision="pre.v1",
+        opened_at=1_000.0)
+
+
+def _full_counts():
+    return {key: MINIMUM_WINDOWS_PER_STRATUM for key in STRATUM_KEYS}
 
 
 class BoundTests(unittest.TestCase):
@@ -332,6 +352,190 @@ class FamilyLockTests(unittest.TestCase):
                           configuration=self._configuration())
         self.assertEqual(result["corpus_state"], "ELIGIBLE_PURPOSE_CHANGED_AFTER_FREEZE")
         self.assertFalse(result["promotes"])
+
+
+class StrataDefinitionRevisionTests(unittest.TestCase):
+    """§5.20 correction D: the lock could not see a stratum being redefined."""
+
+    def test_the_two_tuner_strata_are_the_first_window_after_the_event(self):
+        """Correction B. The v1 wording described windows the ring cannot issue:
+        GAIN_CHANGE and RETUNE both clear the buffer."""
+        described = {s.key: s.description for s in STRATA}
+        self.assertIn("First complete window after GAIN_CHANGE",
+                      described["GAIN_STEPS"])
+        self.assertIn("First complete window after RETUNE",
+                      described["RETUNE_TRANSIENTS"])
+        for key in ("GAIN_STEPS", "RETUNE_TRANSIENTS"):
+            with self.subTest(key=key):
+                self.assertNotIn("part-way", described[key])
+                self.assertNotIn("spanning", described[key])
+
+    def test_the_redefined_strata_name_an_actual_invalidation_reason(self):
+        """A description that named an event the ring does not have would be
+        the same class of mistake in a new coat."""
+        from rf_iq_ring import INVALIDATION_REASONS
+        described = {s.key: s.description for s in STRATA}
+        self.assertIn("GAIN_CHANGE", INVALIDATION_REASONS)
+        self.assertIn("RETUNE", INVALIDATION_REASONS)
+        self.assertIn("GAIN_CHANGE", described["GAIN_STEPS"])
+        self.assertIn("RETUNE", described["RETUNE_TRANSIENTS"])
+
+    def test_the_lock_freezes_the_definition_revision(self):
+        self.assertEqual(_lock().strata_definition_revision,
+                         STRATA_DEFINITION_REVISION)
+        self.assertEqual(STRATA_DEFINITION_REVISION, "rf-null-strata.v2")
+
+    def test_the_strata_digest_moves_with_the_definition_revision(self):
+        """The gap correction D closed: name, count and buildability unchanged,
+        meaning changed, digest unmoved."""
+        before = manifest._strata_digest()
+        original = manifest.STRATA_DEFINITION_REVISION
+        try:
+            manifest.STRATA_DEFINITION_REVISION = "rf-null-strata.v3"
+            self.assertNotEqual(manifest._strata_digest(), before)
+        finally:
+            manifest.STRATA_DEFINITION_REVISION = original
+        self.assertEqual(manifest._strata_digest(), before)
+
+    def test_the_digest_does_not_move_when_only_prose_moves(self):
+        """Descriptions are deliberately not hashed. A digest over sentences
+        would read a comma as a strata change, and would still miss a
+        redefinition that reused the same words."""
+        before = manifest._strata_digest()
+        original = manifest.STRATA
+        try:
+            manifest.STRATA = tuple(
+                replace(s, description=s.description + ".") for s in original)
+            self.assertEqual(manifest._strata_digest(), before)
+        finally:
+            manifest.STRATA = original
+
+    def test_the_digest_still_moves_with_the_things_it_always_covered(self):
+        before = manifest._strata_digest()
+        original = manifest.STRATA
+        try:
+            manifest.STRATA = tuple(
+                replace(s, minimum_windows=s.minimum_windows + 1)
+                for s in original)
+            self.assertNotEqual(manifest._strata_digest(), before)
+        finally:
+            manifest.STRATA = original
+
+
+class CompletionReceiptTests(unittest.TestCase):
+    """§5.20 correction C: precommitment and completion are two states."""
+
+    def test_a_complete_corpus_receives_a_receipt(self):
+        receipt = issue_completion_receipt(lock=_lock(), counted=_full_counts(),
+                                           issued_at=2_000.0)
+        self.assertIs(type(receipt), CorpusCompletionReceipt)
+        self.assertEqual(receipt.total_windows, TARGET_TOTAL_NULL_WINDOWS)
+        self.assertEqual(receipt.windows_per_stratum, MINIMUM_WINDOWS_PER_STRATUM)
+        self.assertEqual(len(receipt.counted), len(STRATUM_KEYS))
+
+    def test_the_receipt_is_not_a_promotion_claim(self):
+        """A complete corpus may be evaluated. What the evaluation finds is a
+        separate result, and one false DIGITAL fails the frozen corpus."""
+        data = issue_completion_receipt(lock=_lock(), counted=_full_counts(),
+                                        issued_at=2_000.0).to_dict()
+        self.assertFalse(data["promotes"])
+        self.assertIn("NEVER A PROMOTION", data["promotion_note"])
+
+    def test_a_corpus_without_its_lock_refuses(self):
+        for absent in (None, "corpus-a", object()):
+            with self.subTest(lock=type(absent).__name__):
+                with self.assertRaises(CompletionRefused) as caught:
+                    issue_completion_receipt(lock=absent, counted=_full_counts())
+                self.assertEqual(caught.exception.code, COMPLETION_LOCK_ABSENT)
+
+    def test_a_look_alike_lock_refuses_nominally(self):
+        """`type(x) is T`. A duck-typed stand-in carrying the right attributes
+        is the impostor surface every other gate here closes."""
+        class NotALock:
+            corpus_id = "corpus-a"
+            strata_digest = manifest._strata_digest()
+            configuration_digest = "blake2s:0"
+            strata_definition_revision = STRATA_DEFINITION_REVISION
+            validation_family_revision = "rf-digital-q4.v1"
+        with self.assertRaises(CompletionRefused) as caught:
+            issue_completion_receipt(lock=NotALock(), counted=_full_counts())
+        self.assertEqual(caught.exception.code, COMPLETION_LOCK_ABSENT)
+
+    def test_a_missing_stratum_refuses_by_name(self):
+        counts = _full_counts()
+        del counts["RECEIVER_SPURS"]
+        with self.assertRaises(CompletionRefused) as caught:
+            issue_completion_receipt(lock=_lock(), counted=counts)
+        self.assertEqual(caught.exception.code, COMPLETION_STRATUM_MISSING)
+        self.assertIn("RECEIVER_SPURS", caught.exception.detail)
+
+    def test_an_undeclared_stratum_refuses(self):
+        counts = dict(_full_counts(), INVENTED_STRATUM=MINIMUM_WINDOWS_PER_STRATUM)
+        with self.assertRaises(CompletionRefused) as caught:
+            issue_completion_receipt(lock=_lock(), counted=counts)
+        self.assertEqual(caught.exception.code, COMPLETION_STRATUM_UNKNOWN)
+
+    def test_a_short_stratum_refuses(self):
+        counts = dict(_full_counts())
+        counts["AM"] = MINIMUM_WINDOWS_PER_STRATUM - 1
+        with self.assertRaises(CompletionRefused) as caught:
+            issue_completion_receipt(lock=_lock(), counted=counts)
+        self.assertEqual(caught.exception.code, COMPLETION_COUNT_BELOW_REQUIRED)
+
+    def test_a_long_stratum_refuses_too(self):
+        """The half that is not obvious. 5 561 is a ceiling as well as a floor:
+        a sample whose size depended on the results it saw is not the sample
+        the published bound was computed over."""
+        counts = dict(_full_counts())
+        counts["AM"] = MINIMUM_WINDOWS_PER_STRATUM + 1
+        with self.assertRaises(CompletionRefused) as caught:
+            issue_completion_receipt(lock=_lock(), counted=counts)
+        self.assertEqual(caught.exception.code, COMPLETION_COUNT_ABOVE_REQUIRED)
+
+    def test_a_count_that_is_not_a_count_refuses(self):
+        for value in (True, 5_561.0, "5561", None):
+            with self.subTest(value=repr(value)):
+                counts = dict(_full_counts(), AM=value)
+                with self.assertRaises(CompletionRefused) as caught:
+                    issue_completion_receipt(lock=_lock(), counted=counts)
+                self.assertEqual(caught.exception.code,
+                                 COMPLETION_COUNT_UNCOUNTABLE)
+
+    def test_a_lock_opened_against_different_strata_refuses(self):
+        lock = _lock()
+        original = manifest.STRATA_DEFINITION_REVISION
+        try:
+            manifest.STRATA_DEFINITION_REVISION = "rf-null-strata.v3"
+            with self.assertRaises(CompletionRefused) as caught:
+                issue_completion_receipt(lock=lock, counted=_full_counts())
+            self.assertEqual(caught.exception.code, COMPLETION_LOCK_STRATA_MOVED)
+        finally:
+            manifest.STRATA_DEFINITION_REVISION = original
+
+    def test_the_receipt_touches_no_filesystem(self):
+        """Pure by construction: the module imports nothing that could."""
+        import ast
+        import pathlib
+        tree = ast.parse(pathlib.Path("rf_validation_manifest.py").read_text())
+        imported = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                imported.update(a.name.split(".")[0] for a in node.names)
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                imported.add(node.module.split(".")[0])
+        for forbidden in ("os", "pathlib", "shutil", "tempfile", "io", "open"):
+            with self.subTest(forbidden=forbidden):
+                self.assertNotIn(forbidden, imported)
+
+    def test_the_lock_holds_no_window_counts(self):
+        """Correction C's premise, asserted rather than assumed: the lock never
+        was a completion certificate, so the old refusal described an object
+        this module does not implement."""
+        fields = set(PromotionCorpusLock.__dataclass_fields__)
+        for name in fields:
+            with self.subTest(field=name):
+                self.assertNotIn("window", name)
+                self.assertNotIn("count", name.replace("bound_count", ""))
 
 
 if __name__ == "__main__":
