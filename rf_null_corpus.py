@@ -19,7 +19,9 @@ What it does not do, and has no code for:
   reproducible from its seed and configuration, so persisting one buys nothing
   a `SyntheticWindow` does not already carry -- and §5.19 authorises generation
   and labelling, which is not the same as authorising a corpus on disk. §5.20
-  is where persistence gets decided, and it is unwritten.
+  decides persistence and was **accepted 2026-09-14** -- for the three captured
+  strata only, and it authorises no code by itself. Nothing here writes, and
+  nothing here is the writer it contemplates.
 
   **It has no generic writer.** There is no `write(payload)` and no `emit(kind,
   data)`. Real-window ingestion, when §5.20 permits it, gets its own entry
@@ -46,10 +48,35 @@ from typing import Any, Dict, Iterator, Mapping, Optional, Tuple
 
 import numpy as np
 
+from rf_promotion_geometry import (
+    PROMOTION_GEOMETRY_REFUSED,
+    PROMOTION_SAMPLE_RATE_HZ,
+    PROMOTION_WINDOW_SAMPLES,
+    promotion_geometry_deviations,
+)
 from rf_validation_manifest import STRATA, STRATUM_KEYS
 
 SCHEMA = "scythe.rf-null-corpus.v1"
-GENERATOR_REVISION = "synthetic-null.v1"
+# v2: the generator declaration grew `purpose`, so every identity it computes
+# covers a field v1's did not. Not a rescaling and not comparable -- a v1 record
+# is refused by `regenerate` rather than reinterpreted, which is what a revision
+# is for.
+GENERATOR_REVISION = "synthetic-null.v2"
+
+# -- what a configuration is for -------------------------------------------
+#
+# §5.20 correction A. The geometry lives in `rf_promotion_geometry`, which
+# imports nothing but `typing`; this module reads it from there rather than
+# duplicating the numbers or importing the ring, whose graph carries
+# `threading`, NumPy and a 4 MB allocation for anyone who wanted a constant.
+#
+# 262 144 stays reachable, and only through `DEVELOPMENT_ONLY`: half the
+# arithmetic proves the same properties in a test suite. It is not a smaller
+# promotion geometry, it is not a geometry at all, and a promotion configuration
+# that asks for it is refused rather than rounded.
+PROMOTION_CORPUS = "PROMOTION_CORPUS"
+DEVELOPMENT_ONLY = "DEVELOPMENT_ONLY"
+GENERATOR_PURPOSES: Tuple[str, ...] = (PROMOTION_CORPUS, DEVELOPMENT_ONLY)
 
 # -- where a window came from ---------------------------------------------
 #
@@ -101,6 +128,33 @@ CORPUS_INCOMPLETE_AWAITING_CAPTURE = "CORPUS_INCOMPLETE_AWAITING_CAPTURE"
 CORPUS_INCOMPLETE_STRATA_MISSING = "CORPUS_INCOMPLETE_STRATA_MISSING"
 PROVENANCE_DIGEST_MISMATCH = "PROVENANCE_DIGEST_MISMATCH"
 
+# -- two questions that used to be one --------------------------------------
+#
+# §5.20 correction C. `plan_state` answered `may_freeze: False` with a note
+# saying no `PromotionCorpusLock` may exist while a stratum awaits capture.
+# That was wrong in the direction that matters: the lock is a **configuration
+# precommitment** and has to exist *before* the first promotion window, or
+# thresholds get tuned against the windows that validate them. It holds no
+# window counts -- read its fields.
+#
+# What the old answer was protecting is the other question: nothing may claim a
+# corpus is *complete* while a stratum is missing or awaiting capture. That is
+# `CorpusCompletionReceipt`, and it is unreachable here.
+#
+# There is deliberately **no `may_freeze` alias**. A key that kept the old name
+# and the old meaning would be the contradiction preserved under a synonym, and
+# a reader who never revisited it would never learn it had been answered wrong.
+CONFIGURATION_PRECOMMITMENT_AVAILABLE = "CONFIGURATION_PRECOMMITMENT_AVAILABLE"
+PRECOMMITMENT_STATES: Tuple[str, ...] = (CONFIGURATION_PRECOMMITMENT_AVAILABLE,)
+
+COMPLETION_ELIGIBLE = "COMPLETION_ELIGIBLE"
+COMPLETION_BLOCKED_AWAITING_CAPTURE = "COMPLETION_BLOCKED_AWAITING_CAPTURE"
+COMPLETION_BLOCKED_STRATA_MISSING = "COMPLETION_BLOCKED_STRATA_MISSING"
+COMPLETION_ELIGIBILITY_STATES: Tuple[str, ...] = (
+    COMPLETION_ELIGIBLE, COMPLETION_BLOCKED_AWAITING_CAPTURE,
+    COMPLETION_BLOCKED_STRATA_MISSING,
+)
+
 
 class CorpusRefused(RuntimeError):
     """A window that was not built. A code, never a repair."""
@@ -121,8 +175,12 @@ class GeneratorConfig:
     """
 
     seed: int
-    sample_rate_hz: float = 2_048_000.0
-    window_samples: int = 262_144          # 128 ms at 2.048 MHz
+    # No default. A configuration that did not say what it was for would
+    # default to one of the two answers, and whichever was chosen, half the
+    # callers would be silently wrong -- the promotion ones dangerously so.
+    purpose: str
+    sample_rate_hz: float = PROMOTION_SAMPLE_RATE_HZ
+    window_samples: int = PROMOTION_WINDOW_SAMPLES
     noise_power: float = 1.0
 
     def __post_init__(self) -> None:
@@ -130,6 +188,11 @@ class GeneratorConfig:
                 or not 0 <= self.seed < 2 ** 32:
             raise CorpusRefused(GENERATOR_CONFIG_REFUSED,
                                 "seed is an integer in [0, 2**32)")
+        if self.purpose not in GENERATOR_PURPOSES:
+            raise CorpusRefused(
+                GENERATOR_CONFIG_REFUSED,
+                f"purpose is one of {list(GENERATOR_PURPOSES)}; "
+                f"got {str(self.purpose)[:32]!r}")
         if not (0.0 < float(self.sample_rate_hz) <= 20e6):
             raise CorpusRefused(GENERATOR_CONFIG_REFUSED,
                                 "sample rate outside a plausible range")
@@ -138,6 +201,18 @@ class GeneratorConfig:
                                 "a window under 1024 samples resolves nothing")
         if not (0.0 < float(self.noise_power) <= 1e6):
             raise CorpusRefused(GENERATOR_CONFIG_REFUSED, "noise power unusable")
+        # Last, so a promotion configuration that is wrong in two ways hears
+        # about the generic fault first and the geometry second.
+        if self.purpose == PROMOTION_CORPUS:
+            deviations = promotion_geometry_deviations(
+                sample_rate_hz=self.sample_rate_hz,
+                window_samples=self.window_samples)
+            if deviations:
+                raise CorpusRefused(
+                    PROMOTION_GEOMETRY_REFUSED,
+                    f"a promotion corpus is {PROMOTION_WINDOW_SAMPLES} samples "
+                    f"at {PROMOTION_SAMPLE_RATE_HZ} Hz; {list(deviations)} "
+                    "deviate. Use DEVELOPMENT_ONLY for anything else")
 
     def identity(self) -> str:
         """A digest over **this configuration**, and nothing wider.
@@ -149,7 +224,8 @@ class GeneratorConfig:
         """
         material = json.dumps(
             {"schema": SCHEMA, "generator_revision": GENERATOR_REVISION,
-             "seed": self.seed, "sample_rate_hz": float(self.sample_rate_hz),
+             "seed": self.seed, "purpose": self.purpose,
+             "sample_rate_hz": float(self.sample_rate_hz),
              "window_samples": self.window_samples,
              "noise_power": float(self.noise_power)},
             sort_keys=True, separators=(",", ":")).encode("utf-8")
@@ -157,8 +233,9 @@ class GeneratorConfig:
 
 
 def window_identity(*, schema: str, generator_revision: str, source: str,
-                    stratum: str, index: int, seed: int, sample_rate_hz: float,
-                    window_samples: int, noise_power: float) -> str:
+                    stratum: str, index: int, seed: int, purpose: str,
+                    sample_rate_hz: float, window_samples: int,
+                    noise_power: float) -> str:
     """The digest over a window's complete canonical declaration.
 
     Keyword-only and exhaustive, so adding a declared field without extending
@@ -169,7 +246,7 @@ def window_identity(*, schema: str, generator_revision: str, source: str,
     material = json.dumps(
         {"schema": schema, "generator_revision": generator_revision,
          "source": source, "stratum": stratum, "index": index, "seed": seed,
-         "sample_rate_hz": float(sample_rate_hz),
+         "purpose": purpose, "sample_rate_hz": float(sample_rate_hz),
          "window_samples": window_samples, "noise_power": float(noise_power)},
         sort_keys=True, separators=(",", ":")).encode("utf-8")
     return "blake2s:" + hashlib.blake2s(material, digest_size=16).hexdigest()
@@ -190,6 +267,7 @@ class SyntheticWindow:
     index: int
     samples: np.ndarray
     seed: int
+    purpose: str
     sample_rate_hz: float
     window_samples: int
     noise_power: float
@@ -213,12 +291,14 @@ class SyntheticWindow:
         return window_identity(
             schema=SCHEMA, generator_revision=GENERATOR_REVISION,
             source=SYNTHETIC, stratum=self.stratum, index=self.index,
-            seed=self.seed, sample_rate_hz=self.sample_rate_hz,
+            seed=self.seed, purpose=self.purpose,
+            sample_rate_hz=self.sample_rate_hz,
             window_samples=self.window_samples, noise_power=self.noise_power)
 
     def config(self) -> "GeneratorConfig":
         """The configuration that made this window, rebuilt from its own fields."""
         return GeneratorConfig(seed=self.seed,
+                               purpose=self.purpose,
                                sample_rate_hz=self.sample_rate_hz,
                                window_samples=self.window_samples,
                                noise_power=self.noise_power)
@@ -240,6 +320,7 @@ class SyntheticWindow:
             "stratum": self.stratum,
             "index": self.index,
             "seed": self.seed,
+            "purpose": self.purpose,
             "sample_rate_hz": self.sample_rate_hz,
             "window_samples": self.window_samples,
             "noise_power": self.noise_power,
@@ -256,8 +337,8 @@ class SyntheticWindow:
 # against `window_samples` instead, being a second name for one length.
 DECLARATION_FIELDS: Tuple[str, ...] = (
     "schema", "generator_revision", "source", "stratum", "index", "seed",
-    "sample_rate_hz", "window_samples", "noise_power", "config_identity",
-    "window_identity", "samples",
+    "purpose", "sample_rate_hz", "window_samples", "noise_power",
+    "config_identity", "window_identity", "samples",
 )
 
 
@@ -301,6 +382,7 @@ def regenerate(provenance: Mapping[str, Any]) -> SyntheticWindow:
         generator_revision=provenance["generator_revision"],
         source=provenance["source"], stratum=provenance["stratum"],
         index=provenance["index"], seed=provenance["seed"],
+        purpose=provenance["purpose"],
         sample_rate_hz=provenance["sample_rate_hz"],
         window_samples=provenance["window_samples"],
         noise_power=provenance["noise_power"])
@@ -310,6 +392,7 @@ def regenerate(provenance: Mapping[str, Any]) -> SyntheticWindow:
             "the complete declaration does not hash to its window_identity")
 
     config = GeneratorConfig(seed=provenance["seed"],
+                             purpose=provenance["purpose"],
                              sample_rate_hz=provenance["sample_rate_hz"],
                              window_samples=provenance["window_samples"],
                              noise_power=provenance["noise_power"])
@@ -376,11 +459,14 @@ def plan_state(plan: Optional[Mapping[str, int]] = None) -> Dict[str, Any]:
     complete = not awaiting and not missing
     if missing:
         completion_state = CORPUS_INCOMPLETE_STRATA_MISSING
+        completion_eligibility = COMPLETION_BLOCKED_STRATA_MISSING
     elif awaiting:
         completion_state = CORPUS_INCOMPLETE_AWAITING_CAPTURE
+        completion_eligibility = COMPLETION_BLOCKED_AWAITING_CAPTURE
     else:                                        # pragma: no cover - unreachable
         completion_state = None                  # here while TUNER_REQUIRED is
-    return {                                     # non-empty
+        completion_eligibility = COMPLETION_ELIGIBLE   # non-empty
+    return {
         "schema": SCHEMA,
         "generator_revision": GENERATOR_REVISION,
         "strata": strata,
@@ -397,10 +483,14 @@ def plan_state(plan: Optional[Mapping[str, int]] = None) -> Dict[str, Any]:
         "completion_note": ("COMPLETION REQUIRES EVERY DECLARED STRATUM "
                             "PRESENT AND NONE AWAITING CAPTURE. NOTHING HERE "
                             "HAS GENERATED A WINDOW: A PLAN IS NOT A CORPUS"),
-        "may_freeze": False,
-        "freeze_note": ("NO PromotionCorpusLock WHILE ANY STRATUM AWAITS "
-                        "CAPTURE. A FREEZE OVER A PARTIAL CORPUS WOULD RECORD "
-                        "A STRATA SET NOBODY BUILT"),
+        "configuration_precommitment": CONFIGURATION_PRECOMMITMENT_AVAILABLE,
+        "precommitment_note": ("A PromotionCorpusLock FREEZES CONFIGURATION "
+                               "BEFORE THE FIRST PROMOTION WINDOW. IT HOLDS NO "
+                               "WINDOW COUNTS AND IS NOT A COMPLETION CLAIM"),
+        "completion_eligibility": completion_eligibility,
+        "completion_eligibility_note": ("NO CorpusCompletionReceipt WHILE ANY "
+                                        "DECLARED STRATUM IS MISSING OR "
+                                        "AWAITING CAPTURE"),
         "persists": False,
         "acquires": False,
         "persistence_note": ("SYNTHETIC WINDOWS ARE REGENERATED, NEVER STORED. "
@@ -448,6 +538,7 @@ def generate_window(stratum: str, index: int,
     samples = _SYNTHESISERS[stratum](rng, config)
     return SyntheticWindow(
         stratum=stratum, index=index, samples=samples, seed=config.seed,
+        purpose=config.purpose,
         sample_rate_hz=float(config.sample_rate_hz),
         window_samples=config.window_samples,
         noise_power=float(config.noise_power))

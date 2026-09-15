@@ -143,6 +143,43 @@ likely to go wrong here is that it looks complete: there is a module, a record, 
 green suite and a passing control. The entry exists because that appearance is
 exactly what a queue is for.
 
+---
+
+## 9. `RF_Signal_Family_Classifier_Scope.md` §5.20 — publication step 1 asks for an attestation that does not exist
+
+**Trigger:** when the persistence slice opens, or when §5.20 next opens for a
+reason of its own — whichever is first. It must land before a captured byte is
+written.
+
+§5.20's publication protocol step 1 reads *"Hold the corpus ownership scope and
+**verify the `IQWindow` against the live ring**."* No operation does that.
+
+`BoundedIQRing.verify_window(window_id, digest)` takes **two strings**. It
+proves this ring issued a window with that ID and that digest, under the current
+epoch, and has not evicted it. It never sees an `IQWindow`, so a caller holding
+a genuine pair can present a different object — different samples, different
+metadata, a different interval — and verification returns `WINDOW_VERIFIED`.
+Phase 3a demonstrates this rather than describing it
+(`test_a_different_object_verifies_on_a_genuine_pair_of_strings`), and
+`VERIFICATION_BINDS` / `VERIFICATION_DOES_NOT_BIND` say so in the module.
+
+That is sufficient for its existing job — refusing a `source_window_hash` no
+window ever carried. It is **not** sufficient at step 1, where the object's
+bytes are about to become a file. The gap is exactly the one a two-string check
+looks like it has already closed.
+
+What §5.20 needs instead is an authoritative ring operation over the **exact
+nominal object**: `type(x) is IQWindow`, every metadata field compared against
+the issued record, the sample interval, and a digest **recomputed from the bytes
+being published** rather than read off the object. Phase 3a exposes what that
+operation will compare against — `first_sample_index`, `last_sample_index`,
+`recorded_window()` — and deliberately does not build it, because it is capture
+machinery and Phase 3a excludes capture.
+
+Recorded here rather than corrected in place because §5.20 is accepted text.
+
+---
+
 ## Drain record
 
 A landed entry leaves the list above. It is recorded here in one line, because

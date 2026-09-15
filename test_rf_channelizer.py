@@ -184,6 +184,7 @@ class ProvenanceTests(unittest.TestCase):
         ring, window = _windowed(_signal())
         lying = IQWindow(
             window_id=window.window_id, configuration_epoch=window.configuration_epoch,
+            first_sample_index=window.first_sample_index,
             start_time=window.start_time, end_time=window.start_time + 0.001,
             sample_count=window.sample_count, sample_rate_hz=window.sample_rate_hz,
             digest=window.digest, signal_chain_hash=window.signal_chain_hash,

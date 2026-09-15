@@ -179,6 +179,7 @@ class ProvenanceInterleavingTests(unittest.TestCase):
         genuine = owner.acquire_window().window
         forged = type(genuine)(
             window_id="iqw-0-1-deadbeefcafe", configuration_epoch=genuine.configuration_epoch,
+            first_sample_index=genuine.first_sample_index,
             start_time=genuine.start_time, end_time=genuine.end_time,
             sample_count=genuine.sample_count, sample_rate_hz=genuine.sample_rate_hz,
             digest=genuine.digest, signal_chain_hash=genuine.signal_chain_hash,

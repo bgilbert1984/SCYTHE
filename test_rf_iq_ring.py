@@ -15,8 +15,10 @@ import numpy as np
 from rf_iq_ring import (
     BYTES_PER_SAMPLE, DEFAULT_CAPACITY_SAMPLES, DEFAULT_SAMPLE_RATE_HZ,
     DEFAULT_WINDOW_MS, INVALIDATION_REASONS, MAX_TRACKED_WINDOWS,
-    NOMINAL_CYCLE_RESOLUTION_HZ, STORAGE_DTYPE, WINDOW_OVERLAP,
+    NOMINAL_CYCLE_RESOLUTION_HZ, STORAGE_DTYPE, VERIFICATION_BINDS,
+    VERIFICATION_DOES_NOT_BIND, WINDOW_OVERLAP,
     BoundedIQRing, IQWindow, RawIQNotTransportable, RawIQRetentionRefused,
+    window_interval_disjoint,
 )
 
 
@@ -432,6 +434,221 @@ class RingStateTests(unittest.TestCase):
         ring = _ring(capacity=64)
         self.assertEqual(ring.append(np.array([], dtype=STORAGE_DTYPE)), 0)
         self.assertEqual(ring.status()["held_samples"], 0)
+
+
+class SampleIntervalTests(unittest.TestCase):
+    """§5.20 correction A: non-overlap has to be readable from two windows."""
+
+    def test_a_window_carries_the_interval_it_came_from(self):
+        ring = _ring(capacity=64)
+        ring.append(_block(64))
+        window = ring.acquire_window().window
+        self.assertEqual(window.first_sample_index, 0)
+        self.assertEqual(window.last_sample_index, 64)
+        self.assertEqual(window.last_sample_index - window.first_sample_index,
+                         window.sample_count)
+
+    def test_the_end_index_is_exclusive_and_derived(self):
+        """A third stored number could disagree with the other two, invisibly:
+        every digest here covers the samples, not the bookkeeping."""
+        ring = _ring(capacity=64)
+        ring.append(_block(96))
+        window = ring.acquire_window(32).window
+        self.assertEqual(window.last_sample_index,
+                         window.first_sample_index + window.sample_count)
+        self.assertNotIn("last_sample_index", IQWindow.__dataclass_fields__)
+
+    def test_the_interval_reaches_the_metadata_without_the_samples(self):
+        ring = _ring(capacity=64)
+        ring.append(_block(64))
+        data = ring.acquire_window().window.to_dict()
+        self.assertEqual(data["first_sample_index"], 0)
+        self.assertEqual(data["last_sample_index"], 64)
+        self.assertFalse(data["raw_iq_exposed"])
+        self.assertNotIn("samples", data)
+
+    def test_two_acquisitions_with_no_appends_overlap(self):
+        """The whole reason the indices exist.
+
+        `acquire_window` copies and removes nothing, so these two windows hold
+        **the same samples**. Their IDs differ, their digests are equal, their
+        issue order differs -- and only the interval says they are the same
+        span. A capture rule that trusted "wait for new samples" as a promise
+        would have accepted both.
+        """
+        ring = _ring(capacity=64)
+        ring.append(_block(64))
+        first = ring.acquire_window().window
+        second = ring.acquire_window().window
+        self.assertNotEqual(first.window_id, second.window_id)
+        self.assertTrue(np.array_equal(first.samples, second.samples))
+        self.assertEqual(first.first_sample_index, second.first_sample_index)
+        self.assertFalse(window_interval_disjoint(first, second))
+
+    def test_a_partial_refill_still_overlaps(self):
+        """Sixty-three new samples out of sixty-four is still an overlap."""
+        ring = _ring(capacity=64)
+        ring.append(_block(64))
+        first = ring.acquire_window().window
+        ring.append(_block(63, start=64))
+        second = ring.acquire_window().window
+        self.assertFalse(window_interval_disjoint(first, second))
+
+    def test_a_full_refill_is_disjoint(self):
+        ring = _ring(capacity=64)
+        ring.append(_block(64))
+        first = ring.acquire_window().window
+        ring.append(_block(64, start=64))
+        second = ring.acquire_window().window
+        self.assertTrue(window_interval_disjoint(first, second))
+        self.assertEqual(second.first_sample_index, first.last_sample_index)
+
+    def test_disjointness_is_the_promotion_rule_at_full_capacity(self):
+        """Under the promotion geometry the general form and §5.20's
+        constant-subtraction form are the same inequality."""
+        ring = _ring(capacity=64)
+        ring.append(_block(64))
+        first = ring.acquire_window().window
+        for extra in (0, 32, 64, 128):
+            with self.subTest(extra=extra):
+                if extra:
+                    ring.append(_block(extra, start=64))
+                current = ring.acquire_window().window
+                self.assertEqual(
+                    window_interval_disjoint(first, current),
+                    current.first_sample_index >= first.first_sample_index + 64)
+
+    def test_it_is_arithmetic_and_cannot_establish_common_provenance(self):
+        """The assumption `window_interval_disjoint` makes and cannot check.
+
+        A sample index means something only relative to the ring that assigned
+        it, and every ring counts from zero. Two windows from two rings compare
+        cleanly and the answer is meaningless -- here, two genuinely unrelated
+        windows are reported as overlapping simply because both start at zero.
+        Establishing that both came from one ring is the caller's job, done
+        before this is asked anything.
+        """
+        left, right = _ring(capacity=64), _ring(capacity=64, chain="chain-b")
+        left.append(_block(64))
+        right.append(_block(64, value=7))
+        right.append(_block(64, value=9))
+        a = left.acquire_window().window
+        b = right.acquire_window().window
+        self.assertNotEqual(a.signal_chain_hash, b.signal_chain_hash)
+        self.assertFalse(np.array_equal(a.samples, b.samples))
+
+        # The discriminating case. These windows share no ring, no chain and no
+        # samples, and the arithmetic says "disjoint" because 64 >= 64. A
+        # version that quietly checked provenance would answer False here --
+        # which is why the assertion is True and not False.
+        self.assertEqual(b.first_sample_index, a.last_sample_index)
+        self.assertTrue(window_interval_disjoint(a, b))
+
+        # And the other direction is just as meaningless: two unrelated first
+        # windows both start at zero and report as overlapping.
+        third = _ring(capacity=64, chain="chain-c")
+        third.append(_block(64, value=3))
+        c = third.acquire_window().window
+        self.assertEqual(a.first_sample_index, c.first_sample_index)
+        self.assertFalse(window_interval_disjoint(a, c))
+
+    def test_invalidation_does_not_reset_the_indices(self):
+        """The property the rule depends on.
+
+        `_invalidate_locked` zeroes the buffer, the write index, the held count
+        and the newest-sample time. `_total_appended` is set to zero only in
+        `__init__`. If it were reset, two windows from different epochs would
+        compare as overlapping and a capture rule would refuse genuine windows
+        -- or, with the inequality the other way up, accept duplicates.
+        """
+        ring = _ring(capacity=64)
+        ring.append(_block(64))
+        before = ring.acquire_window().window
+        for reason in ("RETUNE", "GAIN_CHANGE", "SIGNAL_CHAIN_CHANGE"):
+            with self.subTest(reason=reason):
+                ring.invalidate(reason)
+                ring.append(_block(64, start=128))
+                after = ring.acquire_window().window
+                self.assertGreater(after.first_sample_index,
+                                   before.first_sample_index)
+                self.assertTrue(window_interval_disjoint(before, after))
+                before = after
+
+    def test_indices_are_monotonic_across_many_epochs(self):
+        ring = _ring(capacity=64)
+        seen = []
+        for epoch in range(5):
+            ring.append(_block(64, start=64 * epoch))
+            seen.append(ring.acquire_window().window.first_sample_index)
+            ring.invalidate("RETUNE")
+        self.assertEqual(seen, sorted(seen))
+        self.assertEqual(len(set(seen)), len(seen))
+
+
+class VerificationBindingTests(unittest.TestCase):
+    """What `verify_window` proves, and the larger thing it does not.
+
+    Recorded before the persistence writer exists, because the writer is
+    exactly where a two-string check would be mistaken for an attestation of
+    the object whose bytes are about to be written to disk.
+    """
+
+    def test_verification_takes_two_strings_and_never_sees_an_object(self):
+        ring = _ring(capacity=64)
+        ring.append(_block(64))
+        genuine = ring.acquire_window().window
+        self.assertTrue(ring.verify_window(genuine.window_id, genuine.digest))
+
+    def test_a_different_object_verifies_on_a_genuine_pair_of_strings(self):
+        """The limitation, demonstrated rather than described.
+
+        A caller holding a real ID and a real digest can hand `verify_window`
+        the strings while holding an `IQWindow` with different samples,
+        different metadata and a different interval. Verification returns
+        WINDOW_VERIFIED, because it was never shown the object.
+        """
+        ring = _ring(capacity=64)
+        ring.append(_block(64))
+        genuine = ring.acquire_window().window
+        impostor = IQWindow(
+            window_id=genuine.window_id,
+            configuration_epoch=genuine.configuration_epoch,
+            first_sample_index=genuine.first_sample_index + 9_999,
+            start_time=genuine.start_time - 5.0,
+            end_time=genuine.end_time + 5.0,
+            sample_count=genuine.sample_count,
+            sample_rate_hz=genuine.sample_rate_hz * 2,
+            digest=genuine.digest,
+            signal_chain_hash="blake2s:" + "0" * 32,
+            samples=np.zeros(genuine.sample_count, dtype=STORAGE_DTYPE))
+        self.assertFalse(np.array_equal(impostor.samples, genuine.samples))
+        self.assertTrue(ring.verify_window(impostor.window_id, impostor.digest))
+
+    def test_the_module_says_what_verification_binds(self):
+        self.assertEqual(VERIFICATION_BINDS, "WINDOW_ID_AND_DIGEST_ONLY")
+        self.assertIn("its samples", VERIFICATION_DOES_NOT_BIND)
+        self.assertIn("the IQWindow object", VERIFICATION_DOES_NOT_BIND)
+
+    def test_the_record_a_later_attestation_would_compare_against(self):
+        """Exposed here so the persistence slice has something to attest with.
+
+        Metadata only: an attestation needs the interval, the counts and the
+        chain, and never needs the ring to hand back samples.
+        """
+        ring = _ring(capacity=64)
+        ring.append(_block(64))
+        window = ring.acquire_window().window
+        record = ring.recorded_window(window.window_id)
+        self.assertEqual(record["first_sample_index"], window.first_sample_index)
+        self.assertEqual(record["last_sample_index"], window.last_sample_index)
+        self.assertEqual(record["digest"], window.digest)
+        self.assertEqual(record["sample_count"], window.sample_count)
+        self.assertFalse(record["raw_iq_exposed"])
+        self.assertNotIn("samples", record)
+
+    def test_an_unissued_id_has_no_record(self):
+        ring = _ring(capacity=64)
+        self.assertIsNone(ring.recorded_window("iqw-0-1-deadbeefcafe"))
 
 
 if __name__ == "__main__":

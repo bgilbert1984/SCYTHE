@@ -15,6 +15,9 @@ from rf_null_corpus import (
     STRATUM_AWAITING_CAPTURE, STRATUM_NOT_DECLARED, STRATUM_NOT_SYNTHESISABLE,
     SYNTHESIS_PLANNED, SYNTHESISABLE, SYNTHETIC, TUNER_REQUIRED,
     CORPUS_INCOMPLETE_STRATA_MISSING, PROVENANCE_DIGEST_MISMATCH,
+    COMPLETION_BLOCKED_AWAITING_CAPTURE, COMPLETION_BLOCKED_STRATA_MISSING,
+    CONFIGURATION_PRECOMMITMENT_AVAILABLE, DEVELOPMENT_ONLY, PROMOTION_CORPUS,
+    PROMOTION_GEOMETRY_REFUSED,
     CorpusRefused, GeneratorConfig, SyntheticWindow, declared_plan,
     generate_stratum, generate_synthetic_corpus, generate_window, plan_state,
     regenerate, status,
@@ -29,7 +32,8 @@ SOURCE_PARAMETER_ALLOWED = {"window_identity"}
 
 
 def config(seed=3):
-    return GeneratorConfig(seed=seed, window_samples=SMALL)
+    return GeneratorConfig(seed=seed, purpose=DEVELOPMENT_ONLY,
+                           window_samples=SMALL)
 
 
 def small_plan(count=2):
@@ -89,7 +93,7 @@ class RefusalTests(unittest.TestCase):
                    {"window_samples": 512}, {"sample_rate_hz": 0.0},
                    {"noise_power": 0.0}):
             with self.subTest(**kw):
-                fields = dict(seed=3, window_samples=SMALL)
+                fields = dict(seed=3, purpose=DEVELOPMENT_ONLY, window_samples=SMALL)
                 fields.update(kw)
                 with self.assertRaises(CorpusRefused) as caught:
                     GeneratorConfig(**fields)
@@ -163,11 +167,12 @@ class ReproducibilityTests(unittest.TestCase):
         self.assertEqual(provenance["index"], 2)
 
     def test_the_configuration_identity_moves_with_every_field(self):
-        base = GeneratorConfig(seed=1, window_samples=SMALL)
+        base = GeneratorConfig(seed=1, purpose=DEVELOPMENT_ONLY,
+                               window_samples=SMALL)
         for kw in ({"seed": 2}, {"window_samples": SMALL * 2},
                    {"sample_rate_hz": 1_024_000.0}, {"noise_power": 2.0}):
             with self.subTest(**kw):
-                fields = dict(seed=1, window_samples=SMALL)
+                fields = dict(seed=1, purpose=DEVELOPMENT_ONLY, window_samples=SMALL)
                 fields.update(kw)
                 self.assertNotEqual(GeneratorConfig(**fields).identity(),
                                     base.identity())
@@ -285,10 +290,21 @@ class PlanStateTests(unittest.TestCase):
         self.assertEqual(state["completion_state"],
                          CORPUS_INCOMPLETE_AWAITING_CAPTURE)
 
-    def test_no_freeze_while_a_stratum_awaits_capture(self):
+    def test_precommitment_and_completion_are_separate_answers(self):
+        """§5.20 correction C. A lock is available before the first window;
+        completion is blocked while a stratum awaits capture."""
         state = plan_state(small_plan())
-        self.assertFalse(state["may_freeze"])
-        self.assertIn("PromotionCorpusLock", state["freeze_note"])
+        self.assertEqual(state["configuration_precommitment"],
+                         CONFIGURATION_PRECOMMITMENT_AVAILABLE)
+        self.assertEqual(state["completion_eligibility"],
+                         COMPLETION_BLOCKED_AWAITING_CAPTURE)
+        self.assertIn("CorpusCompletionReceipt",
+                      state["completion_eligibility_note"])
+
+    def test_missing_strata_block_completion_by_their_own_name(self):
+        state = plan_state({"AM": 2})
+        self.assertEqual(state["completion_eligibility"],
+                         COMPLETION_BLOCKED_STRATA_MISSING)
 
     def test_the_counts_partition_the_plan(self):
         plan = small_plan(count=5)
@@ -389,7 +405,8 @@ class BoundaryTests(unittest.TestCase):
             schema=corpus_module.SCHEMA,
             generator_revision=corpus_module.GENERATOR_REVISION,
             source=SYNTHETIC, stratum="AM", index=0, seed=1,
-            sample_rate_hz=1_000.0, window_samples=1024, noise_power=1.0)
+            purpose=DEVELOPMENT_ONLY, sample_rate_hz=1_000.0,
+            window_samples=1024, noise_power=1.0)
         self.assertIsInstance(digest, str)
         self.assertTrue(digest.startswith("blake2s:"))
 
@@ -397,7 +414,8 @@ class BoundaryTests(unittest.TestCase):
         """Which is why it needs the parameter at all."""
         common = dict(schema=corpus_module.SCHEMA,
                       generator_revision=corpus_module.GENERATOR_REVISION,
-                      stratum="AM", index=0, seed=1, sample_rate_hz=1_000.0,
+                      stratum="AM", index=0, seed=1,
+                      purpose=DEVELOPMENT_ONLY, sample_rate_hz=1_000.0,
                       window_samples=1024, noise_power=1.0)
         self.assertNotEqual(
             corpus_module.window_identity(source=SYNTHETIC, **common),
@@ -432,7 +450,8 @@ class NullQualityTests(unittest.TestCase):
 
     def _envelope_cv(self, stratum, index=0):
         window = generate_window(stratum, index,
-                                 GeneratorConfig(seed=5, window_samples=65536))
+                                 GeneratorConfig(seed=5, purpose=DEVELOPMENT_ONLY,
+                                                 window_samples=65536))
         envelope = np.abs(window.samples) ** 2
         return float(envelope.std() / envelope.mean())
 
@@ -467,7 +486,8 @@ class NullQualityTests(unittest.TestCase):
                 for index in range(4):
                     window = generate_window(
                         stratum, index,
-                        GeneratorConfig(seed=13, window_samples=65536))
+                        GeneratorConfig(seed=13, purpose=DEVELOPMENT_ONLY,
+                                                    window_samples=65536))
                     statistic, *_ = detector.squared_envelope_statistic(
                         window.samples, window.sample_rate_hz)
                     if statistic is not None:
@@ -480,7 +500,8 @@ class NotACorpusTests(unittest.TestCase):
 
     def test_nothing_here_claims_a_corpus_exists(self):
         self.assertFalse(plan_state()["complete"])
-        self.assertFalse(plan_state()["may_freeze"])
+        self.assertEqual(plan_state()["completion_eligibility"],
+                         COMPLETION_BLOCKED_AWAITING_CAPTURE)
 
     def test_the_declared_plan_is_far_larger_than_anything_tested_here(self):
         """Every test injects a small plan; the real one is 66 732."""
@@ -589,6 +610,7 @@ class RegenerabilityTests(unittest.TestCase):
             "stratum": "THERMAL_NO_INPUT",
             "index": 99,
             "seed": 9,
+            "purpose": PROMOTION_CORPUS,
             "sample_rate_hz": 1_024_000.0,
             "window_samples": SMALL * 2,
             "noise_power": 2.0,
@@ -626,6 +648,7 @@ class RegenerabilityTests(unittest.TestCase):
             generator_revision=forged["generator_revision"],
             source=forged["source"], stratum=forged["stratum"],
             index=forged["index"], seed=forged["seed"],
+            purpose=forged["purpose"],
             sample_rate_hz=forged["sample_rate_hz"],
             window_samples=forged["window_samples"],
             noise_power=forged["noise_power"])
@@ -645,6 +668,7 @@ class RegenerabilityTests(unittest.TestCase):
                     generator_revision=forged["generator_revision"],
                     source=forged["source"], stratum=forged["stratum"],
                     index=forged["index"], seed=forged["seed"],
+                    purpose=forged["purpose"],
                     sample_rate_hz=forged["sample_rate_hz"],
                     window_samples=forged["window_samples"],
                     noise_power=forged["noise_power"])
@@ -679,6 +703,7 @@ class RegenerabilityTests(unittest.TestCase):
         """
         provenance = generate_window("AM", 1, config(seed=8)).provenance()
         rebuilt = GeneratorConfig(seed=provenance["seed"],
+                                  purpose=provenance["purpose"],
                                   sample_rate_hz=provenance["sample_rate_hz"],
                                   window_samples=provenance["window_samples"],
                                   noise_power=provenance["noise_power"])
@@ -719,7 +744,8 @@ class SourceAuthorityTests(unittest.TestCase):
 
     def test_a_constructed_window_is_synthetic_whatever_was_intended(self):
         window = SyntheticWindow(stratum="AM", index=0, samples=np.zeros(4),
-                                 seed=1, sample_rate_hz=1_000.0,
+                                 seed=1, purpose=DEVELOPMENT_ONLY,
+                                 sample_rate_hz=1_000.0,
                                  window_samples=1024, noise_power=1.0)
         self.assertEqual(window.source, SYNTHETIC)
         self.assertEqual(window.generator_revision,
@@ -730,3 +756,114 @@ class SourceAuthorityTests(unittest.TestCase):
         with self.assertRaises(Exception):
             window.source = CAPTURED
         self.assertEqual(window.source, SYNTHETIC)
+
+
+class PromotionGeometryTests(unittest.TestCase):
+    """§5.20 correction A, at the entrypoint that could have ignored it."""
+
+    def test_a_promotion_configuration_defaults_to_the_frozen_geometry(self):
+        config_ = GeneratorConfig(seed=1, purpose=PROMOTION_CORPUS)
+        self.assertEqual(config_.window_samples, 524_288)
+        self.assertEqual(config_.sample_rate_hz, 2_048_000.0)
+
+    def test_a_promotion_configuration_refuses_the_superseded_length(self):
+        """262 144 was a *superseded* detector minimum, registered against no
+        implementation. It is not a smaller promotion geometry."""
+        with self.assertRaises(CorpusRefused) as caught:
+            GeneratorConfig(seed=1, purpose=PROMOTION_CORPUS,
+                            window_samples=262_144)
+        self.assertEqual(caught.exception.code, PROMOTION_GEOMETRY_REFUSED)
+
+    def test_a_promotion_configuration_refuses_every_deviation(self):
+        for kwargs in ({"window_samples": 262_144},
+                       {"window_samples": 1_048_576},
+                       {"sample_rate_hz": 1_024_000.0},
+                       {"sample_rate_hz": 2_400_000.0, "window_samples": 65_536}):
+            with self.subTest(**kwargs):
+                with self.assertRaises(CorpusRefused) as caught:
+                    GeneratorConfig(seed=1, purpose=PROMOTION_CORPUS, **kwargs)
+                self.assertEqual(caught.exception.code,
+                                 PROMOTION_GEOMETRY_REFUSED)
+
+    def test_development_keeps_the_shorter_window(self):
+        """Half the arithmetic proves the same properties in a suite. It stays
+        reachable, and only by saying so."""
+        config_ = GeneratorConfig(seed=1, purpose=DEVELOPMENT_ONLY,
+                                  window_samples=262_144)
+        self.assertEqual(config_.window_samples, 262_144)
+
+    def test_a_configuration_must_say_what_it_is_for(self):
+        with self.assertRaises(TypeError):
+            GeneratorConfig(seed=1)
+
+    def test_an_unknown_purpose_refuses(self):
+        for purpose in ("PROMOTION", "development_only", "", None, True):
+            with self.subTest(purpose=repr(purpose)):
+                with self.assertRaises(CorpusRefused) as caught:
+                    GeneratorConfig(seed=1, purpose=purpose,
+                                    window_samples=SMALL)
+                self.assertEqual(caught.exception.code,
+                                 GENERATOR_CONFIG_REFUSED)
+
+    def test_the_purpose_is_inside_both_identities(self):
+        """Otherwise a development window could be regenerated as a promotion
+        one without either digest noticing."""
+        dev = GeneratorConfig(seed=1, purpose=DEVELOPMENT_ONLY,
+                              window_samples=524_288)
+        promo = GeneratorConfig(seed=1, purpose=PROMOTION_CORPUS)
+        self.assertNotEqual(dev.identity(), promo.identity())
+        self.assertIn("purpose", corpus_module.DECLARATION_FIELDS)
+
+    def test_the_harness_reads_the_geometry_rather_than_declaring_it(self):
+        import rf_promotion_geometry
+        self.assertIs(corpus_module.PROMOTION_WINDOW_SAMPLES,
+                      rf_promotion_geometry.PROMOTION_WINDOW_SAMPLES)
+
+
+class PrecommitmentAndCompletionTests(unittest.TestCase):
+    """§5.20 correction C, and the alias that must not exist."""
+
+    def test_the_old_contradictory_key_is_gone(self):
+        """No compatibility alias. A key that kept the old name and the old
+        meaning would be the contradiction preserved under a synonym, and a
+        reader who never revisited it would never learn it was answered wrong.
+        """
+        state = plan_state(small_plan())
+        self.assertNotIn("may_freeze", state)
+        self.assertNotIn("freeze_note", state)
+
+    def test_no_surviving_key_still_answers_the_old_question(self):
+        state = plan_state(small_plan())
+        for key in state:
+            with self.subTest(key=key):
+                self.assertNotIn("freeze", key)
+
+    def test_a_lock_is_available_before_the_first_window(self):
+        """The half the old rule had backwards: configuration must be frozen
+        *before* the corpus sees a window, or thresholds get tuned against the
+        windows that validate them."""
+        self.assertEqual(plan_state(small_plan())["configuration_precommitment"],
+                         CONFIGURATION_PRECOMMITMENT_AVAILABLE)
+
+    def test_completion_is_blocked_and_says_which_half_blocks_it(self):
+        awaiting = plan_state(small_plan())
+        self.assertEqual(awaiting["completion_eligibility"],
+                         COMPLETION_BLOCKED_AWAITING_CAPTURE)
+        missing = plan_state({"AM": 1})
+        self.assertEqual(missing["completion_eligibility"],
+                         COMPLETION_BLOCKED_STRATA_MISSING)
+
+    def test_every_eligibility_answer_is_a_declared_state(self):
+        for plan in (small_plan(), {"AM": 1}, None):
+            with self.subTest(plan=plan):
+                state = plan_state(plan)
+                self.assertIn(state["completion_eligibility"],
+                              corpus_module.COMPLETION_ELIGIBILITY_STATES)
+                self.assertIn(state["configuration_precommitment"],
+                              corpus_module.PRECOMMITMENT_STATES)
+
+    def test_the_precommitment_note_does_not_claim_completion(self):
+        state = plan_state(small_plan())
+        self.assertIn("NOT A COMPLETION CLAIM", state["precommitment_note"])
+        self.assertIn("CorpusCompletionReceipt",
+                      state["completion_eligibility_note"])
