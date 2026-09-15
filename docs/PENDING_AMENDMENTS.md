@@ -186,15 +186,24 @@ Recorded here rather than corrected in place because §5.20 is accepted text.
 captured second. It is a property of the pair.
 
 Nothing has ever checked that `THERMAL_NO_INPUT`'s tunings are free of the
-receiver's own spurious products. A baseband-locked internal artefact — one tied
-to the local oscillator rather than to a fixed absolute frequency — is in the
-analysis span at **every** tuning. If the receiver has one, then a window
-captured as "terminated input, thermal noise only" contains it, and the two
-strata are not two populations. They are one, entered twice, under two names,
-each carrying its own bound.
+receiver's own spurious products. An internal product whose baseband offset does
+not move with the tuner — slope 0 in §5.21's terms, ``m = 1`` in the mixing
+family — is in the analysis span at **every** tuning. If the receiver has one,
+then a window captured as "terminated input, thermal noise only" contains it.
 
-Two of thirteen bounds would then be measuring the same thing, which is not what
-a stratified corpus with a Bonferroni correction is for.
+**The defect is not that Bonferroni breaks.** Bonferroni is valid under
+arbitrary dependence, so two bounds over one population does not invalidate it.
+The defects are three, and each is real on its own:
+
+1. **Mislabelling.** `THERMAL_NO_INPUT` windows would carry a label that is
+   false of their contents.
+2. **Redundant alpha expenditure.** The family pays a thirteen-bound correction
+   while two of the bounds test one population, so the procedure is more
+   conservative than the coverage it actually buys — and every stratum's
+   required n is larger for it.
+3. **A population never covered.** The spur-free thermal case the stratum exists
+   to test would not appear in the corpus at all, which is the one that cannot
+   be repaired by re-labelling afterwards.
 
 The check requires a spur catalogue, which is what §5.21 proposes and which does
 not yet exist. Recorded separately from §5.21 because the obligation survives
