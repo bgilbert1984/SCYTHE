@@ -244,30 +244,26 @@ is precisely the thing that cannot be amended afterwards.
 
 ---
 
-## 12. Four stale claims in accepted §5.19 and §5.20 — three of them mine, from Phase 3a
+## 13. Two stale claims in code, one of them in runtime output
 
-**Trigger:** immediately, as its own documentation act. These are wrong now, not
-wrong at some future step.
+**Trigger:** immediately. Both are wrong now. Held separately from entry 12
+because that authorisation was for a *documentation* correction and these are
+code.
 
-| where | claim | why it is stale |
+| where | says | why it is stale |
 | --- | --- | --- |
-| §5.19 | "`rf_null_corpus.py` still implements the original rule: `may_freeze` is `False` and `freeze_note` names `PromotionCorpusLock`" | Phase 3a removed both keys with no alias, at `d70fc4c` |
-| §5.20 correction **C** | "what remains for **C** is the code: `rf_null_corpus.py`'s `may_freeze` and `freeze_note` still implement the original rule" | C's code work is **done** |
-| §5.20 | "`RECEIVER_SPURS` has no identification protocol" | §5.21 is accepted |
-| §5.20 | "`may_freeze` stays `False`" | the key does not exist |
+| `rf_validation_manifest.py` docstring | "``RECEIVER_SPURS`` needs an identification protocol that does not exist" | §5.21 is accepted |
+| `rf_null_corpus.py` `plan_state()["persistence_note"]` | "CAPTURED-WINDOW PERSISTENCE AWAITS §5.20" | §5.20 is accepted |
 
-Three of the four were made stale by **Phase 3a**, not by accepting §5.21. I
-wrote "the document is ahead of the code" into three places, then landed the
-code that closed the gap and never went back to the sentences that announced it.
-The note outlived the condition it described, which is the failure the note was
-written to prevent — one level up.
+The second is worse than a stale comment: it is **returned by `plan_state()`**,
+so a caller reading the harness's own status is told that a decision which has
+been made is still pending. What is actually awaited is the persistence *slice* —
+§5.20 grants the authority and no writer exists — and the note should say that
+rather than name a section that has already landed.
 
-The fourth is an ordinary consequence of acceptance.
-
-Each is a small correction to accepted text and therefore its own act. Recorded
-here rather than folded into the acceptance commits, because an acceptance
-commit that also edited two other accepted sections would be exactly the sweep
-`SCYTHE_VERDICT_VOCABULARIES.md` §7 refuses.
+The first is a docstring **I rewrote in Phase 3a to fix a different stale
+claim**, and which went stale again three merges later for a different reason.
+Correcting a sentence does not make it self-maintaining.
 
 ---
 
@@ -290,6 +286,7 @@ what is still pending. This is a record, not a queue: nothing here is waiting.
 | 5 — the name check needed a token source | `SCYTHE_VERDICT_VOCABULARIES.md` §3, *The mechanical step, as implemented* | slice 7 |
 | 6 — a token declared twice collapsed | `test_scythe_verdict_vocabularies.py`, `DUPLICATE_DECLARATIONS` | slice 8, before its ceiling code |
 | 8 — §5.19's "until §5.20 exists" read as satisfied by a proposal | `RF_Signal_Family_Classifier_Scope.md` §5.19 | `8469ed5` |
+| 12 — six stale claims in accepted §5.19 and §5.20, four listed and two found | `RF_Signal_Family_Classifier_Scope.md` §5.19, §5.20 | `d0c030e` |
 
 Entry 8 was written on the §5.20 proposal branch and drained before that
 proposal was accepted: the correction it names was authorised as its own act and
