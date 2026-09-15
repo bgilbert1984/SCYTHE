@@ -205,8 +205,8 @@ The defects are three, and each is real on its own:
    to test would not appear in the corpus at all, which is the one that cannot
    be repaired by re-labelling afterwards.
 
-The check requires a spur catalogue, which is what §5.21 proposes and which does
-not yet exist. Recorded separately from §5.21 because the obligation survives
+The check requires a spur catalogue, which §5.21 now governs — accepted
+2026-09-14 — and which **does not yet exist**. Recorded separately from §5.21 because the obligation survives
 that section being **rejected**: however spurs come to be identified,
 `THERMAL_NO_INPUT` still has to be shown free of them, and that was true before
 §5.21 was drafted.
