@@ -145,6 +145,19 @@ exactly what a queue is for.
 
 ---
 
+## 8. `RF_Signal_Family_Classifier_Scope.md` §5.19 — "until §5.20 exists"
+
+**Trigger:** when §5.20 is accepted, or when it is rejected.
+
+§5.19's fourth refusal reads "out of scope until §5.20 exists". §5.20 now exists
+**as a proposal**, so the sentence can be read as already satisfied by a section
+that authorises nothing. The correction is one word — *accepted* rather than
+*exists* — but §5.19 is accepted text and this slice does not amend it.
+
+§5.20's own status block states the block explicitly in the meantime. If §5.20 is
+rejected, the sentence is corrected to name whatever replaces it, and this entry
+lands either way.
+
 ---
 
 ## Drain record

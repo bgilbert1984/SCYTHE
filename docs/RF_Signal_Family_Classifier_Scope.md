@@ -1859,16 +1859,224 @@ both is exactly the hole that blurs the authority boundary — the same shape
 **No captured byte reaches disk under this section.** `RETUNE_TRANSIENTS`,
 `GAIN_STEPS` and `RECEIVER_SPURS` are out of scope until §5.20 is accepted.
 
-#### 5.20 — captured-corpus persistence *(not written)*
+### 5.20 — captured-corpus persistence — **PROPOSED, NOT ACCEPTED**
 
-Before the first tuner-derived byte is written, its own authority must define:
-exact retained representation · directory · permissions · encryption if any ·
-retention period · deletion method · access surface · and explicit exclusion
-from logs, APIs, model context and ordinary repository artefacts.
+```text
+Status:     PROPOSED. Nothing here is in force.
+Authority:  NONE until an explicit acceptance decision and an acceptance commit.
+Opens:      Nothing. No directory is created and no byte is written by this text.
+Blocks:     GAIN_STEPS, RETUNE_TRANSIENTS, RECEIVER_SPURS — 16 683 windows —
+            remain out of scope, and the corpus remains unfreezable, until this
+            section is accepted.
+```
 
 *§5.5 granted a DSP working buffer — process-local, volatile, fixed-capacity,
 non-persistent. A validation corpus is persisted labelled data by definition, so
 it is a different permission and not an extension of that one.*
+
+#### What would be granted
+
+> SCYTHE may atomically publish verified, ring-issued validation windows for
+> exactly `GAIN_STEPS`, `RETUNE_TRANSIENTS` and `RECEIVER_SPURS`, within one
+> explicitly opened Phase 3 corpus. It grants no general recording, replay,
+> export, capture or archive authority.
+
+The narrowness is the point. "SCYTHE may save IQ" is a different permission and
+is not requested here.
+
+#### Three contradictions this must correct first — and a fourth
+
+An authority written over code that contradicts it authorises the contradiction.
+These are corrections to the *present* repository, verified against it on
+2026-09-14 at `1c4ce23`, not predictions.
+
+**A. The promotion geometry, and what actually registers it.** The window a
+captured corpus is drawn from is **524 288 samples — 256 ms at 2.048 MS/s,
+4 194 304 payload bytes** as `complex64`. That figure is `DEFAULT_CAPACITY_SAMPLES`
+in `rf_iq_ring.py:79` — the **ring's fixed capacity** — and it is the window §6
+Q2 approved at 4.19 MB. `rf_null_corpus.py:125` presently defaults
+`GeneratorConfig.window_samples` to `262_144`.
+
+The correction stands, but its stated reason must not: **262 144 and 524 288 are
+not competing registered detector geometries.** The registered detector's
+`minimum_sample_count` is **32 768** (`rf_signal_family.py:303`), and 262 144 is
+recorded in `rf_symbol_clock.py:579` as a *superseded* minimum — "registered
+against no implementation and unreachable through this channelizer". Calling
+524 288 "the registered detector geometry" would restate a number the detector
+contract does not hold.
+
+So: 262 144 may remain a development and test seam for synthetic work, where a
+shorter window costs half the arithmetic and proves the same properties.
+**Promotion-corpus generation and capture must refuse any geometry but 256 ms**,
+because that is the ring the windows come out of and the window the corpus was
+sized against — not because a detector registered it.
+
+Two consequences follow from the ring, and both belong in the capture rules. A
+524 288-sample acquisition is **the entire ring**: each captured window is a full
+drain, consistent with `WINDOW_OVERLAP = "NONE"`. And after any invalidation the
+ring must **refill completely — 256 ms of continuous stream** — before a
+complete window exists at all; `acquire_window` reports `INSUFFICIENT_WINDOW`
+until it does.
+
+**B. Two stratum descriptions describe windows the ring cannot issue.**
+`rf_validation_manifest.py:295` defines `GAIN_STEPS` as "A gain change part-way
+through the window". `GAIN_CHANGE` is in `INVALIDATION_REASONS`
+(`rf_iq_ring.py:96`) and `IQRetentionOwner.set_gain_db` calls it
+(`rf_iq_retention.py:786`), so the ring is cleared at the gain change and no
+window can straddle it. The same holds for `RETUNE`. Redefine both as the
+**first complete post-invalidation window**:
+
+- `GAIN_STEPS` — first complete window after `GAIN_CHANGE`, linked to the
+  before and after gain declarations.
+- `RETUNE_TRANSIENTS` — first complete window after `RETUNE`, linked to the
+  before and after tuning declarations.
+
+Neither contains samples from both regimes. What each stratum tests is therefore
+**settling behaviour in the first window of a new configuration**, which is the
+honest version of the thing the old wording gestured at.
+
+**D. The lock cannot see a stratum being redefined.** `_strata_digest()`
+(`rf_validation_manifest.py:219`) hashes `key:minimum_windows:buildable` and
+**not `description`**. So correction B — which changes what two strata *mean*
+without changing their names, counts or buildability — is invisible to
+`PromotionCorpusLock`. That is the identical gap `validation_family_revision`
+was added to close: "the bound count alone would not notice a family whose
+membership was rewritten while its size stayed the same."
+
+Doing B now, before any lock exists, is free. Doing it after a corpus opened
+would silently change what 5 561 recorded trials were trials *of*. The
+amendment must therefore also either extend `_strata_digest()` to cover the
+descriptions, or freeze a `strata_definition_revision` in the lock — and the
+redefinition must land **before** the first `PromotionCorpusLock` is created.
+
+**C. §5.19's freeze refusal creates a selection-lock catch-22.** §5.19 refuses
+"`PromotionCorpusLock` freeze … while tuner-dependent strata are absent", and
+`rf_null_corpus.py:401` says so at runtime. But the detector configuration must
+be frozen **before** the promotion corpus sees its first window — otherwise
+thresholds are tuned against the same windows that validate them, which is the
+failure `PromotionCorpusLock` exists to prevent. The refusal as written forbids
+the precommitment until after the thing it precommits to.
+
+The implemented object already supports the correct reading: `PromotionCorpusLock`
+holds `method_revision`, `decision_threshold`, `preprocessing_revision`, the
+digests, the bound count and the per-bound alpha — **no window counts at all**.
+It is a configuration precommitment and never was a completion certificate.
+§5.19's refusal describes an object the code does not implement.
+
+Split the two states explicitly:
+
+| State | Created | Means |
+|---|---|---|
+| `PromotionCorpusLock` | **before** the first generated or captured promotion window | configuration precommitment |
+| `CorpusCompletionReceipt` | only after all twelve strata satisfy their declared counts | the corpus is complete |
+
+An incomplete corpus may be **configuration-frozen** but can never be
+completion-certified or promotion-eligible. §5.19's refusal text is superseded
+on acceptance of this section, and not before.
+
+#### The eight required definitions
+
+| Decision | Proposed authority |
+|---|---|
+| **Representation** | One immutable `.iqc` file per `IQWindow`. Canonical little-endian `complex64` payload, exactly 524 288 samples and 4 194 304 payload bytes. No compression, no pickle, no NumPy object arrays, no native-byte-order ambiguity. |
+| **Directory** | `/home/spectrcyde/scythe-validation-corpus/captured-v1`, resolved before use and disjoint from the repository, ledger, derived-evidence and observation namespaces. Subdirectories derive only from `corpus_id` and the three closed stratum names. |
+| **Permissions** | Corpus directories `0700`; files and manifests `0600`; owner must match the process UID. Local ext4 only for v1. Symlinks, unexpected hard links, wrong ownership, permissive modes, network filesystems and mount or device changes refuse **before** publication. |
+| **Encryption** | **NONE in v1**, stated explicitly. Permissions and namespace isolation are access controls, not encryption. No status field or receipt may imply encrypted storage. Moving or copying the corpus to another medium is unauthorised. |
+| **Retention** | The operator supplies an absolute `delete_not_after` **before** opening the corpus, no later than 90 days after the first captured window; normal target is the Phase 3 decision plus 30 days. An absent or already-expired deadline refuses capture. |
+| **Deletion** | Remove every final and temporary corpus file with `unlinkat`, `fsync` each affected directory, verify the namespace is empty, and report `NAMESPACE_REMOVED_BYTES_NOT_ATTESTED_DESTROYED`. **No claim of secure erasure**: ext4 journalling, SSD block remapping, snapshots and backups all defeat that conclusion. |
+| **Access surface** | One orchestrator-owned writer and one offline Phase 3 reader. No HTTP route, no MCP method, no browser surface, no GraphOps message, no generic download, no arbitrary-path reader. Status exposes counts, digests, deadlines and refusal codes only. |
+| **Exclusions** | Samples never enter logs, exceptions, `repr`, diagnostics, APIs, model context, observation records, Git history, CI artefacts, crash reports, swap-oriented fallback, cloud sync or ordinary backups. The repository must **reject** `.iqc` content rather than ignore it silently — an ignore rule hides the mistake it is meant to prevent. |
+
+#### What it costs on disk
+
+At 16 683 captured windows the payload alone is **69 973 573 632 bytes — 65.17
+GiB**, before headers, manifests and the temporary sibling each publication
+creates. Preflight should require **at least 80 GiB free**, so filesystem
+overhead and in-flight publication do not turn the last stratum into a
+disk-pressure experiment.
+
+*Recorded as an observation, not a guarantee: the pinned host reported 922 GiB
+available on 2026-09-14. Preflight still checks, because a figure written in a
+document is not a measurement of the filesystem at capture time.*
+
+#### File identity and publication
+
+Each file's canonical header carries: schema and format revision · corpus and
+configuration-lock identities · `source` fixed to `CAPTURED` · stratum ·
+ring-issued `window_id` and ring digest · signal-chain hash and configuration
+epoch · sample count, sample rate, dtype, byte order and overlap declaration ·
+capture times and the named clock authority · typed tuner-event identity with
+the before and after configuration declarations · payload SHA-256 · retention
+deadline.
+
+The **filename derives from a SHA-256 digest over the complete header and
+payload**. The ring's BLAKE2s digest remains the live-source attestation; the
+SHA-256 identifies the portable persisted object. Neither replaces the other,
+and a file whose name does not match its own contents is not a corpus member.
+
+Publication protocol — a failure at any step leaves **no partial final file**:
+
+1. Hold the corpus ownership scope and verify the `IQWindow` against the live ring.
+2. Recheck descriptor, mount, directory ownership, mode, corpus limits and retention deadline.
+3. Exclusively create a `0600` temporary sibling.
+4. Write the canonical header and the exact payload.
+5. `fsync` the file.
+6. Publish **without replacement**.
+7. `fsync` the directory.
+8. Read the final file back and verify **both** digests before counting it.
+
+Orphan temporaries are never corpus members and remain subject to the same
+retention deadline.
+
+#### The typed capture boundary
+
+**Do not expose `write_window(window, stratum)`.** A generic writer with a label
+argument is the hole §13k L.1 refused in the derived-evidence producer, for the
+same reason: the label becomes a caller's claim rather than a control path's
+attestation.
+
+Three nominal entrypoints instead, each taking its event attestation from the
+control path that produced it:
+
+```
+record_gain_step(window, gain_event, scope)
+record_retune_transient(window, retune_event, scope)
+record_receiver_spur(window, spur_attestation, scope)
+```
+
+Each accepts an exact `IQWindow`, verifies it against the ring, and refuses a
+caller-supplied `source` label outright.
+
+A tuner operation is evidence for a gain or retune event. **Having an RTL2838
+attached is not evidence that a feature is an internal receiver spur** — that is
+an identification, and `RECEIVER_SPURS` therefore depends on a spur-identification
+procedure this section does not supply and must not imply.
+
+#### The statistical boundary
+
+§5.20 would authorise **retaining bytes**. It does not make trials independent
+and it does not make labels true.
+
+A subsequent capture-plan section must define how the 5 561 events per tuner
+stratum are distributed across time, tuning, gain and receiver conditions.
+Reusing overlapping windows, or drawing thousands of windows from one tuner
+event, must not be counted as thousands of independent trials — the Clopper–Pearson
+bound assumes independence it cannot check, and 5 561 windows from a handful of
+events would produce a number with the right shape and no meaning.
+
+#### What this section does not authorise
+
+No directory is created and no byte is written by this text. It authorises no
+live acquisition, no `rtl_tcp` connection, no capture session, and no change to
+the position-attestation act: entry 7 of `PENDING_AMENDMENTS.md` and §17 slice 11
+remain exactly as blocked as before.
+
+#### What acceptance would require
+
+An explicit acceptance decision and an acceptance commit, before any persistence
+code — and corrections **A**, **B**, **C** and **D** land as code with their own
+negative controls, before the first `PromotionCorpusLock` exists, because **D**
+is the one that stops being free afterwards.
 
 ---
 
