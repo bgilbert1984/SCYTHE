@@ -180,6 +180,30 @@ Recorded here rather than corrected in place because §5.20 is accepted text.
 
 ---
 
+## 10. `THERMAL_NO_INPUT` and `RECEIVER_SPURS` may be one population counted twice
+
+**Trigger:** before **either** stratum is captured — not before whichever is
+captured second. It is a property of the pair.
+
+Nothing has ever checked that `THERMAL_NO_INPUT`'s tunings are free of the
+receiver's own spurious products. A baseband-locked internal artefact — one tied
+to the local oscillator rather than to a fixed absolute frequency — is in the
+analysis span at **every** tuning. If the receiver has one, then a window
+captured as "terminated input, thermal noise only" contains it, and the two
+strata are not two populations. They are one, entered twice, under two names,
+each carrying its own bound.
+
+Two of thirteen bounds would then be measuring the same thing, which is not what
+a stratified corpus with a Bonferroni correction is for.
+
+The check requires a spur catalogue, which is what §5.21 proposes and which does
+not yet exist. Recorded separately from §5.21 because the obligation survives
+that section being **rejected**: however spurs come to be identified,
+`THERMAL_NO_INPUT` still has to be shown free of them, and that was true before
+§5.21 was drafted.
+
+---
+
 ## Drain record
 
 A landed entry leaves the list above. It is recorded here in one line, because
