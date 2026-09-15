@@ -19,7 +19,9 @@ What it does not do, and has no code for:
   reproducible from its seed and configuration, so persisting one buys nothing
   a `SyntheticWindow` does not already carry -- and §5.19 authorises generation
   and labelling, which is not the same as authorising a corpus on disk. §5.20
-  is where persistence gets decided, and it is unwritten.
+  decides persistence and was **accepted 2026-09-14** -- for the three captured
+  strata only, and it authorises no code by itself. Nothing here writes, and
+  nothing here is the writer it contemplates.
 
   **It has no generic writer.** There is no `write(payload)` and no `emit(kind,
   data)`. Real-window ingestion, when §5.20 permits it, gets its own entry

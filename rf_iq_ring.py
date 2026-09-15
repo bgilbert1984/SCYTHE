@@ -158,14 +158,19 @@ WINDOW_INTERVAL_OVERLAP = "WINDOW_INTERVAL_OVERLAP"
 
 
 def window_interval_disjoint(previous: "IQWindow", current: "IQWindow") -> bool:
-    """Do two windows hold disjoint spans of the ring's appended samples?
-
-    `current` must begin at or after `previous` ends::
+    """Interval arithmetic over two windows of **one ring**, and nothing more::
 
         current.first_sample_index >= previous.last_sample_index
 
+    **It assumes what it cannot establish.** A sample index is meaningful only
+    relative to the ring that assigned it, and this function does not and cannot
+    check that both windows came from the same one -- two rings each count from
+    zero, so indices from different rings compare cleanly and mean nothing. The
+    caller must have established common provenance first; this then answers the
+    arithmetic question and only that one.
+
     Under the promotion geometry, where every window is the full 524 288
-    samples, that is exactly §5.20 correction A's rule --
+    samples, it is exactly §5.20 correction A's rule --
     ``current.first >= previous.first + 524_288`` -- and it stays correct for
     the shorter windows a development configuration may take, which the
     constant-subtraction form does not.

@@ -20,15 +20,22 @@ whether a P25 C4FM transmission or a retune transient produces a false DIGITAL.
 Every stratum is therefore bounded separately and the aggregate is bounded too;
 both must pass.
 
-Two strata cannot be built yet, and say so
-------------------------------------------
-``GAIN_STEPS`` needs a gain control, and ``DROPPED_FRAMES_TIMING_GAPS`` needs a
-clock-discontinuity detector.  ``rf_iq_retention`` declares ``GAIN_CHANGE``,
-``DIRECT_SAMPLING_CHANGE`` and ``CLOCK_DISCONTINUITY`` as invalidation reasons
-that nothing calls.  A corpus that labelled windows "gain step" while nothing
-could produce or detect one would be generating its own labels, so those strata
-report ``NOT_BUILDABLE`` and the manifest does not pass while any required
-stratum is in that state.
+Buildability, and where the remaining block actually is
+-------------------------------------------------------
+``Stratum.buildable`` exists because ``GAIN_STEPS`` and
+``DROPPED_FRAMES_TIMING_GAPS`` once had no control path: a corpus labelling
+windows "gain step" while nothing could produce or detect one would be
+generating its own labels.  Both were wired on 2026-09-03 --
+``IQRetentionOwner.set_gain_db`` raises ``GAIN_CHANGE`` and
+``ClockContinuityMonitor`` separates a transport gap from a rate drift -- and
+**every stratum here is now marked buildable**.  The mechanism stays, because the
+next stratum to be declared ahead of its control path should be able to say so.
+
+The block that remains is not buildability.  ``GAIN_STEPS``,
+``RETUNE_TRANSIENTS`` and ``RECEIVER_SPURS`` need a receiver rather than a
+generator, which ``rf_null_corpus`` records as ``TUNER_REQUIRED``; and
+``RECEIVER_SPURS`` needs an identification protocol that does not exist, so it
+is unreachable even with a receiver attached.
 """
 
 from __future__ import annotations
@@ -291,6 +298,7 @@ COMPLETION_RECEIPT_SCHEMA = "scythe.rf-corpus-completion.v1"
 
 COMPLETION_LOCK_ABSENT = "COMPLETION_LOCK_ABSENT"
 COMPLETION_LOCK_STRATA_MOVED = "COMPLETION_LOCK_STRATA_MOVED"
+COMPLETION_LOCK_DECLARATION_MOVED = "COMPLETION_LOCK_DECLARATION_MOVED"
 COMPLETION_STRATUM_MISSING = "COMPLETION_STRATUM_MISSING"
 COMPLETION_STRATUM_UNKNOWN = "COMPLETION_STRATUM_UNKNOWN"
 COMPLETION_COUNT_BELOW_REQUIRED = "COMPLETION_COUNT_BELOW_REQUIRED"
@@ -298,6 +306,7 @@ COMPLETION_COUNT_ABOVE_REQUIRED = "COMPLETION_COUNT_ABOVE_REQUIRED"
 COMPLETION_COUNT_UNCOUNTABLE = "COMPLETION_COUNT_UNCOUNTABLE"
 COMPLETION_REFUSALS: Tuple[str, ...] = (
     COMPLETION_LOCK_ABSENT, COMPLETION_LOCK_STRATA_MOVED,
+    COMPLETION_LOCK_DECLARATION_MOVED,
     COMPLETION_STRATUM_MISSING, COMPLETION_STRATUM_UNKNOWN,
     COMPLETION_COUNT_BELOW_REQUIRED, COMPLETION_COUNT_ABOVE_REQUIRED,
     COMPLETION_COUNT_UNCOUNTABLE,
@@ -311,6 +320,63 @@ class CompletionRefused(RuntimeError):
         super().__init__(f"{code}: {detail}" if detail else code)
         self.code = code
         self.detail = detail
+
+
+# Every lock field, sorted by how it is checked. A test asserts the three sets
+# partition `PromotionCorpusLock` exactly, so a field added later cannot quietly
+# land on the unchecked side.
+#
+# One source: each declaration names how its current value is obtained, and the
+# field list is **derived** from that mapping rather than typed beside it. A list
+# and the dictionary it describes are one thing said twice, and the copy that
+# falls behind is a field nobody checks under a heading that says it is checked.
+#
+# The values are thunks because they are not all knowable at import -- STRATA is
+# defined further down, and `configuration_digest` is computed from the lock
+# rather than from this module at all.
+_DECLARATION_SOURCES = {
+    "strata_digest": lambda lock: _strata_digest(),
+    "strata_definition_revision": lambda lock: STRATA_DEFINITION_REVISION,
+    "validation_family_revision": lambda lock: VALIDATION_FAMILY_REVISION,
+    "tested_bound_count": lambda lock: TESTED_BOUND_COUNT,
+    "per_bound_alpha": lambda lock: PER_BOUND_ALPHA,
+    "eligible_channel_purpose": lambda lock: CHANNEL_PURPOSE_ELIGIBLE_FOR_PROMOTION,
+    "configuration_digest": lambda lock: _configuration_digest(
+        lock.method_revision, lock.decision_threshold,
+        lock.preprocessing_revision),
+}
+LOCK_DECLARATION_FIELDS: Tuple[str, ...] = tuple(_DECLARATION_SOURCES)
+# Not module constants -- they are this corpus's own choices -- but the lock's
+# `configuration_digest` was computed from them, so recomputing that digest from
+# the lock's own fields catches a substitution in any of the three.
+LOCK_FIELDS_COVERED_BY_DIGEST: Tuple[str, ...] = (
+    "method_revision", "decision_threshold", "preprocessing_revision",
+)
+# Not declarations at all: one names the corpus, the other times it, and neither
+# has an answer anywhere to be checked against.
+LOCK_FIELDS_NOT_DECLARATIONS: Tuple[str, ...] = ("corpus_id", "opened_at")
+
+
+def _declaration_disagreements(lock: "PromotionCorpusLock"):
+    """Every frozen declaration that disagrees with what is declared now.
+
+    `type(lock) is PromotionCorpusLock` proves the object is the right class.
+    It cannot prove the object is **internally coherent**, because the dataclass
+    is publicly constructible and `dataclasses.replace` produces an exact
+    `PromotionCorpusLock` carrying whatever was substituted. A forged
+    `strata_definition_revision` or `validation_family_revision` was then copied
+    straight into the receipt -- the receipt attesting to the lie it was handed.
+
+    `configuration_digest` is checked against a digest **recomputed from the
+    lock's own fields**, which is the internal-coherence half: substituting
+    `method_revision` alone leaves a stored digest that no longer describes the
+    configuration beside it.
+    """
+    expected = {name: source(lock)
+                for name, source in _DECLARATION_SOURCES.items()}
+    return tuple((name, getattr(lock, name), value)
+                 for name, value in expected.items()
+                 if getattr(lock, name) != value)
 
 
 @dataclass(frozen=True)
@@ -371,6 +437,12 @@ def issue_completion_receipt(*, lock: Any, counted: Mapping[str, Any],
             COMPLETION_LOCK_STRATA_MOVED,
             "the strata set or its definition revision has moved since this "
             f"lock was opened: {lock.strata_digest} then, {_strata_digest()} now")
+    disagreements = _declaration_disagreements(lock)
+    if disagreements:
+        raise CompletionRefused(
+            COMPLETION_LOCK_DECLARATION_MOVED,
+            "; ".join(f"{name} is {frozen!r} in the lock and {current!r} now"
+                      for name, frozen, current in disagreements))
 
     supplied = dict(counted)
     unknown = sorted(set(supplied) - set(STRATUM_KEYS))

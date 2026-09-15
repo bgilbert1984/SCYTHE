@@ -518,6 +518,40 @@ class SampleIntervalTests(unittest.TestCase):
                     window_interval_disjoint(first, current),
                     current.first_sample_index >= first.first_sample_index + 64)
 
+    def test_it_is_arithmetic_and_cannot_establish_common_provenance(self):
+        """The assumption `window_interval_disjoint` makes and cannot check.
+
+        A sample index means something only relative to the ring that assigned
+        it, and every ring counts from zero. Two windows from two rings compare
+        cleanly and the answer is meaningless -- here, two genuinely unrelated
+        windows are reported as overlapping simply because both start at zero.
+        Establishing that both came from one ring is the caller's job, done
+        before this is asked anything.
+        """
+        left, right = _ring(capacity=64), _ring(capacity=64, chain="chain-b")
+        left.append(_block(64))
+        right.append(_block(64, value=7))
+        right.append(_block(64, value=9))
+        a = left.acquire_window().window
+        b = right.acquire_window().window
+        self.assertNotEqual(a.signal_chain_hash, b.signal_chain_hash)
+        self.assertFalse(np.array_equal(a.samples, b.samples))
+
+        # The discriminating case. These windows share no ring, no chain and no
+        # samples, and the arithmetic says "disjoint" because 64 >= 64. A
+        # version that quietly checked provenance would answer False here --
+        # which is why the assertion is True and not False.
+        self.assertEqual(b.first_sample_index, a.last_sample_index)
+        self.assertTrue(window_interval_disjoint(a, b))
+
+        # And the other direction is just as meaningless: two unrelated first
+        # windows both start at zero and report as overlapping.
+        third = _ring(capacity=64, chain="chain-c")
+        third.append(_block(64, value=3))
+        c = third.acquire_window().window
+        self.assertEqual(a.first_sample_index, c.first_sample_index)
+        self.assertFalse(window_interval_disjoint(a, c))
+
     def test_invalidation_does_not_reset_the_indices(self):
         """The property the rule depends on.
 

@@ -17,7 +17,9 @@ from rf_validation_manifest import (
     COMPLETION_COUNT_ABOVE_REQUIRED, COMPLETION_COUNT_BELOW_REQUIRED,
     COMPLETION_COUNT_UNCOUNTABLE, COMPLETION_LOCK_ABSENT,
     COMPLETION_LOCK_STRATA_MOVED, COMPLETION_STRATUM_MISSING,
-    COMPLETION_STRATUM_UNKNOWN, STRATA_DEFINITION_REVISION,
+    COMPLETION_LOCK_DECLARATION_MOVED, COMPLETION_STRATUM_UNKNOWN,
+    LOCK_DECLARATION_FIELDS, LOCK_FIELDS_COVERED_BY_DIGEST,
+    LOCK_FIELDS_NOT_DECLARATIONS, STRATA_DEFINITION_REVISION,
     CompletionRefused, CorpusCompletionReceipt, PromotionCorpusLock,
     issue_completion_receipt,
 )
@@ -536,6 +538,119 @@ class CompletionReceiptTests(unittest.TestCase):
             with self.subTest(field=name):
                 self.assertNotIn("window", name)
                 self.assertNotIn("count", name.replace("bound_count", ""))
+
+
+class LockCoherenceTests(unittest.TestCase):
+    """A nominal type check cannot establish internal coherence.
+
+    `PromotionCorpusLock` is publicly constructible and `dataclasses.replace`
+    returns an **exact** `PromotionCorpusLock` carrying whatever was
+    substituted. Before this check, a forged `strata_definition_revision` or
+    `validation_family_revision` was copied straight into the receipt -- the
+    receipt attesting to the lie it had been handed.
+    """
+
+    def test_every_forged_declaration_refuses(self):
+        lock = _lock()
+        for field_name, forged in (
+                ("strata_definition_revision", "rf-null-strata.v99"),
+                ("validation_family_revision", "forged.v1"),
+                ("tested_bound_count", 1),
+                ("per_bound_alpha", 0.05),
+                ("eligible_channel_purpose", "ANY_CHANNEL"),
+                ("configuration_digest", "blake2s:" + "0" * 32)):
+            with self.subTest(field=field_name):
+                impostor = replace(lock, **{field_name: forged})
+                self.assertIs(type(impostor), PromotionCorpusLock)
+                with self.assertRaises(CompletionRefused) as caught:
+                    issue_completion_receipt(lock=impostor,
+                                             counted=_full_counts())
+                self.assertEqual(caught.exception.code,
+                                 COMPLETION_LOCK_DECLARATION_MOVED)
+                self.assertIn(field_name, caught.exception.detail)
+
+    def test_a_substituted_configuration_field_is_caught_by_its_own_digest(self):
+        """The internal-coherence half. `method_revision` has no module-level
+        answer to be checked against -- but the digest beside it was computed
+        from it, and recomputing that digest from the lock's own fields is what
+        notices."""
+        lock = _lock()
+        for field_name, forged in (("method_revision", "other.v9"),
+                                   ("decision_threshold", 99.0),
+                                   ("preprocessing_revision", "pre.v9")):
+            with self.subTest(field=field_name):
+                impostor = replace(lock, **{field_name: forged})
+                with self.assertRaises(CompletionRefused) as caught:
+                    issue_completion_receipt(lock=impostor,
+                                             counted=_full_counts())
+                self.assertEqual(caught.exception.code,
+                                 COMPLETION_LOCK_DECLARATION_MOVED)
+                self.assertIn("configuration_digest", caught.exception.detail)
+
+    def test_no_forged_value_reaches_a_receipt(self):
+        """What the hole actually cost: the receipt carried the forgery."""
+        lock = _lock()
+        for field_name in ("strata_definition_revision",
+                           "validation_family_revision"):
+            with self.subTest(field=field_name):
+                impostor = replace(lock, **{field_name: "forged"})
+                with self.assertRaises(CompletionRefused):
+                    issue_completion_receipt(lock=impostor,
+                                             counted=_full_counts())
+
+    def test_every_lock_field_is_either_checked_or_declared_unchecked(self):
+        """The partition, asserted so a field added later cannot quietly join
+        the unchecked side.
+
+        Three sets, not two: `method_revision`, `decision_threshold` and
+        `preprocessing_revision` have no module-level answer to compare against
+        and are caught through the digest computed from them. Writing that down
+        was the correction; an earlier version of this test assumed two sets and
+        failed, which is the test doing its job on its own author.
+        """
+        direct = set(LOCK_DECLARATION_FIELDS)
+        via_digest = set(LOCK_FIELDS_COVERED_BY_DIGEST)
+        unchecked = set(LOCK_FIELDS_NOT_DECLARATIONS)
+        lock = _lock()
+        # Three disjoint sets, together exactly the lock.
+        self.assertEqual(direct & via_digest, set())
+        self.assertEqual(direct & unchecked, set())
+        self.assertEqual(via_digest & unchecked, set())
+        self.assertEqual(direct | via_digest | unchecked,
+                         set(PromotionCorpusLock.__dataclass_fields__))
+        # And the declared list is the one the implementation uses, not a copy:
+        # forging each name must produce a disagreement naming that name.
+        for name in direct - {"configuration_digest"}:
+            with self.subTest(field=name):
+                value = getattr(lock, name)
+                forged = replace(lock, **{name: f"{value}-forged"
+                                          if isinstance(value, str) else 0})
+                self.assertIn(
+                    name, [row[0] for row
+                           in manifest._declaration_disagreements(forged)])
+
+    def test_a_genuine_lock_still_issues(self):
+        """The check refuses forgeries and nothing else."""
+        receipt = issue_completion_receipt(lock=_lock(), counted=_full_counts(),
+                                           issued_at=2_000.0)
+        self.assertEqual(receipt.strata_definition_revision,
+                         STRATA_DEFINITION_REVISION)
+
+
+class BuildabilityClaimTests(unittest.TestCase):
+    """The docstring said two strata report NOT_BUILDABLE. None do."""
+
+    def test_every_declared_stratum_is_buildable(self):
+        self.assertEqual([s.key for s in STRATA if not s.buildable], [])
+
+    def test_the_remaining_block_is_a_receiver_not_buildability(self):
+        from rf_null_corpus import TUNER_REQUIRED
+        self.assertEqual(sorted(TUNER_REQUIRED),
+                         ["GAIN_STEPS", "RECEIVER_SPURS", "RETUNE_TRANSIENTS"])
+        for key in TUNER_REQUIRED:
+            with self.subTest(key=key):
+                self.assertTrue(
+                    next(s for s in STRATA if s.key == key).buildable)
 
 
 if __name__ == "__main__":
