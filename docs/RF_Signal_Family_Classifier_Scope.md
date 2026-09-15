@@ -2492,6 +2492,25 @@ The slope is measured over **at least three declared retunes**, because two
 points fit any line and a two-point slope is an assumption wearing a
 measurement's clothes.
 
+**And a monotonic sweep confounds tuner frequency with time.** If LO settings
+are visited in order, an external signal that drifts, hops, or is itself being
+retuned traces a baseband path that can fit any slope at all, including slopes
+no receiver product could produce. The claim "no received emission behaves this
+way" is then stronger than the experiment that produced it — true of a *static*
+emitter and asserted of every emitter.
+
+Three requirements follow, and all three are pinned to §5.22 rather than set
+here:
+
+- **Randomised or counterbalanced retune order**, so frequency and time are not
+  the same variable.
+- **Repeated visits to the same LO settings**, so a feature that moved between
+  two visits to one setting is caught as non-stationary rather than fitted.
+- **Signed baseband coordinates**, with wrap and folding at band edges handled
+  explicitly. A magnitude loses the sign that distinguishes slope +1 from −1,
+  and a feature folded at an edge reverses its apparent direction of travel —
+  either one manufactures a slope out of bookkeeping.
+
 *(The reference is 28.8 MHz on most R820T2 dongles and 24 MHz on some. The
 device's own must be **declared**, never assumed: a protocol that guessed the
 crystal would be inventing the instrument, which is the §5.15 mistake. The same
@@ -2499,9 +2518,17 @@ goes for the divider family that makes rational slopes possible.)*
 
 **Termination.** Replace the antenna with a 50 Ω load.
 
-A received emission drops by tens of dB. An internal product does not. This is
-the **only** test that decides the slope −1 class, and it costs
-something structural:
+A received emission drops by tens of dB. An internal product does not.
+
+**Termination is the required discriminator for every usable class**, not an
+optional corroboration for one of them. For slope −1 it is also the *only*
+discriminator available, which is why that class carries the higher confidence
+bar rather than a different requirement. An earlier draft had it both ways —
+"the only test that decides" in one paragraph and "proves nothing, ingress
+remains possible" in the next — which is not a nuance, it is two incompatible
+statements about the same act.
+
+It costs something structural:
 
 > Terminating changes the antenna, which changes `signal_chain_manifest`, which
 > changes `signal_chain_hash`, which raises `SIGNAL_CHAIN_CHANGE` and clears the
@@ -2519,12 +2546,22 @@ code:
 
 "The other two strata span one chain" was simply false. Two of the three span
 two identities, and the spur case is distinguished not by *how many* but by
-**what moved**: `GAIN_STEPS` changes a setting on one front end, while
-termination changes the front end itself. A gain step is the same instrument
-turned down; a termination is a different instrument.
+**what moved**:
 
-§5.20's closed attestation union still needs a distinct spur member — for that
-reason rather than the one first given.
+| stratum | same receiver? | same front end? | what differs |
+| --- | --- | --- | --- |
+| `GAIN_STEPS` | yes | **yes** | the declared gain configuration |
+| `RECEIVER_SPURS` | yes | **no** | the front end itself |
+
+Stated that way rather than as "the same instrument turned down", which
+contradicts this repository's own semantics: gain is *inside* the signal-chain
+identity, and `set_gain_db` says in as many words that a window spanning a gain
+change "would compare two different instruments". A phrase that quietly
+redefined *instrument* to exclude gain would have undone §5.17's whole argument,
+where the same mast at two extensions is two instruments.
+
+§5.20's closed attestation union still needs a distinct spur member — for the
+front-end difference, not for a redefinition of the word.
 
 #### What software cannot establish here
 
@@ -2541,12 +2578,16 @@ that claimed otherwise would be asserting a property of a room nobody measured.
 So the catalogue carries a **confidence class, not a boolean** — and the class
 names say *consistent with*, because none of them is proof:
 
-| class | established by | usable |
-| --- | --- | --- |
-| `CONSISTENT_WITH_INTERNAL_MIXING` | slope ≠ −1, inside the modelled family, persists under declared termination | **yes** |
-| `CONSISTENT_WITH_INTERNAL_REFERENCE` | slope −1, persists terminated, matches a rational multiple of the **declared** reference | **only at a governed termination confidence** |
-| `SPUR_CANDIDATE_UNRESOLVED` | persists terminated, fits no modelled slope | no |
-| `VANISHES_ON_DECLARED_TERMINATION` | the feature is gone with the load fitted | no |
+**Every usable class requires an accepted termination/ingress confidence.** The
+two differ in how much *else* they have, and therefore in where the accepted
+level is set — not in whether termination is required:
+
+| class | established by | discriminators | usable |
+| --- | --- | --- | --- |
+| `CONSISTENT_WITH_INTERNAL_MIXING` | slope ≠ −1 inside the modelled family, **and** persists under declared termination | **two**, independent | yes, at the lower accepted confidence |
+| `CONSISTENT_WITH_INTERNAL_REFERENCE` | slope −1, persists terminated, matches a rational multiple of the **declared** reference | **one** — a model match is not a second | yes, only at the higher accepted confidence |
+| `SPUR_CANDIDATE_UNRESOLVED` | persists terminated, fits no modelled slope | — | no |
+| `VANISHES_ON_DECLARED_TERMINATION` | the feature is gone with the load fitted | — | no |
 
 The second row is the one an earlier draft got wrong by calling it
 `SPUR_INTERNAL_CLOCK_LOCKED`. **A model match is not a discriminator.** A
@@ -2555,10 +2596,29 @@ the model, and matching it cannot silently upgrade an `OPERATOR_DECLARED`
 termination into physical proof. The reference comb is dense enough across a
 wide span that coincidence is ordinary rather than remarkable.
 
-That row therefore carries an explicit **termination/ingress confidence**, and
-the level at which it becomes usable is **governed rather than assumed** —
-pinned to §5.22 with the rest of the free parameters. Shielding, a second site,
-or a second discriminator raises it; a declaration on its own does not.
+Both accepted levels are **governed rather than assumed**, and pinned to §5.22
+with the rest of the free parameters. Shielding, a second site, or a genuine
+second discriminator raises a confidence; a declaration on its own does not.
+
+**Stability is a separate axis, not a filter.** Where a feature survives to is
+recorded alongside its class rather than used to exclude it:
+
+| stability | survives |
+| --- | --- |
+| `SESSION_SCOPED` | within one capture session, not across a reconnect |
+| `RECONNECT_STABLE` | across `DISCONNECT` / `RECONNECT`, not across a power cycle |
+| `POWER_CYCLE_STABLE` | across a power cycle |
+
+An earlier draft excluded anything that did not survive a reconnect, on the
+grounds that it "is not a property of the receiver". **That was wrong and is the
+most consequential of these corrections.** A USB transport seam, a PLL settling
+artefact, an initialisation transient — these are session-scoped and they are
+receiver-system behaviour. Worse for the earlier rule: they are *periodic and
+narrow*, which makes them the population `rf_symbol_clock`'s registered
+`PERIODIC_TRANSPORT_ARTEFACT` mode describes, and therefore close to the exact
+population this stratum exists to test. A filter that discarded them would have
+thrown away the most dangerous members of the stratum for being insufficiently
+permanent.
 
 `SPUR_CANDIDATE_UNRESOLVED` is a real state and not a holding pen: a feature
 that survives termination and fits no modelled slope is the one most likely to
@@ -2578,9 +2638,11 @@ and has not seen them, so it cannot have passed them.
 4. Retain features exceeding a declared margin above the local noise floor and
    persisting across **R** repeats at that tuning.
 5. Classify by retune behaviour into the four classes above.
-6. Repeat after a **power cycle** and after a **reconnect**. A feature that does
-   not survive a reconnect is not a property of the receiver; `DISCONNECT` and
-   `RECONNECT` are already invalidation reasons, so the epochs separate cleanly.
+6. Repeat after a **reconnect** and after a **power cycle**, and record the
+   resulting **stability** — `SESSION_SCOPED`, `RECONNECT_STABLE`,
+   `POWER_CYCLE_STABLE`. This classifies; it does not exclude. `DISCONNECT` and
+   `RECONNECT` are already invalidation reasons, so the epochs separate cleanly
+   and a session-scoped feature is visible as such rather than as noise.
 7. Optionally repeat on a second unit of the same model. A feature common to two
    units is a design artefact; one unique to a unit belongs to that unit, and
    the catalogue must say which, because a corpus built on one dongle's private
@@ -2692,7 +2754,11 @@ Each of the following is named here, deliberately left free, and belongs to
 | slope-matching tolerance | which slopes count as inside the modelled family |
 | frequency-matching tolerance against ``n·f_ref`` | how often coincidence passes as a model match |
 | persistence margin above the local noise floor | what counts as a feature at all |
-| accepted **termination/ingress confidence** | whether `CONSISTENT_WITH_INTERNAL_REFERENCE` may attest anything |
+| **retune order** — randomised or counterbalanced | whether frequency and time are separable at all |
+| repeated visits per LO setting | whether a non-stationary emitter is caught or fitted |
+| signed baseband coordinates, wrap and folding at band edges | whether an apparent slope is physical or bookkeeping |
+| both accepted **termination/ingress confidences** | whether either `CONSISTENT_WITH_INTERNAL_*` class may attest anything |
+| stability classes required per attesting spur | whether a `SESSION_SCOPED` product may carry a stratum window |
 
 Fixed here, they would be numbers chosen before the estimand that gives them
 meaning. §5.22 is where they land, and until then this section decides how to
