@@ -1859,17 +1859,34 @@ both is exactly the hole that blurs the authority boundary — the same shape
 **No captured byte reaches disk under this section.** `RETUNE_TRANSIENTS`,
 `GAIN_STEPS` and `RECEIVER_SPURS` are out of scope until §5.20 is accepted.
 
-### 5.20 — captured-corpus persistence — **PROPOSED, NOT ACCEPTED**
+### 5.20 — captured-corpus persistence — **ACCEPTED**
 
 ```text
-Status:     PROPOSED. Nothing here is in force.
-Authority:  NONE until an explicit acceptance decision and an acceptance commit.
-Opens:      Nothing. No directory is created and no byte is written by this text.
-Blocks:     GAIN_STEPS, RETUNE_TRANSIENTS, RECEIVER_SPURS — 16 683 windows —
-            remain out of scope, and the corpus remains unfreezable, until this
-            section is accepted. Acceptance reaches two of the three: see
-            *What acceptance does not unblock*.
+Status:     ACCEPTED 2026-09-14. The authority text is in force.
+Authority:  §5.20 exists. It authorises no persistence code and no live capture.
+            Both require corrections A-D and the controls below landed as code,
+            under their own slice authorisation.
+Opens:      GAIN_STEPS and RETUNE_TRANSIENTS become reachable in principle --
+            two strata, 11 122 windows. RECEIVER_SPURS does not, and the corpus
+            stays unfreezable. See *What acceptance does not unblock*.
+Creates:    Nothing. No directory exists and no byte is written by acceptance.
 ```
+
+*Proposed 2026-09-14 at `fd536cd`, with three contradictions the operator named
+and a fourth found while checking them. Revised at `d4a35c7` after review found
+seven details open — one of which, "drains the entire ring", described behaviour
+`acquire_window` does not have and was concealing an obligation. Revised again
+at `cf4d627` after review found five more, including a digest claim that was
+simply wrong and an attestation field that would have forced `RECEIVER_SPURS` to
+fabricate two declarations to satisfy a schema. **Accepted on the corrected
+substance**; this is the acceptance commit.*
+
+*Two readings are pinned here so they are not recovered later by inference.
+§5.19's "out of scope until §5.20 is accepted" is now satisfied — but
+`RECEIVER_SPURS` remains unreachable behind a **second** gate, the missing
+identification protocol, which §5.20 does not supply. And acceptance of an
+authority is not authorisation of a slice: no persistence code and no live
+capture are authorised by this commit.*
 
 *§5.5 granted a DSP working buffer — process-local, volatile, fixed-capacity,
 non-persistent. A validation corpus is persisted labelled data by definition, so
@@ -2328,10 +2345,11 @@ live acquisition, no `rtl_tcp` connection, no capture session, and no change to
 the position-attestation act: entry 7 of `PENDING_AMENDMENTS.md` and §17 slice 11
 remain exactly as blocked as before.
 
-#### What acceptance would require
+#### What acceptance started, and what it did not
 
-An explicit acceptance decision and an acceptance commit, before any persistence
-code.
+The acceptance decision and this commit are the whole of what has happened. No
+directory exists, no byte has been written, and the three strata remain
+uncaptured.
 
 Corrections **A**, **B**, **C** and **D** land as code with their own negative
 controls **before the first `PromotionCorpusLock` exists** — **D** especially,
