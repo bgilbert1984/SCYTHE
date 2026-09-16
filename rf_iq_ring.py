@@ -61,6 +61,7 @@ import hashlib
 import os
 import threading
 import time
+import weakref
 from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
@@ -152,7 +153,48 @@ VERIFICATION_DOES_NOT_BIND: Tuple[str, ...] = (
     "its metadata",
     "its sample interval",
 )
-FULL_OBJECT_ATTESTATION = "NOT_IMPLEMENTED_REQUIRED_BEFORE_PERSISTENCE"
+# §5.24, accepted 2026-09-16 and implemented here. `attest_window` is the
+# operation the paragraph above says does not exist. It is a **second**
+# operation with a stronger guarantee, not a widening of `verify_window`:
+# the two-string check keeps its narrower job and its narrower name.
+FULL_OBJECT_ATTESTATION = "ATTEST_WINDOW_RETURNS_A_LIVE_SCOPE"
+
+# -- attestation refusals ---------------------------------------------------
+#
+# These raise rather than returning a result object, which is the one place
+# this module departs from "a refusal is a result, not an exception". The
+# reason is the shape of the operation: `with ring.attest_window(w) as a:` has
+# to be **impossible to enter** when attestation fails, and a falsy result
+# object entered by a caller who did not check is the hole again.
+ATTESTATION_NOT_AN_IQ_WINDOW = "ATTESTATION_NOT_AN_IQ_WINDOW"
+ATTESTATION_RING_CLOSED = "ATTESTATION_RING_CLOSED"
+ATTESTATION_WINDOW_NOT_ISSUED = "ATTESTATION_WINDOW_NOT_ISSUED"
+ATTESTATION_EPOCH_CHANGED = "ATTESTATION_EPOCH_CHANGED"
+ATTESTATION_WINDOW_EVICTED = "ATTESTATION_WINDOW_EVICTED"
+ATTESTATION_METADATA_MISMATCH = "ATTESTATION_METADATA_MISMATCH"
+ATTESTATION_REPRESENTATION_INVALID = "ATTESTATION_REPRESENTATION_INVALID"
+ATTESTATION_DIGEST_MISMATCH = "ATTESTATION_DIGEST_MISMATCH"
+ATTESTATION_SCOPE_NOT_ACTIVE = "ATTESTATION_SCOPE_NOT_ACTIVE"
+ATTESTATION_SCOPE_NOT_MINTED = "ATTESTATION_SCOPE_NOT_MINTED"
+ATTESTATION_WRITE_INCOMPLETE = "ATTESTATION_WRITE_INCOMPLETE"
+ATTESTATION_WRITE_TARGET_INVALID = "ATTESTATION_WRITE_TARGET_INVALID"
+ATTESTATION_REFUSALS: Tuple[str, ...] = (
+    ATTESTATION_NOT_AN_IQ_WINDOW, ATTESTATION_RING_CLOSED,
+    ATTESTATION_WINDOW_NOT_ISSUED, ATTESTATION_EPOCH_CHANGED,
+    ATTESTATION_WINDOW_EVICTED, ATTESTATION_METADATA_MISMATCH,
+    ATTESTATION_REPRESENTATION_INVALID, ATTESTATION_DIGEST_MISMATCH,
+    ATTESTATION_SCOPE_NOT_ACTIVE, ATTESTATION_SCOPE_NOT_MINTED,
+    ATTESTATION_WRITE_INCOMPLETE, ATTESTATION_WRITE_TARGET_INVALID,
+)
+
+# Metadata compared field by field against the ring's own record. Declared as a
+# tuple rather than written into the comparison, so "every stored metadata
+# field" is a list somebody can read rather than a claim about a loop body.
+ATTESTED_METADATA_FIELDS: Tuple[str, ...] = (
+    "configuration_epoch", "first_sample_index", "last_sample_index",
+    "sample_count", "sample_rate_hz", "start_time", "end_time",
+    "signal_chain_hash", "digest",
+)
 
 WINDOW_INTERVAL_OVERLAP = "WINDOW_INTERVAL_OVERLAP"
 
@@ -222,6 +264,31 @@ MAX_TRACKED_WINDOWS = 32
 # is a test or a developer shell, which is not a child process; the orchestrator
 # always stamps 'child' on the ones it spawns (scythe_orchestrator.py).
 ALLOWED_PROCESS_ROLES: Tuple[str, ...] = ("", "orchestrator")
+
+
+def _window_digest(signal_chain_hash: str, configuration_epoch: int,
+                   sample_count: int, payload: Any) -> str:
+    """The window digest, from explicit inputs and the payload bytes.
+
+    One implementation, two callers: issuance computes it over the bytes it is
+    about to freeze, and attestation recomputes it over the bytes bound into the
+    scope. **The schema and revision do not change** -- an amendment that
+    quietly moved a digest would invalidate every product already carrying one,
+    so this is a refactor of where the inputs come from and of nothing else.
+
+    `payload` is anything supporting the buffer protocol. A read-only
+    `memoryview` over an immutable array hashes identically to the `bytes` it
+    views, which is why attestation needs no copy of its own.
+    """
+    hasher = hashlib.blake2s(digest_size=32)
+    hasher.update(signal_chain_hash.encode())
+    hasher.update(b"|")
+    hasher.update(str(configuration_epoch).encode())
+    hasher.update(b"|")
+    hasher.update(str(sample_count).encode())
+    hasher.update(b"|")
+    hasher.update(payload)
+    return f"{DIGEST_ALGORITHM}:{hasher.hexdigest()}"
 
 
 class RawIQRetentionRefused(RuntimeError):
@@ -312,6 +379,193 @@ class IQWindow:
             "by the terms of the retention approval")
 
 
+class AttestationRefused(RuntimeError):
+    """An attestation that did not happen, and which check refused it."""
+
+    def __init__(self, code: str, detail: str = "") -> None:
+        super().__init__(f"{code}: {detail}" if detail else code)
+        self.code = code
+        self.detail = detail
+
+
+# Mint-time state lives HERE, not on the scope instance. §5.24: immutable bytes
+# stop the payload being modified, and do nothing about a scope attribute being
+# replaced -- reflection reaches `scope._handle` exactly as it reaches
+# `window.samples`. A scope therefore carries only an opaque handle, and every
+# method re-derives its state from this registry. Replace the handle and the
+# lookup resolves to nothing; replace it with another live scope's handle and
+# the owner check refuses, because the entry names the object it was minted for.
+_SCOPE_REGISTRY: Dict[str, "_ScopeState"] = {}
+_MINT_KEY = object()
+
+
+class _ScopeState:
+    """Bound at mint time and never re-read from the attested object."""
+
+    __slots__ = ("owner", "payload", "samples", "metadata", "active")
+
+    def __init__(self, owner, payload, samples, metadata) -> None:
+        self.owner = owner              # weakref to the scope this belongs to
+        self.payload = payload          # read-only memoryview over immutable bytes
+        self.samples = samples          # the exact array reference, captured once
+        self.metadata = metadata
+        self.active = True
+
+
+class AttestedIQWindowScope:
+    """A live, process-local attestation over one exact `IQWindow`.
+
+    **Not a verdict.** `attest(window) -> bool` leaves a window between the
+    answer and the write, with the object caller-supplied on both sides, so a
+    verdict about a mutable object is a statement about the past. This binds one
+    immutable sample reference and the authoritative metadata for its whole
+    lifetime and never re-reads the attested object, so replacing a frozen
+    dataclass field by reflection after attestation changes nothing it will
+    write.
+
+    **The ring may advance underneath it, and that is correct.** §5.20 already
+    says the ring may have evicted or invalidated the source by publication step
+    8. This is a point-in-time attested snapshot, not a lease on the buffer.
+    """
+
+    __slots__ = ("_handle", "__weakref__")
+
+    def __init__(self, handle: str, mint_key: Any = None) -> None:
+        # Unconstructible through the public API: a scope a caller can build is
+        # a caller's claim, which is the thing attestation exists to replace.
+        if mint_key is not _MINT_KEY:
+            raise AttestationRefused(
+                ATTESTATION_SCOPE_NOT_MINTED,
+                "an AttestedIQWindowScope is minted by BoundedIQRing.attest_window")
+        self._handle = handle
+
+    # -- state, re-derived on every access ---------------------------------
+
+    def _state(self) -> "_ScopeState":
+        state = _SCOPE_REGISTRY.get(getattr(self, "_handle", None))
+        if state is None or state.owner() is not self:
+            raise AttestationRefused(
+                ATTESTATION_SCOPE_NOT_MINTED,
+                "this scope's handle does not resolve to state minted for it")
+        if not state.active:
+            raise AttestationRefused(
+                ATTESTATION_SCOPE_NOT_ACTIVE,
+                "the attestation scope has ended; a reused scope attests nothing")
+        return state
+
+    @property
+    def active(self) -> bool:
+        """Liveness without raising, for a caller deciding whether to proceed."""
+        state = _SCOPE_REGISTRY.get(getattr(self, "_handle", None))
+        return bool(state is not None and state.owner() is self and state.active)
+
+    def __enter__(self) -> "AttestedIQWindowScope":
+        self._state()
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> bool:
+        # Terminal on exit, including by exception. The entry stays so that a
+        # reused scope can be told it has **ended** rather than that it was
+        # never minted -- two different failures deserve two different codes --
+        # but the payload and the array are dropped, so an ended scope keeps no
+        # raw IQ alive.
+        state = _SCOPE_REGISTRY.get(getattr(self, "_handle", None))
+        if state is not None and state.owner() is self:
+            state.active = False
+            state.payload = None
+            state.samples = None
+        return False
+
+    # -- metadata, never payload -------------------------------------------
+
+    @property
+    def window_id(self) -> str:
+        return self._state().metadata["window_id"]
+
+    @property
+    def digest(self) -> str:
+        return self._state().metadata["digest"]
+
+    @property
+    def configuration_epoch(self) -> int:
+        return self._state().metadata["configuration_epoch"]
+
+    @property
+    def signal_chain_hash(self) -> str:
+        return self._state().metadata["signal_chain_hash"]
+
+    @property
+    def sample_count(self) -> int:
+        return self._state().metadata["sample_count"]
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Metadata only. There is no code path that serialises the payload."""
+        data = dict(self._state().metadata)
+        data["raw_iq_exposed"] = False
+        data["attestation"] = FULL_OBJECT_ATTESTATION
+        return data
+
+    # -- the restricted action ---------------------------------------------
+    #
+    # An ACTION, not an accessor. Returning a read-only `memoryview` looked
+    # sufficient -- the bytes are immutable and the registry entry is cleared on
+    # exit -- and it is not: the returned view holds its own reference to the
+    # backing object, so it stays readable after the scope ends. Dropping the
+    # registry reference is bookkeeping; the capability has already left, and
+    # `release()` on one view does not reach a slice a consumer made from it.
+    # §5.24: "a byte handle that outlives the scope is a scope that ended
+    # without ending".
+    #
+    # The zero-copy view inside `attest_window` is fine and stays: that
+    # reference never crosses the operation boundary. Zero-copy hashing is
+    # good; zero-copy capability escape is not.
+
+    def _write_payload_to_fd(self, fd: Any) -> int:
+        """Write the attested bytes to `fd` and return how many. **Restricted.**
+
+        Returns a count and never the payload, the array, bytes or a view.
+        Partial writes are completed here rather than handed back as a resumable
+        offset, because a resumable offset is the handle again with an integer
+        in front of it.
+
+        Python module privacy enforces nothing -- an underscore is a convention
+        and nothing stops an import. What is enforceable, and what §5.24
+        narrowed the claim to, is that there is **no public accessor** and that
+        every production reference to this one is statically restricted;
+        `test_the_payload_action_is_statically_restricted` walks the repository
+        by AST and refuses any call site outside the allowed set.
+        """
+        state = self._state()          # type, provenance and liveness, in order
+        if type(fd) is not int:
+            raise AttestationRefused(
+                ATTESTATION_WRITE_TARGET_INVALID,
+                f"a file descriptor is an int; got {type(fd).__name__}")
+        view = state.payload
+        total = 0
+        while total < view.nbytes:
+            written = os.write(fd, view[total:])
+            if written <= 0:
+                raise AttestationRefused(
+                    ATTESTATION_WRITE_INCOMPLETE,
+                    f"wrote {total} of {view.nbytes} bytes and then stalled")
+            total += written
+        return total
+
+    def _payload_nbytes(self) -> int:
+        """How many bytes a write would produce. A number, never a handle."""
+        return self._state().payload.nbytes
+
+    def __repr__(self) -> str:
+        handle = getattr(self, "_handle", "<replaced>")
+        return (f"AttestedIQWindowScope(handle={handle!r}, "
+                f"active={self.active}, payload=<withheld>)")
+
+    def __reduce__(self):
+        raise RawIQNotTransportable(
+            "an attestation scope binds raw IQ and is process-local by the "
+            "terms of the retention approval")
+
+
 @dataclass(frozen=True)
 class WindowAcquisition:
     """The outcome of a window request. A refusal is a result, not an exception."""
@@ -369,6 +623,10 @@ class _WindowRecord:
     digest: str
     signal_chain_hash: str
     sample_count: int
+    # §5.24. Without it, "every stored metadata field matches the record"
+    # quietly means "every field the record happens to keep", and a window
+    # claiming a rate the ring never issued would attest cleanly.
+    sample_rate_hz: float
     start_time: float
     end_time: float
     # Index of the window's first sample in the ring's monotonic append stream.
@@ -420,6 +678,7 @@ class BoundedIQRing:
         self._newest_sample_time: Optional[float] = None
         self._windows: "OrderedDict[str, _WindowRecord]" = OrderedDict()
         self._issued_windows = 0
+        self._attestations = 0
         self._closed = False
 
     # -- properties ---------------------------------------------------------
@@ -554,15 +813,26 @@ class BoundedIQRing:
                     f"HOLDING {self._held} OF {requested} SAMPLES SINCE EPOCH "
                     f"{self._configuration_epoch}")
 
-            samples = self._ordered_tail_locked(requested)
-            # Copy-isolated and frozen: the consumer cannot write through it, and
-            # it will not silently change under them as the ring is overwritten.
-            samples.setflags(write=False)
+            ordered = self._ordered_tail_locked(requested)
+            # §5.24: immutable BACKING, not an immutable flag.
+            # `setflags(write=False)` on an owning array is discouragement --
+            # `setflags(write=True)` restores it. An array over immutable bytes
+            # does not own its data, so the flag cannot be flipped at all.
+            #
+            # Peak here is two full-window copies, transiently: `ordered` is
+            # still alive while `tobytes` allocates. That is authorised and
+            # bounded at one window -- Python offers no way to fill an immutable
+            # object in place -- and `test_acquisition_peaks_at_two_windows`
+            # measures it rather than inferring it from final ownership.
+            payload = ordered.tobytes(order="C")
+            del ordered
+            samples = np.frombuffer(payload, dtype=STORAGE_DTYPE)
 
             end_time = (self._newest_sample_time
                         if self._newest_sample_time is not None else float(self._now()))
             start_time = end_time - requested / self._sample_rate_hz
-            digest = self._digest_locked(samples)
+            digest = _window_digest(self._signal_chain_hash,
+                                    self._configuration_epoch, requested, payload)
             self._issued_windows += 1
             window_id = (f"iqw-{self._configuration_epoch}-{self._issued_windows}-"
                          f"{hashlib.blake2s(digest.encode(), digest_size=6).hexdigest()}")
@@ -586,6 +856,7 @@ class BoundedIQRing:
                 digest=digest,
                 signal_chain_hash=self._signal_chain_hash,
                 sample_count=requested,
+                sample_rate_hz=self._sample_rate_hz,
                 start_time=start_time,
                 end_time=end_time,
                 first_index=first_index,
@@ -630,6 +901,126 @@ class BoundedIQRing:
             return WindowVerification(True, "WINDOW_VERIFIED",
                                       VERIFICATION_REASONS["WINDOW_VERIFIED"])
 
+    def attest_window(self, window: Any) -> AttestedIQWindowScope:
+        """Attest one exact `IQWindow` and mint a scope over its bytes. §5.24.
+
+        The operation §5.20's publication step 1 asks for, and the one
+        `verify_window` is not: nine checks under the ring lock, over the object
+        rather than over two strings, with the digest **recomputed from the
+        bytes being bound** against the *record's* chain, epoch and sample
+        count. An object that supplies its own comparands proves nothing.
+
+        Raises rather than returning a result, because a refused attestation
+        must be impossible to enter.
+        """
+        with self._lock:
+            # 1. the exact nominal type. A subclass or a mapping carries the
+            #    same two strings and is not the thing the ring issued.
+            if type(window) is not IQWindow:
+                raise AttestationRefused(
+                    ATTESTATION_NOT_AN_IQ_WINDOW,
+                    f"expected an exact IQWindow; got {type(window).__name__}")
+            if self._closed:
+                raise AttestationRefused(
+                    ATTESTATION_RING_CLOSED, VERIFICATION_REASONS["RING_CLOSED"])
+            record = self._windows.get(window.window_id)
+            if record is None:
+                raise AttestationRefused(
+                    ATTESTATION_WINDOW_NOT_ISSUED,
+                    VERIFICATION_REASONS["WINDOW_NOT_ISSUED"])
+            if record.configuration_epoch != self._configuration_epoch:
+                raise AttestationRefused(
+                    ATTESTATION_EPOCH_CHANGED,
+                    f"WINDOW ISSUED UNDER EPOCH {record.configuration_epoch}, RING "
+                    f"IS AT {self._configuration_epoch} AFTER "
+                    f"{self._last_invalidation_reason}")
+            frontier = self._total_appended - self._held
+            if record.first_index < frontier:
+                raise AttestationRefused(
+                    ATTESTATION_WINDOW_EVICTED,
+                    VERIFICATION_REASONS["WINDOW_EVICTED"])
+
+            # 6. every stored metadata field, against the ring's own record.
+            authoritative = {
+                "configuration_epoch": record.configuration_epoch,
+                "first_sample_index": record.first_index,
+                "last_sample_index": record.first_index + record.sample_count,
+                "sample_count": record.sample_count,
+                "sample_rate_hz": record.sample_rate_hz,
+                "start_time": record.start_time,
+                "end_time": record.end_time,
+                "signal_chain_hash": record.signal_chain_hash,
+                "digest": record.digest,
+            }
+            for field in ATTESTED_METADATA_FIELDS:
+                presented = getattr(window, field)
+                if presented != authoritative[field]:
+                    raise AttestationRefused(
+                        ATTESTATION_METADATA_MISMATCH,
+                        f"{field} is {presented!r} on the object and "
+                        f"{authoritative[field]!r} in the record")
+
+            # 7. the sample representation, exactly. A coerced array is a
+            #    different file, so nothing here converts anything.
+            samples = window.samples
+            expected = np.dtype(STORAGE_DTYPE)
+            problems = []
+            if type(samples) is not np.ndarray:
+                problems.append(f"samples are {type(samples).__name__}")
+            else:
+                if samples.ndim != 1:
+                    problems.append(f"{samples.ndim} dimensions")
+                if samples.dtype.str != expected.str:
+                    problems.append(f"dtype {samples.dtype.str} not {expected.str}")
+                if samples.size != record.sample_count:
+                    problems.append(f"{samples.size} samples not {record.sample_count}")
+                if samples.nbytes != record.sample_count * BYTES_PER_SAMPLE:
+                    problems.append(f"{samples.nbytes} bytes")
+                if not samples.flags.c_contiguous:
+                    problems.append("not contiguous")
+                if samples.flags.writeable:
+                    problems.append("writeable")
+                if samples.flags.owndata:
+                    # An owning array can have its write flag restored, so a
+                    # frozen owning array is discouragement rather than backing.
+                    problems.append("owns its data, so its write flag is restorable")
+            if problems:
+                raise AttestationRefused(
+                    ATTESTATION_REPRESENTATION_INVALID, "; ".join(problems))
+
+            # 8/9. recomputed from the bytes being bound, against the record's
+            #      comparands -- and equal to both the record and the object.
+            payload = memoryview(samples).cast("B")
+            recomputed = _window_digest(record.signal_chain_hash,
+                                        record.configuration_epoch,
+                                        record.sample_count, payload)
+            if recomputed != record.digest:
+                raise AttestationRefused(
+                    ATTESTATION_DIGEST_MISMATCH,
+                    "the bytes presented do not digest to the issued record")
+            if recomputed != window.digest:
+                raise AttestationRefused(
+                    ATTESTATION_DIGEST_MISMATCH,
+                    "the bytes presented do not digest to the object's own claim")
+
+            # Prune entries whose scope has been collected: the registry is
+            # process-local bookkeeping, not a cache, and it must not grow
+            # without bound across a long capture.
+            for dead in [h for h, st in _SCOPE_REGISTRY.items()
+                         if st.owner() is None]:
+                del _SCOPE_REGISTRY[dead]
+
+            metadata = dict(authoritative)
+            metadata["window_id"] = record.window_id
+            self._attestations += 1
+            handle = (f"att-{record.window_id}-{self._attestations}-"
+                      f"{os.urandom(8).hex()}")
+            scope = AttestedIQWindowScope(handle, _MINT_KEY)
+            _SCOPE_REGISTRY[handle] = _ScopeState(
+                owner=weakref.ref(scope), payload=payload, samples=samples,
+                metadata=metadata)
+            return scope
+
     def recorded_window(self, window_id: str) -> Optional[Dict[str, Any]]:
         """What this ring recorded when it issued that window. Metadata only.
 
@@ -671,16 +1062,12 @@ class BoundedIQRing:
         Identical samples captured under the same configuration digest
         identically.  The same samples under a different signal chain do not,
         because they are not the same evidence.
+
+        A thin caller of `_window_digest` since §5.24: the arithmetic lives in
+        one place so attestation cannot drift from issuance.
         """
-        hasher = hashlib.blake2s(digest_size=32)
-        hasher.update(self._signal_chain_hash.encode())
-        hasher.update(b"|")
-        hasher.update(str(self._configuration_epoch).encode())
-        hasher.update(b"|")
-        hasher.update(str(samples.size).encode())
-        hasher.update(b"|")
-        hasher.update(samples.tobytes())
-        return f"{DIGEST_ALGORITHM}:{hasher.hexdigest()}"
+        return _window_digest(self._signal_chain_hash, self._configuration_epoch,
+                              int(samples.size), memoryview(samples).cast("B"))
 
     # -- published metadata -------------------------------------------------
 
