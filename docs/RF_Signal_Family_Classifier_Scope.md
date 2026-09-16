@@ -2924,10 +2924,11 @@ first `PromotionCorpusLock` exists**, and it is recorded rather than made here.
 `GAIN_CHANGE`, so a `GAIN_STEPS` observation spans two chain hashes by
 construction and **no promotion corpus has one**. The settled ruling is an
 enumerated envelope of explicitly declared chains, never a single chain hash and
-never a Cartesian product of separately declared sets. §5.23 proposes the
-amendment that would carry it out — but §5.23 is **PROPOSED**, and **Finding A
+never a Cartesian product of separately declared sets. §5.23 carries the
+amendment and **was accepted 2026-09-15, this rejection with it**. **Finding A
 stays open until use-time envelope admission is enforced**, which is the property
-this finding says the repair provides. A proposal satisfies no obligation.
+this finding says the repair provides — acceptance of a contract is not the
+enforcement it describes.
 
 #### Finding B — the aggregate bound is design-weighted, not operational
 
@@ -3122,20 +3123,58 @@ one the moment anything claims the aggregate is an operational rate.
 
 ---
 
-### 5.23 — the lock envelope, in two layers — **PROPOSED**
+### 5.23 — the lock envelope, in two layers — **ACCEPTED**
 
 ```text
-Status:     PROPOSED 2026-09-15. Nothing here is in force.
-Authority:  None. This section is documentation only. It authorises no capture,
-            no persistence, no tuner operation, no directory and no byte, and it
-            changes no behaviour.
-Order:      §13l. Acceptance decision, acceptance commit, merge, and only then
-            a code-only implementation built on that merge.
+Status:     ACCEPTED 2026-09-15. The two declarations, the receiver-identity
+            authorities and the drain condition are in force as contract.
+Authority:  §5.23 is accepted. It authorises no capture, no persistence, no
+            tuner operation, no directory and no byte, and acceptance changes
+            no behaviour: no code exists yet and none is authorised by this
+            commit.
+Order:      §13l. This is the acceptance commit. Merge follows it, and a
+            code-only implementation follows the merge.
 Drains:     Nothing, and nothing on merge. Entry 11 drains only when use-time
             envelope admission is enforced, because that is the defect it names.
-Carries:    Two corrections to accepted text — §5.22 Finding A and entry 11 —
-            which the acceptance must name as part of this section's substance.
+Carries:    Two amendments to accepted text, accepted here as part of this
+            section's substance and named in the acceptance below — §5.22
+            Finding A, and PENDING_AMENDMENTS entry 11.
 ```
+
+*Proposed 2026-09-15 at `8d837a8`, after the implementation-first attempt at
+`eb1b34d` was abandoned unmerged for arriving in the wrong order. Review held it
+and returned three corrections, applied at `fa268f9`: a non-unique identifier
+**does not** produce a class-scoped claim — it establishes only that the unit
+cannot be recovered from the identifier, so one unidentified member of a class
+validates one unit; two declared sets **do not** declare their Cartesian
+product, which admitted chains nobody sampled; and entry 11 **cannot** drain
+while cross-chain licensing stays reachable, since a field nobody enforces makes
+the defect recordable rather than repaired. This is the acceptance commit.*
+
+**What this acceptance accepts, named rather than left to the merge.** §13l is
+explicit that a merge supplies no acceptance, so all three are listed here:
+
+1. **§5.23 itself** — two declarations bound into the lock before the first
+   window; `InstrumentChainEnvelope` as an explicit canonical set of
+   `ChainMember`s, one member to one chain hash; `CapturePlanDeclaration`
+   binding the materialized ordered schedule rather than its seed;
+   self-validating declarations; the three receiver-identity authorities and
+   the rule that carries them forward unchanged; and use-time promotion
+   admission inside the implementation this section governs.
+2. **The amendment to §5.22's Finding A** — the repair it proposed is rejected,
+   and Finding A stays open until use-time envelope admission is enforced.
+3. **The amendment to `PENDING_AMENDMENTS` entry 11** — the repair named there
+   is rejected, and the entry's drain condition is narrowed to the licensing
+   defect it actually names.
+
+*Accepting 2 and 3 is not bookkeeping. Both edit text that was already accepted,
+and an acceptance silent about them would leave two amendments to accepted text
+travelling into `main` on a merge, which is the failure §13l was written for.*
+
+**What acceptance does not start.** No implementation is authorised by this
+commit. Nothing may be built until this section has merged, and what is built
+then is the code-only slice described below — not capture, not persistence, not
+a directory, not a byte.
 
 *§5.22's Finding A recorded a hole in `PromotionCorpusLock` and proposed a
 repair in one sentence. **The repair does not work**, and the replacement is
@@ -3386,9 +3425,10 @@ records half a repair corrupts the only number that measures this queue.*
 - It does not drain entry 11, and it does not resolve Finding A. A proposal
   satisfies no obligation — the reading entry 8 records.
 
-#### What acceptance would require
+#### What acceptance required, and what it starts
 
-An explicit acceptance decision and an acceptance commit.
+*Written before acceptance and kept as written; the decision it asks for has
+now been made, and the ordering it sets is the one in force.*
 
 **The acceptance must say expressly that it accepts the two corrections to
 earlier text** — §5.22's Finding A, and `PENDING_AMENDMENTS` entry 11 — **as part
@@ -3399,8 +3439,9 @@ supplies no acceptance.
 
 Then, in this order:
 
-1. **The acceptance commit, before any implementation exists.**
-2. **Merge**, carrying the accepted contract to `main`.
+1. **The acceptance commit, before any implementation exists.** — *done, this
+   commit.*
+2. **Merge**, carrying the accepted contract to `main`. — *next.*
 3. **A code-only implementation built on that merge** — the two declarations,
    self-validating and canonicalized, over explicit chain members; the
    receiver-identity authority; both bound into `PromotionCorpusLock` and the

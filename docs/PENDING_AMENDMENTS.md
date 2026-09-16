@@ -247,15 +247,17 @@ inside the chain identity and `set_gain_db` rebuilds the chain *before* raising
 `GAIN_CHANGE`, so a `GAIN_STEPS` observation spans two chain hashes by
 construction: **no promotion corpus has one chain hash**, and freezing one would
 make the corpus unbuildable. The settled ruling is an enumerated envelope in two
-layers — instrument chain, and capture plan — and §5.23 proposes the amendment.
+layers — instrument chain, and capture plan. §5.23 carries the amendment and
+**was accepted 2026-09-15, this correction with it**.
 **This entry stays open**, and the condition for draining it is narrower than
 "an implementation lands". This entry names a **licensing** defect — a corpus
 validated on one chain licensing promotion on another — so a lock field nobody
 enforces makes it recordable rather than repaired. It drains when the lock field,
 the receipt propagation **and use-time promotion admission** land together.
 Captured-window admission may follow later, behind entry 9, because no corpus
-exists to expose. Nothing here is satisfied by a proposal, which is the reading
-entry 8 records.
+exists to expose. Neither a proposal nor an accepted contract satisfies anything
+here: entry 8 records the first reading, and this entry is now the second — an
+accepted amendment describing an enforcement is not the enforcement.
 
 ## Drain record
 
