@@ -25,11 +25,47 @@ from rf_validation_manifest import (
 )
 
 
-def _lock(corpus_id="corpus-a"):
+from rf_promotion_envelope import (
+    CAPTURED, SYNTHETIC, RECEIVER_ATTESTED_UNIQUE,
+    RECEIVER_INSTANCE_UNIQUENESS_UNATTESTED, EnvelopeRefused,
+    InstrumentChainEnvelope, StratumTrialPlan,
+)
+# The fixtures live beside the module they exercise. Importing them here rather
+# than keeping a second copy means a change to the declaration shape breaks one
+# builder, not two that can drift apart.
+from test_rf_promotion_envelope import (
+    SEED, _bands, _catalogue, _envelope, _member, _plan, _spread,
+    _spur_allocation, _trial_plans,
+)
+
+
+def _sparse_envelope(**kwargs):
+    """Exactly the two pairings a plan sampled -- not the four a product of the
+    two declared gains and the two declared front ends would admit."""
+    return _envelope(**kwargs)
+
+
+def _presented_chain(envelope=None):
+    envelope = _envelope() if envelope is None else envelope
+    return sorted(envelope.admissible_chain_hashes())[0]
+
+
+def _executed(lock):
+    """The identities a complete RECEIVER_SPURS stratum would have executed.
+
+    The **selected** set, not the eligible universe: the selection is the
+    sample, frozen before capture, and completion is exact against it.
+    """
+    return [tuple(key) for key
+            in lock.capture_plan.spur_allocation.selected_trials]
+
+
+def _lock(corpus_id="corpus-a", envelope=None):
+    envelope = _envelope() if envelope is None else envelope
     return freeze_promotion_corpus(
         corpus_id=corpus_id, method_revision="squared-envelope-cyclic.v1",
         decision_threshold=6.0, preprocessing_revision="pre.v1",
-        opened_at=1_000.0)
+        envelope=envelope, capture_plan=_plan(envelope), opened_at=1_000.0)
 
 
 def _full_counts():
@@ -151,12 +187,15 @@ class StratificationTests(unittest.TestCase):
 
     def test_a_full_corpus_with_a_frozen_lock_promotes(self):
         """The whole gate, passing, so a failure elsewhere is not mistaken for it."""
+        envelope = _envelope()
         lock = freeze_promotion_corpus(
             corpus_id="phase3-a", method_revision="squared-envelope-cyclic.v1",
-            decision_threshold=8.4, preprocessing_revision="passband-local-excess-power.v1")
+            decision_threshold=8.4, preprocessing_revision="passband-local-excess-power.v1",
+            envelope=envelope, capture_plan=_plan(envelope))
         configuration = {"method_revision": "squared-envelope-cyclic.v1",
                          "decision_threshold": 8.4,
-                         "preprocessing_revision": "passband-local-excess-power.v1"}
+                         "preprocessing_revision": "passband-local-excess-power.v1",
+                         "signal_chain_hash": _presented_chain(envelope)}
         report = evaluate({key: (10_000, 0) for key in STRATUM_KEYS},
                           lock=lock, configuration=configuration)
         self.assertEqual(report["corpus_state"], "FROZEN")
@@ -172,12 +211,15 @@ class StratificationTests(unittest.TestCase):
 
     def test_tuning_the_threshold_after_opening_the_corpus_voids_promotion(self):
         """Otherwise repeated tuning turns validation into training."""
+        envelope = _envelope()
         lock = freeze_promotion_corpus(
             corpus_id="phase3-a", method_revision="squared-envelope-cyclic.v1",
-            decision_threshold=8.4, preprocessing_revision="p.v1")
+            decision_threshold=8.4, preprocessing_revision="p.v1",
+            envelope=envelope, capture_plan=_plan(envelope))
         observations = {key: (10_000, 0) for key in STRATUM_KEYS}
         tuned = {"method_revision": "squared-envelope-cyclic.v1",
-                 "decision_threshold": 8.1, "preprocessing_revision": "p.v1"}
+                 "decision_threshold": 8.1, "preprocessing_revision": "p.v1",
+                 "signal_chain_hash": _presented_chain(envelope)}
         report = evaluate(observations, lock=lock, configuration=tuned)
         self.assertFalse(report["promotes"])
         self.assertEqual(report["promotion_blocked_reason"],
@@ -323,16 +365,18 @@ class FamilyLockTests(unittest.TestCase):
     """The lock notices a family rewritten without changing size."""
 
     def _lock(self, **overrides):
+        envelope = _envelope()
         lock = freeze_promotion_corpus(
             corpus_id="c-1", method_revision="squared-envelope-cyclic.v1",
             decision_threshold=2.5, preprocessing_revision="rf-channelizer-fir.v1",
-            opened_at=1000.0)
+            envelope=envelope, capture_plan=_plan(envelope), opened_at=1000.0)
         return replace(lock, **overrides) if overrides else lock
 
     def _configuration(self):
         return {"method_revision": "squared-envelope-cyclic.v1",
                 "decision_threshold": 2.5,
-                "preprocessing_revision": "rf-channelizer-fir.v1"}
+                "preprocessing_revision": "rf-channelizer-fir.v1",
+                "signal_chain_hash": _presented_chain()}
 
     def test_a_matching_lock_is_frozen(self):
         result = evaluate({key: (6_000, 0) for key in STRATUM_KEYS},
@@ -428,7 +472,9 @@ class CompletionReceiptTests(unittest.TestCase):
     """§5.20 correction C: precommitment and completion are two states."""
 
     def test_a_complete_corpus_receives_a_receipt(self):
-        receipt = issue_completion_receipt(lock=_lock(), counted=_full_counts(),
+        lock = _lock()
+        receipt = issue_completion_receipt(lock=lock, counted=_full_counts(),
+                                           executed_spur_trials=_executed(lock),
                                            issued_at=2_000.0)
         self.assertIs(type(receipt), CorpusCompletionReceipt)
         self.assertEqual(receipt.total_windows, TARGET_TOTAL_NULL_WINDOWS)
@@ -438,7 +484,9 @@ class CompletionReceiptTests(unittest.TestCase):
     def test_the_receipt_is_not_a_promotion_claim(self):
         """A complete corpus may be evaluated. What the evaluation finds is a
         separate result, and one false DIGITAL fails the frozen corpus."""
-        data = issue_completion_receipt(lock=_lock(), counted=_full_counts(),
+        lock = _lock()
+        data = issue_completion_receipt(lock=lock, counted=_full_counts(),
+                                        executed_spur_trials=_executed(lock),
                                         issued_at=2_000.0).to_dict()
         self.assertFalse(data["promotes"])
         self.assertIn("NEVER A PROMOTION", data["promotion_note"])
@@ -447,7 +495,8 @@ class CompletionReceiptTests(unittest.TestCase):
         for absent in (None, "corpus-a", object()):
             with self.subTest(lock=type(absent).__name__):
                 with self.assertRaises(CompletionRefused) as caught:
-                    issue_completion_receipt(lock=absent, counted=_full_counts())
+                    issue_completion_receipt(lock=absent,
+                                             counted=_full_counts())
                 self.assertEqual(caught.exception.code, COMPLETION_LOCK_ABSENT)
 
     def test_a_look_alike_lock_refuses_nominally(self):
@@ -509,7 +558,8 @@ class CompletionReceiptTests(unittest.TestCase):
         try:
             manifest.STRATA_DEFINITION_REVISION = "rf-null-strata.v3"
             with self.assertRaises(CompletionRefused) as caught:
-                issue_completion_receipt(lock=lock, counted=_full_counts())
+                issue_completion_receipt(lock=lock, counted=_full_counts(),
+                                 executed_spur_trials=_executed(lock))
             self.assertEqual(caught.exception.code, COMPLETION_LOCK_STRATA_MOVED)
         finally:
             manifest.STRATA_DEFINITION_REVISION = original
@@ -631,7 +681,9 @@ class LockCoherenceTests(unittest.TestCase):
 
     def test_a_genuine_lock_still_issues(self):
         """The check refuses forgeries and nothing else."""
-        receipt = issue_completion_receipt(lock=_lock(), counted=_full_counts(),
+        lock = _lock()
+        receipt = issue_completion_receipt(lock=lock, counted=_full_counts(),
+                                           executed_spur_trials=_executed(lock),
                                            issued_at=2_000.0)
         self.assertEqual(receipt.strata_definition_revision,
                          STRATA_DEFINITION_REVISION)
@@ -655,3 +707,448 @@ class BuildabilityClaimTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class UseTimeAdmissionTests(unittest.TestCase):
+    """§5.23's enforcement point, and the reason entry 11 can drain.
+
+    A lock that carries an envelope nobody checks makes cross-chain licensing
+    *recordable*, not *repaired*. These are the tests that fail if the check is
+    removed and the field is left behind.
+    """
+
+    def _observations(self):
+        return {key: (10_000, 0) for key in STRATUM_KEYS}
+
+    def _configuration(self, envelope, chain=None):
+        return {"method_revision": "squared-envelope-cyclic.v1",
+                "decision_threshold": 6.0, "preprocessing_revision": "pre.v1",
+                "signal_chain_hash": chain or _presented_chain(envelope)}
+
+    def test_a_chain_inside_the_frozen_envelope_promotes(self):
+        envelope = _envelope()
+        report = evaluate(self._observations(), lock=_lock(envelope=envelope),
+                          configuration=self._configuration(envelope))
+        self.assertEqual(report["corpus_state"], "FROZEN")
+        self.assertTrue(report["promotes"])
+
+    def test_a_chain_outside_the_frozen_envelope_does_not(self):
+        """The defect entry 11 names: a corpus validated on one chain licensing
+        a promoted claim from another."""
+        envelope = _envelope()
+        stray = _member(gain=33.0, antenna="ANT_UNSAMPLED").chain_hash()
+        report = evaluate(self._observations(), lock=_lock(envelope=envelope),
+                          configuration=self._configuration(envelope, stray))
+        self.assertEqual(report["corpus_state"], "CHAIN_OUTSIDE_FROZEN_ENVELOPE")
+        self.assertFalse(report["promotes"])
+        self.assertEqual(report["promotion_blocked_reason"],
+                         "CHAIN_OUTSIDE_FROZEN_ENVELOPE")
+
+    def test_an_unsampled_combination_of_declared_parts_does_not_promote(self):
+        """The Cartesian-product correction, reaching all the way to promotion.
+
+        Both the gain and the front end are declared; the pairing is not, and a
+        product rule would have licensed it here.
+        """
+        envelope = _sparse_envelope()
+        unsampled = _member(gain=40.0, antenna="ANT_A").chain_hash()
+        self.assertEqual(len(envelope.admissible_chain_hashes()), 2)
+        report = evaluate(self._observations(), lock=_lock(envelope=envelope),
+                          configuration=self._configuration(envelope, unsampled))
+        self.assertEqual(report["corpus_state"], "CHAIN_OUTSIDE_FROZEN_ENVELOPE")
+
+    def test_a_configuration_with_no_chain_does_not_promote(self):
+        """Silence is not admission. An evaluation that forgot to present the
+        instrument must not inherit the last one that did."""
+        envelope = _envelope()
+        configuration = self._configuration(envelope)
+        del configuration["signal_chain_hash"]
+        report = evaluate(self._observations(), lock=_lock(envelope=envelope),
+                          configuration=configuration)
+        self.assertEqual(report["corpus_state"], "CHAIN_NOT_PRESENTED")
+        self.assertFalse(report["promotes"])
+
+    def test_a_substituted_envelope_is_caught_by_its_own_digest(self):
+        """`dataclasses.replace` makes an exact PromotionCorpusLock carrying an
+        instrument the corpus was never built on."""
+        mine = _envelope()
+        theirs = _envelope(sensor="rtl2838-unit-9")
+        forged = replace(_lock(envelope=mine), envelope=theirs)
+        report = evaluate(self._observations(), lock=forged,
+                          configuration=self._configuration(theirs))
+        self.assertEqual(report["corpus_state"], "ENVELOPE_CHANGED_AFTER_FREEZE")
+        self.assertFalse(report["promotes"])
+
+    def test_a_substituted_capture_plan_is_caught_too(self):
+        envelope = _envelope()
+        forged = replace(_lock(envelope=envelope),
+                         capture_plan=_plan(envelope, seed=1))
+        report = evaluate(self._observations(), lock=forged,
+                          configuration=self._configuration(envelope))
+        self.assertEqual(report["corpus_state"],
+                         "CAPTURE_PLAN_CHANGED_AFTER_FREEZE")
+
+    def test_an_unattested_receiver_identity_never_promotes(self):
+        """Everything else is right. The claim would still be about a unit
+        nobody can name, so it is not made."""
+        envelope = _envelope(authority=RECEIVER_INSTANCE_UNIQUENESS_UNATTESTED)
+        report = evaluate(self._observations(), lock=_lock(envelope=envelope),
+                          configuration=self._configuration(envelope))
+        self.assertEqual(report["corpus_state"],
+                         "RECEIVER_IDENTITY_NOT_SUFFICIENT_FOR_PROMOTION")
+        self.assertFalse(report["promotes"])
+
+    def test_an_unattested_corpus_may_still_be_opened_and_evaluated(self):
+        """Buildable, evaluable, and not promotable -- three different things."""
+        envelope = _envelope(authority=RECEIVER_INSTANCE_UNIQUENESS_UNATTESTED)
+        lock = _lock(envelope=envelope)
+        self.assertEqual(lock.envelope.receiver_identity_authority,
+                         RECEIVER_INSTANCE_UNIQUENESS_UNATTESTED)
+        report = evaluate(self._observations(), lock=lock,
+                          configuration=self._configuration(envelope))
+        self.assertTrue(report["aggregate"]["passes"])
+
+
+class LockRequiresAnInstrumentTests(unittest.TestCase):
+
+    def test_a_corpus_cannot_be_opened_without_an_envelope(self):
+        """No default. A lock openable without an instrument is the hole."""
+        with self.assertRaises(TypeError):
+            freeze_promotion_corpus(
+                corpus_id="c", method_revision="m", decision_threshold=1.0,
+                preprocessing_revision="p")
+
+    def test_an_envelope_that_is_not_one_refuses(self):
+        with self.assertRaises(manifest.LockRefused) as caught:
+            freeze_promotion_corpus(
+                corpus_id="c", method_revision="m", decision_threshold=1.0,
+                preprocessing_revision="p", envelope={"sensor": "rtl2838"},
+                capture_plan=_plan())
+        self.assertEqual(caught.exception.code, manifest.LOCK_ENVELOPE_ABSENT)
+
+    def test_a_plan_that_is_not_one_refuses(self):
+        with self.assertRaises(manifest.LockRefused) as caught:
+            freeze_promotion_corpus(
+                corpus_id="c", method_revision="m", decision_threshold=1.0,
+                preprocessing_revision="p", envelope=_envelope(),
+                capture_plan="the usual sweep")
+        self.assertEqual(caught.exception.code, manifest.LOCK_PLAN_ABSENT)
+
+    def test_a_plan_allocating_outside_its_envelope_refuses(self):
+        """Two declarations that disagree, surfaced at the lock rather than at
+        the first window."""
+        mine = _envelope()
+        theirs = _envelope(sensor="rtl2838-unit-9")
+        with self.assertRaises(manifest.LockRefused) as caught:
+            freeze_promotion_corpus(
+                corpus_id="c", method_revision="m", decision_threshold=1.0,
+                preprocessing_revision="p", envelope=mine,
+                capture_plan=_plan(theirs))
+        self.assertEqual(caught.exception.code,
+                         manifest.LOCK_PLAN_OUTSIDE_ENVELOPE)
+
+    def test_a_plan_allocating_an_undeclared_stratum_refuses(self):
+        envelope = _envelope()
+        plans = _trial_plans(envelope)
+        renamed = (StratumTrialPlan(
+            stratum="A_STRATUM_NOBODY_DECLARED", source=plans[0].source,
+            trials=plans[0].trials, chain_hashes=plans[0].chain_hashes,
+            per_visit=plans[0].per_visit),) + plans[1:]
+        with self.assertRaises(manifest.LockRefused) as caught:
+            freeze_promotion_corpus(
+                corpus_id="c", method_revision="m", decision_threshold=1.0,
+                preprocessing_revision="p", envelope=envelope,
+                capture_plan=_plan(envelope, trial_plans=renamed))
+        self.assertEqual(caught.exception.code,
+                         manifest.LOCK_PLAN_STRATUM_UNKNOWN)
+
+    def test_a_plan_missing_a_stratum_refuses(self):
+        """A corpus plan missing a stratum is incomplete, not complete with a
+        gap -- and the bound is computed over all twelve."""
+        envelope = _envelope()
+        with self.assertRaises(manifest.LockRefused) as caught:
+            freeze_promotion_corpus(
+                corpus_id="c", method_revision="m", decision_threshold=1.0,
+                preprocessing_revision="p", envelope=envelope,
+                capture_plan=_plan(envelope,
+                                   trial_plans=_trial_plans(envelope)[:-1]))
+        self.assertEqual(caught.exception.code,
+                         manifest.LOCK_PLAN_STRATUM_MISSING)
+
+    def test_a_plan_with_the_wrong_trial_count_refuses(self):
+        envelope = _envelope()
+        plans = list(_trial_plans(envelope))
+        short = plans[0]
+        plans[0] = StratumTrialPlan(
+            stratum=short.stratum, source=short.source, trials=4_000,
+            chain_hashes=short.chain_hashes,
+            per_visit=(_spread(4_000, [p for p, _n in short.per_visit])
+                       if short.source == CAPTURED else ()))
+        with self.assertRaises(manifest.LockRefused) as caught:
+            freeze_promotion_corpus(
+                corpus_id="c", method_revision="m", decision_threshold=1.0,
+                preprocessing_revision="p", envelope=envelope,
+                capture_plan=_plan(envelope, trial_plans=tuple(plans)))
+        self.assertEqual(caught.exception.code, manifest.LOCK_PLAN_TRIALS_WRONG)
+
+    def test_a_synthetic_stratum_planned_as_captured_refuses(self):
+        envelope = _envelope()
+        plans = list(_trial_plans(envelope))
+        captured = next(p for p in plans if p.source == CAPTURED)
+        for index, entry in enumerate(plans):
+            if entry.stratum == "AM":
+                plans[index] = StratumTrialPlan(
+                    stratum="AM", source=CAPTURED, trials=entry.trials,
+                    chain_hashes=captured.chain_hashes,
+                    per_visit=captured.per_visit)
+        with self.assertRaises(manifest.LockRefused) as caught:
+            freeze_promotion_corpus(
+                corpus_id="c", method_revision="m", decision_threshold=1.0,
+                preprocessing_revision="p", envelope=envelope,
+                capture_plan=_plan(envelope, trial_plans=tuple(plans)))
+        self.assertEqual(caught.exception.code, manifest.LOCK_PLAN_SOURCE_WRONG)
+
+    def test_gain_steps_planned_over_one_chain_refuses(self):
+        """`gain_db` is inside the chain identity and `set_gain_db` rebuilds the
+        chain before raising GAIN_CHANGE, so one observation spans two."""
+        envelope = _envelope()
+        plans = list(_trial_plans(envelope))
+        for index, entry in enumerate(plans):
+            if entry.stratum == "GAIN_STEPS":
+                plans[index] = StratumTrialPlan(
+                    stratum=entry.stratum, source=entry.source,
+                    trials=entry.trials, chain_hashes=entry.chain_hashes[:1],
+                    per_visit=entry.per_visit)
+        with self.assertRaises(manifest.LockRefused) as caught:
+            freeze_promotion_corpus(
+                corpus_id="c", method_revision="m", decision_threshold=1.0,
+                preprocessing_revision="p", envelope=envelope,
+                capture_plan=_plan(envelope, trial_plans=tuple(plans)))
+        self.assertEqual(caught.exception.code,
+                         manifest.LOCK_PLAN_GAIN_STEPS_ONE_CHAIN)
+
+    def test_the_lock_records_both_digests_from_the_declarations(self):
+        envelope = _envelope()
+        plan = _plan(envelope)
+        lock = freeze_promotion_corpus(
+            corpus_id="c", method_revision="m", decision_threshold=1.0,
+            preprocessing_revision="p", envelope=envelope, capture_plan=plan)
+        self.assertEqual(lock.envelope_digest, envelope.digest())
+        self.assertEqual(lock.capture_plan_digest, plan.digest())
+
+    def test_the_lock_dictionary_carries_the_scope_limits(self):
+        """§5.22: the scope limits travel with the claim rather than being left
+        to be inferred by whoever reads the lock next."""
+        data = _lock(envelope=_envelope(
+            authority=RECEIVER_INSTANCE_UNIQUENESS_UNATTESTED)).to_dict()
+        self.assertEqual(data["receiver_identity_authority"],
+                         RECEIVER_INSTANCE_UNIQUENESS_UNATTESTED)
+        self.assertFalse(data["may_be_promoted_from"])
+
+
+class ReceiptCarriesTheInstrumentTests(unittest.TestCase):
+
+    def test_the_receipt_carries_both_digests_and_the_authority(self):
+        envelope = _envelope(authority=RECEIVER_ATTESTED_UNIQUE)
+        lock = _lock(envelope=envelope)
+        receipt = issue_completion_receipt(lock=lock, counted=_full_counts(),
+                                           executed_spur_trials=_executed(lock),
+                                           issued_at=2_000.0)
+        self.assertEqual(receipt.envelope_digest, lock.envelope_digest)
+        self.assertEqual(receipt.capture_plan_digest, lock.capture_plan_digest)
+        self.assertEqual(receipt.receiver_identity_authority,
+                         RECEIVER_ATTESTED_UNIQUE)
+
+    def test_an_unattested_authority_reaches_the_receipt_unchanged(self):
+        """Carried forward, never upgraded. No downstream step may present an
+        unattested identity as an attested one."""
+        lock = _lock(envelope=_envelope(
+            authority=RECEIVER_INSTANCE_UNIQUENESS_UNATTESTED))
+        receipt = issue_completion_receipt(lock=lock, counted=_full_counts(),
+                                           executed_spur_trials=_executed(lock),
+                                           issued_at=2_000.0)
+        self.assertEqual(receipt.receiver_identity_authority,
+                         RECEIVER_INSTANCE_UNIQUENESS_UNATTESTED)
+
+    def test_a_forged_envelope_digest_never_reaches_a_receipt(self):
+        forged = replace(_lock(), envelope_digest="blake2s:0")
+        with self.assertRaises(CompletionRefused) as caught:
+            issue_completion_receipt(lock=forged, counted=_full_counts(),
+                                 executed_spur_trials=_executed(forged))
+        self.assertEqual(caught.exception.code,
+                         COMPLETION_LOCK_DECLARATION_MOVED)
+
+    def test_a_forged_capture_plan_digest_never_reaches_a_receipt(self):
+        forged = replace(_lock(), capture_plan_digest="blake2s:0")
+        with self.assertRaises(CompletionRefused) as caught:
+            issue_completion_receipt(lock=forged, counted=_full_counts(),
+                                 executed_spur_trials=_executed(forged))
+        self.assertEqual(caught.exception.code,
+                         COMPLETION_LOCK_DECLARATION_MOVED)
+
+    def test_a_receipt_reconciles_against_the_plan_and_not_only_the_constant(self):
+        """`freeze_promotion_corpus` forces the plan to the fixed count, so for
+        a lock it opened the two agree. The lock is publicly constructible, and
+        a receipt that checked only the module constant would attest to a count
+        unrelated to the corpus it is a receipt for.
+        """
+        envelope = _envelope()
+        plans = list(_trial_plans(envelope))
+        for index, entry in enumerate(plans):
+            if entry.stratum == "GAIN_STEPS":
+                plans[index] = StratumTrialPlan(
+                    stratum=entry.stratum, source=entry.source, trials=4_000,
+                    chain_hashes=entry.chain_hashes,
+                    per_visit=_spread(4_000, [p for p, _n in entry.per_visit]))
+        unplanned = _plan(envelope, trial_plans=tuple(plans))
+        # Every other declaration is coherent; only the plan's own count differs
+        # from the constant, which is exactly the case the freeze would refuse.
+        forged = replace(_lock(envelope=envelope), capture_plan=unplanned,
+                         capture_plan_digest=unplanned.digest())
+        with self.assertRaises(CompletionRefused) as caught:
+            issue_completion_receipt(lock=forged, counted=_full_counts(),
+                                 executed_spur_trials=_executed(forged))
+        self.assertEqual(caught.exception.code,
+                         manifest.COMPLETION_COUNT_NOT_PLANNED)
+
+    def test_the_older_count_refusals_are_still_reachable(self):
+        """The plan check is additional, not a replacement: a count short of
+        the fixed number still refuses by direction rather than by plan."""
+        counts = dict(_full_counts())
+        counts["AM"] = MINIMUM_WINDOWS_PER_STRATUM - 1
+        with self.assertRaises(CompletionRefused) as caught:
+            issue_completion_receipt(lock=_lock(), counted=counts)
+        self.assertEqual(caught.exception.code, COMPLETION_COUNT_BELOW_REQUIRED)
+
+    def test_an_envelope_member_with_no_allocated_trials_refuses(self):
+        """Removing the Cartesian product closed implicit widening. An
+        explicitly declared member that no trial samples recreates the same
+        outcome one step later: admissible at promotion, sampled never."""
+        wide = InstrumentChainEnvelope(members=(
+            _member(gain=20.0, antenna="ANT_A"),
+            _member(gain=40.0, antenna="TERMINATION_50R"),
+            _member(gain=30.0, antenna="ANT_NEVER_SAMPLED")))
+        narrow = _envelope()
+        with self.assertRaises(manifest.LockRefused) as caught:
+            freeze_promotion_corpus(
+                corpus_id="c", method_revision="m", decision_threshold=1.0,
+                preprocessing_revision="p", envelope=wide,
+                capture_plan=_plan(narrow))
+        self.assertEqual(caught.exception.code,
+                         manifest.LOCK_ENVELOPE_MEMBER_UNALLOCATED)
+
+    def test_a_per_stratum_count_wrong_at_the_right_total_refuses(self):
+        """Distinguishes the two trial checks: the totals still reach 66 732,
+        so only the per-stratum check can catch this."""
+        envelope = _envelope()
+        plans = list(_trial_plans(envelope))
+        moved = 1_561
+        for index, entry in enumerate(plans):
+            if entry.stratum == "AM":
+                plans[index] = StratumTrialPlan(
+                    stratum=entry.stratum, source=entry.source,
+                    trials=entry.trials - moved, chain_hashes=(), per_visit=())
+            elif entry.stratum == "DC_CONTAMINATION":
+                plans[index] = StratumTrialPlan(
+                    stratum=entry.stratum, source=entry.source,
+                    trials=entry.trials + moved, chain_hashes=(), per_visit=())
+        plan = _plan(envelope, trial_plans=tuple(plans))
+        self.assertEqual(plan.total_trials(), manifest.TARGET_TOTAL_NULL_WINDOWS)
+        with self.assertRaises(manifest.LockRefused) as caught:
+            freeze_promotion_corpus(
+                corpus_id="c", method_revision="m", decision_threshold=1.0,
+                preprocessing_revision="p", envelope=envelope,
+                capture_plan=plan)
+        self.assertEqual(caught.exception.code, manifest.LOCK_PLAN_TRIALS_WRONG)
+
+    def test_completion_reconciles_spur_trials_by_identity(self):
+        """5 561 substitutes are 5 561 windows. They are not the trials the plan
+        authorised, and a receipt comparing only the total could not tell."""
+        lock = _lock()
+        receipt = issue_completion_receipt(
+            lock=lock, counted=_full_counts(),
+            executed_spur_trials=_executed(lock), issued_at=2_000.0)
+        self.assertEqual(receipt.receiver_identity_authority,
+                         RECEIVER_ATTESTED_UNIQUE)
+
+    def test_a_substituted_trial_identity_refuses_at_the_right_count(self):
+        lock = _lock()
+        authorised = _executed(lock)
+        substituted = list(authorised)
+        substituted[0] = ("spur-999", substituted[0][1], substituted[0][2])
+        self.assertEqual(len(substituted), len(authorised))
+        with self.assertRaises(CompletionRefused) as caught:
+            issue_completion_receipt(lock=lock, counted=_full_counts(),
+                                     executed_spur_trials=substituted)
+        self.assertEqual(caught.exception.code,
+                         manifest.COMPLETION_TRIAL_NOT_AUTHORISED)
+
+    def test_counting_spurs_without_identifying_them_refuses(self):
+        with self.assertRaises(CompletionRefused) as caught:
+            issue_completion_receipt(lock=_lock(), counted=_full_counts())
+        self.assertEqual(caught.exception.code,
+                         manifest.COMPLETION_TRIALS_NOT_IDENTIFIED)
+
+    def test_fewer_identities_than_windows_refuses(self):
+        """By selection rather than by count: the executed set must equal the
+        frozen sample, and a short set is simply not equal to it."""
+        lock = _lock()
+        with self.assertRaises(CompletionRefused) as caught:
+            issue_completion_receipt(lock=lock, counted=_full_counts(),
+                                     executed_spur_trials=_executed(lock)[:-1])
+        self.assertEqual(caught.exception.code,
+                         manifest.COMPLETION_TRIALS_NOT_SELECTED)
+
+    def test_completion_requires_the_frozen_selection_exactly(self):
+        """Four cases, and the last is the one membership cannot catch."""
+        lock = _lock()
+        allocation = lock.capture_plan.spur_allocation
+        selected = [tuple(k) for k in allocation.selected_trials]
+        counts = _full_counts()
+
+        # 1. an ineligible identity substituted for a selected one
+        ineligible = list(selected)
+        ineligible[0] = ("spur-999", selected[0][1], selected[0][2])
+        with self.assertRaises(CompletionRefused) as caught:
+            issue_completion_receipt(lock=lock, counted=counts,
+                                     executed_spur_trials=ineligible)
+        self.assertEqual(caught.exception.code,
+                         manifest.COMPLETION_TRIAL_NOT_AUTHORISED)
+
+        # 2. one selected identity omitted
+        with self.assertRaises(CompletionRefused) as caught:
+            issue_completion_receipt(lock=lock, counted=counts,
+                                     executed_spur_trials=selected[:-1])
+        self.assertEqual(caught.exception.code,
+                         manifest.COMPLETION_TRIALS_NOT_SELECTED)
+
+        # 3. another repeated to preserve the row count
+        padded = selected[:-1] + [selected[0]]
+        self.assertEqual(len(padded), len(selected))
+        with self.assertRaises(CompletionRefused) as caught:
+            issue_completion_receipt(lock=lock, counted=counts,
+                                     executed_spur_trials=padded)
+        self.assertEqual(caught.exception.code,
+                         manifest.COMPLETION_TRIALS_NOT_SELECTED)
+
+        # 4. a different 5 561 of the same eligible universe -- every identity
+        #    authorised, the count exact, and not the frozen sample.
+        unchosen = sorted({t.key() for t in allocation.eligible_trials}
+                          - set(allocation.selected_trials))
+        self.assertTrue(unchosen)
+        other_subset = selected[1:] + [unchosen[0]]
+        self.assertEqual(len(other_subset), len(selected))
+        with self.assertRaises(CompletionRefused) as caught:
+            issue_completion_receipt(lock=lock, counted=counts,
+                                     executed_spur_trials=other_subset)
+        self.assertEqual(caught.exception.code,
+                         manifest.COMPLETION_TRIALS_NOT_SELECTED)
+
+    def test_the_frozen_selection_itself_still_issues(self):
+        lock = _lock()
+        receipt = issue_completion_receipt(
+            lock=lock, counted=_full_counts(),
+            executed_spur_trials=[tuple(k) for k
+                                  in lock.capture_plan.spur_allocation.selected_trials],
+            issued_at=2_000.0)
+        self.assertEqual(receipt.corpus_id, "corpus-a")

@@ -259,6 +259,61 @@ exists to expose. Neither a proposal nor an accepted contract satisfies anything
 here: entry 8 records the first reading, and this entry is now the second — an
 accepted amendment describing an enforcement is not the enforcement.
 
+---
+
+## 14. Captured-window admission is named and not built
+
+**Trigger:** before the first captured window is written to disk. Behind entry
+9, which has to land first: a window cannot be admitted before the ring can
+attest to the whole object.
+
+§5.23's implementation enforces the envelope at **use time** — a chain the
+frozen envelope does not admit does not promote. It does not enforce it at
+**capture time**, and there is currently no way to: `rf_null_corpus` has no
+writer, the persistence mechanism §5.20 governs is unbuilt, and a check with
+nothing to check would be the inert admission entry 11 was drained for closing.
+
+What is missing is one gate, at one place: after full-object ring attestation
+and before a window is persisted, a window whose `signal_chain_hash` is not a
+declared member of the corpus's `InstrumentChainEnvelope` **is not corpus**. It
+is not re-labelled, not held aside and not counted — the lock names the
+instruments the corpus is made of, and a window from another one is a window
+from another experiment.
+
+**Why this is exposed and the use-time gate was not.** No corpus exists, so
+nothing can be admitted wrongly today. The moment one does, the order reverses:
+a wrongly admitted window is inside the sample the published bound is computed
+over, and unlike a wrongly licensed promotion it cannot be refused afterwards —
+it has already changed the denominator.
+
+---
+
+## 15. The frozen slope tolerance governs no analysis
+
+**Trigger:** before a spur catalogue entry can become usable. Not before the
+catalogue exists — before anything reads a classification off one.
+
+`CapturePlanDeclaration` freezes `PLAN_SLOPE_TOLERANCE = 0.01` into its digest,
+and **no declaration in the repository refers to it.** Every other §5.22 constant
+now governs a declared act: the retune deltas govern a signed per-visit retune,
+the band-edge exclusion governs which baseband offsets an eligible trial may
+carry, the persistence margin and the 7-of-8 requirement govern the repeats a
+catalogued spur earned its entry with. The slope tolerance governs an
+**analysis** — estimating a feature's slope across retunes and deciding whether
+it matches an integer member of the affine mixing family — and there is no
+analysis in this repository.
+
+The repair, when the analysis exists:
+
+> Before a spur catalogue entry can become usable, the slope analysis must apply
+> the frozen `0.01` tolerance and record the measured slope and its residuals.
+
+Recorded here rather than as a comment beside the constant, because **entry 11
+is the demonstration of what a comment is worth**: a repair recorded in prose
+waits exactly as long as the prose does. The persistence margin and the 7-of-8
+requirement were on the same catalogue-analysis boundary and are now enforced by
+`SpurPersistenceObservation`; slope enforcement is what remains owed.
+
 ## Drain record
 
 A landed entry leaves the list above. It is recorded here in one line, because
@@ -280,6 +335,22 @@ what is still pending. This is a record, not a queue: nothing here is waiting.
 | 8 — §5.19's "until §5.20 exists" read as satisfied by a proposal | `RF_Signal_Family_Classifier_Scope.md` §5.19 | `8469ed5` |
 | 12 — six stale claims in accepted §5.19 and §5.20, four listed and two found | `RF_Signal_Family_Classifier_Scope.md` §5.19, §5.20 | `d0c030e` |
 | 13 — two stale claims in code, and a test that guarded a citation | `rf_null_corpus.py`, `rf_validation_manifest.py` | `623669d` |
+
+Entry 11 is the one to reread before writing "the repair is" in any entry.
+**Its own proposed repair would not have worked**: it said to freeze the
+`signal_chain_hash`, and `gain_db` is inside that hash, so a `GAIN_STEPS`
+observation spans two hashes by construction. An entry may name a defect
+correctly and prescribe a cure that does not exist.
+
+It has now also been **nearly drained twice on a partial repair**. The first
+implementation added the lock field and left admission uncalled, which review
+caught as recordable rather than repaired. The second enforced admission and was
+recorded here as drained -- and review caught that too: the capture-plan half of
+§5.23 froze a permutation of integer labels rather than the declared tunings, so
+the lock could open before the corpus plan existed. **The row was written and
+then withdrawn**, which is the failure this table is supposed to be immune to,
+and it is left in the prose rather than tidied away: a drain rate is only honest
+if a retracted drain costs something to record.
 
 Entry 13 is the one worth rereading before adding a note anywhere. Its runtime
 claim survived five merges **because the test guarding it checked the citation
