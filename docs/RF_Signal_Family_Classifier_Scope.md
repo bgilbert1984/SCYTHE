@@ -2926,10 +2926,11 @@ construction and **no promotion corpus has one**. The settled ruling is an
 enumerated envelope of explicitly declared chains, never a single chain hash and
 never a Cartesian product of separately declared sets. §5.23 carries the
 amendment and **was accepted 2026-09-15, this rejection with it**. **Finding A
-stays open until use-time envelope admission is enforced over a capture plan
-that declares the corpus** — enforcement over the instrument layer alone leaves
-a lock that can open before the plan it freezes exists, and a contract
-describing an enforcement is not the enforcement.
+closed at `9e0efc8`**, when use-time envelope admission was enforced over a
+capture plan that declares the corpus. It did not close at the acceptance, and
+it did not close when the instrument layer alone was enforced: a contract
+describing an enforcement is not the enforcement, and an envelope over a plan
+that freezes nothing the corpus is made of is not the scope it claims.
 
 #### Finding B — the aggregate bound is design-weighted, not operational
 
@@ -3135,11 +3136,10 @@ Authority:  §5.23 is accepted. It authorises no capture, no persistence, no
             commit.
 Order:      §13l. This is the acceptance commit. Merge follows it, and a
             code-only implementation follows the merge.
-Drains:     Nothing yet. Entry 11 drains when use-time envelope admission is
-            enforced **over a capture plan that declares the corpus** -- the
-            first implementation enforced the first and not the second, and the
-            drain was recorded and withdrawn. Captured-window admission is
-            entry 14.
+Drains:     Entry 11, at `9e0efc8`. The lock field, the receipt propagation
+            and use-time envelope admission landed together, over a capture
+            plan that declares the corpus. Captured-window admission is entry
+            14 and is not part of this; entry 9 precedes it.
 Carries:    Two amendments to accepted text, accepted here as part of this
             section's substance and named in the acceptance below — §5.22
             Finding A, and PENDING_AMENDMENTS entry 11.
@@ -3451,16 +3451,18 @@ Then, in this order:
    receiver-identity authority; both bound into `PromotionCorpusLock` and the
    completion receipt; **and use-time promotion admission enforced.** — *done:
    `rf_promotion_envelope.py`, and `_corpus_state` refuses a chain the frozen
-   envelope does not admit. **The capture-plan half is not**: the schedule froze
-   a permutation of integer labels with no declared tunings and no trial
-   allocation, so a lock could open before the corpus plan existed.*
+   envelope does not admit, and the capture plan declares the corpus it is a
+   plan for. The first attempt at this step enforced the first and not the
+   second and was abandoned unmerged.*
 4. **Entry 11 drains at step 3**, because at step 3 the licensing defect is no
    longer reachable. Captured-window admission enters the queue as its own entry
-   at the same time. — *entry 14 opened; **entry 11 does not drain** until the
-   capture plan declares what it is a plan for.*
+   at the same time. — *done: entry 14 opened, and **entry 11 drained at
+   `9e0efc8`** after one withdrawn drain that the queue records.*
 
-Finding A stays open across all four steps and closes at step 3 — and **is
-still open**: step 3 landed for the instrument layer only.
+Finding A stays open across all four steps and closes at step 3 — **closed at
+`9e0efc8`**, when both layers landed and admission was enforced. It stayed open
+across the acceptance and across one abandoned implementation, which is the
+whole of what this finding was for.
 
 ---
 
