@@ -213,6 +213,54 @@ that section being **rejected**: however spurs come to be identified,
 
 ---
 
+## 11. `PromotionCorpusLock` freezes the method and not the instrument
+
+**Trigger:** before the first `PromotionCorpusLock` is created. Not before the
+first capture — before the first **lock**, which comes earlier.
+
+The lock carries `corpus_id`, `opened_at`, `method_revision`,
+`decision_threshold`, `preprocessing_revision`, `strata_digest`,
+`configuration_digest`, `tested_bound_count`, `per_bound_alpha`,
+`validation_family_revision`, `strata_definition_revision` and
+`eligible_channel_purpose`. **There is no signal-chain field, no sensor and no
+envelope.**
+
+That was harmless while the estimand was unnamed. §5.22 names it as
+instrument-scoped — the false-DIGITAL rate over *this* signal chain inside a
+declared envelope — and under that estimand the absence is a hole: a corpus
+validated on one dongle and one antenna would license the same promoted claim
+from a different chain, and nothing in the lock would notice.
+
+Phase 3a's partition test does not catch this. It asserts that every field the
+lock **has** is checked or declared unchecked; it cannot assert that a field the
+lock **needs** exists. A test over a set is silent about what is missing from the
+set, which is the same shape as the hand-listed vocabulary universe
+`SCYTHE_VERDICT_VOCABULARIES.md` §3 replaced with a discovered one.
+
+The repair is a frozen `signal_chain_hash`, or a declared envelope digest where
+the envelope legitimately spans more than one chain. It amends §5.20 and
+`rf_validation_manifest`, and it must land before a lock exists, because a lock
+is precisely the thing that cannot be amended afterwards.
+
+**Correction 2026-09-15 — the repair named above is rejected.** `gain_db` is
+inside the chain identity and `set_gain_db` rebuilds the chain *before* raising
+`GAIN_CHANGE`, so a `GAIN_STEPS` observation spans two chain hashes by
+construction: **no promotion corpus has one chain hash**, and freezing one would
+make the corpus unbuildable. The settled ruling is an enumerated envelope in two
+layers — instrument chain, and capture plan. §5.23 carries the amendment and
+**was accepted 2026-09-15, this correction with it**.
+**This entry stays open**, and the condition for draining it is narrower than
+"an implementation lands". This entry names a **licensing** defect — a corpus
+validated on one chain licensing promotion on another — so a lock field nobody
+enforces makes it recordable rather than repaired. It drains when the lock field,
+the receipt propagation **and use-time promotion admission** land together.
+Captured-window admission may follow later, behind entry 9, because no corpus
+exists to expose. Neither a proposal nor an accepted contract satisfies anything
+here: entry 8 records the first reading, and this entry is now the second — an
+accepted amendment describing an enforcement is not the enforcement.
+
+---
+
 ## 14. Captured-window admission is named and not built
 
 **Trigger:** before the first captured window is written to disk. Behind entry
@@ -238,6 +286,34 @@ a wrongly admitted window is inside the sample the published bound is computed
 over, and unlike a wrongly licensed promotion it cannot be refused afterwards —
 it has already changed the denominator.
 
+---
+
+## 15. The frozen slope tolerance governs no analysis
+
+**Trigger:** before a spur catalogue entry can become usable. Not before the
+catalogue exists — before anything reads a classification off one.
+
+`CapturePlanDeclaration` freezes `PLAN_SLOPE_TOLERANCE = 0.01` into its digest,
+and **no declaration in the repository refers to it.** Every other §5.22 constant
+now governs a declared act: the retune deltas govern a signed per-visit retune,
+the band-edge exclusion governs which baseband offsets an eligible trial may
+carry, the persistence margin and the 7-of-8 requirement govern the repeats a
+catalogued spur earned its entry with. The slope tolerance governs an
+**analysis** — estimating a feature's slope across retunes and deciding whether
+it matches an integer member of the affine mixing family — and there is no
+analysis in this repository.
+
+The repair, when the analysis exists:
+
+> Before a spur catalogue entry can become usable, the slope analysis must apply
+> the frozen `0.01` tolerance and record the measured slope and its residuals.
+
+Recorded here rather than as a comment beside the constant, because **entry 11
+is the demonstration of what a comment is worth**: a repair recorded in prose
+waits exactly as long as the prose does. The persistence margin and the 7-of-8
+requirement were on the same catalogue-analysis boundary and are now enforced by
+`SpurPersistenceObservation`; slope enforcement is what remains owed.
+
 ## Drain record
 
 A landed entry leaves the list above. It is recorded here in one line, because
@@ -259,24 +335,22 @@ what is still pending. This is a record, not a queue: nothing here is waiting.
 | 8 — §5.19's "until §5.20 exists" read as satisfied by a proposal | `RF_Signal_Family_Classifier_Scope.md` §5.19 | `8469ed5` |
 | 12 — six stale claims in accepted §5.19 and §5.20, four listed and two found | `RF_Signal_Family_Classifier_Scope.md` §5.19, §5.20 | `d0c030e` |
 | 13 — two stale claims in code, and a test that guarded a citation | `rf_null_corpus.py`, `rf_validation_manifest.py` | `623669d` |
-| 11 — the lock froze the method and not the instrument | `rf_promotion_envelope.py`, `rf_validation_manifest.py`, §5.23's implementation | slice §5.23 |
 
-Entry 11's drain is the one to reread before writing "the repair is" in any
-future entry. **Its own proposed repair would not have worked.** It said to
-freeze the `signal_chain_hash`, and `gain_db` is inside that hash, so the two
-windows a `GAIN_STEPS` observation is made of carry different hashes by
-construction — a promotion corpus never has one chain hash, and the repair as
-written would have made the corpus unbuildable rather than sound. An entry may
-name a defect correctly and prescribe a cure that does not exist, and a queue
-that let the prescription travel unexamined into an implementation would have
-shipped the second failure under the authority of the first.
+Entry 11 is the one to reread before writing "the repair is" in any entry.
+**Its own proposed repair would not have worked**: it said to freeze the
+`signal_chain_hash`, and `gain_db` is inside that hash, so a `GAIN_STEPS`
+observation spans two hashes by construction. An entry may name a defect
+correctly and prescribe a cure that does not exist.
 
-It is also the entry that sharpened what draining means. A first implementation
-added the lock field and left admission uncalled, which would have made the
-licensing defect **recordable rather than repaired** — and drained an entry
-whose subject was still reachable. The narrower condition, use-time admission
-enforced, is the one this row was finally paid against. **Captured-window
-admission is a separate obligation and is entry 14**, not a footnote here.
+It has now also been **nearly drained twice on a partial repair**. The first
+implementation added the lock field and left admission uncalled, which review
+caught as recordable rather than repaired. The second enforced admission and was
+recorded here as drained -- and review caught that too: the capture-plan half of
+§5.23 froze a permutation of integer labels rather than the declared tunings, so
+the lock could open before the corpus plan existed. **The row was written and
+then withdrawn**, which is the failure this table is supposed to be immune to,
+and it is left in the prose rather than tidied away: a drain rate is only honest
+if a retracted drain costs something to record.
 
 Entry 13 is the one worth rereading before adding a note anywhere. Its runtime
 claim survived five merges **because the test guarding it checked the citation

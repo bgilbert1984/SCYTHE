@@ -67,6 +67,8 @@ from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 from rf_promotion_envelope import (
     AUTHORITIES_SUFFICIENT_FOR_PROMOTION,
+    CAPTURED,
+    SYNTHETIC,
     CapturePlanDeclaration,
     InstrumentChainEnvelope,
     allocations_outside_envelope,
@@ -306,9 +308,16 @@ LOCK_ENVELOPE_ABSENT = "LOCK_ENVELOPE_ABSENT"
 LOCK_PLAN_ABSENT = "LOCK_PLAN_ABSENT"
 LOCK_PLAN_OUTSIDE_ENVELOPE = "LOCK_PLAN_OUTSIDE_ENVELOPE"
 LOCK_PLAN_STRATUM_UNKNOWN = "LOCK_PLAN_STRATUM_UNKNOWN"
+LOCK_PLAN_STRATUM_MISSING = "LOCK_PLAN_STRATUM_MISSING"
+LOCK_PLAN_TRIALS_WRONG = "LOCK_PLAN_TRIALS_WRONG"
+LOCK_PLAN_SOURCE_WRONG = "LOCK_PLAN_SOURCE_WRONG"
+LOCK_PLAN_GAIN_STEPS_ONE_CHAIN = "LOCK_PLAN_GAIN_STEPS_ONE_CHAIN"
+LOCK_ENVELOPE_MEMBER_UNALLOCATED = "LOCK_ENVELOPE_MEMBER_UNALLOCATED"
 LOCK_REFUSALS: Tuple[str, ...] = (
     LOCK_ENVELOPE_ABSENT, LOCK_PLAN_ABSENT, LOCK_PLAN_OUTSIDE_ENVELOPE,
-    LOCK_PLAN_STRATUM_UNKNOWN,
+    LOCK_PLAN_STRATUM_UNKNOWN, LOCK_PLAN_STRATUM_MISSING,
+    LOCK_PLAN_TRIALS_WRONG, LOCK_PLAN_SOURCE_WRONG,
+    LOCK_PLAN_GAIN_STEPS_ONE_CHAIN, LOCK_ENVELOPE_MEMBER_UNALLOCATED,
 )
 
 
@@ -319,6 +328,60 @@ class LockRefused(RuntimeError):
         super().__init__(f"{code}: {detail}" if detail else code)
         self.code = code
         self.detail = detail
+
+
+def _refuse_unreconciled_plan(plan: CapturePlanDeclaration) -> None:
+    """Every declared stratum, at its fixed count, from the right source.
+
+    §5.22 requires feasibility established **before the corpus opens**, and the
+    lock is the act that closes option 4 on `RECEIVER_SPURS`. A lock that could
+    open over a plan naming one stratum would close that option before the
+    information needed to decide it existed, which is the order this refuses.
+    """
+    planned = plan.planned_strata()
+    unknown = sorted(set(planned) - set(STRATUM_KEYS))
+    if unknown:
+        raise LockRefused(
+            LOCK_PLAN_STRATUM_UNKNOWN,
+            f"{unknown} are planned and are not declared strata")
+    missing = [key for key in STRATUM_KEYS if key not in planned]
+    if missing:
+        raise LockRefused(
+            LOCK_PLAN_STRATUM_MISSING,
+            f"{missing} have no trial plan. A corpus plan missing a stratum is "
+            "incomplete, not complete with a gap -- and the bound is computed "
+            "over all twelve")
+    for entry in plan.trial_plans:
+        expected = CAPTURED if entry.stratum in TUNER_REQUIRED else SYNTHETIC
+        if entry.source != expected:
+            raise LockRefused(
+                LOCK_PLAN_SOURCE_WRONG,
+                f"{entry.stratum} is planned as {entry.source} and is "
+                f"{expected}: {TUNER_REQUIRED} need a receiver, and the rest "
+                "are regenerated rather than retained")
+        if entry.trials != MINIMUM_WINDOWS_PER_STRATUM:
+            raise LockRefused(
+                LOCK_PLAN_TRIALS_WRONG,
+                f"{entry.stratum} plans {entry.trials} trials against the "
+                f"fixed {MINIMUM_WINDOWS_PER_STRATUM}. The count is exact in "
+                "both directions: a sample whose size depended on the results "
+                "is not the sample the published bound was computed over")
+    if plan.total_trials() != TARGET_TOTAL_NULL_WINDOWS:
+        raise LockRefused(
+            LOCK_PLAN_TRIALS_WRONG,
+            f"the plan totals {plan.total_trials()} against "
+            f"{TARGET_TOTAL_NULL_WINDOWS}")
+    for entry in plan.trial_plans:
+        if entry.stratum != "GAIN_STEPS":
+            continue
+        if len(set(entry.chain_hashes)) < 2:
+            raise LockRefused(
+                LOCK_PLAN_GAIN_STEPS_ONE_CHAIN,
+                "GAIN_STEPS names one chain. `gain_db` is inside the chain "
+                "identity and `set_gain_db` rebuilds the chain before raising "
+                "GAIN_CHANGE, so the two windows one observation is made of "
+                "carry two identities -- §5.21's corrected table, and the same "
+                "fact that made a single frozen signal_chain_hash unbuildable")
 
 
 def freeze_promotion_corpus(*, corpus_id: str, method_revision: str,
@@ -348,12 +411,19 @@ def freeze_promotion_corpus(*, corpus_id: str, method_revision: str,
             LOCK_PLAN_OUTSIDE_ENVELOPE,
             f"{len(outside)} allocated chain(s) are not members of the "
             "envelope this corpus would be opened against")
-    unknown = sorted({a.stratum for a in capture_plan.allocations}
-                     - set(STRATUM_KEYS))
-    if unknown:
+    # And the other direction. Removing the Cartesian product closed implicit
+    # widening; an explicitly declared member with no allocated trials recreates
+    # the same outcome one step later -- admissible at promotion, sampled never.
+    unallocated = sorted(envelope.admissible_chain_hashes()
+                         - capture_plan.allocated_chain_hashes())
+    if unallocated:
         raise LockRefused(
-            LOCK_PLAN_STRATUM_UNKNOWN,
-            f"{unknown} are allocated by the plan and are not declared strata")
+            LOCK_ENVELOPE_MEMBER_UNALLOCATED,
+            f"{len(unallocated)} declared envelope member(s) have no allocated "
+            "trials. Every chain a promotion may be admitted on is a chain the "
+            "frozen plan governs, or the envelope is a superset of what was "
+            "validated")
+    _refuse_unreconciled_plan(capture_plan)
     return PromotionCorpusLock(
         corpus_id=corpus_id,
         opened_at=time.time() if opened_at is None else float(opened_at),
@@ -399,12 +469,18 @@ COMPLETION_STRATUM_UNKNOWN = "COMPLETION_STRATUM_UNKNOWN"
 COMPLETION_COUNT_BELOW_REQUIRED = "COMPLETION_COUNT_BELOW_REQUIRED"
 COMPLETION_COUNT_ABOVE_REQUIRED = "COMPLETION_COUNT_ABOVE_REQUIRED"
 COMPLETION_COUNT_UNCOUNTABLE = "COMPLETION_COUNT_UNCOUNTABLE"
+COMPLETION_COUNT_NOT_PLANNED = "COMPLETION_COUNT_NOT_PLANNED"
+COMPLETION_TRIALS_NOT_IDENTIFIED = "COMPLETION_TRIALS_NOT_IDENTIFIED"
+COMPLETION_TRIAL_NOT_AUTHORISED = "COMPLETION_TRIAL_NOT_AUTHORISED"
+COMPLETION_TRIALS_NOT_SELECTED = "COMPLETION_TRIALS_NOT_SELECTED"
 COMPLETION_REFUSALS: Tuple[str, ...] = (
     COMPLETION_LOCK_ABSENT, COMPLETION_LOCK_STRATA_MOVED,
     COMPLETION_LOCK_DECLARATION_MOVED,
     COMPLETION_STRATUM_MISSING, COMPLETION_STRATUM_UNKNOWN,
     COMPLETION_COUNT_BELOW_REQUIRED, COMPLETION_COUNT_ABOVE_REQUIRED,
-    COMPLETION_COUNT_UNCOUNTABLE,
+    COMPLETION_COUNT_UNCOUNTABLE, COMPLETION_COUNT_NOT_PLANNED,
+    COMPLETION_TRIALS_NOT_IDENTIFIED, COMPLETION_TRIAL_NOT_AUTHORISED,
+    COMPLETION_TRIALS_NOT_SELECTED,
 )
 
 
@@ -523,6 +599,7 @@ class CorpusCompletionReceipt:
 
 
 def issue_completion_receipt(*, lock: Any, counted: Mapping[str, Any],
+                             executed_spur_trials: Any = None,
                              issued_at: Optional[float] = None,
                              ) -> CorpusCompletionReceipt:
     """Issue a receipt, or refuse and say which stratum and why.
@@ -581,6 +658,56 @@ def issue_completion_receipt(*, lock: Any, counted: Mapping[str, Any],
                 f"{key} holds {count}, above the fixed {required}. A sample "
                 "whose size depended on the results is not the sample the "
                 "published bound was computed over")
+        # And reconciled against **this corpus's own frozen plan**, which is a
+        # different question from the one above. `freeze_promotion_corpus`
+        # refuses a plan whose counts are not the fixed number, so for a lock it
+        # opened the two agree -- but the lock is publicly constructible, and a
+        # receipt that only checked the module constant would attest to a count
+        # unrelated to the corpus it is a receipt for.
+        planned = lock.capture_plan.trials_for(key)
+        if planned is not None and count != planned:
+            raise CompletionRefused(
+                COMPLETION_COUNT_NOT_PLANNED,
+                f"{key} holds {count} against the {planned} this corpus's "
+                "capture plan allocates to it")
+
+    # And the spur stratum reconciles by **identity**, not by count. 5 561
+    # substitutes are 5 561 windows; they are not the trials the plan
+    # authorised, and a receipt comparing only the total could not tell the
+    # difference. The authorised set is on the lock, which retains it.
+    allocation = lock.capture_plan.spur_allocation
+    if allocation is not None and "RECEIVER_SPURS" in supplied:
+        if executed_spur_trials is None:
+            raise CompletionRefused(
+                COMPLETION_TRIALS_NOT_IDENTIFIED,
+                "RECEIVER_SPURS is counted and its executed (spur, tuning, "
+                "epoch) identities were not presented. A count is not a set")
+        executed = {tuple(identity) for identity in executed_spur_trials}
+        authorised = {trial.key() for trial in allocation.eligible_trials}
+        unauthorised = sorted(executed - authorised)
+        if unauthorised:
+            raise CompletionRefused(
+                COMPLETION_TRIAL_NOT_AUTHORISED,
+                f"{len(unauthorised)} executed trial(s) are not in the frozen "
+                f"authorised set, beginning {unauthorised[:3]}")
+        selected = {tuple(key) for key in allocation.selected_trials}
+        if executed != selected:
+            # Membership is weaker than precommitment. A corpus that only had
+            # to prove its trials were *eligible* could choose which of a
+            # larger eligible set to keep once the windows existed, which is
+            # post-hoc selection of the sample rather than of the threshold.
+            missing = sorted(selected - executed)
+            extra = sorted(executed - selected)
+            raise CompletionRefused(
+                COMPLETION_TRIALS_NOT_SELECTED,
+                f"{len(missing)} selected unit(s) were not executed and "
+                f"{len(extra)} executed unit(s) were not selected; the "
+                "selection was frozen before capture and is exact")
+        # There is no separate count check here on purpose. The counted total
+        # was already reconciled against the plan above, and the executed set
+        # is now required to equal the frozen selection exactly, so a count
+        # comparison could never fail independently -- and an unreachable
+        # refusal is a claim about a check that does not exist.
 
     ordered = tuple((key, supplied[key]) for key in STRATUM_KEYS)
     return CorpusCompletionReceipt(
@@ -681,6 +808,13 @@ STRATA: Tuple[Stratum, ...] = (
 )
 
 STRATUM_KEYS: Tuple[str, ...] = tuple(stratum.key for stratum in STRATA)
+
+# Which strata need a receiver rather than a generator. Declared here, beside
+# STRATA, because it is a property of the stratum: `rf_null_corpus` imports it
+# rather than keeping a second copy that could drift from this one.
+TUNER_REQUIRED: Tuple[str, ...] = (
+    "GAIN_STEPS", "RETUNE_TRANSIENTS", "RECEIVER_SPURS",
+)
 
 # The corpus target is the sum of what the strata require: 66_732 today. It moves
 # only when the strata set or the correction moves, and then it moves by itself.

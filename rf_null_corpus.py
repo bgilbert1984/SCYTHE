@@ -54,7 +54,8 @@ from rf_promotion_geometry import (
     PROMOTION_WINDOW_SAMPLES,
     promotion_geometry_deviations,
 )
-from rf_validation_manifest import STRATA, STRATUM_KEYS
+from rf_corpus_vocabulary import CAPTURED, SYNTHETIC
+from rf_validation_manifest import STRATA, STRATUM_KEYS, TUNER_REQUIRED
 
 SCHEMA = "scythe.rf-null-corpus.v1"
 # v2: the generator declaration grew `purpose`, so every identity it computes
@@ -82,8 +83,12 @@ GENERATOR_PURPOSES: Tuple[str, ...] = (PROMOTION_CORPUS, DEVELOPMENT_ONLY)
 #
 # Two members, and they are not interchangeable. A window says which it is, and
 # nothing in this module can produce the second one.
-SYNTHETIC = "SYNTHETIC"
-CAPTURED = "CAPTURED"
+#
+# Declared once, in `rf_corpus_vocabulary`, and imported here. A capture plan
+# names the source of every stratum's trials and this module labels every window
+# it builds; those are the same two words about the same distinction, and two
+# copies could drift into disagreeing about it. The vocabulary module is tiny
+# and owns nothing else, so neither user imports the other to obtain a string.
 WINDOW_SOURCES: Tuple[str, ...] = (SYNTHETIC, CAPTURED)
 
 # -- which strata a generator can honestly build ---------------------------
@@ -100,9 +105,6 @@ WINDOW_SOURCES: Tuple[str, ...] = (SYNTHETIC, CAPTURED)
 #   RETUNE_TRANSIENTS a real retune, with whatever the hardware does across it
 #   RECEIVER_SPURS    internal spurious products, which are a property of the
 #                     actual receiver and cannot be invented
-TUNER_REQUIRED: Tuple[str, ...] = (
-    "GAIN_STEPS", "RETUNE_TRANSIENTS", "RECEIVER_SPURS",
-)
 SYNTHESISABLE: Tuple[str, ...] = tuple(
     key for key in STRATUM_KEYS if key not in TUNER_REQUIRED)
 
