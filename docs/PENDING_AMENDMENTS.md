@@ -213,54 +213,6 @@ that section being **rejected**: however spurs come to be identified,
 
 ---
 
-## 11. `PromotionCorpusLock` freezes the method and not the instrument
-
-**Trigger:** before the first `PromotionCorpusLock` is created. Not before the
-first capture — before the first **lock**, which comes earlier.
-
-The lock carries `corpus_id`, `opened_at`, `method_revision`,
-`decision_threshold`, `preprocessing_revision`, `strata_digest`,
-`configuration_digest`, `tested_bound_count`, `per_bound_alpha`,
-`validation_family_revision`, `strata_definition_revision` and
-`eligible_channel_purpose`. **There is no signal-chain field, no sensor and no
-envelope.**
-
-That was harmless while the estimand was unnamed. §5.22 names it as
-instrument-scoped — the false-DIGITAL rate over *this* signal chain inside a
-declared envelope — and under that estimand the absence is a hole: a corpus
-validated on one dongle and one antenna would license the same promoted claim
-from a different chain, and nothing in the lock would notice.
-
-Phase 3a's partition test does not catch this. It asserts that every field the
-lock **has** is checked or declared unchecked; it cannot assert that a field the
-lock **needs** exists. A test over a set is silent about what is missing from the
-set, which is the same shape as the hand-listed vocabulary universe
-`SCYTHE_VERDICT_VOCABULARIES.md` §3 replaced with a discovered one.
-
-The repair is a frozen `signal_chain_hash`, or a declared envelope digest where
-the envelope legitimately spans more than one chain. It amends §5.20 and
-`rf_validation_manifest`, and it must land before a lock exists, because a lock
-is precisely the thing that cannot be amended afterwards.
-
-**Correction 2026-09-15 — the repair named above is rejected.** `gain_db` is
-inside the chain identity and `set_gain_db` rebuilds the chain *before* raising
-`GAIN_CHANGE`, so a `GAIN_STEPS` observation spans two chain hashes by
-construction: **no promotion corpus has one chain hash**, and freezing one would
-make the corpus unbuildable. The settled ruling is an enumerated envelope in two
-layers — instrument chain, and capture plan. §5.23 carries the amendment and
-**was accepted 2026-09-15, this correction with it**.
-**This entry stays open**, and the condition for draining it is narrower than
-"an implementation lands". This entry names a **licensing** defect — a corpus
-validated on one chain licensing promotion on another — so a lock field nobody
-enforces makes it recordable rather than repaired. It drains when the lock field,
-the receipt propagation **and use-time promotion admission** land together.
-Captured-window admission may follow later, behind entry 9, because no corpus
-exists to expose. Neither a proposal nor an accepted contract satisfies anything
-here: entry 8 records the first reading, and this entry is now the second — an
-accepted amendment describing an enforcement is not the enforcement.
-
----
-
 ## 14. Captured-window admission is named and not built
 
 **Trigger:** before the first captured window is written to disk. Behind entry
@@ -335,22 +287,41 @@ what is still pending. This is a record, not a queue: nothing here is waiting.
 | 8 — §5.19's "until §5.20 exists" read as satisfied by a proposal | `RF_Signal_Family_Classifier_Scope.md` §5.19 | `8469ed5` |
 | 12 — six stale claims in accepted §5.19 and §5.20, four listed and two found | `RF_Signal_Family_Classifier_Scope.md` §5.19, §5.20 | `d0c030e` |
 | 13 — two stale claims in code, and a test that guarded a citation | `rf_null_corpus.py`, `rf_validation_manifest.py` | `623669d` |
+| 11 — the lock froze the method and not the instrument | `rf_promotion_envelope.py`, `rf_corpus_vocabulary.py`, `rf_validation_manifest.py` | `9e0efc8` |
 
-Entry 11 is the one to reread before writing "the repair is" in any entry.
-**Its own proposed repair would not have worked**: it said to freeze the
+Entry 11 is the one to reread before writing "the repair is" in any entry, and
+before recording a drain. **Drained at `9e0efc8`** — and the route there is the
+record, not the row.
+
+**Its own proposed repair would not have worked.** It said to freeze the
 `signal_chain_hash`, and `gain_db` is inside that hash, so a `GAIN_STEPS`
 observation spans two hashes by construction. An entry may name a defect
 correctly and prescribe a cure that does not exist.
 
-It has now also been **nearly drained twice on a partial repair**. The first
+**It was drained once prematurely, and the row was withdrawn.** The first
 implementation added the lock field and left admission uncalled, which review
-caught as recordable rather than repaired. The second enforced admission and was
-recorded here as drained -- and review caught that too: the capture-plan half of
-§5.23 froze a permutation of integer labels rather than the declared tunings, so
-the lock could open before the corpus plan existed. **The row was written and
-then withdrawn**, which is the failure this table is supposed to be immune to,
-and it is left in the prose rather than tidied away: a drain rate is only honest
-if a retracted drain costs something to record.
+called *recordable rather than repaired*. The second enforced admission and was
+recorded here as drained — and review caught that too: the capture-plan half
+froze a permutation of integer labels with no declared tunings and no trial
+allocation, so a lock could open before the corpus plan existed. The row was
+written and then removed, which is the failure this table is supposed to be
+immune to. **It is kept in this prose deliberately**: a drain rate is only
+honest if a retracted drain costs something to record.
+
+**What the drain finally required**, and it is narrower than the entry's own
+title suggests: not an envelope field, but the lock field, the receipt
+propagation **and** use-time promotion admission landing together — plus a
+capture plan that actually declares the corpus, with frequency-bearing tunings,
+governed retune deltas, complete strata and count reconciliation, a retained
+eligible universe, a precommitted selection of the 5 561 trials, and completion
+reconciled against that selection by identity. A lock field nobody enforces
+makes a licensing defect recordable; a plan of seeds and indices freezes
+nothing the corpus is made of.
+
+**Captured-window admission is not part of this drain.** §5.23 governs what a
+corpus may contain and what may later promote; nothing here inspects an IQ
+window on its way to disk, and nothing can, because there is no way to disk.
+That is entry 14, and entry 9 precedes it.
 
 Entry 13 is the one worth rereading before adding a note anywhere. Its runtime
 claim survived five merges **because the test guarding it checked the citation
