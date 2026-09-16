@@ -3466,6 +3466,165 @@ whole of what this finding was for.
 
 ---
 
+### 5.24 — full-object attestation, and the scope the writer consumes — **PROPOSED**
+
+```text
+Status:     PROPOSED 2026-09-16. Nothing here is in force.
+Authority:  None. This section is documentation only. It authorises no capture,
+            no persistence, no directory, no byte and no tuner operation, and it
+            changes no behaviour.
+Order:      §13l. Acceptance decision, acceptance commit, merge, and only then
+            a code-only implementation built on that merge.
+Amends:     §5.20's publication step 1 and its typed capture boundary. The typed
+            writers accept an attested scope, not an exact `IQWindow`.
+Drains:     Nothing on merge. `PENDING_AMENDMENTS` entry 9 drains when the
+            operation and its immutable backing land. Entry 14 stays open.
+```
+
+*Entry 9 recorded that §5.20's publication step 1 asks for an attestation no
+operation performs. This proposes the operation — and finds that the obvious
+shape of it, a function returning a verdict, reintroduces the hole it was
+written to close.*
+
+#### Two operations, and the weaker one keeps its job
+
+`BoundedIQRing.verify_window(window_id, digest)` takes **two strings**. It
+proves this ring issued a window with that ID and digest, under the current
+epoch, and has not evicted it. `test_a_different_object_verifies_on_a_genuine_pair_of_strings`
+demonstrates what that leaves open, and `VERIFICATION_BINDS` says it in the
+module.
+
+That is **sufficient for its existing job** — refusing a `source_window_hash` no
+window ever carried — and it is not renamed, widened or deprecated here. A
+weaker guarantee that states its own limit is not a defect.
+
+What step 1 needs is a second operation over the exact object whose bytes are
+about to become a file. Two operations with different guarantees, named
+differently, is the shape; one operation that sometimes checks more is not.
+
+#### A verdict is the wrong return type
+
+The attractive signature is `attest_window(window) -> bool`, and it is wrong:
+
+```text
+attest(window)  ->  True
+                        mutate or replace the payload
+write(window)   ->  writes what was never attested
+```
+
+Between the answer and the write there is a window, and the object on both
+sides is supplied by the caller. A verdict about a mutable object is a statement
+about the past.
+
+So attestation **mints a live, process-local scope** instead:
+
+```python
+with ring.attest_window(window) as attested:
+    # a future writer consumes `attested`, never `window`
+    ...
+```
+
+The scope binds **one immutable sample reference and the authoritative
+metadata** for its whole lifetime. It never rereads `window.samples`, so
+replacing a frozen dataclass field by reflection after attestation cannot change
+what the writer consumes. The typed entrypoints in §5.20's capture boundary take
+that scope, which is the amendment this section makes to accepted text.
+
+#### What attestation establishes, under the ring lock
+
+| # | check | why it is not covered by the pair |
+| --- | --- | --- |
+| 1 | `type(window) is IQWindow` | a subclass or a mapping carries the same two strings |
+| 2 | the ring is open | |
+| 3 | the ring issued `window.window_id` | |
+| 4 | the record is in the current epoch | |
+| 5 | the sample interval is not evicted | |
+| 6 | **every stored metadata field matches the record** — configuration epoch, first and last sample index, sample count, sample rate, start and end time, signal-chain hash, issued digest | the pair compares none of these |
+| 7 | **the sample representation is exact** — NumPy array type, one dimension, `complex64` with byte order, exact length and byte count, contiguous, immutable backing | a coerced array is a different file |
+| 8 | the digest is **recomputed from the bytes bound into the scope**, using the *record's* chain, epoch and sample count | a digest read off the object attests to itself |
+| 9 | the recomputed digest equals the issued record **and** the object's declared digest | |
+
+Row 8 is the one that carries the others: the authoritative values come from the
+ring's record, never from the object being attested. An object that supplies its
+own comparands proves nothing.
+
+**`_WindowRecord` has no `sample_rate_hz`** and must gain one, or row 6 is
+impossible as written — "every metadata field" would quietly mean "every field
+the record happens to keep".
+
+#### The mutation window is closed structurally, not advisedly
+
+`acquire_window` freezes the issued array with `samples.setflags(write=False)`.
+**That is discouragement.** An owning NumPy array can be made writeable again:
+
+```text
+a = np.array(...);  a.setflags(write=False);  a.setflags(write=True)   -> succeeds
+```
+
+The repair is to back the issued array with immutable bytes, so the flag cannot
+be flipped because the array does not own its data:
+
+```python
+payload = ordered_samples.tobytes(order="C")
+samples = np.frombuffer(payload, dtype=STORAGE_DTYPE)
+```
+
+```text
+b = np.frombuffer(payload, ...);  b.setflags(write=True)
+    -> ValueError: cannot set WRITEABLE flag to True of this array
+```
+
+Both behaviours were **run against NumPy rather than assumed**, which is what
+the distinction between the two turns on. This adds no new raw-IQ copy: it
+replaces the copy `IQWindow` already owns.
+
+#### What the scope is, and is not
+
+- **Unconstructible through the public API.** A scope a caller can build is a
+  caller's claim.
+- **No `to_dict()` carrying payload**, no samples in `repr`, no pickle — the
+  rules `IQWindow` already lives under, inherited rather than restated.
+- **Rechecks its own liveness on every method**, and becomes terminal on context
+  exit including by exception. A reused scope refuses.
+- **Payload access only to the eventual internal persistence module**, which
+  does not exist.
+
+**The ring may advance after the scope is minted, and that is correct.** §5.20
+already states the ring may have evicted or invalidated the source by
+publication step 8. The scope is a point-in-time attested immutable snapshot,
+not a lease on the buffer.
+
+#### One digest implementation, two callers
+
+Extract `_window_digest(signal_chain_hash, configuration_epoch, sample_count,
+payload)` and use it for issuance and for attestation.
+
+**The digest schema and revision do not change.** This is one implementation
+shared by two callers, not a new identity — and an amendment that quietly moved
+a digest would invalidate every product already carrying one.
+
+#### What this section does not do
+
+- It does not authorise capture, persistence, a directory, a byte or a tuner
+  operation, and it changes no behaviour of any module.
+- It does not build captured-window admission. Attestation says *this object is
+  the window the ring issued*; admission says *this window belongs in this
+  corpus*. They are different questions and entry 14 is the second one.
+- It does not rename, widen or deprecate `verify_window`.
+- It does not drain entry 9. A proposal satisfies no obligation.
+
+#### What acceptance would require
+
+An explicit acceptance decision and an acceptance commit, then merge, then a
+code-only implementation. **Entry 9 drains when the operation and its immutable
+backing land together** — an attestation over an array whose write flag can be
+restored is a verdict about the past again, one layer down.
+
+Entry 14 remains open and behind this: a window cannot be admitted to a corpus
+before the ring can attest the whole object.
+
+---
+
 ## 6. Open questions for the operator
 
 1. **Approve the bounded IQ ring** (§2.2)? First retention of raw IQ beyond one block.

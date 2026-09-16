@@ -178,6 +178,19 @@ machinery and Phase 3a excludes capture.
 
 Recorded here rather than corrected in place because §5.20 is accepted text.
 
+**§5.24 proposes the operation, 2026-09-16, and is PROPOSED.** It finds that the
+obvious shape — a function returning a verdict — reintroduces the hole, because
+a verdict about a mutable object is a statement about the past; so attestation
+mints a live scope that binds one immutable sample reference, and §5.20's typed
+writers take that scope rather than an exact `IQWindow`. It also finds that
+`samples.setflags(write=False)` is discouragement: an owning NumPy array can be
+made writeable again, which was **run rather than assumed**.
+
+**This entry stays open.** It drains when the operation **and its immutable
+backing** land together — an attestation over an array whose write flag can be
+restored is the same defect one layer down. A proposal satisfies nothing, which
+is the reading entry 8 records and entry 11 demonstrated twice.
+
 ---
 
 ## 10. `THERMAL_NO_INPUT` and `RECEIVER_SPURS` may be one population counted twice
