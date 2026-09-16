@@ -43,6 +43,18 @@ one and §5.22 supplies the parameters it left free, both accepted 2026-09-14.
 What is missing now is **execution**: no spur catalogue exists, no feasibility
 check has been run against an actual count of internal products, and a method
 nobody has run identifies nothing.
+
+The instrument, which the lock once did not freeze
+--------------------------------------------------
+§5.23, accepted 2026-09-15.  `PromotionCorpusLock` froze the method and not the
+instrument, so a corpus validated on one chain licensed a promoted claim from
+another and nothing noticed.  It now carries an `InstrumentChainEnvelope` and a
+`CapturePlanDeclaration`, both required, and `_corpus_state` **enforces** the
+first at use time: a chain the frozen envelope does not admit does not promote.
+
+Captured-window admission -- refusing a window on its way to disk -- is a
+different point and is **not implemented**, because there is no way to disk.
+§5.23 assigns it to the persistence slice behind `PENDING_AMENDMENTS` entry 9.
 """
 
 from __future__ import annotations
@@ -52,6 +64,13 @@ import hashlib
 import math
 import time
 from typing import Any, Dict, List, Mapping, Optional, Tuple
+
+from rf_promotion_envelope import (
+    AUTHORITIES_SUFFICIENT_FOR_PROMOTION,
+    CapturePlanDeclaration,
+    InstrumentChainEnvelope,
+    allocations_outside_envelope,
+)
 
 
 SCHEMA = "scythe.rf-validation-manifest.v1"
@@ -229,6 +248,15 @@ class PromotionCorpusLock:
     configuration_digest: str
     tested_bound_count: int
     per_bound_alpha: float
+    # The instrument, and the distribution. §5.23: a lock without these freezes
+    # the method and not the instrument, and a corpus validated on one chain
+    # licenses a promoted claim from another. Neither has a default -- a lock
+    # openable without an instrument is the hole itself, and a default would be
+    # the version of it that looks like a convenience.
+    envelope: InstrumentChainEnvelope
+    envelope_digest: str
+    capture_plan: CapturePlanDeclaration
+    capture_plan_digest: str
     # The family this corpus was opened against, by revision. The bound count
     # alone would not notice a family whose membership was rewritten while its
     # size stayed the same.
@@ -243,7 +271,15 @@ class PromotionCorpusLock:
     eligible_channel_purpose: str = CHANNEL_PURPOSE_ELIGIBLE_FOR_PROMOTION
 
     def to_dict(self) -> Dict[str, Any]:
-        return {field: getattr(self, field) for field in self.__dataclass_fields__}
+        data = {field: getattr(self, field) for field in self.__dataclass_fields__}
+        data["envelope"] = self.envelope.to_dict()
+        data["capture_plan"] = self.capture_plan.to_dict()
+        # The scope limits travel with the claim, §5.22, rather than being left
+        # to be inferred by whoever reads the lock next.
+        data["receiver_identity_authority"] = (
+            self.envelope.receiver_identity_authority)
+        data["may_be_promoted_from"] = self.envelope.may_be_promoted_from
+        return data
 
 
 def _configuration_digest(method_revision: str, decision_threshold: float,
@@ -266,16 +302,68 @@ def _strata_digest() -> str:
     return f"blake2s:{hashlib.blake2s(payload.encode(), digest_size=16).hexdigest()}"
 
 
+LOCK_ENVELOPE_ABSENT = "LOCK_ENVELOPE_ABSENT"
+LOCK_PLAN_ABSENT = "LOCK_PLAN_ABSENT"
+LOCK_PLAN_OUTSIDE_ENVELOPE = "LOCK_PLAN_OUTSIDE_ENVELOPE"
+LOCK_PLAN_STRATUM_UNKNOWN = "LOCK_PLAN_STRATUM_UNKNOWN"
+LOCK_REFUSALS: Tuple[str, ...] = (
+    LOCK_ENVELOPE_ABSENT, LOCK_PLAN_ABSENT, LOCK_PLAN_OUTSIDE_ENVELOPE,
+    LOCK_PLAN_STRATUM_UNKNOWN,
+)
+
+
+class LockRefused(RuntimeError):
+    """A corpus that was not opened, and which part of it was not declared."""
+
+    def __init__(self, code: str, detail: str = "") -> None:
+        super().__init__(f"{code}: {detail}" if detail else code)
+        self.code = code
+        self.detail = detail
+
+
 def freeze_promotion_corpus(*, corpus_id: str, method_revision: str,
                             decision_threshold: float, preprocessing_revision: str,
+                            envelope: Any, capture_plan: Any,
                             opened_at: Optional[float] = None) -> PromotionCorpusLock:
-    """Open a promotion corpus. What is frozen here cannot move without a new one."""
+    """Open a promotion corpus. What is frozen here cannot move without a new one.
+
+    `envelope` and `capture_plan` are required and have no defaults. Both are
+    checked nominally and then checked **against each other**: a plan allocating
+    a chain the envelope does not admit is two declarations that disagree, and
+    the disagreement has to surface here rather than at the first window.
+    """
+    if type(envelope) is not InstrumentChainEnvelope:
+        raise LockRefused(
+            LOCK_ENVELOPE_ABSENT,
+            "a promotion corpus is opened against an InstrumentChainEnvelope; "
+            f"got {type(envelope).__name__}")
+    if type(capture_plan) is not CapturePlanDeclaration:
+        raise LockRefused(
+            LOCK_PLAN_ABSENT,
+            "a promotion corpus is opened against a CapturePlanDeclaration; "
+            f"got {type(capture_plan).__name__}")
+    outside = allocations_outside_envelope(capture_plan, envelope)
+    if outside:
+        raise LockRefused(
+            LOCK_PLAN_OUTSIDE_ENVELOPE,
+            f"{len(outside)} allocated chain(s) are not members of the "
+            "envelope this corpus would be opened against")
+    unknown = sorted({a.stratum for a in capture_plan.allocations}
+                     - set(STRATUM_KEYS))
+    if unknown:
+        raise LockRefused(
+            LOCK_PLAN_STRATUM_UNKNOWN,
+            f"{unknown} are allocated by the plan and are not declared strata")
     return PromotionCorpusLock(
         corpus_id=corpus_id,
         opened_at=time.time() if opened_at is None else float(opened_at),
         method_revision=method_revision,
         decision_threshold=float(decision_threshold),
         preprocessing_revision=preprocessing_revision,
+        envelope=envelope,
+        envelope_digest=envelope.digest(),
+        capture_plan=capture_plan,
+        capture_plan_digest=capture_plan.digest(),
         strata_digest=_strata_digest(),
         configuration_digest=_configuration_digest(
             method_revision, decision_threshold, preprocessing_revision),
@@ -351,6 +439,11 @@ _DECLARATION_SOURCES = {
     "configuration_digest": lambda lock: _configuration_digest(
         lock.method_revision, lock.decision_threshold,
         lock.preprocessing_revision),
+    # Recomputed from the lock's own declarations, which is the same
+    # internal-coherence check `configuration_digest` gets: a substituted
+    # envelope disagrees with the digest stored beside it.
+    "envelope_digest": lambda lock: lock.envelope.digest(),
+    "capture_plan_digest": lambda lock: lock.capture_plan.digest(),
 }
 LOCK_DECLARATION_FIELDS: Tuple[str, ...] = tuple(_DECLARATION_SOURCES)
 # Not module constants -- they are this corpus's own choices -- but the lock's
@@ -358,6 +451,7 @@ LOCK_DECLARATION_FIELDS: Tuple[str, ...] = tuple(_DECLARATION_SOURCES)
 # the lock's own fields catches a substitution in any of the three.
 LOCK_FIELDS_COVERED_BY_DIGEST: Tuple[str, ...] = (
     "method_revision", "decision_threshold", "preprocessing_revision",
+    "envelope", "capture_plan",
 )
 # Not declarations at all: one names the corpus, the other times it, and neither
 # has an answer anywhere to be checked against.
@@ -407,6 +501,12 @@ class CorpusCompletionReceipt:
     strata_digest: str
     strata_definition_revision: str
     validation_family_revision: str
+    envelope_digest: str
+    capture_plan_digest: str
+    # §5.23: the lock, the receipt and the promotion record carry the authority
+    # forward unchanged. No downstream step may present an unattested identity
+    # as an attested one.
+    receiver_identity_authority: str
     windows_per_stratum: int
     total_windows: int
     counted: Tuple[Tuple[str, int], ...]
@@ -491,6 +591,9 @@ def issue_completion_receipt(*, lock: Any, counted: Mapping[str, Any],
         strata_digest=lock.strata_digest,
         strata_definition_revision=lock.strata_definition_revision,
         validation_family_revision=lock.validation_family_revision,
+        envelope_digest=lock.envelope_digest,
+        capture_plan_digest=lock.capture_plan_digest,
+        receiver_identity_authority=lock.envelope.receiver_identity_authority,
         windows_per_stratum=required,
         total_windows=sum(count for _, count in ordered),
         counted=ordered,
@@ -732,6 +835,18 @@ def _corpus_state(lock: Optional[PromotionCorpusLock],
         # A second eligible lineage is a second opportunity to cross the same
         # threshold. Thirteen bounds do not cover fourteen chances.
         return "ELIGIBLE_PURPOSE_CHANGED_AFTER_FREEZE", False
+    if lock.envelope_digest != lock.envelope.digest():
+        # A substituted envelope is an exact PromotionCorpusLock carrying an
+        # instrument the corpus was not built on. `dataclasses.replace` makes
+        # one in a line, and only the stored digest disagrees.
+        return "ENVELOPE_CHANGED_AFTER_FREEZE", False
+    if lock.capture_plan_digest != lock.capture_plan.digest():
+        return "CAPTURE_PLAN_CHANGED_AFTER_FREEZE", False
+    if not lock.envelope.may_be_promoted_from:
+        # The corpus may exist and may be evaluated. It may not promote: the
+        # declared identifier does not establish which unit was tested, so the
+        # claim would be about a receiver nobody can name. §5.23.
+        return "RECEIVER_IDENTITY_NOT_SUFFICIENT_FOR_PROMOTION", False
     if configuration is None:
         return "CONFIGURATION_NOT_PRESENTED", False
     try:
@@ -742,6 +857,15 @@ def _corpus_state(lock: Optional[PromotionCorpusLock],
         return "CONFIGURATION_NOT_PRESENTED", False
     if presented != lock.configuration_digest:
         return "CONFIGURATION_CHANGED_AFTER_FREEZE", False
+    # Use-time promotion admission, §5.23. The chain presented with the thing
+    # being promoted must be a declared member of the frozen envelope. Without
+    # this the envelope records the scope of a claim and refuses nothing, which
+    # is the state entry 11 calls recordable rather than repaired.
+    presented_chain = configuration.get("signal_chain_hash")
+    if type(presented_chain) is not str or not presented_chain:
+        return "CHAIN_NOT_PRESENTED", False
+    if not lock.envelope.admits(presented_chain):
+        return "CHAIN_OUTSIDE_FROZEN_ENVELOPE", False
     return "FROZEN", True
 
 
@@ -758,7 +882,10 @@ def evaluate(observations: Dict[str, Tuple[int, int]], *,
     each held to 95% do not give the family 95%.
 
     Promotion additionally requires a frozen corpus whose configuration matches
-    the one presented. Without ``lock`` the report is exploratory by construction.
+    the one presented, **and whose frozen envelope admits the presented chain**:
+    ``configuration["signal_chain_hash"]`` is checked for membership, and a
+    corpus opened under an unattested receiver identity does not promote at all.
+    Without ``lock`` the report is exploratory by construction.
     """
     unknown = sorted(set(observations) - set(STRATUM_KEYS))
     if unknown:

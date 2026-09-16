@@ -213,51 +213,30 @@ that section being **rejected**: however spurs come to be identified,
 
 ---
 
-## 11. `PromotionCorpusLock` freezes the method and not the instrument
+## 14. Captured-window admission is named and not built
 
-**Trigger:** before the first `PromotionCorpusLock` is created. Not before the
-first capture — before the first **lock**, which comes earlier.
+**Trigger:** before the first captured window is written to disk. Behind entry
+9, which has to land first: a window cannot be admitted before the ring can
+attest to the whole object.
 
-The lock carries `corpus_id`, `opened_at`, `method_revision`,
-`decision_threshold`, `preprocessing_revision`, `strata_digest`,
-`configuration_digest`, `tested_bound_count`, `per_bound_alpha`,
-`validation_family_revision`, `strata_definition_revision` and
-`eligible_channel_purpose`. **There is no signal-chain field, no sensor and no
-envelope.**
+§5.23's implementation enforces the envelope at **use time** — a chain the
+frozen envelope does not admit does not promote. It does not enforce it at
+**capture time**, and there is currently no way to: `rf_null_corpus` has no
+writer, the persistence mechanism §5.20 governs is unbuilt, and a check with
+nothing to check would be the inert admission entry 11 was drained for closing.
 
-That was harmless while the estimand was unnamed. §5.22 names it as
-instrument-scoped — the false-DIGITAL rate over *this* signal chain inside a
-declared envelope — and under that estimand the absence is a hole: a corpus
-validated on one dongle and one antenna would license the same promoted claim
-from a different chain, and nothing in the lock would notice.
+What is missing is one gate, at one place: after full-object ring attestation
+and before a window is persisted, a window whose `signal_chain_hash` is not a
+declared member of the corpus's `InstrumentChainEnvelope` **is not corpus**. It
+is not re-labelled, not held aside and not counted — the lock names the
+instruments the corpus is made of, and a window from another one is a window
+from another experiment.
 
-Phase 3a's partition test does not catch this. It asserts that every field the
-lock **has** is checked or declared unchecked; it cannot assert that a field the
-lock **needs** exists. A test over a set is silent about what is missing from the
-set, which is the same shape as the hand-listed vocabulary universe
-`SCYTHE_VERDICT_VOCABULARIES.md` §3 replaced with a discovered one.
-
-The repair is a frozen `signal_chain_hash`, or a declared envelope digest where
-the envelope legitimately spans more than one chain. It amends §5.20 and
-`rf_validation_manifest`, and it must land before a lock exists, because a lock
-is precisely the thing that cannot be amended afterwards.
-
-**Correction 2026-09-15 — the repair named above is rejected.** `gain_db` is
-inside the chain identity and `set_gain_db` rebuilds the chain *before* raising
-`GAIN_CHANGE`, so a `GAIN_STEPS` observation spans two chain hashes by
-construction: **no promotion corpus has one chain hash**, and freezing one would
-make the corpus unbuildable. The settled ruling is an enumerated envelope in two
-layers — instrument chain, and capture plan. §5.23 carries the amendment and
-**was accepted 2026-09-15, this correction with it**.
-**This entry stays open**, and the condition for draining it is narrower than
-"an implementation lands". This entry names a **licensing** defect — a corpus
-validated on one chain licensing promotion on another — so a lock field nobody
-enforces makes it recordable rather than repaired. It drains when the lock field,
-the receipt propagation **and use-time promotion admission** land together.
-Captured-window admission may follow later, behind entry 9, because no corpus
-exists to expose. Neither a proposal nor an accepted contract satisfies anything
-here: entry 8 records the first reading, and this entry is now the second — an
-accepted amendment describing an enforcement is not the enforcement.
+**Why this is exposed and the use-time gate was not.** No corpus exists, so
+nothing can be admitted wrongly today. The moment one does, the order reverses:
+a wrongly admitted window is inside the sample the published bound is computed
+over, and unlike a wrongly licensed promotion it cannot be refused afterwards —
+it has already changed the denominator.
 
 ## Drain record
 
@@ -280,6 +259,24 @@ what is still pending. This is a record, not a queue: nothing here is waiting.
 | 8 — §5.19's "until §5.20 exists" read as satisfied by a proposal | `RF_Signal_Family_Classifier_Scope.md` §5.19 | `8469ed5` |
 | 12 — six stale claims in accepted §5.19 and §5.20, four listed and two found | `RF_Signal_Family_Classifier_Scope.md` §5.19, §5.20 | `d0c030e` |
 | 13 — two stale claims in code, and a test that guarded a citation | `rf_null_corpus.py`, `rf_validation_manifest.py` | `623669d` |
+| 11 — the lock froze the method and not the instrument | `rf_promotion_envelope.py`, `rf_validation_manifest.py`, §5.23's implementation | slice §5.23 |
+
+Entry 11's drain is the one to reread before writing "the repair is" in any
+future entry. **Its own proposed repair would not have worked.** It said to
+freeze the `signal_chain_hash`, and `gain_db` is inside that hash, so the two
+windows a `GAIN_STEPS` observation is made of carry different hashes by
+construction — a promotion corpus never has one chain hash, and the repair as
+written would have made the corpus unbuildable rather than sound. An entry may
+name a defect correctly and prescribe a cure that does not exist, and a queue
+that let the prescription travel unexamined into an implementation would have
+shipped the second failure under the authority of the first.
+
+It is also the entry that sharpened what draining means. A first implementation
+added the lock field and left admission uncalled, which would have made the
+licensing defect **recordable rather than repaired** — and drained an entry
+whose subject was still reachable. The narrower condition, use-time admission
+enforced, is the one this row was finally paid against. **Captured-window
+admission is a separate obligation and is entry 14**, not a footnote here.
 
 Entry 13 is the one worth rereading before adding a note anywhere. Its runtime
 claim survived five merges **because the test guarding it checked the citation

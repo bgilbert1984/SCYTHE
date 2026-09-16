@@ -2926,9 +2926,9 @@ construction and **no promotion corpus has one**. The settled ruling is an
 enumerated envelope of explicitly declared chains, never a single chain hash and
 never a Cartesian product of separately declared sets. §5.23 carries the
 amendment and **was accepted 2026-09-15, this rejection with it**. **Finding A
-stays open until use-time envelope admission is enforced**, which is the property
-this finding says the repair provides — acceptance of a contract is not the
-enforcement it describes.
+closed 2026-09-15**, when use-time envelope admission was enforced — the property
+this finding says the repair provides, and the reason it stayed open across the
+acceptance: a contract describing an enforcement is not the enforcement.
 
 #### Finding B — the aggregate bound is design-weighted, not operational
 
@@ -3134,8 +3134,9 @@ Authority:  §5.23 is accepted. It authorises no capture, no persistence, no
             commit.
 Order:      §13l. This is the acceptance commit. Merge follows it, and a
             code-only implementation follows the merge.
-Drains:     Nothing, and nothing on merge. Entry 11 drains only when use-time
-            envelope admission is enforced, because that is the defect it names.
+Drains:     Entry 11, at the implementation and not at this merge: use-time
+            envelope admission is enforced, so the licensing defect the entry
+            names is no longer reachable. Captured-window admission is entry 14.
 Carries:    Two amendments to accepted text, accepted here as part of this
             section's substance and named in the acceptance below — §5.22
             Finding A, and PENDING_AMENDMENTS entry 11.
@@ -3445,12 +3446,15 @@ Then, in this order:
 3. **A code-only implementation built on that merge** — the two declarations,
    self-validating and canonicalized, over explicit chain members; the
    receiver-identity authority; both bound into `PromotionCorpusLock` and the
-   completion receipt; **and use-time promotion admission enforced.**
+   completion receipt; **and use-time promotion admission enforced.** — *done:
+   `rf_promotion_envelope.py`, and `_corpus_state` refuses a chain the frozen
+   envelope does not admit.*
 4. **Entry 11 drains at step 3**, because at step 3 the licensing defect is no
    longer reachable. Captured-window admission enters the queue as its own entry
-   at the same time.
+   at the same time. — *done: entry 11 drained, entry 14 opened.*
 
-Finding A stays open across all four steps and closes at step 3.
+Finding A stays open across all four steps and closes at step 3 — **closed
+2026-09-15**, at the implementation rather than at the acceptance.
 
 ---
 
