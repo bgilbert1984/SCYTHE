@@ -3476,7 +3476,8 @@ Authority:  None. This section is documentation only. It authorises no capture,
 Order:      §13l. Acceptance decision, acceptance commit, merge, and only then
             a code-only implementation built on that merge.
 Amends:     §5.20's publication step 1 and its typed capture boundary. The typed
-            writers accept an attested scope, not an exact `IQWindow`.
+            writers accept an attested scope, not an exact `IQWindow`, and
+            establish its type, provenance and liveness before opening a file.
 Drains:     Nothing on merge. `PENDING_AMENDMENTS` entry 9 drains when the
             operation and its immutable backing land. Entry 14 stays open.
 ```
@@ -3575,8 +3576,58 @@ b = np.frombuffer(payload, ...);  b.setflags(write=True)
 ```
 
 Both behaviours were **run against NumPy rather than assumed**, which is what
-the distinction between the two turns on. This adds no new raw-IQ copy: it
-replaces the copy `IQWindow` already owns.
+the distinction between the two turns on.
+
+##### What it costs, measured rather than inferred
+
+The first draft of this section said *"this adds no new raw-IQ copy"*. **That is
+false**, and the reason it is worth correcting rather than softening is that it
+was inferred from final ownership instead of measured.
+
+`_ordered_tail_locked` already allocates a fresh full-window array. `tobytes()`
+then allocates the immutable payload **while that array is still alive**, so the
+transient peak is two copies, not one:
+
+```text
+one window                4 194 304 B   (4.00 MiB)
+peak above baseline       8 388 905 B   (8.00 MiB)
+copies alive at peak      2.0
+```
+
+So the honest statement is: **no additional retained full-window copy after
+issuance returns** — steady state is one, exactly as today — **and one authorised
+transient second copy, bounded at one window, during acquisition.** At promotion
+geometry that is 8.00 MiB peak for 4.00 MiB retained.
+
+The transient is authorised here because it is unavoidable: Python offers no way
+to fill an immutable object in place, so producing immutable bytes from a ring
+slice requires a second allocation whichever order it is done in.
+
+**The implementation measures peak, it does not reason about it.** A
+`tracemalloc` test asserts the peak is one window plus one transient and no
+more, because "final ownership is one copy" is exactly the inference that
+produced the false claim.
+
+#### The bound state is not an attribute
+
+Immutable bytes stop the payload being **modified**. They do not stop a scope
+field being **replaced** — reflection reaches a scope attribute exactly as it
+reaches `window.samples`, and a scope whose payload lives in an ordinary
+attribute has moved the hole rather than closed it.
+
+So the mint-time state does not live on the instance. It lives in a
+module-private registry that the public API cannot reach, and the scope carries
+only an **opaque handle** minted with it:
+
+- every method re-derives the payload from the registry through that handle;
+- the entry is keyed so that it resolves only for the exact object it was minted
+  for;
+- **replacing any scope field yields a handle that resolves to nothing**, and
+  the scope refuses rather than writing something else.
+
+The required property is stated as an outcome rather than as a mechanism:
+*replacing any field of a scope either refuses, or cannot change the bytes
+written.* An implementation satisfying it another way is satisfying it.
 
 #### What the scope is, and is not
 
@@ -3586,8 +3637,43 @@ replaces the copy `IQWindow` already owns.
   rules `IQWindow` already lives under, inherited rather than restated.
 - **Rechecks its own liveness on every method**, and becomes terminal on context
   exit including by exception. A reused scope refuses.
-- **Payload access only to the eventual internal persistence module**, which
-  does not exist.
+- **No method returns an unscoped payload reference.** A byte handle that
+  outlives the scope is a scope that ended without ending.
+
+#### The runtime boundary, and what Python cannot enforce
+
+§13k L.1 refused a generic writer with a label argument because the label became
+a caller's claim. *"The typed entrypoints take the scope"* repeats that failure
+unless the entrypoints say what taking one means. Before **any file is opened or
+created**, each entrypoint establishes:
+
+1. **exact nominal type** — `type(scope) is AttestedIQWindowScope`. A subclass, a
+   duck type and a caller-constructed substitute all refuse;
+2. **mint provenance** — the handle resolves to a live registry entry minted by
+   this ring for this object;
+3. **active lifetime** — the scope has not exited.
+
+All three before the filesystem is touched, so a refusal leaves no partial file
+and no created directory.
+
+**The scope stays active across the whole write** — canonical header
+construction *and* the complete payload write are inside it. A scope that closed
+after the header would leave the payload written under no attestation at all.
+
+And one claim is **narrowed rather than repeated**. The first draft said payload
+access is *"only to the eventual internal persistence module"*. **Python module
+privacy cannot enforce that**: a leading underscore is a convention, and nothing
+stops an import. What is actually enforceable is stated instead:
+
+> **No public accessor exists**, and the production call sites of the private
+> one are **statically restricted** — a test enumerates every reference to it
+> across the repository by AST and refuses any outside the allowed module set.
+
+That is the same mechanical shape as the token scanner in
+`SCYTHE_VERDICT_VOCABULARIES.md` §3: names are checked by a discovered universe
+rather than trusted to a convention. It does not stop a determined caller, and
+it is not claimed to — it stops the accessor spreading without anyone noticing,
+which is the failure that actually happens.
 
 **The ring may advance after the scope is minted, and that is correct.** §5.20
 already states the ring may have evicted or invalidated the source by
@@ -3616,9 +3702,14 @@ a digest would invalidate every product already carrying one.
 #### What acceptance would require
 
 An explicit acceptance decision and an acceptance commit, then merge, then a
-code-only implementation. **Entry 9 drains when the operation and its immutable
-backing land together** — an attestation over an array whose write flag can be
-restored is a verdict about the past again, one layer down.
+code-only implementation. **Entry 9 drains when the operation, its immutable
+backing and its opaque bound state land together** — an attestation over an
+array whose write flag can be restored, or over a payload reference a caller can
+replace, is a verdict about the past again, one layer down.
+
+The implementation carries a measured peak-memory test, and a static call-site
+check over the private payload accessor. Neither is inferable from the code
+reading correctly.
 
 Entry 14 remains open and behind this: a window cannot be admitted to a corpus
 before the ring can attest the whole object.
