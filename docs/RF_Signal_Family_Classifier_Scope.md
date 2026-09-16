@@ -2313,6 +2313,15 @@ record_receiver_spur(window, spur_attestation, scope)
 Each accepts an exact `IQWindow`, verifies it against the ring, and refuses a
 caller-supplied `source` label outright.
 
+> **Amended by §5.24, accepted 2026-09-16.** Each takes an **attested scope**
+> rather than an exact `IQWindow`, and establishes its exact nominal type, its
+> mint provenance and its active lifetime **before any file is opened or
+> created**. "Verifies it against the ring" was written when the only such
+> operation took two strings; full-object attestation is the operation it
+> actually needs, and the scope is what carries it across the write. The refusal
+> of a caller-supplied `source` label is unchanged.
+
+
 **The attestation is a closed union selected by stratum, not a universal
 before/after field.** A gain change and a retune each have a control action with
 a before and an after; a spur has neither, and a header that required them would
@@ -3466,21 +3475,63 @@ whole of what this finding was for.
 
 ---
 
-### 5.24 — full-object attestation, and the scope the writer consumes — **PROPOSED**
+### 5.24 — full-object attestation, and the scope the writer consumes — **ACCEPTED**
 
 ```text
-Status:     PROPOSED 2026-09-16. Nothing here is in force.
-Authority:  None. This section is documentation only. It authorises no capture,
-            no persistence, no directory, no byte and no tuner operation, and it
-            changes no behaviour.
-Order:      §13l. Acceptance decision, acceptance commit, merge, and only then
-            a code-only implementation built on that merge.
-Amends:     §5.20's publication step 1 and its typed capture boundary. The typed
-            writers accept an attested scope, not an exact `IQWindow`, and
-            establish its type, provenance and liveness before opening a file.
-Drains:     Nothing on merge. `PENDING_AMENDMENTS` entry 9 drains when the
-            operation and its immutable backing land. Entry 14 stays open.
+Status:     ACCEPTED 2026-09-16. The operation's shape, its nine checks, the
+            immutable backing and the opaque bound state are in force as
+            contract.
+Authority:  §5.24 is accepted. Acceptance is documentation only: it authorises
+            no capture, no persistence, no directory creation, no byte write
+            and no tuner action, and it changes no behaviour, because no code
+            exists yet and none is authorised by this commit.
+Order:      §13l. This is the acceptance commit. Merge follows it, and a
+            code-only implementation follows the merge.
+Amends:     §5.20's publication step 1 and its typed capture boundary, accepted
+            here as part of this section's substance. The typed writers accept
+            an attested scope, not an exact `IQWindow`, and establish its type,
+            provenance and liveness before opening a file.
+Drains:     Nothing, and nothing on merge. Entry 9 drains when the code
+            implementation, the immutable backing, the opaque bound state, the
+            measured peak-memory check and the static accessor check land
+            **together**. Entry 14 stays open and behind it.
 ```
+
+*Proposed 2026-09-16 at `ddc60ba`. Review held it and returned four corrections,
+applied at `9611256`: the "no new raw-IQ copy" claim was **false and was
+measured rather than softened** — the transient peak is 2.0 copies, 8.00 MiB for
+a 4.00 MiB window; immutable bytes stop the payload being modified but not a
+scope field being replaced, so the bound state moved off the instance; "the
+typed entrypoints take the scope" was the §13k L.1 shape until it said what
+taking one means; and "payload access only to the persistence module" was
+narrowed, because Python module privacy enforces nothing. This is the acceptance
+commit.*
+
+**What this acceptance accepts, named rather than left to the merge.** §13l is
+explicit that a merge supplies no acceptance, so both are listed:
+
+1. **§5.24 itself** — attestation as a live scope rather than a verdict; the
+   nine checks under the ring lock with the digest recomputed from the bound
+   bytes against the *record's* comparands; `sample_rate_hz` entering
+   `_WindowRecord`; immutable backing via `np.frombuffer`; opaque mint-time
+   state outside the instance; the runtime boundary established before any file
+   is opened; and the scope held live across canonical header construction and
+   the complete payload write.
+2. **The amendment to §5.20's typed capture boundary** — `record_gain_step`,
+   `record_retune_transient` and `record_receiver_spur` take an attested scope
+   rather than an exact `IQWindow`. That edits text already accepted, and an
+   acceptance silent about it would carry an amendment to accepted text into
+   `main` on a merge.
+
+*The scope staying live across the whole write is the load-bearing half of the
+second. A scope that closed after the header would leave only the label attested
+while the evidence bytes crossed the boundary unattested, which is the hole
+inverted rather than closed.*
+
+**What acceptance does not start.** No implementation is authorised by this
+commit. Nothing may be built until this section has merged, and what is built
+then is a code-only slice: not capture, not persistence, not a directory, not a
+byte.
 
 *Entry 9 recorded that §5.20's publication step 1 asks for an attestation no
 operation performs. This proposes the operation — and finds that the obvious
