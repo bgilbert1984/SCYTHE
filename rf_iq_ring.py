@@ -396,13 +396,17 @@ class AttestationRefused(RuntimeError):
 # lookup resolves to nothing; replace it with another live scope's handle and
 # the owner check refuses, because the entry names the object it was minted for.
 _SCOPE_REGISTRY: Dict[str, "_ScopeState"] = {}
+# Guards every insertion, lookup, prune and teardown of the mapping above.
+# Rings do not share a lock, so without this two rings minting concurrently
+# mutate one dictionary from two threads.
+_REGISTRY_LOCK = threading.RLock()
 _MINT_KEY = object()
 
 
 class _ScopeState:
     """Bound at mint time and never re-read from the attested object."""
 
-    __slots__ = ("owner", "payload", "samples", "metadata", "active")
+    __slots__ = ("owner", "payload", "samples", "metadata", "active", "lock")
 
     def __init__(self, owner, payload, samples, metadata) -> None:
         self.owner = owner              # weakref to the scope this belongs to
@@ -410,6 +414,11 @@ class _ScopeState:
         self.samples = samples          # the exact array reference, captured once
         self.metadata = metadata
         self.active = True
+        # Held for the whole of a write, and acquired by teardown. A scope that
+        # went inactive while a blocked write still held a local view would let
+        # the evidence bytes cross the boundary after the scope reported ended,
+        # which is the lifetime inversion §5.24 forbids, inverted in time.
+        self.lock = threading.RLock()
 
 
 class AttestedIQWindowScope:
@@ -442,22 +451,53 @@ class AttestedIQWindowScope:
     # -- state, re-derived on every access ---------------------------------
 
     def _state(self) -> "_ScopeState":
-        state = _SCOPE_REGISTRY.get(getattr(self, "_handle", None))
-        if state is None or state.owner() is not self:
-            raise AttestationRefused(
-                ATTESTATION_SCOPE_NOT_MINTED,
-                "this scope's handle does not resolve to state minted for it")
-        if not state.active:
-            raise AttestationRefused(
-                ATTESTATION_SCOPE_NOT_ACTIVE,
-                "the attestation scope has ended; a reused scope attests nothing")
-        return state
+        """Ordinary resolution, through the handle."""
+        with _REGISTRY_LOCK:
+            state = _SCOPE_REGISTRY.get(getattr(self, "_handle", None))
+            if state is None or state.owner() is not self:
+                raise AttestationRefused(
+                    ATTESTATION_SCOPE_NOT_MINTED,
+                    "this scope's handle does not resolve to state minted for it")
+            if not state.active:
+                raise AttestationRefused(
+                    ATTESTATION_SCOPE_NOT_ACTIVE,
+                    "the attestation scope has ended; a reused scope attests "
+                    "nothing")
+            return state
+
+    def _own_state(self) -> Optional["_ScopeState"]:
+        """The entry minted for this object, found by **identity**.
+
+        Teardown cannot go through the handle. The handle is a mutable field,
+        and an exit resolving through it leaves the genuine entry live whenever
+        the field has been replaced -- so replacing it before the `with` block
+        ends, and restoring it afterwards, would resurrect a scope that had
+        reported itself ended, with its payload intact. Field replacement has to
+        stay a refusal; it must not become delayed capability recovery.
+
+        The handle may govern ordinary resolution. It may not govern teardown.
+        """
+        with _REGISTRY_LOCK:
+            for state in _SCOPE_REGISTRY.values():
+                if state.owner() is self:
+                    return state
+        return None
 
     @property
     def active(self) -> bool:
-        """Liveness without raising, for a caller deciding whether to proceed."""
-        state = _SCOPE_REGISTRY.get(getattr(self, "_handle", None))
-        return bool(state is not None and state.owner() is self and state.active)
+        """Liveness without raising, for a caller deciding whether to proceed.
+
+        Resolved by identity, not by the presented handle: a scope is live or
+        ended as an object, and answering from a replaceable field would let the
+        answer be steered by the thing it is supposed to report on.
+        """
+        state = self._own_state()
+        if state is None or not state.active:
+            return False
+        # Ended scopes report False above; a live one still has to be reachable
+        # through the handle it is presenting, or it cannot be used.
+        with _REGISTRY_LOCK:
+            return _SCOPE_REGISTRY.get(getattr(self, "_handle", None)) is state
 
     def __enter__(self) -> "AttestedIQWindowScope":
         self._state()
@@ -469,8 +509,16 @@ class AttestedIQWindowScope:
         # never minted -- two different failures deserve two different codes --
         # but the payload and the array are dropped, so an ended scope keeps no
         # raw IQ alive.
-        state = _SCOPE_REGISTRY.get(getattr(self, "_handle", None))
-        if state is not None and state.owner() is self:
+        #
+        # Found by identity, so a replaced handle cannot skip teardown; and the
+        # state lock is taken, so an in-progress write finishes before the scope
+        # can report itself ended. Exit therefore blocks behind a blocked write
+        # rather than racing it -- which is the contract, not a deadlock: §5.24
+        # says the scope stays active across the whole write.
+        state = self._own_state()
+        if state is None:
+            return False
+        with state.lock:
             state.active = False
             state.payload = None
             state.samples = None
@@ -540,16 +588,22 @@ class AttestedIQWindowScope:
             raise AttestationRefused(
                 ATTESTATION_WRITE_TARGET_INVALID,
                 f"a file descriptor is an int; got {type(fd).__name__}")
-        view = state.payload
-        total = 0
-        while total < view.nbytes:
-            written = os.write(fd, view[total:])
-            if written <= 0:
-                raise AttestationRefused(
-                    ATTESTATION_WRITE_INCOMPLETE,
-                    f"wrote {total} of {view.nbytes} bytes and then stalled")
-            total += written
-        return total
+        # The whole write happens under the state lock, and teardown acquires
+        # the same lock. A partial write to a full pipe blocks here for as long
+        # as it must, and an exit on another thread waits rather than marking
+        # the scope ended while these bytes are still crossing.
+        with state.lock:
+            state = self._state()      # re-resolved: the handle may have moved
+            view = state.payload
+            total = 0
+            while total < view.nbytes:
+                written = os.write(fd, view[total:])
+                if written <= 0:
+                    raise AttestationRefused(
+                        ATTESTATION_WRITE_INCOMPLETE,
+                        f"wrote {total} of {view.nbytes} bytes and then stalled")
+                total += written
+            return total
 
     def _payload_nbytes(self) -> int:
         """How many bytes a write would produce. A number, never a handle."""
@@ -1003,22 +1057,22 @@ class BoundedIQRing:
                     ATTESTATION_DIGEST_MISMATCH,
                     "the bytes presented do not digest to the object's own claim")
 
-            # Prune entries whose scope has been collected: the registry is
-            # process-local bookkeeping, not a cache, and it must not grow
-            # without bound across a long capture.
-            for dead in [h for h, st in _SCOPE_REGISTRY.items()
-                         if st.owner() is None]:
-                del _SCOPE_REGISTRY[dead]
-
             metadata = dict(authoritative)
             metadata["window_id"] = record.window_id
             self._attestations += 1
             handle = (f"att-{record.window_id}-{self._attestations}-"
                       f"{os.urandom(8).hex()}")
             scope = AttestedIQWindowScope(handle, _MINT_KEY)
-            _SCOPE_REGISTRY[handle] = _ScopeState(
-                owner=weakref.ref(scope), payload=payload, samples=samples,
-                metadata=metadata)
+            with _REGISTRY_LOCK:
+                # Prune entries whose scope has been collected: the registry is
+                # process-local bookkeeping, not a cache, and it must not grow
+                # without bound across a long capture.
+                for dead in [h for h, st in _SCOPE_REGISTRY.items()
+                             if st.owner() is None]:
+                    del _SCOPE_REGISTRY[dead]
+                _SCOPE_REGISTRY[handle] = _ScopeState(
+                    owner=weakref.ref(scope), payload=payload, samples=samples,
+                    metadata=metadata)
             return scope
 
     def recorded_window(self, window_id: str) -> Optional[Dict[str, Any]]:
