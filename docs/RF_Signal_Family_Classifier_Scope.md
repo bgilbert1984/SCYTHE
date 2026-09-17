@@ -3774,25 +3774,60 @@ before the ring can attest the whole object.
 
 ---
 
-### 5.25 — captured-window admission, and the persistence boundary — **PROPOSED**
+### 5.25 — captured-window admission, and the persistence boundary — **ACCEPTED**
 
 ```text
-Status:     PROPOSED 2026-09-16. Nothing here is in force.
-Authority:  None. This section is documentation only. It authorises no capture,
-            no persistence, no directory creation, no byte write, no lock, no
-            corpus, no tuner action and no NESDR operation, on proposal or on
-            merge, and it changes no behaviour.
-Order:      §13l. Proposal, review, explicit acceptance, acceptance commit,
-            merge, and only then a code-only implementation.
-Amends:     §5.20's `.iqc` header, which predates §5.23's capture plan and
-            §5.24's declared payload length.
-Drains:     Nothing on merge. `PENDING_AMENDMENTS` entry 14 drains only when
-            **admission and the persistence boundary land together**. A
-            proposed or accepted document drains nothing.
+Status:     ACCEPTED 2026-09-17. The boundary, the six authorities, the
+            exclusivity requirement, the two failure regimes and the ten
+            controls are in force as contract.
+Authority:  §5.25 is accepted. Acceptance is documentation only: it authorises
+            no capture, no persistence, no directory creation, no byte write,
+            no lock, no corpus, no tuner action and no NESDR operation, and it
+            changes no behaviour, because no code exists yet and none is
+            authorised by this commit.
+Order:      §13l. This is the acceptance commit. Merge follows it, and a
+            code-only implementation follows the merge.
+Amends:     §5.20's `.iqc` header -- exactly three new fields -- accepted here
+            as part of this section's substance, together with the `__exit__`
+            tightening of §5.24's structural check.
+Drains:     Nothing, and nothing on merge. `PENDING_AMENDMENTS` entry 14 drains
+            only when **admission and the persistence boundary land together**.
+            An accepted document drains nothing.
 ```
 
+*Proposed 2026-09-16 at `cba9d14`. Review returned an eighth control at
+`c708aeb`, then four corrections at `6824ee7` -- two of which were
+**self-contradictions in the proposal itself**: the header table required the
+stratum attestation while the derivation below it had no typed entrypoint, and
+the pre-create rule contradicted the §5.20 protocol quoted two paragraphs above
+it. The authority universe went from three to six, completeness gained
+exclusivity, and the amendment accounting came down from four new header fields
+to three. This is the acceptance commit.*
+
+**What this acceptance accepts, named rather than left to the merge.** §13l is
+explicit that a merge supplies no acceptance, so all three are listed:
+
+1. **§5.25 itself** — admission consuming the frozen envelope from the ownership
+   scope rather than being told; the six authorities declaring their header
+   bindings mechanically, with the emitted set required to **equal** their
+   union; the two failure regimes kept apart; the three-way length invariant as
+   proof of framing and not of content identity; and the ten controls.
+2. **The amendment to §5.20's `.iqc` header** — `declared_payload_bytes`,
+   `envelope_digest` and `capture_plan_digest`, and **only** those three. That
+   edits accepted text, and an acceptance silent about it would carry an
+   amendment into `main` on a merge.
+3. **The `__exit__` tightening of §5.24's structural check** — making the
+   payload-store exemption explicit to teardown rather than categorical. It is
+   implementation work with its own control and need not exist before
+   acceptance, but it is **authorised here rather than left implied**.
+
 *§5.24 established what a window **is**. Entry 14 is the different question of
-whether it **belongs**, and this proposes the boundary between the two.*
+whether it **belongs**, and this is the accepted boundary between the two.*
+
+**What acceptance does not start.** No implementation is authorised by this
+commit. Nothing may be built until this section has merged, and what is built
+then is a code-only slice — not capture, not persistence, not a directory, not a
+byte, not a lock and not a corpus.
 
 #### Attestation is not admission
 
