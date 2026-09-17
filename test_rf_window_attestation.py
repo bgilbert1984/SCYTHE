@@ -319,7 +319,7 @@ class TheBoundStateIsNotAnAttributeTests(unittest.TestCase):
         scope._handle = "att-forged"
         self.assertFalse(scope.active)
         with self.assertRaises(AttestationRefused) as caught:
-            scope._payload_nbytes()
+            _drain(scope)
         self.assertEqual(caught.exception.code, ATTESTATION_SCOPE_NOT_MINTED)
 
     def test_borrowing_another_live_scopes_handle_refuses(self):
@@ -351,7 +351,6 @@ class ScopeLifetimeTests(unittest.TestCase):
         self.assertFalse(attested.active)
         for call in (lambda: attested.window_id,
                      lambda: attested.to_dict(),
-                     lambda: attested._payload_nbytes(),
                      lambda: _drain(attested)):
             with self.assertRaises(AttestationRefused) as caught:
                 call()
@@ -474,10 +473,8 @@ class TeardownIsTerminalTests(unittest.TestCase):
         scope._handle = genuine
         self.assertFalse(scope.active)
         with self.assertRaises(AttestationRefused) as caught:
-            scope._payload_nbytes()
-        self.assertEqual(caught.exception.code, ATTESTATION_SCOPE_NOT_ACTIVE)
-        with self.assertRaises(AttestationRefused):
             _drain(scope)
+        self.assertEqual(caught.exception.code, ATTESTATION_SCOPE_NOT_ACTIVE)
 
     def test_a_replaced_handle_still_leaves_no_raw_iq_behind(self):
         ring = _ring()
@@ -718,8 +715,7 @@ class NoPayloadHandleEscapesTests(unittest.TestCase):
                     if not callable(getattr(attested, name, None))]
         for value in held:
             self.assertNotIsInstance(value, self.PAYLOAD_TYPES)
-        for call in (lambda: attested._payload_nbytes(),
-                     lambda: _drain(attested)):
+        for call in (lambda: _drain(attested),):
             with self.assertRaises(AttestationRefused):
                 call()
 
@@ -728,7 +724,10 @@ class NoPayloadHandleEscapesTests(unittest.TestCase):
         would be the handle again with an integer in front of it."""
         ring = _ring()
         with ring.attest_window(_window(ring)) as attested:
-            expected = attested._payload_nbytes()
+            # Derived from the attested metadata, which is where a writer's
+            # canonical header gets it: the ring's authoritative record, not
+            # the payload object's own account of itself.
+            expected = attested.sample_count * BYTES_PER_SAMPLE
             written, payload = _drain(attested)
         self.assertEqual(written, expected)
         self.assertEqual(len(payload), expected)
@@ -778,7 +777,8 @@ class MeasuredCostTests(unittest.TestCase):
         try:
             base = tracemalloc.get_traced_memory()[0]
             with ring.attest_window(window) as attested:
-                self.assertEqual(attested._payload_nbytes(), window_bytes)
+                self.assertEqual(attested.sample_count * BYTES_PER_SAMPLE,
+                                 window_bytes)
                 _current, peak = tracemalloc.get_traced_memory()
         finally:
             tracemalloc.stop()
@@ -791,7 +791,8 @@ class RestrictedAccessorTests(unittest.TestCase):
     claimed is what is checked: no public accessor, and every production
     reference to the private ones statically restricted."""
 
-    ACCESSORS = ("_write_payload_to_fd", "_payload_nbytes")
+    ACCESSORS = ("_write_payload_to_fd",)
+    DELETED = ("_payload_nbytes",)
     ALLOWED = {"rf_iq_ring.py"}
 
     def _production_modules(self):
@@ -821,6 +822,142 @@ class RestrictedAccessorTests(unittest.TestCase):
                 offenders[path.name] = hits
         self.assertEqual(offenders, {},
                          f"payload accessor referenced outside {self.ALLOWED}")
+
+    def test_the_deleted_accessor_has_not_come_back(self):
+        """Entry 16 drained by deletion, not by rehabilitation.
+
+        `_payload_nbytes()` had no production caller, read
+        `state.payload.nbytes` outside the state lock, and added a second
+        private surface to police. A writer derives the declared length from
+        attested metadata instead, which is stronger: the expected count comes
+        from the ring's authoritative record and the completed write reconciles
+        against it independently.
+
+        Checked at runtime **and** statically, because an attribute check alone
+        would miss a method defined under a different name that returns the
+        same thing -- and a source check alone would miss one added by
+        assignment.
+        """
+        ring = _ring()
+        with ring.attest_window(_window(ring)) as attested:
+            for name in self.DELETED:
+                self.assertFalse(
+                    hasattr(attested, name),
+                    f"{name} was deleted under entry 16 and has returned")
+                self.assertNotIn(name, dir(AttestedIQWindowScope))
+        source = pathlib.Path("rf_iq_ring.py").read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        defined = {node.name for node in ast.walk(tree)
+                   if isinstance(node, ast.FunctionDef)}
+        for name in self.DELETED:
+            self.assertNotIn(name, defined, f"{name} is defined again")
+
+    def test_payload_reads_are_structurally_guarded(self):
+        """A **structural tripwire**, and deliberately not the concurrency proof.
+
+        What it establishes: every read of `.payload` in this class happens
+        inside a `with <state>.lock:` block over *the same variable* whose
+        payload is read, and every **load** is preceded inside that block by a
+        `_state()` re-resolution. A teardown **store** -- clearing the payload
+        -- is exempt from re-resolution, because re-resolving would raise on the
+        very scope being ended.
+
+        What it does **not** establish: that the lock is the right one at
+        runtime, that the object was not aliased before the block, or that exit
+        and the operation are genuinely mutually exclusive. Those are live
+        properties and `test_an_exit_waits_for_a_blocked_write_to_finish` is
+        their proof; this only stops the shape regressing between runs.
+
+        It replaced a check that matched the method *name*: a control re-adding
+        the identical body as `_payload_size` failed zero tests. Name-matching
+        polices a spelling, not a hazard.
+        """
+        tree = ast.parse(pathlib.Path("rf_iq_ring.py").read_text(encoding="utf-8"))
+        scope_class = next(
+            node for node in ast.walk(tree)
+            if isinstance(node, ast.ClassDef)
+            and node.name == "AttestedIQWindowScope")
+
+        offenders = []
+        guarded_loads = 0
+
+        def lock_holder(item):
+            """The variable X in `with X.lock:`, or None."""
+            expr = item.context_expr
+            if (isinstance(expr, ast.Attribute) and expr.attr == "lock"
+                    and isinstance(expr.value, ast.Name)):
+                return expr.value.id
+            return None
+
+        def resolution_lines(body, held):
+            """Lines where `held = self._state()` happens in this block."""
+            lines = []
+            for node in ast.walk(ast.Module(body=body, type_ignores=[])):
+                if (isinstance(node, ast.Assign)
+                        and any(isinstance(t, ast.Name) and t.id == held
+                                for t in node.targets)
+                        and isinstance(node.value, ast.Call)
+                        and isinstance(node.value.func, ast.Attribute)
+                        and node.value.func.attr == "_state"):
+                    lines.append(node.lineno)
+            return lines
+
+        def walk(node, method, held, resolved_at):
+            if isinstance(node, ast.With):
+                for item in node.items:
+                    holder = lock_holder(item)
+                    if holder is not None:
+                        inner_resolved = resolution_lines(node.body, holder)
+                        for child in node.body:
+                            walk(child, method, holder,
+                                 min(inner_resolved) if inner_resolved else None)
+                        return
+                for child in node.body:
+                    walk(child, method, held, resolved_at)
+                return
+            if isinstance(node, ast.Attribute) and node.attr == "payload":
+                nonlocal guarded_loads
+                owner = (node.value.id if isinstance(node.value, ast.Name)
+                         else "<expression>")
+                if held is None:
+                    offenders.append((method, node.lineno, "outside any state lock"))
+                elif owner != held:
+                    offenders.append((method, node.lineno,
+                                      f"guarded on {held} but reads {owner}"))
+                elif isinstance(node.ctx, ast.Load):
+                    if resolved_at is None or node.lineno < resolved_at:
+                        offenders.append((method, node.lineno,
+                                          "no _state() re-resolution before the read"))
+                    else:
+                        guarded_loads += 1
+            for child in ast.iter_child_nodes(node):
+                walk(child, method, held, resolved_at)
+
+        methods = 0
+        for node in scope_class.body:
+            if isinstance(node, ast.FunctionDef):
+                methods += 1
+                for child in node.body:
+                    walk(child, node.name, None, None)
+
+        self.assertGreater(methods, 5, "the class was not actually walked")
+        self.assertGreater(guarded_loads, 0,
+                           "no guarded payload load was found, so this check "
+                           "would pass on a class that never touches a payload")
+        self.assertEqual(
+            offenders, [],
+            "; ".join(f"{name}:{line} {why}" for name, line, why in offenders))
+
+    def test_a_writer_can_derive_the_declared_length_without_it(self):
+        """The replacement, exercised: length from the attested record, and the
+        written count reconciled against it."""
+        ring = _ring()
+        with ring.attest_window(_window(ring)) as attested:
+            declared = attested.sample_count * BYTES_PER_SAMPLE
+            written, payload = _drain(attested)
+        self.assertEqual(declared, CAPACITY * BYTES_PER_SAMPLE)
+        self.assertEqual(written, declared)
+        self.assertEqual(len(payload), declared)
 
     def test_the_check_would_notice_a_new_call_site(self):
         """A scanner that found nothing anywhere would pass vacuously."""
