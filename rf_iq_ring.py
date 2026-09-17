@@ -605,9 +605,20 @@ class AttestedIQWindowScope:
                 total += written
             return total
 
-    def _payload_nbytes(self) -> int:
-        """How many bytes a write would produce. A number, never a handle."""
-        return self._state().payload.nbytes
+    # There is deliberately no `_payload_nbytes()`. It existed, had no
+    # production caller, read `state.payload.nbytes` outside the state lock --
+    # so a concurrent exit produced an incidental `AttributeError` rather than
+    # the declared refusal -- and added a second private surface for the static
+    # call-site check to police. `PENDING_AMENDMENTS` entry 16 offered two
+    # repairs and this is the other one: **a method nobody calls is deleted
+    # rather than rehabilitated.**
+    #
+    # A writer needing the declared payload length derives it from the
+    # attested metadata -- `sample_count * BYTES_PER_SAMPLE` -- while building
+    # its canonical header, and then requires `_write_payload_to_fd` to return
+    # exactly that. That is strictly stronger than asking the payload object
+    # how large it is: the expected length comes from the ring's authoritative
+    # record, and the completed write reconciles against it independently.
 
     def __repr__(self) -> str:
         handle = getattr(self, "_handle", "<replaced>")
