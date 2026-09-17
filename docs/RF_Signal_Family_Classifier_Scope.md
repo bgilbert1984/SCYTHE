@@ -3903,7 +3903,7 @@ one.
 
 #### What the implementation must prove, stated as controls
 
-Seven mutations, each failing its own test and no others:
+Eight mutations, each failing its own test and no others:
 
 | | mutation | what it would otherwise hide |
 | --- | --- | --- |
@@ -3914,9 +3914,33 @@ Seven mutations, each failing its own test and no others:
 | 5 | admission performed after filesystem creation | a precondition refusal leaving an artefact |
 | 6 | scope type, provenance and liveness checked after opening the target | the same, one layer earlier |
 | 7 | the categorical payload-store exemption reintroduced | the structural check licensing a store that is not teardown |
+| 8 | a header omitting one of its required bindings | the amendment itself going unenforced |
 
 Control 7 is why the tightening below is **in this contract rather than in the
 queue**: the requirement and the thing that enforces it arrive together.
+
+**Control 8 exists because the first seven mutate everything except the
+amendment this section makes.** A header that simply omitted the capture-plan
+digest would satisfy all of 1–7: the byte counts still agree, admission still
+refuses a foreign chain, the ordering is still right. The amendment would be
+accepted text describing a field nobody emitted.
+
+And the check it discriminates must not be a **hand-written list of required
+fields**. That is the shape entry 11 began as — *a test over the fields present
+is silent about a field that is missing* — and the repair is the one
+`SCYTHE_VERDICT_VOCABULARIES.md` §3 already made: derive the required set from
+its sources rather than transcribe it.
+
+| source | contributes |
+| --- | --- |
+| the attested scope | every field it exposes as authoritative metadata |
+| the corpus ownership scope | the lock identity and every digest the lock declares |
+| the module | the format version, the header schema, the strata-definition revision |
+
+A field added to `AttestedIQWindowScope`'s metadata, or a digest added to
+`PromotionCorpusLock`, therefore becomes required **without anyone editing a
+list** — and control 8 fails if the header stops emitting it. A hand-written
+list would pass, having been written before the field existed.
 
 #### One tightening owed before this relies on §5.24's structural check
 
