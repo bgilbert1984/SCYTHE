@@ -219,13 +219,22 @@ not drain.** Review of the merged code found two facts, and both are still true:
 steps 5–8 do not exist — so what landed is a temporary-file producer, not
 durable corpus membership.
 
-**§5.26 is PROPOSED as of 2026-09-17** and proposes the repair: a scope that
-reads the lock out of the corpus namespace rather than accepting one, sequence
-state recovered from the namespace rather than started at zero, a bound clock
-provider, and one publication path through §5.20 step 8 with the creation
-primitive call-site restricted so no second writer can reach it. **A proposal
-drains nothing**, and this entry drains only when admission sits on the **only**
-path to membership and that path verifies before it counts.
+**§5.26 is PROPOSED as of 2026-09-17**, revised the same day after review. It
+proposes: a scope that reads the lock out of a corpus manifest rather than
+accepting one; the **corpus-open act** that writes that manifest, without which
+the scope would be another gate on no path; **single-lifetime capture**, because
+a sample index means nothing across two rings and multi-lifetime segments would
+weaken global non-overlap into within-lifetime non-overlap without amending the
+statistical contract; deterministic validated recovery in place of "the most
+recent file"; a membership accounting record, so that a file which merely parses
+is not a member; a capability construction around an opaque directory descriptor
+rather than a call-site scan, which cannot prove unavoidability on its own; and
+§5.20 steps 5–8 with `link`/`unlink` as the no-replacement primitive, `rename`
+having been measured to replace silently.
+
+**A proposal drains nothing.** This entry drains when the corpus-open act and
+the complete publisher **both** exist, and admission sits on the only path to
+membership — a path that verifies before it counts.
 
 What is missing is one gate, at one place: after full-object ring attestation
 and before a window is persisted, a window whose `signal_chain_hash` is not a
