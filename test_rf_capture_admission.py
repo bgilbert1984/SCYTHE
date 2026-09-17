@@ -10,6 +10,7 @@ descriptor, which is what a writer does, and nothing is persisted.
 """
 
 import ast
+import dataclasses
 import json
 import os
 import pathlib
@@ -680,6 +681,43 @@ class HeaderAuthorityTests(CaptureFixture):
                 check_header_completeness(header, "GAIN_STEPS")
         self.assertEqual(caught.exception.code, ADMISSION_BINDING_NOT_EMITTED)
 
+    def test_the_typed_entrypoint_declares_the_stratum_and_the_members_fields(self):
+        """Derived from the member type, and carrying **nothing besides**.
+
+        Written over `dataclasses.fields` rather than as a list of names, so it
+        is a check about what the declaration may contain and not about how a
+        particular field is spelled. Any discriminator re-added beside the
+        stratum -- under any name -- fails here, which is what makes this a
+        control over the hazard rather than over a word.
+        """
+        for stratum, member in sorted(STRATUM_ATTESTATION.items()):
+            with self.subTest(stratum=stratum):
+                expected = ("stratum",) if member is None else (
+                    ("stratum",) + tuple(f"attestation_{f.name}"
+                                         for f in dataclasses.fields(member)))
+                self.assertEqual(
+                    admission._typed_entrypoint_declares(stratum), expected)
+
+    def test_the_stratum_alone_selects_the_attestation_member(self):
+        """Why a discriminator in the header would be repeating itself.
+
+        A reader holding the parsed header has `stratum` in the same instant as
+        every other field -- the header is one canonical JSON object, not a
+        stream -- and the union is closed. So the member type is determined
+        with nothing further to consult, and a field naming it could only ever
+        agree or disagree.
+        """
+        header = self._header()
+        self.assertEqual(STRATUM_ATTESTATION[header["stratum"]],
+                         GainStepAttestation)
+        repeats = [field for field in header
+                   if field != "stratum"
+                   and header[field] in {m.__name__ for m in
+                                         STRATUM_ATTESTATION.values() if m}]
+        self.assertEqual(repeats, [],
+                         f"{repeats} name the member type the stratum already "
+                         "selected, inside bytes hashed into file_sha256")
+
     def test_two_authorities_supplying_one_field_refuses(self):
         header, claimed = {}, {}
         admission._merge(header, "first", {"corpus_id": "a"}, claimed)
@@ -858,7 +896,6 @@ class TypedBoundaryTests(CaptureFixture):
                 create_target=_Creator(self.devnull()), now=NOW)
         header = json.loads(published.header_bytes)
         self.assertEqual(header["stratum"], "RETUNE_TRANSIENTS")
-        self.assertEqual(header["attestation_kind"], "RetuneAttestation")
         self.assertEqual(header["attestation_centre_hz_after"], 433_200_000.0)
         self.assertNotIn("attestation_gain_db_after", header)
 

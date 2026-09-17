@@ -38,23 +38,38 @@ would hold -- the frozen lock and the retention policy -- passed nominally, so
 the envelope is still read out of the frozen lock and never supplied by the
 caller as an answer or as a set.
 
-**Two limits, named rather than left to be found.**
+**This is not yet an enforced boundary, and two blockers say why.** Recorded
+here rather than left to be rediscovered, because a module that reads as
+finished is how an obligation ages into fiction.
 
-*Which lock.* Admission is never told the answer and never told the set -- and
-it is not yet told **which lock**, either. The frozen digests are recomputed
-rather than read, so a lock whose digests disagree with the objects beside it
-refuses; but a caller who builds a lock from their own envelope gets consistent
-digests, and nothing here can tell that lock from the corpus's. What makes a
-lock *this corpus's* lock is the ownership scope that owns the namespace, which
-is §5.20's and unbuilt. So the gate is real against a window from a foreign
-chain under the corpus's own lock, and is not a defence against a substituted
-corpus.
+*It does not consume an ownership scope, so it is still told the set.*
+Admission is never handed an `admitted: bool` and never handed a list of
+chains, and the lock's frozen digests are recomputed rather than read -- so a
+lock whose digests disagree with the objects beside it refuses. That is not
+enough. A caller can build a **self-consistent** lock from its own envelope,
+and nothing here distinguishes it from the corpus's. The caller therefore still
+supplies the set the answer is drawn from, wrapped in a valid object, which is
+the thing §5.25 expressly forbids. What must bind the lock, the corpus
+identity, the envelope and plan, the namespace, the retention policy, the
+sequence state and the clock is a production ownership scope. It is unbuilt,
+and these entrypoints must stop taking a free-standing lock when it exists.
 
-*Which clock.* `now` is a required keyword with no default, so there is no
-hidden clock -- and it is the **caller's** clock, not an authority. The deadline
-it is checked against is the lock's, and the capture times in the header name
-the ring's clock explicitly. Nothing names the clock that decided the deadline
-had not passed, because nothing here can.
+*Nothing is compelled to pass through it.* There is no ownership scope, no
+namespace, no production directory and no publisher, so this gate currently
+refuses nothing that could otherwise become corpus -- which is §5.25's own
+words for what cannot drain entry 14: *"admission without a writer refuses
+nothing that could otherwise happen."*
+
+*And `now` is the caller's clock, not an authority.* A required keyword with no
+default prevents a **hidden** clock; it does not establish authority over one.
+The ownership scope must supply the time source and the header must name it, as
+the header already names the ring's clock for the capture times. A production
+caller should not be supplying a timestamp per write.
+
+Steps 1-4 of §5.20's protocol and the reconciliation are here. Durability,
+no-replacement publication, the directory `fsync`, readback, `file_sha256` and
+filename agreement, and counting only after verification are not -- so what
+this produces is a temporary-file producer, not durable corpus membership.
 """
 
 from __future__ import annotations
@@ -386,11 +401,24 @@ def _typed_entrypoint_declares(stratum: str) -> Tuple[str, ...]:
     Derived from the member type rather than transcribed, so a field added to
     `GainStepAttestation` becomes a required header binding without anyone
     editing a list -- and the header stops being emittable until it is emitted.
+
+    **The stratum, and nothing that repeats it.** An earlier revision also
+    emitted `attestation_kind`, naming the member type. It was declared, so
+    exclusivity permitted it, and it was still wrong: the union is closed and
+    the stratum selects the member, so the field repeated an interpretation the
+    header had already fixed -- inside bytes that are hashed into
+    `file_sha256`. A redundant hashed discriminator can disagree with the fact
+    it repeats, and two spellings of one attestation are two canonical
+    identities for one window.
+
+    The schema-version analogy that was offered for it does not carry. A schema
+    version tells a parser **how to interpret** the record; `attestation_kind`
+    repeated an interpretation `stratum` had already selected.
     """
     member = STRATUM_ATTESTATION.get(stratum)
     if member is None:
         return ("stratum",)
-    return ("stratum", "attestation_kind") + tuple(
+    return ("stratum",) + tuple(
         f"attestation_{field.name}" for field in dataclasses.fields(member))
 
 
@@ -515,7 +543,6 @@ def derive_canonical_header(*, metadata: Mapping[str, Any],
     entrypoint: Dict[str, Any] = {"stratum": stratum}
     member = STRATUM_ATTESTATION.get(stratum)
     if member is not None:
-        entrypoint["attestation_kind"] = member.__name__
         for field in dataclasses.fields(member):
             entrypoint[f"attestation_{field.name}"] = getattr(
                 attestation, field.name)
