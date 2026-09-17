@@ -9,6 +9,9 @@ statement about the past.
 import ast
 import json
 import os
+import queue
+import threading
+import time
 import pathlib
 import pickle
 import tracemalloc
@@ -447,6 +450,212 @@ class NoPayloadEscapesTests(unittest.TestCase):
                     self.assertIsInstance(
                         value, (int, float, str, bool, type(None)),
                         f"{key} carries a {type(value).__name__}")
+
+
+class TeardownIsTerminalTests(unittest.TestCase):
+    """Two lifetime failures the first implementation had, both demonstrated
+    before they were repaired.
+
+    Immutable backing and an opaque handle closed mutation and substitution.
+    They left teardown resolving through the same mutable field it was meant to
+    be immune to, and left a blocked write holding a local view across an exit.
+    """
+
+    def test_a_replaced_handle_cannot_survive_or_be_restored_after_exit(self):
+        """Replacement must stay a refusal. Resolving teardown through the
+        handle turned it into delayed capability recovery: the genuine entry
+        stayed live, and restoring the field brought the scope back with its
+        payload intact."""
+        ring = _ring()
+        with ring.attest_window(_window(ring)) as scope:
+            genuine = scope._handle
+            scope._handle = "replacement"
+
+        scope._handle = genuine
+        self.assertFalse(scope.active)
+        with self.assertRaises(AttestationRefused) as caught:
+            scope._payload_nbytes()
+        self.assertEqual(caught.exception.code, ATTESTATION_SCOPE_NOT_ACTIVE)
+        with self.assertRaises(AttestationRefused):
+            _drain(scope)
+
+    def test_a_replaced_handle_still_leaves_no_raw_iq_behind(self):
+        ring = _ring()
+        with ring.attest_window(_window(ring)) as scope:
+            genuine = scope._handle
+            scope._handle = "replacement"
+        state = ring_module._SCOPE_REGISTRY.get(genuine)
+        self.assertIsNotNone(state)
+        self.assertFalse(state.active)
+        self.assertIsNone(state.payload)
+        self.assertIsNone(state.samples)
+
+    def test_teardown_finds_the_scope_by_identity_not_by_handle(self):
+        ring = _ring()
+        scope = ring.attest_window(_window(ring))
+        genuine = scope._handle
+        scope._handle = "somewhere-else"
+        scope.__exit__(None, None, None)
+        self.assertFalse(ring_module._SCOPE_REGISTRY[genuine].active)
+
+
+class WriteAndExitAreMutuallyExclusiveTests(unittest.TestCase):
+    """§5.24: the scope stays active across the whole write.
+
+    A liveness check taken once, followed by a blocking partial write over a
+    local view, let the evidence bytes cross the boundary after the scope
+    reported itself ended -- the lifetime inversion in time rather than in
+    reference.
+    """
+
+    WRITE_GATE_TIMEOUT = 2.0
+
+    def test_an_exit_waits_for_a_blocked_write_to_finish(self):
+        """The claimed ordering, tested deterministically::
+
+            write acquires the scope-state lock
+                -> exit cannot deactivate the scope
+                -> write completes
+                -> exit acquires the lock and terminates the scope
+
+        `os.write` is gated by an event rather than by a full pipe. An earlier
+        version blocked a real kernel write on a shrunken pipe, and when the
+        assertion failed the test aborted before draining it -- stranding a
+        non-daemon thread on `os.write` so the suite could never exit. A control
+        that converts a crisp assertion into an indefinite hang has produced no
+        result at all.
+        """
+        ring = _ring()
+        scope = ring.attest_window(_window(ring))
+        scope.__enter__()
+
+        entered_write = threading.Event()
+        release_write = threading.Event()
+        exit_finished = threading.Event()
+        errors: "queue.Queue" = queue.Queue()
+        real_write = ring_module.os.write
+
+        def blocked_write(fd, view):
+            entered_write.set()
+            if not release_write.wait(timeout=self.WRITE_GATE_TIMEOUT):
+                raise TimeoutError("the test did not release the write")
+            return len(view)
+
+        def run_write():
+            try:
+                scope._write_payload_to_fd(123)
+            except BaseException as exc:            # noqa: BLE001 - reported below
+                errors.put(exc)
+
+        def run_exit():
+            try:
+                scope.__exit__(None, None, None)
+            except BaseException as exc:            # noqa: BLE001 - reported below
+                errors.put(exc)
+            finally:
+                exit_finished.set()
+
+        writer = threading.Thread(target=run_write, daemon=True)
+        exiter = threading.Thread(target=run_exit, daemon=True)
+        ring_module.os.write = blocked_write
+        try:
+            writer.start()
+            self.assertTrue(entered_write.wait(timeout=self.WRITE_GATE_TIMEOUT),
+                            "the write never started")
+            exiter.start()
+            # The bytes are still crossing, so the scope has not ended.
+            self.assertFalse(exit_finished.wait(timeout=0.3),
+                             "the scope ended while a write held the payload")
+            self.assertTrue(scope.active)
+        finally:
+            # Released whatever happened above, so a failed assertion cannot
+            # strand a thread. Daemon threads are the containment belt, not the
+            # cleanup mechanism -- a leaked daemon would turn a deadlock into a
+            # green suite, which is why both are joined and checked below.
+            release_write.set()
+            writer.join(timeout=5)
+            exiter.join(timeout=5)
+            ring_module.os.write = real_write
+
+        self.assertFalse(writer.is_alive(), "the write thread did not terminate")
+        self.assertFalse(exiter.is_alive(), "the exit thread did not terminate")
+        if not errors.empty():
+            raise errors.get()
+        self.assertTrue(exit_finished.is_set())
+        self.assertFalse(scope.active)
+
+    def test_a_partial_write_is_completed_internally(self):
+        """The loop keeps calling until the payload is done, rather than
+        handing back a resumable offset."""
+        ring = _ring()
+        scope = ring.attest_window(_window(ring))
+        scope.__enter__()
+        calls = []
+        real_write = ring_module.os.write
+
+        def short_write(fd, view):
+            calls.append(len(view))
+            return min(len(view), 1024)
+
+        ring_module.os.write = short_write
+        try:
+            written = scope._write_payload_to_fd(123)
+        finally:
+            ring_module.os.write = real_write
+            scope.__exit__(None, None, None)
+        expected = CAPACITY * BYTES_PER_SAMPLE
+        self.assertEqual(written, expected)
+        self.assertGreater(len(calls), 1, "a short write was not resumed")
+        self.assertEqual(calls[0], expected)
+        self.assertEqual(sum(min(n, 1024) for n in calls), expected)
+
+    def test_a_stalled_write_refuses_rather_than_looping(self):
+        ring = _ring()
+        scope = ring.attest_window(_window(ring))
+        scope.__enter__()
+        real_write = ring_module.os.write
+        ring_module.os.write = lambda fd, view: 0
+        try:
+            with self.assertRaises(AttestationRefused) as caught:
+                scope._write_payload_to_fd(123)
+        finally:
+            ring_module.os.write = real_write
+            scope.__exit__(None, None, None)
+        self.assertEqual(caught.exception.code,
+                         ring_module.ATTESTATION_WRITE_INCOMPLETE)
+
+    def test_a_write_after_an_exit_refuses_rather_than_racing(self):
+        ring = _ring()
+        scope = ring.attest_window(_window(ring))
+        with scope:
+            pass
+        with self.assertRaises(AttestationRefused) as caught:
+            _drain(scope)
+        self.assertEqual(caught.exception.code, ATTESTATION_SCOPE_NOT_ACTIVE)
+
+    def test_concurrent_mints_do_not_corrupt_the_registry(self):
+        """The registry is one module-global dictionary and rings do not share
+        a lock, so minting from several threads writes it concurrently."""
+        rings = [_ring(chain=f"blake2s:chain-{index}") for index in range(4)]
+        scopes, errors = [], []
+        barrier = threading.Barrier(len(rings))
+
+        def mint(ring):
+            try:
+                barrier.wait(5)
+                for _ in range(8):
+                    with ring.attest_window(_window(ring)) as attested:
+                        scopes.append(attested.window_id)
+            except Exception as exc:       # pragma: no cover - failure path
+                errors.append(exc)
+
+        threads = [threading.Thread(target=mint, args=(ring,)) for ring in rings]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(20)
+        self.assertEqual(errors, [])
+        self.assertEqual(len(scopes), len(rings) * 8)
 
 
 class NoPayloadHandleEscapesTests(unittest.TestCase):
