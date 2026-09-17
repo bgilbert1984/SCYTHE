@@ -3758,9 +3758,12 @@ An explicit acceptance decision and an acceptance commit, then merge, then a
 code-only implementation. **Entry 9 drained at `9b0bb06`**, when the operation, its immutable backing and
 its opaque bound state landed together — an attestation over an array whose
 write flag can be restored, or over a payload reference a caller can replace, is
-a verdict about the past again, one layer down. Both of those were written here
-as hazards and both then occurred: the returned view escaped, and teardown
-resolved through the very field the opaque handle exists to resist.
+a verdict about the past again, one layer down. **The section had already named the
+governing hazards — an unscoped payload lifetime and substitution through
+mutable scope state — yet the first implementation still instantiated both in
+forms the prose had not operationally excluded: a returned view escaped the
+scope, and teardown resolved through the very field the opaque handle existed to
+resist. Naming a hazard did not make the implementation immune to it.**
 
 The implementation carries a measured peak-memory test, and a static call-site
 check over the private payload accessor. Neither is inferable from the code

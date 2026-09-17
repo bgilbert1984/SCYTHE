@@ -324,7 +324,12 @@ complete**, in the order they were discovered:
 
 Every one of the three survived a completeness claim, and every one was found by
 adversarial inspection or by execution rather than by the code reading
-correctly. **That is why the measured checks and the discriminating controls are
+correctly. §5.24 had named the governing hazards — an unscoped payload lifetime,
+and substitution through mutable scope state — and the first implementation
+satisfied their **surface vocabulary** rather than their adversarial outcomes:
+immutable backing worked and a returned view escaped anyway; opaque state
+resisted ordinary replacement and teardown trusted the replaceable handle
+anyway. **That is why the measured checks and the discriminating controls are
 part of the implementation rather than commentary on it.** A memory figure that
 is asserted is a figure nobody has checked; a lifetime that is argued is a
 lifetime nobody has raced.
