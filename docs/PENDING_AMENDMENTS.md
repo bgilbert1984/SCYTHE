@@ -145,59 +145,6 @@ exactly what a queue is for.
 
 ---
 
-## 9. `RF_Signal_Family_Classifier_Scope.md` §5.20 — publication step 1 asks for an attestation that does not exist
-
-**Trigger:** when the persistence slice opens, or when §5.20 next opens for a
-reason of its own — whichever is first. It must land before a captured byte is
-written.
-
-§5.20's publication protocol step 1 reads *"Hold the corpus ownership scope and
-**verify the `IQWindow` against the live ring**."* No operation does that.
-
-`BoundedIQRing.verify_window(window_id, digest)` takes **two strings**. It
-proves this ring issued a window with that ID and that digest, under the current
-epoch, and has not evicted it. It never sees an `IQWindow`, so a caller holding
-a genuine pair can present a different object — different samples, different
-metadata, a different interval — and verification returns `WINDOW_VERIFIED`.
-Phase 3a demonstrates this rather than describing it
-(`test_a_different_object_verifies_on_a_genuine_pair_of_strings`), and
-`VERIFICATION_BINDS` / `VERIFICATION_DOES_NOT_BIND` say so in the module.
-
-That is sufficient for its existing job — refusing a `source_window_hash` no
-window ever carried. It is **not** sufficient at step 1, where the object's
-bytes are about to become a file. The gap is exactly the one a two-string check
-looks like it has already closed.
-
-What §5.20 needs instead is an authoritative ring operation over the **exact
-nominal object**: `type(x) is IQWindow`, every metadata field compared against
-the issued record, the sample interval, and a digest **recomputed from the bytes
-being published** rather than read off the object. Phase 3a exposes what that
-operation will compare against — `first_sample_index`, `last_sample_index`,
-`recorded_window()` — and deliberately does not build it, because it is capture
-machinery and Phase 3a excludes capture.
-
-Recorded here rather than corrected in place because §5.20 is accepted text.
-
-**§5.24 carries the operation and was accepted 2026-09-16.** It finds that the
-obvious shape — a function returning a verdict — reintroduces the hole, because
-a verdict about a mutable object is a statement about the past; so attestation
-mints a live scope that binds one immutable sample reference, and §5.20's typed
-writers take that scope rather than an exact `IQWindow`. It also finds that
-`samples.setflags(write=False)` is discouragement: an owning NumPy array can be
-made writeable again, which was **run rather than assumed**.
-
-**This entry stays open**, and acceptance does not narrow that. It drains when
-five things land **together**: the code implementation, the immutable backing,
-the opaque bound state, the measured peak-memory check and the static accessor
-check. An attestation over an array whose write flag can be restored, or over a
-payload reference a caller can replace, is the same defect one layer down; and a
-memory claim inferred rather than measured is how the first draft of §5.24 came
-to say something false. Neither a proposal nor an accepted contract satisfies
-anything here — entry 8 records the first reading and entry 11 demonstrated the
-second, twice.
-
----
-
 ## 10. `THERMAL_NO_INPUT` and `RECEIVER_SPURS` may be one population counted twice
 
 **Trigger:** before **either** stratum is captured — not before whichever is
@@ -284,6 +231,47 @@ waits exactly as long as the prose does. The persistence margin and the 7-of-8
 requirement were on the same catalogue-analysis boundary and are now enforced by
 `SpurPersistenceObservation`; slope enforcement is what remains owed.
 
+---
+
+## 16. `_payload_nbytes()` can race teardown
+
+**Trigger:** before `_payload_nbytes()` gains any production caller. Not before
+the persistence slice — before the first line of it that calls this method.
+
+`AttestedIQWindowScope._payload_nbytes()` resolves its state through `_state()`,
+which establishes provenance and liveness, and then reads
+`state.payload.nbytes` **outside the scope-state lock**. A concurrent
+`__exit__` nulls `payload` between those two steps, so the caller gets an
+incidental `AttributeError` rather than the declared
+`ATTESTATION_SCOPE_NOT_ACTIVE`.
+
+The repair, either half of which drains this:
+
+> Before `_payload_nbytes()` gains any production caller, it must either be
+> **removed**, or acquire the scope-state lock and **re-resolve provenance and
+> liveness under that lock**. Concurrent exit must produce the declared
+> attestation refusal, never an incidental `AttributeError`.
+
+**Deleting the unused method is a valid drain.** No method needs rehabilitation
+merely because it exists, and a size accessor the writer turns out not to want
+is one fewer surface for the static call-site check to confine.
+
+What this entry is not:
+
+- It does **not** reopen entry 9. The two holes that entry names are closed, and
+  this is a third path that exposes no payload.
+- It does **not** claim a payload or persistence failure. The method returns an
+  integer, has no production caller, and is statically confined to `rf_iq_ring`.
+- It does **not** block work unrelated to a production caller.
+- It **becomes a predecessor of entry 14** if entry 14's writer intends to call
+  it. Otherwise it drains by deletion whenever someone reaches it.
+
+*Found by inspecting the merged repair rather than by the repair itself: the
+write was the path under examination, and this is the same race one call
+shallower. Queued rather than folded into entry 9's drain record, because a
+conditional obligation left inside a drain record waits exactly as long as the
+record does — which is what entry 15 exists to avoid.*
+
 ## Drain record
 
 A landed entry leaves the list above. It is recorded here in one line, because
@@ -306,6 +294,46 @@ what is still pending. This is a record, not a queue: nothing here is waiting.
 | 12 — six stale claims in accepted §5.19 and §5.20, four listed and two found | `RF_Signal_Family_Classifier_Scope.md` §5.19, §5.20 | `d0c030e` |
 | 13 — two stale claims in code, and a test that guarded a citation | `rf_null_corpus.py`, `rf_validation_manifest.py` | `623669d` |
 | 11 — the lock froze the method and not the instrument | `rf_promotion_envelope.py`, `rf_corpus_vocabulary.py`, `rf_validation_manifest.py` | `9e0efc8` |
+| 9 — publication step 1 asked for an attestation that did not exist | `rf_iq_ring.py`, `test_rf_window_attestation.py`, §5.24's implementation | `9b0bb06` |
+
+Entry 9 is the one to reread before reporting a part complete. **Drained at
+`9b0bb06`**, after §5.24's five parts landed together: the attestation
+operation, the immutable backing, the opaque bound state, the measured
+peak-memory check and the static accessor check. §5.20's publication step 1 now
+has the operation it asks for, and the scope stays active across the complete
+payload action and becomes terminal on exit.
+
+**Three corrections were found after the part carrying them had been reported
+complete**, in the order they were discovered:
+
+1. **Peak memory was inferred instead of measured.** §5.24's first draft said
+   the immutable backing added no raw-IQ copy. It adds one: the transient peak
+   is 2.00 windows, 8.00 MiB for a 4.00 MiB window, because the ordered array is
+   still alive while `tobytes` allocates. The claim was reasoned from final
+   ownership, and it was false.
+2. **A read-only view escaped, because immutability was mistaken for lifetime
+   confinement.** Returning a `memoryview` looked contained — the bytes cannot
+   be modified and the registry entry is cleared on exit — and the view carries
+   its own reference to the backing object, so it stayed readable afterwards.
+   Access became an action returning a count.
+3. **Teardown trusted the mutable handle it was meant to resist, and exit could
+   race an in-progress write.** Replacing `_handle` before the block ended
+   skipped teardown entirely, and restoring it afterwards resurrected the scope
+   with its payload intact; separately, 16 384 bytes completed after `__exit__`
+   returned and the scope reported inactive.
+
+Every one of the three survived a completeness claim, and every one was found by
+adversarial inspection or by execution rather than by the code reading
+correctly. **That is why the measured checks and the discriminating controls are
+part of the implementation rather than commentary on it.** A memory figure that
+is asserted is a figure nobody has checked; a lifetime that is argued is a
+lifetime nobody has raced.
+
+**Entry 14 is not closed by this and is not narrowed by it.** Attestation
+establishes *what the window is* and keeps its bytes bound through the action.
+It does not establish that the window belongs in the corpus, and nothing here
+inspects one on its way to disk. **Entry 16** records a third race, in
+`_payload_nbytes()`, queued separately rather than buried here.
 
 Entry 11 is the one to reread before writing "the repair is" in any entry, and
 before recording a drain. **Drained at `9e0efc8`** — and the route there is the
