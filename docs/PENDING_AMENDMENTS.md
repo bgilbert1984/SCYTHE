@@ -190,7 +190,7 @@ frozen envelope does not admit does not promote. It does not enforce it at
 writer, the persistence mechanism §5.20 governs is unbuilt, and a check with
 nothing to check would be the inert admission entry 11 was drained for closing.
 
-**§5.25 proposes the boundary, 2026-09-16, and is PROPOSED.** It separates the
+**§5.25 carries the boundary and was accepted 2026-09-17.** It separates the
 two failure regimes the entry does not distinguish: a **precondition refusal**
 before any target is opened leaves no file, directory or partial artefact, while
 a **post-open failure** follows §5.20's existing rules — no partial *final* file,
@@ -198,8 +198,8 @@ and an orphan temporary that is never a corpus member and is deliberately kept
 for diagnosis. It also carries the requirement to make §5.24's payload-store
 exemption explicit to `__exit__` before its implementation relies on that check.
 
-**This entry stays open.** It drains only when **admission and the persistence
-boundary land together**: admission without a writer refuses nothing that could
+**This entry stays open**, and acceptance does not narrow that. It drains only
+when **admission and the persistence boundary land together**: admission without a writer refuses nothing that could
 otherwise happen, and a writer without admission is the hole this entry names.
 
 What is missing is one gate, at one place: after full-object ring attestation
