@@ -240,9 +240,15 @@ could never be reopened. The record is now an append-only **intent/commit
 journal** with declared framing, six recovery classifications and a control for
 each crash boundary.
 
-**A proposal drains nothing.** This entry drains when corpus creation, the
-complete publisher and the membership journal all exist, and admission sits on
-the only path to membership — a path that verifies before it counts.
+**§5.26 was ACCEPTED 2026-09-17**, and acceptance does not narrow this entry.
+An accepted contract describing an enforcement is not the enforcement — the
+reading entries 8, 9 and 11 each record, and the one §5.25 demonstrated again
+by landing substantial machinery that refused nothing.
+
+This entry drains when corpus creation, the complete publisher and the
+membership journal **all** exist, and admission sits on the only path to
+membership — a path that verifies before it counts. Nothing of that exists
+today.
 
 What is missing is one gate, at one place: after full-object ring attestation
 and before a window is persisted, a window whose `signal_chain_hash` is not a
