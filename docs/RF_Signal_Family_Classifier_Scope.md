@@ -4067,6 +4067,296 @@ writer without admission is the hole the entry names.
 
 ---
 
+### 5.26 — the corpus ownership scope, and the only path to membership — **PROPOSED**
+
+```text
+Status:     PROPOSED 2026-09-17. Nothing here is in force.
+Authority:  None. This section is documentation only. It authorises no capture,
+            no persistence, no directory creation, no byte write, no lock, no
+            corpus, no tuner action and no NESDR operation, on proposal or on
+            merge, and it changes no behaviour.
+Order:      §13l. Proposal, review, explicit acceptance, acceptance commit,
+            merge, and only then an implementation slice.
+Amends:     §5.20's `.iqc` header by **exactly one** field, and §5.25's typed
+            entrypoints, which must stop accepting a free-standing lock and a
+            per-write timestamp.
+Drains:     Nothing on merge. `PENDING_AMENDMENTS` entry 14 drains only when
+            admission sits on the **only** path to corpus membership and that
+            path completes §5.20 through step 8. A proposed or accepted
+            document drains nothing.
+```
+
+*§5.25's implementation merged at `af9d4bd` and did not drain entry 14. Review
+of it found two decisive facts, and this section exists to remove both. They are
+quoted rather than paraphrased, because a proposal that restates its own
+motivation in friendlier words is a proposal that has already started to drift:*
+
+> **Admission is not consuming an ownership scope.** A caller can provide a
+> self-consistent lock constructed from its own envelope. That means the caller
+> still supplies the set from which admission answers, only wrapped in a valid
+> object. §5.25 expressly forbids that.
+>
+> **No production persistence path is compelled to pass through admission.**
+> There is no ownership scope, namespace, production directory or publisher.
+> Therefore the merged gate currently refuses nothing that could otherwise
+> become corpus.
+
+*The second is the one that governs. A gate on no path is not a weak gate; it is
+not a gate. §5.25 said so itself -- "admission without a writer refuses nothing
+that could otherwise happen" -- and the implementation did not change that
+sentence's truth value.*
+
+#### Binding is not accepting, and the difference is where the lock comes from
+
+The repair is not a stricter check on the lock a caller hands over. Every check
+worth writing already exists: §5.25 recomputes the frozen digests rather than
+reading them, so a lock whose digests disagree with the objects beside it
+refuses. A caller who builds a lock from its **own** envelope passes all of them,
+because the lock is internally consistent and consistency is all a check on one
+object can establish.
+
+So the object must not arrive from the caller at all.
+
+> **The lock is a fact of the corpus namespace, not an argument.** It is written
+> once, when the corpus is opened, into a manifest inside the namespace. The
+> ownership scope **reads** it from there. No entrypoint accepts one.
+
+That is what makes admission's answer authoritative: the set it is drawn from is
+whatever the corpus recorded about itself before the first window existed, and a
+caller has no parameter through which to offer a different one.
+
+##### The trust boundary this does not cross, stated rather than implied
+
+Whoever can write the namespace can change the corpus. A manifest on disk is
+authority against a **caller**, and it is not authority against someone holding
+the filesystem. §5.20's access controls are what narrow that -- `0700`
+directories, `0600` files, owner matching the process UID, local ext4 only,
+refusal on symlinks, unexpected hard links, permissive modes, network
+filesystems and mount or device changes -- and they are access controls, not
+cryptography. §5.20 already says so about encryption and the same honesty is
+owed here.
+
+**This section does not claim a corpus is tamper-evident.** It claims something
+narrower and checkable: no code path in this repository can present admission
+with a lock the namespace did not record.
+
+#### What the scope binds
+
+One nominal object, produced by one factory, holding everything §5.20's
+publication step 1 means by *"hold the corpus ownership scope"*:
+
+| bound | where it comes from | what a caller may do about it |
+| --- | --- | --- |
+| the exact `PromotionCorpusLock` | read from the namespace manifest | nothing |
+| corpus identity | the manifest, and the directory it was read from | nothing |
+| the envelope and capture-plan objects | reconstructed from the manifest, digests recomputed | nothing |
+| namespace authority | one resolver, one root, checked at open | nothing |
+| the retention policy | the manifest — supplied before the corpus opened | nothing |
+| per-stratum sequence state | **recovered from the namespace**, not started at zero | nothing |
+| the clock | a provider bound at open and named | inject one **at open**, in a test |
+
+The last column is the whole point. There is no parameter through which a
+caller offers a lock, an envelope, a chain set, a deadline, a count, a
+predecessor or a timestamp.
+
+##### The sequence state has to be recovered, or the cap is a decoration
+
+`CapturedStratumSequence` currently starts at zero in memory. A restart
+therefore resets it, and the 5 562nd window is accepted by a process that has
+never seen the first 5 561. §5.20's cap -- *"the 5 562nd is refused before
+anything is written"* -- would hold only for as long as one process stayed up,
+which is not a property of the corpus at all.
+
+So the scope **derives** the count and the predecessor by enumerating the
+stratum's **recognised final files** at open: their count is the count, and the
+most recent one's header supplies `previous_window_id` and the indices. Orphan
+temporaries are not members and are not counted, which is §5.20's rule and is
+why the enumeration must recognise rather than merely list.
+
+##### The clock becomes an authority, or it stays a caller's number
+
+`now` as a required keyword prevented a **hidden** clock. It did not make the
+clock an authority: a production caller still supplied a timestamp per write,
+and retention, expiry and every time-dependent refusal rested on it.
+
+The scope binds a clock provider at open and **names** it. The entrypoints lose
+`now` entirely. A test injects a clock when it constructs the scope, which is a
+seam at the boundary rather than a parameter on every write -- the same shape
+`BoundedIQRing` already uses for its own `now`, and the same reason.
+
+#### One path, and the enforcement that it is the only one
+
+```text
+ownership scope
+    → exact attested scope
+    → typed stratum attestation
+    → admission and every pre-create check
+    → exclusive temporary creation
+    → canonical header and payload
+    → durability and publication
+    → readback verification
+    → corpus membership and counting
+```
+
+A diagram is a claim. Two mechanical checks make it a fact, and both instruments
+already exist in this repository rather than being invented here:
+
+**The creation primitive is call-site restricted.** The exclusive
+`O_CREAT | O_EXCL` create, and the namespace resolver that produces the path it
+is given, have exactly one production call site each. The instrument is
+`test_rf_window_attestation`'s static walk over every non-test module, which
+already polices `_write_payload_to_fd` and `_payload_sha256` — a second caller
+anywhere in the tree fails it.
+
+**The ordering is observed, not asserted.** §5.25 already establishes this
+shape: every precondition refusal leaves a recording creator uncalled. That
+enumeration carries over to the real creator, so a check moved below the create
+is caught by a creator that ran.
+
+> **No alternate writer may reach creation without passing the same boundary**
+> — and "the same" means the same function, not an equivalent one. A second
+> implementation that performed identical checks would still be a second place
+> for them to drift apart, which is the failure `write_window(window, stratum)`
+> was refused for.
+
+#### §5.20's protocol, all eight steps, and where each refusal lives
+
+| step | act | regime |
+| ---: | --- | --- |
+| 1 | hold the ownership scope; attest the window | precondition |
+| 2 | recheck descriptor, mount, ownership, mode, corpus limits, retention | precondition |
+| 3 | exclusively create a `0600` temporary sibling | **the boundary** |
+| 4 | write the canonical header and the exact payload | post-open |
+| 5 | `fsync` the file | post-open |
+| 6 | publish **without replacement** | post-open |
+| 7 | `fsync` the directory | post-open |
+| 8 | read the final file back; verify `payload_sha256` **and** `file_sha256` | post-open |
+| — | count it | **only after 8** |
+
+§5.25 built 1–4 and the length reconciliation. What is owed is 5–8, the filename
+agreement, and the counting rule.
+
+**Steps 5 and 7 are two different durability facts.** `fsync` on the file makes
+the bytes survive; `fsync` on the directory makes the **name** survive. A
+published window whose directory entry is lost is a file nobody can find under a
+name the corpus counted, and one `fsync` does not imply the other. Each needs
+its own control, because a single "durability" control would pass with either.
+
+**Step 6 is without replacement.** `link`/`rename`-with-replacement would let one
+window silently take another's identity. Since the final name derives from
+`file_sha256`, a collision is either the same bytes or a hash collision, and
+both deserve a refusal rather than an overwrite.
+
+**Step 8 verifies two digests and the name.** `payload_sha256` catches a payload
+substituted between write and count; `file_sha256` catches a header substituted
+under a correct payload; and the **filename must equal** `file_sha256`, or the
+file is one whose name does not match its own framed bytes. §5.20 already says
+such a file is not a corpus member. Three separate checks, three controls: any
+two of them passing does not establish the third.
+
+**Counting happens only after all of that.** §5.25 deliberately made
+`count_published` a separate act rather than a side effect of writing, and this
+is what that separation was for: membership is established by verification, not
+by having written something.
+
+#### The header amendment — exactly one field
+
+`corpus_clock_authority`, supplied by the ownership scope, naming the clock that
+governed the retention and expiry decisions for this window. The header already
+names the **ring's** clock for the capture times; these are two different clocks
+and conflating them would be a field that means one thing on some rows.
+
+**And exactly one.** No publication timestamp is added: a time the readback
+cannot verify is a header fact with no witness, and §5.20's list did not ask for
+one. The amendment accounting is stated precisely because §5.25's first draft
+claimed four new fields and had three.
+
+Required header fields go from **31 to 32**.
+
+#### A decision this section cannot make for the operator
+
+Every slice since §5.20 has been code-only under a standing constraint: *no
+directory creation, no byte write*. **An implementation of this section cannot
+hold that constraint and still be tested.** Durability, no-replacement
+publication, directory `fsync`, readback and filename agreement are facts about
+a filesystem, and a test that mocks them proves the mock.
+
+The options, with the recommendation stated rather than buried:
+
+1. **A per-test temporary directory** (`tempfile.mkdtemp()`, removed in
+   teardown), with a mechanical check that no test ever resolves a path under
+   the production namespace constant and that the production root is never
+   created by a test. **Recommended.** It writes bytes, and it writes none of
+   them where a corpus lives.
+2. **Mock the filesystem.** Rejected in advance as a recommendation: it would
+   make every control above a test of the mock's behaviour, which is the shape
+   §5.20's own controls exist to refuse.
+3. **Defer the implementation** until the operator authorises filesystem writes
+   separately. Legitimate, and it leaves entry 14 open indefinitely.
+
+**This section proposes option 1 and does not assume it.** The constraint is the
+operator's, and relaxing it is an explicit act, not something an implementation
+slice may do because it found it inconvenient.
+
+#### What the implementation must prove, stated as controls
+
+Eighteen mutations, each failing its own tests, each with the collateral scan.
+The first four are the two findings this section exists to remove.
+
+| | mutation | what it would otherwise hide |
+| ---: | --- | --- |
+| 1 | the scope accepts a lock from the caller | the caller supplying the set admission answers from |
+| 2 | the manifest's digest not verified on read | a lock edited in place under a corpus |
+| 3 | an entrypoint accepts a caller timestamp | the clock never becoming an authority |
+| 4 | an entrypoint accepts a free-standing lock beside the scope | two authorities, one of them the caller's |
+| 5 | a second call site reaches the creation primitive | an alternate writer bypassing admission |
+| 6 | the namespace path resolved outside the one resolver | a writer in a directory nobody authorised |
+| 7 | an admission check performed after creation | a precondition refusal leaving an artefact |
+| 8 | two ownership scopes open on one corpus at once | two sequence states, and a cap counted twice |
+| 9 | sequence state starts at zero on reopen | the cap holding only while one process stays up |
+| 10 | orphan temporaries counted as members | a failed publication inflating the sample |
+| 11 | the file `fsync` removed | a counted window a power loss loses |
+| 12 | publication by replacement | one window taking another's identity |
+| 13 | the directory `fsync` removed | a name that does not survive, over bytes that do |
+| 14 | the readback removed | a file counted without ever being read |
+| 15 | `payload_sha256` not verified at readback | a payload substituted between write and count |
+| 16 | `file_sha256` not verified at readback | a header substituted under a correct payload |
+| 17 | the filename not required to equal `file_sha256` | a file whose name does not match its own bytes |
+| 18 | counting before verification | membership established by writing rather than verifying |
+
+Controls 1 and 3 are named explicitly because they are the operator's two
+findings, and a section that removed them without a mutation proving the removal
+would be asserting its own success.
+
+#### What this section does not do
+
+- It authorises **no capture, no persistence, no directory, no byte, no lock, no
+  corpus, no tuner action and no NESDR operation** — on proposal or on merge.
+- It does not create a corpus. Opening one — writing the manifest for the first
+  time — is a separate act and is not proposed here; this section describes the
+  scope that **reads** a manifest, and an implementation without a corpus-open
+  act can be tested and cannot be run.
+- It does not implement §5.20's deletion row, which is its own slice and is not
+  required for entry 14.
+- It does not make `RECEIVER_SPURS` reachable and settles nothing in entry 10.
+- It does not drain entry 14. An accepted contract describing an enforcement is
+  not the enforcement — the reading entries 8, 9, 11 and now 14 each record.
+
+#### What acceptance would require
+
+An explicit acceptance decision and an acceptance commit, naming three things as
+part of this section's substance: the **one-field** amendment to §5.20's header;
+the amendment to §5.25's typed entrypoints, which lose their `lock` and `now`
+parameters and gain a scope; and the operator's decision on where the
+implementation's tests write, because an implementation slice may not relax a
+standing constraint on its own authority.
+
+Then, in order: merge; an implementation; and only then the drain — which is
+owed when admission sits on the only path to membership and that path completes
+§5.20 through step 8.
+
+---
+
 ## 6. Open questions for the operator
 
 1. **Approve the bounded IQ ring** (§2.2)? First retention of raw IQ beyond one block.

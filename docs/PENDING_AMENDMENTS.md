@@ -202,6 +202,31 @@ exemption explicit to `__exit__` before its implementation relies on that check.
 when **admission and the persistence boundary land together**: admission without a writer refuses nothing that could
 otherwise happen, and a writer without admission is the hole this entry names.
 
+**§5.25 was implemented at `bb745ab`, corrected at `5109ca6`, and the entry did
+not drain.** Review of the merged code found two facts, and both are still true:
+
+- **Admission does not consume an ownership scope.** A caller can present a
+  self-consistent `PromotionCorpusLock` built from its own envelope. Every
+  check on one object passes, because internal consistency is all such a check
+  can establish — so the caller still supplies the set the answer is drawn
+  from, wrapped in a valid object.
+- **Nothing is compelled to pass through the gate.** There is no ownership
+  scope, namespace, production directory or publisher, so the merged boundary
+  refuses nothing that could otherwise become corpus. That is this entry's own
+  drain condition, quoted back at the implementation that did not meet it.
+
+`now` is also still a caller's number rather than a clock authority, and §5.20
+steps 5–8 do not exist — so what landed is a temporary-file producer, not
+durable corpus membership.
+
+**§5.26 is PROPOSED as of 2026-09-17** and proposes the repair: a scope that
+reads the lock out of the corpus namespace rather than accepting one, sequence
+state recovered from the namespace rather than started at zero, a bound clock
+provider, and one publication path through §5.20 step 8 with the creation
+primitive call-site restricted so no second writer can reach it. **A proposal
+drains nothing**, and this entry drains only when admission sits on the **only**
+path to membership and that path verifies before it counts.
+
 What is missing is one gate, at one place: after full-object ring attestation
 and before a window is persisted, a window whose `signal_chain_hash` is not a
 declared member of the corpus's `InstrumentChainEnvelope` **is not corpus**. It
