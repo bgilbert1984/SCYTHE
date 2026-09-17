@@ -3774,6 +3774,191 @@ before the ring can attest the whole object.
 
 ---
 
+### 5.25 — captured-window admission, and the persistence boundary — **PROPOSED**
+
+```text
+Status:     PROPOSED 2026-09-16. Nothing here is in force.
+Authority:  None. This section is documentation only. It authorises no capture,
+            no persistence, no directory creation, no byte write, no lock, no
+            corpus, no tuner action and no NESDR operation, on proposal or on
+            merge, and it changes no behaviour.
+Order:      §13l. Proposal, review, explicit acceptance, acceptance commit,
+            merge, and only then a code-only implementation.
+Amends:     §5.20's `.iqc` header, which predates §5.23's capture plan and
+            §5.24's declared payload length.
+Drains:     Nothing on merge. `PENDING_AMENDMENTS` entry 14 drains only when
+            **admission and the persistence boundary land together**. A
+            proposed or accepted document drains nothing.
+```
+
+*§5.24 established what a window **is**. Entry 14 is the different question of
+whether it **belongs**, and this proposes the boundary between the two.*
+
+#### Attestation is not admission
+
+`attest_window` answers *is this precisely the window the ring issued, and are
+its bytes bound for the length of this action*. It says nothing about whether
+that window belongs in this corpus, and it cannot: the ring has never heard of a
+`PromotionCorpusLock`.
+
+```text
+attested authoritative metadata
+    → captured-window admission
+    → canonical header with declared payload length
+    → complete payload action
+    → written count reconciled to declared length
+```
+
+Every arrow is a refusal point. None of them implies the next.
+
+#### Admission consumes the frozen envelope, and is never told
+
+**Do not accept an `admitted: bool`, and do not accept a list of chains.** A
+caller-supplied verdict is the label-as-authority failure §13k L.1 refused in
+the derived-evidence producer, and §5.23 refused again when the lock's envelope
+was a field nobody enforced.
+
+Admission reads the `InstrumentChainEnvelope` **out of the corpus ownership
+scope**, and asks it whether the *attested* chain hash is a declared member. The
+caller supplies neither the answer nor the set the answer is drawn from.
+
+| supplied by the caller | supplied by the attested scope | supplied by the ownership scope |
+| --- | --- | --- |
+| which stratum, and its attestation | the chain hash, the digest, every metadata field | the frozen envelope, the capture plan, the corpus identity |
+
+A window whose attested chain is not a declared member **is not corpus**. It is
+not re-labelled, not held aside and not counted.
+
+#### Two failure regimes, and the contract must not blur them
+
+**Precondition refusal — before any target is opened.** Exact scope type, mint
+provenance, active lifetime, corpus ownership scope, and envelope membership are
+all established **before** §5.20's publication step 3 exclusively creates the
+temporary sibling. A refusal here creates **no file, no directory and no partial
+artefact**, because nothing has been created yet.
+
+**Post-open failure — once publication has begun.** §5.20 already governs this
+and this section does not contradict it: *"a failure at any step leaves no
+partial final file"*, and *"orphan temporaries are never corpus members and
+remain subject to the same retention deadline."*
+
+> **The contract must not promise "no artefact" once publication has begun.**
+> §5.20 keeps a temporary deliberately — for diagnosis and recovery — and a
+> later document claiming the boundary leaves nothing behind would be
+> contradicting an accepted protocol in order to sound stronger. What is
+> promised is *no partial **final** file*, and an orphan that is never a corpus
+> member.
+
+The ordering requirement is therefore sharp: **every check that can refuse must
+run before the create.** A check performed after the descriptor exists has moved
+a precondition refusal into the post-open regime, and the artefact it leaves is
+the cost of that mistake.
+
+#### The canonical header, and what §5.20 did not yet know
+
+§5.20's header list was written before §5.23 froze a capture plan and before
+§5.24 gave the writer a declared payload length. It must bind, at minimum:
+
+| field | from |
+| --- | --- |
+| attested `window_id` and ring digest | the attested scope |
+| configuration epoch, signal-chain hash | the attested scope |
+| sample count, storage representation, **declared payload bytes** | the attested scope's metadata |
+| **corpus lock identity, envelope digest, capture-plan digest** | the ownership scope |
+| stratum, and its stratum-specific attestation | the typed entrypoint |
+| `IQC_FORMAT_VERSION`, `IQC_HEADER_SCHEMA`, `STRATA_DEFINITION_REVISION` | the module |
+
+The three in bold are the amendment. `declared_payload_bytes` is new because
+§5.24 deleted the accessor that would have answered it at write time, and the
+capture-plan and envelope digests are new because §5.23 created them after
+§5.20's list was written.
+
+#### The invariant, and the thing it does not prove
+
+$$
+\text{declared payload bytes}
+\;=\;
+\text{attested sample count}\times\text{protocol bytes per sample}
+\;=\;
+\text{completed write count}
+$$
+
+Three quantities from three independent places: the header's declaration, the
+ring's authoritative record, and what the write actually returned. Each side is
+independently mutable, so a test that moves one and not the others fails.
+
+**This proves framing. It does not prove content identity.**
+
+$$
+\text{content identity} \;\neq\; \text{byte-count agreement}
+$$
+
+A window of the right length carrying the wrong samples satisfies the equation
+exactly. Content identity comes from the attested scope and its **recomputed
+digest** — §5.24's nine checks — and from §5.20's step 8, which reads the final
+file back and verifies `payload_sha256` **and** `file_sha256` before counting
+it. **Both are required, and neither substitutes for the other.** The length
+invariant catches a truncated or padded write; the digest catches a substituted
+one.
+
+#### What the implementation must prove, stated as controls
+
+Seven mutations, each failing its own test and no others:
+
+| | mutation | what it would otherwise hide |
+| --- | --- | --- |
+| 1 | a header declaring the wrong byte count | the header and the record disagreeing |
+| 2 | correct header arithmetic, incomplete write | a short write reported as success |
+| 3 | a complete write whose returned count is falsified | the reconciliation trusting the writer |
+| 4 | admission against a chain outside the frozen envelope | the envelope recorded and not enforced |
+| 5 | admission performed after filesystem creation | a precondition refusal leaving an artefact |
+| 6 | scope type, provenance and liveness checked after opening the target | the same, one layer earlier |
+| 7 | the categorical payload-store exemption reintroduced | the structural check licensing a store that is not teardown |
+
+Control 7 is why the tightening below is **in this contract rather than in the
+queue**: the requirement and the thing that enforces it arrive together.
+
+#### One tightening owed before this relies on §5.24's structural check
+
+`test_payload_reads_are_structurally_guarded` currently exempts every payload
+**store** from the re-resolution requirement, **by category**.
+`AttestedIQWindowScope.__exit__` earns that exemption for a precise reason — it
+invalidates state it has already found by object identity, and re-resolving
+through the ordinary live-scope path would contradict termination itself — and
+**that justification does not travel to any other store.** A categorical
+exemption silently licenses a future method to mutate `state.payload` under the
+right lock without ever proving it is the teardown operation.
+
+The exemption is made **explicit to `__exit__`** before this section's
+implementation relies on the check. Control 7 is its negative control.
+
+#### What this section does not do
+
+- It authorises **no capture, no persistence, no directory, no byte, no lock, no
+  corpus, no tuner action and no NESDR operation** — on proposal or on merge.
+- It does not create a corpus ownership scope, which §5.20 governs and which is
+  unbuilt.
+- It does not make `RECEIVER_SPURS` reachable, and it settles nothing in entry
+  10.
+- It does not drain entry 14. A proposal satisfies no obligation, and an
+  accepted contract describing an enforcement is not the enforcement — the
+  reading entries 8, 9 and 11 each record.
+
+#### What acceptance would require
+
+An explicit acceptance decision and an acceptance commit, **naming the amendment
+to §5.20's header as part of this section's substance**, because that edits
+accepted text and a merge supplies no acceptance.
+
+Then, in order: merge; a code-only implementation of admission **and** the
+persistence boundary; and only then the drain.
+
+**Entry 14 drains when admission and the persistence boundary land together.**
+Admission without a writer refuses nothing that could otherwise happen, and a
+writer without admission is the hole the entry names.
+
+---
+
 ## 6. Open questions for the operator
 
 1. **Approve the bounded IQ ring** (§2.2)? First retention of raw IQ beyond one block.
