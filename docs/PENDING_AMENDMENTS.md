@@ -231,47 +231,6 @@ waits exactly as long as the prose does. The persistence margin and the 7-of-8
 requirement were on the same catalogue-analysis boundary and are now enforced by
 `SpurPersistenceObservation`; slope enforcement is what remains owed.
 
----
-
-## 16. `_payload_nbytes()` can race teardown
-
-**Trigger:** before `_payload_nbytes()` gains any production caller. Not before
-the persistence slice — before the first line of it that calls this method.
-
-`AttestedIQWindowScope._payload_nbytes()` resolves its state through `_state()`,
-which establishes provenance and liveness, and then reads
-`state.payload.nbytes` **outside the scope-state lock**. A concurrent
-`__exit__` nulls `payload` between those two steps, so the caller gets an
-incidental `AttributeError` rather than the declared
-`ATTESTATION_SCOPE_NOT_ACTIVE`.
-
-The repair, either half of which drains this:
-
-> Before `_payload_nbytes()` gains any production caller, it must either be
-> **removed**, or acquire the scope-state lock and **re-resolve provenance and
-> liveness under that lock**. Concurrent exit must produce the declared
-> attestation refusal, never an incidental `AttributeError`.
-
-**Deleting the unused method is a valid drain.** No method needs rehabilitation
-merely because it exists, and a size accessor the writer turns out not to want
-is one fewer surface for the static call-site check to confine.
-
-What this entry is not:
-
-- It does **not** reopen entry 9. The two holes that entry names are closed, and
-  this is a third path that exposes no payload.
-- It does **not** claim a payload or persistence failure. The method returns an
-  integer, has no production caller, and is statically confined to `rf_iq_ring`.
-- It does **not** block work unrelated to a production caller.
-- It **becomes a predecessor of entry 14** if entry 14's writer intends to call
-  it. Otherwise it drains by deletion whenever someone reaches it.
-
-*Found by inspecting the merged repair rather than by the repair itself: the
-write was the path under examination, and this is the same race one call
-shallower. Queued rather than folded into entry 9's drain record, because a
-conditional obligation left inside a drain record waits exactly as long as the
-record does — which is what entry 15 exists to avoid.*
-
 ## Drain record
 
 A landed entry leaves the list above. It is recorded here in one line, because
@@ -295,6 +254,49 @@ what is still pending. This is a record, not a queue: nothing here is waiting.
 | 13 — two stale claims in code, and a test that guarded a citation | `rf_null_corpus.py`, `rf_validation_manifest.py` | `623669d` |
 | 11 — the lock froze the method and not the instrument | `rf_promotion_envelope.py`, `rf_corpus_vocabulary.py`, `rf_validation_manifest.py` | `9e0efc8` |
 | 9 — publication step 1 asked for an attestation that did not exist | `rf_iq_ring.py`, `test_rf_window_attestation.py`, §5.24's implementation | `9b0bb06` |
+| 16 — `_payload_nbytes()` could race teardown | deleted from `rf_iq_ring.py` | `98e5a60` |
+
+Entry 16 **drained by deletion at `98e5a60`**, which is the path the entry
+itself named as valid. The method had no production caller and no role in
+attestation, so there was nothing to repair: a writer derives the expected byte
+count from authoritative attested metadata — `sample_count × BYTES_PER_SAMPLE` —
+while building its canonical header, and reconciles that expectation against the
+count the completed write returns. That is stronger than asking the payload
+object how large it is, because the expectation comes from the ring's record and
+the write is checked against it independently.
+
+**The lesson is not the deletion. It is that the check meant to replace the
+method was wrong twice, and neither time was found by reading it.**
+
+1. The first check matched the **method name**. A control re-adding the
+   identical body as `_payload_size` failed **zero** tests — and the
+   payload-handle walk missed it too, because it returns an `int`.
+2. The second matched the **superficial presence of a lock**: any `.payload`
+   read inside a `with` block mentioning `.lock`. That proves neither that the
+   lock is the state's own nor that anything was re-resolved under it.
+
+Three controls settled what the property actually is:
+
+| control | established |
+| --- | --- |
+| **A18** identical body under a new name | the check must be **name-independent** |
+| **A19** read under an arbitrary `threading.RLock()` | the lock must **belong to the state** whose payload is read |
+| **A20** the right lock, no re-resolution | taking the correct lock **without re-resolving provenance and liveness still does not establish the property** |
+
+A20 is the one to remember. It reads under `state.lock`, it looks correct on
+inspection, and it is not — which is why the condition had to be named rather
+than inferred from code that appeared to satisfy it.
+
+*One tightening is owed and is deliberately **not** a queue entry of its own:
+the structural check currently exempts every payload **store** from the
+re-resolution requirement, by category. `AttestedIQWindowScope.__exit__` is
+exceptional for a precise reason — it invalidates state it has already found by
+object identity, and re-resolving through the ordinary live-scope path would
+contradict termination itself — and that justification does not travel to any
+other store. The exemption must be made explicit to `__exit__` before entry
+14's implementation relies on the check. **Entry 14's proposal carries that
+requirement**, which is where it belongs: a conditional obligation with a named
+dependent is a line in that dependent's contract, not a standing queue entry.*
 
 Entry 9 is the one to reread before reporting a part complete. **Drained at
 `9b0bb06`**, after §5.24's five parts landed together: the attestation
