@@ -3849,29 +3849,61 @@ remain subject to the same retention deadline."*
 > promised is *no partial **final** file*, and an orphan that is never a corpus
 > member.
 
-The ordering requirement is therefore sharp: **every check that can refuse must
-run before the create.** A check performed after the descriptor exists has moved
-a precondition refusal into the post-open regime, and the artefact it leaves is
-the cost of that mistake.
+The ordering requirement is therefore sharp, and narrower than "every check
+that can refuse":
+
+> **Every admission, authority and publication-precondition check must complete
+> before creation. Failures intrinsic to writing, durability, publication and
+> readback remain governed by the post-open protocol.**
+
+A short write, a failed `fsync`, a publication collision and a readback mismatch
+are all refusals **after** the create, and they must be: they are facts about
+the write, and they cannot be known before one. What must not happen is an
+*admission* or *authority* check performed after the descriptor exists — that
+has moved a precondition refusal into the post-open regime, and the artefact it
+leaves is the cost of the mistake.
 
 #### The canonical header, and what §5.20 did not yet know
 
 §5.20's header list was written before §5.23 froze a capture plan and before
 §5.24 gave the writer a declared payload length. It must bind, at minimum:
 
-| field | from |
-| --- | --- |
-| attested `window_id` and ring digest | the attested scope |
-| configuration epoch, signal-chain hash | the attested scope |
-| sample count, storage representation, **declared payload bytes** | the attested scope's metadata |
-| **corpus lock identity, envelope digest, capture-plan digest** | the ownership scope |
-| stratum, and its stratum-specific attestation | the typed entrypoint |
-| `IQC_FORMAT_VERSION`, `IQC_HEADER_SCHEMA`, `STRATA_DEFINITION_REVISION` | the module |
+**Six authorities, not three.** The draft of this section listed the attested
+scope, the ownership scope and the module, and a header could omit the stratum
+attestation, the sequence facts, the retention deadline and `payload_sha256`
+while satisfying every check derived from those three. The table above the
+derivation required the typed attestation; the derivation below had no typed
+entrypoint in it.
 
-The three in bold are the amendment. `declared_payload_bytes` is new because
-§5.24 deleted the accessor that would have answered it at write time, and the
-capture-plan and envelope digests are new because §5.23 created them after
-§5.20's list was written.
+| authority | required contribution |
+| --- | --- |
+| **attested scope** | all authoritative window metadata — `window_id`, ring digest, configuration epoch, signal-chain hash, sample count, sample rate, capture times and the named clock authority, `first_sample_index` |
+| **corpus ownership scope** | corpus and configuration-lock identity, **envelope digest**, **capture-plan digest**, and the retention policy that fixes the deadline |
+| **typed entrypoint** | the fixed stratum, and **every field** of its exact nominal attestation member |
+| **corpus sequence state** | `previous_window_id`, the overlap declaration and the sample interval between windows |
+| **payload action** | `payload_sha256` and the completed write count |
+| **module / file-format declaration** | `source` fixed to `CAPTURED`, `IQC_HEADER_SCHEMA`, `IQC_FORMAT_VERSION`, the storage representation — dtype and byte order — `STRATA_DEFINITION_REVISION`, and **`declared_payload_bytes`** as a declared field of the format |
+
+**Exactly three fields are new** against §5.20's list: `declared_payload_bytes`,
+`envelope_digest` and `capture_plan_digest`. `declared_payload_bytes` because
+§5.24 deleted the accessor that would have answered it at write time; the two
+digests because §5.23 created them after §5.20's list was written. **The corpus
+and configuration-lock identities were already in §5.20's header** — they are
+listed above because the derivation needs their authority named, not because
+this section introduces them, and §5.25 changes neither their meaning nor their
+representation.
+
+##### Each authority declares its own bindings, and the union is the requirement
+
+Do not serialise every field of every object. Adding an internal diagnostic
+field to `PromotionCorpusLock` would then silently become a **file-format
+revision**, which is the kind of change that has to be deliberate or it is not a
+format at all.
+
+Each authority declares, mechanically, the bindings it exports to the header.
+The required header set is the **union of those declarations** — so a field
+becomes required by being exported, and an internal field stays internal by not
+being.
 
 #### The invariant, and the thing it does not prove
 
@@ -3903,7 +3935,7 @@ one.
 
 #### What the implementation must prove, stated as controls
 
-Eight mutations, each failing its own test and no others:
+Ten mutations, each failing its own test and no others:
 
 | | mutation | what it would otherwise hide |
 | --- | --- | --- |
@@ -3914,7 +3946,9 @@ Eight mutations, each failing its own test and no others:
 | 5 | admission performed after filesystem creation | a precondition refusal leaving an artefact |
 | 6 | scope type, provenance and liveness checked after opening the target | the same, one layer earlier |
 | 7 | the categorical payload-store exemption reintroduced | the structural check licensing a store that is not teardown |
-| 8 | a header omitting one of its required bindings | the amendment itself going unenforced |
+| 8a | an authority absent from the aggregator | a whole class of bindings unenforced |
+| 8b | an authority present, one declared binding omitted | the amendment itself going unenforced |
+| 8c | a header field supplied by no authority | caller-injected decoration entering the canonical identity |
 
 Control 7 is why the tightening below is **in this contract rather than in the
 queue**: the requirement and the thing that enforces it arrive together.
@@ -3925,22 +3959,34 @@ digest would satisfy all of 1–7: the byte counts still agree, admission still
 refuses a foreign chain, the ordering is still right. The amendment would be
 accepted text describing a field nobody emitted.
 
+It splits into three because completeness and exclusivity are different
+properties and one does not imply the other:
+
+- **8a** drops an authority from the aggregator. Everything that authority
+  exports disappears at once, and a per-field check that never asks for the
+  authority's contribution would not notice.
+- **8b** keeps the authority and omits one binding it declares. This is the
+  original control, and the narrow case.
+- **8c** adds a header field that **no authority declared**. Completeness alone
+  permits it: every required binding is present, and something else is too.
+  Since the header is hashed into `file_sha256`, a caller-injected field is
+  caller-supplied decoration inside the canonical identity of a corpus member —
+  the label-as-authority failure moved from the verdict into the file.
+
+**The required set is the union of the declarations, and the emitted set must
+equal it.** Not contain it.
+
 And the check it discriminates must not be a **hand-written list of required
 fields**. That is the shape entry 11 began as — *a test over the fields present
 is silent about a field that is missing* — and the repair is the one
 `SCYTHE_VERDICT_VOCABULARIES.md` §3 already made: derive the required set from
 its sources rather than transcribe it.
 
-| source | contributes |
-| --- | --- |
-| the attested scope | every field it exposes as authoritative metadata |
-| the corpus ownership scope | the lock identity and every digest the lock declares |
-| the module | the format version, the header schema, the strata-definition revision |
-
-A field added to `AttestedIQWindowScope`'s metadata, or a digest added to
-`PromotionCorpusLock`, therefore becomes required **without anyone editing a
-list** — and control 8 fails if the header stops emitting it. A hand-written
-list would pass, having been written before the field existed.
+A binding added to any authority's declaration therefore becomes required
+**without anyone editing a list** — and 8b fails if the header stops emitting
+it. A hand-written list would pass, having been written before the field
+existed. Equally, a field emitted by no authority fails 8c, so the list cannot
+quietly grow either.
 
 #### One tightening owed before this relies on §5.24's structural check
 
@@ -3970,9 +4016,12 @@ implementation relies on the check. Control 7 is its negative control.
 
 #### What acceptance would require
 
-An explicit acceptance decision and an acceptance commit, **naming the amendment
-to §5.20's header as part of this section's substance**, because that edits
-accepted text and a merge supplies no acceptance.
+An explicit acceptance decision and an acceptance commit, **naming two things as
+part of this section's substance**: the amendment to §5.20's header, because
+that edits accepted text and a merge supplies no acceptance; and **the
+`__exit__` tightening of §5.24's structural check**, which is implementation
+work with its own control and need not exist before acceptance, but which
+acceptance must authorise rather than leave implied.
 
 Then, in order: merge; a code-only implementation of admission **and** the
 persistence boundary; and only then the drain.
