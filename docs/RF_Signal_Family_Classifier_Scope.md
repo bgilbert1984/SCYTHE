@@ -4067,26 +4067,67 @@ writer without admission is the hole the entry names.
 
 ---
 
-### 5.26 — the corpus ownership scope, and the only path to membership — **PROPOSED**
+### 5.26 — the corpus ownership scope, and the only path to membership — **ACCEPTED**
 
 ```text
-Status:     PROPOSED 2026-09-17, revised twice the same day after review.
-            Nothing here is in force.
-Authority:  None. This section is documentation only. It authorises no capture,
-            no persistence, no directory creation, no byte write, no lock, no
-            corpus, no tuner action and no NESDR operation, on proposal or on
-            merge, and it changes no behaviour. The operator's authorisation of
-            temporary-directory writes covers an implementation's **tests** and
-            nothing else.
-Order:      §13l. Proposal, review, explicit acceptance, acceptance commit,
-            merge, and only then an implementation slice.
+Status:     ACCEPTED 2026-09-17. The nine contracts, the membership journal and
+            its six recovery classifications, single-lifetime capture, the
+            capability construction and the forty-eight controls are in force
+            as contract.
+Authority:  §5.26 is accepted. Acceptance is documentation only: it authorises
+            no capture, no persistence, no production directory, no byte write,
+            no lock, no corpus, no tuner action and no NESDR operation, and it
+            changes no behaviour, because no code exists yet and none is
+            authorised by this commit. The operator's temporary-directory
+            authorisation covers an implementation's **tests** and nothing else.
+Order:      §13l. This is the acceptance commit. Merge follows it, and an
+            implementation follows the merge.
 Amends:     Nine contracts, enumerated in the table below and not re-listed
             here, because two lists of one thing is how they come to disagree.
-Drains:     Nothing on merge. `PENDING_AMENDMENTS` entry 14 drains only when
-            corpus creation, the complete publisher and the membership journal
-            all exist, and admission sits on the only path to membership. A
-            proposed or accepted document drains nothing.
+            All nine are accepted here as part of this section's substance.
+Drains:     Nothing, and nothing on merge. `PENDING_AMENDMENTS` entry 14 drains
+            only when corpus creation, the complete publisher and the membership
+            journal all exist, and admission sits on the only path to
+            membership. An accepted document drains nothing.
 ```
+
+*Proposed 2026-09-16 at `a75831f`. Revised at `2bddca3` after review returned
+three defects, and again at `638782a` after review found that the revision had
+introduced a worse one. Merged as PROPOSED at `2c2971a`; this is the acceptance
+commit, and it covers the text as revised twice.*
+
+**What this acceptance accepts, named rather than left to the merge.** §13l is
+explicit that a merge supplies no acceptance, so every item is listed:
+
+1. **The nine contracts** in the table below — the manifest, corpus creation,
+   corpus reopening, the membership journal, ring-lifetime identity, the
+   payload action's restricted surface, §5.20 step 6's primitive, §5.25's typed
+   entrypoints, and the `.iqc` header.
+2. **Two new header fields** — `corpus_clock_authority` and `ring_lifetime_id`,
+   and only those two. Required fields go from **31 to 33**. That edits accepted
+   text, and an acceptance silent about it would carry an amendment into `main`
+   on a merge.
+3. **§5.24's attested metadata set grows**, so `IQWindow` and `_WindowRecord`
+   both carry `ring_lifetime_id` and **the nine checks become ten**. §5.24 is
+   accepted text; this changes it.
+4. **§5.25's restricted payload action becomes one prefix-taking digest**,
+   because `file_sha256` has to be known before creation and a second pass over
+   four mebibytes is the second copy §5.24 spent a slice removing.
+5. **§5.20 step 6 gains a primitive** — `link` then `unlink` — together with the
+   hard-link consequences: cleanup is name removal only, and recovery compares
+   `(st_dev, st_ino)` before removing anything.
+6. **Single-lifetime capture**, and with it the consequence stated rather than
+   discovered: **a corpus whose capture is interrupted by a process restart can
+   never be completed.** It can be reopened, verified and read; it can never
+   reach 5 561 in a stratum and can never be issued a
+   `CorpusCompletionReceipt`. Accepting the policy is accepting that.
+7. **The temporary-directory test authorisation**, with its conditions, scoped
+   to an implementation's tests and to nothing else.
+
+**What acceptance does not start.** No implementation is authorised by this
+commit. Nothing may be built until this section has merged, and what is built
+then is an implementation slice — not a production corpus, not a capture, not a
+byte outside a test's temporary root, and not a tuner action.
 
 *§5.25's implementation merged at `af9d4bd` and did not drain entry 14. Review
 found two facts, quoted rather than paraphrased because a proposal that
@@ -4612,7 +4653,7 @@ reports success for most of its own failures.
 - It does not drain entry 14. An accepted contract describing an enforcement is
   not the enforcement — the reading entries 8, 9, 11 and now 14 each record.
 
-#### What acceptance would require
+#### What acceptance required, and what it settled
 
 An explicit acceptance decision and an acceptance commit, naming as part of this
 section's substance: the **nine** contracts in the table above; the two new
@@ -4622,12 +4663,20 @@ action becoming one prefix-taking digest; §5.20 step 6's primitive and the
 hard-link consequences; **the single-lifetime capture policy and the consequence
 that a corpus interrupted by a process restart can never be completed**; and the
 temporary-directory test authorisation, which is the operator's and is recorded
-here rather than assumed.
+here rather than assumed. All are listed at the top of this section, which is
+where an acceptance commit has to put them.
 
 Then, in order: merge; implementation, which may be split into ordered slices;
 and only then the drain — owed when corpus creation, the complete publisher and
 the membership journal all exist, and admission sits on the only path to
 membership.
+
+**One thing acceptance does not settle**, recorded so it is not recovered later
+by inference: the journal's six recovery classifications were written in a
+single pass, and the state of *an intent whose temporary survives while its
+final does not* was folded into abandonment rather than argued into it. If
+implementation finds it is a seventh classification, that is an amendment and
+needs one — not a row quietly added to a table an acceptance already covered.
 
 ---
 
