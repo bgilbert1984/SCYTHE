@@ -202,6 +202,48 @@ exemption explicit to `__exit__` before its implementation relies on that check.
 when **admission and the persistence boundary land together**: admission without a writer refuses nothing that could
 otherwise happen, and a writer without admission is the hole this entry names.
 
+**§5.25 was implemented at `bb745ab`, corrected at `5109ca6`, and the entry did
+not drain.** Review of the merged code found two facts, and both are still true:
+
+- **Admission does not consume an ownership scope.** A caller can present a
+  self-consistent `PromotionCorpusLock` built from its own envelope. Every
+  check on one object passes, because internal consistency is all such a check
+  can establish — so the caller still supplies the set the answer is drawn
+  from, wrapped in a valid object.
+- **Nothing is compelled to pass through the gate.** There is no ownership
+  scope, namespace, production directory or publisher, so the merged boundary
+  refuses nothing that could otherwise become corpus. That is this entry's own
+  drain condition, quoted back at the implementation that did not meet it.
+
+`now` is also still a caller's number rather than a clock authority, and §5.20
+steps 5–8 do not exist — so what landed is a temporary-file producer, not
+durable corpus membership.
+
+**§5.26 is PROPOSED as of 2026-09-17**, revised twice the same day after
+review. It proposes: a scope that reads the lock out of a corpus manifest rather
+than accepting one; **corpus creation** and **corpus reopening** as two separate
+acts, because "rejects a non-empty namespace" is right for one and false for the
+other; **single-lifetime capture**, because a sample index means nothing across
+two rings and segments would weaken global non-overlap into within-lifetime
+non-overlap without amending the statistical contract; deterministic validated
+recovery in place of "the most recent file"; a capability construction around an
+opaque directory descriptor rather than a call-site scan, which cannot prove
+unavoidability on its own; and §5.20 steps 5–8 with `link`/`unlink` as the
+no-replacement primitive, `rename` having been measured to replace silently.
+
+**The second revision's own defect is the largest thing in the third.** It made
+a membership accounting record the thing that turns a valid file into a member
+and left it a noun — no durability, no crash semantics, no recovery — so
+"membership requires accounting" held exactly when nothing crashed. A crash
+between a verified final file and its record would have produced a corpus that
+could never be reopened. The record is now an append-only **intent/commit
+journal** with declared framing, six recovery classifications and a control for
+each crash boundary.
+
+**A proposal drains nothing.** This entry drains when corpus creation, the
+complete publisher and the membership journal all exist, and admission sits on
+the only path to membership — a path that verifies before it counts.
+
 What is missing is one gate, at one place: after full-object ring attestation
 and before a window is persisted, a window whose `signal_chain_hash` is not a
 declared member of the corpus's `InstrumentChainEnvelope` **is not corpus**. It

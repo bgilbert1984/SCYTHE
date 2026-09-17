@@ -4067,6 +4067,570 @@ writer without admission is the hole the entry names.
 
 ---
 
+### 5.26 — the corpus ownership scope, and the only path to membership — **PROPOSED**
+
+```text
+Status:     PROPOSED 2026-09-17, revised twice the same day after review.
+            Nothing here is in force.
+Authority:  None. This section is documentation only. It authorises no capture,
+            no persistence, no directory creation, no byte write, no lock, no
+            corpus, no tuner action and no NESDR operation, on proposal or on
+            merge, and it changes no behaviour. The operator's authorisation of
+            temporary-directory writes covers an implementation's **tests** and
+            nothing else.
+Order:      §13l. Proposal, review, explicit acceptance, acceptance commit,
+            merge, and only then an implementation slice.
+Amends:     Nine contracts, enumerated in the table below and not re-listed
+            here, because two lists of one thing is how they come to disagree.
+Drains:     Nothing on merge. `PENDING_AMENDMENTS` entry 14 drains only when
+            corpus creation, the complete publisher and the membership journal
+            all exist, and admission sits on the only path to membership. A
+            proposed or accepted document drains nothing.
+```
+
+*§5.25's implementation merged at `af9d4bd` and did not drain entry 14. Review
+found two facts, quoted rather than paraphrased because a proposal that
+restates its own motivation in friendlier words has already begun to drift:*
+
+> **Admission is not consuming an ownership scope.** A caller can provide a
+> self-consistent lock constructed from its own envelope. That means the caller
+> still supplies the set from which admission answers, only wrapped in a valid
+> object. §5.25 expressly forbids that.
+>
+> **No production persistence path is compelled to pass through admission.**
+> There is no ownership scope, namespace, production directory or publisher.
+> Therefore the merged gate currently refuses nothing that could otherwise
+> become corpus.
+
+*The second governs. A gate on no path is not a weak gate; it is not a gate.*
+
+*Two rounds of review preceded this text. The first draft claimed one new header
+field and needed two, omitted the manifest from its own amendment accounting
+while the manifest was the mechanism it turned on, proposed comparing sample
+indices across ring lifetimes — which `rf_iq_ring` states in its own words
+cannot be done — and proposed restricting `os.open`, which 23 non-test modules
+already call 48 times. The second draft fixed those and introduced a worse one:
+it made a **membership accounting record** the thing that turns a valid file
+into a member, and left it a noun. It had no durability, no crash semantics and
+no recovery, so "membership requires accounting" was true exactly when nothing
+crashed — which is when a durable protocol is least interesting. That record is
+now a journal with a protocol, and it is the largest single addition here.*
+
+#### What this section amends
+
+| | contract | why it is not "a header field" |
+| ---: | --- | --- |
+| 1 | **the corpus manifest** — framing, canonical form, filename, location, size bound, required fields, opened-object checks | §5.20 mentions manifests only in a permissions row. Where the lock lives is unspecified in accepted text |
+| 2 | **corpus creation**, `create_corpus_namespace()` — a new empty namespace only | a new act, with its own ordering and durability obligations |
+| 3 | **corpus reopening**, `open_corpus_namespace()` — an existing manifest, state reconstructed | a *different* act. "Rejects a non-empty namespace" is right for one and false for the other |
+| 4 | **the membership journal** — intent, commit, abandon; append framing; crash recovery and its classifications | membership stops being "a file that parses", and the thing that replaces it is a ledger. A ledger without a protocol is a noun |
+| 5 | **ring-lifetime identity** — minted in `BoundedIQRing`, stored in `_WindowRecord`, compared during full-object attestation | it amends §5.24's attested metadata set, so `IQWindow` carries it and the nine checks become ten |
+| 6 | **the payload action's restricted surface** — one prefix-taking digest action in place of `_payload_sha256()` | `file_sha256` must be known **before** creation, and a second pass over four mebibytes to get it is a second copy §5.24 spent a slice removing |
+| 7 | **§5.20 step 6's primitive** — `link` then `unlink`, with the hard-link consequences | `rename` was measured to replace silently; the step had no primitive, only a requirement |
+| 8 | **§5.25's typed entrypoints** — they lose `lock` and `now`, and gain the scope | the two findings this section exists to remove |
+| 9 | **§5.20's `.iqc` header** — exactly two fields, `corpus_clock_authority` and `ring_lifetime_id` | 31 → 33 |
+
+**No third header field.** `manifest_sha256` is bound by the **journal**, not by
+the header: the journal is where a publication's identity is committed, and
+putting it in the header would add a field every reader must carry to learn
+something the corpus's own ledger already records.
+
+#### Binding is not accepting, and the difference is where the lock comes from
+
+The repair is not a stricter check on the lock a caller hands over. Every check
+worth writing already exists: §5.25 recomputes the frozen digests rather than
+reading them, so a lock whose digests disagree with the objects beside it
+refuses. A caller who builds a lock from its **own** envelope passes all of
+them, because the lock is internally consistent and consistency is all a check
+on one object can establish.
+
+So the object must not arrive from the caller at all.
+
+> **The lock is a fact of the corpus namespace, not an argument.** It is written
+> once, by corpus creation, into a manifest inside the namespace. The ownership
+> scope **reads** it from there. No entrypoint accepts one.
+
+##### The trust boundary this does not cross, kept narrow on purpose
+
+Whoever can write the namespace can change the corpus. A manifest is authority
+against a **caller** and is not authority against someone holding the
+filesystem, and a digest stored beside mutable content in the same writable
+namespace proves canonical identity and detects corruption — **it does not
+prove the namespace owner did not replace both.** §5.20 is already this honest
+about encryption, and the same honesty is owed here.
+
+**This section does not claim a corpus is tamper-proof.** Three narrower claims,
+each checkable:
+
+1. No code path in this repository can present admission with a lock the
+   namespace did not record.
+2. A manifest replaced **after the first publication intent** is detectable
+   without leaving the namespace: every intent binds `manifest_sha256`, and
+   every published `.iqc` header carries `configuration_digest`,
+   `envelope_digest` and `capture_plan_digest`. A manifest disagreeing with the
+   corpus's own journal or members refuses on reopen.
+3. It buys nothing before the first intent. A namespace owner who rewrites the
+   manifest of a corpus that has done nothing leaves nothing to disagree with,
+   and no arrangement of files in one writable directory can change that.
+
+#### The manifest, specified rather than described
+
+| | |
+| --- | --- |
+| location | `manifest.iqm`, opened **relative to the corpus directory descriptor**, never by path |
+| framing | `IQM_MAGIC` (8 bytes) ‖ `format_version` (uint16 LE) ‖ `body_length` (uint32 LE) ‖ canonical UTF-8 JSON body ‖ EOF |
+| magic | `b"\x89SCYMF\r\n"` — high bit set on byte 0, trailing CR LF, and **distinct from `IQC_MAGIC`**, so a manifest presented as a window is refused without parsing either |
+| size bound | `IQM_MAX_BODY_BYTES = 1_048_576`, checked **before allocating**, as `IQC_MAX_HEADER_BYTES` already is |
+| canonical form | `json.dumps(body, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False)` — the same rule as the `.iqc` header, for the same reasons |
+| digest | `manifest_sha256` = SHA-256 over the **complete framed bytes**, magic through body |
+| where the digest lives | **not in the body.** A digest cannot cover the bytes that carry it — §13i J.7a, §16.53b, and §5.20's own header rule. It is computed on read, and it is *bound* by the membership journal's intent records, which are outside it |
+| trailing bytes | EOF falls immediately after the body. Trailing bytes refuse; they are not ignored |
+
+**Required body fields, by authority:**
+
+| authority | fields |
+| --- | --- |
+| corpus identity | `corpus_id`, `opened_at` |
+| the frozen lock | every `PromotionCorpusLock` field, with `envelope` and `capture_plan` as their own `to_dict()` forms |
+| recomputed on read | `configuration_digest`, `envelope_digest`, `capture_plan_digest`, `strata_digest` must equal what the objects beside them produce |
+| retention | `delete_not_after`, and the maximum it was bounded by |
+| format declaration | manifest schema token, `format_version`, `STRATA_DEFINITION_REVISION`, `IQC_HEADER_SCHEMA`, `IQC_FORMAT_VERSION` |
+
+**Creation — `create_corpus_namespace()`, on a new empty namespace only:**
+
+```text
+resolve the authorised namespace root       (one resolver, one production module)
+→ open the corpus directory, O_DIRECTORY | O_NOFOLLOW
+→ establish OS-backed exclusive ownership
+→ validate the namespace is empty
+→ open manifest.iqm with O_CREAT | O_EXCL | O_WRONLY, mode 0600, dir_fd-relative
+→ write the framed canonical manifest
+→ fsync the manifest
+→ fsync the directory
+→ reopen and verify: framing, size bound, canonical re-serialisation byte-for-byte,
+  recomputed digests, opened-object checks
+→ mint the ownership scope
+```
+
+**Reopening — `open_corpus_namespace()`, on an existing manifest:** the same
+resolution, the same exclusion, the same verification — and it **requires** a
+manifest rather than refusing one, reconstructs the lock, retention and format
+declarations from it, and then runs membership recovery. *"Corpus open rejects a
+non-empty namespace" is correct for creation and false for reopening*, which is
+why these are two acts with two names and not one function with a flag.
+
+**Opened-object checks, on the descriptor and never on the path.** `O_NOFOLLOW`
+on open; then `fstat` on the descriptor: `st_nlink == 1`, `st_uid` equal to the
+process UID, `st_mode & 0o777 == 0o600` for files and `0o700` for the directory,
+and `st_dev` equal to the corpus directory's. A check on a path is a check on
+what the path meant a moment ago — the TOCTOU reading this repository already
+recorded about verdicts over mutable objects, one subsystem over.
+
+#### The membership journal
+
+§5.20's protocol ends at readback. Between a **verified** final file and a
+membership record there is an unavoidable crash window, and the previous draft
+made a bijection between files and records the reopening rule — so a power loss
+at exactly that instruction produced a valid file, no record, and a corpus that
+could never be reopened. Moving the record earlier only reverses the orphan.
+
+So the record becomes an append-only **intent/commit journal**, and the
+publication sequence becomes:
+
+```text
+durable publication intent
+→ create, write and fsync the temporary
+→ link the final without replacement
+→ unlink the temporary name
+→ fsync the directory
+→ read back and verify
+→ durable membership commit
+→ count from committed entries only
+```
+
+**The intent binds**, before any file exists: `manifest_sha256`, `corpus_id`,
+`stratum`, `window_id`, `ring_lifetime_id`, the expected final filename and
+`file_sha256`, `payload_sha256`, the sequence predecessor (`previous_window_id`
+and the first-sample index), and `envelope_digest` and `capture_plan_digest`.
+
+The expected `file_sha256` is computable before creation because the canonical
+header is derived before creation and the payload is already bound — which is
+what amendment 6 is for: **one prefix-taking digest action** over the attested
+bytes gives `payload_sha256` with an empty prefix and `file_sha256` with the
+framing prefix and header, each in a single pass and neither needing a copy.
+
+**Journal framing, because a torn append is the normal case.** Each record is
+`length` (uint32 LE) ‖ canonical JSON ‖ SHA-256 of those bytes (32 raw bytes),
+appended and `fsync`ed. A tail that is short, unparseable or fails its digest is
+a **torn append** — the `fsync` had not completed — and is discarded on
+recovery, which is a declared outcome rather than a corruption.
+
+**Recovery classifications, each of which is a control:**
+
+| state | outcome |
+| --- | --- |
+| intent + verified final + no commit | **complete the commit.** The publication succeeded; only its record was lost |
+| intent + no final | **abandoned**, recorded durably. Never a member; the predecessor does not advance |
+| commit + no final | **refusal.** A counted member whose bytes are gone is not a recoverable state |
+| final + no intent | **not corpus** — an explicit *unaccounted final* condition, preserved and never counted. This is what makes an alternate writer's output not-a-member rather than merely discouraged |
+| duplicate or contradictory intent or commit for one window | **refusal** |
+| torn tail record | discarded, and the journal is truncated to the last intact record |
+
+**The cap counts committed entries.** Not files, not intents.
+
+#### Ring-lifetime identity
+
+`ring_lifetime_id` tells a reader that two sample-index domains are
+**incomparable**. It does not make them comparable, and the first draft treated
+it as though it did. `rf_iq_ring` states the constraint itself: *"two rings each
+count from zero, so indices from different rings compare cleanly and mean
+nothing."* `_total_appended` is zeroed only in `__init__`, so a lifetime spans
+many `configuration_epoch`s and restarts at zero for a new ring;
+`configuration_epoch` restarts at zero too, so nothing in the header
+distinguishes one lifetime from another.
+
+Its authority, stated as requirements:
+
+- minted **once** by `BoundedIQRing.__init__`, from `os.urandom`, unpredictable
+  and collision-resistant;
+- **not a production constructor argument.** A test needing determinism patches
+  the minting function; it does not pass a value, because a parameter is a
+  caller's claim and this is the identity attestation compares against;
+- stored in `_WindowRecord`, carried on `IQWindow`, and **compared during
+  full-object attestation** — §5.24's nine checks become ten;
+- exposed through the attested scope, and carried in the header and in every
+  publication intent;
+- **unchanged** across configuration invalidations, because the index domain is;
+- **different** for every new ring instance.
+
+##### Single-lifetime capture, and what "reopen" does and does not mean
+
+Two policies are available and one must be chosen:
+
+| policy | what a new lifetime permits | what non-overlap proves |
+| --- | --- | --- |
+| **single-lifetime capture** | verification and recovery; **capture refuses** | non-overlap across the whole corpus |
+| **multi-lifetime segments** | capture continues in a new segment | non-overlap **within** a segment only |
+
+> **This section proposes single-lifetime capture**, because segments are only
+> honest if the statistical contract says what a discontinuity means, and
+> amending §5.8's independence argument is not this slice. Weakening global
+> non-overlap into within-lifetime non-overlap without saying so is the failure
+> this whole line of work exists to prevent.
+
+**The rule is about the lifetime, not about reopening**, and the previous draft
+made those accidentally synonymous:
+
+> Capture refuses when the next attested window carries a different
+> `ring_lifetime_id` from the corpus's **first committed member**.
+
+Three cases, stated separately:
+
+- **reopen under the same live ring** — the scope was released and reopened
+  while the ring it captured from still exists: capture **may continue**;
+- **reopen after a ring or process restart** — a new identity, so **read and
+  verify only**, permanently for that corpus;
+- **an empty corpus** — bound by the first *committed* member, so a creation
+  never followed by a capture leaves the corpus open to any lifetime.
+
+**The consequence is severe and is stated rather than discovered later.** A
+corpus whose capture is interrupted by a process restart can never be completed.
+It can be reopened, verified and read; it cannot receive another window, so it
+can never reach 5 561 in a stratum and can never be issued a
+`CorpusCompletionReceipt`. At 16 683 windows of 256 ms, the sample alone is over
+an hour of continuous stream before settling time.
+
+##### Recovery is deterministic and validated; directory order is never sequence order
+
+Filenames derive from `file_sha256`, so a listing has no order at all, and "the
+most recent file" — which the first draft said — is not something a directory
+can tell anyone. Recovery must enumerate candidate finals, **parse and validate
+every one** (framing, canonical re-serialisation, `payload_sha256`,
+`file_sha256`, filename agreement), reconcile each against the journal by the
+classifications above, derive sequence facts only from authoritative header
+fields, and **refuse to reopen if they do not determine one unique
+predecessor.**
+
+The state it produces keeps three things apart that the first draft conflated:
+the **global per-stratum count** over committed entries, which is what the cap
+is against; the **predecessor and index comparisons**, within the current
+`ring_lifetime_id` only; and an explicit **first-window state** for a stratum
+with no committed member.
+
+#### One path, and what actually enforces that it is the only one
+
+```text
+durable manifest
+    → exclusive ownership scope
+    → attested single-lifetime window
+    → typed stratum attestation
+    → admission and every pre-create check
+    → durable publication intent
+    → exclusive temporary creation, write, fsync
+    → link without replacement, unlink the temporary, fsync the directory
+    → readback verification
+    → durable membership commit
+    → counted corpus member
+```
+
+The first draft claimed a call-site scan over `os.open` would enforce this.
+Measured: **23 non-test modules already make 48 `open`/`os.open` calls**, so
+such a scan fires everywhere and proves nothing. The corrected version —
+scanning a named private primitive — **does not prove unavoidability either**,
+because another module could write with `os.open` directly.
+
+What is claimable is a capability construction, and then one fact that does not
+depend on it:
+
+- namespace resolution exists in exactly one production module;
+- the open **directory descriptor** lives in opaque ownership-scope state;
+- no public method returns the path or the descriptor;
+- temporary creation, publication and journal appends consume that state
+  internally;
+- static checks restrict the namespace resolver, the manifest creator, the
+  temporary creator, the publication primitive and the journal writer — as a
+  tripwire over this repository's own shape, which is what a static check is;
+- **and membership requires a committed journal entry.** A file written by
+  anything else parses, validates, and is still not a member: it is an
+  *unaccounted final*.
+
+The last line is the one that does not rest on a scan. A host-level actor can
+still reach the path, and the contract already disclaims protection against that
+actor.
+
+#### §5.20's protocol, and the primitives each step names
+
+| step | act | regime |
+| ---: | --- | --- |
+| 1 | hold the ownership scope; attest the window | precondition |
+| 2 | recheck descriptor, mount, ownership, mode, corpus limits, retention | precondition |
+| — | **durable publication intent** | precondition, and the last thing before creation |
+| 3 | exclusively create a `0600` temporary sibling | **the boundary** |
+| 4 | write the canonical header and the exact payload | post-open |
+| 5 | `fsync` the file | post-open |
+| 6 | `link` the final without replacement, then `unlink` the temporary name | post-open |
+| 7 | `fsync` the directory — **after** the final namespace state, both names settled | post-open |
+| 8 | read the final back; verify `payload_sha256`, `file_sha256` and the filename | post-open |
+| — | **durable membership commit**, then count | only after 8 |
+
+**Steps 5 and 7 are two different durability facts.** `fsync` on the file makes
+the bytes survive; `fsync` on the directory makes the **names** survive. Neither
+implies the other, so they are two controls: a single "durability" control
+passes whenever either still works.
+
+**Step 6's primitive, measured on this host.** `os.rename` over an existing name
+**replaces it silently**, and Python's `os` exposes neither `renameat2` nor
+`RENAME_NOREPLACE`. `os.link` refuses with `EEXIST`. So:
+
+```text
+os.link(temporary, final)     # refuses if `final` exists
+os.unlink(temporary)          # a NAME is removed; the inode is not touched
+```
+
+**Temporary cleanup is name removal only, and this is measured rather than
+argued.** After `link`, both names share one inode. A cleanup path that
+truncates or overwrites the temporary **destroys the member** — demonstrated:
+opening the temporary name `"wb"` left the final file zero bytes. No cleanup,
+deletion or recovery path may do anything to a temporary but `unlink` its name.
+
+**Recovery must classify the two-name state.** A crash between `link` and
+`unlink` leaves a temporary hard-linked to a member. Recovery compares
+`(st_dev, st_ino)` of both names; on equality it **preserves the final and
+unlinks only the temporary name**. On inequality the temporary is an ordinary
+orphan under §5.20's retention rule.
+
+**Step 8 verifies two digests and the name**, and each is its own control:
+`payload_sha256` catches a payload substituted between write and count;
+`file_sha256` catches a header substituted under a correct payload; the filename
+must equal `file_sha256`, or the file is one whose name does not match its own
+framed bytes, which §5.20 already says is not a corpus member. Any two of the
+three passing does not establish the third.
+
+**The commit consumes a verified result a caller cannot construct** — not a
+path, not a Boolean, not a count. The mint-key construction
+`AttestedIQWindowScope` already uses is the shape: an object only the
+verification step can produce.
+
+#### Exclusivity is OS-backed
+
+Two ownership scopes on one corpus means two sequence states, two journals'
+worth of appends and a cap counted twice. An in-process registry does not see a
+second process, which is the case that matters. The exclusion is an exclusive
+lock held on a descriptor inside the namespace, released only when the scope is,
+and **its control opens a second scope from a second process** — an in-process
+control would pass against the very mechanism it exists to refuse.
+
+#### The clock
+
+The scope obtains its clock **internally** when it opens. Production code passes
+no clock and no timestamp; only the **test factory** accepts an injected one, so
+the seam is at the boundary rather than on every write. `corpus_clock_authority`
+names it in the header, and it is a different clock from the ring's — already
+named there for the capture times — because one field meaning different things
+on different rows is how a header stops being a record.
+
+#### The test-write authorisation, recorded
+
+The operator authorised option 1 on 2026-09-17, and it **covers an
+implementation's tests and nothing else** — no production corpus creation, no
+capture, no NESDR operation. Its conditions travel with it: a fresh temporary
+root per test; production namespace resolution mechanically unreachable from
+tests; no test reading or writing the configured production root; cleanup in
+`finally`; tests asserting the temporary root is gone afterwards where the
+platform permits; and **real filesystem behaviour, not mocked** — a mocked
+`fsync`, `link` or readback makes every durability control a test of the mock,
+which is the shape §5.20's controls exist to refuse.
+
+#### What the implementation must prove, stated as controls
+
+Forty-eight mutations, each failing its own tests, each with the collateral
+scan. Grouped by what they attack rather than numbered in one run — and the
+group subtotals are stated so the total can be checked against them, because
+the first number written here was forty-one and the groups summed to
+forty-eight. An amendment count that disagrees with its own table is the
+failure §5.25 recorded, and it is cheap to make mechanical: sum the
+parenthesised subtotals.
+
+**The two findings this section exists to remove (4)**
+
+| | mutation | what it would otherwise hide |
+| ---: | --- | --- |
+| A1 | the scope accepts a lock from the caller | the caller supplying the set admission answers from |
+| A2 | an entrypoint accepts a free-standing lock beside the scope | two authorities, one of them the caller's |
+| A3 | an entrypoint accepts a caller timestamp | the clock never becoming an authority |
+| A4 | production code obtains its clock from the test factory's seam | the seam becoming the interface |
+
+**The manifest (8)**
+
+| | mutation | what it would otherwise hide |
+| ---: | --- | --- |
+| B1 | created with replacement rather than `O_EXCL` | a second creation silently rewriting a corpus's terms |
+| B2 | the manifest `fsync` removed | terms that do not survive the corpus's own opening |
+| B3 | the creation-time directory `fsync` removed | a manifest whose **name** does not survive |
+| B4 | creation does not reopen and verify what it wrote | a manifest nobody has read once |
+| B5 | reopen does not re-serialise and compare byte-for-byte | a non-canonical manifest, and a second identity for one corpus |
+| B6 | the size bound checked after allocating, or not at all | a `uint32` length claiming four gibibytes |
+| B7 | `IQM_MAGIC` made equal to `IQC_MAGIC` | a manifest readable as a window, and the reverse |
+| B8 | the recomputed digests not compared against the body's | a manifest whose declared digests are not its objects' |
+
+**Creation is not reopening (3)**
+
+| | mutation | what it would otherwise hide |
+| ---: | --- | --- |
+| C1 | `create_corpus_namespace` accepts a non-empty namespace | a corpus created over another corpus |
+| C2 | `open_corpus_namespace` refuses a non-empty namespace | reopening made impossible by a rule that belongs to creation |
+| C3 | `open_corpus_namespace` creates a manifest when none is found | a corpus conjured by opening a directory |
+
+**Namespace and capability (5)**
+
+| | mutation | what it would otherwise hide |
+| ---: | --- | --- |
+| D1 | the namespace resolved outside the one resolver | a writer in a directory nobody authorised |
+| D2 | a public method returns the path or the descriptor | the capability leaving the scope — §5.24's lesson, one layer out |
+| D3 | opens without `O_NOFOLLOW` | a symlinked manifest or member |
+| D4 | the opened-object checks applied to the path rather than the descriptor | the TOCTOU the descriptor exists to close |
+| D5 | the `st_nlink`, `st_uid`, `st_mode` or `st_dev` check dropped | a hard-linked, foreign-owned, permissive or cross-device object accepted |
+
+**Exclusivity and lifetime (4)**
+
+| | mutation | what it would otherwise hide |
+| ---: | --- | --- |
+| E1 | a second ownership scope opens from a **second process** | two sequence states and a cap counted twice |
+| E2 | capture permitted under a different `ring_lifetime_id` | within-lifetime non-overlap silently replacing global |
+| E3 | capture refused under the **same** lifetime after a scope reopen | "reopen" and "new lifetime" made synonymous, which forbids what is allowed |
+| E4 | `ring_lifetime_id` substituted on an otherwise genuine window | the identity becoming a claim rather than an attestation |
+
+**Publication (7)**
+
+| | mutation | what it would otherwise hide |
+| ---: | --- | --- |
+| F1 | an admission check performed after creation | a precondition refusal leaving an artefact |
+| F2 | the file `fsync` removed | a counted window a power loss loses |
+| F3 | publication by `rename` rather than `link` | one window replacing another, silently |
+| F4 | the publication directory `fsync` removed, or moved before the `unlink` | names that do not survive, over bytes that do |
+| F5 | temporary cleanup truncates or opens for writing rather than unlinking | **the member's bytes destroyed** — measured, not theorised |
+| F6 | recovery does not compare `(st_dev, st_ino)` before removing a temporary | a member unlinked as though it were an orphan |
+| F7 | the readback removed | a file counted without ever being read |
+
+**Identity at readback (3)**
+
+| | mutation | what it would otherwise hide |
+| ---: | --- | --- |
+| G1 | `payload_sha256` not verified | a payload substituted between write and count |
+| G2 | `file_sha256` not verified | a header substituted under a correct payload |
+| G3 | the filename not required to equal `file_sha256` | a file whose name does not match its own framed bytes |
+
+**The journal (7)**
+
+| | mutation | what it would otherwise hide |
+| ---: | --- | --- |
+| H1 | the intent written after creation rather than before | a final file no record ever anticipated |
+| H2 | the intent or commit not `fsync`ed | a journal that is a cache |
+| H3 | the intent does not bind the expected `file_sha256` | a commit that cannot contradict what was written |
+| H4 | the intent does not bind `manifest_sha256` | a manifest swap invisible to the corpus's own ledger |
+| H5 | a torn tail record accepted rather than discarded | a half-written append read as a decision |
+| H6 | the commit accepts a caller-constructed result | membership established by asserting it |
+| H7 | the cap counted from files or intents rather than commits | an abandoned publication inflating the sample |
+
+**Crash recovery, one per classification (5)**
+
+Each is exercised by interrupting a publication at a named instruction and then
+reopening — real files, real `fsync`, no mocks.
+
+| | crash point | required outcome |
+| ---: | --- | --- |
+| J1 | after the intent, before the temporary | abandoned; predecessor does not advance |
+| J2 | after `link`, before `unlink` | two names, one inode: final preserved, temporary name removed |
+| J3 | after the directory `fsync`, before the readback | intent + verified final + no commit → **commit completed** |
+| J4 | a commit whose final is absent | refusal |
+| J5 | a valid final with no intent | *unaccounted final*: preserved, never counted, never a member |
+
+**Two mutations of the recovery rules themselves (2)**
+
+| | mutation | what it would otherwise hide |
+| ---: | --- | --- |
+| K1 | J3's state refused instead of completed | a power loss at one instruction making a corpus permanently unreopenable |
+| K2 | J5's state counted as a member | anything that can write the directory writing a member |
+
+Groups B2/B3, F2/F4 are four separate `fsync` obligations and G1–G3 three
+separate readback obligations, for one reason in every case: a combined control
+passes whenever **any** of its parts still works, which is a control that
+reports success for most of its own failures.
+
+#### What this section does not do
+
+- It authorises **no capture, no persistence, no production directory, no byte
+  outside a test's temporary root, no lock, no corpus, no tuner action and no
+  NESDR operation** — on proposal or on merge.
+- It does not implement §5.20's deletion row, which is its own slice. The
+  hard-link consequence is recorded here because a deletion pass written without
+  it would destroy members, not because deletion is proposed.
+- It does not make `RECEIVER_SPURS` reachable and settles nothing in entry 10.
+- It does not amend §5.8's independence argument, which is why single-lifetime
+  capture is proposed rather than segments.
+- It does not claim tamper-proofing, and says three times what it does claim.
+- It does not drain entry 14. An accepted contract describing an enforcement is
+  not the enforcement — the reading entries 8, 9, 11 and now 14 each record.
+
+#### What acceptance would require
+
+An explicit acceptance decision and an acceptance commit, naming as part of this
+section's substance: the **nine** contracts in the table above; the two new
+header fields, 31 → 33; §5.24's attested metadata set growing by
+`ring_lifetime_id`, so its nine checks become ten; §5.25's restricted payload
+action becoming one prefix-taking digest; §5.20 step 6's primitive and the
+hard-link consequences; **the single-lifetime capture policy and the consequence
+that a corpus interrupted by a process restart can never be completed**; and the
+temporary-directory test authorisation, which is the operator's and is recorded
+here rather than assumed.
+
+Then, in order: merge; implementation, which may be split into ordered slices;
+and only then the drain — owed when corpus creation, the complete publisher and
+the membership journal all exist, and admission sits on the only path to
+membership.
+
+---
+
 ## 6. Open questions for the operator
 
 1. **Approve the bounded IQ ring** (§2.2)? First retention of raw IQ beyond one block.
