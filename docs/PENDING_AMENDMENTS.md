@@ -219,22 +219,30 @@ not drain.** Review of the merged code found two facts, and both are still true:
 steps 5–8 do not exist — so what landed is a temporary-file producer, not
 durable corpus membership.
 
-**§5.26 is PROPOSED as of 2026-09-17**, revised the same day after review. It
-proposes: a scope that reads the lock out of a corpus manifest rather than
-accepting one; the **corpus-open act** that writes that manifest, without which
-the scope would be another gate on no path; **single-lifetime capture**, because
-a sample index means nothing across two rings and multi-lifetime segments would
-weaken global non-overlap into within-lifetime non-overlap without amending the
-statistical contract; deterministic validated recovery in place of "the most
-recent file"; a membership accounting record, so that a file which merely parses
-is not a member; a capability construction around an opaque directory descriptor
-rather than a call-site scan, which cannot prove unavoidability on its own; and
-§5.20 steps 5–8 with `link`/`unlink` as the no-replacement primitive, `rename`
-having been measured to replace silently.
+**§5.26 is PROPOSED as of 2026-09-17**, revised twice the same day after
+review. It proposes: a scope that reads the lock out of a corpus manifest rather
+than accepting one; **corpus creation** and **corpus reopening** as two separate
+acts, because "rejects a non-empty namespace" is right for one and false for the
+other; **single-lifetime capture**, because a sample index means nothing across
+two rings and segments would weaken global non-overlap into within-lifetime
+non-overlap without amending the statistical contract; deterministic validated
+recovery in place of "the most recent file"; a capability construction around an
+opaque directory descriptor rather than a call-site scan, which cannot prove
+unavoidability on its own; and §5.20 steps 5–8 with `link`/`unlink` as the
+no-replacement primitive, `rename` having been measured to replace silently.
 
-**A proposal drains nothing.** This entry drains when the corpus-open act and
-the complete publisher **both** exist, and admission sits on the only path to
-membership — a path that verifies before it counts.
+**The second revision's own defect is the largest thing in the third.** It made
+a membership accounting record the thing that turns a valid file into a member
+and left it a noun — no durability, no crash semantics, no recovery — so
+"membership requires accounting" held exactly when nothing crashed. A crash
+between a verified final file and its record would have produced a corpus that
+could never be reopened. The record is now an append-only **intent/commit
+journal** with declared framing, six recovery classifications and a control for
+each crash boundary.
+
+**A proposal drains nothing.** This entry drains when corpus creation, the
+complete publisher and the membership journal all exist, and admission sits on
+the only path to membership — a path that verifies before it counts.
 
 What is missing is one gate, at one place: after full-object ring attestation
 and before a window is persisted, a window whose `signal_chain_hash` is not a
