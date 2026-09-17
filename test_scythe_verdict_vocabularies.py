@@ -293,6 +293,16 @@ DUPLICATE_DECLARATIONS = {
     "LEDGER_TORN": (ONE_CONCEPT, "a readability state, re-declared as the closure reason that cites it (§13e F.7)"),
     "LEDGER_UNREADABLE": (ONE_CONCEPT, "a readability state, re-declared as the closure reason that cites it (§13e F.7)"),
 
+    # One concept in two places: the three stratum keys, declared by the
+    # manifest as what needs a receiver rather than a generator, and by the
+    # capture boundary as the scope of §5.20's grant. Two different properties
+    # that pick out the same three strata today -- and could stop: a stratum
+    # could be captured without needing a tuner, or need one without being
+    # granted. One word either way, because it names one stratum.
+    "GAIN_STEPS": (ONE_CONCEPT, "one stratum key, declared as tuner-required by the manifest and as capture-granted by §5.20's boundary"),
+    "RETUNE_TRANSIENTS": (ONE_CONCEPT, "one stratum key, declared as tuner-required by the manifest and as capture-granted by §5.20's boundary"),
+    "RECEIVER_SPURS": (ONE_CONCEPT, "one stratum key, declared as tuner-required by the manifest and as capture-granted by §5.20's boundary"),
+
     # One concept, one vocabulary deliberately reused across subsystems.
     "ARMED": (ONE_CONCEPT, "the same three postures, applied to recovery and to promotion"),
     "SHADOW": (ONE_CONCEPT, "the same three postures, applied to recovery and to promotion"),
@@ -375,6 +385,16 @@ JUDGED = {
         "§13f G.8: the same event from the refusal side and the closure side. "
         "This code names its subject rather than the state it counts, because "
         "UNRESOLVED is already doubled in this tree",
+    ("GAIN_STEPS", "LOCK_PLAN_GAIN_STEPS_ONE_CHAIN"):
+        "the lock refusal is named after the stratum it is about -- a plan "
+        "putting every gain step on one chain. Renaming either would hide the "
+        "link between a stratum and the plan rule that governs it, which is "
+        "the link an operator reading the refusal needs",
+    ("RETUNE_TRANSIENTS", "RETUNE"):
+        "RETUNE is the ring invalidation reason; RETUNE_TRANSIENTS is the "
+        "stratum made of the first complete window after one. §5.20 correction "
+        "B defines the stratum BY that event, so the stratum is named after "
+        "the reason on purpose and neither is a verdict vocabulary",
 }
 
 
@@ -512,6 +532,39 @@ class DiscoveryTests(unittest.TestCase):
             hits = cross_set_collisions(code, self.tokens)
             self.assertEqual(hits, ["CEILING_REACHED"])
             self.assertTrue(judged(code, "CEILING_REACHED"))
+
+    def test_the_capture_boundary_tokens_are_clear_or_judged(self):
+        """§5.25's two new vocabularies, swept as §3 requires.
+
+        Two sets in one module, named disjointly: `ADMISSION_*` for the
+        precondition regime and `PUBLICATION_*` for the post-open one. The
+        sweep is here rather than quoted in a commit message, because a check
+        run once by an author is the "found by looking" failure §3 exists to
+        replace.
+        """
+        declared = _module_tokens("rf_capture_admission")
+        admission = set(declared["ADMISSION_REFUSALS"])
+        publication = set(declared["PUBLICATION_FAILURES"])
+        strata = set(declared["CAPTURED_STRATA"])
+        self.assertTrue(admission and publication and strata)
+        self.assertEqual(admission & publication, set())
+        for candidate in sorted(admission | publication | strata
+                                | set(_module_tokens("rf_iq_ring")["CLOCK_AUTHORITIES"])):
+            unjudged = [hit for hit in cross_set_collisions(candidate, self.tokens)
+                        if not judged(candidate, hit)]
+            self.assertEqual(unjudged, [], f"{candidate}: {unjudged}")
+
+    def test_the_two_capture_regimes_are_named_disjointly(self):
+        """A code cannot be read off as belonging to the other regime.
+
+        The regimes differ in what they leave on disk, so a reader has to be
+        able to tell them apart from the code alone.
+        """
+        declared = _module_tokens("rf_capture_admission")
+        for code in declared["ADMISSION_REFUSALS"]:
+            self.assertFalse(code.startswith("PUBLICATION_"), code)
+        for code in declared["PUBLICATION_FAILURES"]:
+            self.assertTrue(code.startswith("PUBLICATION_"), code)
 
     def test_the_rejected_c2_name_is_absent_from_the_tree(self):
         """§13f G.8 renamed it rather than judging it: UNRESOLVED is already

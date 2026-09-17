@@ -75,6 +75,7 @@ from rf_promotion_geometry import (
     PROMOTION_WINDOW_OVERLAP,
     PROMOTION_WINDOW_SAMPLES,
 )
+from rf_signal_chain_identity import UNDECLARED
 
 
 SCHEMA = "scythe.rf-iq-ring.v1"
@@ -264,6 +265,20 @@ MAX_TRACKED_WINDOWS = 32
 # is a test or a developer shell, which is not a child process; the orchestrator
 # always stamps 'child' on the ones it spawns (scythe_orchestrator.py).
 ALLOWED_PROCESS_ROLES: Tuple[str, ...] = ("", "orchestrator")
+
+# §5.25: the attested scope supplies "capture times and the named clock
+# authority". The ring stamps `start_time` and `end_time` from an injectable
+# `now`, so *which* clock produced them is a property of the ring instance and
+# nothing recorded it. A capture header that carried the times without naming
+# their source would be asserting a quality it never established.
+#
+# `POSIX_REALTIME` is what `time.time` reads. It is named rather than praised:
+# it is settable, it is not monotonic, and nothing here has disciplined it
+# against a reference. A ring handed some other `now` and not told what it is
+# records `UNDECLARED` -- the named absence, never a guess -- and the header
+# carries that rather than the default it would have been convenient to assume.
+CLOCK_AUTHORITY_POSIX_REALTIME = "POSIX_REALTIME"
+CLOCK_AUTHORITIES: Tuple[str, ...] = (CLOCK_AUTHORITY_POSIX_REALTIME, UNDECLARED)
 
 
 def _window_digest(signal_chain_hash: str, configuration_epoch: int,
@@ -605,6 +620,35 @@ class AttestedIQWindowScope:
                 total += written
             return total
 
+    def _payload_sha256(self) -> str:
+        """SHA-256 over the attested bytes, as hex. **Restricted.**
+
+        §5.20's header carries `payload_sha256`, and the header is written
+        **before** the payload -- so the digest cannot be a by-product of the
+        write and has to be taken while the scope is live and before anything
+        is created. §5.25 names the payload action as the authority for that
+        field, which is what this is.
+
+        Returns a 64-character hex string and never the payload, the array,
+        bytes or a view. It is not the deleted `_payload_nbytes()` returning
+        under a new name: that method had no caller and answered a question the
+        attested metadata already answers, and this one answers a question
+        nothing else can -- only the bytes know their own digest.
+
+        The ring digest is not a substitute. It is BLAKE2s over the chain, the
+        epoch, the sample count **and** the payload, so it identifies the live
+        source at issue time; `payload_sha256` is over the payload alone, which
+        is what a reader recomputes from a file it has no ring for.
+        """
+        state = self._state()          # type, provenance and liveness, in order
+        # Same discipline as the write: the whole read happens under the state
+        # lock, and teardown acquires it. A digest taken while an exit was
+        # clearing the payload would either raise incidentally or hash a
+        # half-dropped view, and both are the lifetime inversion §5.24 forbids.
+        with state.lock:
+            state = self._state()      # re-resolved: the handle may have moved
+            return hashlib.sha256(state.payload).hexdigest()
+
     # There is deliberately no `_payload_nbytes()`. It existed, had no
     # production caller, read `state.payload.nbytes` outside the state lock --
     # so a concurrent exit produced an incidental `AttributeError` rather than
@@ -709,8 +753,8 @@ class BoundedIQRing:
 
     def __init__(self, *, capacity_samples: int = DEFAULT_CAPACITY_SAMPLES,
                  sample_rate_hz: float = DEFAULT_SAMPLE_RATE_HZ,
-                 signal_chain_hash: str = "UNDECLARED",
-                 now=time.time) -> None:
+                 signal_chain_hash: str = UNDECLARED,
+                 now=time.time, clock_authority: Optional[str] = None) -> None:
         role = _process_role()
         if role not in ALLOWED_PROCESS_ROLES:
             # Refused before allocation, so a child never holds IQ even briefly.
@@ -729,7 +773,14 @@ class BoundedIQRing:
         self._now = now
         self._capacity = capacity
         self._sample_rate_hz = rate
-        self._signal_chain_hash = _text(signal_chain_hash) or "UNDECLARED"
+        self._signal_chain_hash = _text(signal_chain_hash) or UNDECLARED
+        # Derived from the clock actually installed, not from a parameter a
+        # caller may leave at its default while replacing the clock beside it.
+        if clock_authority is None:
+            self._clock_authority = (CLOCK_AUTHORITY_POSIX_REALTIME
+                                     if now is time.time else UNDECLARED)
+        else:
+            self._clock_authority = _text(clock_authority) or UNDECLARED
         # Allocated once. Nothing in this class reassigns or resizes it.
         self._buffer = np.zeros(capacity, dtype=STORAGE_DTYPE)
         self._write_index = 0
@@ -755,6 +806,11 @@ class BoundedIQRing:
     @property
     def configuration_epoch(self) -> int:
         return self._configuration_epoch
+
+    @property
+    def clock_authority(self) -> str:
+        """Which clock stamped this ring's capture times. §5.25."""
+        return self._clock_authority
 
     @property
     def retention_ms(self) -> float:
@@ -1070,6 +1126,12 @@ class BoundedIQRing:
 
             metadata = dict(authoritative)
             metadata["window_id"] = record.window_id
+            # Outside ATTESTED_METADATA_FIELDS deliberately: that tuple is the
+            # field-by-field comparison of the *object* against the record, and
+            # the clock authority is a property of the ring rather than of the
+            # window. It is bound into the scope because §5.25's header needs
+            # it, and it is bound at mint time so it cannot be re-read later.
+            metadata["clock_authority"] = self._clock_authority
             self._attestations += 1
             handle = (f"att-{record.window_id}-{self._attestations}-"
                       f"{os.urandom(8).hex()}")

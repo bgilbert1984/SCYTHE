@@ -81,6 +81,96 @@ def _drain(scope):
         os.close(read_fd)
 
 
+# The exemption teardown earns, and nothing else does. §5.25 made it explicit
+# to `__exit__` before its implementation relied on this check.
+PAYLOAD_STORE_EXEMPT = "__exit__"
+
+
+def _payload_guard(source, class_name="AttestedIQWindowScope"):
+    """Every `.payload` access in one class, and whether it is guarded.
+
+    Returns `(offenders, loads, stores, methods)`. A load must sit inside a
+    `with <state>.lock:` block over the same variable, and be preceded **inside
+    that block** by a `_state()` re-resolution. A store must sit under the same
+    lock, and is exempt from re-resolution **only in `PAYLOAD_STORE_EXEMPT`**.
+
+    Taking a source string rather than reading the module is the seam that lets
+    the tightening be tested: a check that only ever runs against the one file
+    it passes on cannot show that it would refuse anything.
+    """
+    tree = ast.parse(source)
+    scope_class = next(node for node in ast.walk(tree)
+                       if isinstance(node, ast.ClassDef)
+                       and node.name == class_name)
+    offenders, counts = [], {"loads": 0, "stores": 0}
+
+    def lock_holder(item):
+        """The variable X in `with X.lock:`, or None."""
+        expr = item.context_expr
+        if (isinstance(expr, ast.Attribute) and expr.attr == "lock"
+                and isinstance(expr.value, ast.Name)):
+            return expr.value.id
+        return None
+
+    def resolution_lines(body, held):
+        """Lines where `held = self._state()` happens in this block."""
+        lines = []
+        for node in ast.walk(ast.Module(body=body, type_ignores=[])):
+            if (isinstance(node, ast.Assign)
+                    and any(isinstance(t, ast.Name) and t.id == held
+                            for t in node.targets)
+                    and isinstance(node.value, ast.Call)
+                    and isinstance(node.value.func, ast.Attribute)
+                    and node.value.func.attr == "_state"):
+                lines.append(node.lineno)
+        return lines
+
+    def walk(node, method, held, resolved_at):
+        if isinstance(node, ast.With):
+            for item in node.items:
+                holder = lock_holder(item)
+                if holder is not None:
+                    inner_resolved = resolution_lines(node.body, holder)
+                    for child in node.body:
+                        walk(child, method, holder,
+                             min(inner_resolved) if inner_resolved else None)
+                    return
+            for child in node.body:
+                walk(child, method, held, resolved_at)
+            return
+        if isinstance(node, ast.Attribute) and node.attr == "payload":
+            owner = (node.value.id if isinstance(node.value, ast.Name)
+                     else "<expression>")
+            if held is None:
+                offenders.append((method, node.lineno, "outside any state lock"))
+            elif owner != held:
+                offenders.append((method, node.lineno,
+                                  f"guarded on {held} but reads {owner}"))
+            elif isinstance(node.ctx, ast.Load):
+                if resolved_at is None or node.lineno < resolved_at:
+                    offenders.append((method, node.lineno,
+                                      "no _state() re-resolution before the read"))
+                else:
+                    counts["loads"] += 1
+            elif method == PAYLOAD_STORE_EXEMPT:
+                counts["stores"] += 1
+            else:
+                offenders.append((
+                    method, node.lineno,
+                    f"a payload store outside {PAYLOAD_STORE_EXEMPT}; the "
+                    "teardown exemption does not travel"))
+        for child in ast.iter_child_nodes(node):
+            walk(child, method, held, resolved_at)
+
+    methods = 0
+    for node in scope_class.body:
+        if isinstance(node, ast.FunctionDef):
+            methods += 1
+            for child in node.body:
+                walk(child, node.name, None, None)
+    return offenders, counts["loads"], counts["stores"], methods
+
+
 class AttestationAcceptsWhatTheRingIssuedTests(unittest.TestCase):
 
     def test_a_genuine_window_attests(self):
@@ -791,9 +881,15 @@ class RestrictedAccessorTests(unittest.TestCase):
     claimed is what is checked: no public accessor, and every production
     reference to the private ones statically restricted."""
 
-    ACCESSORS = ("_write_payload_to_fd",)
+    # §5.25 added the second restricted action. §5.20's header carries
+    # `payload_sha256` and the header is written **before** the payload, so the
+    # digest cannot be a by-product of the write -- it has to be taken while
+    # the scope is live and before anything is created. It is policed exactly
+    # like the first: no public accessor, and every production call site inside
+    # the allowed set.
+    ACCESSORS = ("_write_payload_to_fd", "_payload_sha256")
     DELETED = ("_payload_nbytes",)
-    ALLOWED = {"rf_iq_ring.py"}
+    ALLOWED = {"rf_iq_ring.py", "rf_capture_admission.py"}
 
     def _production_modules(self):
         return [path for path in sorted(pathlib.Path(".").glob("*.py"))
@@ -852,6 +948,33 @@ class RestrictedAccessorTests(unittest.TestCase):
         for name in self.DELETED:
             self.assertNotIn(name, defined, f"{name} is defined again")
 
+    def test_the_digest_action_returns_a_digest_and_never_the_bytes(self):
+        """§5.25's payload-action authority, and why it is not the deleted one.
+
+        `_payload_nbytes()` answered a question the attested metadata already
+        answered and had no caller. This answers one nothing else can -- only
+        the bytes know their own digest -- and a writer has to have it before
+        the header it goes in is serialised.
+        """
+        import hashlib
+        ring = _ring()
+        window = _window(ring)
+        with ring.attest_window(window) as attested:
+            digest = attested._payload_sha256()
+            self.assertEqual(type(digest), str)
+            self.assertEqual(len(digest), 64)
+            self.assertEqual(digest,
+                             hashlib.sha256(window.samples.tobytes()).hexdigest())
+            self.assertNotEqual(digest, attested.digest)
+
+    def test_the_digest_action_refuses_on_an_ended_scope(self):
+        ring = _ring()
+        attested = ring.attest_window(_window(ring))
+        attested.__exit__(None, None, None)
+        with self.assertRaises(AttestationRefused) as caught:
+            attested._payload_sha256()
+        self.assertEqual(caught.exception.code, ATTESTATION_SCOPE_NOT_ACTIVE)
+
     def test_payload_reads_are_structurally_guarded(self):
         """A **structural tripwire**, and deliberately not the concurrency proof.
 
@@ -861,6 +984,13 @@ class RestrictedAccessorTests(unittest.TestCase):
         `_state()` re-resolution. A teardown **store** -- clearing the payload
         -- is exempt from re-resolution, because re-resolving would raise on the
         very scope being ended.
+
+        §5.25 tightened that exemption. It used to be categorical: *every*
+        payload store was exempt, which silently licensed a future method to
+        mutate `state.payload` under the right lock without ever proving it was
+        the teardown operation. `AttestedIQWindowScope.__exit__` earns the
+        exemption for a precise reason -- it invalidates state it has already
+        found by object identity -- and **that justification does not travel**.
 
         What it does **not** establish: that the lock is the right one at
         runtime, that the object was not aliased before the block, or that exit
@@ -872,81 +1002,65 @@ class RestrictedAccessorTests(unittest.TestCase):
         the identical body as `_payload_size` failed zero tests. Name-matching
         polices a spelling, not a hazard.
         """
-        tree = ast.parse(pathlib.Path("rf_iq_ring.py").read_text(encoding="utf-8"))
-        scope_class = next(
-            node for node in ast.walk(tree)
-            if isinstance(node, ast.ClassDef)
-            and node.name == "AttestedIQWindowScope")
-
-        offenders = []
-        guarded_loads = 0
-
-        def lock_holder(item):
-            """The variable X in `with X.lock:`, or None."""
-            expr = item.context_expr
-            if (isinstance(expr, ast.Attribute) and expr.attr == "lock"
-                    and isinstance(expr.value, ast.Name)):
-                return expr.value.id
-            return None
-
-        def resolution_lines(body, held):
-            """Lines where `held = self._state()` happens in this block."""
-            lines = []
-            for node in ast.walk(ast.Module(body=body, type_ignores=[])):
-                if (isinstance(node, ast.Assign)
-                        and any(isinstance(t, ast.Name) and t.id == held
-                                for t in node.targets)
-                        and isinstance(node.value, ast.Call)
-                        and isinstance(node.value.func, ast.Attribute)
-                        and node.value.func.attr == "_state"):
-                    lines.append(node.lineno)
-            return lines
-
-        def walk(node, method, held, resolved_at):
-            if isinstance(node, ast.With):
-                for item in node.items:
-                    holder = lock_holder(item)
-                    if holder is not None:
-                        inner_resolved = resolution_lines(node.body, holder)
-                        for child in node.body:
-                            walk(child, method, holder,
-                                 min(inner_resolved) if inner_resolved else None)
-                        return
-                for child in node.body:
-                    walk(child, method, held, resolved_at)
-                return
-            if isinstance(node, ast.Attribute) and node.attr == "payload":
-                nonlocal guarded_loads
-                owner = (node.value.id if isinstance(node.value, ast.Name)
-                         else "<expression>")
-                if held is None:
-                    offenders.append((method, node.lineno, "outside any state lock"))
-                elif owner != held:
-                    offenders.append((method, node.lineno,
-                                      f"guarded on {held} but reads {owner}"))
-                elif isinstance(node.ctx, ast.Load):
-                    if resolved_at is None or node.lineno < resolved_at:
-                        offenders.append((method, node.lineno,
-                                          "no _state() re-resolution before the read"))
-                    else:
-                        guarded_loads += 1
-            for child in ast.iter_child_nodes(node):
-                walk(child, method, held, resolved_at)
-
-        methods = 0
-        for node in scope_class.body:
-            if isinstance(node, ast.FunctionDef):
-                methods += 1
-                for child in node.body:
-                    walk(child, node.name, None, None)
+        offenders, loads, stores, methods = _payload_guard(
+            pathlib.Path("rf_iq_ring.py").read_text(encoding="utf-8"))
 
         self.assertGreater(methods, 5, "the class was not actually walked")
-        self.assertGreater(guarded_loads, 0,
+        self.assertGreater(loads, 0,
                            "no guarded payload load was found, so this check "
                            "would pass on a class that never touches a payload")
+        self.assertGreater(stores, 0,
+                           "no exempt store was found, so the exemption this "
+                           "test narrows would be narrowing nothing")
         self.assertEqual(
             offenders, [],
             "; ".join(f"{name}:{line} {why}" for name, line, why in offenders))
+
+    def test_the_store_exemption_is_explicit_to_teardown(self):
+        """Control 7's discrimination, and the reason the walker takes a string.
+
+        Two classes differing only in the **name of the method** that clears
+        the payload. Both hold the right lock; both would have passed the
+        categorical form. Only the one whose store is in `__exit__` passes now.
+
+        A check that only ever ran against the file it was written for could
+        not show this: it would report `[]` either way, and reintroducing the
+        categorical exemption would fail zero tests -- which is exactly the
+        failure `_payload_size` demonstrated one layer up.
+        """
+        def source(method):
+            return (
+                "class AttestedIQWindowScope:\n"
+                "    def _state(self):\n"
+                "        return self._handle\n"
+                "    def _a(self):\n"
+                "        state = self._state()\n"
+                "        with state.lock:\n"
+                "            state = self._state()\n"
+                "            return len(state.payload)\n"
+                "    def _b(self):\n"
+                "        pass\n"
+                "    def _c(self):\n"
+                "        pass\n"
+                "    def _d(self):\n"
+                "        pass\n"
+                f"    def {method}(self):\n"
+                "        state = self._own_state()\n"
+                "        with state.lock:\n"
+                "            state.payload = None\n")
+
+        clean, loads, stores, methods = _payload_guard(source("__exit__"))
+        self.assertEqual(clean, [])
+        self.assertEqual((loads, stores), (1, 1))
+        self.assertEqual(methods, 6)
+
+        offenders, _loads, stores, _methods = _payload_guard(
+            source("_discard_payload"))
+        self.assertEqual(stores, 0, "the store was counted as exempt")
+        self.assertEqual([(name, why) for name, _line, why in offenders],
+                         [("_discard_payload",
+                           "a payload store outside __exit__; the teardown "
+                           "exemption does not travel")])
 
     def test_a_writer_can_derive_the_declared_length_without_it(self):
         """The replacement, exercised: length from the attested record, and the
