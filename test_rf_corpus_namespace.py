@@ -66,6 +66,8 @@ from test_rf_promotion_envelope import _envelope, _plan
 _REAL_FSYNC = os.fsync
 _REAL_FSTAT = os.fstat
 _REAL_OPEN = os.open
+_REAL_CHMOD = os.chmod
+_REAL_FCHMOD = os.fchmod
 
 _PRODUCTION_ROOT_MARKER = "# production-root: refused on purpose"
 
@@ -746,38 +748,67 @@ class RaceOnTheManifestTests(NamespaceFixture):
     # removed, EEXIST unmapped, the seam never called -- landed on it together
     # and produced identical failing sets, so it could not tell them apart.
 
-    def test_the_race_seam_runs_between_creation_and_the_manifest(self):
-        """Fails only when the seam is gone: the other two guard on it."""
-        self.assertTrue(self._race()["seam_ran"],
-                        "the window O_EXCL defends was never opened")
+    def test_the_race_seam_is_invoked_during_creation(self):
+        """Seam use, recorded directly. No competitor, no refusal, no skip."""
+        calls = []
+        with mock.patch.object(namespace, "_between_directory_and_manifest",
+                               lambda: calls.append(1)):
+            self.create().release()
+        self.assertEqual(len(calls), 1,
+                         "the window O_EXCL defends was never opened")
 
-    def test_a_competing_manifest_is_not_overwritten(self):
-        """Fails only when `O_EXCL` is gone.
+    def test_the_manifest_is_created_exclusively(self):
+        """`O_EXCL` read off the open flags, not inferred from an outcome.
 
-        Guarded on the seam having run. Without the guard, deleting the seam
-        also fails this -- there is no competitor to leave untouched -- and
-        two different defects share one witness again.
+        Testing this through "a competitor survived" routes it through the
+        seam and the EEXIST mapping, so removing any of the three lands on one
+        witness. The flag is a fact about the call and is observable on the
+        ordinary path.
         """
-        outcome = self._race()
-        if not outcome["seam_ran"]:
-            self.skipTest("no competitor was created; the seam control owns this")
-        self.assertIsNotNone(outcome["raised"],
-                             "creation succeeded over an existing manifest")
+        seen = []
+        real_open = _REAL_OPEN
 
-    def test_the_competing_manifest_refusal_carries_the_declared_code(self):
-        """Fails only when `EEXIST` is not mapped.
+        def recording_open(path, flags, *args, **kwargs):
+            if path == MANIFEST_NAME:
+                seen.append(flags)
+            return real_open(path, flags, *args, **kwargs)
 
-        Guarded on a refusal having happened at all, so the `O_EXCL` control --
-        which produces no refusal -- does not also land here.
+        with mock.patch.object(namespace.os, "open", recording_open):
+            self.create().release()
+        self.assertTrue(seen, "the manifest was never opened by name")
+        self.assertTrue(seen[0] & os.O_EXCL,
+                        "the manifest is created without O_EXCL")
+        self.assertFalse(seen[0] & os.O_TRUNC,
+                         "the manifest is created with O_TRUNC")
+
+    def test_an_existing_manifest_is_reported_as_the_declared_refusal(self):
+        """Classification, stimulated directly.
+
+        The delegate raises `EEXIST` where the exclusive create would, so this
+        exercises the mapping without needing a competitor to exist -- and so
+        without depending on the seam that would create one.
         """
+        real_open = _REAL_OPEN
+
+        def refusing_open(path, flags, *args, **kwargs):
+            if path == MANIFEST_NAME and flags & os.O_CREAT:
+                raise FileExistsError(errno.EEXIST, "injected", path)
+            return real_open(path, flags, *args, **kwargs)
+
+        with mock.patch.object(namespace.os, "open", refusing_open):
+            with self.assertRaises(ManifestRefused) as caught:
+                self.create()
+        self.assertEqual(caught.exception.code, MANIFEST_ALREADY_PRESENT)
+
+    def test_a_real_competing_manifest_is_not_overwritten(self):
+        """The behavioural case the three above decompose. All three
+        mutations fail this, which is the honest shared consequence."""
         outcome = self._race()
-        if not outcome["seam_ran"] or outcome["raised"] is None:
-            self.skipTest("no refusal to classify; another control owns this")
+        self.assertTrue(outcome["seam_ran"])
         self.assertIsInstance(outcome["raised"], ManifestRefused)
-        self.assertEqual(outcome["raised"].code, MANIFEST_ALREADY_PRESENT)
         self.assertEqual(
             pathlib.Path(self.path(), MANIFEST_NAME).read_bytes(),
-            self.COMPETITOR, "the competitor's bytes were overwritten")
+            self.COMPETITOR)
 
     def test_the_seam_is_internal_and_not_a_parameter(self):
         import inspect
@@ -1072,19 +1103,27 @@ class DirectCheckTests(NamespaceFixture):
         self.assertEqual(stat.S_IMODE(os.stat(self.path()).st_mode),
                          CORPUS_DIRECTORY_MODE)
 
-    def test_the_manifest_mode_survives_a_hostile_umask(self):
-        """Fails only when the manifest fchmod is gone."""
-        self._create_under_hostile_umask()
-        # Guarded on the DIRECTORY's mode, not on whether the manifest can be
-        # stat'ed. A 0400 directory is readable and not executable, so
-        # `stat()` on anything inside it raises PermissionError rather than
-        # returning "absent" -- the guard would have failed for exactly the
-        # reason it exists to defer, and did: it cost G5 its unique witness.
-        if stat.S_IMODE(os.stat(self.path()).st_mode) != CORPUS_DIRECTORY_MODE:
-            self.skipTest("the directory-mode control owns this case")
-        self.assertEqual(
-            stat.S_IMODE(os.stat(os.path.join(self.path(), MANIFEST_NAME)).st_mode),
-            CORPUS_FILE_MODE)
+    def test_the_directory_mode_is_set_explicitly(self):
+        """Recorded, not inferred from a hostile umask.
+
+        The umask test below is behavioural and both mode mutations fail it.
+        This one is a fact about the call, so it distinguishes them without a
+        guard that another mutation can route into a skip.
+        """
+        seen = []
+        with mock.patch.object(namespace.os, "chmod",
+                               lambda p, m: seen.append((p, m)) or _REAL_CHMOD(p, m)):
+            self.create().release()
+        self.assertIn((self.path(), CORPUS_DIRECTORY_MODE), seen,
+                      "the corpus directory's mode is left to the umask")
+
+    def test_the_manifest_mode_is_set_explicitly(self):
+        seen = []
+        with mock.patch.object(namespace.os, "fchmod",
+                               lambda fd, m: seen.append(m) or _REAL_FCHMOD(fd, m)):
+            self.create().release()
+        self.assertIn(CORPUS_FILE_MODE, seen,
+                      "the manifest's mode is left to the umask")
 
     def test_a_corpus_is_creatable_under_a_hostile_umask(self):
         """Both mutations fail this, and that is correct: either one makes a
