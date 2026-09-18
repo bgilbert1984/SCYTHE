@@ -116,30 +116,6 @@ def _inside(path: str, root: str) -> bool:
     return path == root or path.startswith(root.rstrip(os.sep) + os.sep)
 
 
-def _fully_resolved(path: str) -> str:
-    """`realpath`, and then the nearest existing ancestor resolved as well.
-
-    `realpath` on a path whose tail does not exist still resolves the symlinks
-    in the part that does, so a symlinked parent is caught. This walks up to
-    the nearest existing ancestor anyway and re-resolves from there, because
-    the containment question is about **where the path will land**, and a
-    directory that does not exist yet is exactly the case a creation call is
-    making.
-    """
-    resolved = os.path.realpath(path)
-    ancestor = resolved
-    while ancestor and not os.path.exists(ancestor):
-        parent = os.path.dirname(ancestor)
-        if parent == ancestor:
-            break
-        ancestor = parent
-    if ancestor and os.path.exists(ancestor):
-        tail = os.path.relpath(resolved, ancestor)
-        resolved = os.path.normpath(
-            os.path.join(os.path.realpath(ancestor), tail))
-    return resolved
-
-
 def resolve_corpus_directory(corpus_id: str, *, root: Optional[str]) -> str:
     """The one resolver. `root=None` means production.
 
@@ -159,7 +135,12 @@ def resolve_corpus_directory(corpus_id: str, *, root: Optional[str]) -> str:
             f"{corpus_id!r} is not a single directory name")
     if root is None:
         return os.path.join(production_corpus_root(), name)
-    resolved = _fully_resolved(str(root))
+    # `realpath` resolves symlinks in whatever part of the path exists and
+    # normalises the rest, which covers a symlinked parent and a not-yet-
+    # created child alike. An earlier revision walked to the nearest existing
+    # ancestor and re-resolved from there; reverting that walk failed no test,
+    # because it was defending a case the standard library already handled.
+    resolved = os.path.realpath(str(root))
     if _inside(resolved, production_corpus_root()):
         raise NamespaceRefused(
             NAMESPACE_ROOT_INSIDE_PRODUCTION,
@@ -569,6 +550,11 @@ def create_corpus_namespace(*, corpus_id: str, lock: Any, retention: Any,
                         NAMESPACE_NOT_A_DIRECTORY,
                         f"wrote {written} of {total} manifest bytes and stalled")
                 written += wrote
+            # Set explicitly, exactly as the directory's mode is. `open`'s
+            # mode argument is masked by the umask -- measured: under umask
+            # 0300 a requested 0600 arrives as 0400 -- so relying on it makes
+            # a corpus uncreatable in an environment nobody chose.
+            os.fchmod(fd, CORPUS_FILE_MODE)
             os.fsync(fd)                    # the bytes survive
         finally:
             os.close(fd)

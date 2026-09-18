@@ -469,6 +469,10 @@ class ScopeTests(NamespaceFixture):
         self.assertEqual(public, ["corpus_id", "delete_not_after",
                                   "manifest_sha256", "opened_at", "release",
                                   "to_dict"])
+        # Asserted per capability as well as in aggregate: the aggregate alone
+        # gave "the descriptor escaped" and "the body escaped" one witness.
+        self.assertNotIn("directory_fd", public)
+        self.assertNotIn("manifest", public)
         with self.create() as corpus:
             rendered = json.dumps(corpus.to_dict())
             self.assertNotIn(self.root, rendered)
@@ -493,13 +497,19 @@ class ScopeTests(NamespaceFixture):
                 offenders[path.name] = sorted(hits)
         self.assertEqual(offenders, {})
 
-    def test_a_released_scope_answers_nothing_and_holds_no_descriptor(self):
+    def test_a_released_scope_answers_nothing(self):
         corpus = self.create()
-        held = corpus._directory_fd()
         corpus.release()
         with self.assertRaises(NamespaceRefused) as caught:
             corpus.corpus_id
         self.assertEqual(caught.exception.code, NAMESPACE_SCOPE_RELEASED)
+
+    def test_a_released_scope_holds_no_descriptor(self):
+        """Separated from the refusal above so that "the scope still answers"
+        and "the descriptor leaked" cannot share one witness."""
+        corpus = self.create()
+        held = corpus._directory_fd()
+        corpus.release()
         with self.assertRaises(OSError) as closed:
             os.fstat(held)
         self.assertEqual(closed.exception.errno, errno.EBADF)
@@ -618,11 +628,19 @@ class DurabilityProtocolTests(NamespaceFixture):
         self.assertLess(dir_sync, readback,
                         "nothing may read the result before both syncs")
 
-    def test_the_two_syncs_target_different_object_types(self):
-        trace, dir_id, man_id = self._trace_a_creation()
-        kinds = {c["type"] for c in trace.calls if c["kind"] == "fsync"}
-        self.assertEqual(kinds, {"REG", "DIR"})
-        self.assertNotEqual(dir_id, man_id)
+    def test_an_fsync_reaches_the_manifest_itself(self):
+        """Its own test, not half of a set comparison: removing the file sync
+        and removing the directory sync are different defects."""
+        trace, _dir_id, man_id = self._trace_a_creation()
+        self.assertIsNotNone(trace.seq_of("fsync", man_id),
+                             "no fsync reached the manifest; its bytes are not "
+                             "durable")
+
+    def test_an_fsync_reaches_the_namespace_directory(self):
+        trace, dir_id, _man_id = self._trace_a_creation()
+        self.assertIsNotNone(trace.seq_of("fsync", dir_id),
+                             "no fsync reached the directory; the manifest's "
+                             "NAME is not durable")
 
     def test_a_manifest_fsync_failure_stops_everything_after_it(self):
         """Not swallowed, and not followed by the directory sync, the readback
@@ -702,25 +720,46 @@ class ForeignOwnershipTests(NamespaceFixture):
 class RaceOnTheManifestTests(NamespaceFixture):
     """`O_EXCL` defends one window, so the window is what the test reproduces."""
 
-    def test_a_competing_manifest_refuses_and_is_left_untouched(self):
-        original = b"another writer got here first"
-        state = {}
+    COMPETITOR = b"another writer got here first"
+
+    def _race(self):
+        """Create a competing manifest in the one window `O_EXCL` defends."""
+        state = {"ran": False}
 
         def interpose():
-            target = os.path.join(self.path(), MANIFEST_NAME)
-            with open(target, "wb") as handle:
-                handle.write(original)
-            state["created"] = True
+            state["ran"] = True
+            with open(os.path.join(self.path(), MANIFEST_NAME), "wb") as handle:
+                handle.write(self.COMPETITOR)
 
+        outcome = {}
         with mock.patch.object(namespace, "_between_directory_and_manifest",
                                interpose):
-            with self.assertRaises(ManifestRefused) as caught:
-                self.create()
-        self.assertTrue(state.get("created"))
-        self.assertEqual(caught.exception.code, MANIFEST_ALREADY_PRESENT)
+            try:
+                self.create().release()
+                outcome["raised"] = None
+            except BaseException as exc:                   # noqa: BLE001
+                outcome["raised"] = exc
+        outcome["seam_ran"] = state["ran"]
+        return outcome
+
+    # Three assertions that were one test. Three different defects -- O_EXCL
+    # removed, EEXIST unmapped, the seam never called -- landed on it together
+    # and produced identical failing sets, so it could not tell them apart.
+
+    def test_the_race_seam_runs_between_creation_and_the_manifest(self):
+        self.assertTrue(self._race()["seam_ran"],
+                        "the window O_EXCL defends was never opened")
+
+    def test_a_competing_manifest_is_left_untouched(self):
+        self._race()
         self.assertEqual(
-            pathlib.Path(self.path(), MANIFEST_NAME).read_bytes(), original,
-            "the competitor's bytes were overwritten")
+            pathlib.Path(self.path(), MANIFEST_NAME).read_bytes(),
+            self.COMPETITOR, "the competitor's bytes were overwritten")
+
+    def test_the_competing_manifest_refusal_carries_the_declared_code(self):
+        raised = self._race()["raised"]
+        self.assertIsInstance(raised, ManifestRefused)
+        self.assertEqual(raised.code, MANIFEST_ALREADY_PRESENT)
 
     def test_the_seam_is_internal_and_not_a_parameter(self):
         import inspect
@@ -921,6 +960,107 @@ class BoundedSliceTests(NamespaceFixture):
         finally:
             shutil.rmtree(scratch, ignore_errors=True)
         self.assertFalse(os.path.exists(scratch))
+
+
+class DirectCheckTests(NamespaceFixture):
+    """Witnesses that do not reopen a corpus.
+
+    `C2` -- making reopening refuse a namespace holding only its manifest --
+    breaks every test that reopens, and so subsumed the only witnesses B8, D6,
+    D7 and G2 had. A check that can only be observed through one code path has
+    exactly one witness, and the broadest mutation on that path owns it.
+    """
+
+    def _body(self):
+        return manifest_body(lock=self.lock, retention=self.retention)
+
+    def test_a_declaration_that_does_not_digest_to_its_frozen_value(self):
+        body = dict(self._body(), envelope_digest="blake2s:" + "0" * 32)
+        with self.assertRaises(ManifestRefused) as caught:
+            namespace._check_declarations(body)
+        self.assertEqual(caught.exception.code, MANIFEST_DECLARATION_DISAGREES)
+
+    def test_a_body_opened_under_other_strata_definitions(self):
+        body = dict(self._body(), strata_definition_revision="rf-null-strata.v9")
+        with self.assertRaises(ManifestRefused) as caught:
+            namespace._check_declarations(body)
+        self.assertEqual(caught.exception.code, MANIFEST_DECLARATION_DISAGREES)
+
+    def test_a_permissive_manifest_descriptor(self):
+        with self.create():
+            pass
+        target = os.path.join(self.path(), MANIFEST_NAME)
+        os.chmod(target, 0o644)
+        fd = os.open(target, os.O_RDONLY)
+        try:
+            with self.assertRaises(NamespaceRefused) as caught:
+                namespace._check_manifest_file(fd, os.fstat(fd).st_dev)
+        finally:
+            os.close(fd)
+        self.assertEqual(caught.exception.code, NAMESPACE_MODE_PERMISSIVE)
+
+    def test_a_hard_linked_manifest_descriptor(self):
+        with self.create():
+            pass
+        target = os.path.join(self.path(), MANIFEST_NAME)
+        os.link(target, os.path.join(self.root, "second-name"))
+        fd = os.open(target, os.O_RDONLY)
+        try:
+            with self.assertRaises(NamespaceRefused) as caught:
+                namespace._check_manifest_file(fd, os.fstat(fd).st_dev)
+        finally:
+            os.close(fd)
+        self.assertEqual(caught.exception.code, NAMESPACE_HARD_LINKED)
+
+    def test_a_symlinked_namespace_does_not_silently_succeed(self):
+        """`D4`'s own witness. Dropping `O_NOFOLLOW` follows the link and
+        succeeds; classifying by errno still refuses, just with the wrong
+        reason -- so "it refused at all" separates the two."""
+        with self.create():
+            pass
+        link_root = tempfile.mkdtemp(prefix="scythe-corpus-link2-")
+        self.addCleanup(shutil.rmtree, link_root, ignore_errors=True)
+        os.symlink(self.path(), os.path.join(link_root, "corpus-a"))
+        with self.assertRaises(Exception):
+            open_corpus_namespace(corpus_id="corpus-a", root=link_root).release()
+
+    def test_the_directory_mode_is_set_against_a_hostile_umask(self):
+        """`G3`'s own witness. At an ordinary umask `mkdir(0o700)` already
+        yields 0700, so the explicit chmod is a no-op and removing it fails
+        nothing. Measured: under umask 0300 a requested 0700 arrives as 0400."""
+        previous = os.umask(0o300)
+        try:
+            with self.create() as corpus:
+                self.assertEqual(corpus.corpus_id, "corpus-a")
+        finally:
+            os.umask(previous)
+        self.assertEqual(stat.S_IMODE(os.stat(self.path()).st_mode),
+                         CORPUS_DIRECTORY_MODE)
+        self.assertEqual(
+            stat.S_IMODE(os.stat(os.path.join(self.path(), MANIFEST_NAME)).st_mode),
+            CORPUS_FILE_MODE)
+
+
+class DigestStabilityTests(unittest.TestCase):
+    """`G1`'s witness: self-consistency is not stability.
+
+    Changing the canonical separators inside `declaration_digest` fails nothing,
+    because the frozen digest and the recomputed one both come from that one
+    function and still agree. A format whose value nothing pins can be changed
+    silently, so the value is pinned.
+    """
+
+    DECLARATION = {"schema": "scythe.test", "members": [1, 2], "z": None}
+    EXPECTED = "blake2s:25c3cbfaf4e0000c582978305bdab65b"
+
+    def test_the_declaration_digest_is_pinned(self):
+        self.assertEqual(declaration_digest(self.DECLARATION), self.EXPECTED)
+
+    def test_the_pin_is_over_the_canonical_form(self):
+        """Key order must not change the digest; spacing must not either,
+        because there is only one spelling."""
+        reordered = {"z": None, "members": [1, 2], "schema": "scythe.test"}
+        self.assertEqual(declaration_digest(reordered), self.EXPECTED)
 
 
 if __name__ == "__main__":
