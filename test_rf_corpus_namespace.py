@@ -1075,12 +1075,16 @@ class DirectCheckTests(NamespaceFixture):
     def test_the_manifest_mode_survives_a_hostile_umask(self):
         """Fails only when the manifest fchmod is gone."""
         self._create_under_hostile_umask()
-        manifest = pathlib.Path(self.path(), MANIFEST_NAME)
-        if not manifest.exists():
-            self.skipTest("creation stopped before the manifest; the directory "
-                          "mode control owns that")
-        self.assertEqual(stat.S_IMODE(manifest.stat().st_mode),
-                         CORPUS_FILE_MODE)
+        # Guarded on the DIRECTORY's mode, not on whether the manifest can be
+        # stat'ed. A 0400 directory is readable and not executable, so
+        # `stat()` on anything inside it raises PermissionError rather than
+        # returning "absent" -- the guard would have failed for exactly the
+        # reason it exists to defer, and did: it cost G5 its unique witness.
+        if stat.S_IMODE(os.stat(self.path()).st_mode) != CORPUS_DIRECTORY_MODE:
+            self.skipTest("the directory-mode control owns this case")
+        self.assertEqual(
+            stat.S_IMODE(os.stat(os.path.join(self.path(), MANIFEST_NAME)).st_mode),
+            CORPUS_FILE_MODE)
 
     def test_a_corpus_is_creatable_under_a_hostile_umask(self):
         """Both mutations fail this, and that is correct: either one makes a
