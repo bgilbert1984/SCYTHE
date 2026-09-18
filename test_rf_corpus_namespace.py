@@ -747,19 +747,37 @@ class RaceOnTheManifestTests(NamespaceFixture):
     # and produced identical failing sets, so it could not tell them apart.
 
     def test_the_race_seam_runs_between_creation_and_the_manifest(self):
+        """Fails only when the seam is gone: the other two guard on it."""
         self.assertTrue(self._race()["seam_ran"],
                         "the window O_EXCL defends was never opened")
 
-    def test_a_competing_manifest_is_left_untouched(self):
-        self._race()
+    def test_a_competing_manifest_is_not_overwritten(self):
+        """Fails only when `O_EXCL` is gone.
+
+        Guarded on the seam having run. Without the guard, deleting the seam
+        also fails this -- there is no competitor to leave untouched -- and
+        two different defects share one witness again.
+        """
+        outcome = self._race()
+        if not outcome["seam_ran"]:
+            self.skipTest("no competitor was created; the seam control owns this")
+        self.assertIsNotNone(outcome["raised"],
+                             "creation succeeded over an existing manifest")
+
+    def test_the_competing_manifest_refusal_carries_the_declared_code(self):
+        """Fails only when `EEXIST` is not mapped.
+
+        Guarded on a refusal having happened at all, so the `O_EXCL` control --
+        which produces no refusal -- does not also land here.
+        """
+        outcome = self._race()
+        if not outcome["seam_ran"] or outcome["raised"] is None:
+            self.skipTest("no refusal to classify; another control owns this")
+        self.assertIsInstance(outcome["raised"], ManifestRefused)
+        self.assertEqual(outcome["raised"].code, MANIFEST_ALREADY_PRESENT)
         self.assertEqual(
             pathlib.Path(self.path(), MANIFEST_NAME).read_bytes(),
             self.COMPETITOR, "the competitor's bytes were overwritten")
-
-    def test_the_competing_manifest_refusal_carries_the_declared_code(self):
-        raised = self._race()["raised"]
-        self.assertIsInstance(raised, ManifestRefused)
-        self.assertEqual(raised.code, MANIFEST_ALREADY_PRESENT)
 
     def test_the_seam_is_internal_and_not_a_parameter(self):
         import inspect
@@ -1024,21 +1042,51 @@ class DirectCheckTests(NamespaceFixture):
         with self.assertRaises(Exception):
             open_corpus_namespace(corpus_id="corpus-a", root=link_root).release()
 
-    def test_the_directory_mode_is_set_against_a_hostile_umask(self):
-        """`G3`'s own witness. At an ordinary umask `mkdir(0o700)` already
-        yields 0700, so the explicit chmod is a no-op and removing it fails
-        nothing. Measured: under umask 0300 a requested 0700 arrives as 0400."""
-        previous = os.umask(0o300)
+    def _create_under_hostile_umask(self, mask=0o300):
+        """Create with a umask that strips owner bits, restoring it always.
+
+        Measured: under umask 0300 a requested 0700 arrives as 0400, and so
+        does a requested 0600. At an ordinary umask both explicit mode-setting
+        calls are no-ops, which is why removing either failed nothing.
+        """
+        previous = os.umask(mask)
         try:
-            with self.create() as corpus:
-                self.assertEqual(corpus.corpus_id, "corpus-a")
+            try:
+                self.create().release()
+                return True
+            except BaseException:                          # noqa: BLE001
+                return False
         finally:
             os.umask(previous)
+
+    def test_the_directory_mode_survives_a_hostile_umask(self):
+        """Fails only when the directory chmod is gone.
+
+        Separated from the manifest's mode by **what exists at the point of
+        failure**: both mutations make creation abort at a mode check, so a
+        test that asserted both modes gave them one witness. Without the
+        directory chmod the directory itself is 0400 and no manifest is ever
+        created; without the manifest's fchmod the directory is still 0700.
+        """
+        self._create_under_hostile_umask()
         self.assertEqual(stat.S_IMODE(os.stat(self.path()).st_mode),
                          CORPUS_DIRECTORY_MODE)
-        self.assertEqual(
-            stat.S_IMODE(os.stat(os.path.join(self.path(), MANIFEST_NAME)).st_mode),
-            CORPUS_FILE_MODE)
+
+    def test_the_manifest_mode_survives_a_hostile_umask(self):
+        """Fails only when the manifest fchmod is gone."""
+        self._create_under_hostile_umask()
+        manifest = pathlib.Path(self.path(), MANIFEST_NAME)
+        if not manifest.exists():
+            self.skipTest("creation stopped before the manifest; the directory "
+                          "mode control owns that")
+        self.assertEqual(stat.S_IMODE(manifest.stat().st_mode),
+                         CORPUS_FILE_MODE)
+
+    def test_a_corpus_is_creatable_under_a_hostile_umask(self):
+        """Both mutations fail this, and that is correct: either one makes a
+        corpus uncreatable in an environment nobody chose."""
+        self.assertTrue(self._create_under_hostile_umask(),
+                        "creation failed under a restrictive umask")
 
 
 class DigestStabilityTests(unittest.TestCase):
@@ -1050,6 +1098,10 @@ class DigestStabilityTests(unittest.TestCase):
     silently, so the value is pinned.
     """
 
+    # The canonical form this pin covers, written out so a reviewer can verify
+    # the literal below by hand rather than by running the code it constrains:
+    #     {"members":[1,2],"schema":"scythe.test","z":null}
+    # BLAKE2s-128 of those UTF-8 bytes, prefixed "blake2s:".
     DECLARATION = {"schema": "scythe.test", "members": [1, 2], "z": None}
     EXPECTED = "blake2s:25c3cbfaf4e0000c582978305bdab65b"
 
