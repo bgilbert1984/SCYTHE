@@ -166,6 +166,24 @@ class EnvelopeRefused(RuntimeError):
         self.detail = detail
 
 
+def declaration_digest(declaration: Any) -> str:
+    """The digest of a declaration, from its own canonical form.
+
+    One implementation, three callers: the envelope, the capture plan, and
+    §5.26's manifest reader, which recomputes a **stored** declaration's digest
+    to check it against the one frozen beside it. The two methods held
+    byte-identical copies of this before §5.26 needed a third; a rule that
+    exists three times is a rule that will disagree with itself twice.
+
+    No `default=str`. A value the schema did not anticipate must raise here
+    rather than be quietly stringified into the digest, which would widen what
+    may be declared and record the widening as if it were declared on purpose.
+    """
+    material = json.dumps(declaration, sort_keys=True,
+                          separators=(",", ":")).encode("utf-8")
+    return f"blake2s:{hashlib.blake2s(material, digest_size=16).hexdigest()}"
+
+
 def _finite(value: Any) -> bool:
     """A real number that is actually a number.
 
@@ -446,13 +464,7 @@ class InstrumentChainEnvelope:
         }
 
     def digest(self) -> str:
-        # No `default=str`. A value the schema did not anticipate must raise
-        # here rather than be quietly stringified into the digest, which would
-        # widen what may be declared and record the widening as if it were
-        # declared on purpose.
-        material = json.dumps(self.to_dict(), sort_keys=True,
-                              separators=(",", ":")).encode("utf-8")
-        return f"blake2s:{hashlib.blake2s(material, digest_size=16).hexdigest()}"
+        return declaration_digest(self.to_dict())
 
 
 def declare_instrument_chain_envelope(*, members: Any) -> InstrumentChainEnvelope:
@@ -1615,9 +1627,7 @@ class CapturePlanDeclaration:
         }
 
     def digest(self) -> str:
-        material = json.dumps(self.to_dict(), sort_keys=True,
-                              separators=(",", ":")).encode("utf-8")
-        return f"blake2s:{hashlib.blake2s(material, digest_size=16).hexdigest()}"
+        return declaration_digest(self.to_dict())
 
 
 def _canonical_bytes(payload: Any) -> bytes:
