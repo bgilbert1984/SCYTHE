@@ -554,6 +554,27 @@ class DiscoveryTests(unittest.TestCase):
                         if not judged(candidate, hit)]
             self.assertEqual(unjudged, [], f"{candidate}: {unjudged}")
 
+    def test_the_corpus_namespace_tokens_are_clear_or_judged(self):
+        """§5.26's two new vocabularies, swept as §3 requires.
+
+        Two sets in two modules, named disjointly: `MANIFEST_*` is about bytes
+        and `NAMESPACE_*` is about a directory, a descriptor or who holds it.
+        A code that could be read as belonging to the other set would leave a
+        reader guessing which of the two regimes refused them.
+        """
+        manifest = set(_module_tokens("rf_corpus_manifest")["MANIFEST_REFUSALS"])
+        acts = set(_module_tokens("rf_corpus_namespace")["NAMESPACE_REFUSALS"])
+        self.assertTrue(manifest and acts)
+        self.assertEqual(manifest & acts, set())
+        for code in sorted(manifest):
+            self.assertTrue(code.startswith("MANIFEST_"), code)
+        for code in sorted(acts):
+            self.assertTrue(code.startswith("NAMESPACE_"), code)
+        for candidate in sorted(manifest | acts):
+            unjudged = [hit for hit in cross_set_collisions(candidate, self.tokens)
+                        if not judged(candidate, hit)]
+            self.assertEqual(unjudged, [], f"{candidate}: {unjudged}")
+
     def test_the_two_capture_regimes_are_named_disjointly(self):
         """A code cannot be read off as belonging to the other regime.
 
