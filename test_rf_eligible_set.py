@@ -6,7 +6,12 @@ that write and read them live in `test_rf_corpus_namespace`.
 
 import io
 import json
+import os
+import shutil
 import struct
+import subprocess
+import sys
+import tempfile
 import unittest
 from unittest import mock
 
@@ -92,12 +97,69 @@ class ArtefactFramingTests(unittest.TestCase):
         self.assertEqual(A.digest_over_records(records),
                          stored["eligible_trials_digest"])
 
-    def test_the_magic_is_distinct_from_both_other_formats(self):
+    def test_the_magic_has_the_shared_shape(self):
         self.assertEqual(len(A.IQE_MAGIC), 8)
         self.assertTrue(A.IQE_MAGIC[0] & 0x80)
         self.assertTrue(A.IQE_MAGIC.endswith(b"\r\n"))
+
+    def test_the_magic_is_distinct_from_the_manifest_magic(self):
         self.assertNotEqual(A.IQE_MAGIC, IQM_MAGIC)
+
+    def test_the_magic_is_distinct_from_the_window_magic(self):
         self.assertNotEqual(A.IQE_MAGIC, IQC_MAGIC)
+
+    def _collision_detonates(self, other_value):
+        """Import the real chain with `IQE_MAGIC` forced to collide, in a
+        SUBPROCESS, by shadowing the module on `sys.path`.
+
+        A collision raises at import, so an in-process assertion cannot witness
+        it: every test in this file and in the namespace file disappears
+        together, which is a detonation, not a discrimination. The two
+        invariants also live in different modules -- IQE/IQC in the artefact
+        module, IQM/IQE downstream in `rf_corpus_manifest` -- so the probe must
+        import the chain rather than the one file, or it is blind to half of
+        what it claims to cover.
+        """
+        here = os.path.dirname(os.path.abspath(__file__))
+        with open(os.path.join(here,
+                               "rf_eligible_trials_artefact.py")) as handle:
+            source = handle.read()
+        needle = r'IQE_MAGIC = b"\x89SCYET\r\n"'
+        self.assertIn(needle, source,
+                      "the magic definition moved; this probe would be blind")
+        shadow = tempfile.mkdtemp(prefix="scythe-magic-")
+        self.addCleanup(shutil.rmtree, shadow, ignore_errors=True)
+        with open(os.path.join(shadow, "rf_eligible_trials_artefact.py"),
+                  "w") as handle:
+            handle.write(source.replace(needle,
+                                        "IQE_MAGIC = " + repr(other_value)))
+        probe = ("import sys\n"
+                 "sys.path.insert(0, %r)\n"
+                 "sys.path.append(%r)\n"
+                 "try:\n"
+                 "    import rf_corpus_manifest\n"
+                 "except Exception as exc:\n"
+                 "    print(type(exc).__name__ + ': ' + str(exc))\n"
+                 "else:\n"
+                 "    print('NO REFUSAL')\n") % (shadow, here)
+        result = subprocess.run([sys.executable, "-c", probe],
+                                capture_output=True, text=True, timeout=120,
+                                cwd=shadow)
+        return result.stdout.strip() + result.stderr.strip()
+
+    def test_a_manifest_magic_collision_is_refused_at_import_by_name(self):
+        message = self._collision_detonates(IQM_MAGIC)
+        self.assertNotIn("NO REFUSAL", message)
+        self.assertIn("IQM_MAGIC", message,
+                      "the manifest collision must be named specifically, or "
+                      "this witness cannot be told from the window collision")
+
+    def test_a_window_magic_collision_is_refused_at_import_by_name(self):
+        message = self._collision_detonates(IQC_MAGIC)
+        self.assertNotIn("NO REFUSAL", message)
+        self.assertIn("IQC_MAGIC", message,
+                      "the window collision must be named specifically, or "
+                      "this witness cannot be told from the manifest collision")
 
     def test_a_manifest_is_not_readable_as_a_sidecar(self):
         framed = IQM_MAGIC + struct.pack("<H", 2) + struct.pack("<Q", 0)
@@ -112,9 +174,22 @@ class ArtefactFramingTests(unittest.TestCase):
         self.assertIn(".iqc", caught.exception.detail)
 
     def test_a_count_that_disagrees_with_the_plan_refuses_before_any_row(self):
+        """The PLAN's count against the framed one."""
         with self.assertRaises(EligibleSetRefused) as caught:
             self._read(self.blob, count=len(self.rows) - 1)
         self.assertEqual(caught.exception.code, ELIGIBLE_COUNT_DISAGREES)
+
+    def test_a_framed_count_that_overstates_the_records_refuses(self):
+        """The FRAMED count against the bytes actually present, which is a
+        different check from the one above: that test compares the header to
+        the plan, this one compares the header to the file. Sharing a witness
+        let one mutation stand in for the other."""
+        body = self.blob[A.IQE_FRAMING_PREFIX_BYTES:]
+        lied = (A.IQE_MAGIC + struct.pack("<H", A.IQE_FORMAT_VERSION)
+                + struct.pack("<Q", len(self.rows) + 1) + body)
+        with self.assertRaises(EligibleSetRefused) as caught:
+            self._read(lied, count=len(self.rows) + 1)
+        self.assertEqual(caught.exception.code, ELIGIBLE_FRAMING_REFUSED)
 
     def test_trailing_bytes_are_refused_not_ignored(self):
         with self.assertRaises(EligibleSetRefused) as caught:
@@ -184,15 +259,21 @@ class ArtefactFramingTests(unittest.TestCase):
 
 class ManifestVersionTests(unittest.TestCase):
 
-    def test_the_manifest_is_v2_and_declares_the_sidecar_format(self):
+    def test_the_manifest_schema_is_v2(self):
         self.assertEqual(IQM_SCHEMA, "scythe.iq-corpus-manifest.v2")
+
+    def test_the_manifest_format_version_is_2(self):
         self.assertEqual(IQM_FORMAT_VERSION, 2)
+
+    def test_the_required_set_includes_iqe_schema(self):
         self.assertIn("iqe_schema", required_manifest_fields())
+
+    def test_the_required_set_includes_iqe_format_version(self):
         self.assertIn("iqe_format_version", required_manifest_fields())
 
-    def test_the_iqe_fields_are_unconditional(self):
-        """Not conditional on the plan having a spur allocation: a conditional
-        field makes the required set a handwritten list with a branch in it."""
+    def _unconditional_body(self):
+        """A body built through a real frozen lock, shared by the two tests
+        below so that each asserts exactly one field."""
         from rf_capture_admission import CapturedCorpusRetention
         from rf_validation_manifest import freeze_promotion_corpus
         env = _envelope()
@@ -200,9 +281,17 @@ class ManifestVersionTests(unittest.TestCase):
             corpus_id="c", method_revision="m", decision_threshold=6.0,
             preprocessing_revision="p", envelope=env, capture_plan=_plan(env),
             opened_at=1000.0)
-        body = manifest_body(lock=lock,
+        return manifest_body(lock=lock,
                              retention=CapturedCorpusRetention(2000.0))
+
+    def test_the_iqe_schema_is_unconditional(self):
+        """Not conditional on the plan having a spur allocation: a conditional
+        field makes the required set a handwritten list with a branch in it."""
+        body = self._unconditional_body()
         self.assertEqual(body["iqe_schema"], A.IQE_SCHEMA)
+
+    def test_the_iqe_format_version_is_unconditional(self):
+        body = self._unconditional_body()
         self.assertEqual(body["iqe_format_version"], A.IQE_FORMAT_VERSION)
 
     def test_a_v1_manifest_refuses_as_unsupported_and_is_not_upgraded(self):

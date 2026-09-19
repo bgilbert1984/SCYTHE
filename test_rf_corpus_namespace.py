@@ -15,6 +15,7 @@ tests and nothing else, and these are the checks that keep it that way.
 
 import ast
 import errno
+import io
 import json
 import os
 import pathlib
@@ -54,8 +55,10 @@ from rf_corpus_namespace import (
     namespace_status, open_corpus_namespace, production_corpus_root,
     resolve_corpus_directory,
 )
+import rf_eligible_trials_artefact as artefact
 from rf_eligible_trials_artefact import (
-    ELIGIBLE_ARTEFACT_NOT_FOUND, ELIGIBLE_ARTEFACT_UNEXPECTED, EligibleSetRefused,
+    ELIGIBLE_ARTEFACT_NOT_FOUND, ELIGIBLE_ARTEFACT_UNEXPECTED,
+    ELIGIBLE_DIGEST_DISAGREES, EligibleSetRefused,
 )
 from rf_promotion_envelope import (
     CapturePlanDeclaration, InstrumentChainEnvelope, declaration_digest,
@@ -676,9 +679,13 @@ class DurabilityProtocolTests(NamespaceFixture):
         self.assertEqual([c["type"] for c in trace.calls], ["REG"],
                          "the directory fsync ran after the file fsync failed")
 
-    def test_a_directory_fsync_failure_stops_the_readback_and_the_scope(self):
-        """Honestly a post-create failure: the artefact exists and the protocol
-        governs it. What must not happen is a scope over an unverified corpus."""
+    def _directory_fsync_failure(self):
+        """One injected failure, three independent assertions below.
+
+        This was a single test asserting the errno, the sync ordering AND the
+        open count, which handed `remove the sidecar fsync` and `omit sidecar
+        readback` the same witness.
+        """
         trace = _SyscallTrace()
 
         def failing_fsync(fd):
@@ -696,21 +703,31 @@ class DurabilityProtocolTests(NamespaceFixture):
 
         with mock.patch.object(namespace.os, "fsync", failing_fsync), \
                 mock.patch.object(namespace.os, "open", recording_open):
-            before = len(opened)
             with self.assertRaises(OSError) as caught:
                 self.create()
-            after = len(opened)
-        self.assertEqual(caught.exception.errno, errno.EIO)
-        # §5.27 writes the eligible-trial sidecar before the manifest, so two
-        # regular-file syncs precede the directory sync. The directory sync is
-        # still the last thing attempted, and it still stops everything after.
-        self.assertEqual([c["type"] for c in trace.calls][-2:], ["REG", "DIR"])
-        self.assertEqual([c["type"] for c in trace.calls].count("DIR"), 1)
-        # The manifest was created and written; it was never reopened.
-        self.assertNotIn("readback", [])  # kept explicit: see the count below
-        # The directory, the sidecar (created, then verified), and the manifest.
-        # A further open would be the post-fsync readback, which must not run.
-        self.assertEqual(after - before, 4,
+        return trace, len(opened), caught.exception
+
+    def test_a_directory_fsync_failure_is_not_swallowed(self):
+        """Honestly a post-create failure: the artefact exists and the protocol
+        governs it. What must not happen is a scope over an unverified corpus."""
+        _, _, error = self._directory_fsync_failure()
+        self.assertEqual(error.errno, errno.EIO)
+
+    def test_the_directory_fsync_is_attempted_last_and_exactly_once(self):
+        """§5.27 writes the sidecar before the manifest, so two regular-file
+        syncs precede the directory sync. Dropping either one shows up here."""
+        trace, _, _ = self._directory_fsync_failure()
+        types = [call["type"] for call in trace.calls]
+        self.assertEqual(types[-2:], ["REG", "DIR"])
+        self.assertEqual(types.count("DIR"), 1)
+        self.assertEqual(types.count("REG"), 2,
+                         "the sidecar and the manifest are each synced once")
+
+    def test_the_readback_does_not_run_after_a_directory_fsync_failure(self):
+        """The directory, the sidecar (created, then verified) and the
+        manifest. A fifth open would be the post-fsync readback."""
+        _, opens, _ = self._directory_fsync_failure()
+        self.assertEqual(opens, 4,
                          "an extra open would be the readback the failed "
                          "directory fsync must have stopped")
 
@@ -1236,6 +1253,56 @@ class EligibleSidecarTests(NamespaceFixture):
                         "the manifest was created before its dependency had "
                         "been read back")
 
+    def test_the_sidecar_is_opened_for_reading_during_creation(self):
+        """The readback itself, independent of ordering and of any fsync.
+
+        Removing the readback previously showed up only in tests that other
+        mutations also broke, so it had no witness of its own.
+        """
+        reads = []
+        real_open = _REAL_OPEN
+
+        def recording_open(path, flags, *args, **kwargs):
+            if path == namespace.ELIGIBLE_NAME and not flags & os.O_CREAT:
+                reads.append(flags)
+            return real_open(path, flags, *args, **kwargs)
+
+        with mock.patch.object(namespace.os, "open", recording_open):
+            self.create().release()
+        # Twice, and both are required: the readback that must precede the
+        # manifest, and the final verification pass after the directory fsync.
+        # Dropping the first leaves one, which is what this witnesses.
+        self.assertEqual(len(reads), 2,
+                         "creation reads the sidecar back before the manifest "
+                         "and again in the closing verification")
+
+    def test_the_manifest_is_created_after_the_sidecar_is_durable(self):
+        """Ordered against the sidecar's fsync rather than against the
+        readback, so that removing the readback does not also break this."""
+        events = []
+        real_open, real_fsync = _REAL_OPEN, _REAL_FSYNC
+
+        def recording_open(path, flags, *args, **kwargs):
+            if path == MANIFEST_NAME and flags & os.O_CREAT:
+                events.append("MANIFEST_CREATED")
+            return real_open(path, flags, *args, **kwargs)
+
+        def recording_fsync(fd):
+            try:
+                regular = stat.S_ISREG(_REAL_FSTAT(fd).st_mode)
+            except OSError:                                # pragma: no cover
+                regular = False
+            if regular and "SIDECAR_FSYNC" not in events:
+                events.append("SIDECAR_FSYNC")
+            return real_fsync(fd)
+
+        with mock.patch.object(namespace.os, "open", recording_open), \
+                mock.patch.object(namespace.os, "fsync", recording_fsync):
+            self.create().release()
+        self.assertEqual(events[:2], ["SIDECAR_FSYNC", "MANIFEST_CREATED"],
+                         "the manifest was created before its dependency was "
+                         "durable")
+
     def test_the_directory_fsync_follows_both_names(self):
         trace = _SyscallTrace()
         with mock.patch.object(namespace.os, "fsync", trace.fsync):
@@ -1471,13 +1538,23 @@ class BoundNominalObjectTests(NamespaceFixture):
             why.append("BOUND_STATE")
         return why
 
-    def test_no_scope_method_hands_out_reconstructed_authority(self):
-        """A RUNTIME surface walk, independent of the static call-site check,
-        with a fresh scope for every candidate."""
+    _WALK = None
+
+    def _walk_once(self):
+        """Walk every zero-argument member once, with a fresh scope per
+        candidate, and cache the offences for the six class-specific tests.
+
+        One walk, six independent assertions. The split is the point: this was
+        a single test carrying all six escape classes, so five properties
+        shared one witness and deleting it un-tested all of them at once --
+        the combined-assertion defect, one layer out from where §5.24 found it.
+        """
+        cls = BoundNominalObjectTests
+        if cls._WALK is not None:
+            return cls._WALK
         names = [n for n in sorted(dir(CorpusOwnershipScope))
                  if n not in ("__class__", "__getattribute__", "__init__",
                               "__init_subclass__", "__subclasshook__")]
-        self.assertGreater(len(names), 8, "the class was not actually walked")
         offences = []
         probed = 0
         for name in names:
@@ -1501,52 +1578,201 @@ class BoundNominalObjectTests(NamespaceFixture):
                                 for why in self._classify(value, state))
             finally:
                 corpus.release()
-        self.assertGreater(probed, 5, "nothing was actually invoked")
-        self.assertEqual(offences, [],
-                         "a scope method hands out authority or bound state")
+        cls._WALK = {"names": names, "probed": probed, "offences": offences}
+        return cls._WALK
 
-    def test_the_walk_detects_each_escape_class_independently(self):
-        """The control's own control.
+    def _assert_no_escape(self, kind):
+        walk = self._walk_once()
+        self.assertGreater(len(walk["names"]), 8,
+                           "the class was not actually walked")
+        self.assertGreater(walk["probed"], 5, "nothing was actually invoked")
+        self.assertEqual([n for n, why in walk["offences"] if why == kind], [],
+                         f"a scope method hands out {kind}")
 
-        A walk that detected nothing would pass on a class that hands out
-        everything, so each of the six classes is exercised against a value
-        that must trip it -- and against one that must not.
-        """
+    def test_no_scope_method_hands_out_the_sidecar_path(self):
+        self._assert_no_escape("PATH")
+
+    def test_no_scope_method_hands_out_a_directory_descriptor(self):
+        self._assert_no_escape("DESCRIPTOR")
+
+    def test_no_scope_method_hands_out_the_eligible_rows(self):
+        self._assert_no_escape("ELIGIBLE_ROWS")
+
+    def test_no_scope_method_hands_out_an_authority_object(self):
+        self._assert_no_escape("AUTHORITY_OBJECT")
+
+    def test_no_scope_method_hands_out_an_authority_container(self):
+        self._assert_no_escape("AUTHORITY_CONTAINER")
+
+    def test_no_scope_method_hands_out_bound_state(self):
+        self._assert_no_escape("BOUND_STATE")
+
+    _CLASSIFIER = None
+
+    def _classifier_once(self):
+        """The walk's own control, computed once and asserted six times."""
+        cls = BoundNominalObjectTests
+        if cls._CLASSIFIER is not None:
+            return cls._CLASSIFIER
         corpus = self._fresh_scope()
         try:
             state = corpus._live()
             rows = [t.to_dict() for t in
                     state.capture_plan.spur_allocation.eligible_trials[:2]]
             duplicated = os.dup(state.dir_fd)
-            self.addCleanup(os.close, duplicated)
-            self.assertNotEqual(duplicated, state.dir_fd)
-            cases = {
-                "PATH": state.path,
-                "DESCRIPTOR": state.dir_fd,
-                "ELIGIBLE_ROWS": rows,
-                "AUTHORITY_OBJECT": state.lock,
-                "AUTHORITY_CONTAINER": [state.envelope],
-                "BOUND_STATE": state.body,
-            }
-            for expected, value in cases.items():
-                with self.subTest(escape=expected):
-                    self.assertIn(expected, self._classify(value, state))
-            self.assertEqual(sorted(cases), sorted(self.ESCAPES))
-
-            with self.subTest(escape="DESCRIPTOR/duplicated"):
-                self.assertIn("DESCRIPTOR", self._classify(duplicated, state),
-                              "a duplicated descriptor is a different integer "
-                              "naming the same open directory, and must be "
-                              "caught by opened-object identity")
-            for benign in ("corpus-a", 3, 0, [], {}, None, 1.5,
-                           state.manifest_sha256):
-                with self.subTest(benign=repr(benign)[:24]):
-                    if benign == state.dir_fd or benign == state.path:
+            try:
+                cases = {
+                    "PATH": state.path,
+                    "DESCRIPTOR": state.dir_fd,
+                    "ELIGIBLE_ROWS": rows,
+                    "AUTHORITY_OBJECT": state.lock,
+                    "AUTHORITY_CONTAINER": [state.envelope],
+                    "BOUND_STATE": state.body,
+                }
+                result = {k: self._classify(v, state) for k, v in cases.items()}
+                result["DESCRIPTOR/duplicated"] = self._classify(duplicated,
+                                                                 state)
+                result["_distinct_fd"] = duplicated != state.dir_fd
+                result["_cases"] = sorted(cases)
+                benign = {}
+                for value in ("corpus-a", 3, 0, [], {}, None, 1.5,
+                              state.manifest_sha256):
+                    if value == state.dir_fd or value == state.path:
                         continue
-                    self.assertEqual(self._classify(benign, state), [],
-                                     "the walk fires on an ordinary value")
+                    benign[repr(value)[:24]] = self._classify(value, state)
+                result["_benign"] = benign
+            finally:
+                os.close(duplicated)
         finally:
             corpus.release()
+        cls._CLASSIFIER = result
+        return result
+
+    def test_the_walk_detects_a_path(self):
+        self.assertIn("PATH", self._classifier_once()["PATH"])
+
+    def test_the_walk_detects_a_descriptor(self):
+        self.assertIn("DESCRIPTOR", self._classifier_once()["DESCRIPTOR"])
+
+    def test_the_walk_detects_a_duplicated_descriptor(self):
+        result = self._classifier_once()
+        self.assertTrue(result["_distinct_fd"])
+        self.assertIn("DESCRIPTOR", result["DESCRIPTOR/duplicated"],
+                      "a duplicated descriptor is a different integer naming "
+                      "the same open directory, and must be caught by "
+                      "opened-object identity")
+
+    def test_the_walk_detects_eligible_rows(self):
+        self.assertIn("ELIGIBLE_ROWS", self._classifier_once()["ELIGIBLE_ROWS"])
+
+    def test_the_walk_detects_an_authority_object(self):
+        self.assertIn("AUTHORITY_OBJECT",
+                      self._classifier_once()["AUTHORITY_OBJECT"])
+
+    def test_the_walk_detects_an_authority_container(self):
+        self.assertIn("AUTHORITY_CONTAINER",
+                      self._classifier_once()["AUTHORITY_CONTAINER"])
+
+    def test_the_walk_detects_bound_state(self):
+        self.assertIn("BOUND_STATE", self._classifier_once()["BOUND_STATE"])
+
+    def test_the_six_escape_classes_are_all_exercised(self):
+        self.assertEqual(self._classifier_once()["_cases"],
+                         sorted(self.ESCAPES))
+
+    def test_the_walk_does_not_fire_on_ordinary_values(self):
+        for label, why in self._classifier_once()["_benign"].items():
+            with self.subTest(benign=label):
+                self.assertEqual(why, [],
+                                 "the walk fires on an ordinary value")
+
+
+class UnwitnessedChecksTests(NamespaceFixture):
+    """Three properties the §5.27 mutation sweep found had no test at all.
+
+    Each was a check that existed in production and that no test reached, so
+    deleting it changed nothing anywhere in the suite. A check nothing
+    witnesses is indistinguishable from a comment.
+    """
+
+    def _reframe_sidecar(self, mutate):
+        """Rewrite the sidecar in place, well-formed, with `mutate` applied to
+        the parsed rows. Framing, count and order stay canonical so that the
+        digest comparison is what the reopen reaches."""
+        target = os.path.join(self.path(), namespace.ELIGIBLE_NAME)
+        with open(target, "rb") as handle:
+            blob = handle.read()
+        declared = struct.unpack("<Q", blob[10:18])[0]
+        stream = io.BytesIO(blob)
+        records = list(artefact.read_records(stream.read,
+                                             expected_count=declared))
+        rows = [dict(r) for r in artefact.parse_rows(records)]
+        mutate(rows)
+        os.chmod(target, 0o600)
+        with open(target, "wb") as handle:
+            handle.write(b"".join(artefact.frame_records(rows)))
+        os.chmod(target, 0o600)
+
+    def test_a_sidecar_that_does_not_digest_to_the_frozen_value_is_refused(self):
+        """The binding between the sidecar and the envelope the lock froze.
+        Without this, a well-formed artefact holding DIFFERENT observations
+        reopens as though it were the catalogue the plan was built on."""
+        with self.create():
+            pass
+        original = None
+
+        def bump(rows):
+            nonlocal original
+            original = rows[0]["signed_baseband_hz"]
+            # Not a sort key, so order and count stay canonical and the digest
+            # comparison is the check the reopen must reach.
+            rows[0]["signed_baseband_hz"] = original + 1.0
+
+        self._reframe_sidecar(bump)
+        with self.assertRaises(EligibleSetRefused) as caught:
+            with open_corpus_namespace(corpus_id="corpus-a", root=self.root):
+                pass
+        self.assertEqual(caught.exception.code, ELIGIBLE_DIGEST_DISAGREES)
+
+    def test_a_manifest_owned_by_another_uid_is_refused(self):
+        """A SECOND owner check, distinct from the directory's.
+
+        `_check_directory` and `_check_manifest_file` each test `st_uid`. Only
+        the directory one had a witness, so removing the file one was invisible.
+        """
+        with self.create():
+            pass
+        foreign = os.getuid() + 1
+
+        def lying_fstat(descriptor):
+            info = _REAL_FSTAT(descriptor)
+            fields = list(info)
+            fields[4] = foreign                # st_uid
+            return os.stat_result(tuple(fields))
+
+        fd = os.open(os.path.join(self.path(), MANIFEST_NAME), os.O_RDONLY)
+        try:
+            device = _REAL_FSTAT(fd).st_dev
+            with mock.patch.object(namespace.os, "fstat", lying_fstat):
+                with self.assertRaises(NamespaceRefused) as caught:
+                    namespace._check_manifest_file(fd, device)
+        finally:
+            os.close(fd)
+        self.assertEqual(caught.exception.code, NAMESPACE_OWNER_MISMATCH)
+
+    def test_a_manifest_on_another_device_is_refused(self):
+        """Every existing caller passed the manifest's OWN device, so the
+        comparison could never fail and the check was never exercised."""
+        with self.create():
+            pass
+        fd = os.open(os.path.join(self.path(), MANIFEST_NAME), os.O_RDONLY)
+        try:
+            elsewhere = _REAL_FSTAT(fd).st_dev + 1
+            with self.assertRaises(NamespaceRefused) as caught:
+                namespace._check_manifest_file(fd, elsewhere)
+        finally:
+            os.close(fd)
+        self.assertEqual(caught.exception.code, NAMESPACE_DEVICE_MISMATCH)
 
 
 if __name__ == "__main__":
