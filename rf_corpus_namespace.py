@@ -36,7 +36,8 @@ from typing import Any, Dict, Optional, Tuple
 
 from rf_corpus_manifest import (
     IQM_FRAMING_PREFIX_BYTES, IQM_MAX_BODY_BYTES, MANIFEST_ALREADY_PRESENT,
-    ManifestRefused, frame_manifest, manifest_body, parse_manifest,
+    MANIFEST_NOT_FOUND, ManifestRefused, frame_manifest, manifest_body,
+    parse_manifest,
 )
 from rf_corpus_reconstruction import (
     ReconstructionRefused, capture_plan as _rebuild_plan,
@@ -44,8 +45,8 @@ from rf_corpus_reconstruction import (
 )
 from rf_eligible_trials_artefact import (
     ELIGIBLE_ARTEFACT_NOT_FOUND, ELIGIBLE_ARTEFACT_UNEXPECTED,
-    EligibleSetRefused, digest_over_records, frame_records, parse_rows,
-    read_records, sort_key as _eligible_sort_key,
+    ELIGIBLE_DIGEST_DISAGREES, EligibleSetRefused, digest_over_records,
+    frame_records, parse_rows, read_records, sort_key as _eligible_sort_key,
 )
 from rf_promotion_envelope import declaration_digest
 from rf_validation_manifest import PromotionCorpusLock, STRATA_DEFINITION_REVISION
@@ -564,13 +565,13 @@ def _read_eligible_rows(dir_fd: int, device: int, allocation: Any):
     recomputed = digest_over_records(records)
     if recomputed != allocation["eligible_trials_digest"]:
         raise EligibleSetRefused(
-            "ELIGIBLE_DIGEST_DISAGREES",
+            ELIGIBLE_DIGEST_DISAGREES,
             "the artefact does not digest to the value the capture plan froze")
     return parse_rows(records)
 
 
 def _read_manifest(dir_fd: int, device: int) -> Tuple[Dict[str, Any], str]:
-    fd = _open_member(dir_fd, MANIFEST_NAME, device, "MANIFEST_NOT_FOUND")
+    fd = _open_member(dir_fd, MANIFEST_NAME, device, MANIFEST_NOT_FOUND)
     try:
         framed = os.read(fd, MANIFEST_READ_LIMIT)
     finally:
