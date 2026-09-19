@@ -17,14 +17,14 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pyarrow.compute as pc
 
-from scene_duckdb_store import ScytheDuckStore, TacticalEvent, get_store, EVENTS_SCHEMA
+from scene_duckdb_store import (ScytheDuckStore, TacticalEvent, get_store, EVENTS_SCHEMA,
+                                DEFAULT_PARQUET_DIR)
 
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
 
 DEFAULT_BLOCK_SECONDS = 60          # 1-minute blocks
-DEFAULT_PARQUET_DIR   = "/home/spectrcyde/NerfEngine/metrics_logs/parquet_blocks"
 COMPRESSION           = "zstd"
 COMPRESSION_LEVEL     = 9
 

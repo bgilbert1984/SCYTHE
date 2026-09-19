@@ -104,13 +104,19 @@ def _raw_embed(ollama_url: str, model: str, text: str) -> Optional[List[float]]:
         return None
 
 
+_REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
+
+
 # ─── EmbeddingEngine ─────────────────────────────────────────────────────────
 
 class EmbeddingEngine:
     """Semantic memory: embed → FAISS cosine search → DuckDB persistence."""
 
-    INDEX_PATH = "/home/spectrcyde/NerfEngine/embedding_index.faiss"
-    DB_PATH    = "/home/spectrcyde/NerfEngine/embedding_store.duckdb"
+    # Anchored to this file, not to an absolute home directory. These are only
+    # the fallbacks: __init__ prefers the instance-scoped paths passed by the
+    # caller, which is what keeps concurrent instances off one DuckDB lock.
+    INDEX_PATH = os.path.join(_REPO_ROOT, "embedding_index.faiss")
+    DB_PATH    = os.path.join(_REPO_ROOT, "embedding_store.duckdb")
 
     def __init__(self, ollama_url: str = "http://localhost:11434",
                  db_path: Optional[str] = None,

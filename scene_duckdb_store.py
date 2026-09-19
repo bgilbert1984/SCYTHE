@@ -8,6 +8,7 @@ Replaces the SQLite scene_event_log.py with a columnar engine that:
   - enables arbitrary SQL analytics on the event stream
 """
 
+import os
 import time
 import uuid
 import json
@@ -19,6 +20,31 @@ from typing import Optional, List, Dict, Any
 import duckdb
 import pyarrow as pa
 import pyarrow.parquet as pq
+
+# ---------------------------------------------------------------------------
+# Store location
+# ---------------------------------------------------------------------------
+#
+# Anchored to this file rather than to an absolute path. The previous literals
+# named one developer's home, so every other checkout opened the store with
+# EACCES and fell back to no store at all -- silently, because the caller logs
+# the failure and continues.
+#
+# SCYTHE_DATA_DIR is rf_scythe_api_server's existing name for this directory
+# (its default is the same relative 'metrics_logs'). Resolving a relative value
+# against this file rather than the cwd matters because the orchestrator spawns
+# child instances from their own working directories; against the cwd they
+# would each open a different store and none of them the one already on disk.
+
+_REPO_ROOT = Path(__file__).resolve().parent
+
+_DATA_DIR = Path(os.environ.get("SCYTHE_DATA_DIR", "metrics_logs"))
+if not _DATA_DIR.is_absolute():
+    _DATA_DIR = _REPO_ROOT / _DATA_DIR
+
+DEFAULT_DB_PATH = str(_DATA_DIR / "scythe_events.duckdb")
+DEFAULT_PARQUET_DIR = str(_DATA_DIR / "parquet_blocks")
+
 
 # ---------------------------------------------------------------------------
 # Schema
@@ -88,8 +114,8 @@ class ScytheDuckStore:
     Thread-safe for concurrent append + query from Flask routes.
     """
 
-    def __init__(self, db_path: str = "/home/spectrcyde/NerfEngine/metrics_logs/scythe_events.duckdb",
-                 parquet_dir: str = "/home/spectrcyde/NerfEngine/metrics_logs/parquet_blocks"):
+    def __init__(self, db_path: str = DEFAULT_DB_PATH,
+                 parquet_dir: str = DEFAULT_PARQUET_DIR):
         self._lock = threading.Lock()
         self._db_path = db_path
         self._parquet_dir = Path(parquet_dir)

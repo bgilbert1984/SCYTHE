@@ -19,7 +19,7 @@ from typing import Any, Dict, List, Optional
 import os
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, "/home/spectrcyde/SCYTHE")
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from rf_structure_channel_sweep import PROMOTION_REQUIREMENT as CURRENT_REQUIREMENT  # noqa: E402
 

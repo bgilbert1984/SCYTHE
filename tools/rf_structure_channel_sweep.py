@@ -39,13 +39,14 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
 import sys
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
-sys.path.insert(0, "/home/spectrcyde/SCYTHE")
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from rf_channelizer import (CHANNEL_POLICIES, ChannelPolicy, ChannelRequest,  # noqa: E402
                             channelize, estimate_occupied_bandwidth)
