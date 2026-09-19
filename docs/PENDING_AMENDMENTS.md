@@ -245,6 +245,24 @@ An accepted contract describing an enforcement is not the enforcement — the
 reading entries 8, 9 and 11 each record, and the one §5.25 demonstrated again
 by landing substantial machinery that refused nothing.
 
+**The manifest-and-namespace sub-slice merged at `6308715`, and typed
+reconstruction stopped on a new defect rather than routing around it.** The
+manifest carries `SpurAllocation`'s eligible-set digest and count but not its
+rows. Selected trials are reproducible from the eligible set, seed and revision;
+eligible trials are observational data and are not. On the standard fixture the
+missing eligible rows alone exceed `IQM_MAX_BODY_BYTES`, so making the manifest
+lossless by raising its bound would size a protocol against a fixture.
+
+**§5.27 is PROPOSED as of 2026-09-18.** It keeps the compact capture-plan form
+and its existing digest, persists the irreducible eligible rows in one separately
+framed namespace artefact bound by that digest, and makes `manifest.iqm` the
+last creation record after the sidecar is durable and verified. Because that is
+an incompatible required-field and namespace change, it advances the manifest
+schema and format to v2 rather than making v1 mean two things. It proposes no
+partial reconstruction and no production write. Proposal and acceptance do not
+narrow this entry: even a fully reconstructed scope refuses nothing until
+admission consumes it on the complete journalled path to membership.
+
 This entry drains when corpus creation, the complete publisher and the
 membership journal **all** exist, and admission sits on the only path to
 membership — a path that verifies before it counts. Nothing of that exists

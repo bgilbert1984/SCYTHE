@@ -4680,6 +4680,302 @@ needs one — not a row quietly added to a table an acceptance already covered.
 
 ---
 
+### 5.27 — the eligible-spur set is a namespace artefact — **PROPOSED**
+
+```text
+Status:     PROPOSED 2026-09-18. Nothing here is accepted or implemented.
+Authority:  NONE. This proposal authorises no persistence, production
+            directory, byte, lock, corpus, capture, tuner action or NESDR
+            operation. Merge as PROPOSED would preserve a proposal and grant
+            nothing.
+Finding:    §5.26 cannot reconstruct the exact nominal CapturePlanDeclaration
+            from manifest.iqm. SpurAllocation.to_dict() commits to the
+            eligible set by digest and count but does not carry the rows, and
+            those rows are observations rather than seed-derived state.
+Amends:     If accepted, §5.26's claim that the lock is written into one
+            manifest, its manifest fields and version, and its creation and
+            reopening sequences. It does not amend §5.22's eligible set,
+            §5.23's compact CapturePlanDeclaration form or the existing
+            capture-plan digest.
+Drains:     Nothing. Entry 14 remains open on its existing condition.
+```
+
+*Discovered while starting §5.26's typed-reconstruction slice, after the
+manifest-and-namespace sub-slice merged at `6308715`. The implementation stopped
+rather than manufacturing a partial `CapturePlanDeclaration` and calling it the
+nominal object.*
+
+#### The manifest is internally consistent and still insufficient
+
+`SpurAllocation` has seven declared fields. Its compact `to_dict()` deliberately
+emits the catalogue, epochs, allocation, seed and revision, then represents the
+two large tuples by digests and counts:
+
+| field absent as rows | can it be recovered? | why |
+| --- | --- | --- |
+| `selected_trials` | **yes** | `select_spur_trials(eligible_trials, selection_seed, selection_revision, selected_count)` reproduces the tuple; `SpurAllocation.__post_init__` already refuses disagreement, and the stored `selected_trials_digest` checks the result |
+| `eligible_trials` | **no** | each row contains the observed `(spur, tuning, epoch)` unit and its chain, signed baseband offset, stability class and confidence. No production generator produces those observations, and a seed cannot regenerate a measurement |
+
+The distinction was **executed rather than inferred**. Selection reproduced
+exactly in-process and under a different `PYTHONHASHSEED`; its order is
+BLAKE2s-based, not Python-`hash()`-based. The eligible tuple had no production
+producer at all. The similarly named test helper fabricates signed offsets and
+is not an authority.
+
+On the standard 5 700-eligible / 5 561-selected fixture, the existing manifest
+body is 39 311 bytes. Serialising the selected tuple would add 200 197 bytes and
+is unnecessary. Serialising the eligible tuple would add 1 508 983 bytes and
+**alone exceeds `IQM_MAX_BODY_BYTES = 1 048 576`**. Raising that bound to fit one
+fixture would mistake the largest test constructed today for the largest
+catalogue the protocol permits tomorrow.
+
+So two claims separate:
+
+1. **The existing `capture_plan_digest` is a valid commitment to the eligible
+   set.** Its compact declaration includes `eligible_trials_digest` and
+   `distinct_trial_units`; changing the set changes the plan digest.
+2. **A commitment is not a declaration a reader can reconstruct.** A manifest
+   that says which digest the rows have, while holding none of the rows, cannot
+   mint the exact nominal object admission must consume.
+
+The repair is not a larger manifest and not partial reconstruction. It is one
+separately framed, immutable namespace artefact whose rows are bound by the
+digest the compact plan already carries.
+
+#### One sidecar, and no second plan
+
+When and only when the compact capture plan has a non-`None` `spur_allocation`,
+the namespace contains exactly one additional declaration:
+
+| property | value |
+| --- | --- |
+| filename | `eligible-spur-trials.iqe`, opened relative to the held corpus directory descriptor |
+| purpose | the complete canonical `eligible_trials` tuple, and nothing else |
+| schema and version | `scythe.iq-eligible-spur-trials.v1`, `IQE_FORMAT_VERSION = 1` |
+| magic | `b"\x89SCYET\r\n"`, distinct from `IQM_MAGIC` and `IQC_MAGIC` |
+| framing | magic (8 bytes) ‖ format version (uint16 LE) ‖ record count (uint64 LE) ‖ repeated records ‖ EOF |
+| record | record length (uint32 LE) ‖ canonical UTF-8 JSON for exactly one `EligibleSpurTrial.to_dict()` |
+| record bound | `IQE_MAX_RECORD_BYTES = 1 048 576`, checked **before allocating that record**. A per-record format bound, not one inferred from the fixture's total size — the largest record in the standard fixture is 268 bytes |
+| order | the same total order the nominal object uses: `(spur_id, tuning_id, epoch_id, chain_hash)` |
+| content digest | the **existing** `eligible_trials_digest`: BLAKE2s-128, prefixed `blake2s:`, over the canonical JSON array formed by `[` + the canonical record bytes joined by `,` + `]` |
+| permissions | `0600`, owner UID, `st_nlink == 1`, same device as the corpus directory; symlinks refused and checks performed on the opened descriptor |
+
+##### The record's canonical rule is not the manifest's, and the difference is load-bearing
+
+```python
+json.dumps(row, sort_keys=True, separators=(",", ":"),
+           ensure_ascii=True, allow_nan=False)
+```
+
+`ensure_ascii=True` — where `manifest.iqm` and the `.iqc` header both use
+`False`. That looks like an inconsistency and is the opposite of one:
+`_canonical_bytes` in `rf_promotion_envelope` takes Python's default, so the
+**already-frozen** `eligible_trials_digest` is computed over escaped bytes. A
+sidecar written with `ensure_ascii=False` would not reproduce the digest the
+capture plan already carries.
+
+Verified rather than reasoned: for the standard fixture, the per-record bytes
+joined by commas inside brackets are byte-identical to
+`_canonical_bytes(rows)`, and the digest reconstructed from them equals the
+stored `eligible_trials_digest`.
+
+An implementer who "fixes" the inconsistency breaks the binding, so it is stated
+here rather than left to be discovered by a failing digest.
+
+The reader **streams** records. It does not read a length-prefixed whole file
+into memory and does not acquire a second encoded copy of the set. Before
+reading rows it requires the framed count to equal the compact plan's
+`distinct_trial_units`; after reading it requires immediate EOF, canonical
+record spelling, strict canonical order, unique trial keys and the exact stored
+`eligible_trials_digest`.
+
+The artefact introduces two manifest format declarations — `iqe_schema` and
+`iqe_format_version`. They are **always present**, so the required
+manifest-field set remains one derived equality rather than a conditional
+handwritten list. Adding those fields and making a second file necessary is an
+incompatible manifest change, so `IQM_SCHEMA` becomes
+`scythe.iq-corpus-manifest.v2` and `IQM_FORMAT_VERSION` becomes 2. A v1 manifest
+does not contain enough evidence to reconstruct the plan and refuses as
+unsupported; it is not upgraded by inventing the missing rows. No production v1
+corpus exists, so no migration is proposed.
+
+Presence of the file is conditional and determined only by
+`capture_plan.spur_allocation`:
+
+- allocation present + artefact absent: **refuse**;
+- allocation absent + artefact present: **refuse** as an unaccounted namespace
+  artefact;
+- allocation absent + artefact absent: no eligible set exists to reconstruct;
+- allocation present + exactly one verified artefact: **reconstruct**.
+
+**No new lock field and no second eligible-set digest are introduced.** Two
+stored digests for one tuple could disagree and would need an authority rule of
+their own. The manifest's `capture_plan_digest` binds the compact plan; the
+compact plan binds the sidecar rows by the already-declared count and digest.
+
+#### Reconstruction is one act, in one scope factory
+
+```text
+parse and canonically verify manifest.iqm
+→ parse eligible-spur-trials.iqe as a bounded record stream
+→ construct every exact EligibleSpurTrial
+→ verify count, order, uniqueness and eligible_trials_digest
+→ regenerate selected_trials from the eligible tuple, seed, revision and count
+→ verify selected_trials_digest
+→ construct SpurAllocation (running its own invariants)
+→ construct CapturePlanDeclaration (running its own invariants)
+→ require its compact to_dict() to equal the manifest mapping byte-for-byte
+→ require its digest to equal capture_plan_digest
+→ bind the nominal plan in opaque CorpusOwnershipScope state
+```
+
+Admission receives **only that bound nominal object**. It receives no mapping,
+artefact path, descriptor, eligible tuple or reconstruction switch. A public
+sidecar accessor would move the caller-supplied-set defect from the lock to the
+rows and is refused by the same runtime and static surface checks §5.24 and
+§5.26 already require.
+
+The selected tuple is **regenerated because it is derived** and then **checked
+because derived does not mean unbound**. The eligible tuple is **read because it
+is observed** and then **checked because persisted does not mean authoritative
+by itself**.
+
+#### Creation: dependency first, manifest last
+
+The sidecar changes corpus creation order. `manifest.iqm` becomes the **final**
+creation record, not the first file written:
+
+```text
+resolve, open, exclusively hold and validate the empty corpus directory
+→ derive the canonical eligible-row stream from the exact nominal plan
+→ create eligible-spur-trials.iqe with O_CREAT | O_EXCL | O_WRONLY
+→ write completely, fchmod 0600, fsync, reopen and verify it
+→ derive manifest.iqm, including the same eligible count and digest
+→ create manifest.iqm with O_CREAT | O_EXCL | O_WRONLY
+→ write completely, fchmod 0600 and fsync it
+→ fsync the corpus directory after both names exist
+→ reopen and reconstruct the exact nominal objects from both artefacts
+→ mint the ownership scope
+```
+
+Writing the manifest first would publish a corpus whose declared dependency did
+not yet exist. A crash before the manifest is durably named leaves an
+**incomplete namespace, not a corpus**: it cannot be opened, cannot be resumed
+by quietly trusting the surviving sidecar, and cannot mint a scope. It is
+preserved for diagnosis and requires the separately governed deletion path;
+creation does not overwrite or adopt it on retry.
+
+Once `manifest.iqm` is durable, the sidecar is part of the corpus's frozen
+terms. Substitution is detected by the digest already inside the manifest; after
+the first publication intent, replacement of both is additionally contradicted
+by the journal's `manifest_sha256`. Before the first intent, the same narrow
+trust boundary §5.26 already states remains: a namespace owner can replace all
+terms in a writable namespace. **This amendment does not turn local files into a
+signature scheme.**
+
+#### Controls the implementation must discriminate
+
+Thirty-seven mutations, grouped so the subtotal can be checked rather than
+trusted. Each runs against the complete suite in an isolated worktree; **no
+witness may be created by mutation-dependent skipping.**
+
+**The finding and exact reconstruction (9)**
+
+| | mutation | property lost |
+| ---: | --- | --- |
+| A1 | reconstruct from the compact manifest without reading the sidecar | a digest presented as the declaration it commits to |
+| A2 | accept one eligible row changed | the persisted observation is unbound |
+| A3 | accept one eligible row omitted while repairing the framed count | the manifest's declared set becomes a subset chosen on reopen |
+| A4 | accept a duplicate trial key | one observed unit gains multiple persisted identities |
+| A5 | accept non-canonical row order | one set gains multiple byte representations |
+| A6 | regenerate selected trials without comparing `selected_trials_digest` | a revised selection algorithm silently changes the frozen sample |
+| A7 | accept a caller-supplied selected tuple | selection after seeing the eligible population |
+| A8 | omit the final compact `to_dict()` equality | reconstructed fields can disagree with their persisted declaration |
+| A9 | omit the final `capture_plan_digest` comparison | a valid sidecar can be attached to a differently bound plan |
+
+**Format and binding (12)**
+
+| | mutation | property lost |
+| ---: | --- | --- |
+| B1 | make `IQE_MAGIC` equal `IQM_MAGIC` | a sidecar readable as a manifest, or the reverse |
+| B2 | make `IQE_MAGIC` equal `IQC_MAGIC` | a sidecar readable as a window, or the reverse |
+| B3 | allocate a record before enforcing `IQE_MAX_RECORD_BYTES` | a four-gibibyte length becomes an allocation request |
+| B4 | accept trailing bytes | hidden rows after the declared set |
+| B5 | accept a non-canonical JSON record | two byte representations for one declaration |
+| B6 | accept a false framed count | a reader stopping before or reading beyond the declared set |
+| B7 | omit `iqe_schema` from the manifest's derived required set | a sidecar schema no manifest authority declares |
+| B8 | omit `iqe_format_version` from that set | a sidecar version no manifest authority declares |
+| B9 | add a second stored eligible-set digest | two authorities for one tuple |
+| B10 | stop comparing the existing `eligible_trials_digest` | no authority binding the persisted rows |
+| B11 | leave `IQM_SCHEMA` at v1 | incompatible required fields presented as the old schema |
+| B12 | leave `IQM_FORMAT_VERSION` at 1 | an incompatible two-file format presented as the old version |
+
+**Creation, durability and opened objects (10)**
+
+| | mutation | property lost |
+| ---: | --- | --- |
+| C1 | create the sidecar without `O_EXCL` | retry replaces frozen observations |
+| C2 | remove the sidecar `fsync` | a manifest may survive while its dependency does not |
+| C3 | create or durably name the manifest before the sidecar is verified | the creation record precedes what it records |
+| C4 | omit sidecar readback | a declaration nobody has read once |
+| C5 | open the sidecar without `O_NOFOLLOW` | a symlink accepted as frozen terms |
+| C6 | omit the `st_nlink == 1` check | a mutable name elsewhere reaches the same inode |
+| C7 | omit the owner-UID check | another owner supplies the declaration |
+| C8 | omit the exact `0600` mode check | terms readable or writable outside the declared boundary |
+| C9 | omit the same-device check | a declaration outside the corpus filesystem's durability domain |
+| C10 | mint the scope before both artefacts reconstruct the nominal plan | ownership over declarations the process has not recovered |
+
+**Presence and capability (6)**
+
+| | mutation | property lost |
+| ---: | --- | --- |
+| D1 | allocation present and sidecar absent is accepted | an unreconstructable plan held as nominal |
+| D2 | allocation absent and sidecar present is ignored or adopted | an unaccounted file influencing or decorating corpus identity |
+| D3 | a scope method returns the sidecar path | namespace capability escapes the ownership lifetime |
+| D4 | a scope method returns the sidecar descriptor | an open capability escapes the ownership lifetime |
+| D5 | a scope method returns the eligible rows | the authority becomes caller-supplied state again |
+| D6 | a scope method returns mutable reconstructed state | a frozen plan becomes replaceable after reconstruction |
+
+The durability witnesses are **recording delegates that call through to the real
+filesystem** and identify opened objects by `(st_dev, st_ino, type, sequence)`,
+not reused descriptor numbers. They prove the required syscall protocol was
+**issued and ordered**; they do not simulate power loss or prove survival after
+it. That remains the declared local-ext4 and OS contract, stated at the same
+strength as §5.26's existing `fsync` controls.
+
+#### What this proposal does not do
+
+- It does not implement the sidecar or typed reconstruction, and does not change
+  the already-merged manifest-and-namespace sub-slice.
+- It does not make the test fixture a size authority, and does not raise
+  `IQM_MAX_BODY_BYTES`.
+- It does not persist `selected_trials`; they are deterministic derived state,
+  regenerated and checked against the frozen digest.
+- It does not weaken exact nominal reconstruction to a partial object.
+- It does not authorise production enablement, a membership journal, a
+  publisher, capture or any byte outside an authorised test temporary root.
+- It does not drain entry 14. Even after this amendment is implemented,
+  admission still has to consume the scope and sit on the complete, journalled
+  path to membership.
+
+#### What acceptance would have to name
+
+An acceptance must expressly accept all five amendments to §5.26: the eligible
+set as a separate namespace artefact; the two IQE format declarations in the
+manifest; the IQM schema and format version advancing to v2 with no fabricated
+v1 migration; the creation order with `manifest.iqm` last; and reopening
+reconstructing the exact nominal plan from both files. It must also accept the
+thirty-seven controls, and state that §5.22's eligible set, §5.23's compact plan
+form and the existing capture-plan digest are unchanged.
+
+Then, in order: merge the accepted amendment; implement the format, creation and
+reconstruction in tests' temporary roots; rerun the isolated negative-control
+sweep; and only then resume admission rewiring. Entry 14's drain remains where
+§5.26 put it — after the complete publisher and membership journal exist and
+admission is unavoidable.
+
+---
+
 ## 6. Open questions for the operator
 
 1. **Approve the bounded IQ ring** (§2.2)? First retention of raw IQ beyond one block.
