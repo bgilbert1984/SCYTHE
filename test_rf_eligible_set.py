@@ -302,6 +302,18 @@ class ReconstructionTests(unittest.TestCase):
         self.assertEqual(caught.exception.code,
                          RECONSTRUCTION_MAPPING_DISAGREES)
 
+    def test_a_caller_supplied_selected_tuple_is_refused(self):
+        """The selection is derived. A stored one would be a selection made
+        after seeing the eligible population, which is the post-hoc choice the
+        frozen sample exists to prevent."""
+        mapping = json.loads(json.dumps(self.plan.to_dict()))
+        mapping["spur_allocation"]["selected_trials"] = [
+            list(k) for k in self.plan.spur_allocation.selected_trials[:3]]
+        with self.assertRaises(ReconstructionRefused) as caught:
+            self._plan_again(mapping=mapping)
+        self.assertEqual(caught.exception.code,
+                         RECONSTRUCTION_FIELD_NO_AUTHORITY)
+
     def test_a_plan_bound_to_another_digest_refuses(self):
         with self.assertRaises(ReconstructionRefused) as caught:
             self._plan_again(digest="blake2s:" + "0" * 32)

@@ -289,14 +289,16 @@ class CorpusOwnershipScope:
     # Until then `to_dict()` reports bounded diagnostics: digests, counts and
     # type names, which are comparison results rather than authority.
 
-    def _directory_fd(self) -> int:
-        """**Restricted.** The held descriptor, for this module's acts only.
-
-        Python privacy enforces nothing; what is enforceable, and what §5.24
-        narrowed the equivalent claim to, is that there is no public accessor
-        and that every production reference is statically restricted.
-        """
-        return self._live().dir_fd
+    # There is deliberately no `_directory_fd()` either. §5.26 shipped one,
+    # "restricted for this module's acts", and it had **no production caller**:
+    # every act here already holds the descriptor as a local. The runtime
+    # surface walk added in §5.27 classified it as a DESCRIPTOR escape on its
+    # first run, which is what it is -- a caller inside the `with` block could
+    # retain the integer, and after release the fd is closed, so a retained
+    # number either fails or names whatever the kernel handed out next.
+    #
+    # Entry 16's precedent applies unchanged: a method nobody calls is deleted
+    # rather than rehabilitated.
 
     def release(self) -> None:
         state = self._state

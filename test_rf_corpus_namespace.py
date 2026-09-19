@@ -25,6 +25,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from collections.abc import Mapping
 from unittest import mock
 from dataclasses import replace
 
@@ -468,7 +469,7 @@ class ScopeTests(NamespaceFixture):
     # holding it would hold the envelope and the capture plan as **mappings**,
     # and admission consuming a mapping is the caller-supplied set §5.25
     # refused, wearing a different shape.
-    RESTRICTED = ("_directory_fd", "_verified_body")
+    RESTRICTED = ("_verified_body",)
 
     def test_there_is_no_public_accessor_for_the_path_or_the_descriptor(self):
         public = sorted(name for name in dir(CorpusOwnershipScope)
@@ -520,7 +521,10 @@ class ScopeTests(NamespaceFixture):
         """Separated from the refusal above so that "the scope still answers"
         and "the descriptor leaked" cannot share one witness."""
         corpus = self.create()
-        held = corpus._directory_fd()
+        # Reached through the opaque state, not through an accessor: §5.27
+        # deleted `_directory_fd()` because it had no production caller and
+        # handed out a capability that outlived the ownership it came from.
+        held = corpus._live().dir_fd
         corpus.release()
         with self.assertRaises(OSError) as closed:
             os.fstat(held)
@@ -1206,6 +1210,32 @@ class EligibleSidecarTests(NamespaceFixture):
         self.assertEqual(created, [namespace.ELIGIBLE_NAME, MANIFEST_NAME],
                          "the manifest must be the last creation record")
 
+    def test_the_sidecar_is_read_back_before_the_manifest_is_created(self):
+        """Creation verifies its own dependency before recording it.
+
+        Distinct from "the sidecar is created first": a creation that wrote
+        both and only verified at the end would publish a manifest naming an
+        artefact nobody had read.
+        """
+        events = []
+        real_open = _REAL_OPEN
+
+        def recording_open(path, flags, *args, **kwargs):
+            if path == namespace.ELIGIBLE_NAME and not flags & os.O_CREAT:
+                events.append("SIDECAR_READBACK")
+            if path == MANIFEST_NAME and flags & os.O_CREAT:
+                events.append("MANIFEST_CREATED")
+            return real_open(path, flags, *args, **kwargs)
+
+        with mock.patch.object(namespace.os, "open", recording_open):
+            self.create().release()
+        self.assertIn("SIDECAR_READBACK", events)
+        self.assertIn("MANIFEST_CREATED", events)
+        self.assertLess(events.index("SIDECAR_READBACK"),
+                        events.index("MANIFEST_CREATED"),
+                        "the manifest was created before its dependency had "
+                        "been read back")
+
     def test_the_directory_fsync_follows_both_names(self):
         trace = _SyscallTrace()
         with mock.patch.object(namespace.os, "fsync", trace.fsync):
@@ -1377,49 +1407,124 @@ class BoundNominalObjectTests(NamespaceFixture):
             self.assertEqual(
                 reopened.to_dict()["reconstructed_capture_plan_digest"], first)
 
+    ELIGIBLE_ROW_KEYS = frozenset(
+        ("spur_id", "tuning_id", "epoch_id", "chain_hash", "stability_class",
+         "signed_baseband_hz", "confidence"))
+
+    def _surface_offences(self, corpus):
+        """Every zero-argument method's return, classified by what escaped.
+
+        Four distinct escapes, because §5.27 names four: the path, the
+        descriptor, the eligible rows, and mutable reconstructed state -- plus
+        the authority objects themselves. A walk that collapsed them would let
+        one mutation stand in for four properties.
+        """
+        authority = (PromotionCorpusLock, InstrumentChainEnvelope,
+                     CapturePlanDeclaration)
+        state = corpus._live()
+        live = {id(state.body), id(state.envelope), id(state.capture_plan),
+                id(state.lock)}
+        try:
+            held = _REAL_FSTAT(state.dir_fd)
+            held_id = (held.st_dev, held.st_ino)
+        except OSError:                                    # pragma: no cover
+            held_id = None
+        offences = []
+        for name in sorted(dir(corpus)):
+            if name in ("release", "__enter__", "__exit__", "__init__",
+                        "__class__", "__dir__", "__sizeof__", "__reduce__",
+                        "__reduce_ex__", "__init_subclass__",
+                        "__subclasshook__", "__getattribute__"):
+                continue
+            try:
+                attribute = getattr(corpus, name)
+            except Exception:                              # noqa: BLE001
+                continue
+            value = attribute
+            if callable(attribute):
+                try:
+                    value = attribute()
+                except TypeError:
+                    continue
+                except Exception:                          # noqa: BLE001
+                    continue
+            offences.extend(
+                (name, why) for why in self._classify(value, authority, live,
+                                                      held_id, state))
+        return offences
+
+    def _classify(self, value, authority, live, held_id, state):
+        why = []
+        if isinstance(value, authority):
+            why.append("AUTHORITY_OBJECT")
+        if id(value) in live:
+            why.append("LIVE_STATE")
+        # D3: the namespace path.
+        if isinstance(value, str) and value == state.path:
+            why.append("PATH")
+        # D4: the held directory descriptor, identified by the object it names
+        # rather than by its integer value, which could coincide by accident.
+        if (isinstance(value, int) and not isinstance(value, bool)
+                and held_id is not None and 0 <= value < 1 << 20):
+            try:
+                info = _REAL_FSTAT(value)
+                if (info.st_dev, info.st_ino) == held_id:
+                    why.append("DESCRIPTOR")
+            except (OSError, OverflowError, ValueError):
+                pass
+        if isinstance(value, (list, tuple, set, frozenset)):
+            items = list(value)
+            if any(isinstance(item, authority) for item in items):
+                why.append("AUTHORITY_CONTAINER")
+            # D5: the eligible rows, as data.
+            if any(isinstance(item, Mapping)
+                   and self.ELIGIBLE_ROW_KEYS <= set(item) for item in items):
+                why.append("ELIGIBLE_ROWS")
+            if any(type(item).__name__ == "EligibleSpurTrial" for item in items):
+                why.append("ELIGIBLE_ROWS")
+        # D6: mutable reconstructed state -- a container carrying any part of
+        # the rebuilt plan, handed out where a caller can hold or alter it.
+        if isinstance(value, dict) and any(
+                isinstance(v, authority) for v in value.values()):
+            why.append("MUTABLE_RECONSTRUCTED_STATE")
+        return why
+
     def test_no_scope_method_hands_out_reconstructed_authority(self):
         """A RUNTIME surface walk, independent of the static call-site check.
 
         The static check governs who may call an accessor. It says nothing
         about what an allowed caller keeps afterwards, and nothing at all about
-        an accessor added later. This calls every zero-argument method on a
-        live scope and refuses any that returns a reconstructed nominal object,
-        a container of them, or the scope's own live state.
+        an accessor added later.
         """
-        forbidden = (PromotionCorpusLock, InstrumentChainEnvelope,
-                     CapturePlanDeclaration)
+        with self.create() as corpus:
+            self.assertEqual(self._surface_offences(corpus), [])
+
+    def test_the_walk_detects_each_escape_it_is_meant_to(self):
+        """The control's own control. A walk that detected nothing would pass
+        on a class that hands out everything, so each classification is
+        exercised against a value that should trip it."""
         with self.create() as corpus:
             state = corpus._live()
-            live_objects = {id(state.body), id(state.envelope),
-                            id(state.capture_plan), id(state.lock)}
-            offenders = []
-            for name in sorted(dir(corpus)):
-                if name in ("release", "__enter__", "__exit__", "__init__",
-                            "__class__", "__dir__", "__sizeof__", "__reduce__",
-                            "__reduce_ex__", "__init_subclass__",
-                            "__subclasshook__", "__getattribute__"):
-                    continue
-                try:
-                    attribute = getattr(corpus, name)
-                except Exception:                          # noqa: BLE001
-                    continue
-                value = attribute
-                if callable(attribute):
-                    try:
-                        value = attribute()
-                    except TypeError:
-                        continue                           # needs arguments
-                    except Exception:                      # noqa: BLE001
-                        continue
-                if isinstance(value, forbidden):
-                    offenders.append((name, type(value).__name__))
-                elif id(value) in live_objects:
-                    offenders.append((name, "the scope's own live state"))
-                elif isinstance(value, (list, tuple, set)) and any(
-                        isinstance(item, forbidden) for item in value):
-                    offenders.append((name, "a container of authority objects"))
-            self.assertEqual(offenders, [],
-                             "a scope method hands out reconstructed authority")
+            authority = (PromotionCorpusLock, InstrumentChainEnvelope,
+                         CapturePlanDeclaration)
+            live = {id(state.body)}
+            held = _REAL_FSTAT(state.dir_fd)
+            held_id = (held.st_dev, held.st_ino)
+            rows = [t.to_dict() for t in
+                    state.capture_plan.spur_allocation.eligible_trials[:2]]
+            cases = {
+                "AUTHORITY_OBJECT": state.lock,
+                "LIVE_STATE": state.body,
+                "PATH": state.path,
+                "DESCRIPTOR": state.dir_fd,
+                "ELIGIBLE_ROWS": rows,
+                "MUTABLE_RECONSTRUCTED_STATE": {"lock": state.lock},
+            }
+            for expected, value in cases.items():
+                with self.subTest(escape=expected):
+                    self.assertIn(
+                        expected,
+                        self._classify(value, authority, live, held_id, state))
 
     def test_the_walk_would_catch_an_accessor_that_returned_the_lock(self):
         """The control's own control: a walk that found nothing anywhere would
