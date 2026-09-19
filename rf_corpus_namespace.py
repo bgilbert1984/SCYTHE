@@ -38,6 +38,15 @@ from rf_corpus_manifest import (
     IQM_FRAMING_PREFIX_BYTES, IQM_MAX_BODY_BYTES, MANIFEST_ALREADY_PRESENT,
     ManifestRefused, frame_manifest, manifest_body, parse_manifest,
 )
+from rf_corpus_reconstruction import (
+    ReconstructionRefused, capture_plan as _rebuild_plan,
+    envelope as _rebuild_envelope,
+)
+from rf_eligible_trials_artefact import (
+    ELIGIBLE_ARTEFACT_NOT_FOUND, ELIGIBLE_ARTEFACT_UNEXPECTED,
+    EligibleSetRefused, digest_over_records, frame_records, parse_rows,
+    read_records, sort_key as _eligible_sort_key,
+)
 from rf_promotion_envelope import declaration_digest
 from rf_validation_manifest import PromotionCorpusLock, STRATA_DEFINITION_REVISION
 
@@ -48,6 +57,10 @@ SCHEMA = "scythe.rf-corpus-namespace.v1"
 PRODUCTION_CORPUS_ROOT = "/home/spectrcyde/scythe-validation-corpus/captured-v1"
 
 MANIFEST_NAME = "manifest.iqm"
+# §5.27. Present when and only when the compact capture plan has a spur
+# allocation: the eligible rows are observations, and a seed cannot regenerate
+# an observation.
+ELIGIBLE_NAME = "eligible-spur-trials.iqe"
 
 # §5.20's permissions row.
 CORPUS_DIRECTORY_MODE = 0o700
@@ -156,15 +169,22 @@ class _ScopeState:
     """Held by the scope and reachable through no public attribute."""
 
     __slots__ = ("dir_fd", "device", "body", "manifest_sha256", "path",
-                 "released")
+                 "released", "envelope", "capture_plan", "lock")
 
-    def __init__(self, dir_fd, device, body, digest, path) -> None:
+    def __init__(self, dir_fd, device, body, digest, path,
+                 envelope=None, capture_plan=None, lock=None) -> None:
         self.dir_fd = dir_fd
         self.device = device
         self.body = body
         self.manifest_sha256 = digest
         self.path = path
         self.released = False
+        # The exact nominal objects, reconstructed once by the factory. §5.27:
+        # admission must consume only this bound state, never a mapping and
+        # never a reconstruction it performed itself.
+        self.envelope = envelope
+        self.capture_plan = capture_plan
+        self.lock = lock
 
 
 class CorpusOwnershipScope:
@@ -247,6 +267,28 @@ class CorpusOwnershipScope:
     def delete_not_after(self) -> float:
         return float(self._live().body["delete_not_after"])
 
+    # There is deliberately NO accessor returning the reconstructed lock, the
+    # envelope, the capture plan, the allocation or the eligible rows.
+    #
+    # An earlier revision of this slice had `_bound_lock()`, restricted by the
+    # static call-site check, and that is not sufficient. Demonstrated before
+    # it was removed: a caller inside the `with` block took the lock, the block
+    # ended, the scope refused with NAMESPACE_SCOPE_RELEASED -- and the escaped
+    # object still answered, all 5 700 eligible rows included. Immutability
+    # does not help. The escaped object simply no longer proves the namespace
+    # is held, unchanged or exclusively owned, and a static check governs who
+    # may CALL an accessor, never what an allowed caller RETAINS afterwards.
+    #
+    # This is §5.24's lesson one layer out, where a returned `memoryview`
+    # outlived the attestation that vouched for it.
+    #
+    # Admission is not rewired in this slice, so nothing needs to consume the
+    # objects yet. When it is, it gets an ACTION -- re-establishing scope
+    # identity and liveness and answering the admission question while
+    # ownership is held -- exactly as §5.24 replaced its accessor with a write.
+    # Until then `to_dict()` reports bounded diagnostics: digests, counts and
+    # type names, which are comparison results rather than authority.
+
     def _directory_fd(self) -> int:
         """**Restricted.** The held descriptor, for this module's acts only.
 
@@ -284,6 +326,23 @@ class CorpusOwnershipScope:
             "held": True,
             "path_exposed": False,
             "descriptor_exposed": False,
+            # Bounded diagnostics. Strings and integers only -- enough to
+            # establish that reconstruction happened and agrees with what the
+            # namespace froze, and not enough to be authority.
+            "capture_plan_reconstructed": state.capture_plan is not None,
+            "reconstructed_types": sorted(
+                type(obj).__name__ for obj in
+                (state.envelope, state.capture_plan, state.lock)
+                if obj is not None),
+            "reconstructed_envelope_digest": (
+                None if state.envelope is None else state.envelope.digest()),
+            "reconstructed_capture_plan_digest": (
+                None if state.capture_plan is None
+                else state.capture_plan.digest()),
+            "eligible_trials_bound": (
+                0 if state.capture_plan is None
+                or state.capture_plan.spur_allocation is None
+                else len(state.capture_plan.spur_allocation.eligible_trials)),
             "sequence_state": "NOT BUILT",
             "membership_journal": "NOT BUILT",
             "publisher": "NOT BUILT",
@@ -419,21 +478,98 @@ def _between_directory_and_manifest() -> None:
     return None
 
 
-def _read_manifest(dir_fd: int, device: int) -> Tuple[Dict[str, Any], str]:
+def _write_file(dir_fd: int, name: str, chunks) -> int:
+    """Create exclusively, write completely, set the mode, and `fsync`.
+
+    The mode is set with `fchmod` rather than trusted to `open`'s argument,
+    which the umask masks -- measured: under umask 0300 a requested 0600
+    arrives as 0400.
+    """
     try:
-        fd = os.open(MANIFEST_NAME, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=dir_fd)
+        fd = os.open(name, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW,
+                     CORPUS_FILE_MODE, dir_fd=dir_fd)
+    except FileExistsError as exc:
+        raise ManifestRefused(
+            MANIFEST_ALREADY_PRESENT,
+            f"{name} appeared after this corpus's directory was created; "
+            "another writer is in this namespace") from exc
+    total = 0
+    try:
+        for chunk in chunks:
+            written = 0
+            while written < len(chunk):
+                wrote = os.write(fd, chunk[written:])
+                if wrote <= 0:
+                    raise NamespaceRefused(
+                        NAMESPACE_NOT_A_DIRECTORY,
+                        f"wrote {total + written} bytes of {name} and stalled")
+                written += wrote
+            total += written
+        os.fchmod(fd, CORPUS_FILE_MODE)
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+    return total
+
+
+def _open_member(dir_fd: int, name: str, device: int, absent_code: str) -> int:
+    """Open a namespace file and check the OPENED OBJECT, never the path."""
+    try:
+        fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=dir_fd)
     except OSError as exc:
         if exc.errno == errno.ENOENT:
+            if absent_code == ELIGIBLE_ARTEFACT_NOT_FOUND:
+                raise EligibleSetRefused(
+                    absent_code,
+                    f"the capture plan declares a spur allocation and {name} "
+                    "is not in this namespace") from exc
             raise ManifestRefused(
-                "MANIFEST_NOT_FOUND",
-                f"no {MANIFEST_NAME} in this namespace") from exc
+                absent_code, f"no {name} in this namespace") from exc
         if exc.errno == errno.ELOOP:
             raise NamespaceRefused(
-                NAMESPACE_SYMLINK_REFUSED,
-                f"{MANIFEST_NAME} is a symbolic link") from exc
+                NAMESPACE_SYMLINK_REFUSED, f"{name} is a symbolic link") from exc
         raise
     try:
         _check_manifest_file(fd, device)
+    except BaseException:
+        os.close(fd)
+        raise
+    return fd
+
+
+def _read_eligible_rows(dir_fd: int, device: int, allocation: Any):
+    """Stream the sidecar, or refuse. Returns the canonical rows.
+
+    Presence is decided only by the compact plan's `spur_allocation`, so an
+    artefact nobody declared is an unaccounted namespace entry rather than a
+    decoration.
+    """
+    present = ELIGIBLE_NAME in set(os.listdir(dir_fd))
+    if allocation is None:
+        if present:
+            raise EligibleSetRefused(
+                ELIGIBLE_ARTEFACT_UNEXPECTED,
+                f"{ELIGIBLE_NAME} is here and the capture plan declares no "
+                "spur allocation to reconstruct")
+        return []
+    fd = _open_member(dir_fd, ELIGIBLE_NAME, device, ELIGIBLE_ARTEFACT_NOT_FOUND)
+    try:
+        records = list(read_records(
+            lambda count: os.read(fd, count),
+            expected_count=int(allocation["distinct_trial_units"])))
+    finally:
+        os.close(fd)
+    recomputed = digest_over_records(records)
+    if recomputed != allocation["eligible_trials_digest"]:
+        raise EligibleSetRefused(
+            "ELIGIBLE_DIGEST_DISAGREES",
+            "the artefact does not digest to the value the capture plan froze")
+    return parse_rows(records)
+
+
+def _read_manifest(dir_fd: int, device: int) -> Tuple[Dict[str, Any], str]:
+    fd = _open_member(dir_fd, MANIFEST_NAME, device, "MANIFEST_NOT_FOUND")
+    try:
         framed = os.read(fd, MANIFEST_READ_LIMIT)
     finally:
         os.close(fd)
@@ -465,6 +601,34 @@ def _check_declarations(body: Dict[str, Any]) -> None:
             "MANIFEST_DECLARATION_DISAGREES",
             f"the corpus was opened under {body['strata_definition_revision']} "
             f"and the strata now mean {STRATA_DEFINITION_REVISION}")
+
+
+def _reconstruct(body, rows):
+    """The exact nominal objects, built once and returned together.
+
+    §5.26 held the manifest's **mapping**, and admission consuming a mapping is
+    the caller-supplied set §5.25 refused wearing a different shape. Everything
+    below is checked by the two comparisons `rf_corpus_reconstruction` ends
+    with: re-serialisation to the stored declaration, byte for byte, and the
+    frozen digest.
+    """
+    rebuilt_envelope = _rebuild_envelope(body["envelope"],
+                                         frozen_digest=body["envelope_digest"])
+    rebuilt_plan = _rebuild_plan(body["capture_plan"], eligible_rows=rows,
+                                 frozen_digest=body["capture_plan_digest"])
+    fields = {name: body[name] for name in PromotionCorpusLock.__dataclass_fields__
+              if name not in ("envelope", "capture_plan")}
+    lock = PromotionCorpusLock(envelope=rebuilt_envelope,
+                               capture_plan=rebuilt_plan, **fields)
+    return rebuilt_envelope, rebuilt_plan, lock
+
+
+def _eligible_rows_for(plan) -> list:
+    allocation = getattr(plan, "spur_allocation", None)
+    if allocation is None:
+        return []
+    return sorted((trial.to_dict() for trial in allocation.eligible_trials),
+                  key=_eligible_sort_key)
 
 
 # -- the two acts -----------------------------------------------------------
@@ -528,44 +692,36 @@ def create_corpus_namespace(*, corpus_id: str, lock: Any, retention: Any,
                 NAMESPACE_HOLDS_ENTRIES,
                 f"{len(entries)} entr(y/ies) already here: {entries[:4]}")
         _between_directory_and_manifest()
-        try:
-            fd = os.open(MANIFEST_NAME,
-                         os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW,
-                         CORPUS_FILE_MODE, dir_fd=dir_fd)
-        except FileExistsError as exc:
-            # Someone created it between `mkdir` and here. `O_EXCL` turns that
-            # into a refusal instead of a silent overwrite of a corpus's terms,
-            # and it is reported as the declared code rather than as a bare
-            # FileExistsError a caller might mistake for its own bug.
-            raise ManifestRefused(
-                MANIFEST_ALREADY_PRESENT,
-                f"{MANIFEST_NAME} appeared after this corpus's directory was "
-                "created; another writer is in this namespace") from exc
-        try:
-            written, total = 0, len(framed)
-            while written < total:
-                wrote = os.write(fd, framed[written:])
-                if wrote <= 0:
-                    raise NamespaceRefused(
-                        NAMESPACE_NOT_A_DIRECTORY,
-                        f"wrote {written} of {total} manifest bytes and stalled")
-                written += wrote
-            # Set explicitly, exactly as the directory's mode is. `open`'s
-            # mode argument is masked by the umask -- measured: under umask
-            # 0300 a requested 0600 arrives as 0400 -- so relying on it makes
-            # a corpus uncreatable in an environment nobody chose.
-            os.fchmod(fd, CORPUS_FILE_MODE)
-            os.fsync(fd)                    # the bytes survive
-        finally:
-            os.close(fd)
-        os.fsync(dir_fd)                    # the NAME survives; not the same fact
+
+        # §5.27: the DEPENDENCY first. Writing the manifest first would publish
+        # a corpus whose declared eligible set did not yet exist. A crash
+        # before the manifest is durably named leaves an incomplete namespace
+        # rather than a corpus: unopenable, unresumable, minting no scope, and
+        # never adopted on retry.
+        rows = _eligible_rows_for(lock.capture_plan)
+        if rows:
+            _write_file(dir_fd, ELIGIBLE_NAME, frame_records(rows))
+            _read_eligible_rows(dir_fd, device,
+                                body["capture_plan"]["spur_allocation"])
+
+        _write_file(dir_fd, MANIFEST_NAME, (framed,))
+        # After BOTH names exist. The directory fsync makes names durable, and
+        # making one durable before the other is what leaves a manifest whose
+        # dependency can be lost.
+        os.fsync(dir_fd)
+
         read_body, digest = _read_manifest(dir_fd, device)
         _check_declarations(read_body)
         if read_body != body:
             raise ManifestRefused(
                 "MANIFEST_NOT_CANONICAL",
                 "the manifest read back is not the manifest written")
-        state = _ScopeState(dir_fd, device, read_body, digest, path)
+        read_rows = _read_eligible_rows(
+            dir_fd, device, read_body["capture_plan"]["spur_allocation"])
+        rebuilt_envelope, rebuilt_plan, rebuilt_lock = _reconstruct(
+            read_body, read_rows)
+        state = _ScopeState(dir_fd, device, read_body, digest, path,
+                            rebuilt_envelope, rebuilt_plan, rebuilt_lock)
         return CorpusOwnershipScope(state, _MINT_KEY)
     except BaseException:
         os.close(dir_fd)
@@ -597,17 +753,23 @@ def open_corpus_namespace(*, corpus_id: str, root: Optional[str] = None
         device = _check_directory(dir_fd, path)
         _hold_exclusively(dir_fd, path)
         entries = sorted(os.listdir(dir_fd))
-        unexpected = [entry for entry in entries if entry != MANIFEST_NAME]
+        unexpected = [entry for entry in entries
+                      if entry not in (MANIFEST_NAME, ELIGIBLE_NAME)]
         if unexpected:
             raise NamespaceRefused(
                 NAMESPACE_RECOVERY_UNBUILT,
-                f"{len(unexpected)} entr(y/ies) besides the manifest, and "
-                "membership recovery is not built. §5.26 requires every "
-                "candidate final to be parsed, validated and reconciled "
-                f"against the journal before a corpus is reopened: {unexpected[:4]}")
+                f"{len(unexpected)} entr(y/ies) besides this corpus's own "
+                "declarations, and membership recovery is not built. §5.26 "
+                "requires every candidate final to be parsed, validated and "
+                "reconciled against the journal before a corpus is reopened: "
+                f"{unexpected[:4]}")
         body, digest = _read_manifest(dir_fd, device)
         _check_declarations(body)
-        state = _ScopeState(dir_fd, device, body, digest, path)
+        rows = _read_eligible_rows(dir_fd, device,
+                                   body["capture_plan"]["spur_allocation"])
+        rebuilt_envelope, rebuilt_plan, rebuilt_lock = _reconstruct(body, rows)
+        state = _ScopeState(dir_fd, device, body, digest, path,
+                            rebuilt_envelope, rebuilt_plan, rebuilt_lock)
         return CorpusOwnershipScope(state, _MINT_KEY)
     except BaseException:
         os.close(dir_fd)
@@ -621,9 +783,12 @@ def namespace_status() -> Dict[str, Any]:
         "production_root": PRODUCTION_CORPUS_ROOT,
         "production_creation_authorised": False,
         "manifest_name": MANIFEST_NAME,
-        "built": ["THE MANIFEST", "CORPUS CREATION", "CORPUS REOPENING"],
+        "eligible_artefact_name": ELIGIBLE_NAME,
+        "built": ["THE MANIFEST", "THE ELIGIBLE-TRIAL ARTEFACT",
+                  "CORPUS CREATION", "CORPUS REOPENING",
+                  "TYPED RECONSTRUCTION AND OPAQUE BINDING"],
         "not_built": ["MEMBERSHIP JOURNAL", "SEQUENCE STATE", "PUBLISHER",
-                      "RING LIFETIME IDENTITY", "TYPED LOCK RECONSTRUCTION",
+                      "RING LIFETIME IDENTITY",
                       "ADMISSION CONSUMPTION OF THIS SCOPE", "CLOCK PROVIDER"],
         # Stated as its own key rather than left to be read off the list
         # above: this scope is not yet consumed by anything, so nothing is

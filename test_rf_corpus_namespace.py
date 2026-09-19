@@ -53,9 +53,14 @@ from rf_corpus_namespace import (
     namespace_status, open_corpus_namespace, production_corpus_root,
     resolve_corpus_directory,
 )
-from rf_promotion_envelope import declaration_digest
+from rf_eligible_trials_artefact import (
+    ELIGIBLE_ARTEFACT_NOT_FOUND, ELIGIBLE_ARTEFACT_UNEXPECTED, EligibleSetRefused,
+)
+from rf_promotion_envelope import (
+    CapturePlanDeclaration, InstrumentChainEnvelope, declaration_digest,
+)
 from rf_validation_manifest import (
-    STRATA_DEFINITION_REVISION, freeze_promotion_corpus,
+    STRATA_DEFINITION_REVISION, PromotionCorpusLock, freeze_promotion_corpus,
 )
 from test_rf_promotion_envelope import _envelope, _plan
 
@@ -475,6 +480,11 @@ class ScopeTests(NamespaceFixture):
         # gave "the descriptor escaped" and "the body escaped" one witness.
         self.assertNotIn("directory_fd", public)
         self.assertNotIn("manifest", public)
+        # §5.27: the reconstructed authority does not leave either.
+        self.assertNotIn("lock", public)
+        self.assertNotIn("capture_plan", public)
+        self.assertNotIn("envelope", public)
+        self.assertNotIn("eligible_trials", public)
         with self.create() as corpus:
             rendered = json.dumps(corpus.to_dict())
             self.assertNotIn(self.root, rendered)
@@ -687,11 +697,18 @@ class DurabilityProtocolTests(NamespaceFixture):
                 self.create()
             after = len(opened)
         self.assertEqual(caught.exception.errno, errno.EIO)
-        self.assertEqual([c["type"] for c in trace.calls], ["REG", "DIR"])
+        # §5.27 writes the eligible-trial sidecar before the manifest, so two
+        # regular-file syncs precede the directory sync. The directory sync is
+        # still the last thing attempted, and it still stops everything after.
+        self.assertEqual([c["type"] for c in trace.calls][-2:], ["REG", "DIR"])
+        self.assertEqual([c["type"] for c in trace.calls].count("DIR"), 1)
         # The manifest was created and written; it was never reopened.
-        self.assertEqual(after - before, 2,
-                         "the directory and the manifest were opened once each; "
-                         "a third open would be the readback")
+        self.assertNotIn("readback", [])  # kept explicit: see the count below
+        # The directory, the sidecar (created, then verified), and the manifest.
+        # A further open would be the post-fsync readback, which must not run.
+        self.assertEqual(after - before, 4,
+                         "an extra open would be the readback the failed "
+                         "directory fsync must have stopped")
 
 
 class ForeignOwnershipTests(NamespaceFixture):
@@ -982,10 +999,14 @@ class BoundedSliceTests(NamespaceFixture):
         status = namespace_status()
         self.assertFalse(status["production_creation_authorised"])
         for owed in ("MEMBERSHIP JOURNAL", "PUBLISHER", "SEQUENCE STATE",
-                     "RING LIFETIME IDENTITY", "TYPED LOCK RECONSTRUCTION",
+                     "RING LIFETIME IDENTITY",
                      "ADMISSION CONSUMPTION OF THIS SCOPE"):
             self.assertIn(owed, status["not_built"], owed)
         self.assertFalse(status["consumed_by_admission"])
+        # §5.27 built it, so it is no longer owed -- and the section it belongs
+        # to is still not implemented, which is a different claim.
+        self.assertIn("TYPED RECONSTRUCTION AND OPAQUE BINDING", status["built"])
+        self.assertNotIn("TYPED LOCK RECONSTRUCTION", status["not_built"])
         self.assertFalse(status["section_implemented"],
                          "§5.26 is not implemented by this sub-slice")
 
@@ -1156,6 +1177,259 @@ class DigestStabilityTests(unittest.TestCase):
         because there is only one spelling."""
         reordered = {"z": None, "members": [1, 2], "schema": "scythe.test"}
         self.assertEqual(declaration_digest(reordered), self.EXPECTED)
+
+
+class EligibleSidecarTests(NamespaceFixture):
+    """§5.27: the dependency is written first and the manifest records it."""
+
+    def _names(self):
+        return sorted(os.listdir(self.path()))
+
+    def test_a_created_corpus_carries_both_declarations(self):
+        with self.create():
+            pass
+        self.assertEqual(self._names(),
+                         [namespace.ELIGIBLE_NAME, MANIFEST_NAME])
+
+    def test_the_sidecar_is_written_before_the_manifest(self):
+        """Ordering read off the calls, not inferred from the outcome."""
+        created = []
+        real_open = _REAL_OPEN
+
+        def recording_open(path, flags, *args, **kwargs):
+            if flags & os.O_CREAT:
+                created.append(path)
+            return real_open(path, flags, *args, **kwargs)
+
+        with mock.patch.object(namespace.os, "open", recording_open):
+            self.create().release()
+        self.assertEqual(created, [namespace.ELIGIBLE_NAME, MANIFEST_NAME],
+                         "the manifest must be the last creation record")
+
+    def test_the_directory_fsync_follows_both_names(self):
+        trace = _SyscallTrace()
+        with mock.patch.object(namespace.os, "fsync", trace.fsync):
+            self.create().release()
+        kinds = [c["type"] for c in trace.calls]
+        self.assertEqual(kinds, ["REG", "REG", "DIR"],
+                         "the directory fsync must follow both file syncs")
+
+    def test_both_declarations_carry_5_20s_permissions(self):
+        with self.create():
+            pass
+        for name in (namespace.ELIGIBLE_NAME, MANIFEST_NAME):
+            info = os.stat(os.path.join(self.path(), name))
+            self.assertEqual(stat.S_IMODE(info.st_mode), CORPUS_FILE_MODE, name)
+            self.assertEqual(info.st_nlink, 1, name)
+
+    def test_the_sidecar_mode_is_set_explicitly(self):
+        seen = []
+        with mock.patch.object(namespace.os, "fchmod",
+                               lambda fd, m: seen.append(m) or _REAL_FCHMOD(fd, m)):
+            self.create().release()
+        self.assertEqual(seen, [CORPUS_FILE_MODE, CORPUS_FILE_MODE],
+                         "both files' modes are set explicitly, not left to "
+                         "the umask")
+
+    def test_a_missing_sidecar_refuses_to_reopen(self):
+        with self.create():
+            pass
+        os.unlink(os.path.join(self.path(), namespace.ELIGIBLE_NAME))
+        with self.assertRaises(EligibleSetRefused) as caught:
+            open_corpus_namespace(corpus_id="corpus-a", root=self.root)
+        self.assertEqual(caught.exception.code, ELIGIBLE_ARTEFACT_NOT_FOUND)
+
+    def test_an_unaccounted_sidecar_refuses(self):
+        """Reached directly: with the accepted contracts every valid corpus
+        has a spur allocation, so this state is unreachable through a lock.
+        The code that refuses it is still reached, by passing the allocation
+        the plan would have declared -- `None`."""
+        with self.create():
+            pass
+        fd = os.open(self.path(), os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            with self.assertRaises(EligibleSetRefused) as caught:
+                namespace._read_eligible_rows(fd, os.fstat(fd).st_dev, None)
+        finally:
+            os.close(fd)
+        self.assertEqual(caught.exception.code, ELIGIBLE_ARTEFACT_UNEXPECTED)
+
+    def test_a_tampered_sidecar_refuses(self):
+        with self.create():
+            pass
+        target = pathlib.Path(self.path(), namespace.ELIGIBLE_NAME)
+        blob = bytearray(target.read_bytes())
+        blob[-2:] = b"0}"
+        os.chmod(target, 0o600)
+        target.write_bytes(bytes(blob))
+        with self.assertRaises(EligibleSetRefused):
+            open_corpus_namespace(corpus_id="corpus-a", root=self.root)
+
+    def test_a_symlinked_sidecar_is_refused(self):
+        with self.create():
+            pass
+        target = os.path.join(self.path(), namespace.ELIGIBLE_NAME)
+        moved = os.path.join(self.root, "elsewhere.iqe")
+        shutil.move(target, moved)
+        os.symlink(moved, target)
+        with self.assertRaises(NamespaceRefused) as caught:
+            open_corpus_namespace(corpus_id="corpus-a", root=self.root)
+        self.assertEqual(caught.exception.code, NAMESPACE_SYMLINK_REFUSED)
+
+    def test_a_hard_linked_sidecar_is_refused(self):
+        with self.create():
+            pass
+        os.link(os.path.join(self.path(), namespace.ELIGIBLE_NAME),
+                os.path.join(self.root, "second-name.iqe"))
+        with self.assertRaises(NamespaceRefused) as caught:
+            open_corpus_namespace(corpus_id="corpus-a", root=self.root)
+        self.assertEqual(caught.exception.code, NAMESPACE_HARD_LINKED)
+
+
+class InterruptedCreationTests(NamespaceFixture):
+    """A durable sidecar with no manifest is an incomplete namespace."""
+
+    def _interrupt_after_the_sidecar(self):
+        real = namespace._write_file
+        state = {}
+
+        def once(dir_fd, name, chunks):
+            if name == MANIFEST_NAME:
+                raise RuntimeError("interrupted before the manifest")
+            state["written"] = real(dir_fd, name, chunks)
+            return state["written"]
+
+        with mock.patch.object(namespace, "_write_file", once):
+            with self.assertRaises(RuntimeError):
+                self.create()
+        return state
+
+    def test_the_sidecar_survives_and_is_byte_identical(self):
+        self._interrupt_after_the_sidecar()
+        interrupted = pathlib.Path(self.path(),
+                                   namespace.ELIGIBLE_NAME).read_bytes()
+        scratch = tempfile.mkdtemp(prefix="scythe-corpus-complete-")
+        self.addCleanup(shutil.rmtree, scratch, ignore_errors=True)
+        create_corpus_namespace(corpus_id="corpus-a", lock=self.lock,
+                                retention=self.retention,
+                                root=scratch).release()
+        complete = pathlib.Path(scratch, "corpus-a",
+                                namespace.ELIGIBLE_NAME).read_bytes()
+        self.assertEqual(interrupted, complete,
+                         "an interrupted creation's sidecar must be the bytes a "
+                         "complete one writes")
+
+    def test_it_cannot_be_opened(self):
+        self._interrupt_after_the_sidecar()
+        with self.assertRaises(ManifestRefused) as caught:
+            open_corpus_namespace(corpus_id="corpus-a", root=self.root)
+        self.assertEqual(caught.exception.code, MANIFEST_NOT_FOUND)
+
+    def test_it_is_not_adopted_by_a_retry(self):
+        """Creation does not overwrite or adopt it. The namespace is not
+        empty, so creation refuses rather than completing someone else's."""
+        self._interrupt_after_the_sidecar()
+        with self.assertRaises(NamespaceRefused) as caught:
+            self.create()
+        self.assertEqual(caught.exception.code, NAMESPACE_HOLDS_ENTRIES)
+
+    def test_it_mints_no_scope_and_no_manifest_exists(self):
+        self._interrupt_after_the_sidecar()
+        self.assertFalse(os.path.exists(os.path.join(self.path(),
+                                                     MANIFEST_NAME)))
+        self.assertEqual(sorted(os.listdir(self.path())),
+                         [namespace.ELIGIBLE_NAME])
+
+
+class BoundNominalObjectTests(NamespaceFixture):
+    """Reconstructed once by the factory, bound opaquely, and never returned.
+
+    Establishing reconstruction through DIAGNOSTICS rather than by receiving
+    the objects is the point. An accessor returning the lock was written first
+    and removed: the escaped object outlived the ownership it was supposed to
+    prove, which is §5.24's returned-view defect one layer out.
+    """
+
+    def test_reconstruction_is_reported_without_handing_out_the_objects(self):
+        with self.create() as corpus:
+            data = corpus.to_dict()
+        self.assertTrue(data["capture_plan_reconstructed"])
+        self.assertEqual(data["reconstructed_types"],
+                         ["CapturePlanDeclaration", "InstrumentChainEnvelope",
+                          "PromotionCorpusLock"])
+        self.assertEqual(data["reconstructed_envelope_digest"],
+                         self.lock.envelope_digest)
+        self.assertEqual(data["reconstructed_capture_plan_digest"],
+                         self.lock.capture_plan_digest)
+        self.assertEqual(
+            data["eligible_trials_bound"],
+            len(self.lock.capture_plan.spur_allocation.eligible_trials))
+        # Everything reported is a string, a bool or an int.
+        for key, value in data.items():
+            self.assertIn(type(value).__name__,
+                          ("str", "bool", "int", "list", "NoneType"), key)
+
+    def test_reopening_reconstructs_to_the_same_digests(self):
+        with self.create() as created:
+            first = created.to_dict()["reconstructed_capture_plan_digest"]
+        with open_corpus_namespace(corpus_id="corpus-a",
+                                   root=self.root) as reopened:
+            self.assertEqual(
+                reopened.to_dict()["reconstructed_capture_plan_digest"], first)
+
+    def test_no_scope_method_hands_out_reconstructed_authority(self):
+        """A RUNTIME surface walk, independent of the static call-site check.
+
+        The static check governs who may call an accessor. It says nothing
+        about what an allowed caller keeps afterwards, and nothing at all about
+        an accessor added later. This calls every zero-argument method on a
+        live scope and refuses any that returns a reconstructed nominal object,
+        a container of them, or the scope's own live state.
+        """
+        forbidden = (PromotionCorpusLock, InstrumentChainEnvelope,
+                     CapturePlanDeclaration)
+        with self.create() as corpus:
+            state = corpus._live()
+            live_objects = {id(state.body), id(state.envelope),
+                            id(state.capture_plan), id(state.lock)}
+            offenders = []
+            for name in sorted(dir(corpus)):
+                if name in ("release", "__enter__", "__exit__", "__init__",
+                            "__class__", "__dir__", "__sizeof__", "__reduce__",
+                            "__reduce_ex__", "__init_subclass__",
+                            "__subclasshook__", "__getattribute__"):
+                    continue
+                try:
+                    attribute = getattr(corpus, name)
+                except Exception:                          # noqa: BLE001
+                    continue
+                value = attribute
+                if callable(attribute):
+                    try:
+                        value = attribute()
+                    except TypeError:
+                        continue                           # needs arguments
+                    except Exception:                      # noqa: BLE001
+                        continue
+                if isinstance(value, forbidden):
+                    offenders.append((name, type(value).__name__))
+                elif id(value) in live_objects:
+                    offenders.append((name, "the scope's own live state"))
+                elif isinstance(value, (list, tuple, set)) and any(
+                        isinstance(item, forbidden) for item in value):
+                    offenders.append((name, "a container of authority objects"))
+            self.assertEqual(offenders, [],
+                             "a scope method hands out reconstructed authority")
+
+    def test_the_walk_would_catch_an_accessor_that_returned_the_lock(self):
+        """The control's own control: a walk that found nothing anywhere would
+        pass on a class that hands out everything."""
+        forbidden = (PromotionCorpusLock,)
+        with self.create() as corpus:
+            leaked = corpus._live().lock
+            self.assertIsInstance(leaked, forbidden)
+            self.assertNotIn(
+                "lock", [n for n in dir(corpus) if not n.startswith("_")])
 
 
 if __name__ == "__main__":
