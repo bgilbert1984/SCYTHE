@@ -253,7 +253,7 @@ eligible trials are observational data and are not. On the standard fixture the
 missing eligible rows alone exceed `IQM_MAX_BODY_BYTES`, so making the manifest
 lossless by raising its bound would size a protocol against a fixture.
 
-**§5.27 is PROPOSED as of 2026-09-18.** It keeps the compact capture-plan form
+**§5.27 was ACCEPTED 2026-09-19.** As of 2026-09-18 it It keeps the compact capture-plan form
 and its existing digest, persists the irreducible eligible rows in one separately
 framed namespace artefact bound by that digest, and makes `manifest.iqm` the
 last creation record after the sidecar is durable and verified. Because that is
@@ -262,6 +262,13 @@ schema and format to v2 rather than making v1 mean two things. It proposes no
 partial reconstruction and no production write. Proposal and acceptance do not
 narrow this entry: even a fully reconstructed scope refuses nothing until
 admission consumes it on the complete journalled path to membership.
+
+**Acceptance also does not repair the contradiction it names.** §5.26 remains
+accepted with a manifest that cannot reconstruct the capture plan it commits to,
+and stays that way until §5.27's implementation lands. What acceptance changed is
+that the repair is now contract rather than a finding — the format, the v2
+advance, the creation order and the orphan class it creates are all in force as
+text, and none of them exists as code.
 
 This entry drains when corpus creation, the complete publisher and the
 membership journal **all** exist, and admission sits on the only path to

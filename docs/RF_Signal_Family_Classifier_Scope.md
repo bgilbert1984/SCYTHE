@@ -4680,25 +4680,68 @@ needs one — not a row quietly added to a table an acceptance already covered.
 
 ---
 
-### 5.27 — the eligible-spur set is a namespace artefact — **PROPOSED**
+### 5.27 — the eligible-spur set is a namespace artefact — **ACCEPTED**
 
 ```text
-Status:     PROPOSED 2026-09-18. Nothing here is accepted or implemented.
-Authority:  NONE. This proposal authorises no persistence, production
-            directory, byte, lock, corpus, capture, tuner action or NESDR
-            operation. Merge as PROPOSED would preserve a proposal and grant
-            nothing.
+Status:     ACCEPTED 2026-09-19. The sidecar artefact, its framing and
+            canonical rule, the manifest v2 advance, the creation order and
+            the thirty-seven controls are in force as contract.
+Authority:  §5.27 is accepted. Acceptance is documentation only: it authorises
+            no persistence, production directory, byte, lock, corpus, capture,
+            tuner action or NESDR operation, and it changes no behaviour,
+            because no code exists yet and none is authorised by this commit.
+Order:      §13l. This is the acceptance commit. Merge follows it, and an
+            implementation follows the merge.
 Finding:    §5.26 cannot reconstruct the exact nominal CapturePlanDeclaration
             from manifest.iqm. SpurAllocation.to_dict() commits to the
             eligible set by digest and count but does not carry the rows, and
             those rows are observations rather than seed-derived state.
-Amends:     If accepted, §5.26's claim that the lock is written into one
-            manifest, its manifest fields and version, and its creation and
-            reopening sequences. It does not amend §5.22's eligible set,
-            §5.23's compact CapturePlanDeclaration form or the existing
-            capture-plan digest.
-Drains:     Nothing. Entry 14 remains open on its existing condition.
+Amends:     Five things in §5.26, enumerated in the acceptance below and not
+            re-listed here. It does not amend §5.22's eligible set, §5.23's
+            compact CapturePlanDeclaration form or the existing capture-plan
+            digest.
+Drains:     Nothing, and nothing on merge. Entry 14 remains open on its
+            existing condition. An accepted document drains nothing.
 ```
+
+*Proposed 2026-09-18 at `b15e164`, merged as PROPOSED at `e9f1230`. This is the
+acceptance commit.*
+
+**What this acceptance accepts, named rather than left to the merge.** §13l is
+explicit that a merge supplies no acceptance, so every item is listed:
+
+1. **The eligible set as a separate namespace artefact** —
+   `eligible-spur-trials.iqe`, framed and immutable, present when and only when
+   the compact capture plan has a `spur_allocation`, and bound by the
+   `eligible_trials_digest` the plan **already** carries. No second digest and
+   no new lock field.
+2. **Two IQE format declarations in the manifest** — `iqe_schema` and
+   `iqe_format_version`, **always present**, so the required manifest-field set
+   stays one derived equality rather than a conditional handwritten list.
+3. **`IQM_SCHEMA` and `IQM_FORMAT_VERSION` advance to v2**, with **no fabricated
+   v1 migration**. A v1 manifest does not contain enough evidence to reconstruct
+   the plan and refuses as unsupported; it is not upgraded by inventing the
+   missing rows. That edits §5.26's accepted manifest contract.
+4. **The creation order, with `manifest.iqm` last** — after the sidecar is
+   durable and verified. That edits §5.26's accepted creation sequence, and with
+   it the orphan class named below.
+5. **Reopening reconstructs the exact nominal plan from both files**, binding it
+   in opaque scope state, with admission receiving only that bound object.
+
+Plus **the thirty-seven controls**, and the statement that §5.22's eligible set,
+§5.23's compact plan form and the existing capture-plan digest are **unchanged**.
+
+**One consequence is accepted with item 4 rather than discovered later.** A crash
+after the sidecar is durable and before `manifest.iqm` is durably named leaves a
+namespace that is **not a corpus**: it cannot be opened, cannot be resumed by
+trusting the surviving sidecar, and cannot mint a scope. It is preserved for
+diagnosis and requires the separately governed deletion path. That is a new
+orphan class §5.26 does not have, and accepting the ordering is accepting it.
+
+**What acceptance does not start.** No implementation is authorised by this
+commit. Nothing may be built until this section has merged, and what is built
+then is an implementation slice in tests' temporary roots — not a production
+corpus, not a capture, not a byte outside an authorised test root.
 
 *Discovered while starting §5.26's typed-reconstruction slice, after the
 manifest-and-namespace sub-slice merged at `6308715`. The implementation stopped
@@ -4958,21 +5001,41 @@ strength as §5.26's existing `fsync` controls.
   admission still has to consume the scope and sit on the complete, journalled
   path to membership.
 
-#### What acceptance would have to name
+#### What acceptance required, and what it settled
 
-An acceptance must expressly accept all five amendments to §5.26: the eligible
-set as a separate namespace artefact; the two IQE format declarations in the
-manifest; the IQM schema and format version advancing to v2 with no fabricated
-v1 migration; the creation order with `manifest.iqm` last; and reopening
-reconstructing the exact nominal plan from both files. It must also accept the
-thirty-seven controls, and state that §5.22's eligible set, §5.23's compact plan
-form and the existing capture-plan digest are unchanged.
+All five amendments to §5.26 are named at the top of this section, which is
+where an acceptance commit has to put them, together with the thirty-seven
+controls and the statement that §5.22's eligible set, §5.23's compact plan form
+and the existing capture-plan digest are unchanged.
 
 Then, in order: merge the accepted amendment; implement the format, creation and
 reconstruction in tests' temporary roots; rerun the isolated negative-control
 sweep; and only then resume admission rewiring. Entry 14's drain remains where
 §5.26 put it — after the complete publisher and membership journal exist and
 admission is unavoidable.
+
+**Three things acceptance does not settle**, recorded so they are not recovered
+later by inference:
+
+- **The four-way presence rule was written in one pass.** Allocation × artefact
+  gives four states and all four are declared, but every table in this line of
+  work that was written in one pass has come back needing a row. A fifth state —
+  an artefact that parses, counts and digests correctly while belonging to a
+  different corpus — is refused today only by the `capture_plan_digest`
+  comparison at the end of reconstruction, which is a consequence rather than a
+  row in that table.
+- **The orphan class item 4 creates has no deletion path of its own.** §5.20's
+  deletion row governs recognised final files and their temporary siblings; a
+  sidecar with no manifest is neither. It is preserved and unreopenable, which is
+  correct and is not the same as governed.
+- **Foreclosing v1 rests on a fact about today.** "No production v1 corpus
+  exists" is true, and it is a statement about the world rather than about the
+  format. If an implementation's tests create v1 corpora that outlive the slice,
+  that premise needs re-checking rather than restating.
+
+If implementation finds any of the three is a contract question rather than an
+implementation one, that is an amendment and needs one — not a row quietly added
+to a table an acceptance already covered.
 
 ---
 
