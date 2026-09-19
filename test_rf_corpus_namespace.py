@@ -1303,6 +1303,47 @@ class EligibleSidecarTests(NamespaceFixture):
                          "the manifest was created before its dependency was "
                          "durable")
 
+    def test_no_sidecar_read_falls_between_the_manifest_and_the_directory_sync(self):
+        """Separates `the manifest is named before the sidecar is verified`
+        from `the readback is omitted entirely`.
+
+        Relocating the readback to after the manifest puts a sidecar read in
+        that window; removing the readback puts nothing there. Every test that
+        asserts the readback PRECEDES the manifest is broken by both, so
+        neither had a witness of its own. The closing verification read, which
+        happens after the directory sync, is deliberately outside the window.
+        """
+        events = []
+        real_open, real_fsync = _REAL_OPEN, _REAL_FSYNC
+
+        def recording_open(path, flags, *args, **kwargs):
+            if path == namespace.ELIGIBLE_NAME and not flags & os.O_CREAT:
+                events.append("SIDECAR_READ")
+            if path == MANIFEST_NAME and flags & os.O_CREAT:
+                events.append("MANIFEST_CREATED")
+            return real_open(path, flags, *args, **kwargs)
+
+        def recording_fsync(fd):
+            try:
+                directory = stat.S_ISDIR(_REAL_FSTAT(fd).st_mode)
+            except OSError:                                # pragma: no cover
+                directory = False
+            if directory and "DIR_FSYNC" not in events:
+                events.append("DIR_FSYNC")
+            return real_fsync(fd)
+
+        with mock.patch.object(namespace.os, "open", recording_open), \
+                mock.patch.object(namespace.os, "fsync", recording_fsync):
+            self.create().release()
+        self.assertIn("MANIFEST_CREATED", events)
+        self.assertIn("DIR_FSYNC", events)
+        opened = events.index("MANIFEST_CREATED")
+        synced = events.index("DIR_FSYNC")
+        self.assertLess(opened, synced)
+        self.assertNotIn("SIDECAR_READ", events[opened:synced],
+                         "the sidecar was verified after its manifest had "
+                         "already been created")
+
     def test_the_directory_fsync_follows_both_names(self):
         trace = _SyscallTrace()
         with mock.patch.object(namespace.os, "fsync", trace.fsync):
@@ -1478,8 +1519,12 @@ class BoundNominalObjectTests(NamespaceFixture):
         ("spur_id", "tuning_id", "epoch_id", "chain_hash", "stability_class",
          "signed_baseband_hz", "confidence"))
 
+    # BOUND_STATE was one class covering two different escapes --- handing
+    # back a live bound object, and handing back a mutable container holding
+    # authority --- so `a scope method returns mutable reconstructed state`
+    # and `the live body is returned instead of a copy` shared a witness.
     ESCAPES = ("PATH", "DESCRIPTOR", "ELIGIBLE_ROWS", "AUTHORITY_OBJECT",
-               "AUTHORITY_CONTAINER", "BOUND_STATE")
+               "AUTHORITY_CONTAINER", "LIVE_OBJECT", "MUTABLE_STATE")
 
     def _fresh_scope(self):
         """One corpus per probe, in its own root.
@@ -1532,10 +1577,10 @@ class BoundNominalObjectTests(NamespaceFixture):
         live = {id(state.body), id(state.envelope), id(state.capture_plan),
                 id(state.lock)}
         if id(value) in live:
-            why.append("BOUND_STATE")
+            why.append("LIVE_OBJECT")
         elif isinstance(value, dict) and any(
                 isinstance(v, authority) for v in value.values()):
-            why.append("BOUND_STATE")
+            why.append("MUTABLE_STATE")
         return why
 
     _WALK = None
@@ -1604,8 +1649,11 @@ class BoundNominalObjectTests(NamespaceFixture):
     def test_no_scope_method_hands_out_an_authority_container(self):
         self._assert_no_escape("AUTHORITY_CONTAINER")
 
-    def test_no_scope_method_hands_out_bound_state(self):
-        self._assert_no_escape("BOUND_STATE")
+    def test_no_scope_method_hands_out_a_live_bound_object(self):
+        self._assert_no_escape("LIVE_OBJECT")
+
+    def test_no_scope_method_hands_out_mutable_reconstructed_state(self):
+        self._assert_no_escape("MUTABLE_STATE")
 
     _CLASSIFIER = None
 
@@ -1627,7 +1675,8 @@ class BoundNominalObjectTests(NamespaceFixture):
                     "ELIGIBLE_ROWS": rows,
                     "AUTHORITY_OBJECT": state.lock,
                     "AUTHORITY_CONTAINER": [state.envelope],
-                    "BOUND_STATE": state.body,
+                    "LIVE_OBJECT": state.body,
+                    "MUTABLE_STATE": {"lock": state.lock},
                 }
                 result = {k: self._classify(v, state) for k, v in cases.items()}
                 result["DESCRIPTOR/duplicated"] = self._classify(duplicated,
@@ -1673,8 +1722,11 @@ class BoundNominalObjectTests(NamespaceFixture):
         self.assertIn("AUTHORITY_CONTAINER",
                       self._classifier_once()["AUTHORITY_CONTAINER"])
 
-    def test_the_walk_detects_bound_state(self):
-        self.assertIn("BOUND_STATE", self._classifier_once()["BOUND_STATE"])
+    def test_the_walk_detects_a_live_bound_object(self):
+        self.assertIn("LIVE_OBJECT", self._classifier_once()["LIVE_OBJECT"])
+
+    def test_the_walk_detects_mutable_state(self):
+        self.assertIn("MUTABLE_STATE", self._classifier_once()["MUTABLE_STATE"])
 
     def test_the_six_escape_classes_are_all_exercised(self):
         self.assertEqual(self._classifier_once()["_cases"],

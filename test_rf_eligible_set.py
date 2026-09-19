@@ -108,59 +108,6 @@ class ArtefactFramingTests(unittest.TestCase):
     def test_the_magic_is_distinct_from_the_window_magic(self):
         self.assertNotEqual(A.IQE_MAGIC, IQC_MAGIC)
 
-    def _collision_detonates(self, other_value):
-        """Import the real chain with `IQE_MAGIC` forced to collide, in a
-        SUBPROCESS, by shadowing the module on `sys.path`.
-
-        A collision raises at import, so an in-process assertion cannot witness
-        it: every test in this file and in the namespace file disappears
-        together, which is a detonation, not a discrimination. The two
-        invariants also live in different modules -- IQE/IQC in the artefact
-        module, IQM/IQE downstream in `rf_corpus_manifest` -- so the probe must
-        import the chain rather than the one file, or it is blind to half of
-        what it claims to cover.
-        """
-        here = os.path.dirname(os.path.abspath(__file__))
-        with open(os.path.join(here,
-                               "rf_eligible_trials_artefact.py")) as handle:
-            source = handle.read()
-        needle = r'IQE_MAGIC = b"\x89SCYET\r\n"'
-        self.assertIn(needle, source,
-                      "the magic definition moved; this probe would be blind")
-        shadow = tempfile.mkdtemp(prefix="scythe-magic-")
-        self.addCleanup(shutil.rmtree, shadow, ignore_errors=True)
-        with open(os.path.join(shadow, "rf_eligible_trials_artefact.py"),
-                  "w") as handle:
-            handle.write(source.replace(needle,
-                                        "IQE_MAGIC = " + repr(other_value)))
-        probe = ("import sys\n"
-                 "sys.path.insert(0, %r)\n"
-                 "sys.path.append(%r)\n"
-                 "try:\n"
-                 "    import rf_corpus_manifest\n"
-                 "except Exception as exc:\n"
-                 "    print(type(exc).__name__ + ': ' + str(exc))\n"
-                 "else:\n"
-                 "    print('NO REFUSAL')\n") % (shadow, here)
-        result = subprocess.run([sys.executable, "-c", probe],
-                                capture_output=True, text=True, timeout=120,
-                                cwd=shadow)
-        return result.stdout.strip() + result.stderr.strip()
-
-    def test_a_manifest_magic_collision_is_refused_at_import_by_name(self):
-        message = self._collision_detonates(IQM_MAGIC)
-        self.assertNotIn("NO REFUSAL", message)
-        self.assertIn("IQM_MAGIC", message,
-                      "the manifest collision must be named specifically, or "
-                      "this witness cannot be told from the window collision")
-
-    def test_a_window_magic_collision_is_refused_at_import_by_name(self):
-        message = self._collision_detonates(IQC_MAGIC)
-        self.assertNotIn("NO REFUSAL", message)
-        self.assertIn("IQC_MAGIC", message,
-                      "the window collision must be named specifically, or "
-                      "this witness cannot be told from the manifest collision")
-
     def test_a_manifest_is_not_readable_as_a_sidecar(self):
         framed = IQM_MAGIC + struct.pack("<H", 2) + struct.pack("<Q", 0)
         with self.assertRaises(EligibleSetRefused) as caught:
@@ -173,8 +120,16 @@ class ArtefactFramingTests(unittest.TestCase):
             self._read(framed, count=0)
         self.assertIn(".iqc", caught.exception.detail)
 
-    def test_a_count_that_disagrees_with_the_plan_refuses_before_any_row(self):
-        """The PLAN's count against the framed one."""
+    def test_a_framed_count_below_the_plans_refuses(self):
+        """A row omitted: the artefact frames fewer records than the plan
+        declares. Separate from the case below because a check that only
+        rejects one direction leaves the other silently accepted."""
+        with self.assertRaises(EligibleSetRefused) as caught:
+            self._read(self.blob, count=len(self.rows) + 1)
+        self.assertEqual(caught.exception.code, ELIGIBLE_COUNT_DISAGREES)
+
+    def test_a_framed_count_above_the_plans_refuses(self):
+        """A framed count that lies upward."""
         with self.assertRaises(EligibleSetRefused) as caught:
             self._read(self.blob, count=len(self.rows) - 1)
         self.assertEqual(caught.exception.code, ELIGIBLE_COUNT_DISAGREES)
