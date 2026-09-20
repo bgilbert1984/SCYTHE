@@ -1303,7 +1303,7 @@ class EligibleSidecarTests(NamespaceFixture):
                          "the manifest was created before its dependency was "
                          "durable")
 
-    def test_no_sidecar_read_falls_between_the_manifest_and_the_directory_sync(self):
+    def test_no_sidecar_read_falls_between_the_manifest_and_its_verification(self):
         """Separates `the manifest is named before the sidecar is verified`
         from `the readback is omitted entirely`.
 
@@ -1314,33 +1314,28 @@ class EligibleSidecarTests(NamespaceFixture):
         happens after the directory sync, is deliberately outside the window.
         """
         events = []
-        real_open, real_fsync = _REAL_OPEN, _REAL_FSYNC
+        real_open = _REAL_OPEN
 
         def recording_open(path, flags, *args, **kwargs):
             if path == namespace.ELIGIBLE_NAME and not flags & os.O_CREAT:
                 events.append("SIDECAR_READ")
-            if path == MANIFEST_NAME and flags & os.O_CREAT:
-                events.append("MANIFEST_CREATED")
+            if path == MANIFEST_NAME:
+                events.append("MANIFEST_CREATED" if flags & os.O_CREAT
+                              else "MANIFEST_VERIFIED")
             return real_open(path, flags, *args, **kwargs)
 
-        def recording_fsync(fd):
-            try:
-                directory = stat.S_ISDIR(_REAL_FSTAT(fd).st_mode)
-            except OSError:                                # pragma: no cover
-                directory = False
-            if directory and "DIR_FSYNC" not in events:
-                events.append("DIR_FSYNC")
-            return real_fsync(fd)
-
-        with mock.patch.object(namespace.os, "open", recording_open), \
-                mock.patch.object(namespace.os, "fsync", recording_fsync):
+        with mock.patch.object(namespace.os, "open", recording_open):
             self.create().release()
+        # The window is bounded by the manifest's own two opens, not by the
+        # directory fsync. Bounding it by the fsync made `the directory fsync
+        # removed` break this test on the boundary's ABSENCE rather than on
+        # the ordering, which left the relocation with no witness of its own.
         self.assertIn("MANIFEST_CREATED", events)
-        self.assertIn("DIR_FSYNC", events)
-        opened = events.index("MANIFEST_CREATED")
-        synced = events.index("DIR_FSYNC")
-        self.assertLess(opened, synced)
-        self.assertNotIn("SIDECAR_READ", events[opened:synced],
+        self.assertIn("MANIFEST_VERIFIED", events)
+        created = events.index("MANIFEST_CREATED")
+        verified = events.index("MANIFEST_VERIFIED")
+        self.assertLess(created, verified)
+        self.assertNotIn("SIDECAR_READ", events[created:verified],
                          "the sidecar was verified after its manifest had "
                          "already been created")
 
