@@ -31,29 +31,85 @@ def _source(module):
         return handle.read()
 
 
-def _literal(module, name):
+def _literal(module, name, _seen=()):
     """The declared value, read rather than imported.
 
     Importing would defeat the purpose: under the very collision these tests
     exist to witness, importing the chain is what raises.
+
+    An alias --- `IQE_MAGIC = IQC_MAGIC` --- is resolved rather than treated as
+    an error. `ast.literal_eval` raises on a name reference, and a probe that
+    raises reports the same failure whichever constant was aliased, which is
+    how the two collisions came to share a witness.
     """
     for node in ast.parse(_source(module)).body:
-        if isinstance(node, ast.Assign):
-            for target in node.targets:
-                if isinstance(target, ast.Name) and target.id == name:
-                    return ast.literal_eval(node.value)
+        if isinstance(node, ast.Assign) and any(
+                isinstance(target, ast.Name) and target.id == name
+                for target in node.targets):
+            if isinstance(node.value, ast.Name):
+                alias = node.value.id
+                if alias in _seen:
+                    raise AssertionError(f"{name} aliases in a cycle")
+                return _visible(module, alias, _seen + (alias,))
+            return ast.literal_eval(node.value)
     raise AssertionError(f"{name} is not declared at module scope in {module}")
 
 
-class DeclaredMagicTests(unittest.TestCase):
+def _visible(module, name, seen):
+    """`name` as `module` sees it: declared there, or imported into it."""
+    for node in ast.parse(_source(module)).body:
+        if isinstance(node, ast.Assign) and any(
+                isinstance(target, ast.Name) and target.id == name
+                for target in node.targets):
+            return _literal(module, name, seen)
+        if isinstance(node, ast.ImportFrom) and node.module and any(
+                alias.name == name for alias in node.names):
+            return _literal(node.module + ".py", name, seen)
+    raise AssertionError(f"{name} is neither declared in nor imported into {module}")
 
-    def test_the_three_magics_are_declared_distinct(self):
-        iqe = _literal(ARTEFACT, "IQE_MAGIC")
-        iqm = _literal(MANIFEST, "IQM_MAGIC")
-        iqc = _literal(WINDOW, "IQC_MAGIC")
-        self.assertEqual(len({iqe, iqm, iqc}), 3)
-        for name, value in (("IQE", iqe), ("IQM", iqm), ("IQC", iqc)):
+
+def _rewrite_magic(source, value):
+    """Replace the IQE_MAGIC declaration, located by AST rather than by text.
+
+    An earlier version matched the literal `IQE_MAGIC = b"\\x89SCYET\\r\\n"`,
+    which stops matching the moment IQE_MAGIC is mutated --- so under either
+    collision the probe failed on its own "the definition moved" guard rather
+    than on the collision, and the two mutations produced identical failing
+    sets. Finding the assignment structurally cannot go blind that way.
+    """
+    tree = ast.parse(source)
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(
+                isinstance(t, ast.Name) and t.id == "IQE_MAGIC"
+                for t in node.targets):
+            lines = source.splitlines(keepends=True)
+            end = node.end_lineno or node.lineno
+            lines[node.lineno - 1:end] = ["IQE_MAGIC = " + repr(value) + "\n"]
+            return "".join(lines)
+    raise AssertionError("IQE_MAGIC is not declared at module scope")
+
+
+class DeclaredMagicTests(unittest.TestCase):
+    """One test per PAIR. A single assertion over all three pairs gives every
+    collision the same witness, which is how B1 and B2 stayed identical."""
+
+    def test_the_sidecar_magic_differs_from_the_manifest_magic(self):
+        self.assertNotEqual(_literal(ARTEFACT, "IQE_MAGIC"),
+                            _literal(MANIFEST, "IQM_MAGIC"))
+
+    def test_the_sidecar_magic_differs_from_the_window_magic(self):
+        self.assertNotEqual(_literal(ARTEFACT, "IQE_MAGIC"),
+                            _literal(WINDOW, "IQC_MAGIC"))
+
+    def test_the_manifest_magic_differs_from_the_window_magic(self):
+        self.assertNotEqual(_literal(MANIFEST, "IQM_MAGIC"),
+                            _literal(WINDOW, "IQC_MAGIC"))
+
+    def test_each_magic_has_the_shared_shape(self):
+        for module, name in ((ARTEFACT, "IQE_MAGIC"), (MANIFEST, "IQM_MAGIC"),
+                             (WINDOW, "IQC_MAGIC")):
             with self.subTest(magic=name):
+                value = _literal(module, name)
                 self.assertEqual(len(value), 8)
                 self.assertTrue(value[0] & 0x80)
                 self.assertTrue(value.endswith(b"\r\n"))
@@ -63,14 +119,10 @@ class CollisionRefusedAtImportTests(unittest.TestCase):
     """Each collision separately, named in the message it raises."""
 
     def _collide(self, other_value):
-        source = _source(ARTEFACT)
-        needle = 'IQE_MAGIC = b"\\x89SCYET\\r\\n"'
-        self.assertIn(needle, source,
-                      "the magic definition moved; this probe would be blind")
         shadow = tempfile.mkdtemp(prefix="scythe-magic-")
         self.addCleanup(shutil.rmtree, shadow, ignore_errors=True)
         with open(os.path.join(shadow, ARTEFACT), "w", encoding="utf-8") as out:
-            out.write(source.replace(needle, "IQE_MAGIC = " + repr(other_value)))
+            out.write(_rewrite_magic(_source(ARTEFACT), other_value))
         probe = ("import sys\n"
                  "sys.path.insert(0, %r)\n"
                  "sys.path.append(%r)\n"
