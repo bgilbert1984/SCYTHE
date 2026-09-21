@@ -575,6 +575,26 @@ class DiscoveryTests(unittest.TestCase):
                         if not judged(candidate, hit)]
             self.assertEqual(unjudged, [], f"{candidate}: {unjudged}")
 
+    def test_the_eligible_set_tokens_are_clear_or_judged(self):
+        """§5.27's two new vocabularies, swept as §3 requires.
+
+        `ELIGIBLE_*` is about the persisted rows and their framing;
+        `RECONSTRUCTION_*` is about turning declarations back into objects.
+        Named disjointly so a reader can tell which half refused them.
+        """
+        rows = set(_module_tokens("rf_eligible_trials_artefact")["ELIGIBLE_REFUSALS"])
+        rebuild = set(_module_tokens("rf_corpus_reconstruction")["RECONSTRUCTION_REFUSALS"])
+        self.assertTrue(rows and rebuild)
+        self.assertEqual(rows & rebuild, set())
+        for code in sorted(rows):
+            self.assertTrue(code.startswith("ELIGIBLE_"), code)
+        for code in sorted(rebuild):
+            self.assertTrue(code.startswith("RECONSTRUCTION_"), code)
+        for candidate in sorted(rows | rebuild | {"MANIFEST_VERSION_REFUSED"}):
+            unjudged = [hit for hit in cross_set_collisions(candidate, self.tokens)
+                        if not judged(candidate, hit)]
+            self.assertEqual(unjudged, [], f"{candidate}: {unjudged}")
+
     def test_the_two_capture_regimes_are_named_disjointly(self):
         """A code cannot be read off as belonging to the other regime.
 

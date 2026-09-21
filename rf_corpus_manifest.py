@@ -29,6 +29,9 @@ import struct
 from typing import Any, Dict, Mapping, Tuple
 
 from rf_capture_format import IQC_FORMAT_VERSION, IQC_HEADER_SCHEMA, IQC_MAGIC
+from rf_eligible_trials_artefact import (
+    IQE_FORMAT_VERSION, IQE_MAGIC, IQE_SCHEMA,
+)
 from rf_validation_manifest import STRATA_DEFINITION_REVISION
 
 # -- the framing, declared rather than described (§5.26) --------------------
@@ -39,8 +42,11 @@ from rf_validation_manifest import STRATA_DEFINITION_REVISION
 # presented as a window, or a window presented as a manifest, is refused
 # without either being parsed.
 IQM_MAGIC = b"\x89SCYMF\r\n"                      # exactly 8 bytes
-IQM_FORMAT_VERSION = 1                             # uint16, little-endian
-IQM_SCHEMA = "scythe.iq-corpus-manifest.v1"
+IQM_FORMAT_VERSION = 2                             # uint16, little-endian
+# v2. §5.27 makes a second namespace artefact necessary and adds two required
+# fields, which a v1 manifest does not carry -- so v1 REFUSES as unsupported
+# rather than being upgraded by inventing the rows it never held.
+IQM_SCHEMA = "scythe.iq-corpus-manifest.v2"
 # The body carries a whole capture plan -- 64 tunings, a spur catalogue and a
 # selection -- so the bound is larger than the header's. Checked BEFORE
 # allocating: a uint32 length can claim four gibibytes, and a corrupt or
@@ -60,6 +66,11 @@ if IQM_MAGIC == IQC_MAGIC:                               # pragma: no cover
     raise ImportError(
         "IQM_MAGIC and IQC_MAGIC are equal; a corpus manifest would be "
         "readable as an IQ window and a window as a manifest")
+# Checked here because this is the one module that imports all three formats.
+if IQM_MAGIC == IQE_MAGIC:                               # pragma: no cover
+    raise ImportError(
+        "IQM_MAGIC and IQE_MAGIC are equal; a corpus manifest would be "
+        "readable as an eligible-trial artefact, and the reverse")
 
 # -- refusals ---------------------------------------------------------------
 #
@@ -67,6 +78,7 @@ if IQM_MAGIC == IQC_MAGIC:                               # pragma: no cover
 # and the two are named disjointly: a code here is about bytes, a code there is
 # about a directory, a descriptor or who holds it.
 MANIFEST_NOT_FOUND = "MANIFEST_NOT_FOUND"
+MANIFEST_VERSION_REFUSED = "MANIFEST_VERSION_REFUSED"
 MANIFEST_ALREADY_PRESENT = "MANIFEST_ALREADY_PRESENT"
 MANIFEST_FRAMING_REFUSED = "MANIFEST_FRAMING_REFUSED"
 MANIFEST_BODY_TOO_LARGE = "MANIFEST_BODY_TOO_LARGE"
@@ -76,7 +88,8 @@ MANIFEST_DECLARATION_DISAGREES = "MANIFEST_DECLARATION_DISAGREES"
 MANIFEST_FIELD_NOT_EMITTED = "MANIFEST_FIELD_NOT_EMITTED"
 MANIFEST_FIELD_NO_AUTHORITY = "MANIFEST_FIELD_NO_AUTHORITY"
 MANIFEST_REFUSALS: Tuple[str, ...] = (
-    MANIFEST_NOT_FOUND, MANIFEST_ALREADY_PRESENT, MANIFEST_FRAMING_REFUSED,
+    MANIFEST_NOT_FOUND, MANIFEST_VERSION_REFUSED, MANIFEST_ALREADY_PRESENT,
+    MANIFEST_FRAMING_REFUSED,
     MANIFEST_BODY_TOO_LARGE, MANIFEST_NOT_CANONICAL, MANIFEST_TRAILING_BYTES,
     MANIFEST_DECLARATION_DISAGREES, MANIFEST_FIELD_NOT_EMITTED,
     MANIFEST_FIELD_NO_AUTHORITY,
@@ -111,6 +124,10 @@ RETENTION_FIELDS: Tuple[str, ...] = ("delete_not_after",
 FORMAT_FIELDS: Tuple[str, ...] = (
     "schema", "format_version", "strata_definition_revision",
     "iqc_header_schema", "iqc_format_version",
+    # §5.27. Always present, never conditional on whether the plan has a spur
+    # allocation: a conditional field would make the required set a handwritten
+    # list with a branch in it, and the union equality below is the whole point.
+    "iqe_schema", "iqe_format_version",
 )
 
 
@@ -142,6 +159,8 @@ def manifest_body(*, lock: Any, retention: Any) -> Dict[str, Any]:
         "strata_definition_revision": STRATA_DEFINITION_REVISION,
         "iqc_header_schema": IQC_HEADER_SCHEMA,
         "iqc_format_version": IQC_FORMAT_VERSION,
+        "iqe_schema": IQE_SCHEMA,
+        "iqe_format_version": IQE_FORMAT_VERSION,
         "delete_not_after": float(retention.delete_not_after),
         "retention_maximum_days": retention.to_dict()[
             "maximum_days_from_opened_at"],
@@ -250,9 +269,15 @@ def parse_manifest(framed: bytes) -> Tuple[Dict[str, Any], str]:
             + (" -- this is an .iqc window" if framed[:8] == IQC_MAGIC else ""))
     version = struct.unpack("<H", framed[8:10])[0]
     if version != IQM_FORMAT_VERSION:
+        # A v1 manifest is not corrupt; it is a complete declaration of an
+        # earlier format that cannot reconstruct a capture plan, because the
+        # eligible rows it commits to live in an artefact v1 never had. It is
+        # refused as UNSUPPORTED rather than upgraded by inventing them.
         raise ManifestRefused(
-            MANIFEST_FRAMING_REFUSED,
-            f"format version {version}, not {IQM_FORMAT_VERSION}")
+            MANIFEST_VERSION_REFUSED,
+            f"format version {version}, not {IQM_FORMAT_VERSION}"
+            + ("; a v1 manifest carries no eligible-trial artefact and cannot "
+               "reconstruct its capture plan" if version == 1 else ""))
     length = struct.unpack("<I", framed[10:14])[0]
     # Bounded BEFORE the slice, not after it.
     if length > IQM_MAX_BODY_BYTES:
