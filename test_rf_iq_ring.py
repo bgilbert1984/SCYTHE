@@ -9,8 +9,11 @@ import json
 import os
 import pickle
 import unittest
+import unittest.mock
 
 import numpy as np
+
+import rf_iq_ring as ring_module
 
 from rf_iq_ring import (
     BYTES_PER_SAMPLE, DEFAULT_CAPACITY_SAMPLES, DEFAULT_SAMPLE_RATE_HZ,
@@ -620,6 +623,7 @@ class VerificationBindingTests(unittest.TestCase):
             sample_rate_hz=genuine.sample_rate_hz * 2,
             digest=genuine.digest,
             signal_chain_hash="blake2s:" + "0" * 32,
+            ring_lifetime_id=genuine.ring_lifetime_id,
             samples=np.zeros(genuine.sample_count, dtype=STORAGE_DTYPE))
         self.assertFalse(np.array_equal(impostor.samples, genuine.samples))
         self.assertTrue(ring.verify_window(impostor.window_id, impostor.digest))
@@ -649,6 +653,81 @@ class VerificationBindingTests(unittest.TestCase):
     def test_an_unissued_id_has_no_record(self):
         ring = _ring(capacity=64)
         self.assertIsNone(ring.recorded_window("iqw-0-1-deadbeefcafe"))
+
+
+
+class RingLifetimeIdentityTests(unittest.TestCase):
+    """§5.26. Two rings each count from zero, so indices from different rings
+    compare cleanly and mean nothing. This is what says so.
+
+    One property per test: the identity has six separate requirements and a
+    single test asserting all of them would give six mutations one witness.
+    """
+
+    def test_every_ring_instance_gets_a_different_identity(self):
+        self.assertNotEqual(_ring().ring_lifetime_id, _ring().ring_lifetime_id)
+
+    def test_the_identity_is_stable_for_one_instance(self):
+        ring = _ring()
+        self.assertEqual(ring.ring_lifetime_id, ring.ring_lifetime_id)
+
+    def test_the_identity_is_not_a_constructor_argument(self):
+        """A parameter is a caller's claim. This is what attestation compares
+        against, so there must be no way to supply one."""
+        with self.assertRaises(TypeError):
+            BoundedIQRing(capacity_samples=64, sample_rate_hz=1024.0,
+                          signal_chain_hash="chain-a",
+                          ring_lifetime_id="deadbeef")
+
+    def test_the_identity_comes_from_urandom(self):
+        """Unpredictable and collision-resistant, not a counter or a clock."""
+        seen = []
+        real = os.urandom
+
+        def recording(n):
+            seen.append(n)
+            return real(n)
+
+        with unittest.mock.patch.object(ring_module.os, "urandom", recording):
+            ring_module._mint_ring_lifetime_id()
+        self.assertIn(ring_module.RING_LIFETIME_ID_BYTES, seen)
+
+    def test_a_test_patches_the_minting_function_rather_than_passing_a_value(self):
+        """The seam the contract allows, exercised so it is known to work."""
+        with unittest.mock.patch.object(ring_module, "_mint_ring_lifetime_id",
+                                        lambda: "fixed-identity"):
+            self.assertEqual(_ring().ring_lifetime_id, "fixed-identity")
+
+    def test_the_identity_survives_a_configuration_invalidation(self):
+        """A configuration change starts a new epoch, not a new index domain."""
+        ring = _ring(capacity=64, chain="chain-a")
+        before = ring.ring_lifetime_id
+        ring.append(_block(64, value=1.0))
+        ring.append(_block(8, value=2.0), {"signal_chain_hash": "chain-b"})
+        self.assertEqual(ring.status()["last_invalidation_reason"],
+                         "SIGNAL_CHAIN_CHANGE")
+        self.assertEqual(ring.ring_lifetime_id, before)
+
+    def test_an_issued_window_carries_the_rings_identity(self):
+        ring = _ring(capacity=64)
+        ring.append(_block(64))
+        self.assertEqual(ring.acquire_window().window.ring_lifetime_id,
+                         ring.ring_lifetime_id)
+
+    def test_the_windows_dict_reports_the_identity(self):
+        ring = _ring(capacity=64)
+        ring.append(_block(64))
+        self.assertEqual(
+            ring.acquire_window().window.to_dict()["ring_lifetime_id"],
+            ring.ring_lifetime_id)
+
+    def test_the_ring_record_stores_the_identity(self):
+        """Stored, not merely carried: attestation compares the record."""
+        ring = _ring(capacity=64)
+        ring.append(_block(64))
+        window = ring.acquire_window().window
+        self.assertEqual(ring._windows[window.window_id].ring_lifetime_id,
+                         ring.ring_lifetime_id)
 
 
 if __name__ == "__main__":

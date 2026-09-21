@@ -387,7 +387,7 @@ def _attested_scope_declares(stratum: str) -> Tuple[str, ...]:
     return ("window_id", "ring_digest", "configuration_epoch",
             "signal_chain_hash", "sample_count", "sample_rate_hz",
             "first_sample_index", "capture_start_time", "capture_end_time",
-            "clock_authority")
+            "clock_authority", "ring_lifetime_id")
 
 
 def _corpus_ownership_declares(stratum: str) -> Tuple[str, ...]:
@@ -530,6 +530,10 @@ def derive_canonical_header(*, metadata: Mapping[str, Any],
         "capture_start_time": metadata["start_time"],
         "capture_end_time": metadata["end_time"],
         "clock_authority": metadata["clock_authority"],
+        # §5.26. Read from the attested scope's metadata, where attestation
+        # put it, never from the window object: the object's copy is what
+        # attestation checked, not what it established.
+        "ring_lifetime_id": metadata["ring_lifetime_id"],
     }, claimed)
 
     _merge(header, "corpus_ownership", {

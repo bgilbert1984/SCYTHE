@@ -28,7 +28,7 @@ from rf_iq_ring import (
     ATTESTATION_SCOPE_NOT_ACTIVE, ATTESTATION_SCOPE_NOT_MINTED,
     ATTESTATION_WINDOW_EVICTED, ATTESTATION_WINDOW_NOT_ISSUED,
     ATTESTED_METADATA_FIELDS, BYTES_PER_SAMPLE, STORAGE_DTYPE,
-    ATTESTATION_WRITE_TARGET_INVALID,
+    ATTESTATION_WRITE_TARGET_INVALID, ATTESTATION_RING_LIFETIME_MISMATCH,
     AttestationRefused, AttestedIQWindowScope, BoundedIQRing, IQWindow,
     RawIQNotTransportable, _window_digest,
 )
@@ -1082,6 +1082,65 @@ class RestrictedAccessorTests(unittest.TestCase):
                    and node.name in self.ACCESSORS for node in ast.walk(tree)):
                 found = True
         self.assertTrue(found, "the accessor was not found where it is defined")
+
+
+
+class RingLifetimeAttestationTests(unittest.TestCase):
+    """§5.26's tenth check, and the ninth's new field, kept apart.
+
+    Check 6 compares the OBJECT against the record. Check 10 compares the
+    RECORD against the ring. They catch different forgeries and each needs its
+    own witness, or one deletion silently un-tests both.
+    """
+
+    def test_a_substituted_identity_on_the_object_is_refused(self):
+        """E4: the identity becoming a claim rather than an attestation."""
+        ring = _ring()
+        window = _window(ring)
+        with self.assertRaises(AttestationRefused) as caught:
+            ring.attest_window(replace(window, ring_lifetime_id="borrowed"))
+        self.assertEqual(caught.exception.code, ATTESTATION_METADATA_MISMATCH)
+
+    def test_a_record_from_another_lifetime_is_refused(self):
+        """The tenth check. A record claiming another lifetime must not lend
+        its authority to a window, even one whose every other field agrees."""
+        ring = _ring()
+        window = _window(ring)
+        record = ring._windows[window.window_id]
+        ring._windows[window.window_id] = replace(record,
+                                                  ring_lifetime_id="elsewhere")
+        with self.assertRaises(AttestationRefused) as caught:
+            ring.attest_window(window)
+        self.assertEqual(caught.exception.code,
+                         ATTESTATION_RING_LIFETIME_MISMATCH)
+
+    def test_the_refusal_codes_are_distinct(self):
+        """Two checks, two codes. One code for both would make the sweep
+        unable to tell which check had been deleted."""
+        self.assertNotEqual(ATTESTATION_RING_LIFETIME_MISMATCH,
+                            ATTESTATION_METADATA_MISMATCH)
+
+    def test_the_identity_is_in_the_attested_field_list(self):
+        self.assertIn("ring_lifetime_id", ATTESTED_METADATA_FIELDS)
+
+    def test_a_genuine_window_attests_and_the_scope_carries_the_identity(self):
+        """Exposed through the attested scope, which is where the header
+        reads it from --- never from the object attestation was checking."""
+        ring = _ring()
+        with ring.attest_window(_window(ring)) as scope:
+            self.assertEqual(scope.to_dict()["ring_lifetime_id"],
+                             ring.ring_lifetime_id)
+
+    def test_a_window_from_another_ring_is_refused(self):
+        """The case the identity exists for: two rings, each counting from
+        zero, whose indices compare cleanly and mean nothing."""
+        one, two = _ring(), _ring()
+        stranger = _window(two)
+        with self.assertRaises(AttestationRefused) as caught:
+            one.attest_window(stranger)
+        # Refused as never issued here, before the identity is even reached ---
+        # recorded so that a later change making it reachable is visible.
+        self.assertEqual(caught.exception.code, ATTESTATION_WINDOW_NOT_ISSUED)
 
 
 if __name__ == "__main__":

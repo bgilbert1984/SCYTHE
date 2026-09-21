@@ -188,6 +188,7 @@ class ProvenanceTests(unittest.TestCase):
             start_time=window.start_time, end_time=window.start_time + 0.001,
             sample_count=window.sample_count, sample_rate_hz=window.sample_rate_hz,
             digest=window.digest, signal_chain_hash=window.signal_chain_hash,
+            ring_lifetime_id=window.ring_lifetime_id,
             samples=window.samples)
         self.assertEqual(channelize(lying, _request(), ring=ring).product.outcome,
                          "TIMING_QUALITY_INSUFFICIENT")

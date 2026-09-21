@@ -183,6 +183,7 @@ class ProvenanceInterleavingTests(unittest.TestCase):
             start_time=genuine.start_time, end_time=genuine.end_time,
             sample_count=genuine.sample_count, sample_rate_hz=genuine.sample_rate_hz,
             digest=genuine.digest, signal_chain_hash=genuine.signal_chain_hash,
+            ring_lifetime_id=genuine.ring_lifetime_id,
             samples=genuine.samples)
         product = owner.channelize_window(forged, capture_center_hz=CENTRE,
                                           target_frequency_hz=TARGET)
