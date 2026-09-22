@@ -714,7 +714,21 @@ class RingLifetimeIdentityTests(unittest.TestCase):
         self.assertEqual(ring.acquire_window().window.ring_lifetime_id,
                          ring.ring_lifetime_id)
 
+    def test_the_windows_dict_has_the_identity_key(self):
+        """Reported at all, which is not the same claim as reported correctly.
+
+        Split from the equality below because one assertion covering both let
+        two different defects share one witness: a `to_dict` that drops the
+        key and a ring whose identity is unstable both failed the same test,
+        so the mutation that omits the key had no witness of its own.
+        """
+        ring = _ring(capacity=64)
+        ring.append(_block(64))
+        self.assertIn("ring_lifetime_id",
+                      ring.acquire_window().window.to_dict())
+
     def test_the_windows_dict_reports_the_identity(self):
+        """And the value is the ring's own."""
         ring = _ring(capacity=64)
         ring.append(_block(64))
         self.assertEqual(
