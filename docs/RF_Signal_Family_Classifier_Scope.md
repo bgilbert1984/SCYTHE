@@ -4321,7 +4321,7 @@ recovery, which is a declared outcome rather than a corruption.
 
 ##### The five decisions the journal's shape needed, settled
 
-The framing, the ten fields an intent binds, the six recovery classifications
+The framing, the bindings an intent carries, the six recovery classifications
 and the cap over committed entries are accepted above. These are the gaps
 *around* that spec, which an implementation cannot invent for itself.
 
@@ -4407,6 +4407,125 @@ from the clock actually installed: **exactly `time.time` maps to
 `POSIX_REALTIME`, and any injected or wrapped callable maps to `UNDECLARED`**,
 including a wrapper that calls `time.time` itself. Authority is never inferred
 from equivalent behaviour.
+
+##### Amendment: the record format, the journal's creation, and what 3b can prove
+
+Three things the settled decisions above still left an implementation to
+invent, plus one correction to them. Reading the accepted text against the
+existing namespace found them before any code was written; the branch stopped
+clean with no files changed, which is the outcome this rule exists for.
+
+**A. The three record schemas are exact, and the discriminant is closed.**
+
+| record | exact fields |
+| --- | --- |
+| intent | `record_type`, `manifest_sha256`, `corpus_id`, `stratum`, `window_id`, `ring_lifetime_id`, `expected_final_filename`, `file_sha256`, `payload_sha256`, `previous_window_id`, `first_sample_index`, `envelope_digest`, `capture_plan_digest` |
+| commit | `record_type`, `window_id` |
+| abandon | `record_type`, `window_id` |
+
+- `record_type` is exactly one of `INTENT`, `COMMIT`, `ABANDON`. **Upper case**,
+  because every closed vocabulary in this repository that reaches durable bytes
+  already is --- `SYNTHETIC`/`CAPTURED` in the `.iqc` `source` field,
+  `POSIX_REALTIME`/`UNDECLARED` in `clock_authority`, the stratum keys. A
+  second convention is most expensive in exactly the place these bytes live.
+- The emitted fields must **equal** the required set for the record type.
+  Extra and missing fields both refuse; neither is tolerated.
+- A terminal record identifies its intent by `window_id` and **repeats nothing
+  that intent already bound.** A `commit` carrying `file_sha256` could disagree
+  with the intent that fixed it, which is the `attestation_kind` defect one
+  field over: a redundant copy can contradict the fact it repeats. Corpus
+  identity comes from which directory descriptor the journal was reached
+  through, not from what a record says about itself.
+- A second intent for a spent `window_id`, a duplicate terminal record, or both
+  terminal types for one `window_id` all refuse.
+
+**Canonical JSON here means the `.iqm` and `.iqc` form**: `sort_keys=True`,
+`separators=(",", ":")`, `ensure_ascii=False`, `allow_nan=False`. Naming it
+matters because canonical JSON is *not one thing in this repository*:
+`canonical_record_bytes` for the `.iqe` sidecar deliberately uses
+`ensure_ascii=True`, because `eligible_trials_digest` is already frozen over
+escaped bytes and a sidecar written the other way would fail its binding for a
+reason that looked like corruption. The journal has no analogue --- its records
+are digested by the journal itself and nothing external has pre-frozen a digest
+over them --- so it follows the other form, and its encoder says so where the
+`.iqe` encoder says the opposite.
+
+**B. The empty journal is created durably during corpus creation.**
+
+`membership.iqj` is accepted as the name, but nothing said when its directory
+entry becomes durable. Creating it on the first intent is the weak option: an
+`fsync` on the journal makes its **bytes** durable and not its newly created
+**name**, and fixing that needs a directory `fsync` inside the publication path
+that the accepted sequence does not name. Creation order becomes:
+
+```text
+eligible-spur-trials.iqe, when required
+    -> empty membership.iqj
+    -> manifest.iqm last
+    -> one directory fsync covering every name
+    -> reopen and verify
+```
+
+This is the module's own rule applied to a third name. `create_corpus_namespace`
+already writes the dependency first and the manifest last and `fsync`s the
+directory **after both names exist**, because making one durable before the
+other is what leaves a manifest whose dependency can be lost.
+
+- exclusive, descriptor-relative creation; mode `0600` set explicitly with
+  `fchmod` rather than left to the umask;
+- the empty file is `fsync`ed; `manifest.iqm` still goes last;
+- an **empty journal is the canonical zero-record journal**, not a missing one;
+- `open_corpus_namespace` recognises `membership.iqj` as a known entry;
+- a **missing** journal under a v2 manifest **refuses** rather than being
+  silently created during reopen.
+
+A crash after the journal name appears but before the manifest is durable is
+the already-accepted incomplete-namespace orphan class: unopenable,
+unresumable, minting no scope, never adopted on retry.
+
+**C. Final-dependent recovery is not 3b's to implement.**
+
+Three classifications need only the journal's own structure, and belong to 3b:
+duplicate or contradictory records, torn-tail truncation, and the record and
+abandonment bounds. Four need a fact the journal cannot establish about itself
+--- `intent + verified final`, `intent + no final`, `commit + no final`, and
+`final + no intent`.
+
+A filename set handed to the journal turns "verified final" into **a caller's
+claim**, and a callback hides the same problem behind choreography. The
+accepted text already requires a candidate final to be parsed and checked for
+canonical framing, `payload_sha256`, `file_sha256` and filename agreement ---
+and that verifier is step 8's, which is 3c's. So:
+
+| slice | what it owns |
+| --- | --- |
+| 3b-core | creation, the exact record schemas, canonical framing, append and `fsync`, exact reading, torn-tail truncation, the bounds, the reservation rule, and the intrinsic duplicate/contradiction checks |
+| 3c | steps 5-8, and a verified-final result that cannot be constructed by a caller |
+| 3d | reconciling verified finals against journal state, all six classifications, the mandatory recovery `commit` or `abandon`, and the sequence state |
+
+The six accepted classifications are preserved whole; what moves is only
+*where* the four that depend on a verified final are executed. **This is not
+permission to weaken them into a temporary API that accepts testimony.**
+
+**The abandon asymmetry is two actions, never a boolean.** `required=True`
+would make the obligation a caller's argument, which is the objection §5.20
+already made to `write_window(window, stratum)`. In 3d: a recovery action that
+appends and `fsync`s and whose failure refuses opening, and a runtime action
+that first confirms no recognised final exists, attempts the append, and
+**preserves the original publication failure** if the journal append also
+fails. Both consume one private terminal writer; neither is part of 3b's
+public format surface.
+
+**D. Correction: the intent's bindings were miscounted.**
+
+The subsection above said "the ten fields an intent binds". §5.26's own
+accepted text never states a count, and the enumerated bindings are **twelve** ---
+eleven if the sequence predecessor is counted as one item, and ten on no
+reading. The field table in **A** replaces the prose count, which is corrected
+above. The error was introduced by the acceptance commit that recorded these
+decisions, not by the text it was recording.
+
+**Drains:** nothing.
 
 **Drains:** nothing. `PENDING_AMENDMENTS` entry 14 is untouched and drains
 only when admission and the persistence boundary land together. An accepted
