@@ -1142,6 +1142,56 @@ class RingLifetimeAttestationTests(unittest.TestCase):
         # recorded so that a later change making it reachable is visible.
         self.assertEqual(caught.exception.code, ATTESTATION_WINDOW_NOT_ISSUED)
 
+    def _twin(self):
+        """A ring on a pinned clock, so two of them differ in nothing but
+        their identity.
+
+        Without this the timestamps differ, `start_time` is compared six
+        fields before `ring_lifetime_id`, and the cross-ring test below would
+        pass on a refusal that has nothing to do with the identity --- green
+        for the wrong reason, and no witness at all for a mutation that
+        removes the identity from the comparison.
+        """
+        ring = BoundedIQRing(capacity_samples=CAPACITY,
+                             sample_rate_hz=2_048_000.0,
+                             signal_chain_hash="blake2s:chain-a",
+                             now=lambda: 1_000_000.0,
+                             clock_authority="TEST_FIXED")
+        ring.append(np.arange(CAPACITY, dtype=STORAGE_DTYPE))
+        return ring
+
+    def test_two_rings_fed_the_same_bytes_issue_the_same_window_id(self):
+        """The premise that makes the identity load-bearing, asserted rather
+        than assumed.
+
+        `window_id` is `iqw-<epoch>-<n>-<blake2s(digest)>`, and the digest is
+        over the chain, the epoch, the count and the payload. None of that
+        names a ring, so two rings configured alike and fed alike issue *the
+        same identifier* and `_windows` cannot tell them apart. A structural
+        guard: if `window_id` ever gains a ring component this stops being
+        true, and the check below stops being what refuses.
+        """
+        self.assertEqual(_window(self._twin()).window_id,
+                         _window(self._twin()).window_id)
+
+    def test_a_colliding_window_from_another_ring_is_refused_by_the_identity(self):
+        """The case the field exists for, reached rather than short-circuited.
+
+        Both rings have issued, so the stranger's `window_id` resolves to the
+        first ring's own record and every earlier check passes.
+        `ring_lifetime_id` is the only field that disagrees, which is the
+        whole claim: two index domains that compare cleanly and mean nothing.
+        The message is asserted as well as the code, because every field
+        mismatch raises the same code and only the message says which one.
+        """
+        one, two = self._twin(), self._twin()
+        _window(one)
+        stranger = _window(two)
+        with self.assertRaises(AttestationRefused) as caught:
+            one.attest_window(stranger)
+        self.assertEqual(caught.exception.code, ATTESTATION_METADATA_MISMATCH)
+        self.assertIn("ring_lifetime_id", str(caught.exception))
+
 
 if __name__ == "__main__":
     unittest.main()
