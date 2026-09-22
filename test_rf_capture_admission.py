@@ -44,6 +44,7 @@ from rf_capture_admission import (
     PublicationFailed, RetuneAttestation, admission_status,
     check_header_completeness, derive_canonical_header, record_gain_step,
     record_receiver_spur, record_retune_transient, required_header_fields,
+    _attested_scope_declares, _corpus_ownership_declares,
 )
 from rf_capture_format import (
     IQC_FORMAT_VERSION, IQC_HEADER_SCHEMA, IQC_MAGIC, IQC_MAX_HEADER_BYTES,
@@ -166,6 +167,14 @@ class CaptureFixture(unittest.TestCase):
                              **self.kwargs(**overrides))
         return caught.exception, creator
 
+    def _header(self):
+        with self.ring.attest_window(_window(self.ring)) as scope:
+            return derive_canonical_header(
+                metadata=scope.to_dict(), lock=self.lock,
+                retention=self.retention, stratum="GAIN_STEPS",
+                attestation=_gain_attestation(), sequence=self.sequence,
+                payload_sha256="0" * 64)
+
 
 def _through_a_pipe(call):
     """Run `call(create_target)` against a pipe; return its result and the image.
@@ -195,7 +204,6 @@ def _through_a_pipe(call):
         reader.join(timeout=60)
         os.close(read_fd)
     return result, b"".join(blocks)
-
 
 class AttestationIsNotAdmissionTests(CaptureFixture):
     """The ring has never heard of a PromotionCorpusLock, and cannot."""
@@ -734,13 +742,6 @@ class HeaderAuthorityTests(CaptureFixture):
                          required_header_fields("GAIN_STEPS"))
         self.assertEqual(PAYLOAD_ACTION_RECONCILES, "completed_write_count")
 
-    def _header(self):
-        with self.ring.attest_window(_window(self.ring)) as scope:
-            return derive_canonical_header(
-                metadata=scope.to_dict(), lock=self.lock,
-                retention=self.retention, stratum="GAIN_STEPS",
-                attestation=_gain_attestation(), sequence=self.sequence,
-                payload_sha256="0" * 64)
 
 
 class FramingTests(CaptureFixture):
@@ -1156,6 +1157,36 @@ class StatusTests(CaptureFixture):
             published, _creator = self.publish(scope)
         self.assertEqual(json.loads(published.header_bytes)["clock_authority"],
                          "UNDECLARED")
+
+
+
+class RingLifetimeInTheHeaderTests(CaptureFixture):
+    """§5.26's header field, from the attested scope rather than the object.
+
+    The clock authority's neighbour, and deliberately separate tests: one
+    asserting presence, one asserting provenance, one asserting the declaring
+    authority, so removing any of the three has its own witness.
+    """
+
+    def test_the_header_carries_the_ring_lifetime_id(self):
+        self.assertIn("ring_lifetime_id", self._header())
+
+    def test_the_header_value_is_the_rings_identity(self):
+        self.assertEqual(self._header()["ring_lifetime_id"],
+                         self.ring.ring_lifetime_id)
+
+    def test_the_attested_scope_is_the_declaring_authority(self):
+        """Not the corpus ownership authority: the identity is the ring's, and
+        one field declared by two authorities is how `_merge` stops being able
+        to refuse a field claimed twice."""
+        self.assertIn("ring_lifetime_id",
+                      _attested_scope_declares("GAIN_STEPS"))
+        self.assertNotIn("ring_lifetime_id",
+                         _corpus_ownership_declares("GAIN_STEPS"))
+
+    def test_the_field_is_required_not_optional(self):
+        self.assertIn("ring_lifetime_id",
+                      required_header_fields("GAIN_STEPS"))
 
 
 if __name__ == "__main__":

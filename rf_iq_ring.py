@@ -175,6 +175,7 @@ ATTESTATION_WINDOW_EVICTED = "ATTESTATION_WINDOW_EVICTED"
 ATTESTATION_METADATA_MISMATCH = "ATTESTATION_METADATA_MISMATCH"
 ATTESTATION_REPRESENTATION_INVALID = "ATTESTATION_REPRESENTATION_INVALID"
 ATTESTATION_DIGEST_MISMATCH = "ATTESTATION_DIGEST_MISMATCH"
+ATTESTATION_RING_LIFETIME_MISMATCH = "ATTESTATION_RING_LIFETIME_MISMATCH"
 ATTESTATION_SCOPE_NOT_ACTIVE = "ATTESTATION_SCOPE_NOT_ACTIVE"
 ATTESTATION_SCOPE_NOT_MINTED = "ATTESTATION_SCOPE_NOT_MINTED"
 ATTESTATION_WRITE_INCOMPLETE = "ATTESTATION_WRITE_INCOMPLETE"
@@ -194,8 +195,25 @@ ATTESTATION_REFUSALS: Tuple[str, ...] = (
 ATTESTED_METADATA_FIELDS: Tuple[str, ...] = (
     "configuration_epoch", "first_sample_index", "last_sample_index",
     "sample_count", "sample_rate_hz", "start_time", "end_time",
-    "signal_chain_hash", "digest",
+    "signal_chain_hash", "digest", "ring_lifetime_id",
 )
+
+# §5.26. Two rings each count from zero, so indices from different rings
+# compare cleanly and mean nothing. `_total_appended` is zeroed only in
+# `__init__` and `configuration_epoch` restarts at zero too, so before this
+# nothing in a header distinguished one lifetime from another.
+RING_LIFETIME_ID_BYTES = 16
+
+
+def _mint_ring_lifetime_id() -> str:
+    """Unpredictable and collision-resistant, minted once per ring instance.
+
+    A module-level function rather than a constructor argument on purpose: a
+    parameter is a caller's claim, and this is the identity that attestation
+    compares against. A test needing determinism patches this; it cannot pass
+    a value in.
+    """
+    return os.urandom(RING_LIFETIME_ID_BYTES).hex()
 
 WINDOW_INTERVAL_OVERLAP = "WINDOW_INTERVAL_OVERLAP"
 
@@ -346,6 +364,9 @@ class IQWindow:
     sample_rate_hz: float
     digest: str
     signal_chain_hash: str
+    # The ring instance this window came from. Two rings count from zero
+    # independently, so without it two sample-index domains look comparable.
+    ring_lifetime_id: str
     samples: np.ndarray
 
     def to_dict(self) -> Dict[str, Any]:
@@ -360,6 +381,7 @@ class IQWindow:
             "sample_count": self.sample_count,
             "sample_rate_hz": self.sample_rate_hz,
             "digest": self.digest,
+            "ring_lifetime_id": self.ring_lifetime_id,
             "signal_chain_hash": self.signal_chain_hash,
             "duration_s": self.duration_s,
             "raw_iq_exposed": False,
@@ -741,6 +763,8 @@ class _WindowRecord:
     # Index of the window's first sample in the ring's monotonic append stream.
     # Compared against the eviction frontier to tell whether it still exists.
     first_index: int
+    # §5.26: the ring lifetime this record was issued under.
+    ring_lifetime_id: str
 
 
 class BoundedIQRing:
@@ -795,6 +819,11 @@ class BoundedIQRing:
         self._windows: "OrderedDict[str, _WindowRecord]" = OrderedDict()
         self._issued_windows = 0
         self._attestations = 0
+        # §5.26: minted once, here, and never taken from the caller. It is
+        # deliberately NOT reset by `_invalidate`: a configuration change
+        # starts a new epoch, not a new index domain, and the identity tracks
+        # the domain.
+        self._ring_lifetime_id = _mint_ring_lifetime_id()
         self._closed = False
 
     # -- properties ---------------------------------------------------------
@@ -806,6 +835,11 @@ class BoundedIQRing:
     @property
     def configuration_epoch(self) -> int:
         return self._configuration_epoch
+
+    @property
+    def ring_lifetime_id(self) -> str:
+        """This ring instance's identity. Different for every new ring."""
+        return self._ring_lifetime_id
 
     @property
     def clock_authority(self) -> str:
@@ -969,6 +1003,7 @@ class BoundedIQRing:
                 sample_rate_hz=self._sample_rate_hz,
                 digest=digest,
                 signal_chain_hash=self._signal_chain_hash,
+                ring_lifetime_id=self._ring_lifetime_id,
                 samples=samples,
             )
             self._windows[window_id] = _WindowRecord(
@@ -981,6 +1016,7 @@ class BoundedIQRing:
                 start_time=start_time,
                 end_time=end_time,
                 first_index=first_index,
+                ring_lifetime_id=self._ring_lifetime_id,
             )
             while len(self._windows) > MAX_TRACKED_WINDOWS:
                 self._windows.popitem(last=False)
@@ -1026,7 +1062,7 @@ class BoundedIQRing:
         """Attest one exact `IQWindow` and mint a scope over its bytes. §5.24.
 
         The operation §5.20's publication step 1 asks for, and the one
-        `verify_window` is not: nine checks under the ring lock, over the object
+        `verify_window` is not: ten checks under the ring lock, over the object
         rather than over two strings, with the digest **recomputed from the
         bytes being bound** against the *record's* chain, epoch and sample
         count. An object that supplies its own comparands proves nothing.
@@ -1061,7 +1097,19 @@ class BoundedIQRing:
                     ATTESTATION_WINDOW_EVICTED,
                     VERIFICATION_REASONS["WINDOW_EVICTED"])
 
-            # 6. every stored metadata field, against the ring's own record.
+            # 6. §5.26. The RECORD against the ring itself, before the
+            #    object is compared to the record. Placed here because the
+            #    other order makes it unreachable: a tampered record fails the
+            #    field-by-field comparison below first, and a check that
+            #    cannot fire is not a check.
+            if record.ring_lifetime_id != self._ring_lifetime_id:
+                raise AttestationRefused(
+                    ATTESTATION_RING_LIFETIME_MISMATCH,
+                    f"the record was issued under ring lifetime "
+                    f"{record.ring_lifetime_id!r}; this ring is "
+                    f"{self._ring_lifetime_id!r}")
+
+            # 7. every stored metadata field, against the ring's own record.
             authoritative = {
                 "configuration_epoch": record.configuration_epoch,
                 "first_sample_index": record.first_index,
@@ -1072,6 +1120,7 @@ class BoundedIQRing:
                 "end_time": record.end_time,
                 "signal_chain_hash": record.signal_chain_hash,
                 "digest": record.digest,
+                "ring_lifetime_id": record.ring_lifetime_id,
             }
             for field in ATTESTED_METADATA_FIELDS:
                 presented = getattr(window, field)
@@ -1132,6 +1181,9 @@ class BoundedIQRing:
             # window. It is bound into the scope because §5.25's header needs
             # it, and it is bound at mint time so it cannot be re-read later.
             metadata["clock_authority"] = self._clock_authority
+            # Already in `authoritative` above, and therefore in the scope's
+            # metadata; named here only because §5.26 requires it exposed
+            # through the attested scope and carried in the header.
             self._attestations += 1
             handle = (f"att-{record.window_id}-{self._attestations}-"
                       f"{os.urandom(8).hex()}")
