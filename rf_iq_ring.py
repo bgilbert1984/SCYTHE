@@ -180,13 +180,21 @@ ATTESTATION_SCOPE_NOT_ACTIVE = "ATTESTATION_SCOPE_NOT_ACTIVE"
 ATTESTATION_SCOPE_NOT_MINTED = "ATTESTATION_SCOPE_NOT_MINTED"
 ATTESTATION_WRITE_INCOMPLETE = "ATTESTATION_WRITE_INCOMPLETE"
 ATTESTATION_WRITE_TARGET_INVALID = "ATTESTATION_WRITE_TARGET_INVALID"
+ATTESTATION_DIGEST_PREFIX_INVALID = "ATTESTATION_DIGEST_PREFIX_INVALID"
+# Every attestation refusal this module can raise, and it is checked to be
+# every one. It had no reader at all, which is how it came to be missing
+# `ATTESTATION_RING_LIFETIME_MISMATCH` from the moment that check was added:
+# an incomplete list nothing consults reads as a complete one to whoever
+# consults it next. The test that makes it exhaustive is the reader.
 ATTESTATION_REFUSALS: Tuple[str, ...] = (
     ATTESTATION_NOT_AN_IQ_WINDOW, ATTESTATION_RING_CLOSED,
     ATTESTATION_WINDOW_NOT_ISSUED, ATTESTATION_EPOCH_CHANGED,
     ATTESTATION_WINDOW_EVICTED, ATTESTATION_METADATA_MISMATCH,
     ATTESTATION_REPRESENTATION_INVALID, ATTESTATION_DIGEST_MISMATCH,
+    ATTESTATION_RING_LIFETIME_MISMATCH,
     ATTESTATION_SCOPE_NOT_ACTIVE, ATTESTATION_SCOPE_NOT_MINTED,
     ATTESTATION_WRITE_INCOMPLETE, ATTESTATION_WRITE_TARGET_INVALID,
+    ATTESTATION_DIGEST_PREFIX_INVALID,
 )
 
 # Metadata compared field by field against the ring's own record. Declared as a
@@ -642,26 +650,39 @@ class AttestedIQWindowScope:
                 total += written
             return total
 
-    def _payload_sha256(self) -> str:
-        """SHA-256 over the attested bytes, as hex. **Restricted.**
+    def _prefixed_sha256(self, prefix: bytes) -> str:
+        """SHA-256 over `prefix` then the attested bytes, as hex. **Restricted.**
 
-        §5.20's header carries `payload_sha256`, and the header is written
-        **before** the payload -- so the digest cannot be a by-product of the
-        write and has to be taken while the scope is live and before anything
-        is created. §5.25 names the payload action as the authority for that
-        field, which is what this is.
+        One action for both digests §5.20 needs, because the second one has to
+        be known **before** the file exists and a second pass over four
+        mebibytes is the copy §5.24 spent a slice removing:
+
+        * `prefix=b""` gives `payload_sha256`, the field the header carries;
+        * `prefix=framing_prefix(header) + header` gives `file_sha256`, which
+          the publication intent binds before creation and step 8 recomputes
+          from the file it reads back. The framing puts EOF immediately after
+          the payload, so the file image is a prefix and the payload, with
+          nothing trailing --- which is what makes one prefix enough.
+
+        `prefix` has no default. An empty default would let a caller that meant
+        `file_sha256` receive `payload_sha256` by omission, and the two are
+        both 64 hex characters, so nothing downstream would notice. The same
+        reason admission's `now` is a required keyword: a default does not
+        prevent the wrong value, it hides which one was chosen.
 
         Returns a 64-character hex string and never the payload, the array,
-        bytes or a view. It is not the deleted `_payload_nbytes()` returning
-        under a new name: that method had no caller and answered a question the
-        attested metadata already answers, and this one answers a question
-        nothing else can -- only the bytes know their own digest.
-
-        The ring digest is not a substitute. It is BLAKE2s over the chain, the
-        epoch, the sample count **and** the payload, so it identifies the live
-        source at issue time; `payload_sha256` is over the payload alone, which
-        is what a reader recomputes from a file it has no ring for.
+        bytes or a view. Replaces `_payload_sha256()`, which could answer only
+        the first question.
         """
+        # Nominal, because a `bytearray` or `memoryview` hashes identically and
+        # is a different thing: the prefix is file bytes, fixed at the moment
+        # the header was serialised, and a mutable one can change between the
+        # intent that binds `file_sha256` and the readback that recomputes it.
+        if type(prefix) is not bytes:
+            raise AttestationRefused(
+                ATTESTATION_DIGEST_PREFIX_INVALID,
+                f"the digest prefix is exact bytes; got "
+                f"{type(prefix).__name__}")
         state = self._state()          # type, provenance and liveness, in order
         # Same discipline as the write: the whole read happens under the state
         # lock, and teardown acquires it. A digest taken while an exit was
@@ -669,7 +690,13 @@ class AttestedIQWindowScope:
         # half-dropped view, and both are the lifetime inversion §5.24 forbids.
         with state.lock:
             state = self._state()      # re-resolved: the handle may have moved
-            return hashlib.sha256(state.payload).hexdigest()
+            # Two updates rather than one concatenation: joining them would
+            # copy the payload, which is the whole thing this action exists to
+            # avoid. `update` takes the memoryview directly.
+            digest = hashlib.sha256()
+            digest.update(prefix)
+            digest.update(state.payload)
+            return digest.hexdigest()
 
     # There is deliberately no `_payload_nbytes()`. It existed, had no
     # production caller, read `state.payload.nbytes` outside the state lock --
