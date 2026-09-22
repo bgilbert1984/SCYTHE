@@ -767,6 +767,34 @@ class FramingTests(CaptureFixture):
         # to.
         self.assertEqual(len(image), 14 + header_length + len(payload))
 
+    def test_the_prefixed_digest_is_the_file_sha256_of_the_written_image(self):
+        """Amendment 6's second use, against the bytes that actually get
+        written.
+
+        `file_sha256` has to be bound by the publication intent *before* the
+        file exists, so it cannot be read back off one. The claim is that the
+        same action, handed the framing prefix and the header, produces exactly
+        the digest a reader recomputes from the finished file --- which holds
+        only because the framing puts EOF immediately after the payload, so the
+        image is a prefix and the attested bytes with nothing trailing.
+
+        Proved here rather than in the ring's own tests because only this
+        module has the framed image to compare against. The production caller
+        arrives with the intent; until then this is what keeps the second use
+        from being an untested claim in a docstring.
+        """
+        import hashlib
+        with self.ring.attest_window(_window(self.ring)) as scope:
+            def run(create_target):
+                return record_gain_step(scope=scope,
+                                        create_target=create_target,
+                                        **self.kwargs())
+            published, image = _through_a_pipe(run)
+            header_bytes = published.header_bytes
+            computed = scope._prefixed_sha256(
+                framing_prefix(header_bytes) + header_bytes)
+        self.assertEqual(computed, hashlib.sha256(image).hexdigest())
+
     def test_the_payload_written_is_the_attested_payload(self):
         import hashlib
         with self.ring.attest_window(_window(self.ring)) as scope:

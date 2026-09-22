@@ -29,6 +29,7 @@ from rf_iq_ring import (
     ATTESTATION_WINDOW_EVICTED, ATTESTATION_WINDOW_NOT_ISSUED,
     ATTESTED_METADATA_FIELDS, BYTES_PER_SAMPLE, STORAGE_DTYPE,
     ATTESTATION_WRITE_TARGET_INVALID, ATTESTATION_RING_LIFETIME_MISMATCH,
+    ATTESTATION_DIGEST_PREFIX_INVALID, ATTESTATION_REFUSALS,
     AttestationRefused, AttestedIQWindowScope, BoundedIQRing, IQWindow,
     RawIQNotTransportable, _window_digest,
 )
@@ -887,8 +888,12 @@ class RestrictedAccessorTests(unittest.TestCase):
     # the scope is live and before anything is created. It is policed exactly
     # like the first: no public accessor, and every production call site inside
     # the allowed set.
-    ACCESSORS = ("_write_payload_to_fd", "_payload_sha256")
-    DELETED = ("_payload_nbytes",)
+    ACCESSORS = ("_write_payload_to_fd", "_prefixed_sha256")
+    # `_payload_sha256` joins the deleted set for the same reason
+    # `_payload_nbytes` is in it: amendment 6 replaced it rather than adding
+    # beside it, and a narrower surface left in place is a second way to reach
+    # the bytes for the static check to police.
+    DELETED = ("_payload_nbytes", "_payload_sha256")
     ALLOWED = {"rf_iq_ring.py", "rf_capture_admission.py"}
 
     def _production_modules(self):
@@ -948,6 +953,28 @@ class RestrictedAccessorTests(unittest.TestCase):
         for name in self.DELETED:
             self.assertNotIn(name, defined, f"{name} is defined again")
 
+    def test_every_declared_attestation_refusal_is_listed(self):
+        """`ATTESTATION_REFUSALS` had no reader in production or in tests, and
+        was missing `ATTESTATION_RING_LIFETIME_MISMATCH` from the moment that
+        check was added --- for the whole of the slice that added it, including
+        a fourteen-control sweep. An unread list cannot be wrong in a way
+        anything notices, so it reads as complete to whoever consults it next.
+        This is the reader.
+        """
+        import rf_iq_ring as ring_module
+        declared = {name for name in dir(ring_module)
+                    if name.startswith("ATTESTATION_")
+                    and name != "ATTESTATION_REFUSALS"
+                    and type(getattr(ring_module, name)) is str}
+        listed = {n for n in declared
+                  if getattr(ring_module, n) in ATTESTATION_REFUSALS}
+        self.assertEqual(sorted(declared - listed), [],
+                         "declared refusal codes missing from "
+                         "ATTESTATION_REFUSALS")
+        self.assertEqual(len(set(ATTESTATION_REFUSALS)),
+                         len(ATTESTATION_REFUSALS),
+                         "ATTESTATION_REFUSALS repeats a code")
+
     def test_the_digest_action_returns_a_digest_and_never_the_bytes(self):
         """§5.25's payload-action authority, and why it is not the deleted one.
 
@@ -960,7 +987,7 @@ class RestrictedAccessorTests(unittest.TestCase):
         ring = _ring()
         window = _window(ring)
         with ring.attest_window(window) as attested:
-            digest = attested._payload_sha256()
+            digest = attested._prefixed_sha256(b"")
             self.assertEqual(type(digest), str)
             self.assertEqual(len(digest), 64)
             self.assertEqual(digest,
@@ -972,8 +999,59 @@ class RestrictedAccessorTests(unittest.TestCase):
         attested = ring.attest_window(_window(ring))
         attested.__exit__(None, None, None)
         with self.assertRaises(AttestationRefused) as caught:
-            attested._payload_sha256()
+            attested._prefixed_sha256(b"")
         self.assertEqual(caught.exception.code, ATTESTATION_SCOPE_NOT_ACTIVE)
+
+    def test_a_prefix_changes_the_digest(self):
+        """The parameter does something. Without this the action could ignore
+        it entirely and every empty-prefix test would still pass."""
+        ring = _ring()
+        with ring.attest_window(_window(ring)) as attested:
+            self.assertNotEqual(attested._prefixed_sha256(b""),
+                                attested._prefixed_sha256(b"x"))
+
+    def test_the_prefix_is_hashed_before_the_payload_not_after(self):
+        """Order, not merely inclusion. SHA-256 over `prefix + payload` and
+        over `payload + prefix` are both influenced by the prefix and only one
+        of them is the file."""
+        import hashlib
+        ring = _ring()
+        window = _window(ring)
+        with ring.attest_window(window) as attested:
+            body = window.samples.tobytes()
+            self.assertEqual(attested._prefixed_sha256(b"abc"),
+                             hashlib.sha256(b"abc" + body).hexdigest())
+
+    def test_the_prefix_must_be_exact_bytes(self):
+        """A `bytearray` hashes identically and can change between the intent
+        that binds `file_sha256` and the readback that recomputes it."""
+        ring = _ring()
+        with ring.attest_window(_window(ring)) as attested:
+            with self.assertRaises(AttestationRefused) as caught:
+                attested._prefixed_sha256(bytearray(b"abc"))
+            self.assertEqual(caught.exception.code,
+                             ATTESTATION_DIGEST_PREFIX_INVALID)
+
+    def test_the_prefix_has_no_default(self):
+        """Omission must not silently yield `payload_sha256`. Both digests are
+        64 hex characters, so a caller handed the wrong one carries it into the
+        header with nothing downstream able to notice."""
+        ring = _ring()
+        with ring.attest_window(_window(ring)) as attested:
+            with self.assertRaises(TypeError):
+                attested._prefixed_sha256()
+
+    def test_the_prefix_type_is_checked_before_the_scope_is_resolved(self):
+        """A malformed argument is refused on an ended scope too --- otherwise
+        the type gate is reachable only while live, and the code it raises
+        would be unobservable wherever it matters most."""
+        ring = _ring()
+        attested = ring.attest_window(_window(ring))
+        attested.__exit__(None, None, None)
+        with self.assertRaises(AttestationRefused) as caught:
+            attested._prefixed_sha256("not bytes")
+        self.assertEqual(caught.exception.code,
+                         ATTESTATION_DIGEST_PREFIX_INVALID)
 
     def test_payload_reads_are_structurally_guarded(self):
         """A **structural tripwire**, and deliberately not the concurrency proof.

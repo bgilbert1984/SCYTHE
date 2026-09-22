@@ -813,7 +813,13 @@ def _admit(*, scope: Any, stratum: str, attestation: Any,
     # 9. the payload digest, taken while the scope is live and before anything
     #    is created. §5.20 writes the header first, so this cannot be a
     #    by-product of the write.
-    payload_sha256 = scope._payload_sha256()
+    #
+    #    The empty prefix is written out rather than defaulted: the same action
+    #    returns `file_sha256` when handed the framing prefix and the header,
+    #    and both are 64 hex characters, so a caller that received the wrong
+    #    one would carry it into the header unnoticed. The `file_sha256` caller
+    #    arrives with the publication intent, which binds it before creation.
+    payload_sha256 = scope._prefixed_sha256(b"")
 
     header = derive_canonical_header(
         metadata=metadata, lock=lock, retention=retention, stratum=stratum,
