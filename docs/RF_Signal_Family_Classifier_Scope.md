@@ -4319,6 +4319,99 @@ recovery, which is a declared outcome rather than a corruption.
 
 **The cap counts committed entries.** Not files, not intents.
 
+##### The five decisions the journal's shape needed, settled
+
+The framing, the ten fields an intent binds, the six recovery classifications
+and the cap over committed entries are accepted above. These are the gaps
+*around* that spec, which an implementation cannot invent for itself.
+
+**1. One journal per corpus, named `membership.iqj`.** The convention is
+`manifest.iqm` and `eligible-spur-trials.iqe`, and `open_corpus_namespace`
+refuses any entry outside the names it knows, so this adds one known name
+rather than a discovery rule. Not one per stratum: the exclusion is a single
+exclusive lock held inside the namespace, so per-stratum files would give
+three append points under one lock with no added guarantee and would make the
+ordering *between* strata unrecoverable from the file. "The corpus's first
+committed member" is singular, and every record carries its `stratum`, so
+per-stratum counts are projections over committed records.
+
+**2. Abandon: recovery always, runtime only before the final exists.**
+
+- Recovery **must** append `abandon` for `intent + no recognised final`.
+- Runtime **may** append `abandon` after a durable intent **only after
+  confirming that no recognised final name exists**.
+- Once the final link succeeds, **no runtime path may append `abandon`.**
+  Failures during unlink, the directory `fsync`, readback or the commit leave
+  `intent + final`, which the table above resolves by *completing the commit*.
+  An abandon written there would discard a verifiable member and contradict
+  the accepted classification.
+- Runtime abandon is opportunistic and **non-load-bearing**: if it fails, the
+  disk holds `intent + no final` and recovery reaches the identical outcome.
+  That is the only form in which it is safe.
+- Failure to append a **required recovery** abandon **refuses namespace
+  opening**. It cannot silently mint a scope over unresolved journal state.
+- An abandoned `window_id` is spent and never reused --- duplicate or
+  contradictory intent for one window is already a refusal.
+- Abandon never advances membership or the predecessor.
+
+The asymmetry is deliberate: the runtime abandon may be skipped, the recovery
+abandon may not.
+
+**3. Bounds, stated as three separate values.** With the corpus member
+capacity `N = 3 strata x 5 561 = 16 683`:
+
+| value | figure | what it is |
+| --- | ---: | --- |
+| `IQJ_MAX_RECORD_BYTES` | 65 536 | the corrupt-length read bound, and nothing else |
+| `MAX_ABANDONED_ATTEMPTS` | `2N` = 33 366 | an explicit failure budget |
+| `IQJ_MAX_RECORDS` | `2(N + 2N)` = `6N` = 100 098 | every record the journal may hold |
+
+A committed attempt consumes two records (intent, commit) and an **abandoned
+attempt also consumes two** (intent, abandon) --- which is what makes the
+total `6N` rather than `4N`.
+
+**Capacity for the terminal record is reserved before the intent is
+appended**, so a crash always leaves room for the `commit` or `abandon` that
+resolves it.
+
+**Reaching the abandonment budget permanently refuses further publication and
+may leave the corpus incomplete.** Accepting the budget is accepting that, in
+the same form as the single-lifetime consequence above.
+
+The worst-case framed size follows from the record bound and not from an
+expected record size: `100 098 x (4 + 65 536 + 32)` = **6 563 626 056 bytes,
+about 6.11 GiB**. An expected record is roughly 800 bytes, which is an
+expectation and not a bound. A smaller byte ceiling, if wanted, is an
+additional explicit policy value and cannot be derived from that expectation.
+
+**4. `corpus_clock_authority` is declared by the corpus-ownership authority
+alone**, taking the required header fields **32 -> 33**. The scope obtains its
+clock internally when it opens, so the field is a property of the ownership
+scope and not window metadata; `_attested_scope_declares` continues to
+describe window-bound facts only, where the ring's own `clock_authority`
+already lives for the capture times. One field declared by two authorities is
+what stops `_merge` being able to refuse a field claimed twice.
+
+**5. The clock vocabulary is shared, and moves to the leaf that already owns
+`UNDECLARED`.** `CLOCK_AUTHORITY_POSIX_REALTIME` and `CLOCK_AUTHORITIES` move
+from `rf_iq_ring` to `rf_signal_chain_identity`, and both the ring and the
+namespace import that one declaration. Two declarations of one vocabulary is
+the single-source defect 5.27 spent a slice removing; importing the ring's
+copy into the corpus namespace would instead couple the namespace to the IQ
+ring, which it does not otherwise depend on.
+
+`POSIX_REALTIME` means the same thing in both rows --- the note above that
+this is *a different clock from the ring's* is about the **field**, not the
+token, and two fields may honestly carry one value. The authority is derived
+from the clock actually installed: **exactly `time.time` maps to
+`POSIX_REALTIME`, and any injected or wrapped callable maps to `UNDECLARED`**,
+including a wrapper that calls `time.time` itself. Authority is never inferred
+from equivalent behaviour.
+
+**Drains:** nothing. `PENDING_AMENDMENTS` entry 14 is untouched and drains
+only when admission and the persistence boundary land together. An accepted
+document drains nothing.
+
 #### Ring-lifetime identity
 
 `ring_lifetime_id` tells a reader that two sample-index domains are
