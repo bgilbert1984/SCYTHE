@@ -48,6 +48,11 @@ from rf_eligible_trials_artefact import (
     ELIGIBLE_DIGEST_DISAGREES, EligibleSetRefused, digest_over_records,
     frame_records, parse_rows, read_records, sort_key as _eligible_sort_key,
 )
+from rf_membership_journal import (
+    JOURNAL_NAME, JOURNAL_NOT_CANONICAL, JournalRefused,
+    create_membership_journal,
+    journal_declaration, read_membership_journal,
+)
 from rf_promotion_envelope import declaration_digest
 from rf_validation_manifest import PromotionCorpusLock, STRATA_DEFINITION_REVISION
 
@@ -645,7 +650,8 @@ def create_corpus_namespace(*, corpus_id: str, lock: Any, retention: Any,
     §5.26's sequence, in order::
 
         resolve -> create the directory 0700 -> hold exclusively
-        -> validate empty -> O_CREAT|O_EXCL the manifest 0600
+        -> validate empty -> create and fsync the empty journal 0600
+        -> O_CREAT|O_EXCL the manifest 0600
         -> write -> fsync the manifest -> fsync the directory
         -> reopen and verify -> mint the scope
 
@@ -707,10 +713,21 @@ def create_corpus_namespace(*, corpus_id: str, lock: Any, retention: Any,
             _read_eligible_rows(dir_fd, device,
                                 body["capture_plan"]["spur_allocation"])
 
+        # §5.26 amendment A/B: an empty journal is the canonical zero-record
+        # journal.  It exists before the manifest so the directory fsync below
+        # makes all three names durable together; creating it on first intent
+        # would fsync its bytes and leave its name outside the accepted order.
+        create_membership_journal(dir_fd)
+        journal = read_membership_journal(dir_fd)
+        if journal.records:                            # pragma: no cover
+            raise JournalRefused(
+                JOURNAL_NOT_CANONICAL,
+                "a newly created membership journal is not empty")
+
         _write_file(dir_fd, MANIFEST_NAME, (framed,))
-        # After BOTH names exist. The directory fsync makes names durable, and
-        # making one durable before the other is what leaves a manifest whose
-        # dependency can be lost.
+        # After every name exists. The directory fsync makes names durable,
+        # and making one durable before another is what leaves a manifest
+        # whose dependency or membership accounting can be lost.
         os.fsync(dir_fd)
 
         read_body, digest = _read_manifest(dir_fd, device)
@@ -757,7 +774,8 @@ def open_corpus_namespace(*, corpus_id: str, root: Optional[str] = None
         _hold_exclusively(dir_fd, path)
         entries = sorted(os.listdir(dir_fd))
         unexpected = [entry for entry in entries
-                      if entry not in (MANIFEST_NAME, ELIGIBLE_NAME)]
+                      if entry not in (MANIFEST_NAME, ELIGIBLE_NAME,
+                                       JOURNAL_NAME)]
         if unexpected:
             raise NamespaceRefused(
                 NAMESPACE_RECOVERY_UNBUILT,
@@ -768,6 +786,13 @@ def open_corpus_namespace(*, corpus_id: str, root: Optional[str] = None
                 f"{unexpected[:4]}")
         body, digest = _read_manifest(dir_fd, device)
         _check_declarations(body)
+        journal = read_membership_journal(dir_fd)
+        if journal.records:
+            raise NamespaceRefused(
+                NAMESPACE_RECOVERY_UNBUILT,
+                f"membership.iqj holds {len(journal.records)} record(s); "
+                "slice 3d reconciles them against verified finals before a "
+                "scope may be minted")
         rows = _read_eligible_rows(dir_fd, device,
                                    body["capture_plan"]["spur_allocation"])
         rebuilt_envelope, rebuilt_plan, rebuilt_lock = _reconstruct(body, rows)
@@ -787,10 +812,12 @@ def namespace_status() -> Dict[str, Any]:
         "production_creation_authorised": False,
         "manifest_name": MANIFEST_NAME,
         "eligible_artefact_name": ELIGIBLE_NAME,
+        "membership_journal": journal_declaration(),
         "built": ["THE MANIFEST", "THE ELIGIBLE-TRIAL ARTEFACT",
                   "CORPUS CREATION", "CORPUS REOPENING",
-                  "TYPED RECONSTRUCTION AND OPAQUE BINDING"],
-        "not_built": ["MEMBERSHIP JOURNAL", "SEQUENCE STATE", "PUBLISHER",
+                  "TYPED RECONSTRUCTION AND OPAQUE BINDING",
+                  "MEMBERSHIP JOURNAL CORE"],
+        "not_built": ["FINAL-DEPENDENT JOURNAL RECOVERY", "SEQUENCE STATE", "PUBLISHER",
                       "RING LIFETIME IDENTITY",
                       "ADMISSION CONSUMPTION OF THIS SCOPE", "CLOCK PROVIDER"],
         # Stated as its own key rather than left to be read off the list
