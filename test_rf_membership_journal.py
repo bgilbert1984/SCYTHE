@@ -19,12 +19,14 @@ from rf_membership_journal import (
     JOURNAL_DUPLICATE_INTENT, JOURNAL_DUPLICATE_TERMINAL,
     JOURNAL_FIELD_NO_AUTHORITY, JOURNAL_FIELD_NOT_EMITTED,
     JOURNAL_FILE_MODE, JOURNAL_NAME, JOURNAL_NOT_CANONICAL,
+    JOURNAL_DESCRIPTOR_REFUSED,
     JOURNAL_NOT_FOUND, JOURNAL_RECORD_LIMIT_REACHED,
     JOURNAL_RECORD_TOO_LARGE, JOURNAL_RECORD_TYPE_REFUSED,
     JOURNAL_TERMINAL_WITHOUT_INTENT,
     MAX_ABANDONED_ATTEMPTS, RECORD_TYPES, TERMINAL_FIELDS, JournalRefused,
     append_intent, canonical_record_bytes, create_membership_journal,
     frame_record, intent_record, journal_declaration,
+    _encode_canonical,
     read_membership_journal, terminal_record,
 )
 from rf_capture_admission import CAPTURED_STRATA
@@ -117,10 +119,57 @@ class CanonicalRecordTests(unittest.TestCase):
         self.assertEqual(framed[4:4 + len(body)], body)
         self.assertEqual(framed[-32:], hashlib.sha256(body).digest())
 
-    def test_the_journal_uses_the_manifest_json_form(self):
-        body = canonical_record_bytes(_intent(corpus_id="café"))
+    # Split by PROPERTY, not by name. One test per parameter, each with a
+    # stimulus the other two cannot move. Three tests all asserting whole-byte
+    # equality against a four-parameter `json.dumps` would be three names for
+    # one witness: every parameter mutation breaks every one of them, and the
+    # sweep reported `DUPLICATE SETS` for exactly that reason.
+
+    def test_non_ascii_is_carried_as_utf_8_not_escaped(self):
+        """`ensure_ascii=False` alone. A single key keeps ordering out of it,
+        and escaping is invisible to the separators."""
+        body = _encode_canonical({"alpha": "café"})
         self.assertIn("café".encode("utf-8"), body)
         self.assertNotIn(b"\\u00e9", body)
+
+    def test_keys_are_serialised_in_sorted_order(self):
+        """`sort_keys=True` alone, asserted as an offset relation. Inserted out
+        of order, all-ASCII, so neither escaping nor spacing can affect it."""
+        body = _encode_canonical({"zeta": "z", "alpha": "a"})
+        self.assertLess(body.index(b"alpha"), body.index(b"zeta"))
+
+    def test_separators_carry_no_whitespace(self):
+        """`separators=(",", ":")` alone. All-ASCII and order-agnostic, so the
+        other two parameters leave this green."""
+        body = _encode_canonical({"zeta": "z", "alpha": "a"})
+        self.assertNotIn(b", ", body)
+        self.assertNotIn(b": ", body)
+
+    def test_a_non_finite_value_is_refused_by_the_encoder(self):
+        """`allow_nan=False`, witnessed at the seam that can reach it.
+
+        Unreachable through `canonical_record_bytes`: every permitted field is
+        an exact string, integer or `None` and extras refuse, so validation
+        rejects a float first --- identically whether the parameter is True or
+        False. The sweep proved the parameter discriminated nothing. It is the
+        backstop for the day a numeric field is added, so it is tested where it
+        is reachable rather than deleted or left unproven.
+        """
+        for value in (float("nan"), float("inf"), float("-inf")):
+            with self.assertRaises(JournalRefused) as caught:
+                _encode_canonical({"alpha": value})
+            self.assertEqual(caught.exception.code, JOURNAL_NOT_CANONICAL)
+
+    def test_validation_still_precedes_the_encoder_seam(self):
+        """The seam exists to witness the encoder, never to skip the checks."""
+        with self.assertRaises(JournalRefused) as caught:
+            canonical_record_bytes({"record_type": INTENT})
+        self.assertEqual(caught.exception.code, JOURNAL_FIELD_NOT_EMITTED)
+
+    def test_the_journal_uses_the_manifest_json_form(self):
+        """The whole form, kept as the integration statement over the three
+        property tests above --- not as their replacement."""
+        body = canonical_record_bytes(_intent(corpus_id="café"))
         self.assertEqual(body, json.dumps(
             _intent(corpus_id="café"), sort_keys=True,
             separators=(",", ":"), ensure_ascii=False,
@@ -205,6 +254,57 @@ class AppendAndReadTests(JournalFixture):
         self.assertEqual(reread.records, (expected,))
         self.assertEqual(reread.valid_bytes, os.path.getsize(self.path()))
 
+    def test_two_appends_both_survive_and_keep_their_order(self):
+        """J20's separating witness. A single append to an empty file lands at
+        offset zero whether or not the descriptor appends, so one record proves
+        nothing; the second is what a non-appending write overwrites.
+
+        Independent of J19's hazard: validating after the write leaves both
+        records present and ordered.
+        """
+        first = _intent(window_id="window-a")
+        second = _intent(window_id="window-b")
+        append_intent(self.dir_fd, first)
+        append_intent(self.dir_fd, second)
+        state = read_membership_journal(self.dir_fd)
+        self.assertEqual(state.records, (first, second))
+
+    def test_a_zero_length_write_is_refused_rather_than_looping(self):
+        """J21's branch. The guard exists to refuse exactly this; that a regular
+        file rarely produces it is a reason to inject it, not to leave the
+        refusal unproven."""
+        real_write = os.write
+
+        def stalled(fd, data):
+            return 0
+
+        with mock.patch.object(os, "write", stalled):
+            with self.assertRaises(JournalRefused) as caught:
+                append_intent(self.dir_fd, _intent())
+        self.assertEqual(caught.exception.code, JOURNAL_DESCRIPTOR_REFUSED)
+        self.assertEqual(os.write, real_write)
+
+    def test_committed_entries_are_counted_by_stratum(self):
+        """J24's branch. Nothing asserted this accounting at all, so a mutation
+        that stopped counting commits discriminated nothing."""
+        append_intent(self.dir_fd, _intent(window_id="window-a"))
+        state = journal._append_terminal(self.dir_fd, COMMIT, "window-a")
+        stratum = _intent()["stratum"]
+        self.assertEqual(state.committed_by_stratum[stratum], 1)
+        self.assertEqual(
+            sum(state.committed_by_stratum.values()), 1)
+
+    def test_the_stratum_cap_counts_commits_and_not_intents(self):
+        """The cap is over committed entries --- not files, not intents. An
+        intent alone must not advance it."""
+        append_intent(self.dir_fd, _intent(window_id="window-a"))
+        state = read_membership_journal(self.dir_fd)
+        stratum = _intent()["stratum"]
+        self.assertEqual(state.committed_by_stratum[stratum], 0)
+        journal._append_terminal(self.dir_fd, ABANDON, "window-a")
+        state = read_membership_journal(self.dir_fd)
+        self.assertEqual(state.committed_by_stratum[stratum], 0)
+
     def test_capacity_for_the_terminal_is_checked_before_the_intent(self):
         with mock.patch.object(journal, "IQJ_MAX_RECORDS", 1):
             with self.assertRaises(JournalRefused) as caught:
@@ -254,6 +354,78 @@ class TornTailTests(JournalFixture):
         self.write_raw(tail)
         state = read_membership_journal(self.dir_fd)
         self.assertTrue(state.torn_tail_truncated)
+        self.assertEqual(len(state.records), 1)
+        self.assertEqual(os.path.getsize(self.path()), self.intact_size)
+
+    def test_an_unparseable_complete_record_refuses_without_truncating(self):
+        """J12's branch. A record whose digest is correct but whose body is not
+        JSON, with valid bytes after it, is corruption --- not a torn append.
+
+        The digest must agree, or this would be caught by the digest branch
+        instead and prove nothing about this one.
+        """
+        bad = b'{"record_type":'                       # complete, unparseable
+        framed = (struct.pack("<I", len(bad)) + bad
+                  + hashlib.sha256(bad).digest())
+        self.write_raw(framed)
+        self.write_raw(frame_record(_intent(window_id="window-b")))
+        before = os.path.getsize(self.path())
+        with self.assertRaises(JournalRefused) as caught:
+            read_membership_journal(self.dir_fd)
+        self.assertEqual(caught.exception.code, JOURNAL_NOT_CANONICAL)
+        self.assertEqual(os.path.getsize(self.path()), before)
+
+    def test_the_truncation_is_issued_before_the_journal_fsync(self):
+        """J15's branch. The protocol was issued, which is what a test can see;
+        crash survival is not observable from inside the process.
+
+        Recorded by opened-object identity so another file's `fsync` cannot
+        stand in for the journal's.
+        """
+        order = []
+        real_truncate, real_fsync = os.ftruncate, os.fsync
+        journal_fds = set()
+        real_open = os.open
+
+        def watched_open(*args, **kwargs):
+            fd = real_open(*args, **kwargs)
+            if args and args[0] == JOURNAL_NAME:
+                journal_fds.add(fd)
+            return fd
+
+        def watched_truncate(fd, length):
+            if fd in journal_fds:
+                order.append("truncate")
+            return real_truncate(fd, length)
+
+        def watched_fsync(fd):
+            if fd in journal_fds:
+                order.append("fsync")
+            return real_fsync(fd)
+
+        self.write_raw(b"\x05\x00")                    # a torn length prefix
+        with mock.patch.object(os, "open", watched_open), \
+             mock.patch.object(os, "ftruncate", watched_truncate), \
+             mock.patch.object(os, "fsync", watched_fsync):
+            state = read_membership_journal(self.dir_fd)
+        self.assertTrue(state.torn_tail_truncated)
+        self.assertIn("truncate", order)
+        self.assertIn("fsync", order)
+        self.assertLess(order.index("truncate"), order.index("fsync"))
+
+    def test_a_fragmented_read_is_accumulated_not_truncated(self):
+        """J13's branch. `os.read` may return fewer bytes than asked for; the
+        loop must accumulate. A version returning the first fragment would see
+        a short body, fail the digest, and truncate a record that was intact.
+        """
+        real_read = os.read
+
+        def fragmented(fd, count):
+            return real_read(fd, 1 if count > 1 else count)
+
+        with mock.patch.object(os, "read", fragmented):
+            state = read_membership_journal(self.dir_fd)
+        self.assertFalse(state.torn_tail_truncated)
         self.assertEqual(len(state.records), 1)
         self.assertEqual(os.path.getsize(self.path()), self.intact_size)
 

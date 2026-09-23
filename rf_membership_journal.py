@@ -178,24 +178,41 @@ def _check_record(record: Mapping[str, Any]) -> Dict[str, Any]:
     return body
 
 
-def canonical_record_bytes(record: Mapping[str, Any]) -> bytes:
-    """The `.iqm`/`.iqc` canonical JSON form, deliberately not `.iqe`'s.
+def _encode_canonical(mapping: Mapping[str, Any]) -> bytes:
+    """The `.iqm`/`.iqc` canonical JSON form, below record validation.
 
-    `.iqe` uses ``ensure_ascii=True`` to reproduce a digest frozen elsewhere.
-    Journal records are digested here, so there is no pre-existing escaped-byte
-    identity to reproduce and the manifest/header form is the relevant one.
+    A named seam rather than an inline `json.dumps`, because `allow_nan=False`
+    is **unreachable through the public path**: every permitted field is an
+    exact string, integer or `None` and extras refuse, so no valid record can
+    carry a non-finite value this far. The parameter is the backstop for the day
+    a numeric field is added --- and a backstop nothing can reach is a backstop
+    nothing has tested. A sweep proved exactly that: flipping it to
+    `allow_nan=True` discriminated nothing.
+
+    Validation stays in front of this. The seam exists so the encoder's own
+    refusal can be witnessed, not so a caller can skip the checks.
     """
-    checked = _check_record(record)
     try:
         text = json.dumps(
-            checked, sort_keys=True, separators=(",", ":"),
+            mapping, sort_keys=True, separators=(",", ":"),
             ensure_ascii=False, allow_nan=False,
         )
     except (TypeError, ValueError) as exc:
         raise JournalRefused(
             JOURNAL_NOT_CANONICAL,
             f"the record is not canonically serialisable: {exc}") from exc
-    encoded = text.encode("utf-8")
+    return text.encode("utf-8")
+
+
+def canonical_record_bytes(record: Mapping[str, Any]) -> bytes:
+    """One validated record's canonical bytes, bounded by the record limit.
+
+    `.iqe` uses ``ensure_ascii=True`` to reproduce a digest frozen elsewhere.
+    Journal records are digested here, so there is no pre-existing escaped-byte
+    identity to reproduce and the manifest/header form is the relevant one.
+    """
+    checked = _check_record(record)
+    encoded = _encode_canonical(checked)
     if len(encoded) > IQJ_MAX_RECORD_BYTES:
         raise JournalRefused(
             JOURNAL_RECORD_TOO_LARGE,
@@ -397,11 +414,19 @@ def read_membership_journal(dir_fd: int) -> JournalState:
         file_size = os.fstat(fd).st_size
         while True:
             start = valid_end
-            prefix = os.read(fd, IQJ_RECORD_LENGTH_BYTES)
-            if not prefix:
-                break
-            if len(prefix) != IQJ_RECORD_LENGTH_BYTES:
-                torn = True
+            # Accumulating, like the body and digest reads below. A bare
+            # `os.read` here treated a SHORT READ of an intact length prefix as
+            # a torn append and truncated from the last good record --- silently
+            # discarding committed members. `os.read` is permitted to return
+            # fewer bytes than asked for, which is why the other two reads
+            # already went through this helper; the prefix was the one that did
+            # not, and a fragmented-read test is what found it.
+            prefix = _read_exact_or_tail(fd, IQJ_RECORD_LENGTH_BYTES)
+            if prefix is None:
+                # A clean end leaves nothing over; a partial prefix does. The
+                # helper cannot tell those apart and the file size can.
+                if valid_end != file_size:
+                    torn = True
                 break
             if len(records) >= IQJ_MAX_RECORDS:
                 raise JournalRefused(
