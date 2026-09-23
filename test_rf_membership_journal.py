@@ -112,11 +112,28 @@ class DeclarationTests(unittest.TestCase):
 
 
 class CanonicalRecordTests(unittest.TestCase):
-    def test_framing_is_length_body_and_raw_sha256(self):
+    # Split by PROPERTY. One test asserted the little-endian length, the body
+    # and the body-only digest together, so the framing control and the digest
+    # control named the SAME witness and neither had one of its own.
+
+    def test_the_length_prefix_is_little_endian_uint32(self):
         body = canonical_record_bytes(_intent())
         framed = frame_record(_intent())
         self.assertEqual(framed[:4], struct.pack("<I", len(body)))
+
+    def test_the_body_follows_the_length_prefix_verbatim(self):
+        body = canonical_record_bytes(_intent())
+        framed = frame_record(_intent())
         self.assertEqual(framed[4:4 + len(body)], body)
+
+    def test_the_record_digest_is_sha256_of_the_body_alone(self):
+        """The digest's DOMAIN: the body, not the framed bytes. A digest taken
+        over prefix+body would still be a valid sha256 of something, which is
+        why this compares against the body's digest rather than merely checking
+        the length.
+        """
+        body = canonical_record_bytes(_intent())
+        framed = frame_record(_intent())
         self.assertEqual(framed[-32:], hashlib.sha256(body).digest())
 
     # Split by PROPERTY, not by name. One test per parameter, each with a
@@ -274,14 +291,25 @@ class AppendAndReadTests(JournalFixture):
         file rarely produces it is a reason to inject it, not to leave the
         refusal unproven."""
         real_write = os.write
+        calls = []
 
         def stalled(fd, data):
+            calls.append(len(data))
+            if len(calls) >= 2:
+                # The guard's entire purpose is that there is no second call.
+                # An UNBOUNDED stub makes the mutant loop instead of fail: the
+                # suite then times out, and a timeout is not a witness --- it
+                # records n=0 with no tests run at all, which reads as a zero.
+                raise AssertionError(
+                    "os.write was called again after returning 0; the "
+                    "zero-length write was not refused")
             return 0
 
         with mock.patch.object(os, "write", stalled):
             with self.assertRaises(JournalRefused) as caught:
                 append_intent(self.dir_fd, _intent())
         self.assertEqual(caught.exception.code, JOURNAL_DESCRIPTOR_REFUSED)
+        self.assertEqual(len(calls), 1)
         self.assertEqual(os.write, real_write)
 
     def test_committed_entries_are_counted_by_stratum(self):
@@ -375,11 +403,10 @@ class TornTailTests(JournalFixture):
         self.assertEqual(caught.exception.code, JOURNAL_NOT_CANONICAL)
         self.assertEqual(os.path.getsize(self.path()), before)
 
-    def test_the_truncation_is_issued_before_the_journal_fsync(self):
-        """J15's branch. The protocol was issued, which is what a test can see;
-        crash survival is not observable from inside the process.
+    def _recorded_torn_tail_recovery(self):
+        """Recover over a torn tail, recording the JOURNAL's own calls.
 
-        Recorded by opened-object identity so another file's `fsync` cannot
+        Keyed by opened-descriptor identity so another file's `fsync` cannot
         stand in for the journal's.
         """
         order = []
@@ -408,9 +435,29 @@ class TornTailTests(JournalFixture):
              mock.patch.object(os, "ftruncate", watched_truncate), \
              mock.patch.object(os, "fsync", watched_fsync):
             state = read_membership_journal(self.dir_fd)
-        self.assertTrue(state.torn_tail_truncated)
-        self.assertIn("truncate", order)
+        return state, order
+
+    def test_a_torn_tail_recovery_fsyncs_the_journal(self):
+        """The fsync's PRESENCE, alone. Dropping the truncate leaves this green
+        --- the fsync is still issued --- so the truncate control cannot stand
+        in as this property's witness. Dropping the fsync fails it. That is the
+        discrimination the combined test could not make: three assertions in one
+        gave both mutations a single shared witness and neither its own.
+        """
+        _state, order = self._recorded_torn_tail_recovery()
         self.assertIn("fsync", order)
+
+    def test_a_torn_tail_is_reported_as_truncated(self):
+        state, _order = self._recorded_torn_tail_recovery()
+        self.assertTrue(state.torn_tail_truncated)
+
+    def test_the_truncation_is_issued_before_the_journal_fsync(self):
+        """The ORDER, alone. Either mutation breaks this one, which is why the
+        presence assertions had to move out of it. The protocol was issued,
+        which is what a test can see; crash survival is not observable from
+        inside the process.
+        """
+        _state, order = self._recorded_torn_tail_recovery()
         self.assertLess(order.index("truncate"), order.index("fsync"))
 
     def test_a_fragmented_read_is_accumulated_not_truncated(self):
@@ -514,6 +561,40 @@ class IntrinsicConsistencyTests(JournalFixture):
             journal._append_terminal(self.dir_fd, COMMIT, "window-a")
         self.assertEqual(caught.exception.code, JOURNAL_DUPLICATE_TERMINAL)
         self.assertEqual(pathlib.Path(self.path()).read_bytes(), before)
+
+    def test_an_invalid_terminal_is_refused_before_the_journal_is_written(self):
+        """The ordering observed at the WRITE SEAM rather than in the bytes.
+
+        The bytes-unchanged test above is moved by anything that disturbs where
+        or whether bytes land, so it could not tell "validation ran first" from
+        "the append opened the journal wrongly". This observes the seam itself:
+        a terminal with no preceding intent is refused, and neither the
+        write-mode open nor `_write_all` is ever reached.
+
+        It needs no successful append first, so a control that only changes HOW
+        a valid append opens the journal leaves it green.
+        """
+        writes = []
+        write_opens = []
+        real_write_all = journal._write_all
+        real_open_journal = journal._open_journal
+
+        def watched_write_all(fd, data):
+            writes.append(len(data))
+            return real_write_all(fd, data)
+
+        def watched_open_journal(dir_fd, flags):
+            if flags & os.O_WRONLY:
+                write_opens.append(flags)
+            return real_open_journal(dir_fd, flags)
+
+        with mock.patch.object(journal, "_write_all", watched_write_all), \
+             mock.patch.object(journal, "_open_journal", watched_open_journal):
+            with self.assertRaises(JournalRefused) as caught:
+                journal._append_terminal(self.dir_fd, COMMIT, "window-never")
+        self.assertEqual(caught.exception.code,
+                         JOURNAL_TERMINAL_WITHOUT_INTENT)
+        self.assertEqual((writes, write_opens), ([], []))
 
 
 if __name__ == "__main__":                            # pragma: no cover
