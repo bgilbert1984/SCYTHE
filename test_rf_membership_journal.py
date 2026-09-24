@@ -211,6 +211,24 @@ class CanonicalRecordTests(unittest.TestCase):
             terminal_record("DONE", "window-a")
         self.assertEqual(caught.exception.code, JOURNAL_RECORD_TYPE_REFUSED)
 
+    def test_a_str_subclass_record_type_is_refused_by_the_nominal_gate(self):
+        """The surviving nominal gate's own witness.
+
+        `required_fields` discriminates with `==` and `in`, which a `str`
+        SUBCLASS satisfies, so it would accept this record. Only the nominal
+        `type(record_type) is not str` gate refuses it. Without this test that
+        gate would be exactly as unwitnessed as the redundant value clause
+        deleted beside it --- the record is otherwise a complete, valid intent,
+        so the record_type's TYPE is the only thing under test.
+        """
+        class _SubclassOfStr(str):
+            pass
+
+        record = dict(_intent(), record_type=_SubclassOfStr(INTENT))
+        with self.assertRaises(JournalRefused) as caught:
+            journal._check_record(record)
+        self.assertEqual(caught.exception.code, JOURNAL_RECORD_TYPE_REFUSED)
+
     def test_terminal_records_repeat_no_intent_binding(self):
         self.assertEqual(terminal_record(COMMIT, "window-a"),
                          {"record_type": COMMIT, "window_id": "window-a"})

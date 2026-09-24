@@ -130,7 +130,7 @@ def _check_record(record: Mapping[str, Any]) -> Dict[str, Any]:
             f"a journal record is a mapping; got {type(record).__name__}")
     body = dict(record)
     record_type = body.get("record_type")
-    if type(record_type) is not str or record_type not in RECORD_TYPES:
+    if type(record_type) is not str:
         raise JournalRefused(
             JOURNAL_RECORD_TYPE_REFUSED,
             f"record_type {record_type!r} is not one of {', '.join(RECORD_TYPES)}")
@@ -361,7 +361,7 @@ def _validated_state(records: Tuple[Mapping[str, Any], ...], *,
         window_id = checked["window_id"]
         kind = checked["record_type"]
         if kind == INTENT:
-            if window_id in intents or window_id in terminals:
+            if window_id in intents:
                 raise JournalRefused(
                     JOURNAL_DUPLICATE_INTENT,
                     f"window {window_id!r} has more than one intent or was spent")
@@ -537,7 +537,7 @@ def append_intent(dir_fd: int, record: Mapping[str, Any]) -> JournalState:
             "the abandonment budget is exhausted; publication is permanently "
             "refused for this corpus")
     window_id = checked["window_id"]
-    if window_id in state.intents or window_id in state.terminals:
+    if window_id in state.intents:
         raise JournalRefused(
             JOURNAL_DUPLICATE_INTENT,
             f"window {window_id!r} already has an intent or is spent")
