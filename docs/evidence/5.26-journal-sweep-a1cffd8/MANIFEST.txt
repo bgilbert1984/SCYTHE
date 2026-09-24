@@ -1,0 +1,32 @@
+§5.26 3b-core sweep bundle
+checkpoint      a1cffd8b2bf9bcc9d9b25f79ed0c23941d0ef35e
+branch          feat/5.26-journal-core-repair  (pushed; fast-forward from 2ac4abb)
+controls        27  (J1..J27; J27 is new: the nominal record_type gate)
+expected count  2245 tests, exactly, 1 pre-existing skip
+gate            run_sweep_journal.py: require_sane_baseline(..., 2245, ...)
+BROAD_DECLARED  J8, J16, J17 -- each with a causal reason and a named direct
+                witness that must remain in its failing set
+SUBSUMED        empty; no allowances are in use
+reviewer        includes NOT MEASURED, MEASURED OVER 40, UNDECLARED DETONATION,
+                and the declared-broad witness checks
+
+Changed since the bundle that produced the dedirock 2ac4abb table:
+  J7   re-anchored on required_fields' refusal (was two-patch over a production
+       redundancy that has now been deleted)
+  J13  re-anchored on the prefix call site (was the shared _read_exact_or_tail
+       helper, which detonated at n=107)
+  J25  re-anchored on the surviving intents clause (was an equivalent mutant)
+  J27  new
+  BROAD_DECLARED added; measured n>40 no longer excludes anything by itself,
+       and an UNDECLARED row above 40 now refuses certification
+
+Known harness limitations, unrepaired:
+  TIMEOUT = 1800 in sweep.py is absolute wall-clock, not relative to the host's
+  measured baseline. A control row was observed at 979.6s on this machine, so a
+  host ~2x slower can time out on a HEALTHY control and record n=0, which reads
+  as a zero. Relativise before trusting a TIMED_OUT row from slower hardware.
+
+  require_sane_baseline gates on count >= minimum, a FLOOR. A stale bundle with
+  a lower expected count therefore launches against a newer tree without
+  complaint. Verify the count equals the figure above rather than relying on the
+  gate.
