@@ -23,7 +23,8 @@ from unittest import mock
 
 import rf_capture_publication as publication
 from rf_capture_format import (
-    IQC_FRAMING_PREFIX_BYTES, IQC_MAGIC, canonical_header_bytes,
+    IQC_FRAMING_PREFIX_BYTES, IQC_MAGIC, IQC_MAX_HEADER_BYTES,
+    canonical_header_bytes,
     canonical_member_name, framing_prefix, FramingRefused,
 )
 from rf_capture_admission import PublicationFailed
@@ -39,6 +40,9 @@ from rf_capture_publication import (
     PUBLICATION_RESULT_UNCONSTRUCTIBLE, PUBLICATION_TRAILING_BYTES,
 )
 
+MODULE_STEM = "rf_capture_publication"
+MODULE_NAME = MODULE_STEM + ".py"
+_REAL_FSTAT = os.fstat
 _PAYLOAD_BYTES = 256
 TEMPORARY = "publication.tmp"
 
@@ -191,6 +195,31 @@ class Durability(PublicationFixture):
             self.publish()
         self.assertLess(order.index("unlink"), order.index("fsync-dir"))
 
+    def test_no_directory_fsync_precedes_the_unlink(self):
+        """"None before" is a different property from "one after".
+
+        Removing the directory `fsync` entirely leaves this test GREEN --- there
+        is then no fsync to precede anything --- so the control that moves the
+        fsync earlier gets a witness the control that deletes it cannot take.
+        """
+        before_unlink = []
+        real_fsync, real_unlink = os.fsync, os.unlink
+        seen = []
+
+        def watched_fsync(fd):
+            if stat.S_ISDIR(os.fstat(fd).st_mode):
+                seen.append("dir")
+            return real_fsync(fd)
+
+        def watched_unlink(*args, **kwargs):
+            before_unlink.append(len(seen))
+            return real_unlink(*args, **kwargs)
+
+        with mock.patch.object(os, "fsync", watched_fsync), \
+             mock.patch.object(os, "unlink", watched_unlink):
+            self.publish()
+        self.assertEqual(before_unlink, [0])
+
     def test_a_file_fsync_failure_publishes_no_final_name(self):
         real_fsync = os.fsync
 
@@ -291,6 +320,23 @@ class UnlinkFailureStillPublishes(PublicationFixture):
         b = os.stat(os.path.join(self.dir_path, self.final_name))
         self.assertEqual((a.st_dev, a.st_ino), (b.st_dev, b.st_ino))
 
+    def test_an_unlink_failure_does_not_escape_as_an_oserror(self):
+        """K22's own witness, and the reason its containment of the accounting
+        control is strict rather than equal.
+
+        A control that re-raises the `unlink` failure lets an `OSError` out. A
+        control that mis-accounts the retained name raises `PublicationFailed`
+        instead, so this test cannot see it --- which is the separation the two
+        controls needed.
+        """
+        with self._unlink_fails():
+            try:
+                self.publish()
+            except OSError as exc:
+                self.fail(f"an unlink failure escaped as OSError: {exc}")
+            except PublicationFailed:
+                pass          # a different defect; not this property
+
     def test_the_directory_is_still_fsynced(self):
         """An `unlink` failure must not skip step 7."""
         seen = []
@@ -386,6 +432,70 @@ class Readback(PublicationFixture):
         self.assertEqual(caught.exception.code,
                          PUBLICATION_FINAL_NAME_COUNT_WRONG)
 
+    def test_a_member_on_another_device_is_refused(self):
+        """Every ordinary caller passes the member's OWN device, so the
+        comparison can never fail through the primitive and the check went
+        unexercised. Called directly with a device it is not on, which is how
+        the namespace's own file checks are exercised."""
+        self.publish()
+        fd = os.open(self.final_name, os.O_RDONLY, dir_fd=self.dir_fd)
+        try:
+            elsewhere = _REAL_FSTAT(fd).st_dev + 1
+            with self.assertRaises(PublicationFailed) as caught:
+                publication._check_member_object(fd, elsewhere,
+                                                 expected_names=1)
+        finally:
+            os.close(fd)
+        self.assertEqual(caught.exception.code,
+                         PUBLICATION_FINAL_OBJECT_REFUSED)
+
+    def test_a_member_owned_by_another_uid_is_refused(self):
+        """A second owner check, distinct from the directory's. Only the
+        directory had a witness, so removing this one was invisible."""
+        self.publish()
+        foreign = os.getuid() + 1
+
+        def lying_fstat(descriptor):
+            fields = list(_REAL_FSTAT(descriptor))
+            fields[4] = foreign                        # st_uid
+            return os.stat_result(tuple(fields))
+
+        fd = os.open(self.final_name, os.O_RDONLY, dir_fd=self.dir_fd)
+        try:
+            device = _REAL_FSTAT(fd).st_dev
+            with mock.patch.object(publication.os, "fstat", lying_fstat):
+                with self.assertRaises(PublicationFailed) as caught:
+                    publication._check_member_object(fd, device,
+                                                     expected_names=1)
+        finally:
+            os.close(fd)
+        self.assertEqual(caught.exception.code,
+                         PUBLICATION_FINAL_OBJECT_REFUSED)
+
+    def test_a_member_that_is_not_a_regular_file_is_refused(self):
+        """The check the sweep could not see: no control and no test, so nothing
+        would have reported its removal.
+
+        A FIFO, not a directory. A directory is mode 0700, so with the
+        regular-file check removed the MODE check fires and carries the same
+        refusal code --- the stimulus has to pass every other check so that only
+        this one can answer. A 0600 FIFO owned by this process on the corpus's
+        own device, with one name, does.
+        """
+        os.mkfifo("pipe", 0o600, dir_fd=self.dir_fd)
+        fd = os.open("pipe", os.O_RDONLY | os.O_NONBLOCK, dir_fd=self.dir_fd)
+        try:
+            info = _REAL_FSTAT(fd)
+            self.assertEqual(stat.S_IMODE(info.st_mode), 0o600)
+            self.assertEqual(info.st_nlink, 1)
+            with self.assertRaises(PublicationFailed) as caught:
+                publication._check_member_object(fd, info.st_dev,
+                                                 expected_names=1)
+        finally:
+            os.close(fd)
+        self.assertEqual(caught.exception.code,
+                         PUBLICATION_FINAL_OBJECT_REFUSED)
+
     def test_a_fragmented_read_is_accumulated(self):
         """`os.read` may return fewer bytes than asked for. A bare read here
         would disagree with every digest over an intact file."""
@@ -429,9 +539,19 @@ class FramingAndLength(PublicationFixture):
         self.assertEqual(caught.exception.code, PUBLICATION_FRAMING_UNREADABLE)
 
     def test_an_overlong_header_length_refuses(self):
-        damaged = (self.image[:len(IQC_MAGIC) + 2]
-                   + struct.pack("<I", 1 << 20)
-                   + self.image[IQC_FRAMING_PREFIX_BYTES:])
+        """The stimulus isolates the BOUND, not the shortfall.
+
+        A 1 MiB declared header over a 313-byte file trips the bound and then,
+        with the bound removed, trips "shorter than the header it declares" ---
+        which carries the SAME refusal code, so the mutation was invisible. The
+        header length here is one byte over the maximum and the file is padded
+        past it, so only the bound can answer.
+        """
+        over = IQC_MAX_HEADER_BYTES + 1
+        damaged = (self.image[:len(IQC_MAGIC) + 2] + struct.pack("<I", over)
+                   + self.header_bytes
+                   + bytes(over - len(self.header_bytes)) + self.payload)
+        self.assertGreater(len(damaged), IQC_FRAMING_PREFIX_BYTES + over)
         with self.assertRaises(PublicationFailed) as caught:
             self._republish(damaged)
         self.assertEqual(caught.exception.code, PUBLICATION_FRAMING_UNREADABLE)
@@ -568,18 +688,40 @@ class Vocabulary(unittest.TestCase):
         for code in DURABILITY_FAILURES:
             self.assertEqual(getattr(publication, code), code)
 
-    def test_the_module_is_not_wired_to_any_typed_entrypoint(self):
-        """3c-core's boundary, asserted rather than trusted: admission must not
-        import or call the publisher until journal sequencing exists."""
+    def test_no_production_module_is_wired_to_the_publisher(self):
+        """3c-core's boundary, over EVERY production module rather than one.
+
+        The first version parsed `rf_capture_admission.py` alone --- one file of
+        163 --- so any other production module could have wired the publisher
+        without moving this test. That is the same defect as a checker closing
+        over one slice's identifiers instead of deriving them: the scope has to
+        come from the tree, not from a name typed here.
+
+        The publisher itself is excluded, and nothing else is.
+        """
         import ast
-        tree = ast.parse(pathlib.Path("rf_capture_admission.py").read_text())
-        imported = set()
-        for node in ast.walk(tree):
-            if isinstance(node, ast.ImportFrom) and node.module:
-                imported.add(node.module)
-            elif isinstance(node, ast.Import):
-                imported |= {a.name for a in node.names}
-        self.assertNotIn("rf_capture_publication", imported)
+        offenders = {}
+        for path in sorted(pathlib.Path(".").glob("*.py")):
+            if path.name.startswith("test_") or path.name == MODULE_NAME:
+                continue
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            imported = set()
+            for node in ast.walk(tree):
+                if isinstance(node, ast.ImportFrom) and node.module:
+                    imported.add(node.module)
+                elif isinstance(node, ast.Import):
+                    imported |= {a.name for a in node.names}
+            if MODULE_STEM in imported:
+                offenders[path.name] = sorted(imported & {MODULE_STEM})
+        self.assertEqual(offenders, {})
+
+    def test_the_boundary_scan_reads_every_production_module(self):
+        """The breadth itself, witnessed. A scan that silently narrowed back to
+        one file would still pass the test above while a second module wired the
+        publisher, so the count is asserted separately."""
+        scanned = [p for p in pathlib.Path(".").glob("*.py")
+                   if not p.name.startswith("test_") and p.name != MODULE_NAME]
+        self.assertGreater(len(scanned), 100)
 
 
 if __name__ == "__main__":                            # pragma: no cover
