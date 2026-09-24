@@ -42,6 +42,17 @@ from rf_capture_publication import (
 
 MODULE_STEM = "rf_capture_publication"
 MODULE_NAME = MODULE_STEM + ".py"
+
+
+def _production_modules():
+    """The boundary scan's scope, derived from the tree rather than named.
+
+    Both boundary tests read it: the prohibition walks it, and the breadth
+    test asserts its size. A scan that silently narrowed back to one file
+    therefore fails the breadth test rather than passing unnoticed.
+    """
+    return sorted(p for p in pathlib.Path(".").glob("*.py")
+                  if not p.name.startswith("test_") and p.name != MODULE_NAME)
 _REAL_FSTAT = os.fstat
 _PAYLOAD_BYTES = 256
 TEMPORARY = "publication.tmp"
@@ -701,9 +712,7 @@ class Vocabulary(unittest.TestCase):
         """
         import ast
         offenders = {}
-        for path in sorted(pathlib.Path(".").glob("*.py")):
-            if path.name.startswith("test_") or path.name == MODULE_NAME:
-                continue
+        for path in _production_modules():
             tree = ast.parse(path.read_text(encoding="utf-8"))
             imported = set()
             for node in ast.walk(tree):
@@ -719,9 +728,7 @@ class Vocabulary(unittest.TestCase):
         """The breadth itself, witnessed. A scan that silently narrowed back to
         one file would still pass the test above while a second module wired the
         publisher, so the count is asserted separately."""
-        scanned = [p for p in pathlib.Path(".").glob("*.py")
-                   if not p.name.startswith("test_") and p.name != MODULE_NAME]
-        self.assertGreater(len(scanned), 100)
+        self.assertGreater(len(_production_modules()), 100)
 
 
 if __name__ == "__main__":                            # pragma: no cover
