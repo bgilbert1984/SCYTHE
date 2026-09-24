@@ -4531,6 +4531,115 @@ decisions, not by the text it was recording.
 only when admission and the persistence boundary land together. An accepted
 document drains nothing.
 
+#### Amendment: the persistence boundary splits into 3c-core and 3c-wire
+
+*Proposed and accepted 2026-09-24 against `4bdc3b1`, after §5.26 3b-core
+certified at `a1cffd8` --- 27 controls, every one discriminating, reproduced row
+for row on two independent hosts. Three behavioural decisions the accepted text
+does not settle are recorded here rather than made silently while implementing,
+and the persistence boundary becomes two slices instead of one.*
+
+**The split.**
+
+| slice | what it owns |
+| --- | --- |
+| 3c-core | the private steps 5-8 primitive: the file `fsync`; `link` without replacement; the temporary `unlink` attempt; the directory `fsync` after both names settle; the fresh final-name readback; digest, length and filename reconciliation; and the restricted verified-final mint. No entrypoint wiring, no header or clock change, no journal write |
+| 3c-wire | the clock vocabulary moved to `rf_signal_chain_identity`; `CorpusOwnershipScope`'s internally acquired clock; typed `InstrumentChainEnvelope` and `CapturePlanDeclaration` objects bound; `corpus_clock_authority` declared by `_corpus_ownership_declares` **alone**, taking the required header fields **32 -> 33**; the typed entrypoints changing from `(lock, now, ...)` to `(scope, ...)`. Still no production publication path independent of 3d |
+| 3d | durable intent before creation; 3c's publication; `commit` only after the verified-final mint; counting from commits; the runtime and recovery `abandon` actions; sequence and predecessor state; the single unavoidable membership path; and the entry 14 drain |
+
+**The split is cleaner than one slice only under one hard condition: 3c-core
+remains an unreachable private primitive.** Tests may exercise it directly. It
+must **not** be attached to the existing entrypoints before journal sequencing
+exists, because a reachable publisher without intent and commit manufactures
+**verified-but-unaccounted finals** --- which is precisely the state the journal
+exists to classify rather than to normalise. A slice that relaxes this has
+merged 3c and 3d without saying so.
+
+**`PENDING_AMENDMENTS` entry 14 remains open through both**, and drains only
+with 3d, when admission, durable publication, journal intent/commit and
+membership accounting become one unavoidable path. Neither 3c slice may claim
+it. Admission without a writer refuses nothing that could otherwise happen; a
+writer without membership accounting is a second way to say the same thing.
+
+##### 1. The successful final `link` is the point of no abandon
+
+`link` refuses with `EEXIST` and `unlink` removes a **name**, not an inode, so
+once the final name exists the member is reachable and its bytes are the ones
+step 5 made durable. After that point:
+
+- no runtime path may classify the publication as abandoned;
+- no path removes or replaces the final name;
+- an `unlink` failure does **not** stop the directory `fsync` or the final-name
+  readback;
+- if the final verifies, publication **succeeds**, with a retained temporary
+  residue;
+- the retained temporary is not a second member. It is another name for the
+  member's inode, and it is preserved for the separately governed deletion
+  path rather than cleaned up here;
+- if the directory `fsync` or the readback fails, **no verified-final result is
+  minted**, and 3d's recovery later sees `intent + final`.
+
+Treating a post-`link` `unlink` failure as a publication failure would discard a
+verifiable member. That is the same error as a runtime abandon trigger drawn too
+widely, which the accepted table already resolves by completing the commit.
+
+Surfacing the incomplete cleanup without turning it into a failure needs exactly
+one additional bounded fact on the result:
+
+```text
+temporary_name_retained: bool
+```
+
+##### 2. Step 8 reads back through a fresh open of the final name
+
+Verifying the descriptor already held proves the bytes were written. It proves
+nothing about **which name** they are reachable under, and filename agreement is
+required. So the readback must:
+
+- open the final **relative** name afresh, through the held namespace
+  descriptor;
+- use `O_NOFOLLOW`;
+- perform the accepted opened-object checks on that descriptor;
+- reparse the bytes reached through that name;
+- recompute `payload_sha256` **and** `file_sha256`;
+- verify the final filename equals the canonical name derived from
+  `file_sha256`;
+- verify the declared payload length against both the parsed framing and the
+  actual payload.
+
+The final name is therefore derived from `file_sha256`, which is knowable only
+after step 4's bytes exist --- so naming is 3c's, not admission's, and
+`create_target` continues to name only the temporary.
+
+**Reading through the already-held temporary descriptor cannot establish
+filename agreement, and is a negative control**, not an alternative
+implementation.
+
+##### 3. The verified-final result is mint-key constructed and carries no capability
+
+The mint-key construction `AttestedIQWindowScope` and `CorpusOwnershipScope`
+already use is the shape: an object only the verification step can produce. Its
+public payload is exactly these immutable, bounded, non-capability facts:
+
+```text
+final_name                  # relative basename only
+payload_sha256
+file_sha256
+declared_payload_bytes
+temporary_name_retained
+```
+
+It carries no absolute path, no directory descriptor, no file descriptor, no
+header mapping, no caller-supplied timestamp and no mutable container. Its
+private state may bind the verification operation and the expected intent
+identity for 3d to consume, but **no accessor exposes that state**, and the
+result grants no filesystem authority of its own. A path or a descriptor on this
+object would be a capability outliving the scope, which §5.24 spent a slice
+establishing is what a returned `memoryview` already was.
+
+**Drains:** nothing. An accepted document drains nothing, and entry 14 is
+untouched by this one.
+
 #### Ring-lifetime identity
 
 `ring_lifetime_id` tells a reader that two sample-index domains are
