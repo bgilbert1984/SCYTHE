@@ -7,20 +7,20 @@ PASS  S8g-ambiguous-anchor           S8g-ambiguous-anchor: its anchor in rf_corp
 PASS  S8e-zeros-are-not-duplicates   pairs=[('Z3', 'Z4')]
 checkpoint 4bdc3b1bf8e2440e5dd786ecdfe639743d1f344e
 
-PASS  S1-applies-once        expected TEST_FAILURE               got TEST_FAILURE  (119 tests, exit 1, 94.6s)
+PASS  S1-applies-once        expected TEST_FAILURE               got TEST_FAILURE  (119 tests, exit 1, 100.4s)
 PASS  S2-missing-anchor      expected MUTATION_DID_NOT_APPLY     got MUTATION_DID_NOT_APPLY  (None tests, exit None, 0.0s)
 PASS  S3-ambiguous-anchor    expected MUTATION_AMBIGUOUS         got MUTATION_AMBIGUOUS  (None tests, exit None, 0.0s)
 PASS  S4-process-dies        expected CRASHED_BEFORE_COLLECTION  got CRASHED_BEFORE_COLLECTION  (None tests, exit 3, 0.3s)
-PASS  S4b-import-detonation  expected TEST_FAILURE               got TEST_FAILURE  (2032 tests, exit 1, 99.5s)
-PASS  S5-timeout             expected TIMED_OUT                  got TIMED_OUT  (None tests, exit None, 15.1s)
-PASS  S6-green               expected ZERO_DISCRIMINATION        got ZERO_DISCRIMINATION  (119 tests, exit 0, 92.8s)
-PASS  S7-zero-tests          expected HARNESS_ERROR              got HARNESS_ERROR  (0 tests, exit 5, 1.4s)
-PASS  S7b-discover-empty     expected HARNESS_ERROR              got HARNESS_ERROR  (0 tests, exit 5, 0.9s)
+PASS  S4b-import-detonation  expected TEST_FAILURE               got TEST_FAILURE  (2032 tests, exit 1, 110.8s)
+PASS  S5-timeout             expected TIMED_OUT                  got TIMED_OUT  (None tests, exit None, 15.4s)
+PASS  S6-green               expected ZERO_DISCRIMINATION        got ZERO_DISCRIMINATION  (119 tests, exit 0, 99.7s)
+PASS  S7-zero-tests          expected HARNESS_ERROR              got HARNESS_ERROR  (0 tests, exit 5, 0.4s)
+PASS  S7b-discover-empty     expected HARNESS_ERROR              got HARNESS_ERROR  (0 tests, exit 5, 0.4s)
 PASS  S8-timeout-floor       baseline 60s -> 1800s (floor 1800s)
 PASS  S8-timeout-scales      baseline 400s -> 4000s
 PASS  S8-timeout-unknown     no baseline elapsed -> floor
 PASS  S8-timeout-recorded    S5 row records timeout_s=15
-PASS  S10-gate-refuses       a failing baseline refuses and writes /tmp/tmp6l6uhstw/refused.out
+PASS  S10-gate-refuses       a failing baseline refuses and writes /tmp/tmpiijs4y6h/refused.out
 PASS  S10-gate-passes        a clean baseline above the gate passes and writes nothing
 PASS  S10-gate-generations   a clean baseline above the floor but off the expected count refuses
 
