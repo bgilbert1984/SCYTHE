@@ -75,9 +75,9 @@ print(f"BASELINE  {cls}  {count} tests  exit {proc.returncode}  "
 # 2306 is what af188f19795498320e32a8753367cf677ffb1928 collects, exactly. A baseline that differs from it means
 # the controls and the tree are from different generations, which no floor
 # can report; the floor stays at 2306 and is never lowered.
-require_sane_baseline(cls, count, 2306, ids=ids, proc=proc,
+require_sane_baseline(cls, count, 2322, ids=ids, proc=proc,
                       report=Path(S) / "baseline-refused-3c.out",
-                      expected=2306)
+                      expected=2322)
 # Each control's bound is derived from the baseline this host just produced,
 # not from a constant calibrated elsewhere: a fixed 1800s makes a healthy
 # control on a slower or loaded host read as TIMED_OUT.

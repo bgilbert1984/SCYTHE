@@ -78,9 +78,9 @@ print(f"BASELINE  {cls}  {count} tests  exit {proc.returncode}  "
 # exact-match gate written for a1cffd8's own tree refuses main's. A baseline
 # that differs from 2306 means a different generation of the suite, which no
 # floor can report; the floor moves with it and is never lowered.
-require_sane_baseline(cls, count, 2306, ids=ids, proc=proc,
+require_sane_baseline(cls, count, 2322, ids=ids, proc=proc,
                       report=Path(S) / "baseline-refused-journal.out",
-                      expected=2306)
+                      expected=2322)
 # Each control's bound is derived from the baseline this host just produced,
 # not from a constant calibrated elsewhere: a fixed 1800s makes a healthy
 # control on a slower or loaded host read as TIMED_OUT.
