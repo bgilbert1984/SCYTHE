@@ -1,0 +1,33 @@
+--- /var/tmp/scythe-sweep/3c-run1-64f5837/harness/controls_3c.py	2026-09-25 03:46:12.760247906 +0530
++++ controls_3c.py	2026-09-25 05:03:42.009962432 +0530
+@@ -10,6 +10,7 @@
+ P = "rf_capture_publication.py"
+ F = "rf_capture_format.py"
+ A = "rf_capture_admission.py"
++T = "test_rf_capture_publication.py"   # the boundary tests' shared scan scope
+ 
+ ACCEPTED_IN_SCOPE = ()
+ ACCEPTED_DEFERRED = {}
+@@ -149,9 +150,19 @@
+    "def _record(*, scope: Any, stratum: str, attestation: Any, lock: Any,",
+    "def _wire_the_publisher():\n    import rf_capture_publication\n\n\n"
+    "def _record(*, scope: Any, stratum: str, attestation: Any, lock: Any,")]),
+- # The scan's BREADTH, witnessed from a module that is not admission. Without
+- # this, narrowing the scan back to one file would pass every other control.
+- ("K25 a second production module is wired to the publisher", [(F,
++ # The scan's BREADTH, witnessed. Run 1 at 64f5837 measured K25 as "a second
++ # module is wired" alone, which the prohibition catches exactly as it catches
++ # K24: one witness, two controls. The breadth test is the one that must see a
++ # scan narrowed back to one file, so this control narrows the shared scope
++ # to admission alone WHILE a second module wires the publisher. The
++ # prohibition, reading the narrowed scope, stays green; only the breadth
++ # test can answer.
++ ("K25 the scan narrowed to one file while a second module is wired to the publisher", [
++  (T,
++   "    return sorted(p for p in pathlib.Path(\".\").glob(\"*.py\")\n"
++   "                  if not p.name.startswith(\"test_\") and p.name != MODULE_NAME)",
++   "    return [pathlib.Path(\"rf_capture_admission.py\")]"),
++  (F,
+    "def framing_declaration() -> Dict[str, Any]:",
+    "def _wire_the_publisher():\n    import rf_capture_publication\n\n\n"
+    "def framing_declaration() -> Dict[str, Any]:")]),
