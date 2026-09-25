@@ -554,10 +554,15 @@ class ScopeTests(NamespaceFixture):
             CorpusOwnershipScope(None)
 
     def test_the_scope_says_what_is_not_built(self):
+        """Three states, not one. "NOT BUILT" for the journal was false once
+        3b-core built and certified it, and a reader acting on that string would
+        have concluded no journal exists."""
         with self.create() as corpus:
             data = corpus.to_dict()
-        self.assertEqual(data["membership_journal"], "NOT BUILT")
-        self.assertEqual(data["publisher"], "NOT BUILT")
+        self.assertEqual(data["sequence_state"], "NOT BUILT")
+        self.assertEqual(data["membership_journal"],
+                         "CORE BUILT; RECOVERY AND SEQUENCE NOT BOUND")
+        self.assertEqual(data["publisher"], "CORE BUILT; NOT WIRED")
         self.assertFalse(data["path_exposed"])
         self.assertFalse(data["descriptor_exposed"])
 
@@ -1029,9 +1034,16 @@ class BoundedSliceTests(NamespaceFixture):
     def test_the_status_names_what_is_not_built(self):
         status = namespace_status()
         self.assertFalse(status["production_creation_authorised"])
-        for owed in ("FINAL-DEPENDENT JOURNAL RECOVERY", "PUBLISHER", "SEQUENCE STATE",
-                     "RING LIFETIME IDENTITY"):
+        for owed in ("FINAL-DEPENDENT JOURNAL RECOVERY", "SEQUENCE STATE",
+                     "PUBLISHER WIRING"):
             self.assertIn(owed, status["not_built"], owed)
+        # Both of these were owed when the list was written and are not now. The
+        # ring mints a lifetime id and attestation compares it; 3c-core built the
+        # steps 5-8 primitive. What remains owed is the publisher's WIRING, which
+        # is a narrower claim than "not built" and the only true one.
+        for built in ("RING LIFETIME IDENTITY", "PUBLISHER CORE"):
+            self.assertIn(built, status["built"], built)
+            self.assertNotIn(built, status["not_built"], built)
         # 3c-wire built these two; consumption is still not compulsion.
         self.assertIn("CLOCK PROVIDER", status["built"])
         self.assertIn("ADMISSION CONSUMPTION OF THIS SCOPE", status["built"])

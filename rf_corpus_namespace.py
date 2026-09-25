@@ -306,13 +306,22 @@ class CorpusOwnershipScope:
         caller-supplied set §5.25 refused wearing a different shape -- the same
         defect that produced §5.26, one layer further in.
 
-        What must happen instead, and is **not** built here: one scope factory
-        reconstructs the exact nominal `InstrumentChainEnvelope`,
-        `CapturePlanDeclaration`, `PromotionCorpusLock` and retention objects
-        **once**, validates them, and binds them in this opaque state. Admission
-        then consumes only that bound state. Reconstructing types
-        opportunistically inside each entrypoint would put the same fragile
-        step in several places and let them drift.
+        What happens instead is **built**: one scope factory reconstructs the
+        exact nominal `InstrumentChainEnvelope`, `CapturePlanDeclaration` and
+        `PromotionCorpusLock` **once**, validates them, and binds them in this
+        opaque state (§5.27); admission consumes only that bound state, through
+        `admit_window` rather than through an accessor (3c-wire). Reconstructing
+        types opportunistically inside each entrypoint would put the same
+        fragile step in several places and let them drift.
+
+        **Retention is not among them, and is not owed.** An earlier revision of
+        this docstring listed "retention objects" beside the three. No accepted
+        clause requires a reconstructed `CapturedCorpusRetention`: the policy's
+        one fact is an absolute deadline, it is stored in the manifest body as
+        `delete_not_after`, and `_corpus_ownership_declares` carries it into the
+        header from there. A typed object rebuilt around a float the body
+        already holds would be a second spelling of one fact. The sentence was
+        wrong about the three being unbuilt, and wrong to name a fourth.
         """
         return dict(self._live().body)
 
@@ -445,9 +454,12 @@ class CorpusOwnershipScope:
                 or state.capture_plan.spur_allocation is None
                 else len(state.capture_plan.spur_allocation.eligible_trials)),
             "corpus_clock_authority": state.clock_authority,
+            # Three different states, which one string flattened into a
+            # falsehood. A reader acting on "NOT BUILT" for the journal would
+            # conclude no journal exists; 3b-core built and certified one.
             "sequence_state": "NOT BUILT",
-            "membership_journal": "NOT BUILT",
-            "publisher": "NOT BUILT",
+            "membership_journal": "CORE BUILT; RECOVERY AND SEQUENCE NOT BOUND",
+            "publisher": "CORE BUILT; NOT WIRED",
         }
 
     def __repr__(self) -> str:
@@ -954,9 +966,16 @@ def namespace_status() -> Dict[str, Any]:
                   "CORPUS CREATION", "CORPUS REOPENING",
                   "TYPED RECONSTRUCTION AND OPAQUE BINDING",
                   "MEMBERSHIP JOURNAL CORE",
-                  "CLOCK PROVIDER", "ADMISSION CONSUMPTION OF THIS SCOPE"],
-        "not_built": ["FINAL-DEPENDENT JOURNAL RECOVERY", "SEQUENCE STATE", "PUBLISHER",
-                      "RING LIFETIME IDENTITY"],
+                  "CLOCK PROVIDER", "ADMISSION CONSUMPTION OF THIS SCOPE",
+                  "RING LIFETIME IDENTITY", "PUBLISHER CORE"],
+        # "PUBLISHER" and "RING LIFETIME IDENTITY" were both owed when this list
+        # was written and are not now: the ring mints a lifetime id and
+        # attestation compares it, and 3c-core built the steps 5-8 primitive.
+        # What remains owed of the publisher is its WIRING, which the accepted
+        # sequence prohibits until 3d -- a narrower claim than "not built", and
+        # the only one that is true.
+        "not_built": ["FINAL-DEPENDENT JOURNAL RECOVERY", "SEQUENCE STATE",
+                      "PUBLISHER WIRING"],
         "clock_authorities": list(CLOCK_AUTHORITIES),
         # 3c-wire: admission consumes this scope, through `admit_window`. That
         # is consumption, not compulsion: no production path is yet obliged
