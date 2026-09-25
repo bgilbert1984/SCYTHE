@@ -75,7 +75,9 @@ from rf_promotion_geometry import (
     PROMOTION_WINDOW_OVERLAP,
     PROMOTION_WINDOW_SAMPLES,
 )
-from rf_signal_chain_identity import UNDECLARED
+from rf_signal_chain_identity import (
+    CLOCK_AUTHORITIES, CLOCK_AUTHORITY_POSIX_REALTIME, UNDECLARED,
+)
 
 
 SCHEMA = "scythe.rf-iq-ring.v1"
@@ -298,13 +300,12 @@ ALLOWED_PROCESS_ROLES: Tuple[str, ...] = ("", "orchestrator")
 # nothing recorded it. A capture header that carried the times without naming
 # their source would be asserting a quality it never established.
 #
-# `POSIX_REALTIME` is what `time.time` reads. It is named rather than praised:
-# it is settable, it is not monotonic, and nothing here has disciplined it
-# against a reference. A ring handed some other `now` and not told what it is
-# records `UNDECLARED` -- the named absence, never a guess -- and the header
-# carries that rather than the default it would have been convenient to assume.
-CLOCK_AUTHORITY_POSIX_REALTIME = "POSIX_REALTIME"
-CLOCK_AUTHORITIES: Tuple[str, ...] = (CLOCK_AUTHORITY_POSIX_REALTIME, UNDECLARED)
+# 3c-wire: the vocabulary itself -- `CLOCK_AUTHORITY_POSIX_REALTIME` and
+# `CLOCK_AUTHORITIES` -- is declared once in `rf_signal_chain_identity` and
+# imported above, because the corpus ownership scope names its own clock in
+# the same words. The derivation stays here: exactly `time.time` is
+# `POSIX_REALTIME`, and a ring handed some other `now` and not told what it is
+# records `UNDECLARED` -- the named absence, never a guess.
 
 
 def _window_digest(signal_chain_hash: str, configuration_epoch: int,

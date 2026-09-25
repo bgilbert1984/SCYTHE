@@ -12,7 +12,11 @@ a caller's choice.
 **This slice is bounded.** §5.26 was accepted whole; the operator authorised
 corpus creation and the manifest. Not here, and refused rather than omitted
 where a caller could reach for them: the membership journal, the publisher,
-§5.20 steps 3-8, `ring_lifetime_id`, and the rewiring of §5.25's entrypoints.
+§5.20 steps 3-8 and `ring_lifetime_id`. 3c-wire rewired §5.25's entrypoints
+onto this scope: the scope acquires its clock internally when it opens, names
+it as `corpus_clock_authority`, and answers admission's question through one
+action, `admit_window`, while ownership is held. Nothing is yet compelled to
+pass through it, so entry 14 stays open.
 
 **No production corpus is creatable by this code.** §5.26's acceptance
 authorises no production corpus creation, so `create_corpus_namespace` refuses
@@ -32,7 +36,9 @@ import errno
 import fcntl
 import os
 import stat
-from typing import Any, Dict, Optional, Tuple
+import time
+from dataclasses import dataclass
+from typing import Any, Callable, Dict, Optional, Tuple
 
 from rf_corpus_manifest import (
     IQM_FRAMING_PREFIX_BYTES, IQM_MAX_BODY_BYTES, MANIFEST_ALREADY_PRESENT,
@@ -54,6 +60,9 @@ from rf_membership_journal import (
     journal_declaration, read_membership_journal,
 )
 from rf_promotion_envelope import declaration_digest
+from rf_signal_chain_identity import (
+    CLOCK_AUTHORITIES, CLOCK_AUTHORITY_POSIX_REALTIME, UNDECLARED,
+)
 from rf_validation_manifest import PromotionCorpusLock, STRATA_DEFINITION_REVISION
 
 SCHEMA = "scythe.rf-corpus-namespace.v1"
@@ -175,22 +184,64 @@ class _ScopeState:
     """Held by the scope and reachable through no public attribute."""
 
     __slots__ = ("dir_fd", "device", "body", "manifest_sha256", "path",
-                 "released", "envelope", "capture_plan", "lock")
+                 "released", "envelope", "capture_plan", "lock",
+                 "clock", "clock_authority")
 
     def __init__(self, dir_fd, device, body, digest, path,
-                 envelope=None, capture_plan=None, lock=None) -> None:
+                 envelope=None, capture_plan=None, lock=None,
+                 clock: Callable[[], float] = time.time) -> None:
         self.dir_fd = dir_fd
         self.device = device
         self.body = body
         self.manifest_sha256 = digest
         self.path = path
         self.released = False
+        # 3c-wire: the clock the scope acquired when it opened, and its named
+        # authority, derived from the callable actually installed. Production
+        # passes no clock; only the test factory injects one.
+        self.clock = clock
+        self.clock_authority = _clock_authority_of(clock)
         # The exact nominal objects, reconstructed once by the factory. §5.27:
         # admission must consume only this bound state, never a mapping and
         # never a reconstruction it performed itself.
         self.envelope = envelope
         self.capture_plan = capture_plan
         self.lock = lock
+
+
+def _clock_authority_of(clock: Any) -> str:
+    """Exactly `time.time` is `POSIX_REALTIME`; anything else is `UNDECLARED`.
+
+    Identity, not behaviour: a wrapper that calls `time.time` reads the same
+    clock and is still `UNDECLARED`, because nothing here can tell it from a
+    wrapper that does not. Authority is never inferred from equivalence.
+    """
+    return CLOCK_AUTHORITY_POSIX_REALTIME if clock is time.time else UNDECLARED
+
+
+@dataclass(frozen=True)
+class CorpusAdmissionTerms:
+    """What the ownership scope tells admission, and nothing more.
+
+    The answer to one action, taken while ownership is held: bounded,
+    immutable, non-capability facts. Strings, floats and one boolean. No lock,
+    no envelope, no plan, no descriptor and no path -- a caller holding this
+    holds comparison results, not the authority that produced them, which is
+    the same construction as the verified-final result and for the same
+    reason. `now` is read from the scope's own clock, so a production caller
+    supplies no timestamp.
+    """
+
+    corpus_id: str
+    opened_at: float
+    delete_not_after: float
+    configuration_digest: str
+    envelope_digest: str
+    capture_plan_digest: str
+    strata_definition_revision: str
+    corpus_clock_authority: str
+    now: float
+    chain_admitted: bool
 
 
 class CorpusOwnershipScope:
@@ -203,12 +254,12 @@ class CorpusOwnershipScope:
     There is no public accessor for either, and the static call-site check
     refuses a production reference to the private one.
 
-    **What it does not yet carry**: per-stratum sequence state, the membership
-    journal, a clock provider and typed `InstrumentChainEnvelope` /
-    `CapturePlanDeclaration` objects. This slice verifies the stored
-    declarations by **recomputing their digests from the stored form**; turning
-    them back into objects is owed by the slice that rewires admission, and is
-    refused here rather than half-done.
+    **What it does not yet carry**: per-stratum sequence state and the
+    journal's intent, commit and abandon acts, which are 3d's. The typed
+    `InstrumentChainEnvelope` / `CapturePlanDeclaration` / `PromotionCorpusLock`
+    objects are reconstructed once by the factory and bound here (§5.27); the
+    clock is acquired internally when the scope opens (3c-wire); and admission
+    consumes both through `admit_window`, an action rather than an accessor.
     """
 
     __slots__ = ("_state",)
@@ -306,6 +357,48 @@ class CorpusOwnershipScope:
     # Entry 16's precedent applies unchanged: a method nobody calls is deleted
     # rather than rehabilitated.
 
+    @property
+    def corpus_clock_authority(self) -> str:
+        """Which clock this scope acquired when it opened. §5.26 point 4.
+
+        A property of the ownership scope, not of any window: the ring names
+        its own clock for the capture times, and one field declared by two
+        authorities is what stops `_merge` refusing a field claimed twice.
+        """
+        return self._live().clock_authority
+
+    def admit_window(self, *, signal_chain_hash: str) -> CorpusAdmissionTerms:
+        """The admission action. §5.25's gate, answered while ownership is held.
+
+        Admission asks the scope whether the **attested** chain hash is a
+        declared member of the frozen envelope, and receives the corpus terms
+        the header binds -- as bounded facts, never as the objects. The caller
+        supplies neither the answer nor the set the answer is drawn from: the
+        envelope consulted is the one this factory reconstructed and verified
+        against the manifest's frozen digest, and nothing a caller passes can
+        substitute for it.
+
+        An action rather than an accessor because §5.24 and §5.27 both found
+        that a returned authority object outlives the scope that vouched for
+        it. Every call re-establishes that the namespace is still held.
+        """
+        state = self._live()
+        chain = str(signal_chain_hash)
+        lock = state.lock
+        return CorpusAdmissionTerms(
+            corpus_id=str(state.body["corpus_id"]),
+            opened_at=float(state.body["opened_at"]),
+            delete_not_after=float(state.body["delete_not_after"]),
+            configuration_digest=str(lock.configuration_digest),
+            envelope_digest=str(lock.envelope_digest),
+            capture_plan_digest=str(lock.capture_plan_digest),
+            strata_definition_revision=str(
+                state.body["strata_definition_revision"]),
+            corpus_clock_authority=state.clock_authority,
+            now=float(state.clock()),
+            chain_admitted=bool(state.envelope.admits(chain)),
+        )
+
     def release(self) -> None:
         state = self._state
         if state is None or state.released:
@@ -351,6 +444,7 @@ class CorpusOwnershipScope:
                 0 if state.capture_plan is None
                 or state.capture_plan.spur_allocation is None
                 else len(state.capture_plan.spur_allocation.eligible_trials)),
+            "corpus_clock_authority": state.clock_authority,
             "sequence_state": "NOT BUILT",
             "membership_journal": "NOT BUILT",
             "publisher": "NOT BUILT",
@@ -647,6 +741,11 @@ def create_corpus_namespace(*, corpus_id: str, lock: Any, retention: Any,
                             ) -> CorpusOwnershipScope:
     """Open a corpus for the first time. A **new, empty** namespace only.
 
+    The scope acquires its clock **internally**: `time.time`, and nothing a
+    caller passes. Only `_create_corpus_namespace_with_clock`, the test
+    factory, accepts an injected one, so the seam sits at the boundary rather
+    than on every write, and a production caller cannot reach it.
+
     §5.26's sequence, in order::
 
         resolve -> create the directory 0700 -> hold exclusively
@@ -659,6 +758,27 @@ def create_corpus_namespace(*, corpus_id: str, lock: Any, retention: Any,
     whose terms have never been shown to parse, and every later act rests on
     them.
     """
+    return _create(corpus_id=corpus_id, lock=lock, retention=retention,
+                   root=root, clock=time.time)
+
+
+def _create_corpus_namespace_with_clock(*, corpus_id: str, lock: Any,
+                                        retention: Any, root: Optional[str],
+                                        clock: Callable[[], float]
+                                        ) -> CorpusOwnershipScope:
+    """**The test factory.** Creation with an injected clock, and nothing else.
+
+    Restricted: a production reference to this name is refused by the static
+    call-site check, so production code obtains its clock only from
+    `create_corpus_namespace` and reads `POSIX_REALTIME`. A scope minted here
+    names its clock `UNDECLARED` unless the callable is exactly `time.time`.
+    """
+    return _create(corpus_id=corpus_id, lock=lock, retention=retention,
+                   root=root, clock=clock)
+
+
+def _create(*, corpus_id: str, lock: Any, retention: Any, root: Optional[str],
+            clock: Callable[[], float]) -> CorpusOwnershipScope:
     if root is None:
         raise NamespaceRefused(
             NAMESPACE_PRODUCTION_NOT_AUTHORISED,
@@ -741,7 +861,8 @@ def create_corpus_namespace(*, corpus_id: str, lock: Any, retention: Any,
         rebuilt_envelope, rebuilt_plan, rebuilt_lock = _reconstruct(
             read_body, read_rows)
         state = _ScopeState(dir_fd, device, read_body, digest, path,
-                            rebuilt_envelope, rebuilt_plan, rebuilt_lock)
+                            rebuilt_envelope, rebuilt_plan, rebuilt_lock,
+                            clock=clock)
         return CorpusOwnershipScope(state, _MINT_KEY)
     except BaseException:
         os.close(dir_fd)
@@ -751,6 +872,9 @@ def create_corpus_namespace(*, corpus_id: str, lock: Any, retention: Any,
 def open_corpus_namespace(*, corpus_id: str, root: Optional[str] = None
                           ) -> CorpusOwnershipScope:
     """Reopen an existing corpus. **Requires** a manifest rather than refusing one.
+
+    Acquires its clock internally, as creation does; the test factory is
+    `_open_corpus_namespace_with_clock`.
 
     Not `create_corpus_namespace` with a flag: *"rejects a non-empty
     namespace"* is right for creation and false here, and a flag would make
@@ -762,6 +886,18 @@ def open_corpus_namespace(*, corpus_id: str, root: Optional[str] = None
     reopening over it silently would be the inert admission entry 11 was drained
     for closing.
     """
+    return _open(corpus_id=corpus_id, root=root, clock=time.time)
+
+
+def _open_corpus_namespace_with_clock(*, corpus_id: str, root: Optional[str],
+                                      clock: Callable[[], float]
+                                      ) -> CorpusOwnershipScope:
+    """**The test factory** for reopening. See `_create_corpus_namespace_with_clock`."""
+    return _open(corpus_id=corpus_id, root=root, clock=clock)
+
+
+def _open(*, corpus_id: str, root: Optional[str],
+          clock: Callable[[], float]) -> CorpusOwnershipScope:
     if root is None:
         raise NamespaceRefused(
             NAMESPACE_PRODUCTION_NOT_AUTHORISED,
@@ -797,7 +933,8 @@ def open_corpus_namespace(*, corpus_id: str, root: Optional[str] = None
                                    body["capture_plan"]["spur_allocation"])
         rebuilt_envelope, rebuilt_plan, rebuilt_lock = _reconstruct(body, rows)
         state = _ScopeState(dir_fd, device, body, digest, path,
-                            rebuilt_envelope, rebuilt_plan, rebuilt_lock)
+                            rebuilt_envelope, rebuilt_plan, rebuilt_lock,
+                            clock=clock)
         return CorpusOwnershipScope(state, _MINT_KEY)
     except BaseException:
         os.close(dir_fd)
@@ -816,15 +953,17 @@ def namespace_status() -> Dict[str, Any]:
         "built": ["THE MANIFEST", "THE ELIGIBLE-TRIAL ARTEFACT",
                   "CORPUS CREATION", "CORPUS REOPENING",
                   "TYPED RECONSTRUCTION AND OPAQUE BINDING",
-                  "MEMBERSHIP JOURNAL CORE"],
+                  "MEMBERSHIP JOURNAL CORE",
+                  "CLOCK PROVIDER", "ADMISSION CONSUMPTION OF THIS SCOPE"],
         "not_built": ["FINAL-DEPENDENT JOURNAL RECOVERY", "SEQUENCE STATE", "PUBLISHER",
-                      "RING LIFETIME IDENTITY",
-                      "ADMISSION CONSUMPTION OF THIS SCOPE", "CLOCK PROVIDER"],
-        # Stated as its own key rather than left to be read off the list
-        # above: this scope is not yet consumed by anything, so nothing is
-        # compelled to pass through it -- which is §5.26's own reason that
-        # entry 14 does not drain.
-        "consumed_by_admission": False,
+                      "RING LIFETIME IDENTITY"],
+        "clock_authorities": list(CLOCK_AUTHORITIES),
+        # 3c-wire: admission consumes this scope, through `admit_window`. That
+        # is consumption, not compulsion: no production path is yet obliged
+        # to pass through it, which is §5.26's own reason that entry 14 does
+        # not drain until 3d.
+        "consumed_by_admission": True,
+        "compelled_path_to_membership": False,
         "section_implemented": False,
         "exclusion": "FLOCK ON THE DIRECTORY DESCRIPTOR",
     }

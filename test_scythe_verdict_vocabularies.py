@@ -548,8 +548,15 @@ class DiscoveryTests(unittest.TestCase):
         strata = set(declared["CAPTURED_STRATA"])
         self.assertTrue(admission and publication and strata)
         self.assertEqual(admission & publication, set())
-        for candidate in sorted(admission | publication | strata
-                                | set(_module_tokens("rf_iq_ring")["CLOCK_AUTHORITIES"])):
+        # 3c-wire moved CLOCK_AUTHORITIES to rf_signal_chain_identity, which
+        # declares UNDECLARED as a string where the ring only imported it. The
+        # named absence is shared across vocabularies by design -- it is the
+        # identity leaf's word for a metadata omission, not a clock authority
+        # in its own right -- so the sweep covers the clock tokens proper.
+        clocks = (set(_module_tokens("rf_signal_chain_identity")["CLOCK_AUTHORITIES"])
+                  - {"UNDECLARED"})
+        self.assertTrue(clocks)
+        for candidate in sorted(admission | publication | strata | clocks):
             unjudged = [hit for hit in cross_set_collisions(candidate, self.tokens)
                         if not judged(candidate, hit)]
             self.assertEqual(unjudged, [], f"{candidate}: {unjudged}")
