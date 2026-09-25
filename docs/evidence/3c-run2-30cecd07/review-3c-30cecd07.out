@@ -1,0 +1,52 @@
+==========================================================================
+BASELINE  ZERO_DISCRIMINATION  ran=2254  failing=0  OK
+checkpoint: 30cecd07e07ffe5e12b097d01fc086fab803191d
+controls with rows: 26
+
+ID    CLASSIFICATION             n   ran    UNIQ
+--------------------------------------------------------------------------
+K1    TEST_FAILURE               3  2254       2
+K2    TEST_FAILURE              42  2254       2
+K3    TEST_FAILURE               1  2254       0
+K22   TEST_FAILURE               6  2254       0
+K4    TEST_FAILURE               4  2254       0
+K5    TEST_FAILURE               4  2254       0
+K6    TEST_FAILURE              39  2254       0
+K7    TEST_FAILURE               2  2254       0
+K8    TEST_FAILURE               1  2254       1
+K9    TEST_FAILURE               5  2254       0
+K10   TEST_FAILURE               1  2254       0
+K11   TEST_FAILURE               1  2254       0
+K12   TEST_FAILURE               1  2254       0
+K13   TEST_FAILURE               1  2254       0
+K14   TEST_FAILURE               1  2254       0
+K15   TEST_FAILURE               1  2254       0
+K16   TEST_FAILURE               1  2254       0
+K17   TEST_FAILURE               1  2254       0
+K18   TEST_FAILURE               1  2254       0
+K19   TEST_FAILURE               1  2254       0
+K20   TEST_FAILURE               1  2254       0
+K21   TEST_FAILURE               1  2254       1
+K24   TEST_FAILURE               1  2254       1
+K25   TEST_FAILURE               1  2254       1
+K26   TEST_FAILURE               1  2254       1
+K23   TEST_FAILURE               1  2254       1
+
+ZEROS                : none
+DUPLICATE SETS       : none
+NOT MEASURED         : none
+COLLECTION (modal 2254): uniform
+MEASURED OVER 40     : ['K2(n=42)']
+UNDECLARED DETONATION: none
+  DECLARED BROAD K2   n=42  step 6 IS the publication primitive: replacing link with rename removes the temporary as a side effect, so the unlink then fails, the retained-name accounting refuses, and every property established after the publish is disturbed
+      direct witness present: test_the_occupying_bytes_survive_the_refusal
+  DECLARED BROAD K6   n=39  the readback reaches the bytes through the descriptor step 3 created instead of through a fresh open of the final name, so every check downstream of the open reads a file at EOF
+      direct witness present: test_the_final_name_is_opened_afresh
+NO UNIQUE WITNESS    : among 24 narrow controls: none
+  ALLOWED  K9 subset K22 -- both mutations reach only the retained-temporary path, and K22 re-raises before the readback K9 alters, so K22's failing set strictly contains K9's
+SUPPRESSION          : none
+CLASSIFICATIONS      : {'TEST_FAILURE': 26}
+COMPLETENESS         : 26/26 (controls_3c)  missing=none  unexpected=none
+
+VERDICT: every control discriminated
+==========================================================================

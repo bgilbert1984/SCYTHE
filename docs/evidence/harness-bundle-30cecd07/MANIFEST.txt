@@ -1,0 +1,64 @@
+§5.20 / §5.26 sweep harness -- for runs AT OR AFTER 30cecd07
+
+checkpoint      30cecd07e07ffe5e12b097d01fc086fab803191d  (feat/5.20-3c-core)
+expected count  2254 tests, EXACTLY, 1 pre-existing skip
+3c controls     26  (K1..K26) in controls_3c.py
+3b controls     27  (J1..J27) in controls_journal.py, for
+                feat/5.26-journal-core-repair at a1cffd8 -- expected count 2245
+
+SWEEPS RUN ON THE DEDIROCK HOST. Its baseline is roughly 3x faster than the
+authoring host's, so that is where the K- and J-series are measured. The
+authoring host implements, runs the focused and full suites, audits the controls
+against the committed checkpoint, and pushes. It does not sweep.
+
+BROAD_DECLARED (3c)
+  K2  step 6 IS the publication primitive: replacing link with rename removes
+      the temporary as a side effect, so the unlink fails and the retained-name
+      accounting refuses.  witness test_the_occupying_bytes_survive_the_refusal
+  K6  the readback reaches the bytes through the descriptor step 3 created
+      rather than a fresh open of the final name, so every check after the open
+      reads a file at EOF.  witness test_the_final_name_is_opened_afresh
+  K2 measures n=42, ABOVE the absolute BROAD=40 tripwire. It is declared, so
+  that is reported, not refused. The threshold was NOT lowered to fit it.
+
+SUBSUMED (3c)
+  ("K9","K22") -- both reach only the retained-temporary path and K22 re-raises
+  before the readback K9 alters, so K22's set strictly contains K9's. Strict
+  rather than equal because K22 has its own witness in the escaping exception
+  TYPE. One named allowance; no general subset exemption.
+
+K25 PATCHES A TEST MODULE -- the only control here that does. It narrows the
+boundary tests' shared scope to one file while a second module wires the
+publisher, which is the only way to witness the scan's BREADTH: a production
+mutation cannot reach a scan's scope. WATCHED therefore includes
+test_rf_capture_publication.py. Read that row as evidence the two boundary tests
+are coupled, NOT as evidence about rf_capture_publication.
+
+CORRECTED SINCE THE 64f5837 BUNDLE, both raised by the dedirock review:
+  1. K25's description said "a second production module is wired". That form was
+     indistinguishable from K24 -- the prohibition catches a second module
+     exactly as it catches the first -- and run 1 failed on the duplicate pair.
+     The description and the mutation now match what it actually does.
+  2. review_sweep.py defaulted its second argument to controls527, so reviewing
+     a 3c run without it reported COMPLETENESS 26/43 and K2 as an undeclared
+     detonation -- four lines that read like real failures, from a forgotten
+     argument. FIXED STRUCTURALLY rather than documented: each runner now records
+     controls_module in its baseline row and the reviewer reads it. An explicit
+     second argument still overrides. A run older than this change takes the
+     controls527 fallback, so pass the module explicitly for those.
+
+HARNESS ACCEPTANCE
+  selftest.out is this bundle's own acceptance: 24 cases, 0 failures, run after
+  the reviewer amendment. It covers these bytes.
+
+HOST-LOCAL, CHECK BEFORE LAUNCHING
+  run_sweep_3c.py / run_sweep_journal.py
+      BUILD = Path(S) / "..."   the worktree name this host holds for the slice
+      S = os.environ.get("SCYTHE_SCRATCH", "<a session path>")
+
+DECLARED LIMITATION, UNREPAIRED
+  The control bound is max(1800s, 10 x baseline) derived from ONE baseline sample
+  taken before the controls start, so it cannot see load arriving afterwards. A
+  row at 979.6s was observed on a host whose baseline was 202.7s -- 5x, while
+  neighbours sat at 1.0-1.1x. The bound in force is recorded per row so such a
+  row can be read for what it was.
