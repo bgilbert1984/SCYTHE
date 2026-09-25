@@ -1,0 +1,54 @@
+==========================================================================
+BASELINE  ZERO_DISCRIMINATION  ran=2245  failing=0  OK
+checkpoint: a1cffd8b2bf9bcc9d9b25f79ed0c23941d0ef35e
+controls with rows: 27
+
+ID    CLASSIFICATION             n   ran    UNIQ
+--------------------------------------------------------------------------
+J1    TEST_FAILURE               2  2245       1
+J2    TEST_FAILURE               2  2245       1
+J3    TEST_FAILURE               2  2245       1
+J4    TEST_FAILURE               1  2245       1
+J5    TEST_FAILURE               2  2245       2
+J6    TEST_FAILURE               1  2245       1
+J7    TEST_FAILURE               1  2245       1
+J8    TEST_FAILURE              13  2245       2
+J9    TEST_FAILURE               1  2245       1
+J10   TEST_FAILURE               1  2245       0
+J11   TEST_FAILURE               1  2245       0
+J12   TEST_FAILURE               1  2245       0
+J13   TEST_FAILURE               1  2245       0
+J14   TEST_FAILURE               5  2245       0
+J15   TEST_FAILURE               2  2245       0
+J16   TEST_FAILURE              23  2245       1
+J17   TEST_FAILURE              22  2245       1
+J18   TEST_FAILURE               1  2245       1
+J19   TEST_FAILURE               2  2245       0
+J20   TEST_FAILURE               3  2245       0
+J21   TEST_FAILURE               1  2245       1
+J22   TEST_FAILURE               1  2245       1
+J23   TEST_FAILURE               1  2245       0
+J24   TEST_FAILURE               1  2245       0
+J25   TEST_FAILURE               2  2245       0
+J26   TEST_FAILURE               1  2245       0
+J27   TEST_FAILURE               1  2245       1
+
+ZEROS                : none
+DUPLICATE SETS       : none
+NOT MEASURED         : none
+COLLECTION (modal 2245): uniform
+MEASURED OVER 40     : none
+UNDECLARED DETONATION: none
+  DECLARED BROAD J16  n=23  framing length byte order: the uint32 prefix is written by _frame_record and read by every recovery path, so a byte order change reaches every record round-trip
+      direct witness present: test_the_length_prefix_is_little_endian_uint32
+  DECLARED BROAD J17  n=22  digest domain: the record digest is computed in _frame_record and re-checked on every read, so changing what it covers reaches every record round-trip
+      direct witness present: test_the_record_digest_is_sha256_of_the_body_alone
+  DECLARED BROAD J8   n=13  terminal schema declaration: TERMINAL_FIELDS is the field set every terminal record is built and validated against, so widening it reaches every commit, abandon and count
+      direct witness present: test_terminal_records_repeat_no_intent_binding
+NO UNIQUE WITNESS    : among 24 narrow controls: none
+SUPPRESSION          : none
+CLASSIFICATIONS      : {'TEST_FAILURE': 27}
+COMPLETENESS         : 27/27 (controls_journal)  missing=none  unexpected=none
+
+VERDICT: every control discriminated
+==========================================================================

@@ -55,6 +55,10 @@ from rf_corpus_namespace import (
     namespace_status, open_corpus_namespace, production_corpus_root,
     resolve_corpus_directory,
 )
+from rf_membership_journal import (
+    JOURNAL_NOT_FOUND, JOURNAL_REFUSALS, JournalRefused, append_intent,
+    intent_record,
+)
 import rf_eligible_trials_artefact as artefact
 from rf_eligible_trials_artefact import (
     ELIGIBLE_ARTEFACT_NOT_FOUND, ELIGIBLE_ARTEFACT_UNEXPECTED,
@@ -714,20 +718,19 @@ class DurabilityProtocolTests(NamespaceFixture):
         self.assertEqual(error.errno, errno.EIO)
 
     def test_the_directory_fsync_is_attempted_last_and_exactly_once(self):
-        """§5.27 writes the sidecar before the manifest, so two regular-file
-        syncs precede the directory sync. Dropping either one shows up here."""
+        """The sidecar, journal and manifest are durable before their names."""
         trace, _, _ = self._directory_fsync_failure()
         types = [call["type"] for call in trace.calls]
         self.assertEqual(types[-2:], ["REG", "DIR"])
         self.assertEqual(types.count("DIR"), 1)
-        self.assertEqual(types.count("REG"), 2,
-                         "the sidecar and the manifest are each synced once")
+        self.assertEqual(types.count("REG"), 3,
+                         "the sidecar, journal and manifest are each synced")
 
     def test_the_readback_does_not_run_after_a_directory_fsync_failure(self):
-        """The directory, the sidecar (created, then verified) and the
-        manifest. A fifth open would be the post-fsync readback."""
+        """The directory, sidecar create/read, journal create/read, manifest.
+        A seventh open would be the post-fsync readback."""
         _, opens, _ = self._directory_fsync_failure()
-        self.assertEqual(opens, 4,
+        self.assertEqual(opens, 6,
                          "an extra open would be the readback the failed "
                          "directory fsync must have stopped")
 
@@ -1019,7 +1022,7 @@ class BoundedSliceTests(NamespaceFixture):
     def test_the_status_names_what_is_not_built(self):
         status = namespace_status()
         self.assertFalse(status["production_creation_authorised"])
-        for owed in ("MEMBERSHIP JOURNAL", "PUBLISHER", "SEQUENCE STATE",
+        for owed in ("FINAL-DEPENDENT JOURNAL RECOVERY", "PUBLISHER", "SEQUENCE STATE",
                      "RING LIFETIME IDENTITY",
                      "ADMISSION CONSUMPTION OF THIS SCOPE"):
             self.assertIn(owed, status["not_built"], owed)
@@ -1027,16 +1030,21 @@ class BoundedSliceTests(NamespaceFixture):
         # §5.27 built it, so it is no longer owed -- and the section it belongs
         # to is still not implemented, which is a different claim.
         self.assertIn("TYPED RECONSTRUCTION AND OPAQUE BINDING", status["built"])
+        self.assertIn("MEMBERSHIP JOURNAL CORE", status["built"])
         self.assertNotIn("TYPED LOCK RECONSTRUCTION", status["not_built"])
         self.assertFalse(status["section_implemented"],
                          "§5.26 is not implemented by this sub-slice")
 
     def test_the_two_vocabularies_are_disjoint(self):
         self.assertEqual(set(NAMESPACE_REFUSALS) & set(MANIFEST_REFUSALS), set())
+        self.assertEqual(set(NAMESPACE_REFUSALS) & set(JOURNAL_REFUSALS), set())
+        self.assertEqual(set(MANIFEST_REFUSALS) & set(JOURNAL_REFUSALS), set())
         for code in NAMESPACE_REFUSALS:
             self.assertTrue(code.startswith("NAMESPACE_"), code)
         for code in MANIFEST_REFUSALS:
             self.assertTrue(code.startswith("MANIFEST_"), code)
+        for code in JOURNAL_REFUSALS:
+            self.assertTrue(code.startswith("JOURNAL_"), code)
 
     def test_the_temporary_root_is_gone_after_a_test(self):
         """The operator's condition, exercised rather than promised."""
@@ -1206,11 +1214,12 @@ class EligibleSidecarTests(NamespaceFixture):
     def _names(self):
         return sorted(os.listdir(self.path()))
 
-    def test_a_created_corpus_carries_both_declarations(self):
+    def test_a_created_corpus_carries_both_declarations_and_the_journal(self):
         with self.create():
             pass
         self.assertEqual(self._names(),
-                         [namespace.ELIGIBLE_NAME, MANIFEST_NAME])
+                         [namespace.ELIGIBLE_NAME, MANIFEST_NAME,
+                          namespace.JOURNAL_NAME])
 
     def test_the_sidecar_is_written_before_the_manifest(self):
         """Ordering read off the calls, not inferred from the outcome."""
@@ -1224,7 +1233,8 @@ class EligibleSidecarTests(NamespaceFixture):
 
         with mock.patch.object(namespace.os, "open", recording_open):
             self.create().release()
-        self.assertEqual(created, [namespace.ELIGIBLE_NAME, MANIFEST_NAME],
+        self.assertEqual(created, [namespace.ELIGIBLE_NAME,
+                                   namespace.JOURNAL_NAME, MANIFEST_NAME],
                          "the manifest must be the last creation record")
 
     def test_the_sidecar_is_read_back_before_the_manifest_is_created(self):
@@ -1344,13 +1354,14 @@ class EligibleSidecarTests(NamespaceFixture):
         with mock.patch.object(namespace.os, "fsync", trace.fsync):
             self.create().release()
         kinds = [c["type"] for c in trace.calls]
-        self.assertEqual(kinds, ["REG", "REG", "DIR"],
-                         "the directory fsync must follow both file syncs")
+        self.assertEqual(kinds, ["REG", "REG", "REG", "DIR"],
+                         "the directory fsync must follow all file syncs")
 
     def test_both_declarations_carry_5_20s_permissions(self):
         with self.create():
             pass
-        for name in (namespace.ELIGIBLE_NAME, MANIFEST_NAME):
+        for name in (namespace.ELIGIBLE_NAME, namespace.JOURNAL_NAME,
+                     MANIFEST_NAME):
             info = os.stat(os.path.join(self.path(), name))
             self.assertEqual(stat.S_IMODE(info.st_mode), CORPUS_FILE_MODE, name)
             self.assertEqual(info.st_nlink, 1, name)
@@ -1360,8 +1371,9 @@ class EligibleSidecarTests(NamespaceFixture):
         with mock.patch.object(namespace.os, "fchmod",
                                lambda fd, m: seen.append(m) or _REAL_FCHMOD(fd, m)):
             self.create().release()
-        self.assertEqual(seen, [CORPUS_FILE_MODE, CORPUS_FILE_MODE],
-                         "both files' modes are set explicitly, not left to "
+        self.assertEqual(seen, [CORPUS_FILE_MODE, CORPUS_FILE_MODE,
+                                CORPUS_FILE_MODE],
+                         "all files' modes are set explicitly, not left to "
                          "the umask")
 
     def test_a_missing_sidecar_refuses_to_reopen(self):
@@ -1371,6 +1383,39 @@ class EligibleSidecarTests(NamespaceFixture):
         with self.assertRaises(EligibleSetRefused) as caught:
             open_corpus_namespace(corpus_id="corpus-a", root=self.root)
         self.assertEqual(caught.exception.code, ELIGIBLE_ARTEFACT_NOT_FOUND)
+
+    def test_a_missing_journal_under_a_v2_manifest_refuses_to_reopen(self):
+        with self.create():
+            pass
+        os.unlink(os.path.join(self.path(), namespace.JOURNAL_NAME))
+        with self.assertRaises(JournalRefused) as caught:
+            open_corpus_namespace(corpus_id="corpus-a", root=self.root)
+        self.assertEqual(caught.exception.code, JOURNAL_NOT_FOUND)
+
+    def test_a_nonempty_journal_waits_for_final_dependent_recovery(self):
+        with self.create():
+            pass
+        dir_fd = os.open(self.path(), os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            append_intent(dir_fd, intent_record(
+                manifest_sha256="a" * 64,
+                corpus_id="corpus-a",
+                stratum="GAIN_STEPS",
+                window_id="window-a",
+                ring_lifetime_id="ring-a",
+                expected_final_filename="b" * 64 + ".iqc",
+                file_sha256="b" * 64,
+                payload_sha256="c" * 64,
+                previous_window_id=None,
+                first_sample_index=0,
+                envelope_digest="blake2s:" + "d" * 32,
+                capture_plan_digest="blake2s:" + "e" * 32,
+            ))
+        finally:
+            os.close(dir_fd)
+        with self.assertRaises(NamespaceRefused) as caught:
+            open_corpus_namespace(corpus_id="corpus-a", root=self.root)
+        self.assertEqual(caught.exception.code, NAMESPACE_RECOVERY_UNBUILT)
 
     def test_an_unaccounted_sidecar_refuses(self):
         """Reached directly: with the accepted contracts every valid corpus
@@ -1471,7 +1516,7 @@ class InterruptedCreationTests(NamespaceFixture):
         self.assertFalse(os.path.exists(os.path.join(self.path(),
                                                      MANIFEST_NAME)))
         self.assertEqual(sorted(os.listdir(self.path())),
-                         [namespace.ELIGIBLE_NAME])
+                         [namespace.ELIGIBLE_NAME, namespace.JOURNAL_NAME])
 
 
 class BoundNominalObjectTests(NamespaceFixture):

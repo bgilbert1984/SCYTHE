@@ -1,0 +1,43 @@
+§5.26 3b-core sweep bundle  --  MERGED (dedirock fold + anchor audit)
+
+checkpoint      5797b18f85c65f64dea3a1951e3246b88de49382
+branch          feat/5.26-journal-core-repair
+                (5797b18 adds only docs/evidence/...; no .py changed, so the
+                 tree the controls mutate is still a1cffd8's)
+controls        27  (J1..J27)
+expected count  2245 tests, EXACTLY, 1 pre-existing skip
+gate            require_sane_baseline(..., 2245, expected=2245) -- floor AND
+                exact match; an off-count baseline refuses as a different
+                generation, which no floor can report
+control bound   control_timeout(baseline) = max(1800s, 10 x baseline), derived
+                from the baseline THIS host produces, and recorded per row as
+                timeout_s / control_timeout_s
+BROAD_DECLARED  J8, J16, J17 -- each with a causal reason and a named direct
+                witness that must remain in its failing set
+SUBSUMED        empty; no allowances in use
+
+Folded FROM dedirock (harness-dedirock-0940.patch, 254 lines):
+  relativised control bound + per-row recording of the bound in force
+  exact expected-count assertion in the baseline gate
+  reviewer TIMED_OUT flag carrying elapsed and bound
+  selftest S8-timeout-{floor,scales,unknown,recorded} and
+           S10-gate-{refuses,passes,generations}
+
+Added HERE (the defect dedirock identified at 08:22):
+  check_mutations now reports a DEAD or AMBIGUOUS anchor PRE-FLIGHT. It
+  previously set an internal flag and continued without reporting, deferring to
+  an anchor check that only ran per control DURING the sweep -- so a stale
+  bundle spent a baseline before surfacing MUTATION_DID_NOT_APPLY, and the
+  skipped control received no identifier or SyntaxError audit either.
+  selftest S8f-dead-anchor, S8g-ambiguous-anchor.
+
+Host-local line to check before launching:
+  run_sweep_journal.py BUILD = Path(S) / "build3br" -- set this to the worktree
+  name this host actually holds for the slice branch.
+
+Remaining declared limitation:
+  The control bound derives from ONE baseline sample taken before the controls
+  start, so it does not protect against load arriving afterwards. A row at
+  979.6s was observed on a host whose baseline was 202.7s -- 5x, while
+  neighbouring rows sat at 1.0-1.1x. The bound in force is recorded per row so
+  such a row can be read for what it was.

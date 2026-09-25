@@ -1,0 +1,254 @@
+diff -ru '--exclude=__pycache__' '--exclude=results' '--exclude=*.md' '--exclude=controls_ring.py' '--exclude=run_sweep*ring.py' '--exclude=run_sweep527.py' '--exclude=recompute_suppression.py' /var/tmp/scythe-sweep/harness-as-received-0940/review_sweep.py /home/bgilbert1984/scythe-sweep-harness/review_sweep.py
+--- /var/tmp/scythe-sweep/harness-as-received-0940/review_sweep.py	2026-09-24 09:43:31.963108119 +0530
++++ /home/bgilbert1984/scythe-sweep-harness/review_sweep.py	2026-09-24 09:43:31.972108099 +0530
+@@ -57,7 +57,12 @@
+         uniq = len(sets[i] - others)
+         ran_values[i] = r["tests_ran"]
+         flag = ""
+-        if r["classification"] != "TEST_FAILURE":
++        if r["classification"] == "TIMED_OUT":
++            # an empty failing set that is NOT a zero: the control was never
++            # measured, and the bound it was held to is in the row
++            flag = "  <<< TIMED_OUT at %ss (bound %ss)" % (
++                r.get("elapsed_s"), r.get("timeout_s", "unrecorded"))
++        elif r["classification"] != "TEST_FAILURE":
+             flag = "  <<< not TEST_FAILURE"
+         elif not sets[i]:
+             flag = "  <<< ZERO"
+diff -ru '--exclude=__pycache__' '--exclude=results' '--exclude=*.md' '--exclude=controls_ring.py' '--exclude=run_sweep*ring.py' '--exclude=run_sweep527.py' '--exclude=recompute_suppression.py' /var/tmp/scythe-sweep/harness-as-received-0940/run_sweep_journal.py /home/bgilbert1984/scythe-sweep-harness/run_sweep_journal.py
+--- /var/tmp/scythe-sweep/harness-as-received-0940/run_sweep_journal.py	2026-09-24 09:43:31.964108117 +0530
++++ /home/bgilbert1984/scythe-sweep-harness/run_sweep_journal.py	2026-09-24 09:43:31.972108099 +0530
+@@ -5,7 +5,8 @@
+ sys.path.insert(0, S)
+ from sweep import (REPO, WORKTREES, PYTHON, SUITE_FULL, git, checkpoint_blobs,
+                    run_control, working_tree_hashes, classify, expand, unittest_argv,
+-                   require_sane_baseline, resolve_branch)
++                   require_sane_baseline, resolve_branch,
++                   control_timeout, TIMEOUT, TIMEOUT_FACTOR)
+ from controls_journal import (CONTROLS, INTRODUCES, ACCEPTED_IN_SCOPE,
+                            ACCEPTED_DEFERRED, check_inventory,
+                            check_mutations)
+@@ -40,7 +41,7 @@
+ # The tree whose integrity matters is the BUILD worktree: the new modules
+ # exist only on the branch, and a leak from a disposable worktree would land
+ # there rather than in main's checkout.
+-BUILD = Path(S) / "build3br"
++BUILD = Path(S) / "build3bc"   # dedirock: the worktree this host holds at a1cffd8
+ import hashlib as _h
+ def _build_hashes(paths):
+     return {p: _h.sha256((BUILD / p).read_bytes()).hexdigest() for p in paths}
+@@ -62,16 +63,28 @@
+ # skips as newly suppressed. `run_control` has always passed it; the
+ # baseline did not, which made the suppression column uninformative.
+ proc = subprocess.run(unittest_argv(PYTHON, SUITE_FULL, tree), cwd=str(tree),
+-                      capture_output=True, text=True, timeout=1800)
+-cls, count, ids = classify(proc, time.time()-t0)
++                      capture_output=True, text=True, timeout=4 * TIMEOUT)
++BASELINE_ELAPSED = round(time.time()-t0, 1)
++cls, count, ids = classify(proc, BASELINE_ELAPSED)
+ BASELINE_SKIPS = getattr(classify, "last_skipped", [])
+ subprocess.run(["git","worktree","remove","--force",str(tree)], cwd=str(REPO),
+                capture_output=True)
+ shutil.rmtree(tree, ignore_errors=True)
+ print(f"BASELINE  {cls}  {count} tests  exit {proc.returncode}  "
+-      f"{round(time.time()-t0,1)}s", flush=True)
++      f"{BASELINE_ELAPSED}s", flush=True)
++# 2245 is what a1cffd8 collects, exactly. A baseline that differs from it means
++# the controls and the tree are from different generations, which no floor
++# can report; the floor stays at 2245 and is never lowered.
+ require_sane_baseline(cls, count, 2245, ids=ids, proc=proc,
+-                      report=Path(S) / "baseline-refused-journal.out")
++                      report=Path(S) / "baseline-refused-journal.out",
++                      expected=2245)
++# Each control's bound is derived from the baseline this host just produced,
++# not from a constant calibrated elsewhere: a fixed 1800s makes a healthy
++# control on a slower or loaded host read as TIMED_OUT.
++CONTROL_TIMEOUT = control_timeout(BASELINE_ELAPSED)
++print(f"TIMEOUT   controls bounded at {CONTROL_TIMEOUT}s  "
++      f"(floor {TIMEOUT}s, {TIMEOUT_FACTOR} x baseline {BASELINE_ELAPSED}s)",
++      flush=True)
+ BASELINE_COUNT = count
+ with out.open("a") as fh:
+     fh.write(json.dumps({"control":"BASELINE","classification":cls,
+@@ -79,10 +92,12 @@
+                          "exit_code":proc.returncode,"failing":ids,
+                          # so suppression is computable from the file alone,
+                          # without the runner's in-memory state
+-                         "skipped":BASELINE_SKIPS,"skips_added":[]})+"\n")
++                         "skipped":BASELINE_SKIPS,"skips_added":[],
++                         "elapsed_s":BASELINE_ELAPSED,
++                         "control_timeout_s":CONTROL_TIMEOUT})+"\n")
+ 
+ for cid, patches in CONTROLS:
+-    rec = run_control(cid, patches, COMMIT, BASE)
++    rec = run_control(cid, patches, COMMIT, BASE, timeout=CONTROL_TIMEOUT)
+     rec["skipped"] = getattr(classify, "last_skipped", [])
+     rec["baseline_tests"] = BASELINE_COUNT
+     rec["collection_degraded"] = (
+diff -ru '--exclude=__pycache__' '--exclude=results' '--exclude=*.md' '--exclude=controls_ring.py' '--exclude=run_sweep*ring.py' '--exclude=run_sweep527.py' '--exclude=recompute_suppression.py' /var/tmp/scythe-sweep/harness-as-received-0940/selftest.py /home/bgilbert1984/scythe-sweep-harness/selftest.py
+--- /var/tmp/scythe-sweep/harness-as-received-0940/selftest.py	2026-09-24 09:43:31.964108117 +0530
++++ /home/bgilbert1984/scythe-sweep-harness/selftest.py	2026-09-24 09:43:31.972108099 +0530
+@@ -5,7 +5,8 @@
+ from sweep import (REPO, git, checkpoint_blobs, run_control, working_tree_hashes,
+                    MUTATION_DID_NOT_APPLY, MUTATION_AMBIGUOUS, TIMED_OUT,
+                    CRASHED_BEFORE_COLLECTION, HARNESS_ERROR,
+-                   ZERO_DISCRIMINATION, TEST_FAILURE)
++                   ZERO_DISCRIMINATION, TEST_FAILURE,
++                   control_timeout, TIMEOUT, TIMEOUT_FACTOR, require_sane_baseline)
+ 
+ COMMIT = git("rev-parse", "HEAD")
+ M, N, T = "rf_corpus_manifest.py", "rf_corpus_namespace.py", "test_rf_corpus_namespace.py"
+@@ -122,8 +123,10 @@
+ 
+ print(f"checkpoint {COMMIT}\n")
+ ok = True
++RECS = {}
+ for cid, patches, suite, timeout, expected in CASES:
+     rec = run_control(cid, patches, COMMIT, BASE, suite=suite, timeout=timeout)
++    RECS[cid] = rec
+     got = rec.get("classification")
+     good = got == expected
+     ok &= good
+@@ -134,6 +137,54 @@
+         print("      ", json.dumps({k: v for k, v in rec.items()
+                                     if k not in ("failing",)}), flush=True)
+ 
++
++def check(cid, good, detail=""):
++    global ok
++    ok &= bool(good)
++    print(f"{'PASS' if good else 'FAIL'}  {cid:22} {detail}", flush=True)
++
++# S8-timeout: the control bound is relative to the baseline this host produced.
++# A fixed 1800s, calibrated on one host, makes a healthy control on a host three
++# times slower under load read as TIMED_OUT -- an empty failing set that a
++# reviewer counting zeros takes for an unwitnessed mutation. The floor holds on
++# a fast host, the bound scales on a slow one, and the bound in force is
++# recorded in every row so an archived TIMED_OUT row can be read for what it was.
++check("S8-timeout-floor", control_timeout(60.0) == TIMEOUT,
++      f"baseline 60s -> {control_timeout(60.0)}s (floor {TIMEOUT}s)")
++check("S8-timeout-scales", control_timeout(400.0) == TIMEOUT_FACTOR * 400,
++      f"baseline 400s -> {control_timeout(400.0)}s")
++check("S8-timeout-unknown", control_timeout(None) == TIMEOUT,
++      "no baseline elapsed -> floor")
++check("S8-timeout-recorded", RECS["S5-timeout"].get("timeout_s") == 15,
++      f"S5 row records timeout_s={RECS['S5-timeout'].get('timeout_s')}")
++
++# S10: the baseline gate. It refuses a failing baseline and writes the report;
++# it passes a clean one silently; and a clean baseline above the floor but off
++# the expected count refuses as a different generation, which a floor cannot.
++import subprocess as _sp, tempfile as _tf
++_rep = os.path.join(_tf.mkdtemp(), "refused.out")
++_fake = _sp.CompletedProcess(["x"], 1, "Ran 3 tests\n", "FAIL: t (m.T)\n")
++try:
++    require_sane_baseline(TEST_FAILURE, 3, 2, ids=["t (m.T)"], proc=_fake, report=_rep)
++    _refused = False
++except SystemExit as _e:
++    _refused = _rep in str(_e)
++check("S10-gate-refuses", _refused and os.path.exists(_rep)
++      and "t (m.T)" in open(_rep).read(), f"a failing baseline refuses and writes {_rep}")
++try:
++    require_sane_baseline(ZERO_DISCRIMINATION, 3, 2, ids=[], proc=_fake, report=_rep + ".2")
++    _passed = not os.path.exists(_rep + ".2")
++except SystemExit:
++    _passed = False
++check("S10-gate-passes", _passed, "a clean baseline above the gate passes and writes nothing")
++try:
++    require_sane_baseline(ZERO_DISCRIMINATION, 2245, 2245, expected=2240)
++    _stale = False
++except SystemExit as _e:
++    _stale = "different generations" in str(_e)
++check("S10-gate-generations", _stale,
++      "a clean baseline above the floor but off the expected count refuses")
++
+ AFTER = working_tree_hashes(WATCHED)
+ unchanged = BEFORE == AFTER
+ print(f"\n{'PASS' if unchanged else 'FAIL'}  the original working tree is hash-identical throughout")
+diff -ru '--exclude=__pycache__' '--exclude=results' '--exclude=*.md' '--exclude=controls_ring.py' '--exclude=run_sweep*ring.py' '--exclude=run_sweep527.py' '--exclude=recompute_suppression.py' /var/tmp/scythe-sweep/harness-as-received-0940/sweep.py /home/bgilbert1984/scythe-sweep-harness/sweep.py
+--- /var/tmp/scythe-sweep/harness-as-received-0940/sweep.py	2026-09-24 09:43:31.964108117 +0530
++++ /home/bgilbert1984/scythe-sweep-harness/sweep.py	2026-09-24 09:43:31.972108099 +0530
+@@ -12,6 +12,7 @@
+ 
+ import hashlib
+ import json
++import math
+ import os
+ import re
+ import shutil
+@@ -79,7 +80,25 @@
+         f"SCYTHE_PYTHON resolves to {PYTHON}, which is not executable.\n"
+         "Export SCYTHE_PYTHON to an interpreter with numpy and requests.")
+ SUITE_FULL = ["test_rf_*.py", "test_graphops_rf_*.py", "test_scythe_*.py"]
+-TIMEOUT = 1800
++TIMEOUT = 1800          # the FLOOR of a control's bound, in seconds
++TIMEOUT_FACTOR = 10     # unmutated baselines a control may take before TIMED_OUT
++
++
++def control_timeout(baseline_elapsed, floor=TIMEOUT, factor=TIMEOUT_FACTOR):
++    """The bound on one control, relative to the baseline THIS host produced.
++
++    A fixed 1800s was calibrated on one host. On a host three times slower, or
++    the same host under load, a healthy control passes it and reads as
++    TIMED_OUT --- an empty failing set, which a reviewer counting zeros takes
++    for an unwitnessed mutation. The bound guards against a non-terminating
++    mutation; it is not a performance test, so it is generous: the larger of
++    the floor and `factor` baselines. The runner measures the baseline's
++    elapsed time immediately before the controls, on the same host and under
++    the same load, and records the bound it derived in every row.
++    """
++    if not baseline_elapsed or baseline_elapsed <= 0:
++        return floor
++    return max(floor, int(math.ceil(factor * baseline_elapsed)))
+ 
+ # -- classifications --------------------------------------------------------
+ MUTATION_DID_NOT_APPLY = "MUTATION_DID_NOT_APPLY"
+@@ -160,7 +179,7 @@
+ 
+ 
+ def require_sane_baseline(cls, count, minimum, ids=None, proc=None,
+-                          report=None):
++                          report=None, expected=None):
+     """The baseline is the harness's own control. Read it before proceeding.
+ 
+     The refusal used to say only the classification and the count, and then
+@@ -170,8 +189,17 @@
+     gate was throwing away the evidence for. The failing ids go in the message,
+     and the child's whole output is written to `report` when one is given,
+     because the next run may not reproduce it.
++
++    `minimum` is a floor and a floor is not enough: a bundle whose controls
++    were written for an older tree launches happily against a newer one that
++    collects more tests, and nothing reports that the controls and the tree
++    are from different generations. `expected` is the count the checkpoint
++    is known to collect; when given, the baseline must match it exactly, so
++    a bundle is tied to the checkpoint it was audited against.
+     """
+-    if cls == ZERO_DISCRIMINATION and count is not None and count >= minimum:
++    stale = expected is not None and count != expected
++    if (cls == ZERO_DISCRIMINATION and count is not None and count >= minimum
++            and not stale):
+         return
+     where = ""
+     if report is not None and proc is not None:
+@@ -186,6 +214,11 @@
+         shown = ", ".join(sorted(ids)[:20])
+         more = "" if len(ids) <= 20 else f" (+{len(ids) - 20} more)"
+         listed = f"\n  failing: {shown}{more}"
++    if stale and cls == ZERO_DISCRIMINATION and count >= minimum:
++        raise SystemExit(
++            f"BASELINE collects {count} tests; this bundle was audited against "
++            f"a checkpoint collecting {expected}. The controls and the tree are "
++            f"from different generations{where}")
+     raise SystemExit(
+         f"BASELINE is {cls} with {count} tests (expected a clean run of at "
+         f"least {minimum}); the instrument is not measuring the tree"
+@@ -254,7 +287,8 @@
+     WORKTREES.mkdir(parents=True, exist_ok=True)
+     subprocess.run(["git", "worktree", "add", "--detach", str(tree), commit],
+                    cwd=str(REPO), capture_output=True, check=True)
+-    record = {"checkpoint": commit, "control": cid, "worktree": str(tree)}
++    record = {"checkpoint": commit, "control": cid, "worktree": str(tree),
++              "timeout_s": timeout}
+     started = time.time()
+     try:
+         # 2. the baseline is verified INSIDE the worktree, before any mutation
