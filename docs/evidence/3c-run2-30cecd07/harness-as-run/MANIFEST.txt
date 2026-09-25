@@ -1,0 +1,56 @@
+§5.20 3c-core sweep bundle
+
+checkpoint      64f58375262fd5d48a3310dfd2de19606bda1bbf
+branch          feat/5.20-3c-core   (pushed; branched from main at 60517a5,
+                which is an ancestor -- main carries the accepted 3c amendment)
+controls        26  (K1..K26)
+expected count  2254 tests, EXACTLY, 1 pre-existing skip
+gate            run_sweep_3c.py: require_sane_baseline(..., 2254, expected=2254)
+control bound   control_timeout(baseline) = max(1800s, 10 x baseline), recorded
+                per row as timeout_s / control_timeout_s
+
+BROAD_DECLARED  K2 -- step 6 IS the publication primitive; replacing link with
+                  rename removes the temporary as a side effect, so the unlink
+                  fails and the retained-name accounting refuses.
+                  witness: test_the_occupying_bytes_survive_the_refusal
+                K6 -- the readback reaches the bytes through the descriptor step
+                  3 created rather than a fresh open of the final name, so every
+                  check after the open reads a file at EOF.
+                  witness: test_the_final_name_is_opened_afresh
+                On the last run K2 measured n=42, ABOVE the absolute BROAD=40
+                tripwire. It is declared, so that is reported and not refused;
+                the threshold was NOT lowered to fit it.
+
+SUBSUMED        ("K9","K22") -- both mutations reach only the retained-temporary
+                path, and K22 re-raises before the readback K9 alters, so K22's
+                failing set strictly contains K9's. Strict, not equal: K22 has
+                its own witness in the escaping exception TYPE (an OSError
+                reaches a caller only under K22; K9 raises PublicationFailed).
+                One named allowance. No general subset exemption.
+
+WHAT 3c-core IS
+  §5.20 steps 5-8 as a PRIVATE primitive, deliberately unwired. No production
+  module imports rf_capture_publication, and a test derives that scope from the
+  tree rather than naming one file; K24 and K25 wire it from two DIFFERENT
+  modules so both the prohibition and the scan's breadth are witnessed.
+  No header change, no clock change, no journal write. Entry 14 stays open.
+
+HARNESS PROVENANCE
+  sweep.py, controls527.py, review_sweep.py and selftest.py are BYTE-IDENTICAL
+  to the copies that produced selftest-accepted.out (HARNESS ACCEPTANCE: PASS,
+  24 cases, 0 failures), so that acceptance covers them here. controls_3c.py and
+  run_sweep_3c.py are this slice's own files and are audited by the launch gates
+  rather than by the selftest.
+
+HOST-LOCAL, CHECK BEFORE LAUNCHING
+  run_sweep_3c.py  BUILD = Path(S) / "w3c"
+      the worktree name this host holds for the slice branch. Set it to yours.
+  run_sweep_3c.py  S = os.environ.get("SCYTHE_SCRATCH", "<a session path>")
+      set SCYTHE_SCRATCH.
+
+DECLARED LIMITATION, UNREPAIRED
+  The control bound derives from ONE baseline sample taken before the controls
+  start, so it cannot see load arriving afterwards. A row at 979.6s was observed
+  on a host whose baseline was 202.7s -- 5x, while neighbours sat at 1.0-1.1x.
+  The bound in force is recorded per row so such a row can be read for what it
+  was.

@@ -1,0 +1,18 @@
+§5.20 3c-core sweep, run 2 -- addendum to MANIFEST.txt (bundle 64f5837)
+
+checkpoint      30cecd07e07ffe5e12b097d01fc086fab803191d  (local commit on
+                feat/5.20-3c-core, on top of 64f5837; NOT pushed at run time)
+change          tests only: test_rf_capture_publication.py. The breadth test
+                computed its own module count from the tree, so no mutation
+                could reach it and K24/K25 shared one witness (run 1). Both
+                boundary tests now read one derived scope, _production_modules().
+expected count  2254, unchanged (61 tests in the module before and after)
+controls        26 (K1..K26), IDs unchanged. K25 amended -- see controls-K25.patch:
+                it now narrows the shared scope to admission alone WHILE wiring
+                the publisher from rf_capture_format, so the prohibition stays
+                green and only the breadth test can answer. WATCHED gains the
+                test module.
+shared modules  sweep.py, controls527.py, review_sweep.py, selftest.py
+                byte-identical to the 64f5837 bundle; selftest on this host
+                PASS (24 cases) at 03:48 today, see ../3c-run1-64f5837/selftest.out
+host-local      BUILD = build3c (same as run 1)

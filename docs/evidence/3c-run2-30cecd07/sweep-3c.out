@@ -1,0 +1,35 @@
+launched 2026-09-25 05:04:30 run2 from /var/tmp/scythe-sweep/3c-run2-30cecd07/harness
+branch 'feat/5.20-3c-core' resolved through 'feat/5.20-3c-core' to 30cecd07e07ffe5e12b097d01fc086fab803191d
+inventory: 26 controls, 0 accepted in scope, 0 deferred ()
+mutation audit: 26 controls, no problems
+BASELINE  ZERO_DISCRIMINATION  2254 tests  exit 0  67.7s
+TIMEOUT   controls bounded at 1800s  (floor 1800s, 10 x baseline 67.7s)
+TEST_FAILURE               K1 the file is never fsynced                         n=3   ran=2254 67.6s
+TEST_FAILURE               K2 publication replaces silently, by rename          n=42  ran=2254 67.3s
+TEST_FAILURE               K3 an occupied final name is an ordinary link failur n=1   ran=2254 67.0s
+TEST_FAILURE               K22 a failed unlink becomes a publication failure    n=6   ran=2254 67.5s
+TEST_FAILURE               K4 the directory is never fsynced                    n=4   ran=2254 66.9s
+TEST_FAILURE               K5 the directory fsync precedes the unlink           n=4   ran=2254 68.1s
+TEST_FAILURE               K6 the readback uses the descriptor already held     n=39  ran=2254 68.5s
+TEST_FAILURE               K7 the readback follows a symbolic link              n=2   ran=2254 67.5s
+TEST_FAILURE               K8 a foreign hard link to a member is tolerated      n=1   ran=2254 67.4s
+TEST_FAILURE               K9 the retained temporary is not accounted for       n=5   ran=2254 67.7s
+TEST_FAILURE               K10 a permissive member is tolerated                 n=1   ran=2254 68.3s
+TEST_FAILURE               K11 a member on another device is tolerated          n=1   ran=2254 68.4s
+TEST_FAILURE               K12 a member owned by another uid is tolerated       n=1   ran=2254 68.2s
+TEST_FAILURE               K13 a fragmented read is accepted as a complete one  n=1   ran=2254 68.0s
+TEST_FAILURE               K14 the magic is not checked                         n=1   ran=2254 67.8s
+TEST_FAILURE               K15 the format version is not checked                n=1   ran=2254 68.2s
+TEST_FAILURE               K16 the header length bound is not checked           n=1   ran=2254 67.9s
+TEST_FAILURE               K17 trailing bytes are called a length disagreement  n=1   ran=2254 67.8s
+TEST_FAILURE               K18 the payload digest is not reconciled             n=1   ran=2254 67.6s
+TEST_FAILURE               K19 the file digest is not reconciled against the in n=1   ran=2254 68.0s
+TEST_FAILURE               K20 filename agreement is not checked                n=1   ran=2254 67.3s
+TEST_FAILURE               K21 a verified final may be constructed by a caller  n=1   ran=2254 67.9s
+TEST_FAILURE               K24 admission is wired to the publisher              n=1   ran=2254 67.2s
+TEST_FAILURE               K25 the scan narrowed to one file while a second mod n=1   ran=2254 67.2s
+TEST_FAILURE               K26 a member need not be a regular file              n=1   ran=2254 67.5s
+TEST_FAILURE               K23 the member name accepts any digest-shaped string n=1   ran=2254 67.3s
+
+working tree hash-identical throughout: True
+exit 0 05:35:53

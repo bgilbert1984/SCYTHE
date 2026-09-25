@@ -100,6 +100,38 @@ def framing_prefix(header_bytes: bytes) -> bytes:
             + struct.pack("<I", len(header_bytes)))
 
 
+IQC_MEMBER_SUFFIX = ".iqc"
+IQC_FILE_DIGEST_HEX_CHARS = 64
+
+
+def canonical_member_name(file_sha256: str) -> str:
+    """The member's one filename: its `file_sha256`, then `.iqc`.
+
+    The name carries the digest and **nothing else**. A name that also spelled
+    the stratum or the window id would repeat facts the header already fixes,
+    inside a string a reader compares against the file's own digest --- and a
+    redundant discriminator can disagree with the fact it repeats, which is the
+    objection that removed `attestation_kind` from the header. One file, one
+    name, and the name is checkable from the bytes.
+
+    Nominal and shape-checked, because a digest is the one argument here and a
+    caller that passed something else would produce a name that no readback
+    could ever agree with.
+    """
+    if type(file_sha256) is not str:
+        raise FramingRefused(
+            "a member name derives from file_sha256 as a string; got "
+            f"{type(file_sha256).__name__}")
+    if len(file_sha256) != IQC_FILE_DIGEST_HEX_CHARS:
+        raise FramingRefused(
+            f"file_sha256 is {len(file_sha256)} characters, not "
+            f"{IQC_FILE_DIGEST_HEX_CHARS}")
+    if any(c not in "0123456789abcdef" for c in file_sha256):
+        raise FramingRefused(
+            "file_sha256 is lowercase hexadecimal; this is not")
+    return file_sha256 + IQC_MEMBER_SUFFIX
+
+
 def framing_declaration() -> Dict[str, Any]:
     """What the format declares about itself, for a status surface to read."""
     return {
