@@ -21,6 +21,7 @@ import unittest
 
 from rf_capture_format import (
     canonical_header_bytes, canonical_member_name, framing_prefix,
+    partial_member_name,
 )
 from rf_corpus_namespace import (
     CORPUS_FILE_MODE, ELIGIBLE_NAME, MANIFEST_NAME, open_corpus_namespace,
@@ -171,6 +172,19 @@ class ReconcileFixture(NamespaceFixture):
         return {"name": name, "file_sha256": file_sha256,
                 "payload_sha256": hashlib.sha256(payload).hexdigest(),
                 "first_sample_index": first}
+
+    def write_partial(self, file_sha256, data=b"a partial capture"):
+        name = partial_member_name(file_sha256)
+        fd = os.open(name, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW,
+                     CORPUS_FILE_MODE, dir_fd=self.dir_fd)
+        try:
+            os.write(fd, data)
+        finally:
+            os.close(fd)
+        return name
+
+    def listing(self):
+        return set(os.listdir(self.dir_fd))
 
     def add_intent(self, window_id, *, first, member=None, file_sha256=None,
                    payload_sha256=None, name=None, stratum="GAIN_STEPS",
@@ -333,6 +347,41 @@ class ReconcileTests(ReconcileFixture):
             reconcile(-1, journal=journal, entries=(), reserved_names=_RESERVED,
                       manifest_sha256=self.manifest_sha256)
         self.assertEqual(caught.exception.code, RECOVERY_DESCRIPTOR_REFUSED)
+
+    def test_an_orphan_temporary_for_a_discarded_intent_is_removed(self):
+        """A crash before the link leaves the temporary in the corpus dir. The
+        intent is discarded and the orphan temporary is freed, so a later reopen
+        does not trip over a stray."""
+        digest = "a" * 64
+        self.write_partial(digest)
+        self.add_intent("w-1", first=0, file_sha256=digest,
+                        payload_sha256="b" * 64,
+                        name=canonical_member_name(digest))
+        reconciled = self.reconcile()
+        self.assertEqual(reconciled.counts[DISCARDED_UNWRITTEN], 1)
+        self.assertNotIn(partial_member_name(digest), self.listing())
+        self.assertEqual(read_membership_journal(self.dir_fd).terminals["w-1"],
+                         ABANDON)
+
+    def test_a_partial_temporary_with_no_intent_is_a_stray(self):
+        self.write_partial("a" * 64)
+        with self.assertRaises(RecoveryRefused) as caught:
+            self.reconcile()
+        self.assertEqual(caught.exception.code, RECOVERY_STRAY_ENTRY)
+
+    def test_a_leftover_temporary_beside_a_member_is_removed(self):
+        """A retained temporary -- the step-6 unlink that never ran -- is a
+        redundant second name, not a second member. The member is counted and
+        the leftover freed."""
+        member = self.write_member(first=0)
+        self.write_partial(member["file_sha256"])
+        self.add_intent("w-1", first=0, member=member)
+        append_commit(self.dir_fd, "w-1")
+        reconciled = self.reconcile()
+        self.assertEqual(reconciled.counts[SETTLED_MEMBER], 1)
+        listing = self.listing()
+        self.assertNotIn(partial_member_name(member["file_sha256"]), listing)
+        self.assertIn(member["name"], listing)
 
     def test_reconcile_is_stable_across_a_second_pass(self):
         """Adoption is idempotent: once the COMMIT is appended, the second

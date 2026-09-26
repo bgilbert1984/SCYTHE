@@ -57,7 +57,8 @@ from rf_capture_admission import (
 )
 from rf_capture_format import (
     IQC_FRAMING_PREFIX_BYTES, IQC_MAGIC, IQC_MAX_HEADER_BYTES,
-    IQC_FORMAT_VERSION, canonical_member_name,
+    IQC_FORMAT_VERSION, canonical_member_name, is_partial_member_name,
+    partial_member_name,
 )
 from rf_corpus_namespace import CORPUS_FILE_MODE
 from rf_membership_journal import (
@@ -347,6 +348,21 @@ def _verify_final(dir_fd: int, directory_device: int,
                         last_sample_index=first + sample_count)
 
 
+def _unlink_if_present(dir_fd: int, name: str) -> None:
+    """Remove a name if it is there, treating absence as success.
+
+    A discarded intent's temporary is an orphan the crash left behind, and a
+    published member's temporary is a redundant leftover the step-6 unlink
+    would have removed had it run: either way the partial is not the member,
+    and reconciliation frees the name. Absence is the ordinary case -- most
+    intents have no partial -- so it is not an error.
+    """
+    try:
+        os.unlink(name, dir_fd=dir_fd)
+    except FileNotFoundError:
+        pass
+
+
 def reconcile(dir_fd: int, *, journal: JournalState, entries: Tuple[str, ...],
               reserved_names: Tuple[str, ...],
               manifest_sha256: str) -> ReconciledMembership:
@@ -374,10 +390,17 @@ def reconcile(dir_fd: int, *, journal: JournalState, entries: Tuple[str, ...],
     # terminal is appended if the directory holds anything unaccountable.
     accounted = {canonical_member_name(intent["file_sha256"])
                  for intent in journal.intents.values()}
+    accounted_partials = {partial_member_name(intent["file_sha256"])
+                          for intent in journal.intents.values()}
     reserved = frozenset(reserved_names)
     for entry in entries:
-        if entry in reserved or entry in accounted:
+        if entry in reserved or entry in accounted or entry in accounted_partials:
             continue
+        if is_partial_member_name(entry):
+            raise RecoveryRefused(
+                RECOVERY_STRAY_ENTRY,
+                f"{entry!r} is a partial member sibling no intent accounts "
+                "for; a temporary exists only under the intent that named it")
         if entry.endswith(".iqc"):
             raise RecoveryRefused(
                 RECOVERY_UNACCOUNTED_FINAL,
@@ -411,6 +434,10 @@ def reconcile(dir_fd: int, *, journal: JournalState, entries: Tuple[str, ...],
                 first_sample_index=outcome.first_sample_index,
                 last_sample_index=outcome.last_sample_index,
                 ring_lifetime_id=intent["ring_lifetime_id"]))
+        # Free the temporary once the window's fate is settled: an orphan for a
+        # discarded intent, a redundant leftover for a member. The final name,
+        # if any, is a different inode and is untouched.
+        _unlink_if_present(dir_fd, partial_member_name(intent["file_sha256"]))
 
     members_by_stratum = {
         stratum: tuple(sorted(windows, key=lambda w: w.first_sample_index))

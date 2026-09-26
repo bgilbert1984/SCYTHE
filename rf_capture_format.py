@@ -132,6 +132,30 @@ def canonical_member_name(file_sha256: str) -> str:
     return file_sha256 + IQC_MEMBER_SUFFIX
 
 
+IQC_PARTIAL_PREFIX = ".partial-"
+
+
+def partial_member_name(file_sha256: str) -> str:
+    """The temporary sibling a member is written to before it is published.
+
+    §5.20 step 3 creates a temporary; 3d moves that creation inside the
+    namespace, so the temporary now lives in the corpus directory and needs a
+    name recovery can reason about. The final name is the file digest; the
+    partial is that same name behind a `.partial-` prefix, so a reader listing
+    the directory sees at once that it is not a member, and recovery derives it
+    from the intent that bound the digest to match an orphan temporary to
+    exactly one window. `canonical_member_name` shape-checks the digest and this
+    reuses it, so the two names cannot diverge on what a valid digest is.
+    """
+    return IQC_PARTIAL_PREFIX + canonical_member_name(file_sha256)
+
+
+def is_partial_member_name(name: str) -> bool:
+    """Whether a directory entry is a partial member sibling. Name shape only."""
+    return (isinstance(name, str) and name.startswith(IQC_PARTIAL_PREFIX)
+            and name.endswith(IQC_MEMBER_SUFFIX))
+
+
 def framing_declaration() -> Dict[str, Any]:
     """What the format declares about itself, for a status surface to read."""
     return {
