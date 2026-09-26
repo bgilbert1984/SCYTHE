@@ -492,12 +492,53 @@ class CorpusOwnershipScope:
                 for stratum, sequence in state.sequences.items()},
         }
 
+    def _sequence_snapshot(self, stratum: str, window_lifetime: str) -> Any:
+        """The scope's own sequence state for a stratum, read but not stored.
+
+        Compulsion (entry 14): admission consumes the scope's sequence, never a
+        caller's, so a fresh or forged one cannot bypass the cap. A stratum that
+        has captured returns its live sequence; one that has not returns an
+        empty sequence bound to the corpus's single ring lifetime -- the pinned
+        one if the corpus has captured anything, this window's otherwise -- so
+        admission's lifetime check refuses a window from a second lifetime.
+        Storing happens only on a verified commit, in `_count_captured`.
+        """
+        from rf_capture_admission import CapturedStratumSequence
+        state = self._live()
+        existing = state.sequences.get(stratum)
+        if existing is not None:
+            return existing
+        lifetime = (state.ring_lifetime_id if state.ring_lifetime_id is not None
+                    else window_lifetime)
+        return CapturedStratumSequence(
+            corpus_id=state.body["corpus_id"], stratum=stratum,
+            ring_lifetime_id=lifetime)
+
+    def _count_captured(self, stratum: str, window_lifetime: str,
+                        publication: Any) -> int:
+        """Count a verified window in the scope's own sequence, minting it once.
+
+        The first commit pins the corpus's single ring lifetime and mints the
+        stratum's sequence; every later commit advances it. Only a window that
+        became a durable, verified member reaches here.
+        """
+        from rf_capture_admission import CapturedStratumSequence
+        state = self._live()
+        if state.ring_lifetime_id is None:
+            state.ring_lifetime_id = window_lifetime
+        sequence = state.sequences.get(stratum)
+        if sequence is None:
+            sequence = CapturedStratumSequence(
+                corpus_id=state.body["corpus_id"], stratum=stratum,
+                ring_lifetime_id=state.ring_lifetime_id)
+            state.sequences[stratum] = sequence
+        return sequence.count_published(publication)
+
     def commit_window(self, *, attested_scope: Any, header: Dict[str, Any],
                       header_bytes: bytes, framing_prefix_bytes: bytes,
                       metadata: Dict[str, Any], stratum: str,
                       payload_sha256: str, file_sha256: str,
-                      previous_window_id: Any, ring_lifetime_id: str
-                      ) -> Any:
+                      ring_lifetime_id: str) -> Any:
         """§5.20 steps 3-8 for one window, bracketed by the membership journal.
 
         3d wires the publisher through here. Admission has run every
@@ -523,6 +564,10 @@ class CorpusOwnershipScope:
         state = self._live()
         dir_fd = state.dir_fd
         window_id = metadata["window_id"]
+        # Compulsion: the predecessor is read from the scope's own sequence, not
+        # handed in, so the chain a window claims is the one the scope holds.
+        previous_window_id = self._sequence_snapshot(
+            stratum, ring_lifetime_id).previous_window_id
         append_intent(dir_fd, intent_record(
             manifest_sha256=state.manifest_sha256,
             corpus_id=state.body["corpus_id"], stratum=stratum,
@@ -557,6 +602,9 @@ class CorpusOwnershipScope:
                 append_abandon(dir_fd, window_id)
                 raise
             append_commit(dir_fd, window_id)
+            # Count only now, in the scope that owns the sequence: a verified,
+            # committed member, and the step-8 act §5.20 requires.
+            self._count_captured(stratum, ring_lifetime_id, publication)
             return verified, publication
         finally:
             os.close(fd)

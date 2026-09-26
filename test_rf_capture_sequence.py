@@ -153,27 +153,29 @@ class AdmitLifetimeTests(unittest.TestCase):
         self.addCleanup(self.corpus.release)
 
     def test_admit_accepts_matching_lifetime(self):
-        sequence = reconstruct_stratum_sequence(
-            corpus_id=self.lock.corpus_id, stratum="GAIN_STEPS",
-            ring_lifetime_id=self.ring.ring_lifetime_id,
-            committed_windows=())
+        """A created corpus's first capture pins it to the window's ring
+        lifetime; the scope owns and counts the sequence (3d compulsion)."""
         with self.ring.attest_window(_window(self.ring)) as scope:
             published = record_gain_step(
                 scope=scope, attestation=_gain_attestation(),
-                corpus=self.corpus, sequence=sequence)
+                corpus=self.corpus)
         self.assertEqual(published.stratum, "GAIN_STEPS")
-        self.assertEqual(sequence.accepted, 1)
+        self.assertEqual(
+            self.corpus._state.sequences["GAIN_STEPS"].accepted, 1)
 
-    def test_admit_refuses_dead_ring_lifetime(self):
-        """The precondition regime: admission refuses before it publishes."""
-        dead = CapturedStratumSequence(
+    def test_admit_refuses_a_window_from_another_lifetime(self):
+        """A corpus pinned to one ring lifetime refuses a window from another:
+        the single-lifetime seal, enforced by the scope that owns the sequence
+        rather than by a caller-supplied one."""
+        state = self.corpus._state
+        state.ring_lifetime_id = "ring-lifetime-dead-000"
+        state.sequences["GAIN_STEPS"] = CapturedStratumSequence(
             corpus_id=self.lock.corpus_id, stratum="GAIN_STEPS",
             ring_lifetime_id="ring-lifetime-dead-000")
         with self.ring.attest_window(_window(self.ring)) as scope:
             with self.assertRaises(CaptureRefused) as caught:
-                record_gain_step(
-                    scope=scope, attestation=_gain_attestation(),
-                    corpus=self.corpus, sequence=dead)
+                record_gain_step(scope=scope, attestation=_gain_attestation(),
+                                 corpus=self.corpus)
         self.assertEqual(caught.exception.code,
                          ADMISSION_RING_LIFETIME_MISMATCH)
 

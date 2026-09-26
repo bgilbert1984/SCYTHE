@@ -769,8 +769,7 @@ def _ownership_scope_types() -> Tuple[type, type]:
 
 
 def _admit(*, scope: Any, stratum: str, attestation: Any,
-           corpus: Any, sequence: Any
-           ) -> Tuple[Dict[str, Any], Dict[str, Any], str]:
+           corpus: Any) -> Tuple[Dict[str, Any], Dict[str, Any], str]:
     """Every precondition, in order, before anything is created.
 
     §5.25's ordering requirement is narrower than "every check that can
@@ -886,7 +885,12 @@ def _admit(*, scope: Any, stratum: str, attestation: Any,
             "another experiment: it is not re-labelled, not held aside and "
             "not counted")
 
-    # 8. the corpus sequence state for this stratum.
+    # 8. the corpus sequence state for this stratum. Compulsion (entry 14):
+    #    admission consumes the scope's OWN sequence, read through the scope,
+    #    never a caller's -- so a fresh or forged sequence cannot bypass the
+    #    cap or claim a chain the scope does not hold. The checks below verify
+    #    the admission-to-scope boundary the scope answered across.
+    sequence = corpus._sequence_snapshot(stratum, metadata["ring_lifetime_id"])
     if type(sequence) is not CapturedStratumSequence:
         raise CaptureRefused(
             ADMISSION_SEQUENCE_NOT_THIS_STRATUM,
@@ -1012,8 +1016,8 @@ def write_captured_temp(*, fd: int, scope: AttestedIQWindowScope,
     )
 
 
-def _record(*, scope: Any, stratum: str, attestation: Any, corpus: Any,
-            sequence: Any) -> CapturedWindowPublication:
+def _record(*, scope: Any, stratum: str, attestation: Any, corpus: Any
+            ) -> CapturedWindowPublication:
     """Admit, then let the namespace publish, then count. Order is the contract.
 
     3d wires the publisher. `create_target` is gone: creation is no longer the
@@ -1021,13 +1025,12 @@ def _record(*, scope: Any, stratum: str, attestation: Any, corpus: Any,
     `file_sha256` computed from the live scope before the file exists, and
     `corpus.commit_window` -- inside the namespace, under the journal's
     intent/commit bracket -- creates the temporary, writes it, runs §5.20 steps
-    5-8 and commits. Only a window that became a durable, verified member is
-    counted in the sequence, and the count happens here because the sequence is
-    still the caller's until compulsion (entry 14) binds it to the scope.
+    5-8, commits, and counts the verified member in the sequence the scope
+    holds. Compelled (entry 14): the caller supplies neither a place to write
+    nor a sequence to advance -- both are the scope's.
     """
     metadata, header, payload_sha256 = _admit(
-        scope=scope, stratum=stratum, attestation=attestation, corpus=corpus,
-        sequence=sequence)
+        scope=scope, stratum=stratum, attestation=attestation, corpus=corpus)
     try:
         header_bytes = canonical_header_bytes(header)
         prefix = framing_prefix(header_bytes)
@@ -1046,10 +1049,7 @@ def _record(*, scope: Any, stratum: str, attestation: Any, corpus: Any,
         attested_scope=scope, header=header, header_bytes=header_bytes,
         framing_prefix_bytes=prefix, metadata=metadata, stratum=stratum,
         payload_sha256=payload_sha256, file_sha256=file_sha256,
-        previous_window_id=sequence.previous_window_id,
         ring_lifetime_id=metadata["ring_lifetime_id"])
-
-    sequence.count_published(publication)
     return publication
 
 
@@ -1064,8 +1064,8 @@ def _record(*, scope: Any, stratum: str, attestation: Any, corpus: Any,
 # format's declaration, not a caller's.
 
 
-def record_gain_step(*, scope: Any, attestation: Any, corpus: Any,
-                     sequence: Any) -> CapturedWindowPublication:
+def record_gain_step(*, scope: Any, attestation: Any, corpus: Any
+                     ) -> CapturedWindowPublication:
     """Publish the first complete window after a `GAIN_CHANGE`. §5.20, §5.25.
 
     3c-wire: `(scope, attestation, corpus, sequence, create_target)`. `scope`
@@ -1075,19 +1075,18 @@ def record_gain_step(*, scope: Any, attestation: Any, corpus: Any,
     either gets a `TypeError` rather than a second authority.
     """
     return _record(scope=scope, stratum="GAIN_STEPS", attestation=attestation,
-                   corpus=corpus, sequence=sequence)
+                   corpus=corpus)
 
 
-def record_retune_transient(*, scope: Any, attestation: Any, corpus: Any,
-                            sequence: Any) -> CapturedWindowPublication:
+def record_retune_transient(*, scope: Any, attestation: Any, corpus: Any
+                            ) -> CapturedWindowPublication:
     """Publish the first complete window after a `RETUNE`. §5.20, §5.25."""
     return _record(scope=scope, stratum="RETUNE_TRANSIENTS",
-                   attestation=attestation, corpus=corpus, sequence=sequence)
+                   attestation=attestation, corpus=corpus)
 
 
 def record_receiver_spur(*, scope: Any = None, attestation: Any = None,
-                         corpus: Any = None, sequence: Any = None
-                         ) -> CapturedWindowPublication:
+                         corpus: Any = None) -> CapturedWindowPublication:
     """Refuses by construction. `RECEIVER_SPURS` has no attestation member.
 
     Not a check somebody could relax: the union is closed and the stratum has
