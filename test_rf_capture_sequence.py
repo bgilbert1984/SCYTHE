@@ -27,7 +27,7 @@ from rf_capture_admission import (
 )
 from rf_corpus_namespace import _create_corpus_namespace_with_clock
 from test_rf_capture_admission import (
-    DEADLINE, NOW, OPENED_AT, _Creator, _gain_attestation, _lock, _ring,
+    DEADLINE, NOW, OPENED_AT, _gain_attestation, _lock, _ring,
     _window,
 )
 from test_rf_promotion_envelope import _envelope
@@ -152,41 +152,30 @@ class AdmitLifetimeTests(unittest.TestCase):
             retention=self.retention, root=root, clock=lambda: NOW)
         self.addCleanup(self.corpus.release)
 
-    def _creator(self):
-        devnull = open(os.devnull, "wb")
-        self.addCleanup(devnull.close)
-        creator = _Creator(devnull.fileno())
-        return creator
-
     def test_admit_accepts_matching_lifetime(self):
         sequence = reconstruct_stratum_sequence(
             corpus_id=self.lock.corpus_id, stratum="GAIN_STEPS",
             ring_lifetime_id=self.ring.ring_lifetime_id,
             committed_windows=())
-        creator = self._creator()
         with self.ring.attest_window(_window(self.ring)) as scope:
             published = record_gain_step(
                 scope=scope, attestation=_gain_attestation(),
-                corpus=self.corpus, sequence=sequence,
-                create_target=creator)
-        self.assertEqual(creator.calls, 1)
+                corpus=self.corpus, sequence=sequence)
         self.assertEqual(published.stratum, "GAIN_STEPS")
+        self.assertEqual(sequence.accepted, 1)
 
     def test_admit_refuses_dead_ring_lifetime(self):
-        """The precondition regime: the creator never runs."""
+        """The precondition regime: admission refuses before it publishes."""
         dead = CapturedStratumSequence(
             corpus_id=self.lock.corpus_id, stratum="GAIN_STEPS",
             ring_lifetime_id="ring-lifetime-dead-000")
-        creator = self._creator()
         with self.ring.attest_window(_window(self.ring)) as scope:
             with self.assertRaises(CaptureRefused) as caught:
                 record_gain_step(
                     scope=scope, attestation=_gain_attestation(),
-                    corpus=self.corpus, sequence=dead,
-                    create_target=creator)
+                    corpus=self.corpus, sequence=dead)
         self.assertEqual(caught.exception.code,
                          ADMISSION_RING_LIFETIME_MISMATCH)
-        self.assertEqual(creator.calls, 0)
 
     def test_count_published_advances_reconstructed(self):
         """Restored history keeps counting from where it stopped."""

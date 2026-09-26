@@ -254,7 +254,7 @@ def _parse_framing(image: bytes) -> int:
     return header_length
 
 
-def _publish_and_verify(*, fd: Any, dir_fd: Any, temporary_name: Any,
+def publish_and_verify(*, fd: Any, dir_fd: Any, temporary_name: Any,
                         publication: Any, intent_file_sha256: Any,
                         ) -> VerifiedFinal:
     """§5.20 steps 5-8 over an already-written temporary. **Private.**

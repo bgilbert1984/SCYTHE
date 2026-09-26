@@ -147,7 +147,6 @@ ADMISSION_BINDING_CLAIMED_TWICE = "ADMISSION_BINDING_CLAIMED_TWICE"
 ADMISSION_BINDING_NOT_EMITTED = "ADMISSION_BINDING_NOT_EMITTED"
 ADMISSION_FIELD_NO_AUTHORITY = "ADMISSION_FIELD_NO_AUTHORITY"
 ADMISSION_CANONICAL_FORM_REFUSED = "ADMISSION_CANONICAL_FORM_REFUSED"
-ADMISSION_CREATOR_NOT_CALLABLE = "ADMISSION_CREATOR_NOT_CALLABLE"
 ADMISSION_REFUSALS: Tuple[str, ...] = (
     ADMISSION_SCOPE_TYPE_WRONG, ADMISSION_SCOPE_ENDED,
     ADMISSION_OWNERSHIP_SCOPE_TYPE_WRONG, ADMISSION_OWNERSHIP_SCOPE_RELEASED,
@@ -159,7 +158,7 @@ ADMISSION_REFUSALS: Tuple[str, ...] = (
     ADMISSION_RING_LIFETIME_MISMATCH, ADMISSION_SEQUENCE_HISTORY_REFUSED,
     ADMISSION_STRATUM_CAP_REACHED, ADMISSION_BINDING_CLAIMED_TWICE,
     ADMISSION_BINDING_NOT_EMITTED, ADMISSION_FIELD_NO_AUTHORITY,
-    ADMISSION_CANONICAL_FORM_REFUSED, ADMISSION_CREATOR_NOT_CALLABLE,
+    ADMISSION_CANONICAL_FORM_REFUSED,
     WINDOW_INTERVAL_OVERLAP,
 )
 
@@ -167,12 +166,10 @@ ADMISSION_REFUSALS: Tuple[str, ...] = (
 #
 # Facts about the write, which cannot be known before one. §5.20 governs what
 # they leave behind and this section does not contradict it.
-PUBLICATION_TARGET_NOT_A_DESCRIPTOR = "PUBLICATION_TARGET_NOT_A_DESCRIPTOR"
 PUBLICATION_FRAMING_WRITE_INCOMPLETE = "PUBLICATION_FRAMING_WRITE_INCOMPLETE"
 PUBLICATION_LENGTH_MISMATCH = "PUBLICATION_LENGTH_MISMATCH"
 PUBLICATION_FAILURES: Tuple[str, ...] = (
-    PUBLICATION_TARGET_NOT_A_DESCRIPTOR, PUBLICATION_FRAMING_WRITE_INCOMPLETE,
-    PUBLICATION_LENGTH_MISMATCH,
+    PUBLICATION_FRAMING_WRITE_INCOMPLETE, PUBLICATION_LENGTH_MISMATCH,
 )
 
 
@@ -959,22 +956,20 @@ def _write_all(fd: int, data: bytes) -> int:
     return total
 
 
-def _publish(*, fd: Any, scope: AttestedIQWindowScope, header: Mapping[str, Any],
-             header_bytes: bytes, prefix: bytes, metadata: Mapping[str, Any],
-             stratum: str, corpus_id: str,
-             payload_sha256: str) -> CapturedWindowPublication:
-    """§5.20 steps 3 (already done by the caller) and 4, and the reconciliation.
+def write_captured_temp(*, fd: int, scope: AttestedIQWindowScope,
+                        header: Mapping[str, Any], header_bytes: bytes,
+                        prefix: bytes, metadata: Mapping[str, Any],
+                        stratum: str, corpus_id: str,
+                        payload_sha256: str) -> CapturedWindowPublication:
+    """§5.20 step 4 over a temporary the namespace has just created.
 
-    Everything here is post-open. Nothing refuses with `CaptureRefused`, and
-    nothing unlinks: an orphan temporary is never a corpus member and is kept
-    deliberately, so removing it would be this module contradicting §5.20 in
-    order to sound stronger.
+    3d wires this: the namespace owns step 3 now, creates the temporary inside
+    the corpus directory and passes its descriptor, so there is no caller fd to
+    type-check. Everything here is post-open. Nothing refuses with
+    `CaptureRefused`, and nothing unlinks: an orphan temporary is never a corpus
+    member, and this module removing one would contradict §5.20 to sound
+    stronger.
     """
-    if type(fd) is not int:
-        raise PublicationFailed(
-            PUBLICATION_TARGET_NOT_A_DESCRIPTOR,
-            f"create_target returned {type(fd).__name__}, not a descriptor")
-
     framing = prefix + header_bytes
     framing_written = _write_all(fd, framing)
     if framing_written != len(framing):
@@ -1018,25 +1013,18 @@ def _publish(*, fd: Any, scope: AttestedIQWindowScope, header: Mapping[str, Any]
 
 
 def _record(*, scope: Any, stratum: str, attestation: Any, corpus: Any,
-            sequence: Any, create_target: Any) -> CapturedWindowPublication:
-    """Admit, then create, then write. The order is the contract.
+            sequence: Any) -> CapturedWindowPublication:
+    """Admit, then let the namespace publish, then count. Order is the contract.
 
-    `create_target` is invoked **once**, after `_admit` has returned. It is the
-    caller's §5.20 step 3 -- an exclusive `0600` temporary sibling -- and this
-    module does not implement it, because the corpus namespace is unbuilt and
-    creating one is not authorised here. Passing it in is also what makes the
-    ordering observable: a test counts the calls, and an admission check moved
-    below this line is caught by a creator that ran.
+    3d wires the publisher. `create_target` is gone: creation is no longer the
+    caller's. `_admit` runs every precondition, the header is framed and its
+    `file_sha256` computed from the live scope before the file exists, and
+    `corpus.commit_window` -- inside the namespace, under the journal's
+    intent/commit bracket -- creates the temporary, writes it, runs §5.20 steps
+    5-8 and commits. Only a window that became a durable, verified member is
+    counted in the sequence, and the count happens here because the sequence is
+    still the caller's until compulsion (entry 14) binds it to the scope.
     """
-    # A precondition, not a post-open failure: a creator that cannot be called
-    # never creates anything, so the refusal belongs in the regime where
-    # nothing exists. The two vocabularies stay apart even here.
-    if not callable(create_target):
-        raise CaptureRefused(
-            ADMISSION_CREATOR_NOT_CALLABLE,
-            "create_target is the caller's §5.20 step 3 and must be callable; "
-            f"got {type(create_target).__name__}")
-
     metadata, header, payload_sha256 = _admit(
         scope=scope, stratum=stratum, attestation=attestation, corpus=corpus,
         sequence=sequence)
@@ -1048,13 +1036,21 @@ def _record(*, scope: Any, stratum: str, attestation: Any, corpus: Any,
             ADMISSION_CANONICAL_FORM_REFUSED,
             f"the derived header cannot be framed: {exc}") from exc
 
-    fd = create_target()
+    # The identity the durable intent binds before the file exists, and step 8
+    # recomputes from the file it reads back. `_prefixed_sha256` hashes the
+    # framing prefix and header in front of the live payload in one pass, so the
+    # digest is fixed at the instant the header was serialised.
+    file_sha256 = scope._prefixed_sha256(prefix + header_bytes)
 
-    return _publish(fd=fd, scope=scope, header=header,
-                    header_bytes=header_bytes, prefix=prefix,
-                    metadata=metadata, stratum=stratum,
-                    corpus_id=header["corpus_id"],
-                    payload_sha256=payload_sha256)
+    _verified, publication = corpus.commit_window(
+        attested_scope=scope, header=header, header_bytes=header_bytes,
+        framing_prefix_bytes=prefix, metadata=metadata, stratum=stratum,
+        payload_sha256=payload_sha256, file_sha256=file_sha256,
+        previous_window_id=sequence.previous_window_id,
+        ring_lifetime_id=metadata["ring_lifetime_id"])
+
+    sequence.count_published(publication)
+    return publication
 
 
 # -- the typed capture boundary ---------------------------------------------
@@ -1069,8 +1065,7 @@ def _record(*, scope: Any, stratum: str, attestation: Any, corpus: Any,
 
 
 def record_gain_step(*, scope: Any, attestation: Any, corpus: Any,
-                     sequence: Any, create_target: Any
-                     ) -> CapturedWindowPublication:
+                     sequence: Any) -> CapturedWindowPublication:
     """Publish the first complete window after a `GAIN_CHANGE`. §5.20, §5.25.
 
     3c-wire: `(scope, attestation, corpus, sequence, create_target)`. `scope`
@@ -1080,22 +1075,18 @@ def record_gain_step(*, scope: Any, attestation: Any, corpus: Any,
     either gets a `TypeError` rather than a second authority.
     """
     return _record(scope=scope, stratum="GAIN_STEPS", attestation=attestation,
-                   corpus=corpus, sequence=sequence,
-                   create_target=create_target)
+                   corpus=corpus, sequence=sequence)
 
 
 def record_retune_transient(*, scope: Any, attestation: Any, corpus: Any,
-                            sequence: Any, create_target: Any
-                            ) -> CapturedWindowPublication:
+                            sequence: Any) -> CapturedWindowPublication:
     """Publish the first complete window after a `RETUNE`. §5.20, §5.25."""
     return _record(scope=scope, stratum="RETUNE_TRANSIENTS",
-                   attestation=attestation, corpus=corpus,
-                   sequence=sequence, create_target=create_target)
+                   attestation=attestation, corpus=corpus, sequence=sequence)
 
 
 def record_receiver_spur(*, scope: Any = None, attestation: Any = None,
-                         corpus: Any = None, sequence: Any = None,
-                         create_target: Any = None
+                         corpus: Any = None, sequence: Any = None
                          ) -> CapturedWindowPublication:
     """Refuses by construction. `RECEIVER_SPURS` has no attestation member.
 

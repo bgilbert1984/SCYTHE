@@ -56,9 +56,10 @@ from rf_eligible_trials_artefact import (
 )
 from rf_membership_journal import (
     JOURNAL_NAME, JOURNAL_NOT_CANONICAL, JournalRefused,
-    create_membership_journal,
-    journal_declaration, read_membership_journal,
+    append_abandon, append_commit, append_intent, create_membership_journal,
+    intent_record, journal_declaration, read_membership_journal,
 )
+from rf_capture_format import canonical_member_name, partial_member_name
 from rf_promotion_envelope import declaration_digest
 from rf_signal_chain_identity import (
     CLOCK_AUTHORITIES, CLOCK_AUTHORITY_POSIX_REALTIME, UNDECLARED,
@@ -470,7 +471,7 @@ class CorpusOwnershipScope:
             # not wired -- the one claim here that is still a "not": piece 3.
             "sequence_state": "DURABLE; RECONSTRUCTED AT REOPEN",
             "membership_journal": "CORE BUILT; RECOVERY AND SEQUENCE BOUND",
-            "publisher": "CORE BUILT; NOT WIRED",
+            "publisher": "CORE BUILT; WIRED",
         }
 
     def membership_recovery(self) -> Dict[str, Any]:
@@ -490,6 +491,75 @@ class CorpusOwnershipScope:
                 stratum: sequence.accepted
                 for stratum, sequence in state.sequences.items()},
         }
+
+    def commit_window(self, *, attested_scope: Any, header: Dict[str, Any],
+                      header_bytes: bytes, framing_prefix_bytes: bytes,
+                      metadata: Dict[str, Any], stratum: str,
+                      payload_sha256: str, file_sha256: str,
+                      previous_window_id: Any, ring_lifetime_id: str
+                      ) -> Any:
+        """§5.20 steps 3-8 for one window, bracketed by the membership journal.
+
+        3d wires the publisher through here. Admission has run every
+        precondition and computed `file_sha256` from the live scope before the
+        file exists; this is the durable half, and it lives in the namespace
+        because only the namespace holds the corpus directory descriptor, which
+        never leaves it. The order is the durability contract:
+
+        * the INTENT is appended first, reserving a terminal slot, so a crash at
+          any later instant is a state 3d recovery reconciles rather than a lost
+          or unaccounted member;
+        * the temporary is created inside the corpus directory (step 3), written
+          (step 4), and published (steps 5-8, the publisher's `publish_and_verify`);
+        * the COMMIT is appended on a verified final, or the ABANDON on a
+          publication failure -- the terminal the intent reserved, either way.
+
+        Returns the verified final and the publication admission counts. The
+        descriptor is opaque throughout; a caller receives neither it nor a path.
+        """
+        from rf_capture_admission import write_captured_temp
+        from rf_capture_publication import PublicationFailed, publish_and_verify
+
+        state = self._live()
+        dir_fd = state.dir_fd
+        window_id = metadata["window_id"]
+        append_intent(dir_fd, intent_record(
+            manifest_sha256=state.manifest_sha256,
+            corpus_id=state.body["corpus_id"], stratum=stratum,
+            window_id=window_id, ring_lifetime_id=ring_lifetime_id,
+            expected_final_filename=canonical_member_name(file_sha256),
+            file_sha256=file_sha256, payload_sha256=payload_sha256,
+            previous_window_id=previous_window_id,
+            first_sample_index=int(metadata["first_sample_index"]),
+            envelope_digest=state.body["envelope_digest"],
+            capture_plan_digest=state.body["capture_plan_digest"]))
+
+        temporary_name = partial_member_name(file_sha256)
+        fd = os.open(temporary_name,
+                     os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW,
+                     CORPUS_FILE_MODE, dir_fd=dir_fd)
+        try:
+            os.fchmod(fd, CORPUS_FILE_MODE)
+            try:
+                publication = write_captured_temp(
+                    fd=fd, scope=attested_scope, header=header,
+                    header_bytes=header_bytes, prefix=framing_prefix_bytes,
+                    metadata=metadata, stratum=stratum,
+                    corpus_id=state.body["corpus_id"],
+                    payload_sha256=payload_sha256)
+                verified = publish_and_verify(
+                    fd=fd, dir_fd=dir_fd, temporary_name=temporary_name,
+                    publication=publication, intent_file_sha256=file_sha256)
+            except PublicationFailed:
+                # The reserved terminal pays for the failure: the window is
+                # spent, the orphan temporary is left for recovery to reconcile
+                # and free, exactly as an intent-only crash would be.
+                append_abandon(dir_fd, window_id)
+                raise
+            append_commit(dir_fd, window_id)
+            return verified, publication
+        finally:
+            os.close(fd)
 
     def __repr__(self) -> str:
         state = self._state
@@ -1000,14 +1070,16 @@ def namespace_status() -> Dict[str, Any]:
                   "MEMBERSHIP JOURNAL CORE",
                   "CLOCK PROVIDER", "ADMISSION CONSUMPTION OF THIS SCOPE",
                   "RING LIFETIME IDENTITY", "PUBLISHER CORE",
-                  "FINAL-DEPENDENT JOURNAL RECOVERY", "SEQUENCE STATE"],
-        # "PUBLISHER" and "RING LIFETIME IDENTITY" were both owed when this list
-        # was written and are not now: the ring mints a lifetime id and
-        # attestation compares it, and 3c-core built the steps 5-8 primitive.
-        # What remains owed of the publisher is its WIRING, which the accepted
-        # sequence prohibits until 3d -- a narrower claim than "not built", and
-        # the only one that is true.
-        "not_built": ["PUBLISHER WIRING"],
+                  "FINAL-DEPENDENT JOURNAL RECOVERY", "SEQUENCE STATE",
+                  "PUBLISHER WIRING"],
+        # Everything §5.26 and §5.20 3a-3d owed is built now. 3d piece 3 wired
+        # the publisher: record_gain_step admits, then the namespace's
+        # commit_window creates the temporary, writes it, runs steps 5-8 and
+        # brackets the whole with the journal's intent and commit. What is not
+        # yet true is not a missing capability but compulsion -- nothing is yet
+        # obliged to pass through this path -- which is entry 14 and piece 4,
+        # reported by `compelled_path_to_membership`, not by `not_built`.
+        "not_built": [],
         "clock_authorities": list(CLOCK_AUTHORITIES),
         # 3c-wire: admission consumes this scope, through `admit_window`. That
         # is consumption, not compulsion: no production path is yet obliged

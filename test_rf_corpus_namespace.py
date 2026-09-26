@@ -492,10 +492,11 @@ class ScopeTests(NamespaceFixture):
     def test_there_is_no_public_accessor_for_the_path_or_the_descriptor(self):
         public = sorted(name for name in dir(CorpusOwnershipScope)
                         if not name.startswith("_"))
-        self.assertEqual(public, ["admit_window", "corpus_clock_authority",
-                                  "corpus_id", "delete_not_after",
-                                  "manifest_sha256", "membership_recovery",
-                                  "opened_at", "release", "to_dict"])
+        self.assertEqual(public, ["admit_window", "commit_window",
+                                  "corpus_clock_authority", "corpus_id",
+                                  "delete_not_after", "manifest_sha256",
+                                  "membership_recovery", "opened_at",
+                                  "release", "to_dict"])
         # Asserted per capability as well as in aggregate: the aggregate alone
         # gave "the descriptor escaped" and "the body escaped" one witness.
         self.assertNotIn("directory_fd", public)
@@ -568,7 +569,7 @@ class ScopeTests(NamespaceFixture):
                          "DURABLE; RECONSTRUCTED AT REOPEN")
         self.assertEqual(data["membership_journal"],
                          "CORE BUILT; RECOVERY AND SEQUENCE BOUND")
-        self.assertEqual(data["publisher"], "CORE BUILT; NOT WIRED")
+        self.assertEqual(data["publisher"], "CORE BUILT; WIRED")
         self.assertFalse(data["path_exposed"])
         self.assertFalse(data["descriptor_exposed"])
 
@@ -1040,13 +1041,14 @@ class BoundedSliceTests(NamespaceFixture):
     def test_the_status_names_what_is_not_built(self):
         status = namespace_status()
         self.assertFalse(status["production_creation_authorised"])
-        self.assertEqual(status["not_built"], ["PUBLISHER WIRING"])
-        # Recovery and sequence were owed when the list was first written and
-        # are not now: 3d piece 2 reconciles the journal against the finals on
-        # reopen and reconstructs each stratum's sequence from the result. What
-        # remains owed is the publisher's WIRING alone, the one narrower claim.
+        self.assertEqual(status["not_built"], [])
+        # Everything owed is built: 3d piece 3 wired the publisher through the
+        # namespace's commit_window. What is not yet true is compulsion (entry
+        # 14, piece 4), which the status reports separately.
+        self.assertFalse(status["compelled_path_to_membership"])
         for built in ("RING LIFETIME IDENTITY", "PUBLISHER CORE",
-                      "FINAL-DEPENDENT JOURNAL RECOVERY", "SEQUENCE STATE"):
+                      "FINAL-DEPENDENT JOURNAL RECOVERY", "SEQUENCE STATE",
+                      "PUBLISHER WIRING"):
             self.assertIn(built, status["built"], built)
             self.assertNotIn(built, status["not_built"], built)
         # 3c-wire built these two; consumption is still not compulsion.
