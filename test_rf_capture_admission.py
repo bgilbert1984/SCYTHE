@@ -17,7 +17,11 @@ import pathlib
 import struct
 import threading
 import unittest
+import dataclasses
 from dataclasses import dataclass, replace
+import shutil
+import tempfile
+import time
 from unittest import mock
 
 import numpy as np
@@ -29,8 +33,8 @@ from rf_capture_admission import (
     ADMISSION_BINDING_CLAIMED_TWICE, ADMISSION_BINDING_NOT_EMITTED,
     ADMISSION_CANONICAL_FORM_REFUSED, ADMISSION_CHAIN_OUTSIDE_ENVELOPE,
     ADMISSION_CREATOR_NOT_CALLABLE, ADMISSION_FIELD_NO_AUTHORITY,
-    ADMISSION_GEOMETRY_REFUSED, ADMISSION_LOCK_DIGEST_MOVED,
-    ADMISSION_LOCK_NOT_FROZEN, ADMISSION_REFUSALS,
+    ADMISSION_GEOMETRY_REFUSED, ADMISSION_OWNERSHIP_SCOPE_RELEASED,
+    ADMISSION_OWNERSHIP_SCOPE_TYPE_WRONG, ADMISSION_REFUSALS,
     ADMISSION_RETENTION_BEYOND_MAXIMUM, ADMISSION_RETENTION_EXPIRED,
     ADMISSION_RETENTION_NOT_SUPPLIED, ADMISSION_SCOPE_ENDED,
     ADMISSION_SCOPE_TYPE_WRONG, ADMISSION_SEQUENCE_NOT_THIS_STRATUM,
@@ -49,6 +53,10 @@ from rf_capture_admission import (
 from rf_capture_format import (
     IQC_FORMAT_VERSION, IQC_HEADER_SCHEMA, IQC_MAGIC, IQC_MAX_HEADER_BYTES,
     FramingRefused, canonical_header_bytes, framing_prefix,
+)
+from rf_corpus_namespace import (
+    CorpusOwnershipScope, create_corpus_namespace,
+    _create_corpus_namespace_with_clock,
 )
 from rf_corpus_vocabulary import CAPTURED
 from rf_iq_ring import (
@@ -75,12 +83,12 @@ DEADLINE = OPENED_AT + 30 * 24 * 3600.0
 _SAMPLES = np.arange(PROMOTION_WINDOW_SAMPLES, dtype=STORAGE_DTYPE)
 
 
-def _lock(corpus_id="corpus-a", envelope=None):
+def _lock(corpus_id="corpus-a", envelope=None, opened_at=OPENED_AT):
     envelope = _envelope() if envelope is None else envelope
     return freeze_promotion_corpus(
         corpus_id=corpus_id, method_revision="squared-envelope-cyclic.v1",
         decision_threshold=6.0, preprocessing_revision="pre.v1",
-        envelope=envelope, capture_plan=_plan(envelope), opened_at=OPENED_AT)
+        envelope=envelope, capture_plan=_plan(envelope), opened_at=opened_at)
 
 
 def _ring(chain, samples=None, count=PROMOTION_WINDOW_SAMPLES, **kwargs):
@@ -140,6 +148,41 @@ class CaptureFixture(unittest.TestCase):
         self.retention = CapturedCorpusRetention(delete_not_after=DEADLINE)
         self.sequence = CapturedStratumSequence(
             corpus_id=self.lock.corpus_id, stratum="GAIN_STEPS")
+        # 3c-wire: admission consumes a corpus ownership scope, so every test
+        # holds a real one, in its own temporary root, under the operator's
+        # test-write authorisation. The fixture's corpus is minted through the
+        # test factory with a fixed clock, so these tests stay deterministic
+        # against the fixed OPENED_AT and DEADLINE above; `real_clock=True`
+        # mints one through the public act, which installs `time.time`.
+        self.corpus = self.open_corpus()
+
+    def open_corpus(self, lock=None, retention=None, clock=None,
+                    real_clock=False):
+        """A held corpus in a fresh root. `clock` reaches the test factory
+        only; the public act takes none."""
+        root = tempfile.mkdtemp(prefix="scythe-admission-")
+        self.addCleanup(shutil.rmtree, root, ignore_errors=True)
+        lock = self.lock if lock is None else lock
+        retention = self.retention if retention is None else retention
+        if real_clock:
+            corpus = create_corpus_namespace(
+                corpus_id=lock.corpus_id, lock=lock, retention=retention,
+                root=root)
+        else:
+            corpus = _create_corpus_namespace_with_clock(
+                corpus_id=lock.corpus_id, lock=lock, retention=retention,
+                root=root, clock=(lambda: NOW) if clock is None else clock)
+        self.addCleanup(corpus.release)
+        return corpus
+
+    def real_corpus(self):
+        """A corpus opened now, by the public act, with a deadline ahead of
+        the real clock: the only way to see `POSIX_REALTIME` in a header."""
+        opened = float(int(time.time()))
+        lock = _lock(envelope=self.envelope, opened_at=opened)
+        retention = CapturedCorpusRetention(
+            delete_not_after=opened + 30 * 24 * 3600.0)
+        return self.open_corpus(lock=lock, retention=retention, real_clock=True)
 
     def devnull(self):
         fd = os.open(os.devnull, os.O_WRONLY)
@@ -147,9 +190,8 @@ class CaptureFixture(unittest.TestCase):
         return fd
 
     def kwargs(self, **overrides):
-        fields = dict(attestation=_gain_attestation(), lock=self.lock,
-                      retention=self.retention, sequence=self.sequence,
-                      now=NOW)
+        fields = dict(attestation=_gain_attestation(), corpus=self.corpus,
+                      sequence=self.sequence)
         fields.update(overrides)
         return fields
 
@@ -170,8 +212,10 @@ class CaptureFixture(unittest.TestCase):
     def _header(self):
         with self.ring.attest_window(_window(self.ring)) as scope:
             return derive_canonical_header(
-                metadata=scope.to_dict(), lock=self.lock,
-                retention=self.retention, stratum="GAIN_STEPS",
+                metadata=scope.to_dict(),
+                ownership=self.corpus.admit_window(
+                    signal_chain_hash=scope.to_dict()["signal_chain_hash"]),
+                stratum="GAIN_STEPS",
                 attestation=_gain_attestation(), sequence=self.sequence,
                 payload_sha256="0" * 64)
 
@@ -255,19 +299,40 @@ class AttestationIsNotAdmissionTests(CaptureFixture):
         for entrypoint in (record_gain_step, record_retune_transient):
             names = set(inspect.signature(entrypoint).parameters)
             self.assertEqual(
-                names, {"scope", "attestation", "lock", "retention",
-                        "sequence", "create_target", "now"},
+                names, {"scope", "attestation", "corpus", "sequence",
+                        "create_target"},
                 entrypoint.__name__)
             self.assertNotIn("source", names)
             self.assertNotIn("stratum", names)
+            # 3c-wire, §5.26 A2 and A3: no free-standing lock beside the
+            # scope, and no caller timestamp.
+            self.assertNotIn("lock", names)
+            self.assertNotIn("retention", names)
+            self.assertNotIn("now", names)
 
-    def test_the_envelope_is_read_out_of_the_lock_and_not_out_of_the_call(self):
-        """A lock whose envelope admits nothing refuses every window, however
-        the caller frames the request."""
-        other = _envelope(sensor="rtl2838-unit-2")
-        lock = _lock(corpus_id="corpus-a", envelope=other)
+    def test_a_free_standing_lock_beside_the_scope_is_not_a_parameter(self):
+        """§5.26 control A2. Two authorities, one of them the caller's, is
+        refused by the signature rather than by a check someone could relax."""
         with self.ring.attest_window(_window(self.ring)) as scope:
-            refusal, _creator = self.refuse(scope, lock=lock)
+            with self.assertRaises(TypeError):
+                record_gain_step(scope=scope, create_target=_Creator(),
+                                 lock=self.lock, **self.kwargs())
+
+    def test_a_caller_timestamp_is_not_a_parameter(self):
+        """§5.26 control A3. The clock is the ownership scope's."""
+        with self.ring.attest_window(_window(self.ring)) as scope:
+            with self.assertRaises(TypeError):
+                record_gain_step(scope=scope, create_target=_Creator(),
+                                 now=NOW, **self.kwargs())
+
+    def test_the_envelope_is_read_out_of_the_scope_and_not_out_of_the_call(self):
+        """A corpus whose envelope admits nothing refuses every window, however
+        the caller frames the request. The envelope consulted is the one the
+        namespace reconstructed from its own manifest."""
+        other = _envelope(sensor="rtl2838-unit-2")
+        corpus = self.open_corpus(lock=_lock(corpus_id="corpus-a", envelope=other))
+        with self.ring.attest_window(_window(self.ring)) as scope:
+            refusal, _creator = self.refuse(scope, corpus=corpus)
         self.assertEqual(refusal.code, ADMISSION_CHAIN_OUTSIDE_ENVELOPE)
 
 
@@ -337,10 +402,10 @@ class PreconditionRegimeTests(CaptureFixture):
         return {
             ADMISSION_SCOPE_TYPE_WRONG: self._scope_type_wrong,
             ADMISSION_SCOPE_ENDED: self._scope_ended,
-            ADMISSION_LOCK_NOT_FROZEN: self._lock_not_frozen,
-            ADMISSION_LOCK_DIGEST_MOVED: self._lock_digest_moved,
+            ADMISSION_OWNERSHIP_SCOPE_TYPE_WRONG: self._ownership_type_wrong,
+            ADMISSION_OWNERSHIP_SCOPE_RELEASED: self._ownership_released,
             ADMISSION_STRATA_DEFINITION_MOVED: self._strata_moved,
-            ADMISSION_RETENTION_NOT_SUPPLIED: self._retention_absent,
+            ADMISSION_RETENTION_NOT_SUPPLIED: self._retention_not_a_deadline,
             ADMISSION_RETENTION_BEYOND_MAXIMUM: self._retention_too_far,
             ADMISSION_RETENTION_EXPIRED: self._retention_expired,
             ADMISSION_STRATUM_OUTSIDE_GRANT: self._stratum_outside_grant,
@@ -371,28 +436,45 @@ class PreconditionRegimeTests(CaptureFixture):
         scope.__exit__(None, None, None)
         return self.refuse(scope)
 
-    def _lock_not_frozen(self):
-        return self.refuse(self._live(), lock={"envelope": self.envelope})
+    def _ownership_type_wrong(self):
+        return self.refuse(self._live(), corpus=object())
 
-    def _lock_digest_moved(self):
-        return self.refuse(self._live(),
-                           lock=replace(self.lock, envelope_digest="blake2s:00"))
+    def _ownership_released(self):
+        corpus = self.open_corpus()
+        corpus.release()
+        return self.refuse(self._live(), corpus=corpus)
 
     def _strata_moved(self):
-        return self.refuse(
-            self._live(),
-            lock=replace(self.lock, strata_definition_revision="rf-null-strata.v9"))
+        """The namespace refuses a manifest under other strata definitions
+        before a scope exists, so admission's own check is reached by
+        presenting terms whose revision moved after the scope opened."""
+        real = CorpusOwnershipScope.admit_window
 
-    def _retention_absent(self):
-        return self.refuse(self._live(), retention=DEADLINE)
+        def moved(corpus, **kwargs):
+            return dataclasses.replace(
+                real(corpus, **kwargs),
+                strata_definition_revision="rf-null-strata.v9")
+
+        with mock.patch.object(CorpusOwnershipScope, "admit_window", moved):
+            return self.refuse(self._live())
+
+    def _retention_not_a_deadline(self):
+        """`ADMISSION_RETENTION_NOT_SUPPLIED` is raised where the deadline is
+        constructed; there is no admission-time route to it once a corpus
+        holds one. Produced here so the enumeration stays complete."""
+        creator = _Creator(self.devnull())
+        with self.assertRaises(CaptureRefused) as caught:
+            CapturedCorpusRetention(delete_not_after=float("nan"))
+        return caught.exception, creator
 
     def _retention_too_far(self):
         far = CapturedCorpusRetention(
             delete_not_after=OPENED_AT + RETENTION_MAXIMUM_SECONDS + 1.0)
-        return self.refuse(self._live(), retention=far)
+        return self.refuse(self._live(), corpus=self.open_corpus(retention=far))
 
     def _retention_expired(self):
-        return self.refuse(self._live(), now=DEADLINE + 1.0)
+        late = self.open_corpus(clock=lambda: DEADLINE + 1.0)
+        return self.refuse(self._live(), corpus=late)
 
     def _stratum_outside_grant(self):
         """Reached through the private boundary, because the three public
@@ -667,6 +749,8 @@ class HeaderAuthorityTests(CaptureFixture):
         self.assertEqual(header["envelope_digest"], self.lock.envelope.digest())
         self.assertEqual(header["capture_plan_digest"],
                          self.lock.capture_plan.digest())
+        self.assertEqual(header["corpus_clock_authority"],
+                         self.corpus.corpus_clock_authority)
 
     def test_a_binding_added_to_a_declaration_becomes_required(self):
         """Without anyone editing a list. A hand-written list would pass,
@@ -921,8 +1005,8 @@ class TypedBoundaryTests(CaptureFixture):
         with self.ring.attest_window(_window(self.ring)) as scope:
             published = record_retune_transient(
                 scope=scope, attestation=_retune_attestation(),
-                lock=self.lock, retention=self.retention, sequence=sequence,
-                create_target=_Creator(self.devnull()), now=NOW)
+                corpus=self.corpus, sequence=sequence,
+                create_target=_Creator(self.devnull()))
         header = json.loads(published.header_bytes)
         self.assertEqual(header["stratum"], "RETUNE_TRANSIENTS")
         self.assertEqual(header["attestation_centre_hz_after"], 433_200_000.0)
@@ -1036,7 +1120,7 @@ class SequenceTests(CaptureFixture):
 
 
 class FrozenCorpusTests(CaptureFixture):
-    """What the lock has to be before its envelope is worth consulting."""
+    """What the ownership scope has to be before its envelope is consulted."""
 
     def test_a_window_outside_the_promotion_geometry_is_refused(self):
         """§5.20 correction A: promotion capture refuses any geometry but
@@ -1047,24 +1131,57 @@ class FrozenCorpusTests(CaptureFixture):
             refusal, _creator = self.refuse(scope)
         self.assertEqual(refusal.code, ADMISSION_GEOMETRY_REFUSED)
 
-    def test_a_lock_whose_frozen_digest_is_not_its_envelopes_is_refused(self):
-        """The lock is a frozen dataclass and a caller can build one. What a
-        caller cannot do is make the frozen digests agree with the objects
-        beside them, so they are recomputed rather than read."""
-        for field in ("envelope_digest", "capture_plan_digest"):
-            with self.subTest(field=field):
-                with self.ring.attest_window(_window(self.ring)) as scope:
-                    refusal, _creator = self.refuse(
-                        scope, lock=replace(self.lock, **{field: "blake2s:00"}))
-                self.assertEqual(refusal.code, ADMISSION_LOCK_DIGEST_MOVED)
+    def test_the_ownership_scope_must_be_the_exact_nominal_type(self):
+        """A stand-in carrying the same attributes is not the thing the
+        namespace minted. A subclass is the sharpest impostor: it passes
+        `isinstance` and every duck-typed check."""
+        class LooksLikeAScope(CorpusOwnershipScope):
+            pass
 
-    def test_a_lock_opened_under_other_strata_definitions_is_refused(self):
+        impostor = LooksLikeAScope.__new__(LooksLikeAScope)
+        object.__setattr__(impostor, "_state", self.corpus._state)
+        with self.ring.attest_window(_window(self.ring)) as scope:
+            refusal, creator = self.refuse(scope, corpus=impostor)
+        self.assertEqual(refusal.code, ADMISSION_OWNERSHIP_SCOPE_TYPE_WRONG)
+        self.assertEqual(creator.calls, 0)
+
+    def test_a_released_ownership_scope_admits_nothing(self):
+        """The action re-establishes that the namespace is held. A scope that
+        has released it answers nothing, and admission refuses before any
+        target is opened."""
+        corpus = self.open_corpus()
+        corpus.release()
+        with self.ring.attest_window(_window(self.ring)) as scope:
+            refusal, creator = self.refuse(scope, corpus=corpus)
+        self.assertEqual(refusal.code, ADMISSION_OWNERSHIP_SCOPE_RELEASED)
+        self.assertEqual(creator.calls, 0)
+
+    def test_the_terms_admission_receives_carry_no_authority_object(self):
+        """Bounded facts, not the lock. What the scope hands admission is
+        comparison results -- strings, floats, one boolean -- and nothing a
+        caller could retain as filesystem or corpus authority."""
+        terms = self.corpus.admit_window(signal_chain_hash=self.chain)
+        for value in dataclasses.asdict(terms).values():
+            self.assertIsInstance(value, (str, float, bool))
+        self.assertTrue(terms.chain_admitted)
+        self.assertFalse(self.corpus.admit_window(
+            signal_chain_hash=self.foreign).chain_admitted)
+
+    def test_a_scope_whose_strata_definitions_moved_is_refused(self):
         """§5.20 correction D: a stratum can be redefined while its name, count
         and buildability stay put. A window captured now would be a trial of a
-        different population."""
-        moved = replace(self.lock, strata_definition_revision="rf-null-strata.v9")
-        with self.ring.attest_window(_window(self.ring)) as scope:
-            refusal, _creator = self.refuse(scope, lock=moved)
+        different population. The namespace refuses such a manifest at open,
+        so the terms are moved after the scope opened to reach this check."""
+        real = CorpusOwnershipScope.admit_window
+
+        def moved(corpus, **kwargs):
+            return dataclasses.replace(
+                real(corpus, **kwargs),
+                strata_definition_revision="rf-null-strata.v9")
+
+        with mock.patch.object(CorpusOwnershipScope, "admit_window", moved):
+            with self.ring.attest_window(_window(self.ring)) as scope:
+                refusal, _creator = self.refuse(scope)
         self.assertEqual(refusal.code, ADMISSION_STRATA_DEFINITION_MOVED)
         self.assertEqual(self.lock.strata_definition_revision,
                          STRATA_DEFINITION_REVISION)
@@ -1076,28 +1193,34 @@ class RetentionTests(CaptureFixture):
     def test_a_deadline_ninety_days_out_is_accepted(self):
         edge = CapturedCorpusRetention(
             delete_not_after=OPENED_AT + RETENTION_MAXIMUM_SECONDS)
+        corpus = self.open_corpus(retention=edge)
         with self.ring.attest_window(_window(self.ring)) as scope:
-            published, _creator = self.publish(scope, retention=edge)
+            published, _creator = self.publish(scope, corpus=corpus)
         self.assertEqual(json.loads(published.header_bytes)["delete_not_after"],
                          edge.delete_not_after)
 
     def test_one_second_past_ninety_days_refuses(self):
         far = CapturedCorpusRetention(
             delete_not_after=OPENED_AT + RETENTION_MAXIMUM_SECONDS + 1.0)
+        corpus = self.open_corpus(retention=far)
         with self.ring.attest_window(_window(self.ring)) as scope:
-            refusal, creator = self.refuse(scope, retention=far)
+            refusal, creator = self.refuse(scope, corpus=corpus)
         self.assertEqual(refusal.code, ADMISSION_RETENTION_BEYOND_MAXIMUM)
         self.assertEqual(creator.calls, 0)
 
     def test_a_deadline_already_passed_refuses(self):
+        """Read from the scope's own clock. The only way to move it is the
+        test factory's seam; no entrypoint takes a timestamp."""
+        late = self.open_corpus(clock=lambda: DEADLINE + 1.0)
         with self.ring.attest_window(_window(self.ring)) as scope:
-            refusal, _creator = self.refuse(scope, now=DEADLINE + 1.0)
+            refusal, _creator = self.refuse(scope, corpus=late)
         self.assertEqual(refusal.code, ADMISSION_RETENTION_EXPIRED)
 
     def test_a_deadline_before_the_corpus_opened_refuses(self):
         early = CapturedCorpusRetention(delete_not_after=OPENED_AT - 1.0)
+        corpus = self.open_corpus(retention=early)
         with self.ring.attest_window(_window(self.ring)) as scope:
-            refusal, _creator = self.refuse(scope, retention=early)
+            refusal, _creator = self.refuse(scope, corpus=corpus)
         self.assertEqual(refusal.code, ADMISSION_RETENTION_EXPIRED)
 
     def test_a_deadline_that_is_not_a_finite_instant_is_not_a_deadline(self):
@@ -1153,6 +1276,13 @@ class ObservationBoundaryTests(unittest.TestCase):
 class StatusTests(CaptureFixture):
     """What the boundary says about itself."""
 
+    def test_it_says_what_it_consumes_and_what_it_does_not_accept(self):
+        status = admission_status()
+        self.assertTrue(status["consumes_ownership_scope"])
+        self.assertFalse(status["accepts_caller_lock"])
+        self.assertFalse(status["accepts_caller_timestamp"])
+        self.assertEqual(status["required_header_fields"], 33)
+
     def test_it_says_which_publication_steps_exist(self):
         status = admission_status()
         self.assertTrue(status["creates_nothing"])
@@ -1177,6 +1307,65 @@ class StatusTests(CaptureFixture):
         header = json.loads(published.header_bytes)
         self.assertEqual(header["clock_authority"],
                          ring_module.CLOCK_AUTHORITY_POSIX_REALTIME)
+
+    def test_the_corpus_names_the_clock_its_scope_acquired(self):
+        """§5.26 point 4, 3c-wire. `corpus_clock_authority` is the ownership
+        scope's, a different field from the ring's `clock_authority` even
+        though both may honestly carry `POSIX_REALTIME`."""
+        corpus = self.real_corpus()
+        with self.ring.attest_window(_window(self.ring)) as scope:
+            published, _creator = self.publish(scope, corpus=corpus)
+        header = json.loads(published.header_bytes)
+        self.assertEqual(header["corpus_clock_authority"],
+                         ring_module.CLOCK_AUTHORITY_POSIX_REALTIME)
+        self.assertEqual(header["clock_authority"],
+                         ring_module.CLOCK_AUTHORITY_POSIX_REALTIME)
+        # And the fixture's corpus, minted through the test factory with a
+        # fixed clock, says so rather than guessing.
+        self.assertEqual(self.corpus.corpus_clock_authority, "UNDECLARED")
+
+    def test_the_corpus_clock_is_declared_by_the_ownership_authority_alone(self):
+        """One field, one authority. Declared by `_corpus_ownership_declares`
+        and by nothing else, so `_merge` can still refuse a field claimed
+        twice. Required fields 32 -> 33."""
+        self.assertIn("corpus_clock_authority",
+                      _corpus_ownership_declares("GAIN_STEPS"))
+        self.assertNotIn("corpus_clock_authority",
+                         _attested_scope_declares("GAIN_STEPS"))
+        declaring = [a.name for a in HEADER_AUTHORITIES
+                     if "corpus_clock_authority" in a.declares("GAIN_STEPS")]
+        self.assertEqual(declaring, ["corpus_ownership"])
+        self.assertEqual(len(required_header_fields("GAIN_STEPS")), 33)
+
+    def test_an_injected_corpus_clock_is_declared_absent_not_guessed(self):
+        """Exactly `time.time` is `POSIX_REALTIME`. A wrapper that calls
+        `time.time` reads the same clock and is still `UNDECLARED`: authority
+        is derived from identity, never inferred from equivalent behaviour."""
+        opened = float(int(time.time()))
+        real_lock = _lock(envelope=self.envelope, opened_at=opened)
+        real_retention = CapturedCorpusRetention(
+            delete_not_after=opened + 30 * 24 * 3600.0)
+        for corpus in (self.open_corpus(clock=lambda: NOW),
+                       self.open_corpus(lock=real_lock, retention=real_retention,
+                                        clock=lambda: time.time())):
+            self.assertEqual(corpus.corpus_clock_authority, "UNDECLARED")
+            with self.ring.attest_window(_window(self.ring)) as scope:
+                published, _creator = self.publish(scope, corpus=corpus)
+            header = json.loads(published.header_bytes)
+            self.assertEqual(header["corpus_clock_authority"], "UNDECLARED")
+            self.assertEqual(header["clock_authority"],
+                             ring_module.CLOCK_AUTHORITY_POSIX_REALTIME)
+
+    def test_the_vocabulary_is_declared_once_and_shared(self):
+        """§5.26 point 5: one declaration, in `rf_signal_chain_identity`, that
+        the ring and the namespace both import."""
+        import rf_corpus_namespace as namespace_module
+        import rf_signal_chain_identity as identity
+        self.assertIs(ring_module.CLOCK_AUTHORITIES, identity.CLOCK_AUTHORITIES)
+        self.assertIs(namespace_module.CLOCK_AUTHORITIES,
+                      identity.CLOCK_AUTHORITIES)
+        self.assertEqual(identity.CLOCK_AUTHORITIES,
+                         ("POSIX_REALTIME", "UNDECLARED"))
 
     def test_a_ring_handed_a_clock_nobody_named_declares_the_absence(self):
         ring = _ring(self.chain, now=lambda: NOW)

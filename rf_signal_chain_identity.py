@@ -30,7 +30,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 SIGNAL_CHAIN_SCHEMA = "scythe.rf-signal-chain.v2"
 SIGNAL_CHAIN_REVISION = "v3"
@@ -46,6 +46,25 @@ PRIOR_SIGNAL_CHAIN_REVISION_COMPARABLE = False
 CLOCK_QUALITY = "MODEL_DECLARED_0_5_PPM_TCXO"
 
 UNDECLARED = "UNDECLARED"
+
+# §5.26 point 5, 3c-wire: the clock vocabulary, declared once, in the leaf that
+# already owns `UNDECLARED`. `rf_iq_ring` names the clock that stamped a
+# window's capture times; `rf_corpus_namespace` names the clock the ownership
+# scope acquired when it opened. Both import this one declaration. Two copies
+# of one vocabulary is the single-source defect §5.27 spent a slice removing,
+# and importing the ring's copy into the namespace would couple the namespace
+# to the IQ ring, which it does not otherwise depend on.
+#
+# `POSIX_REALTIME` is what `time.time` reads. It is named rather than praised:
+# it is settable, it is not monotonic, and nothing here has disciplined it
+# against a reference. The authority is derived by each owner from the clock
+# actually installed -- exactly `time.time` is `POSIX_REALTIME`, and any
+# injected or wrapped callable is `UNDECLARED`, including a wrapper that calls
+# `time.time` itself. Authority is never inferred from equivalent behaviour.
+# The derivation stays with the owners because it needs `time`, and this
+# module's imports are held to `hashlib`, `json` and `typing`.
+CLOCK_AUTHORITY_POSIX_REALTIME = "POSIX_REALTIME"
+CLOCK_AUTHORITIES: Tuple[str, ...] = (CLOCK_AUTHORITY_POSIX_REALTIME, UNDECLARED)
 
 
 def signal_chain_manifest(*, sensor_id: str, sample_type: str,

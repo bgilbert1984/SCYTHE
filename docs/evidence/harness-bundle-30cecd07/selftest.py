@@ -196,6 +196,33 @@ except SystemExit as _e:
 check("S10-gate-generations", _stale,
       "a clean baseline above the floor but off the expected count refuses")
 
+# S11: the skip column sees docstring tests. `unittest -v` reports a test that
+# has a docstring on two lines -- the id, then the docstring's first line with
+# the verdict -- and the first skip pattern required the verdict on the id
+# line. On a host without the pinned observation tree, the position-act suite
+# skipped one such test and the column recorded one skip where unittest counted
+# two. The text below is unittest's own output for six tests, captured rather
+# than composed, so the pattern is measured against the shape it must read.
+from sweep import classify as _classify
+_verbose = (
+    "test_decorated_plain (t.T.test_decorated_plain) ... skipped 'decorated plain'\n"
+    "test_decorated_skip (t.T.test_decorated_skip)\n"
+    "Decorated, with docstring. ... skipped 'decorated'\n"
+    "test_doc_ok (t.T.test_doc_ok)\n"
+    "A docstring that passes. ... ok\n"
+    "test_doc_skip (t.T.test_doc_skip)\n"
+    "First line of the docstring. ... skipped 'doc reason'\n"
+    "test_plain_ok (t.T.test_plain_ok) ... ok\n"
+    "test_plain_skip (t.T.test_plain_skip) ... skipped 'plain reason'\n"
+    "\n----------------------------------------------------------------------\n"
+    "Ran 6 tests in 0.000s\n\nOK (skipped=4)\n")
+_cls, _n, _ids = _classify(_sp.CompletedProcess(["x"], 0, "", _verbose), 0.1)
+_want = ["test_decorated_plain", "test_decorated_skip", "test_doc_skip",
+         "test_plain_skip"]
+check("S11-skips-docstring", _classify.last_skipped == _want
+      and (_cls, _n, _ids) == (ZERO_DISCRIMINATION, 6, []),
+      f"skipped={_classify.last_skipped}  ({_cls}, {_n} tests)")
+
 AFTER = working_tree_hashes(WATCHED)
 unchanged = BEFORE == AFTER
 print(f"\n{'PASS' if unchanged else 'FAIL'}  the original working tree is hash-identical throughout")

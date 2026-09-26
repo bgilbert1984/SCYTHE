@@ -141,15 +141,20 @@ CONTROLS = [
  # 3c-core's boundary is a property of the code, so it gets a control like any
  # other. Without one, the test asserting the publisher is unwired would be a
  # test nothing can fail --- the same gap as a clause with no control.
+ # RE-ANCHORED for 3c-wire: `_record` lost its `lock` parameter when the typed
+ # entrypoints began consuming the ownership scope, so the old anchor went dead
+ # and this control would never have applied. The PRE-FLIGHT anchor audit
+ # caught it before a sweep was spent, which is the whole reason it reports
+ # instead of deferring to `run_control`.
  # A MODULE-level import here is circular --- the publisher imports
  # PublicationFailed from admission --- so it detonated at import time and
  # collected 2174 of 2248 tests. A degraded row is not evidence. A function-level
  # import is what a real workaround would look like, is never executed because
  # nothing calls it, and the AST scan sees it just the same.
  ("K24 admission is wired to the publisher", [(A,
-   "def _record(*, scope: Any, stratum: str, attestation: Any, lock: Any,",
+   "def _record(*, scope: Any, stratum: str, attestation: Any, corpus: Any,",
    "def _wire_the_publisher():\n    import rf_capture_publication\n\n\n"
-   "def _record(*, scope: Any, stratum: str, attestation: Any, lock: Any,")]),
+   "def _record(*, scope: Any, stratum: str, attestation: Any, corpus: Any,")]),
  # The scan's BREADTH, witnessed. Run 1 at 64f5837 measured K25 as "a second
  # module is wired" alone, which the prohibition catches exactly as it catches
  # K24: one witness, two controls. The breadth test is the one that must see a

@@ -28,6 +28,8 @@ import tempfile
 import unittest
 from collections.abc import Mapping
 from unittest import mock
+import dataclasses
+import time
 from dataclasses import replace
 
 import rf_corpus_namespace as namespace
@@ -476,12 +478,17 @@ class ScopeTests(NamespaceFixture):
     # holding it would hold the envelope and the capture plan as **mappings**,
     # and admission consuming a mapping is the caller-supplied set §5.25
     # refused, wearing a different shape.
-    RESTRICTED = ("_verified_body",)
+    # 3c-wire, §5.26 control A4: the test factory's clock seam is not the
+    # interface. Production code reaches its clock only through the public
+    # acts, which install `time.time` and read `POSIX_REALTIME`.
+    RESTRICTED = ("_verified_body", "_create_corpus_namespace_with_clock",
+                  "_open_corpus_namespace_with_clock")
 
     def test_there_is_no_public_accessor_for_the_path_or_the_descriptor(self):
         public = sorted(name for name in dir(CorpusOwnershipScope)
                         if not name.startswith("_"))
-        self.assertEqual(public, ["corpus_id", "delete_not_after",
+        self.assertEqual(public, ["admit_window", "corpus_clock_authority",
+                                  "corpus_id", "delete_not_after",
                                   "manifest_sha256", "opened_at", "release",
                                   "to_dict"])
         # Asserted per capability as well as in aggregate: the aggregate alone
@@ -547,10 +554,15 @@ class ScopeTests(NamespaceFixture):
             CorpusOwnershipScope(None)
 
     def test_the_scope_says_what_is_not_built(self):
+        """Three states, not one. "NOT BUILT" for the journal was false once
+        3b-core built and certified it, and a reader acting on that string would
+        have concluded no journal exists."""
         with self.create() as corpus:
             data = corpus.to_dict()
-        self.assertEqual(data["membership_journal"], "NOT BUILT")
-        self.assertEqual(data["publisher"], "NOT BUILT")
+        self.assertEqual(data["sequence_state"], "NOT BUILT")
+        self.assertEqual(data["membership_journal"],
+                         "CORE BUILT; RECOVERY AND SEQUENCE NOT BOUND")
+        self.assertEqual(data["publisher"], "CORE BUILT; NOT WIRED")
         self.assertFalse(data["path_exposed"])
         self.assertFalse(data["descriptor_exposed"])
 
@@ -1022,11 +1034,21 @@ class BoundedSliceTests(NamespaceFixture):
     def test_the_status_names_what_is_not_built(self):
         status = namespace_status()
         self.assertFalse(status["production_creation_authorised"])
-        for owed in ("FINAL-DEPENDENT JOURNAL RECOVERY", "PUBLISHER", "SEQUENCE STATE",
-                     "RING LIFETIME IDENTITY",
-                     "ADMISSION CONSUMPTION OF THIS SCOPE"):
+        for owed in ("FINAL-DEPENDENT JOURNAL RECOVERY", "SEQUENCE STATE",
+                     "PUBLISHER WIRING"):
             self.assertIn(owed, status["not_built"], owed)
-        self.assertFalse(status["consumed_by_admission"])
+        # Both of these were owed when the list was written and are not now. The
+        # ring mints a lifetime id and attestation compares it; 3c-core built the
+        # steps 5-8 primitive. What remains owed is the publisher's WIRING, which
+        # is a narrower claim than "not built" and the only true one.
+        for built in ("RING LIFETIME IDENTITY", "PUBLISHER CORE"):
+            self.assertIn(built, status["built"], built)
+            self.assertNotIn(built, status["not_built"], built)
+        # 3c-wire built these two; consumption is still not compulsion.
+        self.assertIn("CLOCK PROVIDER", status["built"])
+        self.assertIn("ADMISSION CONSUMPTION OF THIS SCOPE", status["built"])
+        self.assertTrue(status["consumed_by_admission"])
+        self.assertFalse(status["compelled_path_to_membership"])
         # §5.27 built it, so it is no longer owed -- and the section it belongs
         # to is still not implemented, which is a different claim.
         self.assertIn("TYPED RECONSTRUCTION AND OPAQUE BINDING", status["built"])
@@ -1517,6 +1539,96 @@ class InterruptedCreationTests(NamespaceFixture):
                                                      MANIFEST_NAME)))
         self.assertEqual(sorted(os.listdir(self.path())),
                          [namespace.ELIGIBLE_NAME, namespace.JOURNAL_NAME])
+
+
+class ClockAndAdmissionActionTests(NamespaceFixture):
+    """3c-wire: the scope's internally acquired clock, and the one action
+    through which admission consumes the scope."""
+
+    def test_the_public_acts_install_the_real_clock_and_name_it(self):
+        with self.create() as corpus:
+            self.assertEqual(corpus.corpus_clock_authority, "POSIX_REALTIME")
+            self.assertEqual(corpus.to_dict()["corpus_clock_authority"],
+                             "POSIX_REALTIME")
+        with open_corpus_namespace(corpus_id="corpus-a",
+                                   root=self.root) as reopened:
+            self.assertEqual(reopened.corpus_clock_authority, "POSIX_REALTIME")
+
+    def test_an_injected_clock_is_undeclared_even_when_it_reads_time_time(self):
+        """Identity, not behaviour. §5.26 point 5."""
+        for clock in (lambda: OPENED_AT, lambda: time.time()):
+            root = tempfile.mkdtemp(prefix="scythe-clock-")
+            self.addCleanup(shutil.rmtree, root, ignore_errors=True)
+            with namespace._create_corpus_namespace_with_clock(
+                    corpus_id="corpus-a", lock=self.lock,
+                    retention=self.retention, root=root, clock=clock) as corpus:
+                self.assertEqual(corpus.corpus_clock_authority, "UNDECLARED")
+            with namespace._open_corpus_namespace_with_clock(
+                    corpus_id="corpus-a", root=root, clock=clock) as reopened:
+                self.assertEqual(reopened.corpus_clock_authority, "UNDECLARED")
+        with namespace._create_corpus_namespace_with_clock(
+                corpus_id="corpus-b", lock=_lock("corpus-b"),
+                retention=self.retention, root=self.root,
+                clock=time.time) as exact:
+            self.assertEqual(exact.corpus_clock_authority, "POSIX_REALTIME")
+
+    def test_the_public_acts_take_no_clock(self):
+        """§5.26 control A3 at the namespace: production creation and reopening
+        have no clock parameter, so the seam is the test factory and only the
+        test factory."""
+        import inspect
+        for act in (create_corpus_namespace, open_corpus_namespace):
+            self.assertNotIn("clock", inspect.signature(act).parameters,
+                             act.__name__)
+            self.assertNotIn("now", inspect.signature(act).parameters,
+                             act.__name__)
+
+    def test_the_admission_action_answers_from_the_bound_envelope(self):
+        chain = sorted(self.lock.envelope.admissible_chain_hashes())[0]
+        with self.create() as corpus:
+            admitted = corpus.admit_window(signal_chain_hash=chain)
+            foreign = corpus.admit_window(signal_chain_hash="blake2s:" + "0" * 32)
+        self.assertTrue(admitted.chain_admitted)
+        self.assertFalse(foreign.chain_admitted)
+        self.assertEqual(admitted.corpus_id, "corpus-a")
+        self.assertEqual(admitted.envelope_digest, self.lock.envelope_digest)
+        self.assertEqual(admitted.capture_plan_digest,
+                         self.lock.capture_plan_digest)
+        self.assertEqual(admitted.delete_not_after, DEADLINE)
+        self.assertEqual(admitted.opened_at, OPENED_AT)
+        self.assertEqual(admitted.corpus_clock_authority, "POSIX_REALTIME")
+
+    def test_the_action_reads_now_from_the_scope_clock(self):
+        root = tempfile.mkdtemp(prefix="scythe-clock-")
+        self.addCleanup(shutil.rmtree, root, ignore_errors=True)
+        with namespace._create_corpus_namespace_with_clock(
+                corpus_id="corpus-a", lock=self.lock, retention=self.retention,
+                root=root, clock=lambda: OPENED_AT + 5.0) as corpus:
+            terms = corpus.admit_window(signal_chain_hash="x")
+        self.assertEqual(terms.now, OPENED_AT + 5.0)
+
+    def test_the_action_hands_out_no_authority(self):
+        """Classified by the surface walk's own rule, which skips methods that
+        need an argument: the terms are strings, floats and one boolean."""
+        with self.create() as corpus:
+            terms = corpus.admit_window(signal_chain_hash="x")
+            state = corpus._live()
+            why = BoundNominalObjectTests._classify(
+                BoundNominalObjectTests(), terms, state)
+            for value in terms.__dict__.values():
+                why.extend(BoundNominalObjectTests._classify(
+                    BoundNominalObjectTests(), value, state))
+        self.assertEqual(why, [])
+        self.assertEqual(type(terms).__name__, "CorpusAdmissionTerms")
+        self.assertTrue(dataclasses.is_dataclass(terms))
+        self.assertTrue(type(terms).__dataclass_params__.frozen)
+
+    def test_a_released_scope_refuses_the_action(self):
+        corpus = self.create()
+        corpus.release()
+        with self.assertRaises(NamespaceRefused) as caught:
+            corpus.admit_window(signal_chain_hash="x")
+        self.assertEqual(caught.exception.code, NAMESPACE_SCOPE_RELEASED)
 
 
 class BoundNominalObjectTests(NamespaceFixture):

@@ -1,12 +1,15 @@
 §5.20 / §5.26 sweep harness -- for runs AT OR AFTER 30cecd07
 
-3c controls     26  (K1..K26) in controls_3c.py
+3c controls     26  (K1..K26) in controls_3c.py. K24 IS RE-ANCHORED: 3c-wire
+                removed `lock` from `_record`, so the old anchor went dead and
+                the boundary control would never have applied. The pre-flight
+                anchor audit reported it before a sweep was spent.
 3b controls     27  (J1..J27) in controls_journal.py
 
 EXPECTED COUNT IS A PROPERTY OF A CHECKPOINT, NOT OF THIS PROJECT. Both gates
-now assert 2306, which is what
+now assert 2322, which is what
 
-    af188f19795498320e32a8753367cf677ffb1928   (main, both slices merged)
+    655bbaa  (feat/5.20-3c-wire, integrated onto main)
 
 collects exactly, with 1 pre-existing skip. Update them in the same commit as
 any change to the test count; the gate is an equality, so a stale number makes a
@@ -16,7 +19,8 @@ is not self-correcting.
   count   checkpoint                                what it was
   2245    a1cffd8  3b-core alone                    the J-series certification
   2254    30cecd07 3c-core alone                    the K-series certification
-  2306    af188f1  main, both slices                these gates
+  2306    af188f1  main, both slices                #111's gates
+  2322    655bbaa  + 3c-wire                        these gates
 
 The two certifications remain valid at THEIR counts. 2245 and 2254 were true of
 the trees they were measured on; neither is wrong, and neither is this one's.
@@ -63,8 +67,18 @@ CORRECTED SINCE THE 64f5837 BUNDLE, both raised by the dedirock review:
      controls527 fallback, so pass the module explicitly for those.
 
 HARNESS ACCEPTANCE
-  selftest.out is this bundle's own acceptance: 24 cases, 0 failures, run after
-  the reviewer amendment. It covers these bytes.
+  selftest.out is this bundle's own acceptance: 25 cases, 0 failures, run at
+  the 3c-wire head after the skip-column repair below. It covers these bytes.
+
+SKIP COLUMN REPAIRED (sweep.py, with S11 in selftest.py)
+  `unittest -v` reports a test that has a docstring on two lines: the id, then
+  the docstring's first line carrying the verdict. The skip pattern required
+  the verdict on the id line, so every docstring skip was invisible to the
+  suppression column. Observed at the 3c-wire head on a host without the
+  pinned observation tree: unittest counted skipped=2, the column recorded 1.
+  The count gate reads `Ran N` and was never affected. Earlier tables' BASELINE
+  rows list one skip; read them as "one skip the pattern could see", not as
+  the suite's skip count at that checkpoint.
 
 HOST-LOCAL, CHECK BEFORE LAUNCHING
   run_sweep_3c.py / run_sweep_journal.py

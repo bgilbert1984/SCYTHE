@@ -42,17 +42,14 @@ caller as an answer or as a set.
 here rather than left to be rediscovered, because a module that reads as
 finished is how an obligation ages into fiction.
 
-*It does not consume an ownership scope, so it is still told the set.*
-Admission is never handed an `admitted: bool` and never handed a list of
-chains, and the lock's frozen digests are recomputed rather than read -- so a
-lock whose digests disagree with the objects beside it refuses. That is not
-enough. A caller can build a **self-consistent** lock from its own envelope,
-and nothing here distinguishes it from the corpus's. The caller therefore still
-supplies the set the answer is drawn from, wrapped in a valid object, which is
-the thing §5.25 expressly forbids. What must bind the lock, the corpus
-identity, the envelope and plan, the namespace, the retention policy, the
-sequence state and the clock is a production ownership scope. It is unbuilt,
-and these entrypoints must stop taking a free-standing lock when it exists.
+*It consumes the ownership scope, and is no longer told the set.* 3c-wire.
+Admission takes the corpus ownership scope and asks it, through one action,
+whether the attested chain is a declared member; the terms it binds in the
+header come back as bounded facts, never as objects. The free-standing lock
+and the caller's `now` are gone from every entrypoint, and a caller that
+passes either gets a `TypeError` rather than a second authority. The scope
+names the clock it acquired as `corpus_clock_authority`, declared by the
+ownership authority alone.
 
 *Nothing is compelled to pass through it.* There is no ownership scope, no
 namespace, no production directory and no publisher, so this gate currently
@@ -60,11 +57,10 @@ refuses nothing that could otherwise become corpus -- which is §5.25's own
 words for what cannot drain entry 14: *"admission without a writer refuses
 nothing that could otherwise happen."*
 
-*And `now` is the caller's clock, not an authority.* A required keyword with no
-default prevents a **hidden** clock; it does not establish authority over one.
-The ownership scope must supply the time source and the header must name it, as
-the header already names the ring's clock for the capture times. A production
-caller should not be supplying a timestamp per write.
+*And the clock is the scope's, not the caller's.* The ownership scope acquires
+its time source when it opens and the header names it, as the header already
+names the ring's clock for the capture times. No production caller supplies a
+timestamp per write, and no entrypoint accepts one.
 
 Steps 1-4 of §5.20's protocol and the reconciliation are here. Durability,
 no-replacement publication, the directory `fsync`, readback, `file_sha256` and
@@ -88,13 +84,11 @@ from rf_corpus_vocabulary import CAPTURED
 from rf_iq_ring import (
     BYTES_PER_SAMPLE, WINDOW_INTERVAL_OVERLAP, AttestedIQWindowScope,
 )
-from rf_promotion_envelope import InstrumentChainEnvelope
 from rf_promotion_geometry import (
     PROMOTION_SAMPLE_RATE_HZ, PROMOTION_WINDOW_OVERLAP, PROMOTION_WINDOW_SAMPLES,
 )
 from rf_validation_manifest import (
     MINIMUM_WINDOWS_PER_STRATUM, STRATA_DEFINITION_REVISION, STRATUM_KEYS,
-    PromotionCorpusLock,
 )
 
 SCHEMA = "scythe.rf-capture-admission.v1"
@@ -134,8 +128,8 @@ RETENTION_MAXIMUM_SECONDS = float(RETENTION_MAXIMUM_DAYS * 24 * 60 * 60)
 # been created at the point it is raised.
 ADMISSION_SCOPE_TYPE_WRONG = "ADMISSION_SCOPE_TYPE_WRONG"
 ADMISSION_SCOPE_ENDED = "ADMISSION_SCOPE_ENDED"
-ADMISSION_LOCK_NOT_FROZEN = "ADMISSION_LOCK_NOT_FROZEN"
-ADMISSION_LOCK_DIGEST_MOVED = "ADMISSION_LOCK_DIGEST_MOVED"
+ADMISSION_OWNERSHIP_SCOPE_TYPE_WRONG = "ADMISSION_OWNERSHIP_SCOPE_TYPE_WRONG"
+ADMISSION_OWNERSHIP_SCOPE_RELEASED = "ADMISSION_OWNERSHIP_SCOPE_RELEASED"
 ADMISSION_STRATA_DEFINITION_MOVED = "ADMISSION_STRATA_DEFINITION_MOVED"
 ADMISSION_RETENTION_NOT_SUPPLIED = "ADMISSION_RETENTION_NOT_SUPPLIED"
 ADMISSION_RETENTION_BEYOND_MAXIMUM = "ADMISSION_RETENTION_BEYOND_MAXIMUM"
@@ -154,7 +148,7 @@ ADMISSION_CANONICAL_FORM_REFUSED = "ADMISSION_CANONICAL_FORM_REFUSED"
 ADMISSION_CREATOR_NOT_CALLABLE = "ADMISSION_CREATOR_NOT_CALLABLE"
 ADMISSION_REFUSALS: Tuple[str, ...] = (
     ADMISSION_SCOPE_TYPE_WRONG, ADMISSION_SCOPE_ENDED,
-    ADMISSION_LOCK_NOT_FROZEN, ADMISSION_LOCK_DIGEST_MOVED,
+    ADMISSION_OWNERSHIP_SCOPE_TYPE_WRONG, ADMISSION_OWNERSHIP_SCOPE_RELEASED,
     ADMISSION_STRATA_DEFINITION_MOVED, ADMISSION_RETENTION_NOT_SUPPLIED,
     ADMISSION_RETENTION_BEYOND_MAXIMUM, ADMISSION_RETENTION_EXPIRED,
     ADMISSION_STRATUM_OUTSIDE_GRANT, ADMISSION_ATTESTATION_UNCONSTRUCTIBLE,
@@ -391,8 +385,14 @@ def _attested_scope_declares(stratum: str) -> Tuple[str, ...]:
 
 
 def _corpus_ownership_declares(stratum: str) -> Tuple[str, ...]:
+    # §5.26 point 4, 3c-wire: `corpus_clock_authority` is declared here and
+    # nowhere else. The scope acquired its clock when it opened, so the field
+    # is a property of the ownership scope and not window metadata; the ring's
+    # own `clock_authority` for the capture times stays with the attested
+    # scope. Required fields 32 -> 33.
     return ("corpus_id", "configuration_digest", "envelope_digest",
-            "capture_plan_digest", "delete_not_after")
+            "capture_plan_digest", "delete_not_after",
+            "corpus_clock_authority")
 
 
 def _typed_entrypoint_declares(stratum: str) -> Tuple[str, ...]:
@@ -444,7 +444,7 @@ HEADER_AUTHORITIES: Tuple[HeaderAuthority, ...] = (
     HeaderAuthority(
         "corpus_ownership", _corpus_ownership_declares,
         "corpus and configuration-lock identity, the envelope and capture-plan "
-        "digests, and the retention policy that fixes the deadline"),
+        "digests, the retention deadline, and the clock the scope acquired"),
     HeaderAuthority(
         "typed_entrypoint", _typed_entrypoint_declares,
         "the fixed stratum, and every field of its exact nominal attestation"),
@@ -503,8 +503,7 @@ def _merge(header: Dict[str, Any], authority: str,
 
 
 def derive_canonical_header(*, metadata: Mapping[str, Any],
-                            lock: PromotionCorpusLock,
-                            retention: CapturedCorpusRetention,
+                            ownership: Any,
                             stratum: str, attestation: Any,
                             sequence: CapturedStratumSequence,
                             payload_sha256: str) -> Dict[str, Any]:
@@ -536,12 +535,16 @@ def derive_canonical_header(*, metadata: Mapping[str, Any],
         "ring_lifetime_id": metadata["ring_lifetime_id"],
     }, claimed)
 
+    # 3c-wire. `ownership` is the scope's answer to `admit_window`: bounded
+    # facts read while the namespace was held, not the lock and not a
+    # retention object a caller supplied beside it.
     _merge(header, "corpus_ownership", {
-        "corpus_id": lock.corpus_id,
-        "configuration_digest": lock.configuration_digest,
-        "envelope_digest": lock.envelope_digest,
-        "capture_plan_digest": lock.capture_plan_digest,
-        "delete_not_after": retention.delete_not_after,
+        "corpus_id": ownership.corpus_id,
+        "configuration_digest": ownership.configuration_digest,
+        "envelope_digest": ownership.envelope_digest,
+        "capture_plan_digest": ownership.capture_plan_digest,
+        "delete_not_after": ownership.delete_not_after,
+        "corpus_clock_authority": ownership.corpus_clock_authority,
     }, claimed)
 
     entrypoint: Dict[str, Any] = {"stratum": stratum}
@@ -657,9 +660,22 @@ class CapturedWindowPublication:
 # -- admission --------------------------------------------------------------
 
 
+def _ownership_scope_types() -> Tuple[type, type]:
+    """`CorpusOwnershipScope` and `NamespaceRefused`, resolved on use.
+
+    Not a module-level import: `rf_corpus_namespace` reaches this module
+    through `rf_membership_journal` for `CAPTURED_STRATA`, so a top-level
+    import here would make the cycle's outcome depend on which module the
+    process imported first. Resolving at the call site keeps both orders
+    working and keeps the exact nominal type check -- `type(x) is` -- intact.
+    """
+    from rf_corpus_namespace import CorpusOwnershipScope, NamespaceRefused
+    return CorpusOwnershipScope, NamespaceRefused
+
+
 def _admit(*, scope: Any, stratum: str, attestation: Any,
-           lock: Any, retention: Any, sequence: Any,
-           now: float) -> Tuple[Dict[str, Any], Dict[str, Any], str]:
+           corpus: Any, sequence: Any
+           ) -> Tuple[Dict[str, Any], Dict[str, Any], str]:
     """Every precondition, in order, before anything is created.
 
     §5.25's ordering requirement is narrower than "every check that can
@@ -686,53 +702,45 @@ def _admit(*, scope: Any, stratum: str, attestation: Any,
             "from a scope that has ended or was never minted for this object")
     metadata = scope.to_dict()
 
-    # 3. the authorities a corpus ownership scope would hold.
-    if type(lock) is not PromotionCorpusLock:
+    # 3. the corpus ownership scope, exact and live. §5.26: admission consumes
+    #    the scope and nothing beside it. The action re-establishes that the
+    #    namespace is still held and answers with bounded terms; the lock's
+    #    digests were verified against the manifest when the scope opened, so
+    #    there is nothing here for a caller-built object to be consistent with.
+    ownership_type, namespace_refused = _ownership_scope_types()
+    if type(corpus) is not ownership_type:
         raise CaptureRefused(
-            ADMISSION_LOCK_NOT_FROZEN,
-            "admission reads the envelope out of a frozen PromotionCorpusLock; "
-            f"got {type(lock).__name__}")
-    if type(lock.envelope) is not InstrumentChainEnvelope:
+            ADMISSION_OWNERSHIP_SCOPE_TYPE_WRONG,
+            "admission consumes a CorpusOwnershipScope minted by "
+            f"rf_corpus_namespace; got {type(corpus).__name__}")
+    try:
+        terms = corpus.admit_window(
+            signal_chain_hash=metadata["signal_chain_hash"])
+    except namespace_refused as exc:
         raise CaptureRefused(
-            ADMISSION_LOCK_NOT_FROZEN,
-            "the lock's envelope is not an InstrumentChainEnvelope; got "
-            f"{type(lock.envelope).__name__}")
-    # The lock is a frozen dataclass and a caller can build one. What a caller
-    # cannot do is make the frozen digests agree with the objects beside them,
-    # so they are recomputed rather than read.
-    if lock.envelope_digest != lock.envelope.digest():
-        raise CaptureRefused(
-            ADMISSION_LOCK_DIGEST_MOVED,
-            "the lock's frozen envelope digest is not the digest of the "
-            "envelope it carries")
-    if lock.capture_plan_digest != lock.capture_plan.digest():
-        raise CaptureRefused(
-            ADMISSION_LOCK_DIGEST_MOVED,
-            "the lock's frozen capture-plan digest is not the digest of the "
-            "plan it carries")
-    if lock.strata_definition_revision != STRATA_DEFINITION_REVISION:
+            ADMISSION_OWNERSHIP_SCOPE_RELEASED,
+            "the corpus ownership scope no longer holds its namespace; a "
+            f"window cannot be admitted into a corpus nobody holds: {exc}"
+        ) from exc
+    if terms.strata_definition_revision != STRATA_DEFINITION_REVISION:
         raise CaptureRefused(
             ADMISSION_STRATA_DEFINITION_MOVED,
-            f"the corpus was opened under {lock.strata_definition_revision} "
+            f"the corpus was opened under {terms.strata_definition_revision} "
             f"and the strata now mean {STRATA_DEFINITION_REVISION}; a window "
             "captured now would be a trial of a different population")
 
-    # 4. retention, against the lock that fixes its bound.
-    if type(retention) is not CapturedCorpusRetention:
-        raise CaptureRefused(
-            ADMISSION_RETENTION_NOT_SUPPLIED,
-            "capture requires a CapturedCorpusRetention supplied before the "
-            f"corpus opened; got {type(retention).__name__}")
-    if retention.delete_not_after <= lock.opened_at:
+    # 4. retention, against the terms the corpus recorded when it opened, and
+    #    the scope's own clock -- no caller timestamp enters here.
+    if terms.delete_not_after <= terms.opened_at:
         raise CaptureRefused(
             ADMISSION_RETENTION_EXPIRED,
             "the deletion deadline is at or before the corpus opened")
-    if retention.delete_not_after > lock.opened_at + RETENTION_MAXIMUM_SECONDS:
+    if terms.delete_not_after > terms.opened_at + RETENTION_MAXIMUM_SECONDS:
         raise CaptureRefused(
             ADMISSION_RETENTION_BEYOND_MAXIMUM,
             f"the deletion deadline is more than {RETENTION_MAXIMUM_DAYS} days "
             "after the corpus opened")
-    if float(now) >= retention.delete_not_after:
+    if terms.now >= terms.delete_not_after:
         raise CaptureRefused(
             ADMISSION_RETENTION_EXPIRED,
             "the deletion deadline has passed; capture into a corpus already "
@@ -769,12 +777,13 @@ def _admit(*, scope: Any, stratum: str, attestation: Any,
             f"{metadata['sample_rate_hz']} Hz is not the promotion geometry "
             f"({PROMOTION_WINDOW_SAMPLES} at {PROMOTION_SAMPLE_RATE_HZ})")
 
-    # 7. the gate entry 14 names. The envelope is read out of the frozen lock
-    #    and asked whether the **attested** chain is a declared member. The
-    #    caller supplies neither the answer nor the set the answer is drawn
-    #    from -- an `admitted: bool` or a list of chains would be the
-    #    label-as-authority failure §13k L.1 refused.
-    if not lock.envelope.admits(metadata["signal_chain_hash"]):
+    # 7. the gate entry 14 names. The ownership scope was asked whether the
+    #    **attested** chain is a declared member of the envelope it holds, and
+    #    answered while the namespace was held. The caller supplied neither
+    #    the answer nor the set the answer is drawn from -- an `admitted: bool`
+    #    or a list of chains from a caller would be the label-as-authority
+    #    failure §13k L.1 refused; the scope is the authority.
+    if not terms.chain_admitted:
         raise CaptureRefused(
             ADMISSION_CHAIN_OUTSIDE_ENVELOPE,
             "the attested signal chain is not a declared member of the frozen "
@@ -788,11 +797,11 @@ def _admit(*, scope: Any, stratum: str, attestation: Any,
             ADMISSION_SEQUENCE_NOT_THIS_STRATUM,
             "the sequence state is a CapturedStratumSequence; got "
             f"{type(sequence).__name__}")
-    if sequence.corpus_id != lock.corpus_id or sequence.stratum != stratum:
+    if sequence.corpus_id != terms.corpus_id or sequence.stratum != stratum:
         raise CaptureRefused(
             ADMISSION_SEQUENCE_NOT_THIS_STRATUM,
             f"sequence state for {sequence.corpus_id}/{sequence.stratum} "
-            f"presented for {lock.corpus_id}/{stratum}")
+            f"presented for {terms.corpus_id}/{stratum}")
     if sequence.accepted >= MINIMUM_WINDOWS_PER_STRATUM:
         raise CaptureRefused(
             ADMISSION_STRATUM_CAP_REACHED,
@@ -822,7 +831,7 @@ def _admit(*, scope: Any, stratum: str, attestation: Any,
     payload_sha256 = scope._prefixed_sha256(b"")
 
     header = derive_canonical_header(
-        metadata=metadata, lock=lock, retention=retention, stratum=stratum,
+        metadata=metadata, ownership=terms, stratum=stratum,
         attestation=attestation, sequence=sequence,
         payload_sha256=payload_sha256)
     check_header_completeness(header, stratum)
@@ -844,7 +853,7 @@ def _write_all(fd: int, data: bytes) -> int:
 
 def _publish(*, fd: Any, scope: AttestedIQWindowScope, header: Mapping[str, Any],
              header_bytes: bytes, prefix: bytes, metadata: Mapping[str, Any],
-             stratum: str, lock: PromotionCorpusLock,
+             stratum: str, corpus_id: str,
              payload_sha256: str) -> CapturedWindowPublication:
     """§5.20 steps 3 (already done by the caller) and 4, and the reconciliation.
 
@@ -886,7 +895,7 @@ def _publish(*, fd: Any, scope: AttestedIQWindowScope, header: Mapping[str, Any]
             f"it {attested}, and the write completed {payload_written}")
 
     return CapturedWindowPublication(
-        corpus_id=lock.corpus_id,
+        corpus_id=corpus_id,
         stratum=stratum,
         window_id=metadata["window_id"],
         first_sample_index=int(metadata["first_sample_index"]),
@@ -900,9 +909,8 @@ def _publish(*, fd: Any, scope: AttestedIQWindowScope, header: Mapping[str, Any]
     )
 
 
-def _record(*, scope: Any, stratum: str, attestation: Any, lock: Any,
-            retention: Any, sequence: Any,
-            create_target: Any, now: float) -> CapturedWindowPublication:
+def _record(*, scope: Any, stratum: str, attestation: Any, corpus: Any,
+            sequence: Any, create_target: Any) -> CapturedWindowPublication:
     """Admit, then create, then write. The order is the contract.
 
     `create_target` is invoked **once**, after `_admit` has returned. It is the
@@ -922,8 +930,8 @@ def _record(*, scope: Any, stratum: str, attestation: Any, lock: Any,
             f"got {type(create_target).__name__}")
 
     metadata, header, payload_sha256 = _admit(
-        scope=scope, stratum=stratum, attestation=attestation, lock=lock,
-        retention=retention, sequence=sequence, now=now)
+        scope=scope, stratum=stratum, attestation=attestation, corpus=corpus,
+        sequence=sequence)
     try:
         header_bytes = canonical_header_bytes(header)
         prefix = framing_prefix(header_bytes)
@@ -936,7 +944,8 @@ def _record(*, scope: Any, stratum: str, attestation: Any, lock: Any,
 
     return _publish(fd=fd, scope=scope, header=header,
                     header_bytes=header_bytes, prefix=prefix,
-                    metadata=metadata, stratum=stratum, lock=lock,
+                    metadata=metadata, stratum=stratum,
+                    corpus_id=header["corpus_id"],
                     payload_sha256=payload_sha256)
 
 
@@ -951,28 +960,35 @@ def _record(*, scope: Any, stratum: str, attestation: Any, lock: Any,
 # format's declaration, not a caller's.
 
 
-def record_gain_step(*, scope: Any, attestation: Any, lock: Any,
-                     retention: Any, sequence: Any, create_target: Any,
-                     now: float) -> CapturedWindowPublication:
-    """Publish the first complete window after a `GAIN_CHANGE`. §5.20, §5.25."""
+def record_gain_step(*, scope: Any, attestation: Any, corpus: Any,
+                     sequence: Any, create_target: Any
+                     ) -> CapturedWindowPublication:
+    """Publish the first complete window after a `GAIN_CHANGE`. §5.20, §5.25.
+
+    3c-wire: `(scope, attestation, corpus, sequence, create_target)`. `scope`
+    is the attested window scope the ring minted; `corpus` is the ownership
+    scope the namespace minted. There is no `lock` and no `now`: the corpus
+    terms and the clock are the ownership scope's, and a caller passing
+    either gets a `TypeError` rather than a second authority.
+    """
     return _record(scope=scope, stratum="GAIN_STEPS", attestation=attestation,
-                   lock=lock, retention=retention, sequence=sequence,
-                   create_target=create_target, now=now)
+                   corpus=corpus, sequence=sequence,
+                   create_target=create_target)
 
 
-def record_retune_transient(*, scope: Any, attestation: Any, lock: Any,
-                            retention: Any, sequence: Any, create_target: Any,
-                            now: float) -> CapturedWindowPublication:
+def record_retune_transient(*, scope: Any, attestation: Any, corpus: Any,
+                            sequence: Any, create_target: Any
+                            ) -> CapturedWindowPublication:
     """Publish the first complete window after a `RETUNE`. §5.20, §5.25."""
     return _record(scope=scope, stratum="RETUNE_TRANSIENTS",
-                   attestation=attestation, lock=lock, retention=retention,
-                   sequence=sequence, create_target=create_target, now=now)
+                   attestation=attestation, corpus=corpus,
+                   sequence=sequence, create_target=create_target)
 
 
 def record_receiver_spur(*, scope: Any = None, attestation: Any = None,
-                         lock: Any = None, retention: Any = None,
-                         sequence: Any = None, create_target: Any = None,
-                         now: float = 0.0) -> CapturedWindowPublication:
+                         corpus: Any = None, sequence: Any = None,
+                         create_target: Any = None
+                         ) -> CapturedWindowPublication:
     """Refuses by construction. `RECEIVER_SPURS` has no attestation member.
 
     Not a check somebody could relax: the union is closed and the stratum has
@@ -1006,4 +1022,11 @@ def admission_status() -> Dict[str, Any]:
         "publication_steps_implemented": "5.20 STEPS 1-4 AND RECONCILIATION",
         "publication_steps_unbuilt": "5.20 STEPS 5-8",
         "creates_nothing": True,
+        # 3c-wire. The entrypoints consume the ownership scope and take no
+        # lock and no timestamp. Consumption is not compulsion: nothing yet
+        # obliges a production path through here, which is entry 14.
+        "consumes_ownership_scope": True,
+        "accepts_caller_lock": False,
+        "accepts_caller_timestamp": False,
+        "required_header_fields": len(required_header_fields("GAIN_STEPS")),
     }
