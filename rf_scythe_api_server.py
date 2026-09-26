@@ -3645,6 +3645,32 @@ if FLASK_AVAILABLE:
     app = Flask(__name__, static_folder='.')
     CORS(app)  # Enable CORS for all routes
 
+    # ── Safari gate (public read-only demo mode) ──────────────────────────
+    # When SAFARI_MODE is on, the instance serves the public: only safe HTTP
+    # methods pass without the internal token. /socket.io/ is exempt because
+    # the polling transport POSTs there and live updates must keep flowing;
+    # mutating Socket.IO events are gated separately at the event layer.
+    # Orchestrator↔instance calls carrying X-Internal-Token are exempt so
+    # health checks, registration and internal wiring keep working.
+    _SAFARI_SAFE_METHODS = frozenset({'GET', 'HEAD', 'OPTIONS'})
+
+    @app.before_request
+    def _safari_gate():
+        if not app.config.get('SAFARI_MODE'):
+            return None
+        if request.method in _SAFARI_SAFE_METHODS:
+            return None
+        if request.path.startswith('/socket.io'):
+            return None
+        internal = app.config.get('INTERNAL_TOKEN', '')
+        if internal and request.headers.get('X-Internal-Token') == internal:
+            return None
+        return jsonify({
+            'status': 'error',
+            'error': 'Forbidden',
+            'message': 'Safari mode: this is a public read-only instance',
+        }), 403
+
     # WSGI middleware to proactively reject websocket upgrade attempts to
     # the socket.io endpoint when running under the development server.
     # This prevents low-level websocket handshake errors from reaching
@@ -17770,6 +17796,19 @@ if FLASK_AVAILABLE:
     # WEBSOCKET EVENT HANDLERS (Flask-SocketIO)
     # ========================================================================
 
+    # ── Safari gate for mutating Socket.IO events ──────────────────────────
+    # The HTTP before_request gate exempts /socket.io/ so the polling
+    # transport keeps flowing in safari mode; mutating socket events are
+    # therefore gated here instead.
+    def _safari_socket_gate(fn):
+        @wraps(fn)
+        def _wrapper(*args, **kwargs):
+            if app.config.get('SAFARI_MODE'):
+                emit('error', {'message': 'Safari mode: this is a public read-only instance'})
+                return None
+            return fn(*args, **kwargs)
+        return _wrapper
+
     if SOCKETIO_AVAILABLE and socketio:
 
         @socketio.on('connect')
@@ -17905,6 +17944,7 @@ if FLASK_AVAILABLE:
                 emit('error', {'message': message})
 
         @socketio.on('create_room')
+        @_safari_socket_gate
         def ws_create_room(data):
             """Handle room creation via WebSocket"""
             from flask import session as flask_session
@@ -17945,6 +17985,7 @@ if FLASK_AVAILABLE:
             emit('rooms_list', {'status': 'ok', 'rooms': rooms})
 
         @socketio.on('publish_entity')
+        @_safari_socket_gate
         def ws_publish_entity(data):
             """Publish entity to room via WebSocket"""
             from flask import session as flask_session
@@ -18008,6 +18049,7 @@ if FLASK_AVAILABLE:
                 emit('entity_published', {'status': 'error', 'entity_id': entity_id, 'message': str(e)})
 
         @socketio.on('send_message')
+        @_safari_socket_gate
         def ws_send_message(data):
             """Send message to room via WebSocket"""
             from flask import session as flask_session
@@ -18164,6 +18206,7 @@ if FLASK_AVAILABLE:
                 emit('error', {'message': str(e)})
 
         @socketio.on('scrub_edges')
+        @_safari_socket_gate
         def ws_scrub_edges(data):
             """Adjust evaluation time for an existing subscription.
 
@@ -20220,10 +20263,21 @@ def main():
                         help='HTTP base URL of the eve-streamer sensor daemon (default: http://localhost:8081)')
     parser.add_argument('--internal-token', type=str, default=None,
                         help='Shared secret for internal orchestrator↔instance calls (X-Internal-Token)')
+    parser.add_argument('--safari', action='store_true',
+                        help='Safari mode: public read-only demo instance. Non-safe HTTP methods '
+                             'and mutating Socket.IO events are rejected unless the request carries '
+                             'the internal token. Also enabled via SCYTHE_SAFARI=1.')
     args = parser.parse_args()
 
     # Store internal token for use in route handlers
     app.config['INTERNAL_TOKEN'] = args.internal_token or ''
+
+    # ── Safari mode (public read-only demo instance) ──
+    app.config['SAFARI_MODE'] = bool(
+        args.safari or os.environ.get('SCYTHE_SAFARI', '').strip().lower() in ('1', 'true', 'yes')
+    )
+    if app.config['SAFARI_MODE']:
+        logger.warning('SAFARI MODE enabled: public read-only instance; writes require X-Internal-Token')
 
     # ── Per-instance data directory (storage sovereignty) ──
     global _SCYTHE_DATA_DIR
