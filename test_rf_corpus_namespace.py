@@ -33,6 +33,10 @@ import time
 from dataclasses import replace
 
 import rf_corpus_namespace as namespace
+from rf_membership_recovery import (
+    RECOVERY_INTENT_MANIFEST_MISMATCH, RECOVERY_UNACCOUNTED_FINAL,
+    RecoveryRefused,
+)
 from rf_corpus_manifest import (
     IQM_FORMAT_VERSION, IQM_FRAMING_PREFIX_BYTES, IQM_MAGIC,
     IQM_MAX_BODY_BYTES, MANIFEST_ALREADY_PRESENT, MANIFEST_BODY_TOO_LARGE,
@@ -50,7 +54,7 @@ from rf_corpus_namespace import (
     NAMESPACE_DEVICE_MISMATCH, NAMESPACE_HARD_LINKED, NAMESPACE_HOLDS_ENTRIES,
     NAMESPACE_MODE_PERMISSIVE, NAMESPACE_NOT_A_DIRECTORY,
     NAMESPACE_OWNED_ELSEWHERE, NAMESPACE_OWNER_MISMATCH,
-    NAMESPACE_PRODUCTION_NOT_AUTHORISED, NAMESPACE_RECOVERY_UNBUILT,
+    NAMESPACE_PRODUCTION_NOT_AUTHORISED,
     NAMESPACE_REFUSALS, NAMESPACE_ROOT_INSIDE_PRODUCTION,
     NAMESPACE_SCOPE_RELEASED, NAMESPACE_SYMLINK_REFUSED, PRODUCTION_CORPUS_ROOT,
     CorpusOwnershipScope, NamespaceRefused, create_corpus_namespace,
@@ -332,16 +336,17 @@ class ReopeningIsNotCreationTests(NamespaceFixture):
             open_corpus_namespace(corpus_id="corpus-a", root=self.root)
         self.assertEqual(caught.exception.code, MANIFEST_NOT_FOUND)
 
-    def test_reopening_over_a_member_refuses_because_recovery_is_unbuilt(self):
-        """Not reopened with an unexamined member count. §5.26 requires every
-        candidate final parsed, validated and reconciled against the journal,
-        and the journal does not exist."""
+    def test_reopening_over_an_unaccounted_member_refuses(self):
+        """A member name no intent records is not reopened over. 3d piece 2
+        reconciles the journal against the finals; a member the journal does
+        not account for is the verified-but-unaccounted final the journal
+        exists to refuse, not a member to adopt in silence."""
         with self.create():
             pass
         pathlib.Path(self.path(), "deadbeef.iqc").write_bytes(b"not a window")
-        with self.assertRaises(NamespaceRefused) as caught:
+        with self.assertRaises(RecoveryRefused) as caught:
             open_corpus_namespace(corpus_id="corpus-a", root=self.root)
-        self.assertEqual(caught.exception.code, NAMESPACE_RECOVERY_UNBUILT)
+        self.assertEqual(caught.exception.code, RECOVERY_UNACCOUNTED_FINAL)
 
     def test_they_are_two_functions_and_not_one_with_a_flag(self):
         import inspect
@@ -489,8 +494,8 @@ class ScopeTests(NamespaceFixture):
                         if not name.startswith("_"))
         self.assertEqual(public, ["admit_window", "corpus_clock_authority",
                                   "corpus_id", "delete_not_after",
-                                  "manifest_sha256", "opened_at", "release",
-                                  "to_dict"])
+                                  "manifest_sha256", "membership_recovery",
+                                  "opened_at", "release", "to_dict"])
         # Asserted per capability as well as in aggregate: the aggregate alone
         # gave "the descriptor escaped" and "the body escaped" one witness.
         self.assertNotIn("directory_fd", public)
@@ -559,9 +564,10 @@ class ScopeTests(NamespaceFixture):
         have concluded no journal exists."""
         with self.create() as corpus:
             data = corpus.to_dict()
-        self.assertEqual(data["sequence_state"], "NOT BUILT")
+        self.assertEqual(data["sequence_state"],
+                         "DURABLE; RECONSTRUCTED AT REOPEN")
         self.assertEqual(data["membership_journal"],
-                         "CORE BUILT; RECOVERY AND SEQUENCE NOT BOUND")
+                         "CORE BUILT; RECOVERY AND SEQUENCE BOUND")
         self.assertEqual(data["publisher"], "CORE BUILT; NOT WIRED")
         self.assertFalse(data["path_exposed"])
         self.assertFalse(data["descriptor_exposed"])
@@ -1034,14 +1040,13 @@ class BoundedSliceTests(NamespaceFixture):
     def test_the_status_names_what_is_not_built(self):
         status = namespace_status()
         self.assertFalse(status["production_creation_authorised"])
-        for owed in ("FINAL-DEPENDENT JOURNAL RECOVERY", "SEQUENCE STATE",
-                     "PUBLISHER WIRING"):
-            self.assertIn(owed, status["not_built"], owed)
-        # Both of these were owed when the list was written and are not now. The
-        # ring mints a lifetime id and attestation compares it; 3c-core built the
-        # steps 5-8 primitive. What remains owed is the publisher's WIRING, which
-        # is a narrower claim than "not built" and the only true one.
-        for built in ("RING LIFETIME IDENTITY", "PUBLISHER CORE"):
+        self.assertEqual(status["not_built"], ["PUBLISHER WIRING"])
+        # Recovery and sequence were owed when the list was first written and
+        # are not now: 3d piece 2 reconciles the journal against the finals on
+        # reopen and reconstructs each stratum's sequence from the result. What
+        # remains owed is the publisher's WIRING alone, the one narrower claim.
+        for built in ("RING LIFETIME IDENTITY", "PUBLISHER CORE",
+                      "FINAL-DEPENDENT JOURNAL RECOVERY", "SEQUENCE STATE"):
             self.assertIn(built, status["built"], built)
             self.assertNotIn(built, status["not_built"], built)
         # 3c-wire built these two; consumption is still not compulsion.
@@ -1414,7 +1419,7 @@ class EligibleSidecarTests(NamespaceFixture):
             open_corpus_namespace(corpus_id="corpus-a", root=self.root)
         self.assertEqual(caught.exception.code, JOURNAL_NOT_FOUND)
 
-    def test_a_nonempty_journal_waits_for_final_dependent_recovery(self):
+    def test_a_journal_intent_bound_under_another_manifest_refuses(self):
         with self.create():
             pass
         dir_fd = os.open(self.path(), os.O_RDONLY | os.O_DIRECTORY)
@@ -1435,9 +1440,10 @@ class EligibleSidecarTests(NamespaceFixture):
             ))
         finally:
             os.close(dir_fd)
-        with self.assertRaises(NamespaceRefused) as caught:
+        with self.assertRaises(RecoveryRefused) as caught:
             open_corpus_namespace(corpus_id="corpus-a", root=self.root)
-        self.assertEqual(caught.exception.code, NAMESPACE_RECOVERY_UNBUILT)
+        self.assertEqual(caught.exception.code,
+                         RECOVERY_INTENT_MANIFEST_MISMATCH)
 
     def test_an_unaccounted_sidecar_refuses(self):
         """Reached directly: with the accepted contracts every valid corpus

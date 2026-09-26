@@ -100,7 +100,6 @@ NAMESPACE_SYMLINK_REFUSED = "NAMESPACE_SYMLINK_REFUSED"
 NAMESPACE_DEVICE_MISMATCH = "NAMESPACE_DEVICE_MISMATCH"
 NAMESPACE_HARD_LINKED = "NAMESPACE_HARD_LINKED"
 NAMESPACE_OWNED_ELSEWHERE = "NAMESPACE_OWNED_ELSEWHERE"
-NAMESPACE_RECOVERY_UNBUILT = "NAMESPACE_RECOVERY_UNBUILT"
 NAMESPACE_SCOPE_RELEASED = "NAMESPACE_SCOPE_RELEASED"
 NAMESPACE_REFUSALS: Tuple[str, ...] = (
     NAMESPACE_PRODUCTION_NOT_AUTHORISED, NAMESPACE_ROOT_INSIDE_PRODUCTION,
@@ -108,7 +107,7 @@ NAMESPACE_REFUSALS: Tuple[str, ...] = (
     NAMESPACE_OWNER_MISMATCH, NAMESPACE_MODE_PERMISSIVE,
     NAMESPACE_SYMLINK_REFUSED, NAMESPACE_DEVICE_MISMATCH,
     NAMESPACE_HARD_LINKED, NAMESPACE_OWNED_ELSEWHERE,
-    NAMESPACE_RECOVERY_UNBUILT, NAMESPACE_SCOPE_RELEASED,
+    NAMESPACE_SCOPE_RELEASED,
 )
 
 
@@ -185,11 +184,14 @@ class _ScopeState:
 
     __slots__ = ("dir_fd", "device", "body", "manifest_sha256", "path",
                  "released", "envelope", "capture_plan", "lock",
-                 "clock", "clock_authority")
+                 "clock", "clock_authority",
+                 "sequences", "ring_lifetime_id", "recovery_counts")
 
     def __init__(self, dir_fd, device, body, digest, path,
                  envelope=None, capture_plan=None, lock=None,
-                 clock: Callable[[], float] = time.time) -> None:
+                 clock: Callable[[], float] = time.time, *,
+                 sequences=None, ring_lifetime_id=None,
+                 recovery_counts=None) -> None:
         self.dir_fd = dir_fd
         self.device = device
         self.body = body
@@ -207,6 +209,14 @@ class _ScopeState:
         self.envelope = envelope
         self.capture_plan = capture_plan
         self.lock = lock
+        # 3d piece 2: the per-stratum sequences reconstructed from reconciled
+        # membership at reopen, the single ring lifetime they share (None for a
+        # corpus that has captured nothing), and the classification tally the
+        # reconciliation produced. Creation makes an empty corpus and passes
+        # none of these. Held for piece 4 to compel admission through.
+        self.sequences = dict(sequences) if sequences else {}
+        self.ring_lifetime_id = ring_lifetime_id
+        self.recovery_counts = dict(recovery_counts) if recovery_counts else {}
 
 
 def _clock_authority_of(clock: Any) -> str:
@@ -454,12 +464,31 @@ class CorpusOwnershipScope:
                 or state.capture_plan.spur_allocation is None
                 else len(state.capture_plan.spur_allocation.eligible_trials)),
             "corpus_clock_authority": state.clock_authority,
-            # Three different states, which one string flattened into a
-            # falsehood. A reader acting on "NOT BUILT" for the journal would
-            # conclude no journal exists; 3b-core built and certified one.
-            "sequence_state": "NOT BUILT",
-            "membership_journal": "CORE BUILT; RECOVERY AND SEQUENCE NOT BOUND",
+            # 3d piece 2: sequence state is durable and reconstructed at reopen
+            # from reconciled membership, and the journal's recovery and
+            # sequence are now bound. The publisher's core is built and still
+            # not wired -- the one claim here that is still a "not": piece 3.
+            "sequence_state": "DURABLE; RECONSTRUCTED AT REOPEN",
+            "membership_journal": "CORE BUILT; RECOVERY AND SEQUENCE BOUND",
             "publisher": "CORE BUILT; NOT WIRED",
+        }
+
+    def membership_recovery(self) -> Dict[str, Any]:
+        """What reopen reconciled and reconstructed, structured rather than flat.
+
+        Kept out of `to_dict`, whose contract is scalar diagnostics: this is the
+        one nested view, so a reader that wants the per-stratum sequence lengths
+        and the classification tally asks for it by name. Values are the counts
+        and the accepted lengths -- integers, a lifetime string and None -- and
+        never a sequence object, which piece 4 alone consumes.
+        """
+        state = self._live()
+        return {
+            "ring_lifetime_id": state.ring_lifetime_id,
+            "classification_counts": dict(state.recovery_counts),
+            "reconstructed_strata": {
+                stratum: sequence.accepted
+                for stratum, sequence in state.sequences.items()},
         }
 
     def __repr__(self) -> str:
@@ -892,11 +921,12 @@ def open_corpus_namespace(*, corpus_id: str, root: Optional[str] = None
     namespace"* is right for creation and false here, and a flag would make
     which of the two applies a caller's choice.
 
-    **Membership recovery is unbuilt**, so a namespace holding anything besides
-    the manifest is refused rather than reopened with an unexamined member
-    count. That is the whole of what §5.26's recovery would examine, and
-    reopening over it silently would be the inert admission entry 11 was drained
-    for closing.
+    **Membership recovery reconciles on reopen** (3d piece 2): the journal is
+    read against the finals on disk, each intent adopted or discarded by its
+    verified final, and each stratum's sequence reconstructed from the
+    reconciled membership. A member the journal does not account for, or a stray
+    entry, still refuses -- reopening over it silently is the inert admission
+    entry 11 was drained for closing.
     """
     return _open(corpus_id=corpus_id, root=root, clock=time.time)
 
@@ -920,33 +950,35 @@ def _open(*, corpus_id: str, root: Optional[str],
     try:
         device = _check_directory(dir_fd, path)
         _hold_exclusively(dir_fd, path)
-        entries = sorted(os.listdir(dir_fd))
-        unexpected = [entry for entry in entries
-                      if entry not in (MANIFEST_NAME, ELIGIBLE_NAME,
-                                       JOURNAL_NAME)]
-        if unexpected:
-            raise NamespaceRefused(
-                NAMESPACE_RECOVERY_UNBUILT,
-                f"{len(unexpected)} entr(y/ies) besides this corpus's own "
-                "declarations, and membership recovery is not built. §5.26 "
-                "requires every candidate final to be parsed, validated and "
-                "reconciled against the journal before a corpus is reopened: "
-                f"{unexpected[:4]}")
+        entries = tuple(sorted(os.listdir(dir_fd)))
         body, digest = _read_manifest(dir_fd, device)
         _check_declarations(body)
         journal = read_membership_journal(dir_fd)
-        if journal.records:
-            raise NamespaceRefused(
-                NAMESPACE_RECOVERY_UNBUILT,
-                f"membership.iqj holds {len(journal.records)} record(s); "
-                "slice 3d reconciles them against verified finals before a "
-                "scope may be minted")
+        # 3d piece 2: reconcile the journal against the finals on disk, then
+        # reconstruct each stratum's sequence from the reconciled membership.
+        # A call-site import, because recovery imports this module for
+        # CORPUS_FILE_MODE and a top-level import here would be a cycle whose
+        # resolution depended on load order. The two recovery-unbuilt refusals
+        # this replaces -- a member on disk, a record in the journal -- are now
+        # the reopen path entry 11 was drained to require.
+        from rf_membership_recovery import (
+            corpus_ring_lifetime, reconcile, reconstruct_sequences,
+        )
+        reconciled = reconcile(
+            dir_fd, journal=journal, entries=entries,
+            reserved_names=(MANIFEST_NAME, ELIGIBLE_NAME, JOURNAL_NAME),
+            manifest_sha256=digest)
+        sequences = reconstruct_sequences(
+            reconciled, corpus_id=body["corpus_id"])
+        ring_lifetime_id = corpus_ring_lifetime(reconciled)
         rows = _read_eligible_rows(dir_fd, device,
                                    body["capture_plan"]["spur_allocation"])
         rebuilt_envelope, rebuilt_plan, rebuilt_lock = _reconstruct(body, rows)
         state = _ScopeState(dir_fd, device, body, digest, path,
                             rebuilt_envelope, rebuilt_plan, rebuilt_lock,
-                            clock=clock)
+                            clock=clock, sequences=sequences,
+                            ring_lifetime_id=ring_lifetime_id,
+                            recovery_counts=reconciled.counts)
         return CorpusOwnershipScope(state, _MINT_KEY)
     except BaseException:
         os.close(dir_fd)
@@ -967,15 +999,15 @@ def namespace_status() -> Dict[str, Any]:
                   "TYPED RECONSTRUCTION AND OPAQUE BINDING",
                   "MEMBERSHIP JOURNAL CORE",
                   "CLOCK PROVIDER", "ADMISSION CONSUMPTION OF THIS SCOPE",
-                  "RING LIFETIME IDENTITY", "PUBLISHER CORE"],
+                  "RING LIFETIME IDENTITY", "PUBLISHER CORE",
+                  "FINAL-DEPENDENT JOURNAL RECOVERY", "SEQUENCE STATE"],
         # "PUBLISHER" and "RING LIFETIME IDENTITY" were both owed when this list
         # was written and are not now: the ring mints a lifetime id and
         # attestation compares it, and 3c-core built the steps 5-8 primitive.
         # What remains owed of the publisher is its WIRING, which the accepted
         # sequence prohibits until 3d -- a narrower claim than "not built", and
         # the only one that is true.
-        "not_built": ["FINAL-DEPENDENT JOURNAL RECOVERY", "SEQUENCE STATE",
-                      "PUBLISHER WIRING"],
+        "not_built": ["PUBLISHER WIRING"],
         "clock_authorities": list(CLOCK_AUTHORITIES),
         # 3c-wire: admission consumes this scope, through `admit_window`. That
         # is consumption, not compulsion: no production path is yet obliged
