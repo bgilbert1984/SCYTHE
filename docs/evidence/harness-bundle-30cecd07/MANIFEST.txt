@@ -67,8 +67,18 @@ CORRECTED SINCE THE 64f5837 BUNDLE, both raised by the dedirock review:
      controls527 fallback, so pass the module explicitly for those.
 
 HARNESS ACCEPTANCE
-  selftest.out is this bundle's own acceptance: 24 cases, 0 failures, run after
-  the reviewer amendment. It covers these bytes.
+  selftest.out is this bundle's own acceptance: 25 cases, 0 failures, run at
+  the 3c-wire head after the skip-column repair below. It covers these bytes.
+
+SKIP COLUMN REPAIRED (sweep.py, with S11 in selftest.py)
+  `unittest -v` reports a test that has a docstring on two lines: the id, then
+  the docstring's first line carrying the verdict. The skip pattern required
+  the verdict on the id line, so every docstring skip was invisible to the
+  suppression column. Observed at the 3c-wire head on a host without the
+  pinned observation tree: unittest counted skipped=2, the column recorded 1.
+  The count gate reads `Ran N` and was never affected. Earlier tables' BASELINE
+  rows list one skip; read them as "one skip the pattern could see", not as
+  the suite's skip count at that checkpoint.
 
 HOST-LOCAL, CHECK BEFORE LAUNCHING
   run_sweep_3c.py / run_sweep_journal.py

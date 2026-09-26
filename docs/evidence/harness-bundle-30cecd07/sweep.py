@@ -241,8 +241,17 @@ def classify(proc, elapsed):
     # routing a guarded test into skipTest -- manufactures a distinct failing
     # set without discriminating anything, and a harness that counts only
     # failures cannot tell that apart from independent evidence.
+    #
+    # A test WITH a docstring reports on two lines under `-v`: the id line
+    # alone, then the docstring's first line carrying `... skipped`. The first
+    # form of this pattern required the verdict on the id line, so every
+    # docstring skip was invisible to the suppression column -- the column
+    # read as complete while blind to exactly the tests this suite writes.
+    # The optional group admits one description line; `[^\n]` keeps it from
+    # crossing into the next test's line, so a passing test followed by a
+    # skipped one is not read as a skip of the first.
     skipped = sorted({m for m in re.findall(
-        r"^(\S+) \([^)]*\) \.\.\. skipped", text, re.M)})
+        r"^(\S+) \([^)\n]*\)(?:\n[^\n]*?)? \.\.\. skipped", text, re.M)})
     classify.last_skipped = skipped
     if ran is None:
         return (CRASHED_BEFORE_COLLECTION if proc.returncode != 0
