@@ -140,6 +140,8 @@ ADMISSION_ATTESTATION_TYPE_WRONG = "ADMISSION_ATTESTATION_TYPE_WRONG"
 ADMISSION_GEOMETRY_REFUSED = "ADMISSION_GEOMETRY_REFUSED"
 ADMISSION_CHAIN_OUTSIDE_ENVELOPE = "ADMISSION_CHAIN_OUTSIDE_ENVELOPE"
 ADMISSION_SEQUENCE_NOT_THIS_STRATUM = "ADMISSION_SEQUENCE_NOT_THIS_STRATUM"
+ADMISSION_RING_LIFETIME_MISMATCH = "ADMISSION_RING_LIFETIME_MISMATCH"
+ADMISSION_SEQUENCE_HISTORY_REFUSED = "ADMISSION_SEQUENCE_HISTORY_REFUSED"
 ADMISSION_STRATUM_CAP_REACHED = "ADMISSION_STRATUM_CAP_REACHED"
 ADMISSION_BINDING_CLAIMED_TWICE = "ADMISSION_BINDING_CLAIMED_TWICE"
 ADMISSION_BINDING_NOT_EMITTED = "ADMISSION_BINDING_NOT_EMITTED"
@@ -154,6 +156,7 @@ ADMISSION_REFUSALS: Tuple[str, ...] = (
     ADMISSION_STRATUM_OUTSIDE_GRANT, ADMISSION_ATTESTATION_UNCONSTRUCTIBLE,
     ADMISSION_ATTESTATION_TYPE_WRONG, ADMISSION_GEOMETRY_REFUSED,
     ADMISSION_CHAIN_OUTSIDE_ENVELOPE, ADMISSION_SEQUENCE_NOT_THIS_STRATUM,
+    ADMISSION_RING_LIFETIME_MISMATCH, ADMISSION_SEQUENCE_HISTORY_REFUSED,
     ADMISSION_STRATUM_CAP_REACHED, ADMISSION_BINDING_CLAIMED_TWICE,
     ADMISSION_BINDING_NOT_EMITTED, ADMISSION_FIELD_NO_AUTHORITY,
     ADMISSION_CANONICAL_FORM_REFUSED, ADMISSION_CREATOR_NOT_CALLABLE,
@@ -270,7 +273,16 @@ class CapturedCorpusRetention:
 
 
 class CapturedStratumSequence:
-    """What this corpus has already counted in one stratum. Process-local.
+    """What this corpus has already counted in one stratum, for one ring.
+
+    Process-local by default and reconstructible from reconciled membership:
+    `reconstruct_stratum_sequence` restores verified history after a reopen,
+    which is the only other way a sequence comes into being. The ring
+    lifetime binds the indices to the ring that produced them -- a sample
+    index means nothing across two rings (section 5.26 single-lifetime
+    capture), so a sequence restored for one lifetime never authorises
+    continuity for another lifetime's windows, and admission refuses the
+    mismatch.
 
     **It does not advance on a write.** §5.20 counts a window at publication
     step 8, after the final file has been read back and both digests verified,
@@ -281,17 +293,25 @@ class CapturedStratumSequence:
     rather than hidden.
     """
 
-    __slots__ = ("corpus_id", "stratum", "_accepted", "_last_window_id",
-                 "_first_sample_index", "_last_sample_index")
+    __slots__ = ("corpus_id", "stratum", "ring_lifetime_id", "_accepted",
+                 "_last_window_id", "_first_sample_index", "_last_sample_index")
 
-    def __init__(self, *, corpus_id: str, stratum: str) -> None:
+    def __init__(self, *, corpus_id: str, stratum: str,
+                 ring_lifetime_id: str) -> None:
         if stratum not in CAPTURED_STRATA:
             raise CaptureRefused(
                 ADMISSION_STRATUM_OUTSIDE_GRANT,
                 f"{stratum!r} is not one of the three strata §5.20 granted "
                 f"capture for: {', '.join(CAPTURED_STRATA)}")
+        if not isinstance(ring_lifetime_id, str) or not ring_lifetime_id:
+            raise CaptureRefused(
+                ADMISSION_RING_LIFETIME_MISMATCH,
+                "a stratum's sequence state is bound to the ring lifetime "
+                "whose indices it counts; got "
+                f"{ring_lifetime_id!r}")
         self.corpus_id = str(corpus_id)
         self.stratum = stratum
+        self.ring_lifetime_id = ring_lifetime_id
         self._accepted = 0
         self._last_window_id: Optional[str] = None
         # Both ends of the predecessor, because they answer different
@@ -342,11 +362,89 @@ class CapturedStratumSequence:
 
     def to_dict(self) -> Dict[str, Any]:
         return {"corpus_id": self.corpus_id, "stratum": self.stratum,
+                "ring_lifetime_id": self.ring_lifetime_id,
                 "accepted": self._accepted,
                 "previous_window_id": self._last_window_id,
                 "previous_first_sample_index": self._first_sample_index,
                 "previous_last_sample_index": self._last_sample_index,
                 "cap": MINIMUM_WINDOWS_PER_STRATUM}
+
+
+@dataclass(frozen=True)
+class CommittedWindow:
+    """One reconciled corpus member, for sequence reconstruction.
+
+    The view 3d's recovery reconciliation produces from the journal and the
+    verified final files, oldest first. The ring lifetime rides along so a
+    mixed-lifetime history is refused at reconstruction rather than silently
+    adopted as continuity.
+    """
+    window_id: str
+    first_sample_index: int
+    last_sample_index: int
+    ring_lifetime_id: str
+
+
+def reconstruct_stratum_sequence(*, corpus_id: str, stratum: str,
+                                 ring_lifetime_id: str,
+                                 committed_windows: Tuple[CommittedWindow, ...]
+                                 ) -> CapturedStratumSequence:
+    """Rebuild a stratum's sequence from its reconciled membership.
+
+    The input is verified history, not a live claim: every window here was
+    admitted, published and committed before the reopen -- or the input is
+    empty, which is the creation case and yields a fresh sequence. A window
+    from another ring lifetime is refused, not skipped: foreign history is
+    reported, never adopted as continuity.
+
+    This restores; it does not advance. The live path still advances only
+    through `count_published`, the step-8 act.
+    """
+    if not isinstance(ring_lifetime_id, str) or not ring_lifetime_id:
+        raise CaptureRefused(
+            ADMISSION_RING_LIFETIME_MISMATCH,
+            "sequence reconstruction is bound to a ring lifetime; got "
+            f"{ring_lifetime_id!r}")
+    sequence = CapturedStratumSequence(
+        corpus_id=corpus_id, stratum=stratum,
+        ring_lifetime_id=ring_lifetime_id)
+    for window in committed_windows:
+        if type(window) is not CommittedWindow:
+            raise CaptureRefused(
+                ADMISSION_SEQUENCE_HISTORY_REFUSED,
+                "sequence is reconstructed from reconciled members, not "
+                f"claims; got {type(window).__name__}")
+        if window.ring_lifetime_id != ring_lifetime_id:
+            raise CaptureRefused(
+                ADMISSION_RING_LIFETIME_MISMATCH,
+                f"window {window.window_id!r} belongs to ring lifetime "
+                f"{window.ring_lifetime_id!r}, not {ring_lifetime_id!r}; a "
+                "sample index means nothing across two rings")
+        if not isinstance(window.window_id, str) or not window.window_id:
+            raise CaptureRefused(
+                ADMISSION_SEQUENCE_HISTORY_REFUSED,
+                "a reconciled member without an id is not history")
+        for field in ("first_sample_index", "last_sample_index"):
+            value = getattr(window, field)
+            if (not isinstance(value, int) or isinstance(value, bool)
+                    or value < 0):
+                raise CaptureRefused(
+                    ADMISSION_SEQUENCE_HISTORY_REFUSED,
+                    f"window {window.window_id!r} carries {field} {value!r}; "
+                    "reconstructed history must carry indices")
+        if window.last_sample_index < window.first_sample_index:
+            raise CaptureRefused(
+                ADMISSION_SEQUENCE_HISTORY_REFUSED,
+                f"window {window.window_id!r} ends at "
+                f"{window.last_sample_index} before it begins at "
+                f"{window.first_sample_index}")
+        # Verified history, restored directly: this is not the live path, so
+        # it does not go through `count_published`, the step-8 act.
+        sequence._accepted += 1
+        sequence._last_window_id = window.window_id
+        sequence._first_sample_index = window.first_sample_index
+        sequence._last_sample_index = window.last_sample_index
+    return sequence
 
 
 # -- the six authorities, each declaring what it exports --------------------
@@ -802,6 +900,16 @@ def _admit(*, scope: Any, stratum: str, attestation: Any,
             ADMISSION_SEQUENCE_NOT_THIS_STRATUM,
             f"sequence state for {sequence.corpus_id}/{sequence.stratum} "
             f"presented for {terms.corpus_id}/{stratum}")
+    # 3d. The sequence is bound to the ring lifetime whose indices it counts.
+    # A sample index means nothing across two rings (section 5.26
+    # single-lifetime capture), so a sequence restored for one lifetime never
+    # authorises continuity for another lifetime's windows.
+    if sequence.ring_lifetime_id != metadata["ring_lifetime_id"]:
+        raise CaptureRefused(
+            ADMISSION_RING_LIFETIME_MISMATCH,
+            f"the sequence state belongs to ring lifetime "
+            f"{sequence.ring_lifetime_id!r} and this window was attested "
+            f"under {metadata['ring_lifetime_id']!r}")
     if sequence.accepted >= MINIMUM_WINDOWS_PER_STRATUM:
         raise CaptureRefused(
             ADMISSION_STRATUM_CAP_REACHED,
@@ -1026,6 +1134,10 @@ def admission_status() -> Dict[str, Any]:
         # lock and no timestamp. Consumption is not compulsion: nothing yet
         # obliges a production path through here, which is entry 14.
         "consumes_ownership_scope": True,
+        # 3d. The sequence state is bound to the ring lifetime whose indices
+        # it counts; admission refuses a sequence restored for another
+        # lifetime, because continuity across two rings is not continuity.
+        "sequence_ring_lifetime_bound": True,
         "accepts_caller_lock": False,
         "accepts_caller_timestamp": False,
         "required_header_fields": len(required_header_fields("GAIN_STEPS")),
