@@ -40,6 +40,22 @@ BROAD_DECLARED = {
                   "plan built on the catalogue refuses with them",
         "witness": "test_a_neighbouring_integer_is_outside_the_tolerance",
     },
+    # Declared after run 1 at f9359ee3 measured it at n=194 and the reviewer
+    # refused it as an UNDECLARED DETONATION -- which is the reviewer working,
+    # not a number to be argued with. The breadth is intrinsic: the residual
+    # record is on every catalogue entry, every catalogue is on every plan,
+    # and every plan is reconstructed on every path the suite exercises, so a
+    # derived key the authority list stops naming refuses every rebuild in
+    # the tree. The direct witness is the round trip itself. Run 1 is kept as
+    # the failure record it is; this declaration was made before run 2 was
+    # launched and not before run 1.
+    "S18": {
+        "reason": "a derived key the reconstruction authority list stops "
+                  "naming refuses every rebuilt plan in the suite, because "
+                  "every plan carries a catalogue and every entry carries "
+                  "its slope record",
+        "witness": "test_the_plan_rebuilds_to_the_exact_nominal_object",
+    },
 }
 SUBSUMED = {}
 INTRODUCES = {}
