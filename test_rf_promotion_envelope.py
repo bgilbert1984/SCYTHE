@@ -95,13 +95,19 @@ def _persistence(tuning_id="tuning-000", qualifying=8):
                                for i in range(8)))
 
 
-_DELTAS = (50_000.0, -100_000.0, 200_000.0)
+# Zero-mean by default: four declared retunes, each delta in both directions.
+# An intercept is then the mean offset, so a fit whose intercept term went
+# wrong would predict correctly from these and be caught only where a witness
+# uses the skewed set deliberately -- which keeps an arithmetic control from
+# reaching every prediction a fixture makes.
+_DELTAS = (50_000.0, -50_000.0, 100_000.0, -100_000.0)
+_SKEWED_DELTAS = (50_000.0, -100_000.0, 200_000.0)
 
 
 def _slope(tuning_id="tuning-000", slope=2.0, intercept=100_000.0,
            deltas=_DELTAS, offsets=None):
-    """Three declared retunes at one tuning, on an exact line unless the
-    offsets are given by hand."""
+    """Declared retunes at one tuning, on an exact line unless the offsets are
+    given by hand."""
     if offsets is None:
         offsets = tuple(intercept + slope * d for d in deltas)
     return SpurSlopeEstimate(tuning_id=tuning_id, retune_delta_hz=deltas,
@@ -1073,23 +1079,36 @@ class SlopeIsEstimatedTests(unittest.TestCase):
     entry carries is read off that decision."""
 
     def test_an_integer_slope_is_measured_and_matched(self):
-        estimate = _slope(slope=2.0, intercept=100_000.0)
+        """Over the skewed deltas on purpose: their mean is 50 kHz, so an
+        intercept that was the mean offset rather than the fit's would read
+        200 kHz here and nowhere a zero-mean fixture looks."""
+        estimate = _slope(slope=2.0, intercept=100_000.0, deltas=_SKEWED_DELTAS)
         self.assertAlmostEqual(estimate.measured_slope, 2.0)
         self.assertAlmostEqual(estimate.intercept_hz, 100_000.0)
         self.assertEqual(estimate.residuals_hz, (0.0, 0.0, 0.0))
         self.assertEqual(estimate.matched_slope, 2)
 
-    def test_membership_is_decided_by_the_frozen_tolerance(self):
+    def test_a_neighbouring_integer_is_outside_the_tolerance(self):
         """About sixty times the slope resolution of the smallest delta and far
-        too tight to admit a neighbouring integer, §5.22 says."""
+        too tight to admit a neighbouring integer, §5.22 says. At the
+        tolerance is inside it; half again past it is not."""
         self.assertEqual(matched_mixing_slope(1.0 + PLAN_SLOPE_TOLERANCE), 1)
         self.assertIsNone(matched_mixing_slope(1.0 + PLAN_SLOPE_TOLERANCE * 1.5))
         self.assertIsNone(matched_mixing_slope(1.5))
+        self.assertIsNone(matched_mixing_slope(0.5))
         self.assertEqual(matched_mixing_slope(-1.0), -1)
         self.assertEqual(matched_mixing_slope(0.0), 0)
+
+    def test_the_family_is_bounded_by_the_slope_bound(self):
+        """Beyond |s| = 3 a product leaves the usable half-span on the smallest
+        declared retune, so an exact integer past the bound is still no
+        member."""
         self.assertEqual(matched_mixing_slope(float(PLAN_MAX_MIXING_SLOPE)),
                          PLAN_MAX_MIXING_SLOPE)
+        self.assertEqual(matched_mixing_slope(-float(PLAN_MAX_MIXING_SLOPE)),
+                         -PLAN_MAX_MIXING_SLOPE)
         self.assertIsNone(matched_mixing_slope(PLAN_MAX_MIXING_SLOPE + 1.0))
+        self.assertIsNone(matched_mixing_slope(-(PLAN_MAX_MIXING_SLOPE + 1.0)))
 
     def test_minus_one_is_a_member_and_only_the_reference_class_reads_it(self):
         """A received emission and the m = 0 product both have slope −1;
@@ -1125,6 +1144,18 @@ class SlopeIsEstimatedTests(unittest.TestCase):
                                    persistence=_persistence(), slope=odd)
                 self.assertEqual(caught.exception.code,
                                  PLAN_CLASSIFICATION_NOT_SUPPORTED)
+
+    def test_a_matched_slope_other_than_minus_one_is_not_the_reference_class(self):
+        """The reference class is the reading of slope −1 and nothing else: a
+        product at slope +2 is consistent with mixing at m = 3, and calling it
+        a reference product would attach the higher confidence bar to the
+        wrong evidence."""
+        with self.assertRaises(EnvelopeRefused) as caught:
+            CataloguedSpur(spur_id="s",
+                           classification=CONSISTENT_WITH_INTERNAL_REFERENCE,
+                           stability_class=SESSION_SCOPED,
+                           persistence=_persistence(), slope=_slope(slope=2.0))
+        self.assertEqual(caught.exception.code, PLAN_CLASSIFICATION_NOT_SUPPORTED)
 
     def test_an_unresolved_label_cannot_hide_a_matched_slope(self):
         """The class follows the analysis in both directions. A product the
@@ -1167,7 +1198,8 @@ class SlopeIsEstimatedTests(unittest.TestCase):
 
     def test_a_folded_offset_is_not_an_observation(self):
         with self.assertRaises(EnvelopeRefused) as caught:
-            _slope(slope=3.0, intercept=400_000.0)   # 400k + 3 * 200k folds
+            _slope(slope=3.0, intercept=400_000.0,
+                   deltas=_SKEWED_DELTAS)            # 400k + 3 * 200k folds
         self.assertEqual(caught.exception.code, PLAN_TRIAL_NOT_ELIGIBLE)
 
     def test_the_observations_are_two_of_one_thing(self):
@@ -1177,7 +1209,7 @@ class SlopeIsEstimatedTests(unittest.TestCase):
         self.assertEqual(caught.exception.code, PLAN_SLOPE_NOT_ESTIMATED)
         with self.assertRaises(EnvelopeRefused) as caught:
             SpurSlopeEstimate(tuning_id="t", retune_delta_hz=_DELTAS,
-                              signed_baseband_hz=(1.0, float("nan"), 3.0))
+                              signed_baseband_hz=(1.0, float("nan"), 3.0, 4.0))
         self.assertEqual(caught.exception.code, PLAN_QUANTITY_NOT_FINITE)
 
     def test_residuals_are_recorded_beside_the_slope(self):
@@ -1189,7 +1221,6 @@ class SlopeIsEstimatedTests(unittest.TestCase):
         estimate = _slope(offsets=nudged)
         self.assertEqual(estimate.matched_slope, 2)
         self.assertNotEqual(estimate.residuals_hz, (0.0, 0.0, 0.0))
-        self.assertAlmostEqual(sum(estimate.residuals_hz), 0.0, places=6)
         data = estimate.to_dict()
         for key in ("measured_slope", "intercept_hz", "residuals_hz",
                     "matched_slope", "slope_tolerance", "retune_delta_hz",
@@ -1197,6 +1228,16 @@ class SlopeIsEstimatedTests(unittest.TestCase):
             self.assertIn(key, data)
         self.assertEqual(data["slope_tolerance"], PLAN_SLOPE_TOLERANCE)
         self.assertEqual(len(data["residuals_hz"]), len(_DELTAS))
+
+    def test_the_fit_uses_every_observation(self):
+        """Least squares over all the declared retunes: the residuals sum to
+        zero, and a fit that quietly dropped an observation would leave that
+        observation's residual unbalanced."""
+        exact = tuple(100_000.0 + 2.0 * d for d in _DELTAS)
+        nudged = (exact[0] + 900.0,) + exact[1:]
+        estimate = _slope(offsets=nudged)
+        self.assertAlmostEqual(sum(estimate.residuals_hz), 0.0, places=6)
+        self.assertTrue(all(abs(r) < 900.0 for r in estimate.residuals_hz))
 
     def test_a_feature_that_moved_between_visits_shows_as_residual(self):
         """Repeated visits to one LO setting catch a non-stationary emitter
@@ -1230,6 +1271,38 @@ class SlopeIsEstimatedTests(unittest.TestCase):
         self.assertIsNone(half.matched_slope)
         self.assertTrue(half.in_span_at(2_000_000.0))     # 1.0 MHz − 20 kHz
         self.assertFalse(half.in_span_at(2_200_000.0))    # 1.1 MHz − 22 kHz
+
+    def test_the_span_check_is_the_whole_span_not_the_usable_half(self):
+        """A product anywhere in a captured window contaminates it, folded or
+        not, so "in span" is the whole analysis span and not the half-span
+        the folding guard leaves for slope estimation."""
+        unit = _slope(slope=1.0, intercept=0.0)
+        self.assertGreater(1_000_000.0, usable_half_span_hz())
+        self.assertTrue(unit.in_span_at(1_000_000.0))
+        self.assertFalse(unit.in_span_at(1_030_000.0))
+
+    def test_an_unmatched_slope_carries_the_tolerance_over_the_excursion(self):
+        """An unmatched slope has only its estimate, and the estimate is good
+        to the tolerance: over a 20.5 MHz excursion a slope-0.05 feature is
+        predicted at 1.025 MHz with 205 kHz of uncertainty, and cannot be
+        shown outside a 1.024 MHz half-span. A matched slope at the same
+        predicted offset carries none and can."""
+        shallow = _slope(slope=0.05, intercept=0.0)
+        self.assertIsNone(shallow.matched_slope)
+        self.assertAlmostEqual(shallow.predicted_baseband_hz(20_500_000.0),
+                               1_025_000.0)
+        self.assertTrue(shallow.in_span_at(20_500_000.0))
+        unit = _slope(slope=1.0, intercept=0.0)
+        self.assertFalse(unit.in_span_at(1_025_000.0))
+
+    def test_a_matched_slope_predicts_by_its_integer_not_its_estimate(self):
+        """An integer match is the model, and the model is exact; the
+        estimate carries the tolerance and would put the product 9 kHz off
+        per MHz of excursion."""
+        nearly = _slope(slope=1.0 + PLAN_SLOPE_TOLERANCE * 0.9, intercept=0.0)
+        self.assertEqual(nearly.matched_slope, 1)
+        self.assertAlmostEqual(nearly.predicted_baseband_hz(1_000_000.0),
+                               1_000_000.0, places=3)
 
     def test_the_stored_entry_carries_the_analysis(self):
         data = _catalogue(1)[0].to_dict()
@@ -1330,6 +1403,21 @@ class ThermalIsSpurFreeTests(unittest.TestCase):
             _plan(envelope, trial_plans=plans, spur_allocation=None)
         self.assertEqual(caught.exception.code, PLAN_SPUR_CATALOGUE_ABSENT)
         self.assertIn("THERMAL_NO_INPUT", str(caught.exception))
+
+    def test_a_product_catalogued_at_an_undeclared_tuning_refuses(self):
+        """Nothing can say where a product falls at a tuning the plan does not
+        declare, so the question is refused rather than answered from a
+        tuning that is not there."""
+        stray = CataloguedSpur(spur_id="stray",
+                               classification=CONSISTENT_WITH_INTERNAL_MIXING,
+                               stability_class=SESSION_SCOPED,
+                               persistence=_persistence("tuning-999"),
+                               slope=_slope("tuning-999"))
+        tunings = generate_tunings(seed=SEED, bands=_bands())
+        with self.assertRaises(EnvelopeRefused) as caught:
+            catalogued_spurs_in_span((stray,), tunings,
+                                     tunings[0].center_frequency_hz)
+        self.assertEqual(caught.exception.code, PLAN_TRIAL_NOT_ELIGIBLE)
 
     def test_a_regenerated_thermal_stratum_is_not_checked(self):
         """The check is about captured windows; a synthetic thermal window

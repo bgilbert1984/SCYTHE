@@ -7,13 +7,13 @@ from sweep import (REPO, WORKTREES, PYTHON, SUITE_FULL, git, checkpoint_blobs,
                    run_control, working_tree_hashes, classify, expand, unittest_argv,
                    require_sane_baseline, resolve_branch,
                    control_timeout, TIMEOUT, TIMEOUT_FACTOR)
-from controls_journal import (CONTROLS, INTRODUCES, ACCEPTED_IN_SCOPE,
+from controls_521 import (CONTROLS, INTRODUCES, ACCEPTED_IN_SCOPE,
                            ACCEPTED_DEFERRED, check_inventory,
                            check_mutations)
 
 # The slice branch. It is deleted when the slice merges, so it is named
 # here rather than hardcoded; SCYTHE_BRANCH selects the next one.
-BRANCH = os.environ.get("SCYTHE_BRANCH", "main")   # the journal slice is merged
+BRANCH = os.environ.get("SCYTHE_BRANCH", "feat/5.21-controls")
 COMMIT = resolve_branch(BRANCH)
 WATCHED = sorted({rel for _c, ps in CONTROLS for rel, _o, _n in ps})
 BASE = checkpoint_blobs(COMMIT, WATCHED)
@@ -41,12 +41,12 @@ print("mutation audit: %d controls, no problems" % len(CONTROLS), flush=True)
 # The tree whose integrity matters is the BUILD worktree: the new modules
 # exist only on the branch, and a leak from a disposable worktree would land
 # there rather than in main's checkout.
-BUILD = Path(S) / "build3br"   # this host's worktree for the slice branch
+BUILD = Path(S) / "w521"   # this host's worktree for the §5.21 slice
 import hashlib as _h
 def _build_hashes(paths):
     return {p: _h.sha256((BUILD / p).read_bytes()).hexdigest() for p in paths}
 BEFORE = _build_hashes(WATCHED)
-out = Path(S) / "sweep-journal.jsonl"
+out = Path(S) / "sweep-521.jsonl"
 out.write_text("")
 
 # The unmutated baseline, in its own worktree, so "collection degraded" is
@@ -72,16 +72,14 @@ subprocess.run(["git","worktree","remove","--force",str(tree)], cwd=str(REPO),
 shutil.rmtree(tree, ignore_errors=True)
 print(f"BASELINE  {cls}  {count} tests  exit {proc.returncode}  "
       f"{BASELINE_ELAPSED}s", flush=True)
-# 2399 is what the S-series commit collects, exactly: 4091d22e's 2392 plus
-# the seven witness tests §5.21's controls needed. The journal's controlled
-# file is blob-identical to a1cffd8 there, so the J-series certification
-# carries, but an exact-match gate written for an earlier tree refuses this
-# one. MANIFEST.txt carries the table
-# (2245 / 2254 / 2306 / 2322 / 2370 / 2392 / 2399). A baseline that differs
-# from 2399 means a different generation of the suite, which no floor can
-# report; the floor moves with the checkpoint and is never lowered.
+# 2399 is what the S-series commit (main after 4091d22e, plus §5.21's
+# controls and the seven witness tests they needed) collects, with 2
+# host-dependent skips (the pinned observation tree, a channelizer geometry).
+# The count belongs to that checkpoint, not to the project: a baseline that
+# differs means the controls and the tree are from different generations,
+# which no floor can report; the floor moves with the checkpoint.
 require_sane_baseline(cls, count, 2399, ids=ids, proc=proc,
-                      report=Path(S) / "baseline-refused-journal.out",
+                      report=Path(S) / "baseline-refused-521.out",
                       expected=2399)
 # Each control's bound is derived from the baseline this host just produced,
 # not from a constant calibrated elsewhere: a fixed 1800s makes a healthy
@@ -98,7 +96,7 @@ with out.open("a") as fh:
                          # so suppression is computable from the file alone,
                          # without the runner's in-memory state
                          "skipped":BASELINE_SKIPS,"skips_added":[],
-                         "controls_module":"controls_journal",
+                         "controls_module":"controls_521",
                          "elapsed_s":BASELINE_ELAPSED,
                          "control_timeout_s":CONTROL_TIMEOUT})+"\n")
 

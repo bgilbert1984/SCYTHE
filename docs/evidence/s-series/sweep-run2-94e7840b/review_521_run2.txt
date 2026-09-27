@@ -1,0 +1,46 @@
+==========================================================================
+BASELINE  ZERO_DISCRIMINATION  ran=2399  failing=0  OK
+checkpoint: 94e7840b83b144234a16b5aa928a7657f093acaf
+controls with rows: 21
+
+ID    CLASSIFICATION             n   ran    UNIQ
+--------------------------------------------------------------------------
+S1    TEST_FAILURE             370  2399     167
+S2    TEST_FAILURE               2  2399       0
+S3    TEST_FAILURE               2  2399       1
+S4    TEST_FAILURE               1  2399       1
+S5    TEST_FAILURE               1  2399       1
+S6    TEST_FAILURE               1  2399       1
+S7    TEST_FAILURE               1  2399       1
+S8    TEST_FAILURE               1  2399       1
+S9    TEST_FAILURE               1  2399       1
+S10   TEST_FAILURE               1  2399       1
+S11   TEST_FAILURE               1  2399       1
+S12   TEST_FAILURE               3  2399       0
+S13   TEST_FAILURE               2  2399       1
+S14   TEST_FAILURE               1  2399       0
+S15   TEST_FAILURE               1  2399       1
+S16   TEST_FAILURE               1  2399       0
+S17   TEST_FAILURE               1  2399       1
+S18   TEST_FAILURE             194  2399       0
+S19   TEST_FAILURE               1  2399       1
+S20   TEST_FAILURE               1  2399       1
+S21   TEST_FAILURE               1  2399       1
+
+ZEROS                : none
+DUPLICATE SETS       : none
+NOT MEASURED         : none
+COLLECTION (modal 2399): uniform
+MEASURED OVER 40     : ['S1(n=370)', 'S18(n=194)']
+UNDECLARED DETONATION: none
+  DECLARED BROAD S1   n=370 the tolerance is applied nowhere, so every measured slope matches its nearest integer; the fixture's unresolved products become matched, their entries refuse, and every plan built on the catalogue refuses with them
+      direct witness present: test_a_neighbouring_integer_is_outside_the_tolerance
+  DECLARED BROAD S18  n=194 a derived key the reconstruction authority list stops naming refuses every rebuilt plan in the suite, because every plan carries a catalogue and every entry carries its slope record
+      direct witness present: test_the_plan_rebuilds_to_the_exact_nominal_object
+NO UNIQUE WITNESS    : among 19 narrow controls: none
+SUPPRESSION          : none
+CLASSIFICATIONS      : {'TEST_FAILURE': 21}
+COMPLETENESS         : 21/21 (controls_521)  missing=none  unexpected=none
+
+VERDICT: every control discriminated
+==========================================================================

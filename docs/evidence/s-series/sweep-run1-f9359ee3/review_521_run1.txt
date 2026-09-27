@@ -1,0 +1,44 @@
+==========================================================================
+BASELINE  ZERO_DISCRIMINATION  ran=2399  failing=0  OK
+checkpoint: f9359ee32cb5a1eb4eb95ad434bf8655e30c4caf
+controls with rows: 21
+
+ID    CLASSIFICATION             n   ran    UNIQ
+--------------------------------------------------------------------------
+S1    TEST_FAILURE             370  2399     167
+S2    TEST_FAILURE               2  2399       0
+S3    TEST_FAILURE               2  2399       1
+S4    TEST_FAILURE               1  2399       1
+S5    TEST_FAILURE               1  2399       1
+S6    TEST_FAILURE               1  2399       1
+S7    TEST_FAILURE               1  2399       1
+S8    TEST_FAILURE               1  2399       1
+S9    TEST_FAILURE               1  2399       1
+S10   TEST_FAILURE               1  2399       1
+S11   TEST_FAILURE               1  2399       1
+S12   TEST_FAILURE               3  2399       0
+S13   TEST_FAILURE               2  2399       1
+S14   TEST_FAILURE               1  2399       0
+S15   TEST_FAILURE               1  2399       1
+S16   TEST_FAILURE               1  2399       0
+S17   TEST_FAILURE               1  2399       1
+S18   TEST_FAILURE             194  2399       0
+S19   TEST_FAILURE               1  2399       1
+S20   TEST_FAILURE               1  2399       1
+S21   TEST_FAILURE               1  2399       1
+
+ZEROS                : none
+DUPLICATE SETS       : none
+NOT MEASURED         : none
+COLLECTION (modal 2399): uniform
+MEASURED OVER 40     : ['S1(n=370)', 'S18(n=194)']
+UNDECLARED DETONATION: ['S18']
+  DECLARED BROAD S1   n=370 the tolerance is applied nowhere, so every measured slope matches its nearest integer; the fixture's unresolved products become matched, their entries refuse, and every plan built on the catalogue refuses with them
+      direct witness present: test_a_neighbouring_integer_is_outside_the_tolerance
+NO UNIQUE WITNESS    : among 20 narrow controls: none
+SUPPRESSION          : none
+CLASSIFICATIONS      : {'TEST_FAILURE': 21}
+COMPLETENESS         : 21/21 (controls_521)  missing=none  unexpected=none
+
+VERDICT: NOT certified -- see the flags above
+==========================================================================
