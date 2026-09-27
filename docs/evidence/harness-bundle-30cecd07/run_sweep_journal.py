@@ -13,7 +13,7 @@ from controls_journal import (CONTROLS, INTRODUCES, ACCEPTED_IN_SCOPE,
 
 # The slice branch. It is deleted when the slice merges, so it is named
 # here rather than hardcoded; SCYTHE_BRANCH selects the next one.
-BRANCH = os.environ.get("SCYTHE_BRANCH", "feat/5.26-journal-core-repair")
+BRANCH = os.environ.get("SCYTHE_BRANCH", "main")   # the journal slice is merged
 COMMIT = resolve_branch(BRANCH)
 WATCHED = sorted({rel for _c, ps in CONTROLS for rel, _o, _n in ps})
 BASE = checkpoint_blobs(COMMIT, WATCHED)
@@ -72,17 +72,16 @@ subprocess.run(["git","worktree","remove","--force",str(tree)], cwd=str(REPO),
 shutil.rmtree(tree, ignore_errors=True)
 print(f"BASELINE  {cls}  {count} tests  exit {proc.returncode}  "
       f"{BASELINE_ELAPSED}s", flush=True)
-# 2322 is what 655bbaa (feat/5.20-3c-wire, integrated onto main) collects,
-# exactly: af188f1's 2306 plus the 16 tests 3c-wire brought in. The journal's
-# controlled file is blob-identical to a1cffd8 there, so the J-series
-# certification carries, but an exact-match gate written for an earlier tree
-# refuses this one. MANIFEST.txt carries the table (2245 / 2254 / 2306 / 2322).
-# A baseline that differs from 2322 means a different generation of the suite,
-# which no floor can report; the floor moves with the checkpoint and is never
-# lowered.
-require_sane_baseline(cls, count, 2322, ids=ids, proc=proc,
+# 2370 is what 66a544bf (main, with 3d) collects, exactly: 3a5b7540's 2322
+# plus the 48 tests 3d brought in. The journal's controlled file is
+# blob-identical to a1cffd8 there, so the J-series certification carries, but
+# an exact-match gate written for an earlier tree refuses this one.
+# MANIFEST.txt carries the table (2245 / 2254 / 2306 / 2322 / 2370). A baseline
+# that differs from 2370 means a different generation of the suite, which no
+# floor can report; the floor moves with the checkpoint and is never lowered.
+require_sane_baseline(cls, count, 2370, ids=ids, proc=proc,
                       report=Path(S) / "baseline-refused-journal.out",
-                      expected=2322)
+                      expected=2370)
 # Each control's bound is derived from the baseline this host just produced,
 # not from a constant calibrated elsewhere: a fixed 1800s makes a healthy
 # control on a slower or loaded host read as TIMED_OUT.

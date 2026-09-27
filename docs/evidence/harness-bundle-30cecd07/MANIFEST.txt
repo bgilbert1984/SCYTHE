@@ -1,17 +1,17 @@
 §5.20 / §5.26 sweep harness -- for runs AT OR AFTER 30cecd07
 
-3c controls     26  (K1..K26) in controls_3c.py. K24 IS RE-ANCHORED: 3c-wire
-                removed `lock` from `_record`, so the old anchor went dead and
-                the boundary control would never have applied. The pre-flight
-                anchor audit reported it before a sweep was spent.
+3c controls     26  (K1..K27, K24 RETIRED) in controls_3c.py. See K24 RETIRED,
+                K27 ADDED, K25 AMENDED below. Every anchor audits clean at
+                66a544bf; the inventory gate refuses K24 if it reappears.
 3b controls     27  (J1..J27) in controls_journal.py
 
 EXPECTED COUNT IS A PROPERTY OF A CHECKPOINT, NOT OF THIS PROJECT. Both gates
-now assert 2322, which is what
+now assert 2370, which is what
 
-    655bbaa  (feat/5.20-3c-wire, integrated onto main)
+    66a544bf  (main, with 3d merged as #114)
 
-collects exactly, with 1 pre-existing skip. Update them in the same commit as
+collects exactly, with 2 pre-existing skips on a host without the pinned
+observation tree (the count gate reads `Ran N`, which includes them). Update them in the same commit as
 any change to the test count; the gate is an equality, so a stale number makes a
 sweep REFUSE TO LAUNCH rather than pass quietly, which is the right direction but
 is not self-correcting.
@@ -20,12 +20,37 @@ is not self-correcting.
   2245    a1cffd8  3b-core alone                    the J-series certification
   2254    30cecd07 3c-core alone                    the K-series certification
   2306    af188f1  main, both slices                #111's gates
-  2322    655bbaa  + 3c-wire                        these gates
+  2322    655bbaa  + 3c-wire                        3a5b7540's gates
+  2370    66a544bf + 3d                             these gates
 
 The two certifications remain valid at THEIR counts. 2245 and 2254 were true of
 the trees they were measured on; neither is wrong, and neither is this one's.
 
-SWEEPS RUN ON THE DEDIROCK HOST. Its baseline is roughly 3x faster than the
+K24 RETIRED, K27 ADDED, K25 AMENDED -- for runs at or after 3d (66a544bf)
+  3d wires the publisher from the namespace's commit_window and inverts the
+  boundary test: test_no_production_module_is_wired_to_the_publisher is gone,
+  test_only_the_namespace_wires_the_publisher asserts that ONE site and no
+  other. K24's claim ("admission is wired", violating "nothing is wired") no
+  longer describes the tree, and its anchor died a second time when 3d
+  reflowed `_record`. Retired: the id stays out of EARNED_IDS so it cannot be
+  quietly re-added, and the tables at 30cecd07 and 3a5b7540 keep their K24.
+  K27 "a second production module is wired to the publisher" is K24's
+  mutation under the new invariant, anchored on the whole two-line `_record`
+  signature. K25 narrows the scan to the sanctioned site (the namespace)
+  instead of admission: a scope of admission alone now fails the single-site
+  test too, which would swallow K27's only witness.
+  Measured at 66a544bf on the boundary module alone, before any sweep:
+    K27       -> test_only_the_namespace_wires_the_publisher, nothing else
+    K25       -> test_the_boundary_scan_reads_every_production_module, nothing else
+    K25 (old) -> both, which is why it was amended
+  Inventory gate clean, mutation audit 26 controls no problems, at 66a544bf.
+
+BRANCH DEFAULTS are now `main` in both runners: every §5.20 slice these
+controls cover is merged and the slice branches are deleted. SCYTHE_BRANCH
+still selects any other tip.
+
+SWEEPS RUN ON THE DEDIROCK HOST, or on the authoring host from a second
+clone (~/SCYTHE-sweep/<slice>-<series>-runN-<sha>/) since 3a5b7540. Its baseline is roughly 3x faster than the
 authoring host's, so that is where the K- and J-series are measured. The
 authoring host implements, runs the focused and full suites, audits the controls
 against the committed checkpoint, and pushes. It does not sweep.

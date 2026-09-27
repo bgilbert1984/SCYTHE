@@ -13,7 +13,7 @@ from controls_3c import (CONTROLS, INTRODUCES, ACCEPTED_IN_SCOPE,
 
 # The slice branch. It is deleted when the slice merges, so it is named
 # here rather than hardcoded; SCYTHE_BRANCH selects the next one.
-BRANCH = os.environ.get("SCYTHE_BRANCH", "feat/5.20-3c-core")
+BRANCH = os.environ.get("SCYTHE_BRANCH", "main")   # both §5.20 slices are merged
 COMMIT = resolve_branch(BRANCH)
 WATCHED = sorted({rel for _c, ps in CONTROLS for rel, _o, _n in ps})
 BASE = checkpoint_blobs(COMMIT, WATCHED)
@@ -72,15 +72,15 @@ subprocess.run(["git","worktree","remove","--force",str(tree)], cwd=str(REPO),
 shutil.rmtree(tree, ignore_errors=True)
 print(f"BASELINE  {cls}  {count} tests  exit {proc.returncode}  "
       f"{BASELINE_ELAPSED}s", flush=True)
-# 2322 is what 655bbaa (feat/5.20-3c-wire, integrated onto main) collects,
-# exactly, with 1 pre-existing skip. The count belongs to that checkpoint, not
-# to the project: MANIFEST.txt carries the table (2245 / 2254 / 2306 / 2322). A
-# baseline that differs from it means the controls and the tree are from
-# different generations, which no floor can report; the floor moves with the
-# checkpoint and is never lowered.
-require_sane_baseline(cls, count, 2322, ids=ids, proc=proc,
+# 2370 is what 66a544bf (main, with 3d) collects, exactly, with 2 pre-existing
+# skips on a host without the pinned observation tree. The count belongs to
+# that checkpoint, not to the project: MANIFEST.txt carries the table
+# (2245 / 2254 / 2306 / 2322 / 2370). A baseline that differs from it means the
+# controls and the tree are from different generations, which no floor can
+# report; the floor moves with the checkpoint and is never lowered.
+require_sane_baseline(cls, count, 2370, ids=ids, proc=proc,
                       report=Path(S) / "baseline-refused-3c.out",
-                      expected=2322)
+                      expected=2370)
 # Each control's bound is derived from the baseline this host just produced,
 # not from a constant calibrated elsewhere: a fixed 1800s makes a healthy
 # control on a slower or loaded host read as TIMED_OUT.
