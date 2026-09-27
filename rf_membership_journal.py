@@ -562,6 +562,29 @@ def _append_terminal(dir_fd: int, record_type: str,
     return _append_checked(dir_fd, checked, state)
 
 
+def append_commit(dir_fd: int, window_id: str) -> JournalState:
+    """Durably append the COMMIT that turns an intent into a member.
+
+    3d's membership decision, reachable at last: the journal core reserved the
+    terminal slot when the intent was appended, and this spends it on the
+    outcome that a verified final has been read back. `_validated_state` refuses
+    a COMMIT for a window with no intent, a second terminal, or a stratum
+    already at its cap, before a byte is written.
+    """
+    return _append_terminal(dir_fd, COMMIT, window_id)
+
+
+def append_abandon(dir_fd: int, window_id: str) -> JournalState:
+    """Durably append the ABANDON that spends an intent without a member.
+
+    The other outcome the reserved slot pays for: an intent whose final never
+    became a verified member. Distinct from COMMIT only in the record type, so
+    both go through the one private core that validates the prospective state
+    before it is made durable.
+    """
+    return _append_terminal(dir_fd, ABANDON, window_id)
+
+
 def journal_declaration() -> Dict[str, Any]:
     """Stable scalar diagnostics; never record contents or a directory path."""
     return {

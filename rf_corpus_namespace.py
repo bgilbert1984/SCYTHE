@@ -56,9 +56,10 @@ from rf_eligible_trials_artefact import (
 )
 from rf_membership_journal import (
     JOURNAL_NAME, JOURNAL_NOT_CANONICAL, JournalRefused,
-    create_membership_journal,
-    journal_declaration, read_membership_journal,
+    append_abandon, append_commit, append_intent, create_membership_journal,
+    intent_record, journal_declaration, read_membership_journal,
 )
+from rf_capture_format import canonical_member_name, partial_member_name
 from rf_promotion_envelope import declaration_digest
 from rf_signal_chain_identity import (
     CLOCK_AUTHORITIES, CLOCK_AUTHORITY_POSIX_REALTIME, UNDECLARED,
@@ -100,15 +101,15 @@ NAMESPACE_SYMLINK_REFUSED = "NAMESPACE_SYMLINK_REFUSED"
 NAMESPACE_DEVICE_MISMATCH = "NAMESPACE_DEVICE_MISMATCH"
 NAMESPACE_HARD_LINKED = "NAMESPACE_HARD_LINKED"
 NAMESPACE_OWNED_ELSEWHERE = "NAMESPACE_OWNED_ELSEWHERE"
-NAMESPACE_RECOVERY_UNBUILT = "NAMESPACE_RECOVERY_UNBUILT"
 NAMESPACE_SCOPE_RELEASED = "NAMESPACE_SCOPE_RELEASED"
+NAMESPACE_ADMISSION_REQUIRED = "NAMESPACE_ADMISSION_REQUIRED"
 NAMESPACE_REFUSALS: Tuple[str, ...] = (
     NAMESPACE_PRODUCTION_NOT_AUTHORISED, NAMESPACE_ROOT_INSIDE_PRODUCTION,
     NAMESPACE_NOT_A_DIRECTORY, NAMESPACE_HOLDS_ENTRIES,
     NAMESPACE_OWNER_MISMATCH, NAMESPACE_MODE_PERMISSIVE,
     NAMESPACE_SYMLINK_REFUSED, NAMESPACE_DEVICE_MISMATCH,
     NAMESPACE_HARD_LINKED, NAMESPACE_OWNED_ELSEWHERE,
-    NAMESPACE_RECOVERY_UNBUILT, NAMESPACE_SCOPE_RELEASED,
+    NAMESPACE_SCOPE_RELEASED, NAMESPACE_ADMISSION_REQUIRED,
 )
 
 
@@ -185,11 +186,14 @@ class _ScopeState:
 
     __slots__ = ("dir_fd", "device", "body", "manifest_sha256", "path",
                  "released", "envelope", "capture_plan", "lock",
-                 "clock", "clock_authority")
+                 "clock", "clock_authority",
+                 "sequences", "ring_lifetime_id", "recovery_counts")
 
     def __init__(self, dir_fd, device, body, digest, path,
                  envelope=None, capture_plan=None, lock=None,
-                 clock: Callable[[], float] = time.time) -> None:
+                 clock: Callable[[], float] = time.time, *,
+                 sequences=None, ring_lifetime_id=None,
+                 recovery_counts=None) -> None:
         self.dir_fd = dir_fd
         self.device = device
         self.body = body
@@ -207,6 +211,14 @@ class _ScopeState:
         self.envelope = envelope
         self.capture_plan = capture_plan
         self.lock = lock
+        # 3d piece 2: the per-stratum sequences reconstructed from reconciled
+        # membership at reopen, the single ring lifetime they share (None for a
+        # corpus that has captured nothing), and the classification tally the
+        # reconciliation produced. Creation makes an empty corpus and passes
+        # none of these. Held for piece 4 to compel admission through.
+        self.sequences = dict(sequences) if sequences else {}
+        self.ring_lifetime_id = ring_lifetime_id
+        self.recovery_counts = dict(recovery_counts) if recovery_counts else {}
 
 
 def _clock_authority_of(clock: Any) -> str:
@@ -454,13 +466,162 @@ class CorpusOwnershipScope:
                 or state.capture_plan.spur_allocation is None
                 else len(state.capture_plan.spur_allocation.eligible_trials)),
             "corpus_clock_authority": state.clock_authority,
-            # Three different states, which one string flattened into a
-            # falsehood. A reader acting on "NOT BUILT" for the journal would
-            # conclude no journal exists; 3b-core built and certified one.
-            "sequence_state": "NOT BUILT",
-            "membership_journal": "CORE BUILT; RECOVERY AND SEQUENCE NOT BOUND",
-            "publisher": "CORE BUILT; NOT WIRED",
+            # 3d piece 2: sequence state is durable and reconstructed at reopen
+            # from reconciled membership, and the journal's recovery and
+            # sequence are now bound. The publisher's core is built and still
+            # not wired -- the one claim here that is still a "not": piece 3.
+            "sequence_state": "DURABLE; RECONSTRUCTED AT REOPEN",
+            "membership_journal": "CORE BUILT; RECOVERY AND SEQUENCE BOUND",
+            "publisher": "CORE BUILT; WIRED",
         }
+
+    def membership_recovery(self) -> Dict[str, Any]:
+        """What reopen reconciled and reconstructed, structured rather than flat.
+
+        Kept out of `to_dict`, whose contract is scalar diagnostics: this is the
+        one nested view, so a reader that wants the per-stratum sequence lengths
+        and the classification tally asks for it by name. Values are the counts
+        and the accepted lengths -- integers, a lifetime string and None -- and
+        never a sequence object, which piece 4 alone consumes.
+        """
+        state = self._live()
+        return {
+            "ring_lifetime_id": state.ring_lifetime_id,
+            "classification_counts": dict(state.recovery_counts),
+            "reconstructed_strata": {
+                stratum: sequence.accepted
+                for stratum, sequence in state.sequences.items()},
+        }
+
+    def _sequence_snapshot(self, stratum: str, window_lifetime: str) -> Any:
+        """The scope's own sequence state for a stratum, read but not stored.
+
+        Compulsion (entry 14): admission consumes the scope's sequence, never a
+        caller's, so a fresh or forged one cannot bypass the cap. A stratum that
+        has captured returns its live sequence; one that has not returns an
+        empty sequence bound to the corpus's single ring lifetime -- the pinned
+        one if the corpus has captured anything, this window's otherwise -- so
+        admission's lifetime check refuses a window from a second lifetime.
+        Storing happens only on a verified commit, in `_count_captured`.
+        """
+        from rf_capture_admission import CapturedStratumSequence
+        state = self._live()
+        existing = state.sequences.get(stratum)
+        if existing is not None:
+            return existing
+        lifetime = (state.ring_lifetime_id if state.ring_lifetime_id is not None
+                    else window_lifetime)
+        return CapturedStratumSequence(
+            corpus_id=state.body["corpus_id"], stratum=stratum,
+            ring_lifetime_id=lifetime)
+
+    def _count_captured(self, stratum: str, window_lifetime: str,
+                        publication: Any) -> int:
+        """Count a verified window in the scope's own sequence, minting it once.
+
+        The first commit pins the corpus's single ring lifetime and mints the
+        stratum's sequence; every later commit advances it. Only a window that
+        became a durable, verified member reaches here.
+        """
+        from rf_capture_admission import CapturedStratumSequence
+        state = self._live()
+        if state.ring_lifetime_id is None:
+            state.ring_lifetime_id = window_lifetime
+        sequence = state.sequences.get(stratum)
+        if sequence is None:
+            sequence = CapturedStratumSequence(
+                corpus_id=state.body["corpus_id"], stratum=stratum,
+                ring_lifetime_id=state.ring_lifetime_id)
+            state.sequences[stratum] = sequence
+        return sequence.count_published(publication)
+
+    def commit_window(self, *, admission: Any, attested_scope: Any) -> Any:
+        """§5.20 steps 3-8 for one admitted window, bracketed by the journal.
+
+        Compulsion (entry 14): the only thing that stands for the window is a
+        `WindowAdmission`, minted by admission and unconstructible by a caller,
+        so a commit cannot be reached without passing every precondition -- this
+        is the last of the four side routes, direct commit, closed by
+        construction rather than by a check a caller could route around. The
+        durable half lives here because only the namespace holds the corpus
+        directory descriptor, which never leaves it. The order is the durability
+        contract:
+
+        * the INTENT is appended first, reserving a terminal slot, so a crash at
+          any later instant is a state 3d recovery reconciles rather than a lost
+          or unaccounted member;
+        * the temporary is created inside the corpus directory (step 3), written
+          (step 4), and published (steps 5-8, the publisher's `publish_and_verify`);
+        * the COMMIT is appended on a verified final, or the ABANDON on a
+          publication failure -- the terminal the intent reserved, either way.
+
+        Returns the verified final and the publication admission counts. The
+        descriptor is opaque throughout; a caller receives neither it nor a path.
+        """
+        from rf_capture_admission import WindowAdmission, write_captured_temp
+        from rf_capture_publication import PublicationFailed, publish_and_verify
+
+        if type(admission) is not WindowAdmission:
+            raise NamespaceRefused(
+                NAMESPACE_ADMISSION_REQUIRED,
+                "commit_window publishes only a window admission consented to, "
+                "which a caller cannot mint; that is what makes admission the "
+                f"one path to membership. Got {type(admission).__name__}")
+        stratum = admission.stratum
+        header = admission.header
+        header_bytes = admission.header_bytes
+        framing_prefix_bytes = admission.framing_prefix_bytes
+        metadata = admission.metadata
+        payload_sha256 = admission.payload_sha256
+        file_sha256 = admission.file_sha256
+        ring_lifetime_id = admission.ring_lifetime_id
+        state = self._live()
+        dir_fd = state.dir_fd
+        window_id = metadata["window_id"]
+        # Compulsion: the predecessor is read from the scope's own sequence, not
+        # handed in, so the chain a window claims is the one the scope holds.
+        previous_window_id = self._sequence_snapshot(
+            stratum, ring_lifetime_id).previous_window_id
+        append_intent(dir_fd, intent_record(
+            manifest_sha256=state.manifest_sha256,
+            corpus_id=state.body["corpus_id"], stratum=stratum,
+            window_id=window_id, ring_lifetime_id=ring_lifetime_id,
+            expected_final_filename=canonical_member_name(file_sha256),
+            file_sha256=file_sha256, payload_sha256=payload_sha256,
+            previous_window_id=previous_window_id,
+            first_sample_index=int(metadata["first_sample_index"]),
+            envelope_digest=state.body["envelope_digest"],
+            capture_plan_digest=state.body["capture_plan_digest"]))
+
+        temporary_name = partial_member_name(file_sha256)
+        fd = os.open(temporary_name,
+                     os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW,
+                     CORPUS_FILE_MODE, dir_fd=dir_fd)
+        try:
+            os.fchmod(fd, CORPUS_FILE_MODE)
+            try:
+                publication = write_captured_temp(
+                    fd=fd, scope=attested_scope, header=header,
+                    header_bytes=header_bytes, prefix=framing_prefix_bytes,
+                    metadata=metadata, stratum=stratum,
+                    corpus_id=state.body["corpus_id"],
+                    payload_sha256=payload_sha256)
+                verified = publish_and_verify(
+                    fd=fd, dir_fd=dir_fd, temporary_name=temporary_name,
+                    publication=publication, intent_file_sha256=file_sha256)
+            except PublicationFailed:
+                # The reserved terminal pays for the failure: the window is
+                # spent, the orphan temporary is left for recovery to reconcile
+                # and free, exactly as an intent-only crash would be.
+                append_abandon(dir_fd, window_id)
+                raise
+            append_commit(dir_fd, window_id)
+            # Count only now, in the scope that owns the sequence: a verified,
+            # committed member, and the step-8 act §5.20 requires.
+            self._count_captured(stratum, ring_lifetime_id, publication)
+            return verified, publication
+        finally:
+            os.close(fd)
 
     def __repr__(self) -> str:
         state = self._state
@@ -892,11 +1053,12 @@ def open_corpus_namespace(*, corpus_id: str, root: Optional[str] = None
     namespace"* is right for creation and false here, and a flag would make
     which of the two applies a caller's choice.
 
-    **Membership recovery is unbuilt**, so a namespace holding anything besides
-    the manifest is refused rather than reopened with an unexamined member
-    count. That is the whole of what §5.26's recovery would examine, and
-    reopening over it silently would be the inert admission entry 11 was drained
-    for closing.
+    **Membership recovery reconciles on reopen** (3d piece 2): the journal is
+    read against the finals on disk, each intent adopted or discarded by its
+    verified final, and each stratum's sequence reconstructed from the
+    reconciled membership. A member the journal does not account for, or a stray
+    entry, still refuses -- reopening over it silently is the inert admission
+    entry 11 was drained for closing.
     """
     return _open(corpus_id=corpus_id, root=root, clock=time.time)
 
@@ -920,33 +1082,35 @@ def _open(*, corpus_id: str, root: Optional[str],
     try:
         device = _check_directory(dir_fd, path)
         _hold_exclusively(dir_fd, path)
-        entries = sorted(os.listdir(dir_fd))
-        unexpected = [entry for entry in entries
-                      if entry not in (MANIFEST_NAME, ELIGIBLE_NAME,
-                                       JOURNAL_NAME)]
-        if unexpected:
-            raise NamespaceRefused(
-                NAMESPACE_RECOVERY_UNBUILT,
-                f"{len(unexpected)} entr(y/ies) besides this corpus's own "
-                "declarations, and membership recovery is not built. §5.26 "
-                "requires every candidate final to be parsed, validated and "
-                "reconciled against the journal before a corpus is reopened: "
-                f"{unexpected[:4]}")
+        entries = tuple(sorted(os.listdir(dir_fd)))
         body, digest = _read_manifest(dir_fd, device)
         _check_declarations(body)
         journal = read_membership_journal(dir_fd)
-        if journal.records:
-            raise NamespaceRefused(
-                NAMESPACE_RECOVERY_UNBUILT,
-                f"membership.iqj holds {len(journal.records)} record(s); "
-                "slice 3d reconciles them against verified finals before a "
-                "scope may be minted")
+        # 3d piece 2: reconcile the journal against the finals on disk, then
+        # reconstruct each stratum's sequence from the reconciled membership.
+        # A call-site import, because recovery imports this module for
+        # CORPUS_FILE_MODE and a top-level import here would be a cycle whose
+        # resolution depended on load order. The two recovery-unbuilt refusals
+        # this replaces -- a member on disk, a record in the journal -- are now
+        # the reopen path entry 11 was drained to require.
+        from rf_membership_recovery import (
+            corpus_ring_lifetime, reconcile, reconstruct_sequences,
+        )
+        reconciled = reconcile(
+            dir_fd, journal=journal, entries=entries,
+            reserved_names=(MANIFEST_NAME, ELIGIBLE_NAME, JOURNAL_NAME),
+            manifest_sha256=digest)
+        sequences = reconstruct_sequences(
+            reconciled, corpus_id=body["corpus_id"])
+        ring_lifetime_id = corpus_ring_lifetime(reconciled)
         rows = _read_eligible_rows(dir_fd, device,
                                    body["capture_plan"]["spur_allocation"])
         rebuilt_envelope, rebuilt_plan, rebuilt_lock = _reconstruct(body, rows)
         state = _ScopeState(dir_fd, device, body, digest, path,
                             rebuilt_envelope, rebuilt_plan, rebuilt_lock,
-                            clock=clock)
+                            clock=clock, sequences=sequences,
+                            ring_lifetime_id=ring_lifetime_id,
+                            recovery_counts=reconciled.counts)
         return CorpusOwnershipScope(state, _MINT_KEY)
     except BaseException:
         os.close(dir_fd)
@@ -967,22 +1131,26 @@ def namespace_status() -> Dict[str, Any]:
                   "TYPED RECONSTRUCTION AND OPAQUE BINDING",
                   "MEMBERSHIP JOURNAL CORE",
                   "CLOCK PROVIDER", "ADMISSION CONSUMPTION OF THIS SCOPE",
-                  "RING LIFETIME IDENTITY", "PUBLISHER CORE"],
-        # "PUBLISHER" and "RING LIFETIME IDENTITY" were both owed when this list
-        # was written and are not now: the ring mints a lifetime id and
-        # attestation compares it, and 3c-core built the steps 5-8 primitive.
-        # What remains owed of the publisher is its WIRING, which the accepted
-        # sequence prohibits until 3d -- a narrower claim than "not built", and
-        # the only one that is true.
-        "not_built": ["FINAL-DEPENDENT JOURNAL RECOVERY", "SEQUENCE STATE",
-                      "PUBLISHER WIRING"],
+                  "RING LIFETIME IDENTITY", "PUBLISHER CORE",
+                  "FINAL-DEPENDENT JOURNAL RECOVERY", "SEQUENCE STATE",
+                  "PUBLISHER WIRING"],
+        # Everything §5.26 and §5.20 3a-3d owed is built now. 3d piece 3 wired
+        # the publisher: record_gain_step admits, then the namespace's
+        # commit_window creates the temporary, writes it, runs steps 5-8 and
+        # brackets the whole with the journal's intent and commit. Nothing is
+        # owed and nothing is a missing capability; what 3d piece 4 added is
+        # compulsion, reported by `compelled_path_to_membership`.
+        "not_built": [],
         "clock_authorities": list(CLOCK_AUTHORITIES),
-        # 3c-wire: admission consumes this scope, through `admit_window`. That
-        # is consumption, not compulsion: no production path is yet obliged
-        # to pass through it, which is §5.26's own reason that entry 14 does
-        # not drain until 3d.
+        # 3c-wire: admission consumes this scope through `admit_window`; 3d
+        # piece 4 made it compulsion. Membership is reachable only by admitting
+        # -- the sequence is the scope's, and commit_window takes a
+        # WindowAdmission a caller cannot mint -- and the D-series proves no
+        # side route survives. That is entry 14, drained. `section_implemented`
+        # stays False: production creation is a separate authorisation, still
+        # withheld, so the whole of §5.26 is not implemented by this slice.
         "consumed_by_admission": True,
-        "compelled_path_to_membership": False,
+        "compelled_path_to_membership": True,
         "section_implemented": False,
         "exclusion": "FLOCK ON THE DIRECTORY DESCRIPTOR",
     }

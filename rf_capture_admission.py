@@ -140,12 +140,14 @@ ADMISSION_ATTESTATION_TYPE_WRONG = "ADMISSION_ATTESTATION_TYPE_WRONG"
 ADMISSION_GEOMETRY_REFUSED = "ADMISSION_GEOMETRY_REFUSED"
 ADMISSION_CHAIN_OUTSIDE_ENVELOPE = "ADMISSION_CHAIN_OUTSIDE_ENVELOPE"
 ADMISSION_SEQUENCE_NOT_THIS_STRATUM = "ADMISSION_SEQUENCE_NOT_THIS_STRATUM"
+ADMISSION_RING_LIFETIME_MISMATCH = "ADMISSION_RING_LIFETIME_MISMATCH"
+ADMISSION_SEQUENCE_HISTORY_REFUSED = "ADMISSION_SEQUENCE_HISTORY_REFUSED"
 ADMISSION_STRATUM_CAP_REACHED = "ADMISSION_STRATUM_CAP_REACHED"
 ADMISSION_BINDING_CLAIMED_TWICE = "ADMISSION_BINDING_CLAIMED_TWICE"
 ADMISSION_BINDING_NOT_EMITTED = "ADMISSION_BINDING_NOT_EMITTED"
 ADMISSION_FIELD_NO_AUTHORITY = "ADMISSION_FIELD_NO_AUTHORITY"
 ADMISSION_CANONICAL_FORM_REFUSED = "ADMISSION_CANONICAL_FORM_REFUSED"
-ADMISSION_CREATOR_NOT_CALLABLE = "ADMISSION_CREATOR_NOT_CALLABLE"
+ADMISSION_TICKET_UNCONSTRUCTIBLE = "ADMISSION_TICKET_UNCONSTRUCTIBLE"
 ADMISSION_REFUSALS: Tuple[str, ...] = (
     ADMISSION_SCOPE_TYPE_WRONG, ADMISSION_SCOPE_ENDED,
     ADMISSION_OWNERSHIP_SCOPE_TYPE_WRONG, ADMISSION_OWNERSHIP_SCOPE_RELEASED,
@@ -154,9 +156,10 @@ ADMISSION_REFUSALS: Tuple[str, ...] = (
     ADMISSION_STRATUM_OUTSIDE_GRANT, ADMISSION_ATTESTATION_UNCONSTRUCTIBLE,
     ADMISSION_ATTESTATION_TYPE_WRONG, ADMISSION_GEOMETRY_REFUSED,
     ADMISSION_CHAIN_OUTSIDE_ENVELOPE, ADMISSION_SEQUENCE_NOT_THIS_STRATUM,
+    ADMISSION_RING_LIFETIME_MISMATCH, ADMISSION_SEQUENCE_HISTORY_REFUSED,
     ADMISSION_STRATUM_CAP_REACHED, ADMISSION_BINDING_CLAIMED_TWICE,
     ADMISSION_BINDING_NOT_EMITTED, ADMISSION_FIELD_NO_AUTHORITY,
-    ADMISSION_CANONICAL_FORM_REFUSED, ADMISSION_CREATOR_NOT_CALLABLE,
+    ADMISSION_CANONICAL_FORM_REFUSED, ADMISSION_TICKET_UNCONSTRUCTIBLE,
     WINDOW_INTERVAL_OVERLAP,
 )
 
@@ -164,12 +167,10 @@ ADMISSION_REFUSALS: Tuple[str, ...] = (
 #
 # Facts about the write, which cannot be known before one. §5.20 governs what
 # they leave behind and this section does not contradict it.
-PUBLICATION_TARGET_NOT_A_DESCRIPTOR = "PUBLICATION_TARGET_NOT_A_DESCRIPTOR"
 PUBLICATION_FRAMING_WRITE_INCOMPLETE = "PUBLICATION_FRAMING_WRITE_INCOMPLETE"
 PUBLICATION_LENGTH_MISMATCH = "PUBLICATION_LENGTH_MISMATCH"
 PUBLICATION_FAILURES: Tuple[str, ...] = (
-    PUBLICATION_TARGET_NOT_A_DESCRIPTOR, PUBLICATION_FRAMING_WRITE_INCOMPLETE,
-    PUBLICATION_LENGTH_MISMATCH,
+    PUBLICATION_FRAMING_WRITE_INCOMPLETE, PUBLICATION_LENGTH_MISMATCH,
 )
 
 
@@ -270,7 +271,16 @@ class CapturedCorpusRetention:
 
 
 class CapturedStratumSequence:
-    """What this corpus has already counted in one stratum. Process-local.
+    """What this corpus has already counted in one stratum, for one ring.
+
+    Process-local by default and reconstructible from reconciled membership:
+    `reconstruct_stratum_sequence` restores verified history after a reopen,
+    which is the only other way a sequence comes into being. The ring
+    lifetime binds the indices to the ring that produced them -- a sample
+    index means nothing across two rings (section 5.26 single-lifetime
+    capture), so a sequence restored for one lifetime never authorises
+    continuity for another lifetime's windows, and admission refuses the
+    mismatch.
 
     **It does not advance on a write.** §5.20 counts a window at publication
     step 8, after the final file has been read back and both digests verified,
@@ -281,17 +291,25 @@ class CapturedStratumSequence:
     rather than hidden.
     """
 
-    __slots__ = ("corpus_id", "stratum", "_accepted", "_last_window_id",
-                 "_first_sample_index", "_last_sample_index")
+    __slots__ = ("corpus_id", "stratum", "ring_lifetime_id", "_accepted",
+                 "_last_window_id", "_first_sample_index", "_last_sample_index")
 
-    def __init__(self, *, corpus_id: str, stratum: str) -> None:
+    def __init__(self, *, corpus_id: str, stratum: str,
+                 ring_lifetime_id: str) -> None:
         if stratum not in CAPTURED_STRATA:
             raise CaptureRefused(
                 ADMISSION_STRATUM_OUTSIDE_GRANT,
                 f"{stratum!r} is not one of the three strata §5.20 granted "
                 f"capture for: {', '.join(CAPTURED_STRATA)}")
+        if not isinstance(ring_lifetime_id, str) or not ring_lifetime_id:
+            raise CaptureRefused(
+                ADMISSION_RING_LIFETIME_MISMATCH,
+                "a stratum's sequence state is bound to the ring lifetime "
+                "whose indices it counts; got "
+                f"{ring_lifetime_id!r}")
         self.corpus_id = str(corpus_id)
         self.stratum = stratum
+        self.ring_lifetime_id = ring_lifetime_id
         self._accepted = 0
         self._last_window_id: Optional[str] = None
         # Both ends of the predecessor, because they answer different
@@ -342,11 +360,89 @@ class CapturedStratumSequence:
 
     def to_dict(self) -> Dict[str, Any]:
         return {"corpus_id": self.corpus_id, "stratum": self.stratum,
+                "ring_lifetime_id": self.ring_lifetime_id,
                 "accepted": self._accepted,
                 "previous_window_id": self._last_window_id,
                 "previous_first_sample_index": self._first_sample_index,
                 "previous_last_sample_index": self._last_sample_index,
                 "cap": MINIMUM_WINDOWS_PER_STRATUM}
+
+
+@dataclass(frozen=True)
+class CommittedWindow:
+    """One reconciled corpus member, for sequence reconstruction.
+
+    The view 3d's recovery reconciliation produces from the journal and the
+    verified final files, oldest first. The ring lifetime rides along so a
+    mixed-lifetime history is refused at reconstruction rather than silently
+    adopted as continuity.
+    """
+    window_id: str
+    first_sample_index: int
+    last_sample_index: int
+    ring_lifetime_id: str
+
+
+def reconstruct_stratum_sequence(*, corpus_id: str, stratum: str,
+                                 ring_lifetime_id: str,
+                                 committed_windows: Tuple[CommittedWindow, ...]
+                                 ) -> CapturedStratumSequence:
+    """Rebuild a stratum's sequence from its reconciled membership.
+
+    The input is verified history, not a live claim: every window here was
+    admitted, published and committed before the reopen -- or the input is
+    empty, which is the creation case and yields a fresh sequence. A window
+    from another ring lifetime is refused, not skipped: foreign history is
+    reported, never adopted as continuity.
+
+    This restores; it does not advance. The live path still advances only
+    through `count_published`, the step-8 act.
+    """
+    if not isinstance(ring_lifetime_id, str) or not ring_lifetime_id:
+        raise CaptureRefused(
+            ADMISSION_RING_LIFETIME_MISMATCH,
+            "sequence reconstruction is bound to a ring lifetime; got "
+            f"{ring_lifetime_id!r}")
+    sequence = CapturedStratumSequence(
+        corpus_id=corpus_id, stratum=stratum,
+        ring_lifetime_id=ring_lifetime_id)
+    for window in committed_windows:
+        if type(window) is not CommittedWindow:
+            raise CaptureRefused(
+                ADMISSION_SEQUENCE_HISTORY_REFUSED,
+                "sequence is reconstructed from reconciled members, not "
+                f"claims; got {type(window).__name__}")
+        if window.ring_lifetime_id != ring_lifetime_id:
+            raise CaptureRefused(
+                ADMISSION_RING_LIFETIME_MISMATCH,
+                f"window {window.window_id!r} belongs to ring lifetime "
+                f"{window.ring_lifetime_id!r}, not {ring_lifetime_id!r}; a "
+                "sample index means nothing across two rings")
+        if not isinstance(window.window_id, str) or not window.window_id:
+            raise CaptureRefused(
+                ADMISSION_SEQUENCE_HISTORY_REFUSED,
+                "a reconciled member without an id is not history")
+        for field in ("first_sample_index", "last_sample_index"):
+            value = getattr(window, field)
+            if (not isinstance(value, int) or isinstance(value, bool)
+                    or value < 0):
+                raise CaptureRefused(
+                    ADMISSION_SEQUENCE_HISTORY_REFUSED,
+                    f"window {window.window_id!r} carries {field} {value!r}; "
+                    "reconstructed history must carry indices")
+        if window.last_sample_index < window.first_sample_index:
+            raise CaptureRefused(
+                ADMISSION_SEQUENCE_HISTORY_REFUSED,
+                f"window {window.window_id!r} ends at "
+                f"{window.last_sample_index} before it begins at "
+                f"{window.first_sample_index}")
+        # Verified history, restored directly: this is not the live path, so
+        # it does not go through `count_published`, the step-8 act.
+        sequence._accepted += 1
+        sequence._last_window_id = window.window_id
+        sequence._first_sample_index = window.first_sample_index
+        sequence._last_sample_index = window.last_sample_index
+    return sequence
 
 
 # -- the six authorities, each declaring what it exports --------------------
@@ -657,6 +753,48 @@ class CapturedWindowPublication:
         }
 
 
+_ADMISSION_MINT_KEY = object()
+
+
+class WindowAdmission:
+    """A window that passed every §5.20 precondition, as a capability.
+
+    Compulsion (entry 14): the namespace publishes only what admission produced.
+    A WindowAdmission is minted by `_record`, after `_admit` returns and the
+    header is framed and digested, and by nothing else -- the mint key it
+    requires lives in this module alone. A caller cannot construct one, so
+    `commit_window` cannot be reached without going through admission, which is
+    what makes admission the single path to membership rather than one path
+    among several. It carries only derived facts -- the framed header, the two
+    digests, the stratum and the ring lifetime -- and no descriptor, path or
+    sample: it is proof that admission ran, not authority to write.
+    """
+
+    __slots__ = ("stratum", "metadata", "header", "header_bytes",
+                 "framing_prefix_bytes", "payload_sha256", "file_sha256",
+                 "ring_lifetime_id")
+
+    def __init__(self, mint_key: Any = None, *, stratum: str,
+                 metadata: Mapping[str, Any], header: Mapping[str, Any],
+                 header_bytes: bytes, framing_prefix_bytes: bytes,
+                 payload_sha256: str, file_sha256: str,
+                 ring_lifetime_id: str) -> None:
+        if mint_key is not _ADMISSION_MINT_KEY:
+            raise CaptureRefused(
+                ADMISSION_TICKET_UNCONSTRUCTIBLE,
+                "a WindowAdmission is minted by admission and by nothing else; "
+                "a constructed one would be a caller's claim that a window was "
+                "admitted when no precondition was checked")
+        self.stratum = stratum
+        self.metadata = metadata
+        self.header = header
+        self.header_bytes = header_bytes
+        self.framing_prefix_bytes = framing_prefix_bytes
+        self.payload_sha256 = payload_sha256
+        self.file_sha256 = file_sha256
+        self.ring_lifetime_id = ring_lifetime_id
+
+
 # -- admission --------------------------------------------------------------
 
 
@@ -674,8 +812,7 @@ def _ownership_scope_types() -> Tuple[type, type]:
 
 
 def _admit(*, scope: Any, stratum: str, attestation: Any,
-           corpus: Any, sequence: Any
-           ) -> Tuple[Dict[str, Any], Dict[str, Any], str]:
+           corpus: Any) -> Tuple[Dict[str, Any], Dict[str, Any], str]:
     """Every precondition, in order, before anything is created.
 
     §5.25's ordering requirement is narrower than "every check that can
@@ -791,7 +928,12 @@ def _admit(*, scope: Any, stratum: str, attestation: Any,
             "another experiment: it is not re-labelled, not held aside and "
             "not counted")
 
-    # 8. the corpus sequence state for this stratum.
+    # 8. the corpus sequence state for this stratum. Compulsion (entry 14):
+    #    admission consumes the scope's OWN sequence, read through the scope,
+    #    never a caller's -- so a fresh or forged sequence cannot bypass the
+    #    cap or claim a chain the scope does not hold. The checks below verify
+    #    the admission-to-scope boundary the scope answered across.
+    sequence = corpus._sequence_snapshot(stratum, metadata["ring_lifetime_id"])
     if type(sequence) is not CapturedStratumSequence:
         raise CaptureRefused(
             ADMISSION_SEQUENCE_NOT_THIS_STRATUM,
@@ -802,6 +944,16 @@ def _admit(*, scope: Any, stratum: str, attestation: Any,
             ADMISSION_SEQUENCE_NOT_THIS_STRATUM,
             f"sequence state for {sequence.corpus_id}/{sequence.stratum} "
             f"presented for {terms.corpus_id}/{stratum}")
+    # 3d. The sequence is bound to the ring lifetime whose indices it counts.
+    # A sample index means nothing across two rings (section 5.26
+    # single-lifetime capture), so a sequence restored for one lifetime never
+    # authorises continuity for another lifetime's windows.
+    if sequence.ring_lifetime_id != metadata["ring_lifetime_id"]:
+        raise CaptureRefused(
+            ADMISSION_RING_LIFETIME_MISMATCH,
+            f"the sequence state belongs to ring lifetime "
+            f"{sequence.ring_lifetime_id!r} and this window was attested "
+            f"under {metadata['ring_lifetime_id']!r}")
     if sequence.accepted >= MINIMUM_WINDOWS_PER_STRATUM:
         raise CaptureRefused(
             ADMISSION_STRATUM_CAP_REACHED,
@@ -851,22 +1003,20 @@ def _write_all(fd: int, data: bytes) -> int:
     return total
 
 
-def _publish(*, fd: Any, scope: AttestedIQWindowScope, header: Mapping[str, Any],
-             header_bytes: bytes, prefix: bytes, metadata: Mapping[str, Any],
-             stratum: str, corpus_id: str,
-             payload_sha256: str) -> CapturedWindowPublication:
-    """§5.20 steps 3 (already done by the caller) and 4, and the reconciliation.
+def write_captured_temp(*, fd: int, scope: AttestedIQWindowScope,
+                        header: Mapping[str, Any], header_bytes: bytes,
+                        prefix: bytes, metadata: Mapping[str, Any],
+                        stratum: str, corpus_id: str,
+                        payload_sha256: str) -> CapturedWindowPublication:
+    """§5.20 step 4 over a temporary the namespace has just created.
 
-    Everything here is post-open. Nothing refuses with `CaptureRefused`, and
-    nothing unlinks: an orphan temporary is never a corpus member and is kept
-    deliberately, so removing it would be this module contradicting §5.20 in
-    order to sound stronger.
+    3d wires this: the namespace owns step 3 now, creates the temporary inside
+    the corpus directory and passes its descriptor, so there is no caller fd to
+    type-check. Everything here is post-open. Nothing refuses with
+    `CaptureRefused`, and nothing unlinks: an orphan temporary is never a corpus
+    member, and this module removing one would contradict §5.20 to sound
+    stronger.
     """
-    if type(fd) is not int:
-        raise PublicationFailed(
-            PUBLICATION_TARGET_NOT_A_DESCRIPTOR,
-            f"create_target returned {type(fd).__name__}, not a descriptor")
-
     framing = prefix + header_bytes
     framing_written = _write_all(fd, framing)
     if framing_written != len(framing):
@@ -909,29 +1059,21 @@ def _publish(*, fd: Any, scope: AttestedIQWindowScope, header: Mapping[str, Any]
     )
 
 
-def _record(*, scope: Any, stratum: str, attestation: Any, corpus: Any,
-            sequence: Any, create_target: Any) -> CapturedWindowPublication:
-    """Admit, then create, then write. The order is the contract.
+def _record(*, scope: Any, stratum: str, attestation: Any, corpus: Any
+            ) -> CapturedWindowPublication:
+    """Admit, then let the namespace publish, then count. Order is the contract.
 
-    `create_target` is invoked **once**, after `_admit` has returned. It is the
-    caller's §5.20 step 3 -- an exclusive `0600` temporary sibling -- and this
-    module does not implement it, because the corpus namespace is unbuilt and
-    creating one is not authorised here. Passing it in is also what makes the
-    ordering observable: a test counts the calls, and an admission check moved
-    below this line is caught by a creator that ran.
+    3d wires the publisher. `create_target` is gone: creation is no longer the
+    caller's. `_admit` runs every precondition, the header is framed and its
+    `file_sha256` computed from the live scope before the file exists, and
+    `corpus.commit_window` -- inside the namespace, under the journal's
+    intent/commit bracket -- creates the temporary, writes it, runs §5.20 steps
+    5-8, commits, and counts the verified member in the sequence the scope
+    holds. Compelled (entry 14): the caller supplies neither a place to write
+    nor a sequence to advance -- both are the scope's.
     """
-    # A precondition, not a post-open failure: a creator that cannot be called
-    # never creates anything, so the refusal belongs in the regime where
-    # nothing exists. The two vocabularies stay apart even here.
-    if not callable(create_target):
-        raise CaptureRefused(
-            ADMISSION_CREATOR_NOT_CALLABLE,
-            "create_target is the caller's §5.20 step 3 and must be callable; "
-            f"got {type(create_target).__name__}")
-
     metadata, header, payload_sha256 = _admit(
-        scope=scope, stratum=stratum, attestation=attestation, corpus=corpus,
-        sequence=sequence)
+        scope=scope, stratum=stratum, attestation=attestation, corpus=corpus)
     try:
         header_bytes = canonical_header_bytes(header)
         prefix = framing_prefix(header_bytes)
@@ -940,13 +1082,23 @@ def _record(*, scope: Any, stratum: str, attestation: Any, corpus: Any,
             ADMISSION_CANONICAL_FORM_REFUSED,
             f"the derived header cannot be framed: {exc}") from exc
 
-    fd = create_target()
+    # The identity the durable intent binds before the file exists, and step 8
+    # recomputes from the file it reads back. `_prefixed_sha256` hashes the
+    # framing prefix and header in front of the live payload in one pass, so the
+    # digest is fixed at the instant the header was serialised.
+    file_sha256 = scope._prefixed_sha256(prefix + header_bytes)
 
-    return _publish(fd=fd, scope=scope, header=header,
-                    header_bytes=header_bytes, prefix=prefix,
-                    metadata=metadata, stratum=stratum,
-                    corpus_id=header["corpus_id"],
-                    payload_sha256=payload_sha256)
+    # The capability the namespace requires: proof this window passed admission,
+    # minted here and constructible nowhere else. commit_window takes it in
+    # place of loose arguments, so a caller cannot commit without admitting.
+    admission = WindowAdmission(
+        _ADMISSION_MINT_KEY, stratum=stratum, metadata=metadata, header=header,
+        header_bytes=header_bytes, framing_prefix_bytes=prefix,
+        payload_sha256=payload_sha256, file_sha256=file_sha256,
+        ring_lifetime_id=metadata["ring_lifetime_id"])
+    _verified, publication = corpus.commit_window(
+        admission=admission, attested_scope=scope)
+    return publication
 
 
 # -- the typed capture boundary ---------------------------------------------
@@ -960,8 +1112,7 @@ def _record(*, scope: Any, stratum: str, attestation: Any, corpus: Any,
 # format's declaration, not a caller's.
 
 
-def record_gain_step(*, scope: Any, attestation: Any, corpus: Any,
-                     sequence: Any, create_target: Any
+def record_gain_step(*, scope: Any, attestation: Any, corpus: Any
                      ) -> CapturedWindowPublication:
     """Publish the first complete window after a `GAIN_CHANGE`. §5.20, §5.25.
 
@@ -972,23 +1123,18 @@ def record_gain_step(*, scope: Any, attestation: Any, corpus: Any,
     either gets a `TypeError` rather than a second authority.
     """
     return _record(scope=scope, stratum="GAIN_STEPS", attestation=attestation,
-                   corpus=corpus, sequence=sequence,
-                   create_target=create_target)
+                   corpus=corpus)
 
 
-def record_retune_transient(*, scope: Any, attestation: Any, corpus: Any,
-                            sequence: Any, create_target: Any
+def record_retune_transient(*, scope: Any, attestation: Any, corpus: Any
                             ) -> CapturedWindowPublication:
     """Publish the first complete window after a `RETUNE`. §5.20, §5.25."""
     return _record(scope=scope, stratum="RETUNE_TRANSIENTS",
-                   attestation=attestation, corpus=corpus,
-                   sequence=sequence, create_target=create_target)
+                   attestation=attestation, corpus=corpus)
 
 
 def record_receiver_spur(*, scope: Any = None, attestation: Any = None,
-                         corpus: Any = None, sequence: Any = None,
-                         create_target: Any = None
-                         ) -> CapturedWindowPublication:
+                         corpus: Any = None) -> CapturedWindowPublication:
     """Refuses by construction. `RECEIVER_SPURS` has no attestation member.
 
     Not a check somebody could relax: the union is closed and the stratum has
@@ -1026,6 +1172,10 @@ def admission_status() -> Dict[str, Any]:
         # lock and no timestamp. Consumption is not compulsion: nothing yet
         # obliges a production path through here, which is entry 14.
         "consumes_ownership_scope": True,
+        # 3d. The sequence state is bound to the ring lifetime whose indices
+        # it counts; admission refuses a sequence restored for another
+        # lifetime, because continuity across two rings is not continuity.
+        "sequence_ring_lifetime_bound": True,
         "accepts_caller_lock": False,
         "accepts_caller_timestamp": False,
         "required_header_fields": len(required_header_fields("GAIN_STEPS")),

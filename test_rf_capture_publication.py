@@ -109,7 +109,7 @@ class PublicationFixture(unittest.TestCase):
                       temporary_name=TEMPORARY, publication=self.publication,
                       intent_file_sha256=self.file_sha256)
         kwargs.update(changes)
-        return publication._publish_and_verify(**kwargs)
+        return publication.publish_and_verify(**kwargs)
 
     def names(self):
         return sorted(os.listdir(self.dir_path))
@@ -699,16 +699,13 @@ class Vocabulary(unittest.TestCase):
         for code in DURABILITY_FAILURES:
             self.assertEqual(getattr(publication, code), code)
 
-    def test_no_production_module_is_wired_to_the_publisher(self):
-        """3c-core's boundary, over EVERY production module rather than one.
-
-        The first version parsed `rf_capture_admission.py` alone --- one file of
-        163 --- so any other production module could have wired the publisher
-        without moving this test. That is the same defect as a checker closing
-        over one slice's identifiers instead of deriving them: the scope has to
-        come from the tree, not from a name typed here.
-
-        The publisher itself is excluded, and nothing else is.
+    def test_only_the_namespace_wires_the_publisher(self):
+        """3d piece 3 wired the publisher, and this asserts it did so in exactly
+        one place. 3c-core's version required NO production module to import the
+        publisher; the wiring inverts that to a single sanctioned site --- the
+        namespace's `commit_window`, which owns the corpus descriptor the
+        publish needs --- and demands nothing else reach it. The scope still
+        comes from the tree, over every production module rather than one.
         """
         import ast
         offenders = {}
@@ -722,7 +719,7 @@ class Vocabulary(unittest.TestCase):
                     imported |= {a.name for a in node.names}
             if MODULE_STEM in imported:
                 offenders[path.name] = sorted(imported & {MODULE_STEM})
-        self.assertEqual(offenders, {})
+        self.assertEqual(offenders, {"rf_corpus_namespace.py": [MODULE_STEM]})
 
     def test_the_boundary_scan_reads_every_production_module(self):
         """The breadth itself, witnessed. A scan that silently narrowed back to

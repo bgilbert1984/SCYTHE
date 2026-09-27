@@ -15,7 +15,6 @@ import json
 import os
 import pathlib
 import struct
-import threading
 import unittest
 import dataclasses
 from dataclasses import dataclass, replace
@@ -32,31 +31,40 @@ from rf_capture_admission import (
     ADMISSION_ATTESTATION_TYPE_WRONG, ADMISSION_ATTESTATION_UNCONSTRUCTIBLE,
     ADMISSION_BINDING_CLAIMED_TWICE, ADMISSION_BINDING_NOT_EMITTED,
     ADMISSION_CANONICAL_FORM_REFUSED, ADMISSION_CHAIN_OUTSIDE_ENVELOPE,
-    ADMISSION_CREATOR_NOT_CALLABLE, ADMISSION_FIELD_NO_AUTHORITY,
+    ADMISSION_TICKET_UNCONSTRUCTIBLE,
+    ADMISSION_FIELD_NO_AUTHORITY,
     ADMISSION_GEOMETRY_REFUSED, ADMISSION_OWNERSHIP_SCOPE_RELEASED,
     ADMISSION_OWNERSHIP_SCOPE_TYPE_WRONG, ADMISSION_REFUSALS,
     ADMISSION_RETENTION_BEYOND_MAXIMUM, ADMISSION_RETENTION_EXPIRED,
-    ADMISSION_RETENTION_NOT_SUPPLIED, ADMISSION_SCOPE_ENDED,
-    ADMISSION_SCOPE_TYPE_WRONG, ADMISSION_SEQUENCE_NOT_THIS_STRATUM,
+    ADMISSION_RETENTION_NOT_SUPPLIED, ADMISSION_RING_LIFETIME_MISMATCH,
+    ADMISSION_SCOPE_ENDED,
+    ADMISSION_SCOPE_TYPE_WRONG, ADMISSION_SEQUENCE_HISTORY_REFUSED,
+    ADMISSION_SEQUENCE_NOT_THIS_STRATUM,
     ADMISSION_STRATA_DEFINITION_MOVED, ADMISSION_STRATUM_CAP_REACHED,
     ADMISSION_STRATUM_OUTSIDE_GRANT, CAPTURED_STRATA, HEADER_AUTHORITIES,
     PAYLOAD_ACTION_RECONCILES, PUBLICATION_FAILURES,
     PUBLICATION_FRAMING_WRITE_INCOMPLETE, PUBLICATION_LENGTH_MISMATCH,
-    PUBLICATION_TARGET_NOT_A_DESCRIPTOR, RETENTION_MAXIMUM_SECONDS,
-    STRATUM_ATTESTATION, CaptureRefused, CapturedCorpusRetention,
-    CapturedStratumSequence, CapturedWindowPublication, GainStepAttestation,
+    RETENTION_MAXIMUM_SECONDS,
+    STRATUM_ATTESTATION, WindowAdmission, CaptureRefused,
+    CapturedCorpusRetention,
+    CapturedStratumSequence, CapturedWindowPublication, CommittedWindow,
+    GainStepAttestation,
     PublicationFailed, RetuneAttestation, admission_status,
-    check_header_completeness, derive_canonical_header, record_gain_step,
+    check_header_completeness, derive_canonical_header,
+    reconstruct_stratum_sequence, record_gain_step,
     record_receiver_spur, record_retune_transient, required_header_fields,
     _attested_scope_declares, _corpus_ownership_declares,
 )
 from rf_capture_format import (
     IQC_FORMAT_VERSION, IQC_HEADER_SCHEMA, IQC_MAGIC, IQC_MAX_HEADER_BYTES,
-    FramingRefused, canonical_header_bytes, framing_prefix,
+    FramingRefused, canonical_header_bytes, canonical_member_name,
+    framing_prefix,
 )
+from rf_membership_journal import read_membership_journal
 from rf_corpus_namespace import (
-    CorpusOwnershipScope, create_corpus_namespace,
-    _create_corpus_namespace_with_clock,
+    CorpusOwnershipScope, NAMESPACE_ADMISSION_REQUIRED, NamespaceRefused,
+    create_corpus_namespace, _create_corpus_namespace_with_clock,
+    open_corpus_namespace,
 )
 from rf_corpus_vocabulary import CAPTURED
 from rf_iq_ring import (
@@ -119,21 +127,19 @@ def _retune_attestation(**kwargs):
     return RetuneAttestation(**fields)
 
 
-class _Creator:
-    """A §5.20 step 3 that counts how often it ran, and whether it ran at all.
+class _CaptureProbe:
+    """Stands in for the old create-target's call counter.
 
-    The whole ordering claim rests on this: a precondition refusal is not a
-    promise about the order of some lines, it is a creator that never ran.
+    3d moved §5.20 step-3 creation inside the namespace, so there is no caller
+    function to count. The ordering claim it carried is now structural: a
+    precondition refusal (`CaptureRefused`) is raised in `_admit`, before the
+    namespace publishes anything, so `calls` is 0; a successful publish created
+    exactly one member, so it is 1. `refuse` also checks the corpus journal is
+    untouched, which is the same ordering claim read off the durable state.
     """
 
-    def __init__(self, fd=None, result=None):
-        self.calls = 0
-        self._fd = fd
-        self._result = result
-
-    def __call__(self):
-        self.calls += 1
-        return self._fd if self._result is None else self._result
+    def __init__(self, calls):
+        self.calls = calls
 
 
 class CaptureFixture(unittest.TestCase):
@@ -147,7 +153,11 @@ class CaptureFixture(unittest.TestCase):
         self.ring = _ring(self.chain)
         self.retention = CapturedCorpusRetention(delete_not_after=DEADLINE)
         self.sequence = CapturedStratumSequence(
-            corpus_id=self.lock.corpus_id, stratum="GAIN_STEPS")
+            corpus_id=self.lock.corpus_id, stratum="GAIN_STEPS",
+            ring_lifetime_id=self.ring.ring_lifetime_id)
+        # 3d: creation is inside the namespace now, so tests inspect the corpus
+        # the publish wrote to. open_corpus records each corpus's directory.
+        self._corpus_path = {}
         # 3c-wire: admission consumes a corpus ownership scope, so every test
         # holds a real one, in its own temporary root, under the operator's
         # test-write authorisation. The fixture's corpus is minted through the
@@ -173,6 +183,7 @@ class CaptureFixture(unittest.TestCase):
                 corpus_id=lock.corpus_id, lock=lock, retention=retention,
                 root=root, clock=(lambda: NOW) if clock is None else clock)
         self.addCleanup(corpus.release)
+        self._corpus_path[id(corpus)] = os.path.join(root, lock.corpus_id)
         return corpus
 
     def real_corpus(self):
@@ -190,24 +201,68 @@ class CaptureFixture(unittest.TestCase):
         return fd
 
     def kwargs(self, **overrides):
-        fields = dict(attestation=_gain_attestation(), corpus=self.corpus,
-                      sequence=self.sequence)
+        fields = dict(attestation=_gain_attestation(), corpus=self.corpus)
         fields.update(overrides)
         return fields
 
-    def publish(self, scope, creator=None, **overrides):
-        creator = _Creator(self.devnull()) if creator is None else creator
-        published = record_gain_step(scope=scope, create_target=creator,
-                                     **self.kwargs(**overrides))
-        return published, creator
+    def _seed_scope_sequence(self, sequence, corpus=None):
+        """Put a sequence into the scope's own state, as capture or recovery
+        would, so a test can state a sequence condition the caller can no
+        longer supply (3d compulsion: the sequence is the scope's)."""
+        corpus = self.corpus if corpus is None else corpus
+        state = corpus._state
+        state.sequences[sequence.stratum] = sequence
+        state.ring_lifetime_id = sequence.ring_lifetime_id
+
+    def scope_accepted(self, stratum, corpus=None):
+        corpus = self.corpus if corpus is None else corpus
+        sequence = corpus._state.sequences.get(stratum)
+        return 0 if sequence is None else sequence.accepted
+
+    def corpus_path(self, corpus=None):
+        corpus = self.corpus if corpus is None else corpus
+        return self._corpus_path[id(corpus)]
+
+    def journal_records(self, corpus=None):
+        dir_fd = os.open(self.corpus_path(corpus),
+                         os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            return len(read_membership_journal(dir_fd).records)
+        finally:
+            os.close(dir_fd)
+
+    def read_member(self, file_sha256, corpus=None):
+        with open(os.path.join(self.corpus_path(corpus),
+                               canonical_member_name(file_sha256)), "rb") as f:
+            return f.read()
+
+    def published_image(self, scope, published, corpus=None):
+        """The bytes the publish wrote, read back from the member it created."""
+        file_sha256 = scope._prefixed_sha256(
+            framing_prefix(published.header_bytes) + published.header_bytes)
+        return self.read_member(file_sha256, corpus)
+
+    def publish(self, scope, **overrides):
+        published = record_gain_step(scope=scope, **self.kwargs(**overrides))
+        return published, _CaptureProbe(1)
 
     def refuse(self, scope, **overrides):
-        """Attempt a capture that must not happen, and report the creator."""
-        creator = _Creator(self.devnull())
+        """Attempt a capture that must not happen; prove nothing was created.
+
+        A precondition refusal is raised in `_admit`, before the namespace
+        publishes, so the corpus journal is unchanged -- the ordering claim the
+        old creator counter stood for, read off the durable state instead."""
+        corpus = overrides.get("corpus", self.corpus)
+        # A wrong-type or unregistered corpus has no directory to inspect; the
+        # refusal for those is exactly that the object is not a held scope.
+        known = id(corpus) in self._corpus_path
+        before = self.journal_records(corpus) if known else None
         with self.assertRaises(CaptureRefused) as caught:
-            record_gain_step(scope=scope, create_target=creator,
-                             **self.kwargs(**overrides))
-        return caught.exception, creator
+            record_gain_step(scope=scope, **self.kwargs(**overrides))
+        if known:
+            self.assertEqual(self.journal_records(corpus), before,
+                             "a precondition refusal wrote a journal record")
+        return caught.exception, _CaptureProbe(0)
 
     def _header(self):
         with self.ring.attest_window(_window(self.ring)) as scope:
@@ -219,35 +274,6 @@ class CaptureFixture(unittest.TestCase):
                 attestation=_gain_attestation(), sequence=self.sequence,
                 payload_sha256="0" * 64)
 
-
-def _through_a_pipe(call):
-    """Run `call(create_target)` against a pipe; return its result and the image.
-
-    The whole file image is what crossed the descriptor, which is the only way
-    to see what a writer wrote without writing a file.
-    """
-    read_fd, write_fd = os.pipe()
-    blocks = []
-
-    def drain():
-        while True:
-            block = os.read(read_fd, 1 << 16)
-            if not block:
-                return
-            blocks.append(block)
-
-    # Daemon, and joined with a timeout. A non-daemon reader stranded on a
-    # blocked descriptor is how one of these suites once hung for thirteen
-    # minutes; the harness timeout is the backstop and this is the fix.
-    reader = threading.Thread(target=drain, daemon=True)
-    reader.start()
-    try:
-        result = call(lambda: write_fd)
-    finally:
-        os.close(write_fd)
-        reader.join(timeout=60)
-        os.close(read_fd)
-    return result, b"".join(blocks)
 
 class AttestationIsNotAdmissionTests(CaptureFixture):
     """The ring has never heard of a PromotionCorpusLock, and cannot."""
@@ -299,9 +325,10 @@ class AttestationIsNotAdmissionTests(CaptureFixture):
         for entrypoint in (record_gain_step, record_retune_transient):
             names = set(inspect.signature(entrypoint).parameters)
             self.assertEqual(
-                names, {"scope", "attestation", "corpus", "sequence",
-                        "create_target"},
+                names, {"scope", "attestation", "corpus"},
                 entrypoint.__name__)
+            self.assertNotIn("create_target", names)
+            self.assertNotIn("sequence", names)
             self.assertNotIn("source", names)
             self.assertNotIn("stratum", names)
             # 3c-wire, §5.26 A2 and A3: no free-standing lock beside the
@@ -315,15 +342,14 @@ class AttestationIsNotAdmissionTests(CaptureFixture):
         refused by the signature rather than by a check someone could relax."""
         with self.ring.attest_window(_window(self.ring)) as scope:
             with self.assertRaises(TypeError):
-                record_gain_step(scope=scope, create_target=_Creator(),
-                                 lock=self.lock, **self.kwargs())
+                record_gain_step(scope=scope, lock=self.lock,
+                                 **self.kwargs())
 
     def test_a_caller_timestamp_is_not_a_parameter(self):
         """§5.26 control A3. The clock is the ownership scope's."""
         with self.ring.attest_window(_window(self.ring)) as scope:
             with self.assertRaises(TypeError):
-                record_gain_step(scope=scope, create_target=_Creator(),
-                                 now=NOW, **self.kwargs())
+                record_gain_step(scope=scope, now=NOW, **self.kwargs())
 
     def test_the_envelope_is_read_out_of_the_scope_and_not_out_of_the_call(self):
         """A corpus whose envelope admits nothing refuses every window, however
@@ -383,19 +409,6 @@ class PreconditionRegimeTests(CaptureFixture):
         self.assertFalse(issubclass(CaptureRefused, PublicationFailed))
         self.assertFalse(issubclass(PublicationFailed, CaptureRefused))
 
-    def test_a_post_open_failure_is_not_caught_as_a_refusal(self):
-        """A caller that caught one and handled the other would be deciding an
-        orphan temporary does not exist."""
-        with self.ring.attest_window(_window(self.ring)) as scope:
-            creator = _Creator(result="not a descriptor")
-            with self.assertRaises(PublicationFailed) as caught:
-                record_gain_step(scope=scope, create_target=creator,
-                                 **self.kwargs())
-            self.assertEqual(caught.exception.code,
-                             PUBLICATION_TARGET_NOT_A_DESCRIPTOR)
-            self.assertNotIsInstance(caught.exception, CaptureRefused)
-        self.assertEqual(creator.calls, 1)
-
     # -- one scenario per declared precondition refusal ---------------------
 
     def _scenarios(self):
@@ -414,12 +427,14 @@ class PreconditionRegimeTests(CaptureFixture):
             ADMISSION_GEOMETRY_REFUSED: self._geometry_refused,
             ADMISSION_CHAIN_OUTSIDE_ENVELOPE: self._chain_outside,
             ADMISSION_SEQUENCE_NOT_THIS_STRATUM: self._sequence_mismatched,
+            ADMISSION_RING_LIFETIME_MISMATCH: self._sequence_lifetime_mismatched,
+            ADMISSION_SEQUENCE_HISTORY_REFUSED: self._history_refused,
             ADMISSION_STRATUM_CAP_REACHED: self._cap_reached,
             ADMISSION_BINDING_CLAIMED_TWICE: self._claimed_twice,
             ADMISSION_BINDING_NOT_EMITTED: self._binding_missing,
             ADMISSION_FIELD_NO_AUTHORITY: self._field_undeclared,
             ADMISSION_CANONICAL_FORM_REFUSED: self._not_frameable,
-            ADMISSION_CREATOR_NOT_CALLABLE: self._creator_not_callable,
+            ADMISSION_TICKET_UNCONSTRUCTIBLE: self._ticket_unconstructible,
             WINDOW_INTERVAL_OVERLAP: self._overlaps_previous,
         }
 
@@ -462,10 +477,9 @@ class PreconditionRegimeTests(CaptureFixture):
         """`ADMISSION_RETENTION_NOT_SUPPLIED` is raised where the deadline is
         constructed; there is no admission-time route to it once a corpus
         holds one. Produced here so the enumeration stays complete."""
-        creator = _Creator(self.devnull())
         with self.assertRaises(CaptureRefused) as caught:
             CapturedCorpusRetention(delete_not_after=float("nan"))
-        return caught.exception, creator
+        return caught.exception, _CaptureProbe(0)
 
     def _retention_too_far(self):
         far = CapturedCorpusRetention(
@@ -479,18 +493,16 @@ class PreconditionRegimeTests(CaptureFixture):
     def _stratum_outside_grant(self):
         """Reached through the private boundary, because the three public
         entrypoints each fix their own stratum and cannot be told another."""
-        creator = _Creator(self.devnull())
         with self.assertRaises(CaptureRefused) as caught:
             admission._record(scope=self._live(), stratum="THERMAL_NO_INPUT",
-                              create_target=creator, **self.kwargs())
-        return caught.exception, creator
+                              **self.kwargs())
+        return caught.exception, _CaptureProbe(0)
 
     def _spur_stratum(self):
-        creator = _Creator(self.devnull())
         with self.assertRaises(CaptureRefused) as caught:
             admission._record(scope=self._live(), stratum="RECEIVER_SPURS",
-                              create_target=creator, **self.kwargs())
-        return caught.exception, creator
+                              **self.kwargs())
+        return caught.exception, _CaptureProbe(0)
 
     def _attestation_type_wrong(self):
         return self.refuse(self._live(), attestation=_retune_attestation())
@@ -509,18 +521,57 @@ class PreconditionRegimeTests(CaptureFixture):
         return self.refuse(scope)
 
     def _sequence_mismatched(self):
+        """The admission-to-scope boundary: a scope answering with a sequence
+        for another corpus is refused. Reached by mocking the scope's snapshot,
+        since the real scope never answers with one that does not match."""
         other = CapturedStratumSequence(corpus_id="corpus-b",
-                                        stratum="GAIN_STEPS")
-        return self.refuse(self._live(), sequence=other)
+                                        stratum="GAIN_STEPS",
+                                        ring_lifetime_id=self.ring.ring_lifetime_id)
+        with mock.patch.object(type(self.corpus), "_sequence_snapshot",
+                               lambda s, stratum, life: other):
+            return self.refuse(self._live())
+
+    def _sequence_lifetime_mismatched(self):
+        """A corpus whose sequence is pinned to a dead ring authorises no window
+        from a live one -- the single-lifetime seal a reopen would leave."""
+        corpus = self.open_corpus()
+        self._seed_scope_sequence(CapturedStratumSequence(
+            corpus_id=self.lock.corpus_id, stratum="GAIN_STEPS",
+            ring_lifetime_id="ring-lifetime-dead-000"), corpus)
+        return self.refuse(self._live(), corpus=corpus)
+
+    def _history_refused(self):
+        """Reached through the reconstruction boundary: the admission
+        entrypoints never take history as an argument, only the reopen path
+        does, and it refuses what is not verified history for the lifetime."""
+        with self.assertRaises(CaptureRefused) as caught:
+            reconstruct_stratum_sequence(
+                corpus_id=self.lock.corpus_id, stratum="GAIN_STEPS",
+                ring_lifetime_id=self.ring.ring_lifetime_id,
+                committed_windows=({"window_id": "w-1"},))
+        return caught.exception, _CaptureProbe(0)
 
     def _cap_reached(self):
         """Set directly: there is no public route to 5 561 publications that
         does not involve performing them, and the cap is what stops the
         5 562nd rather than something a count can be talked into."""
+        corpus = self.open_corpus()
         full = CapturedStratumSequence(corpus_id=self.lock.corpus_id,
-                                       stratum="GAIN_STEPS")
+                                       stratum="GAIN_STEPS",
+                                       ring_lifetime_id=self.ring.ring_lifetime_id)
         full._accepted = MINIMUM_WINDOWS_PER_STRATUM
-        return self.refuse(self._live(), sequence=full)
+        self._seed_scope_sequence(full, corpus)
+        return self.refuse(self._live(), corpus=corpus)
+
+    def _ticket_unconstructible(self):
+        """A caller cannot mint the capability commit_window requires; the
+        refusal is at construction, so admission is the only source."""
+        with self.assertRaises(CaptureRefused) as caught:
+            WindowAdmission(
+                stratum="GAIN_STEPS", metadata={}, header={}, header_bytes=b"",
+                framing_prefix_bytes=b"", payload_sha256="0" * 64,
+                file_sha256="0" * 64, ring_lifetime_id="ring-x")
+        return caught.exception, _CaptureProbe(0)
 
     def _overlaps_previous(self):
         """Two freshly issued ids over identical retained samples.
@@ -532,7 +583,6 @@ class PreconditionRegimeTests(CaptureFixture):
         scope = self._live()
         with self.ring.attest_window(_window(self.ring)) as first:
             published, _creator = self.publish(first)
-        self.sequence.count_published(published)
         return self.refuse(scope)
 
     def _claimed_twice(self):
@@ -568,13 +618,6 @@ class PreconditionRegimeTests(CaptureFixture):
             return header
         with mock.patch.object(admission, "derive_canonical_header", with_a_nan):
             return self.refuse(self._live())
-
-    def _creator_not_callable(self):
-        creator = _Creator(self.devnull())
-        with self.assertRaises(CaptureRefused) as caught:
-            record_gain_step(scope=self._live(), create_target=self.devnull(),
-                             **self.kwargs())
-        return caught.exception, creator
 
 
 class LengthInvariantTests(CaptureFixture):
@@ -833,11 +876,8 @@ class FramingTests(CaptureFixture):
 
     def test_the_written_image_is_magic_version_length_header_payload_eof(self):
         with self.ring.attest_window(_window(self.ring)) as scope:
-            def run(create_target):
-                return record_gain_step(scope=scope,
-                                        create_target=create_target,
-                                        **self.kwargs())
-            published, image = _through_a_pipe(run)
+            published, _probe = self.publish(scope)
+            image = self.published_image(scope, published)
 
         self.assertEqual(image[:8], IQC_MAGIC)
         self.assertEqual(struct.unpack("<H", image[8:10])[0], IQC_FORMAT_VERSION)
@@ -869,11 +909,8 @@ class FramingTests(CaptureFixture):
         """
         import hashlib
         with self.ring.attest_window(_window(self.ring)) as scope:
-            def run(create_target):
-                return record_gain_step(scope=scope,
-                                        create_target=create_target,
-                                        **self.kwargs())
-            published, image = _through_a_pipe(run)
+            published, _probe = self.publish(scope)
+            image = self.published_image(scope, published)
             header_bytes = published.header_bytes
             computed = scope._prefixed_sha256(
                 framing_prefix(header_bytes) + header_bytes)
@@ -882,11 +919,8 @@ class FramingTests(CaptureFixture):
     def test_the_payload_written_is_the_attested_payload(self):
         import hashlib
         with self.ring.attest_window(_window(self.ring)) as scope:
-            def run(create_target):
-                return record_gain_step(scope=scope,
-                                        create_target=create_target,
-                                        **self.kwargs())
-            published, image = _through_a_pipe(run)
+            published, _probe = self.publish(scope)
+            image = self.published_image(scope, published)
         header_length = struct.unpack("<I", image[10:14])[0]
         payload = image[14 + header_length:]
         self.assertEqual(hashlib.sha256(payload).hexdigest(),
@@ -936,12 +970,30 @@ class FramingTests(CaptureFixture):
         parsing it."""
         self.assertNotIn(IQC_HEADER_SCHEMA.encode(), IQC_MAGIC)
 
+    def _admit_and_frame(self, scope):
+        metadata, header, payload_sha256 = admission._admit(
+            scope=scope, stratum="GAIN_STEPS",
+            attestation=_gain_attestation(), corpus=self.corpus)
+        header_bytes = canonical_header_bytes(header)
+        return metadata, header, header_bytes, framing_prefix(header_bytes), \
+            payload_sha256
+
     def test_an_incomplete_framing_write_is_a_post_open_failure(self):
+        """write_captured_temp's own regime. Exercised directly rather than
+        through the full path, because 3d journals an intent first and a global
+        os.write patch would stall that write, not the framing one."""
         with self.ring.attest_window(_window(self.ring)) as scope:
+            metadata, header, header_bytes, prefix, payload_sha256 = \
+                self._admit_and_frame(scope)
             with mock.patch.object(admission.os, "write",
                                    lambda fd, data: 0):
                 with self.assertRaises(PublicationFailed) as caught:
-                    self.publish(scope)
+                    admission.write_captured_temp(
+                        fd=self.devnull(), scope=scope, header=header,
+                        header_bytes=header_bytes, prefix=prefix,
+                        metadata=metadata, stratum="GAIN_STEPS",
+                        corpus_id=header["corpus_id"],
+                        payload_sha256=payload_sha256)
         self.assertEqual(caught.exception.code,
                          PUBLICATION_FRAMING_WRITE_INCOMPLETE)
 
@@ -957,8 +1009,15 @@ class FramingTests(CaptureFixture):
             return real(fd, data[:1] if len(data) < 1 << 16 else data)
 
         with self.ring.attest_window(_window(self.ring)) as scope:
+            metadata, header, header_bytes, prefix, payload_sha256 = \
+                self._admit_and_frame(scope)
             with mock.patch.object(admission.os, "write", one_byte_at_a_time):
-                published, _creator = self.publish(scope)
+                published = admission.write_captured_temp(
+                    fd=self.devnull(), scope=scope, header=header,
+                    header_bytes=header_bytes, prefix=prefix,
+                    metadata=metadata, stratum="GAIN_STEPS",
+                    corpus_id=header["corpus_id"],
+                    payload_sha256=payload_sha256)
         self.assertGreater(len(calls), 100)
         self.assertEqual(published.framing_bytes_written,
                          14 + len(published.header_bytes))
@@ -1000,13 +1059,10 @@ class TypedBoundaryTests(CaptureFixture):
         self.assertEqual(creator.calls, 0)
 
     def test_a_retune_window_carries_every_field_of_its_own_attestation(self):
-        sequence = CapturedStratumSequence(corpus_id=self.lock.corpus_id,
-                                           stratum="RETUNE_TRANSIENTS")
         with self.ring.attest_window(_window(self.ring)) as scope:
             published = record_retune_transient(
                 scope=scope, attestation=_retune_attestation(),
-                corpus=self.corpus, sequence=sequence,
-                create_target=_Creator(self.devnull()))
+                corpus=self.corpus)
         header = json.loads(published.header_bytes)
         self.assertEqual(header["stratum"], "RETUNE_TRANSIENTS")
         self.assertEqual(header["attestation_centre_hz_after"], 433_200_000.0)
@@ -1059,22 +1115,25 @@ class SequenceTests(CaptureFixture):
     def _two_windows(self):
         with self.ring.attest_window(_window(self.ring)) as scope:
             first, _creator = self.publish(scope)
-        self.sequence.count_published(first)
         self.ring.append(_SAMPLES)
         with self.ring.attest_window(_window(self.ring)) as scope:
             second, _creator = self.publish(scope)
         return json.loads(second.header_bytes), first, second
 
-    def test_a_publication_does_not_count_itself(self):
-        """§5.20 counts at step 8, after the readback, and step 8 is unbuilt."""
+    def test_a_publication_counts_once_at_step_8(self):
+        """§5.20 counts at step 8, after the readback. 3d wired the publisher,
+        so record_gain_step publishes and counts in one act: one call advances
+        the sequence by exactly one -- not zero, the window is a verified
+        member, and not two, there is no uncounted publication handed back."""
+        self.assertEqual(self.scope_accepted("GAIN_STEPS"), 0)
         with self.ring.attest_window(_window(self.ring)) as scope:
-            published, _creator = self.publish(scope)
-        self.assertEqual(self.sequence.accepted, 0)
-        self.assertEqual(self.sequence.count_published(published), 1)
+            self.publish(scope)
+        self.assertEqual(self.scope_accepted("GAIN_STEPS"), 1)
 
     def test_a_publication_from_another_stratum_is_not_counted_here(self):
         other = CapturedStratumSequence(corpus_id=self.lock.corpus_id,
-                                        stratum="RETUNE_TRANSIENTS")
+                                        stratum="RETUNE_TRANSIENTS",
+                                        ring_lifetime_id=self.ring.ring_lifetime_id)
         with self.ring.attest_window(_window(self.ring)) as scope:
             published, _creator = self.publish(scope)
         with self.assertRaises(CaptureRefused) as caught:
@@ -1089,11 +1148,15 @@ class SequenceTests(CaptureFixture):
     def test_the_cap_refuses_the_next_window_before_anything_is_written(self):
         """The sample is fixed before it is collected. The 5 562nd is refused
         before anything is written, not trimmed afterwards."""
-        self.sequence._accepted = MINIMUM_WINDOWS_PER_STRATUM
+        corpus = self.open_corpus()
+        full = CapturedStratumSequence(
+            corpus_id=self.lock.corpus_id, stratum="GAIN_STEPS",
+            ring_lifetime_id=self.ring.ring_lifetime_id)
+        full._accepted = MINIMUM_WINDOWS_PER_STRATUM
+        self._seed_scope_sequence(full, corpus)
         with self.ring.attest_window(_window(self.ring)) as scope:
-            refusal, creator = self.refuse(scope)
+            refusal, _probe = self.refuse(scope, corpus=corpus)
         self.assertEqual(refusal.code, ADMISSION_STRATUM_CAP_REACHED)
-        self.assertEqual(creator.calls, 0)
         self.assertEqual(MINIMUM_WINDOWS_PER_STRATUM, 5_561)
 
     def test_a_window_that_overlaps_its_predecessor_is_refused(self):
@@ -1107,7 +1170,6 @@ class SequenceTests(CaptureFixture):
         """
         with self.ring.attest_window(_window(self.ring)) as first:
             published, _creator = self.publish(first)
-        self.sequence.count_published(published)
         with self.ring.attest_window(_window(self.ring)) as again:
             refusal, _creator = self.refuse(again)
         self.assertEqual(refusal.code, WINDOW_INTERVAL_OVERLAP)
@@ -1115,7 +1177,8 @@ class SequenceTests(CaptureFixture):
     def test_a_stratum_outside_the_grant_has_no_sequence(self):
         with self.assertRaises(CaptureRefused) as caught:
             CapturedStratumSequence(corpus_id="corpus-a",
-                                    stratum="THERMAL_NO_INPUT")
+                                    stratum="THERMAL_NO_INPUT",
+                                    ring_lifetime_id="ring-test")
         self.assertEqual(caught.exception.code, ADMISSION_STRATUM_OUTSIDE_GRANT)
 
 
@@ -1370,6 +1433,8 @@ class StatusTests(CaptureFixture):
     def test_a_ring_handed_a_clock_nobody_named_declares_the_absence(self):
         ring = _ring(self.chain, now=lambda: NOW)
         self.assertEqual(ring.clock_authority, "UNDECLARED")
+        # 3d. The window is this ring's, so the sequence must be too: the
+        # fixture's belongs to the fixture ring's lifetime, not this one's.
         with ring.attest_window(_window(ring)) as scope:
             published, _creator = self.publish(scope)
         self.assertEqual(json.loads(published.header_bytes)["clock_authority"],
@@ -1404,6 +1469,67 @@ class RingLifetimeInTheHeaderTests(CaptureFixture):
     def test_the_field_is_required_not_optional(self):
         self.assertIn("ring_lifetime_id",
                       required_header_fields("GAIN_STEPS"))
+
+
+class LivePublishThenReopenTests(CaptureFixture):
+    """The capstone of 3d piece 3: a published window is a durable member.
+
+    Every other test exercises a slice of the wired path; this drives the whole
+    of it and then reopens the corpus, which is the only proof that the publish
+    left a member recovery adopts rather than a state it discards.
+    """
+
+    def test_a_published_window_survives_a_reopen_as_a_member(self):
+        with self.ring.attest_window(_window(self.ring)) as scope:
+            record_gain_step(scope=scope, attestation=_gain_attestation(),
+                             corpus=self.corpus)
+        self.assertEqual(
+            self.corpus.membership_recovery()["reconstructed_strata"]
+            ["GAIN_STEPS"], 1)
+        # One member, and no orphan temporary: step 6 unlinked it.
+        entries = os.listdir(self.corpus_path())
+        members = [e for e in entries
+                   if e.endswith(".iqc") and not e.startswith(".partial")]
+        self.assertEqual(len(members), 1)
+        self.assertFalse([e for e in entries if e.startswith(".partial")])
+        root = os.path.dirname(self.corpus_path())
+        self.corpus.release()
+        with open_corpus_namespace(corpus_id=self.lock.corpus_id,
+                                   root=root) as reopened:
+            recovery = reopened.membership_recovery()
+        self.assertEqual(recovery["classification_counts"]["SETTLED_MEMBER"], 1)
+        self.assertEqual(recovery["reconstructed_strata"]["GAIN_STEPS"], 1)
+
+
+class AdmissionIsCompelledTests(CaptureFixture):
+    """Compulsion (entry 14): commit is reachable only through admission."""
+
+    def test_a_caller_cannot_mint_a_window_admission(self):
+        with self.assertRaises(CaptureRefused) as caught:
+            WindowAdmission(
+                stratum="GAIN_STEPS", metadata={}, header={}, header_bytes=b"",
+                framing_prefix_bytes=b"", payload_sha256="0" * 64,
+                file_sha256="0" * 64, ring_lifetime_id="ring-x")
+        self.assertEqual(caught.exception.code, ADMISSION_TICKET_UNCONSTRUCTIBLE)
+
+    def test_commit_window_refuses_anything_but_an_admission(self):
+        """The direct-commit side route, closed by construction: a member of
+        the corpus cannot be made by calling commit_window with loose data."""
+        with self.ring.attest_window(_window(self.ring)) as scope:
+            with self.assertRaises(NamespaceRefused) as caught:
+                self.corpus.commit_window(
+                    admission={"stratum": "GAIN_STEPS"}, attested_scope=scope)
+        self.assertEqual(caught.exception.code, NAMESPACE_ADMISSION_REQUIRED)
+        # And nothing was written: a refused commit leaves the journal empty.
+        self.assertEqual(self.journal_records(), 0)
+
+    def test_record_gain_step_mints_a_genuine_admission(self):
+        """The positive: the only route that reaches a commit is admission, and
+        it does reach one -- a member the scope counts."""
+        with self.ring.attest_window(_window(self.ring)) as scope:
+            record_gain_step(scope=scope, attestation=_gain_attestation(),
+                             corpus=self.corpus)
+        self.assertEqual(self.scope_accepted("GAIN_STEPS"), 1)
 
 
 if __name__ == "__main__":
