@@ -1,0 +1,15 @@
+{
+  "id": "benspectrcydegilbert/biohub-thr-sweep",
+  "title": "biohub-thr-sweep",
+  "code_file": "biohub-thr-sweep.ipynb",
+  "language": "python",
+  "kernel_type": "notebook",
+  "is_private": true,
+  "enable_gpu": true,
+  "enable_internet": false,
+  "machine_shape": "NvidiaTeslaT4",
+  "dataset_sources": [],
+  "competition_sources": ["biohub-cell-tracking-during-development"],
+  "kernel_sources": [],
+  "model_sources": ["jirkaborovec/biohubcelltrack-trackastra-artifact-and-packages/pytorch/default/1"]
+}
