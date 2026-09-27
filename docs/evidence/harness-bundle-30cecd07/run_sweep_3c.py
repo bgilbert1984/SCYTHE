@@ -72,15 +72,16 @@ subprocess.run(["git","worktree","remove","--force",str(tree)], cwd=str(REPO),
 shutil.rmtree(tree, ignore_errors=True)
 print(f"BASELINE  {cls}  {count} tests  exit {proc.returncode}  "
       f"{BASELINE_ELAPSED}s", flush=True)
-# 2370 is what 66a544bf (main, with 3d) collects, exactly, with 2 pre-existing
-# skips on a host without the pinned observation tree. The count belongs to
-# that checkpoint, not to the project: MANIFEST.txt carries the table
-# (2245 / 2254 / 2306 / 2322 / 2370). A baseline that differs from it means the
-# controls and the tree are from different generations, which no floor can
-# report; the floor moves with the checkpoint and is never lowered.
-require_sane_baseline(cls, count, 2370, ids=ids, proc=proc,
+# 2392 is what 4091d22e (main, with §5.21's catalogue analysis) collects,
+# exactly, with 2 pre-existing skips on a host without the pinned observation
+# tree. The count belongs to that checkpoint, not to the project: MANIFEST.txt
+# carries the table (2245 / 2254 / 2306 / 2322 / 2370 / 2392). A baseline that
+# differs from it means the controls and the tree are from different
+# generations, which no floor can report; the floor moves with the checkpoint
+# and is never lowered.
+require_sane_baseline(cls, count, 2392, ids=ids, proc=proc,
                       report=Path(S) / "baseline-refused-3c.out",
-                      expected=2370)
+                      expected=2392)
 # Each control's bound is derived from the baseline this host just produced,
 # not from a constant calibrated elsewhere: a fixed 1800s makes a healthy
 # control on a slower or loaded host read as TIMED_OUT.
