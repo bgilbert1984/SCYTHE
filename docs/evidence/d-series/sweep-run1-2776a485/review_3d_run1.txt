@@ -1,0 +1,28 @@
+==========================================================================
+BASELINE  ZERO_DISCRIMINATION  ran=2370  failing=0  OK
+checkpoint: 2776a4859e426cb12da3ef19914cb0bf126d7e95
+controls with rows: 7
+
+ID    CLASSIFICATION             n   ran    UNIQ
+--------------------------------------------------------------------------
+D1    TEST_FAILURE               2  2370       1
+D2    TEST_FAILURE               1  2370       1
+D3    TEST_FAILURE               2  2370       1
+D4    TEST_FAILURE               2  2370       1
+D5    TEST_FAILURE               3  2370       3
+D6    TEST_FAILURE               1  2370       1
+D7    TEST_FAILURE               2  2370       2
+
+ZEROS                : none
+DUPLICATE SETS       : none
+NOT MEASURED         : none
+COLLECTION (modal 2370): uniform
+MEASURED OVER 40     : none
+UNDECLARED DETONATION: none
+NO UNIQUE WITNESS    : among 7 narrow controls: none
+SUPPRESSION          : none
+CLASSIFICATIONS      : {'TEST_FAILURE': 7}
+COMPLETENESS         : 7/7 (controls_3d)  missing=none  unexpected=none
+
+VERDICT: every control discriminated
+==========================================================================
