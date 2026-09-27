@@ -6,9 +6,9 @@
 3b controls     27  (J1..J27) in controls_journal.py
 
 EXPECTED COUNT IS A PROPERTY OF A CHECKPOINT, NOT OF THIS PROJECT. Both gates
-now assert 2370, which is what
+now assert 2392, which is what
 
-    66a544bf  (main, with 3d merged as #114)
+    4091d22e  (main, with §5.21's catalogue analysis merged as #118)
 
 collects exactly, with 2 pre-existing skips on a host without the pinned
 observation tree (the count gate reads `Ran N`, which includes them). Update them in the same commit as
@@ -21,7 +21,8 @@ is not self-correcting.
   2254    30cecd07 3c-core alone                    the K-series certification
   2306    af188f1  main, both slices                #111's gates
   2322    655bbaa  + 3c-wire                        3a5b7540's gates
-  2370    66a544bf + 3d                             these gates
+  2370    66a544bf + 3d                             #116's gates
+  2392    4091d22e + §5.21 catalogue analysis        these gates
 
 The two certifications remain valid at THEIR counts. 2245 and 2254 were true of
 the trees they were measured on; neither is wrong, and neither is this one's.
