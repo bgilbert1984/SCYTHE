@@ -147,6 +147,7 @@ ADMISSION_BINDING_CLAIMED_TWICE = "ADMISSION_BINDING_CLAIMED_TWICE"
 ADMISSION_BINDING_NOT_EMITTED = "ADMISSION_BINDING_NOT_EMITTED"
 ADMISSION_FIELD_NO_AUTHORITY = "ADMISSION_FIELD_NO_AUTHORITY"
 ADMISSION_CANONICAL_FORM_REFUSED = "ADMISSION_CANONICAL_FORM_REFUSED"
+ADMISSION_TICKET_UNCONSTRUCTIBLE = "ADMISSION_TICKET_UNCONSTRUCTIBLE"
 ADMISSION_REFUSALS: Tuple[str, ...] = (
     ADMISSION_SCOPE_TYPE_WRONG, ADMISSION_SCOPE_ENDED,
     ADMISSION_OWNERSHIP_SCOPE_TYPE_WRONG, ADMISSION_OWNERSHIP_SCOPE_RELEASED,
@@ -158,7 +159,7 @@ ADMISSION_REFUSALS: Tuple[str, ...] = (
     ADMISSION_RING_LIFETIME_MISMATCH, ADMISSION_SEQUENCE_HISTORY_REFUSED,
     ADMISSION_STRATUM_CAP_REACHED, ADMISSION_BINDING_CLAIMED_TWICE,
     ADMISSION_BINDING_NOT_EMITTED, ADMISSION_FIELD_NO_AUTHORITY,
-    ADMISSION_CANONICAL_FORM_REFUSED,
+    ADMISSION_CANONICAL_FORM_REFUSED, ADMISSION_TICKET_UNCONSTRUCTIBLE,
     WINDOW_INTERVAL_OVERLAP,
 )
 
@@ -752,6 +753,48 @@ class CapturedWindowPublication:
         }
 
 
+_ADMISSION_MINT_KEY = object()
+
+
+class WindowAdmission:
+    """A window that passed every §5.20 precondition, as a capability.
+
+    Compulsion (entry 14): the namespace publishes only what admission produced.
+    A WindowAdmission is minted by `_record`, after `_admit` returns and the
+    header is framed and digested, and by nothing else -- the mint key it
+    requires lives in this module alone. A caller cannot construct one, so
+    `commit_window` cannot be reached without going through admission, which is
+    what makes admission the single path to membership rather than one path
+    among several. It carries only derived facts -- the framed header, the two
+    digests, the stratum and the ring lifetime -- and no descriptor, path or
+    sample: it is proof that admission ran, not authority to write.
+    """
+
+    __slots__ = ("stratum", "metadata", "header", "header_bytes",
+                 "framing_prefix_bytes", "payload_sha256", "file_sha256",
+                 "ring_lifetime_id")
+
+    def __init__(self, mint_key: Any = None, *, stratum: str,
+                 metadata: Mapping[str, Any], header: Mapping[str, Any],
+                 header_bytes: bytes, framing_prefix_bytes: bytes,
+                 payload_sha256: str, file_sha256: str,
+                 ring_lifetime_id: str) -> None:
+        if mint_key is not _ADMISSION_MINT_KEY:
+            raise CaptureRefused(
+                ADMISSION_TICKET_UNCONSTRUCTIBLE,
+                "a WindowAdmission is minted by admission and by nothing else; "
+                "a constructed one would be a caller's claim that a window was "
+                "admitted when no precondition was checked")
+        self.stratum = stratum
+        self.metadata = metadata
+        self.header = header
+        self.header_bytes = header_bytes
+        self.framing_prefix_bytes = framing_prefix_bytes
+        self.payload_sha256 = payload_sha256
+        self.file_sha256 = file_sha256
+        self.ring_lifetime_id = ring_lifetime_id
+
+
 # -- admission --------------------------------------------------------------
 
 
@@ -1045,11 +1088,16 @@ def _record(*, scope: Any, stratum: str, attestation: Any, corpus: Any
     # digest is fixed at the instant the header was serialised.
     file_sha256 = scope._prefixed_sha256(prefix + header_bytes)
 
-    _verified, publication = corpus.commit_window(
-        attested_scope=scope, header=header, header_bytes=header_bytes,
-        framing_prefix_bytes=prefix, metadata=metadata, stratum=stratum,
+    # The capability the namespace requires: proof this window passed admission,
+    # minted here and constructible nowhere else. commit_window takes it in
+    # place of loose arguments, so a caller cannot commit without admitting.
+    admission = WindowAdmission(
+        _ADMISSION_MINT_KEY, stratum=stratum, metadata=metadata, header=header,
+        header_bytes=header_bytes, framing_prefix_bytes=prefix,
         payload_sha256=payload_sha256, file_sha256=file_sha256,
         ring_lifetime_id=metadata["ring_lifetime_id"])
+    _verified, publication = corpus.commit_window(
+        admission=admission, attested_scope=scope)
     return publication
 
 

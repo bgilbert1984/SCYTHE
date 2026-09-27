@@ -31,6 +31,7 @@ from rf_capture_admission import (
     ADMISSION_ATTESTATION_TYPE_WRONG, ADMISSION_ATTESTATION_UNCONSTRUCTIBLE,
     ADMISSION_BINDING_CLAIMED_TWICE, ADMISSION_BINDING_NOT_EMITTED,
     ADMISSION_CANONICAL_FORM_REFUSED, ADMISSION_CHAIN_OUTSIDE_ENVELOPE,
+    ADMISSION_TICKET_UNCONSTRUCTIBLE,
     ADMISSION_FIELD_NO_AUTHORITY,
     ADMISSION_GEOMETRY_REFUSED, ADMISSION_OWNERSHIP_SCOPE_RELEASED,
     ADMISSION_OWNERSHIP_SCOPE_TYPE_WRONG, ADMISSION_REFUSALS,
@@ -44,7 +45,8 @@ from rf_capture_admission import (
     PAYLOAD_ACTION_RECONCILES, PUBLICATION_FAILURES,
     PUBLICATION_FRAMING_WRITE_INCOMPLETE, PUBLICATION_LENGTH_MISMATCH,
     RETENTION_MAXIMUM_SECONDS,
-    STRATUM_ATTESTATION, CaptureRefused, CapturedCorpusRetention,
+    STRATUM_ATTESTATION, WindowAdmission, CaptureRefused,
+    CapturedCorpusRetention,
     CapturedStratumSequence, CapturedWindowPublication, CommittedWindow,
     GainStepAttestation,
     PublicationFailed, RetuneAttestation, admission_status,
@@ -60,8 +62,8 @@ from rf_capture_format import (
 )
 from rf_membership_journal import read_membership_journal
 from rf_corpus_namespace import (
-    CorpusOwnershipScope, create_corpus_namespace,
-    _create_corpus_namespace_with_clock,
+    CorpusOwnershipScope, NAMESPACE_ADMISSION_REQUIRED, NamespaceRefused,
+    create_corpus_namespace, _create_corpus_namespace_with_clock,
     open_corpus_namespace,
 )
 from rf_corpus_vocabulary import CAPTURED
@@ -432,6 +434,7 @@ class PreconditionRegimeTests(CaptureFixture):
             ADMISSION_BINDING_NOT_EMITTED: self._binding_missing,
             ADMISSION_FIELD_NO_AUTHORITY: self._field_undeclared,
             ADMISSION_CANONICAL_FORM_REFUSED: self._not_frameable,
+            ADMISSION_TICKET_UNCONSTRUCTIBLE: self._ticket_unconstructible,
             WINDOW_INTERVAL_OVERLAP: self._overlaps_previous,
         }
 
@@ -559,6 +562,16 @@ class PreconditionRegimeTests(CaptureFixture):
         full._accepted = MINIMUM_WINDOWS_PER_STRATUM
         self._seed_scope_sequence(full, corpus)
         return self.refuse(self._live(), corpus=corpus)
+
+    def _ticket_unconstructible(self):
+        """A caller cannot mint the capability commit_window requires; the
+        refusal is at construction, so admission is the only source."""
+        with self.assertRaises(CaptureRefused) as caught:
+            WindowAdmission(
+                stratum="GAIN_STEPS", metadata={}, header={}, header_bytes=b"",
+                framing_prefix_bytes=b"", payload_sha256="0" * 64,
+                file_sha256="0" * 64, ring_lifetime_id="ring-x")
+        return caught.exception, _CaptureProbe(0)
 
     def _overlaps_previous(self):
         """Two freshly issued ids over identical retained samples.
@@ -1486,6 +1499,37 @@ class LivePublishThenReopenTests(CaptureFixture):
             recovery = reopened.membership_recovery()
         self.assertEqual(recovery["classification_counts"]["SETTLED_MEMBER"], 1)
         self.assertEqual(recovery["reconstructed_strata"]["GAIN_STEPS"], 1)
+
+
+class AdmissionIsCompelledTests(CaptureFixture):
+    """Compulsion (entry 14): commit is reachable only through admission."""
+
+    def test_a_caller_cannot_mint_a_window_admission(self):
+        with self.assertRaises(CaptureRefused) as caught:
+            WindowAdmission(
+                stratum="GAIN_STEPS", metadata={}, header={}, header_bytes=b"",
+                framing_prefix_bytes=b"", payload_sha256="0" * 64,
+                file_sha256="0" * 64, ring_lifetime_id="ring-x")
+        self.assertEqual(caught.exception.code, ADMISSION_TICKET_UNCONSTRUCTIBLE)
+
+    def test_commit_window_refuses_anything_but_an_admission(self):
+        """The direct-commit side route, closed by construction: a member of
+        the corpus cannot be made by calling commit_window with loose data."""
+        with self.ring.attest_window(_window(self.ring)) as scope:
+            with self.assertRaises(NamespaceRefused) as caught:
+                self.corpus.commit_window(
+                    admission={"stratum": "GAIN_STEPS"}, attested_scope=scope)
+        self.assertEqual(caught.exception.code, NAMESPACE_ADMISSION_REQUIRED)
+        # And nothing was written: a refused commit leaves the journal empty.
+        self.assertEqual(self.journal_records(), 0)
+
+    def test_record_gain_step_mints_a_genuine_admission(self):
+        """The positive: the only route that reaches a commit is admission, and
+        it does reach one -- a member the scope counts."""
+        with self.ring.attest_window(_window(self.ring)) as scope:
+            record_gain_step(scope=scope, attestation=_gain_attestation(),
+                             corpus=self.corpus)
+        self.assertEqual(self.scope_accepted("GAIN_STEPS"), 1)
 
 
 if __name__ == "__main__":

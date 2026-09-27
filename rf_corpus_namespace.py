@@ -102,13 +102,14 @@ NAMESPACE_DEVICE_MISMATCH = "NAMESPACE_DEVICE_MISMATCH"
 NAMESPACE_HARD_LINKED = "NAMESPACE_HARD_LINKED"
 NAMESPACE_OWNED_ELSEWHERE = "NAMESPACE_OWNED_ELSEWHERE"
 NAMESPACE_SCOPE_RELEASED = "NAMESPACE_SCOPE_RELEASED"
+NAMESPACE_ADMISSION_REQUIRED = "NAMESPACE_ADMISSION_REQUIRED"
 NAMESPACE_REFUSALS: Tuple[str, ...] = (
     NAMESPACE_PRODUCTION_NOT_AUTHORISED, NAMESPACE_ROOT_INSIDE_PRODUCTION,
     NAMESPACE_NOT_A_DIRECTORY, NAMESPACE_HOLDS_ENTRIES,
     NAMESPACE_OWNER_MISMATCH, NAMESPACE_MODE_PERMISSIVE,
     NAMESPACE_SYMLINK_REFUSED, NAMESPACE_DEVICE_MISMATCH,
     NAMESPACE_HARD_LINKED, NAMESPACE_OWNED_ELSEWHERE,
-    NAMESPACE_SCOPE_RELEASED,
+    NAMESPACE_SCOPE_RELEASED, NAMESPACE_ADMISSION_REQUIRED,
 )
 
 
@@ -534,18 +535,17 @@ class CorpusOwnershipScope:
             state.sequences[stratum] = sequence
         return sequence.count_published(publication)
 
-    def commit_window(self, *, attested_scope: Any, header: Dict[str, Any],
-                      header_bytes: bytes, framing_prefix_bytes: bytes,
-                      metadata: Dict[str, Any], stratum: str,
-                      payload_sha256: str, file_sha256: str,
-                      ring_lifetime_id: str) -> Any:
-        """§5.20 steps 3-8 for one window, bracketed by the membership journal.
+    def commit_window(self, *, admission: Any, attested_scope: Any) -> Any:
+        """§5.20 steps 3-8 for one admitted window, bracketed by the journal.
 
-        3d wires the publisher through here. Admission has run every
-        precondition and computed `file_sha256` from the live scope before the
-        file exists; this is the durable half, and it lives in the namespace
-        because only the namespace holds the corpus directory descriptor, which
-        never leaves it. The order is the durability contract:
+        Compulsion (entry 14): the only thing that stands for the window is a
+        `WindowAdmission`, minted by admission and unconstructible by a caller,
+        so a commit cannot be reached without passing every precondition -- this
+        is the last of the four side routes, direct commit, closed by
+        construction rather than by a check a caller could route around. The
+        durable half lives here because only the namespace holds the corpus
+        directory descriptor, which never leaves it. The order is the durability
+        contract:
 
         * the INTENT is appended first, reserving a terminal slot, so a crash at
           any later instant is a state 3d recovery reconciles rather than a lost
@@ -558,9 +558,23 @@ class CorpusOwnershipScope:
         Returns the verified final and the publication admission counts. The
         descriptor is opaque throughout; a caller receives neither it nor a path.
         """
-        from rf_capture_admission import write_captured_temp
+        from rf_capture_admission import WindowAdmission, write_captured_temp
         from rf_capture_publication import PublicationFailed, publish_and_verify
 
+        if type(admission) is not WindowAdmission:
+            raise NamespaceRefused(
+                NAMESPACE_ADMISSION_REQUIRED,
+                "commit_window publishes only a window admission consented to, "
+                "which a caller cannot mint; that is what makes admission the "
+                f"one path to membership. Got {type(admission).__name__}")
+        stratum = admission.stratum
+        header = admission.header
+        header_bytes = admission.header_bytes
+        framing_prefix_bytes = admission.framing_prefix_bytes
+        metadata = admission.metadata
+        payload_sha256 = admission.payload_sha256
+        file_sha256 = admission.file_sha256
+        ring_lifetime_id = admission.ring_lifetime_id
         state = self._live()
         dir_fd = state.dir_fd
         window_id = metadata["window_id"]
