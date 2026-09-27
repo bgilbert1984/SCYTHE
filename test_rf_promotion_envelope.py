@@ -29,6 +29,10 @@ from rf_promotion_envelope import (
     PLAN_TRIAL_NOT_ELIGIBLE, PLAN_TRIAL_IDENTITY_AMBIGUOUS,
     PLAN_PERSISTENCE_MARGIN_DB,
     PLAN_PERSISTENCE_REQUIRED, PLAN_REPEATS_PER_TUNING,
+    PLAN_SLOPE_TOLERANCE, PLAN_MAX_MIXING_SLOPE, PLAN_RETUNE_DELTAS_HZ,
+    PLAN_SLOPE_NOT_ESTIMATED, PLAN_CLASSIFICATION_NOT_SUPPORTED,
+    PLAN_THERMAL_NOT_SPUR_FREE, PLAN_SPUR_NOT_IN_SPAN,
+    SpurSlopeEstimate, matched_mixing_slope, catalogued_spurs_in_span,
     Band, CapturePlanDeclaration, CataloguedSpur, ChainMember,
     EligibleSpurTrial, EnvelopeRefused,
     FrontEnd, InstrumentChainEnvelope, SpurAllocation,
@@ -91,14 +95,39 @@ def _persistence(tuning_id="tuning-000", qualifying=8):
                                for i in range(8)))
 
 
-def _catalogue(size=45):
+_DELTAS = (50_000.0, -100_000.0, 200_000.0)
+
+
+def _slope(tuning_id="tuning-000", slope=2.0, intercept=100_000.0,
+           deltas=_DELTAS, offsets=None):
+    """Three declared retunes at one tuning, on an exact line unless the
+    offsets are given by hand."""
+    if offsets is None:
+        offsets = tuple(intercept + slope * d for d in deltas)
+    return SpurSlopeEstimate(tuning_id=tuning_id, retune_delta_hz=deltas,
+                             signed_baseband_hz=offsets)
+
+
+# The slope each class is supported by. VANISHES is decided by the load and
+# gets slope 0 here on purpose: a slope-0 product is in span at every tuning,
+# which is the entry-10 case the thermal tests need present by default.
+_SLOPE_BY_CLASS = {CONSISTENT_WITH_INTERNAL_MIXING: 2.0,
+                   CONSISTENT_WITH_INTERNAL_REFERENCE: -1.0,
+                   SPUR_CANDIDATE_UNRESOLVED: 0.5,
+                   VANISHES_ON_DECLARED_TERMINATION: 0.0}
+
+
+def _catalogue(size=45, slopes=None):
     classes = (SESSION_SCOPED, RECONNECT_STABLE, POWER_CYCLE_STABLE)
     kinds = (CONSISTENT_WITH_INTERNAL_MIXING, CONSISTENT_WITH_INTERNAL_REFERENCE,
              SPUR_CANDIDATE_UNRESOLVED, VANISHES_ON_DECLARED_TERMINATION)
+    slopes = dict(_SLOPE_BY_CLASS, **(slopes or {}))
     return tuple(CataloguedSpur(spur_id=f"spur-{i:03d}",
                                 classification=kinds[i % len(kinds)],
                                 stability_class=classes[i % len(classes)],
-                                persistence=_persistence(f"tuning-{i % 64:03d}"))
+                                persistence=_persistence(f"tuning-{i % 64:03d}"),
+                                slope=_slope(f"tuning-{i % 64:03d}",
+                                             slope=slopes[kinds[i % len(kinds)]]))
                  for i in range(size))
 
 
@@ -128,8 +157,8 @@ def _eligible_trials(catalogue, chains, epochs, needed, tunings=None):
 
 def _spur_allocation(trials=MINIMUM_WINDOWS_PER_STRATUM, size=45, epochs=2,
                      chains=None, eligible=None, selected=None,
-                     eligible_surplus=139):
-    catalogue = _catalogue(size)
+                     eligible_surplus=139, slopes=None):
+    catalogue = _catalogue(size, slopes=slopes)
     present = []
     for spur in catalogue:
         if spur.stability_class not in present:
@@ -844,11 +873,13 @@ class SpurFeasibilityTests(unittest.TestCase):
         mixing = CataloguedSpur(spur_id="s1",
                                 classification=CONSISTENT_WITH_INTERNAL_MIXING,
                                 stability_class=SESSION_SCOPED,
-                                persistence=_persistence())
+                                persistence=_persistence(),
+                                slope=_slope(slope=2.0))
         reference = CataloguedSpur(spur_id="s2",
                                    classification=CONSISTENT_WITH_INTERNAL_REFERENCE,
                                    stability_class=SESSION_SCOPED,
-                                   persistence=_persistence())
+                                   persistence=_persistence(),
+                                   slope=_slope(slope=-1.0))
         self.assertEqual(mixing.required_confidence,
                          CONFIDENCE_MIXING_TERMINATION_AND_SECOND_TIME)
         self.assertEqual(reference.required_confidence,
@@ -861,7 +892,8 @@ class SpurFeasibilityTests(unittest.TestCase):
                                VANISHES_ON_DECLARED_TERMINATION):
             spur = CataloguedSpur(spur_id="s", classification=classification,
                                   stability_class=SESSION_SCOPED,
-                                  persistence=_persistence())
+                                  persistence=_persistence(),
+                                  slope=_slope(slope=_SLOPE_BY_CLASS[classification]))
             self.assertIsNone(spur.required_confidence)
 
     def test_the_bound_does_not_generalise_and_says_so(self):
@@ -993,7 +1025,8 @@ class PersistenceIsObservedTests(unittest.TestCase):
         with self.assertRaises(EnvelopeRefused) as caught:
             CataloguedSpur(spur_id="s", classification=SPUR_CANDIDATE_UNRESOLVED,
                            stability_class=SESSION_SCOPED,
-                           persistence=_persistence(qualifying=6))
+                           persistence=_persistence(qualifying=6),
+                           slope=_slope(slope=0.5))
         self.assertEqual(caught.exception.code, PLAN_SPUR_NOT_PERSISTENT)
 
     def test_a_repeat_below_the_margin_does_not_qualify(self):
@@ -1033,6 +1066,297 @@ class PersistenceIsObservedTests(unittest.TestCase):
         self.assertNotEqual(present.to_dict(), absent.to_dict())
 
 
+class SlopeIsEstimatedTests(unittest.TestCase):
+    """§5.21's retune analysis: the slope is measured over at least three
+    declared retunes, the residuals are recorded beside it, and §5.22's frozen
+    tolerance decides membership of the affine mixing family. The class an
+    entry carries is read off that decision."""
+
+    def test_an_integer_slope_is_measured_and_matched(self):
+        estimate = _slope(slope=2.0, intercept=100_000.0)
+        self.assertAlmostEqual(estimate.measured_slope, 2.0)
+        self.assertAlmostEqual(estimate.intercept_hz, 100_000.0)
+        self.assertEqual(estimate.residuals_hz, (0.0, 0.0, 0.0))
+        self.assertEqual(estimate.matched_slope, 2)
+
+    def test_membership_is_decided_by_the_frozen_tolerance(self):
+        """About sixty times the slope resolution of the smallest delta and far
+        too tight to admit a neighbouring integer, §5.22 says."""
+        self.assertEqual(matched_mixing_slope(1.0 + PLAN_SLOPE_TOLERANCE), 1)
+        self.assertIsNone(matched_mixing_slope(1.0 + PLAN_SLOPE_TOLERANCE * 1.5))
+        self.assertIsNone(matched_mixing_slope(1.5))
+        self.assertEqual(matched_mixing_slope(-1.0), -1)
+        self.assertEqual(matched_mixing_slope(0.0), 0)
+        self.assertEqual(matched_mixing_slope(float(PLAN_MAX_MIXING_SLOPE)),
+                         PLAN_MAX_MIXING_SLOPE)
+        self.assertIsNone(matched_mixing_slope(PLAN_MAX_MIXING_SLOPE + 1.0))
+
+    def test_minus_one_is_a_member_and_only_the_reference_class_reads_it(self):
+        """A received emission and the m = 0 product both have slope −1;
+        retune cannot separate them, and §5.21 keeps the class that claims
+        internality on that slope at the higher confidence. It is not
+        mixing."""
+        minus_one = _slope(slope=-1.0)
+        self.assertEqual(minus_one.matched_slope, -1)
+        CataloguedSpur(spur_id="s", classification=CONSISTENT_WITH_INTERNAL_REFERENCE,
+                       stability_class=SESSION_SCOPED, persistence=_persistence(),
+                       slope=minus_one)
+        with self.assertRaises(EnvelopeRefused) as caught:
+            CataloguedSpur(spur_id="s",
+                           classification=CONSISTENT_WITH_INTERNAL_MIXING,
+                           stability_class=SESSION_SCOPED,
+                           persistence=_persistence(), slope=minus_one)
+        self.assertEqual(caught.exception.code, PLAN_CLASSIFICATION_NOT_SUPPORTED)
+
+    def test_a_slope_outside_the_family_is_unresolved_and_nothing_else(self):
+        """Refused rather than rationalised: the feature most likely to be
+        ingress is the one that fits no modelled slope."""
+        for slope in (0.5, PLAN_MAX_MIXING_SLOPE + 1.0):
+            odd = _slope(slope=slope, intercept=0.0)
+            self.assertIsNone(odd.matched_slope)
+            CataloguedSpur(spur_id="s", classification=SPUR_CANDIDATE_UNRESOLVED,
+                           stability_class=SESSION_SCOPED,
+                           persistence=_persistence(), slope=odd)
+            for usable in (CONSISTENT_WITH_INTERNAL_MIXING,
+                           CONSISTENT_WITH_INTERNAL_REFERENCE):
+                with self.assertRaises(EnvelopeRefused) as caught:
+                    CataloguedSpur(spur_id="s", classification=usable,
+                                   stability_class=SESSION_SCOPED,
+                                   persistence=_persistence(), slope=odd)
+                self.assertEqual(caught.exception.code,
+                                 PLAN_CLASSIFICATION_NOT_SUPPORTED)
+
+    def test_an_unresolved_label_cannot_hide_a_matched_slope(self):
+        """The class follows the analysis in both directions. A product the
+        slope supports as mixing is not a candidate somebody declined to
+        resolve."""
+        with self.assertRaises(EnvelopeRefused) as caught:
+            CataloguedSpur(spur_id="s", classification=SPUR_CANDIDATE_UNRESOLVED,
+                           stability_class=SESSION_SCOPED,
+                           persistence=_persistence(), slope=_slope(slope=2.0))
+        self.assertEqual(caught.exception.code, PLAN_CLASSIFICATION_NOT_SUPPORTED)
+
+    def test_vanishing_is_decided_by_the_load_not_the_slope(self):
+        for slope in (0.0, 0.5, 2.0, -1.0):
+            CataloguedSpur(spur_id="s",
+                           classification=VANISHES_ON_DECLARED_TERMINATION,
+                           stability_class=SESSION_SCOPED,
+                           persistence=_persistence(), slope=_slope(slope=slope))
+
+    def test_two_retunes_do_not_estimate_a_slope(self):
+        """Two points fit any line. A third visit to one setting is a repeat,
+        not a third retune."""
+        for deltas in ((50_000.0, -50_000.0),
+                       (50_000.0, 50_000.0, -100_000.0)):
+            with self.assertRaises(EnvelopeRefused) as caught:
+                _slope(deltas=deltas)
+            self.assertEqual(caught.exception.code, PLAN_SLOPE_NOT_ESTIMATED)
+
+    def test_the_retunes_are_the_declared_ones(self):
+        """The slope is measured over the acts the schedule performs. 75 kHz
+        is under the ceiling and is not one of the three declared deltas."""
+        with self.assertRaises(EnvelopeRefused) as caught:
+            _slope(deltas=(50_000.0, 75_000.0, 200_000.0))
+        self.assertEqual(caught.exception.code, PLAN_RETUNE_NOT_DECLARED)
+        for delta in PLAN_RETUNE_DELTAS_HZ:
+            _slope(deltas=(delta, -delta, 2.0 * delta)
+                   if 2.0 * delta in PLAN_RETUNE_DELTAS_HZ
+                   else (delta, -delta, min(PLAN_RETUNE_DELTAS_HZ)
+                         if delta != min(PLAN_RETUNE_DELTAS_HZ)
+                         else max(PLAN_RETUNE_DELTAS_HZ)))
+
+    def test_a_folded_offset_is_not_an_observation(self):
+        with self.assertRaises(EnvelopeRefused) as caught:
+            _slope(slope=3.0, intercept=400_000.0)   # 400k + 3 * 200k folds
+        self.assertEqual(caught.exception.code, PLAN_TRIAL_NOT_ELIGIBLE)
+
+    def test_the_observations_are_two_of_one_thing(self):
+        with self.assertRaises(EnvelopeRefused) as caught:
+            SpurSlopeEstimate(tuning_id="t", retune_delta_hz=_DELTAS,
+                              signed_baseband_hz=(1.0, 2.0))
+        self.assertEqual(caught.exception.code, PLAN_SLOPE_NOT_ESTIMATED)
+        with self.assertRaises(EnvelopeRefused) as caught:
+            SpurSlopeEstimate(tuning_id="t", retune_delta_hz=_DELTAS,
+                              signed_baseband_hz=(1.0, float("nan"), 3.0))
+        self.assertEqual(caught.exception.code, PLAN_QUANTITY_NOT_FINITE)
+
+    def test_residuals_are_recorded_beside_the_slope(self):
+        """A residual is what says whether "matches an integer" is a fit or a
+        coincidence. One perturbed point, and every residual is in the
+        record rather than a summary of them."""
+        exact = tuple(100_000.0 + 2.0 * d for d in _DELTAS)
+        nudged = (exact[0] + 900.0,) + exact[1:]
+        estimate = _slope(offsets=nudged)
+        self.assertEqual(estimate.matched_slope, 2)
+        self.assertNotEqual(estimate.residuals_hz, (0.0, 0.0, 0.0))
+        self.assertAlmostEqual(sum(estimate.residuals_hz), 0.0, places=6)
+        data = estimate.to_dict()
+        for key in ("measured_slope", "intercept_hz", "residuals_hz",
+                    "matched_slope", "slope_tolerance", "retune_delta_hz",
+                    "signed_baseband_hz"):
+            self.assertIn(key, data)
+        self.assertEqual(data["slope_tolerance"], PLAN_SLOPE_TOLERANCE)
+        self.assertEqual(len(data["residuals_hz"]), len(_DELTAS))
+
+    def test_a_feature_that_moved_between_visits_shows_as_residual(self):
+        """Repeated visits to one LO setting catch a non-stationary emitter
+        rather than fit it. The second visit at +50 kHz finds the feature
+        20 kHz from where the first did."""
+        deltas = (50_000.0, 50_000.0, -100_000.0, 200_000.0)
+        offsets = (200_000.0, 220_000.0, -100_000.0, 500_000.0)
+        estimate = _slope(deltas=deltas, offsets=offsets)
+        self.assertGreater(max(abs(r) for r in estimate.residuals_hz), 5_000.0)
+
+    def test_the_fit_and_the_persistence_name_one_tuning(self):
+        with self.assertRaises(EnvelopeRefused) as caught:
+            CataloguedSpur(spur_id="s", classification=CONSISTENT_WITH_INTERNAL_MIXING,
+                           stability_class=SESSION_SCOPED,
+                           persistence=_persistence("tuning-000"),
+                           slope=_slope("tuning-001"))
+        self.assertEqual(caught.exception.code, PLAN_ABSENT)
+
+    def test_the_model_says_where_a_product_falls_at_another_lo(self):
+        """Slope 0 is in span everywhere; slope 1 only near its anchor. An
+        unmatched slope carries the tolerance's uncertainty over the
+        excursion and cannot be shown outside the span until that clears."""
+        flat = _slope(slope=0.0, intercept=100_000.0)
+        self.assertTrue(flat.in_span_at(40_000_000.0))
+        self.assertTrue(flat.in_span_at(-40_000_000.0))
+        unit = _slope(slope=1.0, intercept=0.0)
+        self.assertTrue(unit.in_span_at(500_000.0))
+        self.assertFalse(unit.in_span_at(2_000_000.0))
+        self.assertAlmostEqual(unit.predicted_baseband_hz(500_000.0), 500_000.0)
+        half = _slope(slope=0.5, intercept=0.0)
+        self.assertIsNone(half.matched_slope)
+        self.assertTrue(half.in_span_at(2_000_000.0))     # 1.0 MHz − 20 kHz
+        self.assertFalse(half.in_span_at(2_200_000.0))    # 1.1 MHz − 22 kHz
+
+    def test_the_stored_entry_carries_the_analysis(self):
+        data = _catalogue(1)[0].to_dict()
+        self.assertIn("slope", data)
+        self.assertEqual(data["slope"]["matched_slope"], 2)
+
+
+class ThermalIsSpurFreeTests(unittest.TestCase):
+    """`PENDING_AMENDMENTS` entry 10: THERMAL_NO_INPUT and RECEIVER_SPURS may be
+    one population counted twice. §5.21's table settles it -- thermal where NO
+    catalogued spur is in span, spurs where at least one is -- and the
+    catalogue's retune model is what answers "in span" at a visit's LO."""
+
+    def _thermal_captured(self, envelope, positions):
+        """The default trial plans, with THERMAL_NO_INPUT captured at the given
+        visit positions instead of regenerated."""
+        chains = sorted(envelope.admissible_chain_hashes())
+        plans = []
+        for plan in _trial_plans(envelope):
+            if plan.stratum == "THERMAL_NO_INPUT":
+                plan = StratumTrialPlan(
+                    stratum="THERMAL_NO_INPUT", source=CAPTURED,
+                    trials=MINIMUM_WINDOWS_PER_STRATUM,
+                    chain_hashes=tuple(chains),
+                    per_visit=_spread(MINIMUM_WINDOWS_PER_STRATUM, positions))
+            plans.append(plan)
+        return tuple(plans)
+
+    def _spur_free_positions(self, plan):
+        by_index = {t.tuning_index: t for t in plan.tunings}
+        free, occupied = [], []
+        for visit in plan.schedule:
+            lo = by_index[visit.tuning_index].center_frequency_hz + visit.retune_delta_hz
+            present = catalogued_spurs_in_span(plan.spur_allocation.catalogue,
+                                               plan.tunings, lo)
+            (occupied if present else free).append(visit.position)
+        return free, occupied
+
+    def test_a_slope_zero_product_forbids_a_captured_thermal_window_anywhere(self):
+        """Entry 10's third defect, as a refusal: the default catalogue holds
+        slope-0 products, which are in span at every tuning."""
+        envelope = _envelope()
+        good = _plan(envelope)
+        self.assertTrue(any(s.slope.matched_slope == 0
+                            for s in good.spur_allocation.catalogue))
+        free, _occupied = self._spur_free_positions(good)
+        self.assertEqual(free, [])
+        with self.assertRaises(EnvelopeRefused) as caught:
+            _plan(envelope, trial_plans=self._thermal_captured(
+                envelope, [good.schedule[0].position]))
+        self.assertEqual(caught.exception.code, PLAN_THERMAL_NOT_SPUR_FREE)
+
+    def test_thermal_is_captured_where_the_catalogue_puts_nothing(self):
+        """Without slope-0 products the catalogue leaves visits free, and a
+        thermal plan drawn from those alone is accepted; one window at an
+        occupied visit refuses it."""
+        envelope = _envelope()
+        chains = sorted(envelope.admissible_chain_hashes())
+        no_flat = {VANISHES_ON_DECLARED_TERMINATION: 2.0}
+        allocation = _spur_allocation(chains=chains, slopes=no_flat)
+        reference = _plan(envelope, spur_allocation=allocation)
+        free, occupied = self._spur_free_positions(reference)
+        self.assertTrue(free and occupied, (len(free), len(occupied)))
+        accepted = _plan(envelope, spur_allocation=allocation,
+                         trial_plans=self._thermal_captured(envelope, free))
+        self.assertEqual(accepted.trials_for("THERMAL_NO_INPUT"),
+                         MINIMUM_WINDOWS_PER_STRATUM)
+        with self.assertRaises(EnvelopeRefused) as caught:
+            _plan(envelope, spur_allocation=allocation,
+                  trial_plans=self._thermal_captured(envelope,
+                                                     free + occupied[:1]))
+        self.assertEqual(caught.exception.code, PLAN_THERMAL_NOT_SPUR_FREE)
+
+    def test_the_anchor_visit_of_a_catalogued_product_is_occupied(self):
+        """Independent of the model's own answer: spur-000 is anchored at
+        tuning-000 with a 100 kHz intercept, so every visit to tuning-000 is
+        inside its span whatever its slope."""
+        envelope = _envelope()
+        chains = sorted(envelope.admissible_chain_hashes())
+        allocation = _spur_allocation(
+            chains=chains, slopes={VANISHES_ON_DECLARED_TERMINATION: 2.0})
+        reference = _plan(envelope, spur_allocation=allocation)
+        anchor = [v.position for v in reference.schedule if v.tuning_index == 0]
+        self.assertEqual(len(anchor), PLAN_VISITS_PER_TUNING)
+        with self.assertRaises(EnvelopeRefused) as caught:
+            _plan(envelope, spur_allocation=allocation,
+                  trial_plans=self._thermal_captured(envelope, anchor[:1]))
+        self.assertEqual(caught.exception.code, PLAN_THERMAL_NOT_SPUR_FREE)
+        self.assertIn("spur-000", str(caught.exception))
+
+    def test_a_captured_thermal_window_needs_a_catalogue(self):
+        """Terminated is not the same as thermal-only until the catalogue says
+        what else could be in the window."""
+        envelope = _envelope()
+        plans = tuple(p for p in self._thermal_captured(envelope, [0])
+                      if p.stratum != "RECEIVER_SPURS")
+        with self.assertRaises(EnvelopeRefused) as caught:
+            _plan(envelope, trial_plans=plans, spur_allocation=None)
+        self.assertEqual(caught.exception.code, PLAN_SPUR_CATALOGUE_ABSENT)
+        self.assertIn("THERMAL_NO_INPUT", str(caught.exception))
+
+    def test_a_regenerated_thermal_stratum_is_not_checked(self):
+        """The check is about captured windows; a synthetic thermal window
+        came through no receiver and holds no receiver's product."""
+        plan = _plan()
+        thermal = [p for p in plan.trial_plans if p.stratum == "THERMAL_NO_INPUT"]
+        self.assertEqual(thermal[0].source, SYNTHETIC)
+
+    def test_a_spur_window_is_captured_where_a_product_is_in_span(self):
+        """The other row of §5.21's table. The eligible units say where each
+        product is observable; a RECEIVER_SPURS visit at a tuning no unit
+        names is a spur window with nothing in it."""
+        envelope = _envelope()
+        chains = sorted(envelope.admissible_chain_hashes())
+        tunings = generate_tunings(seed=SEED, bands=_bands())
+        catalogue = _catalogue(45)
+        short = _eligible_trials(catalogue, chains, 3,
+                                 MINIMUM_WINDOWS_PER_STRATUM + 139,
+                                 tunings=tunings[:-1])
+        allocation = _spur_allocation(chains=chains, epochs=3, eligible=short)
+        self.assertNotIn(tunings[-1].tuning_id, allocation.eligible_tuning_ids())
+        with self.assertRaises(EnvelopeRefused) as caught:
+            _plan(envelope, spur_allocation=allocation)
+        self.assertEqual(caught.exception.code, PLAN_SPUR_NOT_IN_SPAN)
+        self.assertIn(tunings[-1].tuning_id, str(caught.exception))
+
+
 class DeclaredConstantsGovernActsTests(unittest.TestCase):
     """The check the first implementation failed: a constant in a digest is not
     a plan if no declared act refers to it."""
@@ -1066,18 +1390,31 @@ class DeclaredConstantsGovernActsTests(unittest.TestCase):
         self.assertEqual(caught.exception.code,
                          ENVELOPE_RECEIVER_SETTING_VARIES)
 
-    def test_the_slope_tolerance_governs_nothing_here_and_is_queued(self):
-        """Honest rather than hidden. `PLAN_SLOPE_TOLERANCE` is frozen into the
-        digest and enforced by no declaration, because it governs an analysis
-        step and there is no analysis in this module. Recorded as
-        `PENDING_AMENDMENTS` entry 15 rather than as a comment, which is the
-        prose-waits-forever failure entry 11 demonstrated.
+    def test_the_slope_tolerance_governs_the_slope_analysis(self):
+        """`PENDING_AMENDMENTS` entry 15, drained: the frozen tolerance is the
+        act that decides whether a measured slope is a member of the family,
+        and a catalogue entry cannot carry a class the decision does not
+        support. Checked as a property of the module, not as a citation --
+        entry 13 is what a test that asserted the queue's wording was worth.
         """
+        self.assertEqual(PLAN_SLOPE_TOLERANCE, 0.01)
+        inside = _slope(slope=1.0 + PLAN_SLOPE_TOLERANCE - 0.001)
+        outside = _slope(slope=1.0 + PLAN_SLOPE_TOLERANCE + 0.001)
+        self.assertEqual(inside.matched_slope, 1)
+        self.assertIsNone(outside.matched_slope)
+        CataloguedSpur(spur_id="s", classification=CONSISTENT_WITH_INTERNAL_MIXING,
+                       stability_class=SESSION_SCOPED, persistence=_persistence(),
+                       slope=inside)
+        with self.assertRaises(EnvelopeRefused) as caught:
+            CataloguedSpur(spur_id="s",
+                           classification=CONSISTENT_WITH_INTERNAL_MIXING,
+                           stability_class=SESSION_SCOPED,
+                           persistence=_persistence(), slope=outside)
+        self.assertEqual(caught.exception.code, PLAN_CLASSIFICATION_NOT_SUPPORTED)
         import pathlib
         queue = pathlib.Path("docs/PENDING_AMENDMENTS.md").read_text(
             encoding="utf-8")
-        self.assertIn("PLAN_SLOPE_TOLERANCE", queue)
-        self.assertIn("## 15.", queue)
+        self.assertNotIn("## 15.", queue)
 
 
 class TheUnitsAreRetainedTests(unittest.TestCase):
