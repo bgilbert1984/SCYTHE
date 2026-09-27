@@ -77,6 +77,19 @@ class TestSubmissionGuard(unittest.TestCase):
         with self.assertRaises(SubmissionValidationException):
             self.guard.validate_rows(rows)
 
+    def test_accepts_per_dataset_zero_based_node_ids(self):
+        # Format of a 0.953-scoring public submission: IDs restart at 0 per dataset.
+        rows = [
+            node(0, "a", 0, 0), node(1, "a", 1, 1), edge(2, "a", 0, 1),
+            node(3, "b", 0, 0), node(4, "b", 1, 1), edge(5, "b", 0, 1),
+        ]
+        self.assertTrue(self.guard.validate_rows(rows))
+
+    def test_rejects_duplicate_node_id_within_dataset(self):
+        rows = [node(0, "a", 1, 0), node(1, "a", 1, 1)]
+        with self.assertRaises(SubmissionValidationException):
+            self.guard.validate_rows(rows)
+
     def test_rejects_non_forward_edge(self):
         rows = [node(0, "movie", 1, 1), node(1, "movie", 2, 1), edge(2, "movie", 1, 2)]
         with self.assertRaises(SubmissionValidationException):

@@ -136,9 +136,9 @@ class KaggleSubmissionCompiler:
         if [row.get("id") for row in rows] != list(range(len(rows))):
             raise KaggleSubmissionValidationError("Submission row IDs must be consecutive from zero.")
 
-        node_ids = set()
-        node_datasets: Dict[int, str] = {}
-        node_times: Dict[int, int] = {}
+        # node_id is scoped per dataset (the official sample restarts it at 1 per
+        # dataset, and 0-based per-dataset IDs are accepted by the scorer).
+        node_times: Dict[Tuple[str, int], int] = {}
         edge_keys = set()
         outgoing_counts: Dict[Tuple[str, int], int] = {}
         for row in rows:
@@ -149,9 +149,10 @@ class KaggleSubmissionCompiler:
             if not str(row["dataset"]).strip():
                 raise KaggleSubmissionValidationError("Every row must have a dataset identifier.")
             if row["row_type"] == "node":
-                if row["node_id"] in node_ids or row["node_id"] < 1:
+                node_key = (row["dataset"], row["node_id"])
+                if node_key in node_times or row["node_id"] < 0:
                     raise KaggleSubmissionValidationError(
-                        f"Invalid or duplicate node_id: {row['node_id']}."
+                        f"Invalid or duplicate node_id {row['node_id']} in dataset '{row['dataset']}'."
                     )
                 if row["source_id"] != -1 or row["target_id"] != -1:
                     raise KaggleSubmissionValidationError("Node rows require -1 edge placeholders.")
@@ -162,9 +163,7 @@ class KaggleSubmissionCompiler:
                     raise KaggleSubmissionValidationError(
                         "Node time and coordinates must be non-negative integers."
                     )
-                node_ids.add(row["node_id"])
-                node_datasets[row["node_id"]] = row["dataset"]
-                node_times[row["node_id"]] = row["t"]
+                node_times[node_key] = row["t"]
             elif row["row_type"] == "edge":
                 if any(row[column] != -1 for column in ("node_id", "t", "z", "y", "x")):
                     raise KaggleSubmissionValidationError("Edge rows require -1 node placeholders.")
@@ -178,16 +177,15 @@ class KaggleSubmissionCompiler:
         for row in rows:
             if row["row_type"] != "edge":
                 continue
-            if row["source_id"] not in node_ids or row["target_id"] not in node_ids:
-                raise KaggleSubmissionValidationError("An edge references an unknown node_id.")
-            if (
-                node_datasets[row["source_id"]] != row["dataset"]
-                or node_datasets[row["target_id"]] != row["dataset"]
-            ):
-                raise KaggleSubmissionValidationError("An edge crosses dataset boundaries.")
-            if node_times[row["source_id"]] >= node_times[row["target_id"]]:
-                raise KaggleSubmissionValidationError("An edge must point forward in time.")
             source_key = (row["dataset"], row["source_id"])
+            target_key = (row["dataset"], row["target_id"])
+            if source_key not in node_times or target_key not in node_times:
+                # Also catches cross-dataset edges: node IDs resolve within the edge's dataset.
+                raise KaggleSubmissionValidationError(
+                    f"An edge in dataset '{row['dataset']}' references an unknown node_id."
+                )
+            if node_times[source_key] >= node_times[target_key]:
+                raise KaggleSubmissionValidationError("An edge must point forward in time.")
             outgoing_counts[source_key] = outgoing_counts.get(source_key, 0) + 1
             if outgoing_counts[source_key] > 2:
                 raise KaggleSubmissionValidationError(
