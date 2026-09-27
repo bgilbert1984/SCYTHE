@@ -15,7 +15,14 @@ T = "test_rf_capture_publication.py"   # the boundary tests' shared scan scope
 ACCEPTED_IN_SCOPE = ()
 ACCEPTED_DEFERRED = {}
 
-EARNED_IDS = frozenset("K%d" % n for n in range(1, 27))
+# K24 is RETIRED, not renumbered. Its claim -- "admission is wired to the
+# publisher" as a violation of "nothing wires the publisher" -- stopped
+# describing the tree when 3d wired the publisher from the namespace and
+# inverted the boundary test to a single sanctioned site. The same mutation
+# under the new invariant is K27. A retired id stays out of the earned set so
+# the inventory gate refuses a bundle that quietly re-adds it, and the tables
+# that measured K24 at 30cecd07 and 3a5b7540 keep meaning what they meant.
+EARNED_IDS = frozenset("K%d" % n for n in range(1, 28)) - {"K24"}
 
 # The readback through the already-held descriptor is the negative control the
 # accepted amendment names by hand: it cannot establish filename agreement, so
@@ -37,9 +44,9 @@ BROAD_DECLARED = {
     },
 }
 
-# K24 adds an import, so the name it introduces is deliberate. Declared, so the
+# K27 adds an import, so the name it introduces is deliberate. Declared, so the
 # audit distinguishes it from a typo that would mutate nothing.
-INTRODUCES = {"K24": ("rf_capture_publication", "_wire_the_publisher"),
+INTRODUCES = {"K27": ("rf_capture_publication", "_wire_the_publisher"),
               "K25": ("rf_capture_publication", "_wire_the_publisher")}
 # K9 and K22 both manifest ONLY on the unlink-failure path, and K22 aborts that
 # path strictly earlier --- it re-raises before the readback that K9 mis-accounts
@@ -138,35 +145,46 @@ CONTROLS = [
  # --- the mint, and the name's own shape ----------------------------------
  ("K21 a verified final may be constructed by a caller", [(P,
    "        if mint_key is not _MINT_KEY:", "        if False:")]),
- # 3c-core's boundary is a property of the code, so it gets a control like any
- # other. Without one, the test asserting the publisher is unwired would be a
- # test nothing can fail --- the same gap as a clause with no control.
- # RE-ANCHORED for 3c-wire: `_record` lost its `lock` parameter when the typed
- # entrypoints began consuming the ownership scope, so the old anchor went dead
- # and this control would never have applied. The PRE-FLIGHT anchor audit
- # caught it before a sweep was spent, which is the whole reason it reports
- # instead of deferring to `run_control`.
+ # The boundary is a property of the code, so it gets a control like any
+ # other. 3c-core's boundary was "no production module imports the publisher"
+ # and K24 wired admission to violate it. 3d wires the publisher from the
+ # namespace's `commit_window` and the test now asserts that SINGLE site and
+ # no other, so the hazard is a second module reaching the publisher; the
+ # mutation is K24's, the invariant it violates is the new one, and the id is
+ # new because the claim is. K24's anchor died twice, once per signature
+ # change to `_record`, and the PRE-FLIGHT anchor audit caught both before a
+ # sweep was spent, which is the whole reason it reports instead of deferring
+ # to `run_control`. The anchor is now the whole two-line signature, so a
+ # reflow that adds a parameter reports 0 occurrences rather than matching a
+ # prefix of a signature this control was not written against.
  # A MODULE-level import here is circular --- the publisher imports
  # PublicationFailed from admission --- so it detonated at import time and
  # collected 2174 of 2248 tests. A degraded row is not evidence. A function-level
  # import is what a real workaround would look like, is never executed because
  # nothing calls it, and the AST scan sees it just the same.
- ("K24 admission is wired to the publisher", [(A,
-   "def _record(*, scope: Any, stratum: str, attestation: Any, corpus: Any,",
+ ("K27 a second production module is wired to the publisher", [(A,
+   "def _record(*, scope: Any, stratum: str, attestation: Any, corpus: Any\n"
+   "            ) -> CapturedWindowPublication:",
    "def _wire_the_publisher():\n    import rf_capture_publication\n\n\n"
-   "def _record(*, scope: Any, stratum: str, attestation: Any, corpus: Any,")]),
+   "def _record(*, scope: Any, stratum: str, attestation: Any, corpus: Any\n"
+   "            ) -> CapturedWindowPublication:")]),
  # The scan's BREADTH, witnessed. Run 1 at 64f5837 measured K25 as "a second
  # module is wired" alone, which the prohibition catches exactly as it catches
  # K24: one witness, two controls. The breadth test is the one that must see a
  # scan narrowed back to one file, so this control narrows the shared scope
- # to admission alone WHILE a second module wires the publisher. The
- # prohibition, reading the narrowed scope, stays green; only the breadth
- # test can answer.
- ("K25 the scan narrowed to one file while a second module is wired to the publisher", [
+ # WHILE a second module wires the publisher, and the narrowed scope must keep
+ # the single-site test green so that only the breadth test can answer.
+ # Under 3c-core that scope was admission alone. Under 3d the single-site test
+ # demands the namespace be found, so a scope of admission alone fails it too
+ # and K25's set would swallow K27's only witness; measured at 66a544bf, the
+ # old form killed both boundary tests, this form the breadth test alone. The
+ # scope is therefore the sanctioned site alone: the single-site test sees
+ # exactly the offender it expects, and only the count is wrong.
+ ("K25 the scan narrowed to the sanctioned site alone while a second module is wired to the publisher", [
   (T,
    "    return sorted(p for p in pathlib.Path(\".\").glob(\"*.py\")\n"
    "                  if not p.name.startswith(\"test_\") and p.name != MODULE_NAME)",
-   "    return [pathlib.Path(\"rf_capture_admission.py\")]"),
+   "    return [pathlib.Path(\"rf_corpus_namespace.py\")]"),
   (F,
    "def framing_declaration() -> Dict[str, Any]:",
    "def _wire_the_publisher():\n    import rf_capture_publication\n\n\n"
