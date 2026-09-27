@@ -1137,18 +1137,20 @@ def namespace_status() -> Dict[str, Any]:
         # Everything §5.26 and §5.20 3a-3d owed is built now. 3d piece 3 wired
         # the publisher: record_gain_step admits, then the namespace's
         # commit_window creates the temporary, writes it, runs steps 5-8 and
-        # brackets the whole with the journal's intent and commit. What is not
-        # yet true is not a missing capability but compulsion -- nothing is yet
-        # obliged to pass through this path -- which is entry 14 and piece 4,
-        # reported by `compelled_path_to_membership`, not by `not_built`.
+        # brackets the whole with the journal's intent and commit. Nothing is
+        # owed and nothing is a missing capability; what 3d piece 4 added is
+        # compulsion, reported by `compelled_path_to_membership`.
         "not_built": [],
         "clock_authorities": list(CLOCK_AUTHORITIES),
-        # 3c-wire: admission consumes this scope, through `admit_window`. That
-        # is consumption, not compulsion: no production path is yet obliged
-        # to pass through it, which is §5.26's own reason that entry 14 does
-        # not drain until 3d.
+        # 3c-wire: admission consumes this scope through `admit_window`; 3d
+        # piece 4 made it compulsion. Membership is reachable only by admitting
+        # -- the sequence is the scope's, and commit_window takes a
+        # WindowAdmission a caller cannot mint -- and the D-series proves no
+        # side route survives. That is entry 14, drained. `section_implemented`
+        # stays False: production creation is a separate authorisation, still
+        # withheld, so the whole of §5.26 is not implemented by this slice.
         "consumed_by_admission": True,
-        "compelled_path_to_membership": False,
+        "compelled_path_to_membership": True,
         "section_implemented": False,
         "exclusion": "FLOCK ON THE DIRECTORY DESCRIPTOR",
     }

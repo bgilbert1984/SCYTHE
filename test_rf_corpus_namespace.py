@@ -1042,20 +1042,20 @@ class BoundedSliceTests(NamespaceFixture):
         status = namespace_status()
         self.assertFalse(status["production_creation_authorised"])
         self.assertEqual(status["not_built"], [])
-        # Everything owed is built: 3d piece 3 wired the publisher through the
-        # namespace's commit_window. What is not yet true is compulsion (entry
-        # 14, piece 4), which the status reports separately.
-        self.assertFalse(status["compelled_path_to_membership"])
+        # Everything owed is built and compulsion is now the case: 3d piece 4
+        # made admission the only path to membership, proven by the D-series.
+        self.assertTrue(status["compelled_path_to_membership"])
         for built in ("RING LIFETIME IDENTITY", "PUBLISHER CORE",
                       "FINAL-DEPENDENT JOURNAL RECOVERY", "SEQUENCE STATE",
                       "PUBLISHER WIRING"):
             self.assertIn(built, status["built"], built)
             self.assertNotIn(built, status["not_built"], built)
-        # 3c-wire built these two; consumption is still not compulsion.
+        # 3c-wire built these two; 3d piece 4 turned consumption into
+        # compulsion, which the flag now reports.
         self.assertIn("CLOCK PROVIDER", status["built"])
         self.assertIn("ADMISSION CONSUMPTION OF THIS SCOPE", status["built"])
         self.assertTrue(status["consumed_by_admission"])
-        self.assertFalse(status["compelled_path_to_membership"])
+        self.assertTrue(status["compelled_path_to_membership"])
         # §5.27 built it, so it is no longer owed -- and the section it belongs
         # to is still not implemented, which is a different claim.
         self.assertIn("TYPED RECONSTRUCTION AND OPAQUE BINDING", status["built"])
