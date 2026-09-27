@@ -309,8 +309,8 @@ what is still pending. This is a record, not a queue: nothing here is waiting.
 | 11 — the lock froze the method and not the instrument | `rf_promotion_envelope.py`, `rf_corpus_vocabulary.py`, `rf_validation_manifest.py` | `9e0efc8` |
 | 9 — publication step 1 asked for an attestation that did not exist | `rf_iq_ring.py`, `test_rf_window_attestation.py`, §5.24's implementation | `9b0bb06` |
 | 16 — `_payload_nbytes()` could race teardown | deleted from `rf_iq_ring.py` | `98e5a60` |
-| 15 — the frozen slope tolerance governed no analysis | `rf_promotion_envelope.py`, `SpurSlopeEstimate` and `CataloguedSpur` | feat/5.21-slope-catalogue |
-| 10 — `THERMAL_NO_INPUT` and `RECEIVER_SPURS` may be one population counted twice | `rf_promotion_envelope.py`, `CapturePlanDeclaration` | feat/5.21-slope-catalogue |
+| 15 — the frozen slope tolerance governed no analysis | `rf_promotion_envelope.py`, `SpurSlopeEstimate` and `CataloguedSpur` | #118 |
+| 10 — `THERMAL_NO_INPUT` and `RECEIVER_SPURS` may be one population counted twice | `rf_promotion_envelope.py`, `CapturePlanDeclaration` | #118 |
 
 Entries 15 and 10 **drained together**, because the second is answered by the
 analysis the first demanded. `SpurSlopeEstimate` is §5.21's retune analysis:
