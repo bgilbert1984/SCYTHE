@@ -1,0 +1,118 @@
+§5.20 / §5.26 sweep harness -- for runs AT OR AFTER 30cecd07
+
+3c controls     26  (K1..K27, K24 RETIRED) in controls_3c.py. See K24 RETIRED,
+                K27 ADDED, K25 AMENDED below. Every anchor audits clean at
+                66a544bf; the inventory gate refuses K24 if it reappears.
+3b controls     27  (J1..J27) in controls_journal.py
+
+EXPECTED COUNT IS A PROPERTY OF A CHECKPOINT, NOT OF THIS PROJECT. Both gates
+now assert 2370, which is what
+
+    66a544bf  (main, with 3d merged as #114)
+
+collects exactly, with 2 pre-existing skips on a host without the pinned
+observation tree (the count gate reads `Ran N`, which includes them). Update them in the same commit as
+any change to the test count; the gate is an equality, so a stale number makes a
+sweep REFUSE TO LAUNCH rather than pass quietly, which is the right direction but
+is not self-correcting.
+
+  count   checkpoint                                what it was
+  2245    a1cffd8  3b-core alone                    the J-series certification
+  2254    30cecd07 3c-core alone                    the K-series certification
+  2306    af188f1  main, both slices                #111's gates
+  2322    655bbaa  + 3c-wire                        3a5b7540's gates
+  2370    66a544bf + 3d                             these gates
+
+The two certifications remain valid at THEIR counts. 2245 and 2254 were true of
+the trees they were measured on; neither is wrong, and neither is this one's.
+
+K24 RETIRED, K27 ADDED, K25 AMENDED -- for runs at or after 3d (66a544bf)
+  3d wires the publisher from the namespace's commit_window and inverts the
+  boundary test: test_no_production_module_is_wired_to_the_publisher is gone,
+  test_only_the_namespace_wires_the_publisher asserts that ONE site and no
+  other. K24's claim ("admission is wired", violating "nothing is wired") no
+  longer describes the tree, and its anchor died a second time when 3d
+  reflowed `_record`. Retired: the id stays out of EARNED_IDS so it cannot be
+  quietly re-added, and the tables at 30cecd07 and 3a5b7540 keep their K24.
+  K27 "a second production module is wired to the publisher" is K24's
+  mutation under the new invariant, anchored on the whole two-line `_record`
+  signature. K25 narrows the scan to the sanctioned site (the namespace)
+  instead of admission: a scope of admission alone now fails the single-site
+  test too, which would swallow K27's only witness.
+  Measured at 66a544bf on the boundary module alone, before any sweep:
+    K27       -> test_only_the_namespace_wires_the_publisher, nothing else
+    K25       -> test_the_boundary_scan_reads_every_production_module, nothing else
+    K25 (old) -> both, which is why it was amended
+  Inventory gate clean, mutation audit 26 controls no problems, at 66a544bf.
+
+BRANCH DEFAULTS are now `main` in both runners: every §5.20 slice these
+controls cover is merged and the slice branches are deleted. SCYTHE_BRANCH
+still selects any other tip.
+
+SWEEPS RUN ON THE DEDIROCK HOST, or on the authoring host from a second
+clone (~/SCYTHE-sweep/<slice>-<series>-runN-<sha>/) since 3a5b7540. Its baseline is roughly 3x faster than the
+authoring host's, so that is where the K- and J-series are measured. The
+authoring host implements, runs the focused and full suites, audits the controls
+against the committed checkpoint, and pushes. It does not sweep.
+
+BROAD_DECLARED (3c)
+  K2  step 6 IS the publication primitive: replacing link with rename removes
+      the temporary as a side effect, so the unlink fails and the retained-name
+      accounting refuses.  witness test_the_occupying_bytes_survive_the_refusal
+  K6  the readback reaches the bytes through the descriptor step 3 created
+      rather than a fresh open of the final name, so every check after the open
+      reads a file at EOF.  witness test_the_final_name_is_opened_afresh
+  K2 measures n=42, ABOVE the absolute BROAD=40 tripwire. It is declared, so
+  that is reported, not refused. The threshold was NOT lowered to fit it.
+
+SUBSUMED (3c)
+  ("K9","K22") -- both reach only the retained-temporary path and K22 re-raises
+  before the readback K9 alters, so K22's set strictly contains K9's. Strict
+  rather than equal because K22 has its own witness in the escaping exception
+  TYPE. One named allowance; no general subset exemption.
+
+K25 PATCHES A TEST MODULE -- the only control here that does. It narrows the
+boundary tests' shared scope to one file while a second module wires the
+publisher, which is the only way to witness the scan's BREADTH: a production
+mutation cannot reach a scan's scope. WATCHED therefore includes
+test_rf_capture_publication.py. Read that row as evidence the two boundary tests
+are coupled, NOT as evidence about rf_capture_publication.
+
+CORRECTED SINCE THE 64f5837 BUNDLE, both raised by the dedirock review:
+  1. K25's description said "a second production module is wired". That form was
+     indistinguishable from K24 -- the prohibition catches a second module
+     exactly as it catches the first -- and run 1 failed on the duplicate pair.
+     The description and the mutation now match what it actually does.
+  2. review_sweep.py defaulted its second argument to controls527, so reviewing
+     a 3c run without it reported COMPLETENESS 26/43 and K2 as an undeclared
+     detonation -- four lines that read like real failures, from a forgotten
+     argument. FIXED STRUCTURALLY rather than documented: each runner now records
+     controls_module in its baseline row and the reviewer reads it. An explicit
+     second argument still overrides. A run older than this change takes the
+     controls527 fallback, so pass the module explicitly for those.
+
+HARNESS ACCEPTANCE
+  selftest.out is this bundle's own acceptance: 25 cases, 0 failures, run at
+  the 3c-wire head after the skip-column repair below. It covers these bytes.
+
+SKIP COLUMN REPAIRED (sweep.py, with S11 in selftest.py)
+  `unittest -v` reports a test that has a docstring on two lines: the id, then
+  the docstring's first line carrying the verdict. The skip pattern required
+  the verdict on the id line, so every docstring skip was invisible to the
+  suppression column. Observed at the 3c-wire head on a host without the
+  pinned observation tree: unittest counted skipped=2, the column recorded 1.
+  The count gate reads `Ran N` and was never affected. Earlier tables' BASELINE
+  rows list one skip; read them as "one skip the pattern could see", not as
+  the suite's skip count at that checkpoint.
+
+HOST-LOCAL, CHECK BEFORE LAUNCHING
+  run_sweep_3c.py / run_sweep_journal.py
+      BUILD = Path(S) / "..."   the worktree name this host holds for the slice
+      S = os.environ.get("SCYTHE_SCRATCH", "<a session path>")
+
+DECLARED LIMITATION, UNREPAIRED
+  The control bound is max(1800s, 10 x baseline) derived from ONE baseline sample
+  taken before the controls start, so it cannot see load arriving afterwards. A
+  row at 979.6s was observed on a host whose baseline was 202.7s -- 5x, while
+  neighbours sat at 1.0-1.1x. The bound in force is recorded per row so such a
+  row can be read for what it was.
