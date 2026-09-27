@@ -35,7 +35,28 @@ What this module is not
 **Nothing here persists, captures, tunes or opens a device.**  It imports
 `hashlib`, `json`, `math` and two pure modules, and it holds no sample.  Nor does
 it make the corpus buildable: it says what a corpus may contain, and building one
-still needs a receiver, a capture path and a spur catalogue, none of which exist.
+still needs a receiver, a capture path and a populated spur catalogue, none of
+which exist.
+
+The catalogue **analysis** is here, and it has been run over no receiver.
+`SpurSlopeEstimate` is §5.21's retune analysis: a product's baseband offset over
+at least three declared retunes at one tuning, fitted, with the measured slope,
+the intercept and every residual recorded, and §5.22's frozen tolerance applied
+to decide whether the slope is an integer member of the affine mixing family.
+A `CataloguedSpur` carries one and refuses a classification the measured slope
+does not support -- a slope that matches no member cannot be called
+``CONSISTENT_WITH_INTERNAL_MIXING``, and one that matches −1 cannot be called
+anything but the reference class or unresolved. That is the gate
+`PENDING_AMENDMENTS` entry 15 named: nothing reads a classification off the
+catalogue that the analysis did not earn.
+
+The same model answers entry 10. A catalogued product's intercept and slope say
+where it falls at any LO the plan visits, so a plan refuses a **captured**
+``THERMAL_NO_INPUT`` window at any visit where the catalogue puts a product in
+span, and refuses a ``RECEIVER_SPURS`` window at any visit where it puts none.
+A slope-0 product is in span everywhere, and a receiver that has one cannot
+capture a thermal window anywhere -- which is entry 10's third defect stated
+as a refusal rather than discovered after the corpus.
 
 Admission is enforced at **use time** -- `rf_validation_manifest._corpus_state`
 refuses to promote a chain the frozen envelope does not admit.  Captured-window
@@ -139,6 +160,10 @@ PLAN_REPEATS_NOT_OBSERVED = "PLAN_REPEATS_NOT_OBSERVED"
 PLAN_TRIAL_NOT_ELIGIBLE = "PLAN_TRIAL_NOT_ELIGIBLE"
 PLAN_TRIAL_IDENTITY_AMBIGUOUS = "PLAN_TRIAL_IDENTITY_AMBIGUOUS"
 PLAN_SELECTION_NOT_REPRODUCIBLE = "PLAN_SELECTION_NOT_REPRODUCIBLE"
+PLAN_SLOPE_NOT_ESTIMATED = "PLAN_SLOPE_NOT_ESTIMATED"
+PLAN_CLASSIFICATION_NOT_SUPPORTED = "PLAN_CLASSIFICATION_NOT_SUPPORTED"
+PLAN_THERMAL_NOT_SPUR_FREE = "PLAN_THERMAL_NOT_SPUR_FREE"
+PLAN_SPUR_NOT_IN_SPAN = "PLAN_SPUR_NOT_IN_SPAN"
 
 ENVELOPE_REFUSALS: Tuple[str, ...] = (
     ENVELOPE_ABSENT, ENVELOPE_ADMITS_NOTHING, ENVELOPE_GEOMETRY_REFUSED,
@@ -153,7 +178,9 @@ ENVELOPE_REFUSALS: Tuple[str, ...] = (
     PLAN_SPUR_NOT_FEASIBLE, PLAN_SPUR_ALLOCATION_UNDECLARED,
     PLAN_SPUR_NOT_PERSISTENT, PLAN_REPEATS_NOT_OBSERVED,
     PLAN_TRIAL_NOT_ELIGIBLE, PLAN_TRIAL_IDENTITY_AMBIGUOUS,
-    PLAN_SELECTION_NOT_REPRODUCIBLE,
+    PLAN_SELECTION_NOT_REPRODUCIBLE, PLAN_SLOPE_NOT_ESTIMATED,
+    PLAN_CLASSIFICATION_NOT_SUPPORTED, PLAN_THERMAL_NOT_SPUR_FREE,
+    PLAN_SPUR_NOT_IN_SPAN,
 )
 
 
@@ -1004,14 +1031,189 @@ class SpurPersistenceObservation:
         }
 
 
+def matched_mixing_slope(measured_slope: float) -> Optional[int]:
+    """The member of the affine mixing family a measured slope is, or None.
+
+    §5.21: an internal product sits at ``(m - 1)·f_LO + n·f_ref`` after
+    downconversion, so its slope against the tuner is the integer ``m - 1``.
+    The family is bounded by `PLAN_MAX_MIXING_SLOPE`, because beyond it a
+    product leaves the usable half-span on the smallest declared retune and
+    nothing can be measured. −1 is a member: it is the received-emission slope
+    and the ``m = 0`` product both, and §5.21 separates those by termination,
+    not here.
+
+    The match is §5.22's frozen `PLAN_SLOPE_TOLERANCE`, sixty times the slope
+    resolution of the smallest delta and far too tight to admit a neighbouring
+    integer. It is applied here and nowhere else, so this is the declared act
+    the constant governs.
+    """
+    nearest = int(round(measured_slope))
+    if abs(nearest) > PLAN_MAX_MIXING_SLOPE:
+        return None
+    distance = abs(measured_slope - nearest)
+    # At the tolerance is inside it, as at the persistence margin. The
+    # comparison is made tolerant of the last bit so that 1.01 - 1 (which is
+    # 0.010000000000000009 in binary) is not read as outside 0.01.
+    if distance > PLAN_SLOPE_TOLERANCE and not math.isclose(
+            distance, PLAN_SLOPE_TOLERANCE, rel_tol=1e-9):
+        return None
+    return nearest
+
+
+@dataclass(frozen=True)
+class SpurSlopeEstimate:
+    """§5.21's retune analysis, over declared retunes at one tuning.
+
+    A feature's signed baseband offset is observed at the LO settings the
+    schedule actually visits -- the tuning's centre plus each **declared**
+    retune delta -- and a line is fitted. The slope is measured over at least
+    three distinct retunes, because two points fit any line and a two-point
+    slope is an assumption wearing a measurement's clothes. The coordinates are
+    signed and inside the folding guard, because a magnitude cannot tell +1
+    from −1 and a feature within the band-edge exclusion reverses its apparent
+    direction of travel.
+
+    Nothing is summarised away. The observations are held, the slope and
+    intercept are derived from them, and every residual is recorded beside the
+    slope: a residual is what says whether "matches an integer" is a fit or a
+    coincidence, and a reader who cannot see it cannot tell.
+
+    A repeated delta is admitted and contributes a second observation at one
+    setting; a feature that moved between two visits to one setting shows as
+    residual rather than being fitted through.
+    """
+
+    tuning_id: str
+    retune_delta_hz: Tuple[float, ...]
+    signed_baseband_hz: Tuple[float, ...]
+
+    def __post_init__(self) -> None:
+        deltas = tuple(self.retune_delta_hz)
+        offsets = tuple(self.signed_baseband_hz)
+        object.__setattr__(self, "retune_delta_hz", deltas)
+        object.__setattr__(self, "signed_baseband_hz", offsets)
+        if type(self.tuning_id) is not str or not self.tuning_id:
+            raise EnvelopeRefused(
+                PLAN_ABSENT, "a slope estimate names the tuning it was made at")
+        if len(deltas) != len(offsets):
+            raise EnvelopeRefused(
+                PLAN_SLOPE_NOT_ESTIMATED,
+                f"{len(deltas)} retunes and {len(offsets)} offsets; an "
+                "observation is a retune AND where the feature was")
+        for value in deltas + offsets:
+            if not _finite(value):
+                raise EnvelopeRefused(
+                    PLAN_QUANTITY_NOT_FINITE,
+                    f"a retune observation of {value!r} is not a measurement")
+        declared = _signed_deltas()
+        undeclared = sorted({d for d in deltas if d not in declared})
+        if undeclared:
+            raise EnvelopeRefused(
+                PLAN_RETUNE_NOT_DECLARED,
+                f"{undeclared} are not among the declared signed deltas "
+                f"{sorted(declared)}. A slope is measured over the retunes the "
+                "schedule performs, not over whatever was convenient")
+        if len(set(deltas)) < 3:
+            raise EnvelopeRefused(
+                PLAN_SLOPE_NOT_ESTIMATED,
+                f"{len(set(deltas))} distinct retune(s); §5.21 measures the "
+                "slope over at least three, because two points fit any line")
+        for value in offsets:
+            if abs(value) > usable_half_span_hz():
+                raise EnvelopeRefused(
+                    PLAN_TRIAL_NOT_ELIGIBLE,
+                    f"an offset of {value:.0f} Hz is inside the "
+                    f"{PLAN_BAND_EDGE_EXCLUSION:.0%} band-edge exclusion, where "
+                    "a folded feature reverses its apparent direction of travel "
+                    "and would manufacture a slope out of bookkeeping")
+
+    def _fit(self) -> Tuple[float, float]:
+        deltas, offsets = self.retune_delta_hz, self.signed_baseband_hz
+        count = len(deltas)
+        mean_delta = sum(deltas) / count
+        mean_offset = sum(offsets) / count
+        sxx = sum((d - mean_delta) ** 2 for d in deltas)
+        sxy = sum((d - mean_delta) * (f - mean_offset)
+                  for d, f in zip(deltas, offsets))
+        slope = sxy / sxx          # sxx > 0: three distinct deltas
+        return slope, mean_offset - slope * mean_delta
+
+    @property
+    def measured_slope(self) -> float:
+        """``Δf_bb / Δf_LO`` by least squares over the declared retunes."""
+        return self._fit()[0]
+
+    @property
+    def intercept_hz(self) -> float:
+        """The offset the fit puts the feature at with no retune applied --
+        the anchor every prediction at another LO is made from."""
+        return self._fit()[1]
+
+    @property
+    def residuals_hz(self) -> Tuple[float, ...]:
+        slope, intercept = self._fit()
+        return tuple(f - (intercept + slope * d)
+                     for d, f in zip(self.retune_delta_hz,
+                                     self.signed_baseband_hz))
+
+    @property
+    def matched_slope(self) -> Optional[int]:
+        """The family member within the frozen tolerance, or None."""
+        return matched_mixing_slope(self.measured_slope)
+
+    def predicted_baseband_hz(self, lo_offset_hz: float) -> float:
+        """Where the model puts the feature at an LO `lo_offset_hz` from the
+        anchor tuning. An integer match is the model; an unmatched slope has
+        only its estimate."""
+        slope = self.matched_slope
+        model = self.measured_slope if slope is None else float(slope)
+        return self.intercept_hz + model * lo_offset_hz
+
+    def in_span_at(self, lo_offset_hz: float,
+                   span_hz: float = PROMOTION_SAMPLE_RATE_HZ) -> bool:
+        """Whether the feature falls inside the whole analysis span at that LO.
+
+        The WHOLE span, not the usable half-span: a product anywhere in a
+        captured window contaminates it, folded or not. An unmatched slope
+        carries the tolerance's own uncertainty over the excursion --
+        ``PLAN_SLOPE_TOLERANCE × |Δf_LO|`` -- and a feature that close to the
+        edge cannot be shown outside it. An integer match is exact by the
+        model and carries none.
+        """
+        margin = (0.0 if self.matched_slope is not None
+                  else PLAN_SLOPE_TOLERANCE * abs(lo_offset_hz))
+        return abs(self.predicted_baseband_hz(lo_offset_hz)) - margin <= span_hz / 2.0
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "tuning_id": self.tuning_id,
+            "retune_delta_hz": [float(d) for d in self.retune_delta_hz],
+            "signed_baseband_hz": [float(f) for f in self.signed_baseband_hz],
+            "measured_slope": self.measured_slope,
+            "intercept_hz": self.intercept_hz,
+            "residuals_hz": [float(r) for r in self.residuals_hz],
+            "matched_slope": self.matched_slope,
+            "slope_tolerance": PLAN_SLOPE_TOLERANCE,
+        }
+
+
 @dataclass(frozen=True)
 class CataloguedSpur:
-    """One identified product, with what §5.21 could decide about it."""
+    """One identified product, with what §5.21 could decide about it.
+
+    The classification is not a free field. §5.21 establishes each usable
+    class **by** the retune slope and termination, so an entry carries the
+    slope analysis it was classified from and refuses a class the measured
+    slope does not support. Termination is an ``OPERATOR_DECLARED`` act this
+    module cannot check; the slope is arithmetic over declared observations,
+    and it can.
+    """
 
     spur_id: str
     classification: str
     stability_class: str
     persistence: SpurPersistenceObservation
+    slope: SpurSlopeEstimate
 
     def __post_init__(self) -> None:
         if type(self.spur_id) is not str or not self.spur_id:
@@ -1021,6 +1223,17 @@ class CataloguedSpur:
                 PLAN_ABSENT,
                 "a catalogued spur carries its SpurPersistenceObservation; got "
                 f"{type(self.persistence).__name__}")
+        if type(self.slope) is not SpurSlopeEstimate:
+            raise EnvelopeRefused(
+                PLAN_ABSENT,
+                "a catalogued spur carries the SpurSlopeEstimate it was "
+                f"classified from; got {type(self.slope).__name__}")
+        if self.slope.tuning_id != self.persistence.tuning_id:
+            raise EnvelopeRefused(
+                PLAN_ABSENT,
+                f"{self.spur_id} persisted at {self.persistence.tuning_id} and "
+                f"was fitted at {self.slope.tuning_id}. One product earns its "
+                "entry at one declared tuning")
         if not self.persistence.persistent():
             raise EnvelopeRefused(
                 PLAN_SPUR_NOT_PERSISTENT,
@@ -1037,6 +1250,28 @@ class CataloguedSpur:
             raise EnvelopeRefused(
                 PLAN_ABSENT,
                 f"{self.stability_class!r} is not one of {list(SPUR_STABILITY_CLASSES)}")
+        # §5.21's table, row by row. A slope other than −1 inside the family is
+        # consistent with internal mixing at m = s + 1; slope −1 is a received
+        # emission or the m = 0 product, which only termination and the
+        # reference match can take further; a slope outside the family is
+        # refused rather than rationalised. VANISHES_ON_DECLARED_TERMINATION is
+        # decided by the load, not the slope, so any slope supports it.
+        matched = self.slope.matched_slope
+        supported = {
+            CONSISTENT_WITH_INTERNAL_MIXING: matched is not None and matched != -1,
+            CONSISTENT_WITH_INTERNAL_REFERENCE: matched == -1,
+            SPUR_CANDIDATE_UNRESOLVED: matched is None,
+            VANISHES_ON_DECLARED_TERMINATION: True,
+        }[self.classification]
+        if not supported:
+            raise EnvelopeRefused(
+                PLAN_CLASSIFICATION_NOT_SUPPORTED,
+                f"{self.spur_id} is classified {self.classification} and its "
+                f"measured slope is {self.slope.measured_slope:.4f}, which "
+                + ("matches no member of the mixing family"
+                   if matched is None else f"matches slope {matched:+d}")
+                + f" within the {PLAN_SLOPE_TOLERANCE} tolerance. The class is "
+                "read off the analysis, not written beside it")
 
     @property
     def required_confidence(self) -> Optional[str]:
@@ -1056,8 +1291,30 @@ class CataloguedSpur:
             "classification": self.classification,
             "stability_class": self.stability_class,
             "persistence": self.persistence.to_dict(),
+            "slope": self.slope.to_dict(),
             "required_confidence": self.required_confidence,
         }
+
+
+def catalogued_spurs_in_span(catalogue: Any, tunings: Any,
+                             lo_hz: float) -> Tuple[str, ...]:
+    """The catalogued products the retune model puts inside the analysis span
+    at one LO setting, by id. The catalogue answers §5.21's question for both
+    strata: a `THERMAL_NO_INPUT` window is captured where this is empty, a
+    `RECEIVER_SPURS` window where it is not."""
+    by_id = {tuning.tuning_id: tuning for tuning in tunings}
+    present = []
+    for spur in catalogue:
+        anchor = by_id.get(spur.slope.tuning_id)
+        if anchor is None:
+            raise EnvelopeRefused(
+                PLAN_TRIAL_NOT_ELIGIBLE,
+                f"{spur.spur_id} is catalogued at {spur.slope.tuning_id}, "
+                "which these tunings do not declare, so nothing can say where "
+                "it falls at any of them")
+        if spur.slope.in_span_at(lo_hz - anchor.center_frequency_hz):
+            present.append(spur.spur_id)
+    return tuple(present)
 
 
 @dataclass(frozen=True)
@@ -1502,6 +1759,8 @@ class CapturePlanDeclaration:
                 "the same failure")
 
         positions = {visit.position for visit in self.schedule}
+        visits = {visit.position: visit for visit in self.schedule}
+        by_index = {tuning.tuning_index: tuning for tuning in self.tunings}
         for plan in self.trial_plans:
             stray = sorted({p for p, _n in plan.per_visit} - positions)
             if stray:
@@ -1556,12 +1815,64 @@ class CapturePlanDeclaration:
                     f"the per-class allocation sums to "
                     f"{self.spur_allocation.allocated_trials()} against "
                     f"{required} declared trials")
+            # §5.21's table, the RECEIVER_SPURS row: every window is captured
+            # where at least one catalogued spur falls in the span. The eligible
+            # units say at which tunings each product is observable, so a visit
+            # the stratum draws windows from at a tuning no unit names is a spur
+            # window planned where the catalogue puts nothing.
+            observable = self.spur_allocation.eligible_tuning_ids()
+            for position, count in spurs[0].per_visit:
+                if count < 1:
+                    continue
+                tuning = by_index[visits[position].tuning_index]
+                if tuning.tuning_id not in observable:
+                    raise EnvelopeRefused(
+                        PLAN_SPUR_NOT_IN_SPAN,
+                        f"RECEIVER_SPURS draws {count} window(s) from visit "
+                        f"{position} at {tuning.tuning_id}, where no eligible "
+                        "unit puts a catalogued product in span. A window with "
+                        "no internal product in it is not a RECEIVER_SPURS "
+                        "window")
         elif self.spur_allocation is not None:
             raise EnvelopeRefused(
                 PLAN_SPUR_CATALOGUE_ABSENT,
                 "a spur catalogue is declared and RECEIVER_SPURS is not "
                 "planned. §5.22's option 4 drops the stratum; it does not keep "
                 "the catalogue and drop the trials")
+        # §5.21's table, the THERMAL_NO_INPUT row, and PENDING_AMENDMENTS
+        # entry 10: a captured thermal window is captured where NO catalogued
+        # spur falls in the span. Checked per visit at the LO the visit
+        # actually sets, because a slope-0 product is in span at every tuning
+        # and a slope-1 product at only the ones near its anchor. A receiver
+        # with a slope-0 product cannot capture a thermal window anywhere,
+        # and this is where that is discovered rather than after the corpus.
+        thermal = [p for p in self.trial_plans
+                   if p.stratum == "THERMAL_NO_INPUT" and p.source == CAPTURED]
+        if thermal:
+            if self.spur_allocation is None:
+                raise EnvelopeRefused(
+                    PLAN_SPUR_CATALOGUE_ABSENT,
+                    "THERMAL_NO_INPUT is captured and no catalogue says where "
+                    "the receiver's own products fall. A terminated window "
+                    "cannot be shown to hold thermal noise only until the "
+                    "catalogue says what else could be in it")
+            for position, count in thermal[0].per_visit:
+                if count < 1:
+                    continue
+                visit = visits[position]
+                tuning = by_index[visit.tuning_index]
+                lo_hz = tuning.center_frequency_hz + visit.retune_delta_hz
+                present = catalogued_spurs_in_span(
+                    self.spur_allocation.catalogue, self.tunings, lo_hz)
+                if present:
+                    raise EnvelopeRefused(
+                        PLAN_THERMAL_NOT_SPUR_FREE,
+                        f"THERMAL_NO_INPUT draws {count} window(s) from visit "
+                        f"{position} at {lo_hz:.0f} Hz, where the catalogue "
+                        f"puts {list(present[:3])} in span. A window with an "
+                        "internal product in it is a RECEIVER_SPURS window "
+                        "mislabelled, and a stratum that never samples the "
+                        "spur-free case is not covered")
 
     @property
     def harmonic_cap(self) -> int:

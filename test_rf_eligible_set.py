@@ -346,6 +346,21 @@ class ReconstructionTests(unittest.TestCase):
         self.assertEqual(caught.exception.code,
                          RECONSTRUCTION_MAPPING_DISAGREES)
 
+    def test_a_stored_slope_is_re_derived_and_not_read(self):
+        """The catalogue's slope record holds observations; the measured
+        slope, the intercept, the residuals and the match are derived from
+        them on reconstruction. A stored slope that disagrees with its own
+        observations therefore cannot be fed back -- the rebuilt object
+        re-serialises differently and is refused."""
+        mapping = json.loads(json.dumps(self.plan.to_dict()))
+        entry = mapping["spur_allocation"]["catalogue"][0]["slope"]
+        self.assertIn("residuals_hz", entry)
+        entry["measured_slope"] = entry["measured_slope"] + 1.0
+        with self.assertRaises(ReconstructionRefused) as caught:
+            self._plan_again(mapping=mapping)
+        self.assertEqual(caught.exception.code,
+                         RECONSTRUCTION_MAPPING_DISAGREES)
+
     def test_a_caller_supplied_selected_tuple_is_refused(self):
         """The selection is derived. A stored one would be a selection made
         after seeing the eligible population, which is the post-hoc choice the

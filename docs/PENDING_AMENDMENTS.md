@@ -145,39 +145,6 @@ exactly what a queue is for.
 
 ---
 
-## 10. `THERMAL_NO_INPUT` and `RECEIVER_SPURS` may be one population counted twice
-
-**Trigger:** before **either** stratum is captured — not before whichever is
-captured second. It is a property of the pair.
-
-Nothing has ever checked that `THERMAL_NO_INPUT`'s tunings are free of the
-receiver's own spurious products. An internal product whose baseband offset does
-not move with the tuner — slope 0 in §5.21's terms, ``m = 1`` in the mixing
-family — is in the analysis span at **every** tuning. If the receiver has one,
-then a window captured as "terminated input, thermal noise only" contains it.
-
-**The defect is not that Bonferroni breaks.** Bonferroni is valid under
-arbitrary dependence, so two bounds over one population does not invalidate it.
-The defects are three, and each is real on its own:
-
-1. **Mislabelling.** `THERMAL_NO_INPUT` windows would carry a label that is
-   false of their contents.
-2. **Redundant alpha expenditure.** The family pays a thirteen-bound correction
-   while two of the bounds test one population, so the procedure is more
-   conservative than the coverage it actually buys — and every stratum's
-   required n is larger for it.
-3. **A population never covered.** The spur-free thermal case the stratum exists
-   to test would not appear in the corpus at all, which is the one that cannot
-   be repaired by re-labelling afterwards.
-
-The check requires a spur catalogue, which §5.21 now governs — accepted
-2026-09-14 — and which **does not yet exist**. Recorded separately from §5.21 because the obligation survives
-that section being **rejected**: however spurs come to be identified,
-`THERMAL_NO_INPUT` still has to be shown free of them, and that was true before
-§5.21 was drafted.
-
----
-
 ## 14. Captured-window admission is named and not built
 
 **Trigger:** before the first captured window is written to disk. Behind entry
@@ -290,31 +257,33 @@ it has already changed the denominator.
 
 ---
 
-## 15. The frozen slope tolerance governs no analysis
+## 17. The reference-comb match governs no reference-class entry
 
-**Trigger:** before a spur catalogue entry can become usable. Not before the
-catalogue exists — before anything reads a classification off one.
+**Trigger:** before a `CONSISTENT_WITH_INTERNAL_REFERENCE` entry attests to
+anything. Not before the catalogue exists — before that class is read off one.
 
-`CapturePlanDeclaration` freezes `PLAN_SLOPE_TOLERANCE = 0.01` into its digest,
-and **no declaration in the repository refers to it.** Every other §5.22 constant
-now governs a declared act: the retune deltas govern a signed per-visit retune,
-the band-edge exclusion governs which baseband offsets an eligible trial may
-carry, the persistence margin and the 7-of-8 requirement govern the repeats a
-catalogued spur earned its entry with. The slope tolerance governs an
-**analysis** — estimating a feature's slope across retunes and deciding whether
-it matches an integer member of the affine mixing family — and there is no
-analysis in this repository.
+§5.21 establishes the reference class by three things: slope −1, persistence
+under declared termination, and a match to a rational multiple of the
+**declared** reference within the window `n · f_ref · ppm`, below the harmonic
+cap the declared ppm forces. The slope is now enforced at construction
+(entry 15, drained) and the harmonic cap is computed by `harmonic_cap`, but no
+entry declares the harmonic it claims and nothing checks the match. A slope-−1
+feature that persists terminated can therefore be catalogued as the reference
+class on the slope alone, which is exactly the coincidence §5.22's cap exists
+to keep from passing as a model match.
 
-The repair, when the analysis exists:
+The repair, when a reference-class entry is first made:
 
-> Before a spur catalogue entry can become usable, the slope analysis must apply
-> the frozen `0.01` tolerance and record the measured slope and its residuals.
+> A `CONSISTENT_WITH_INTERNAL_REFERENCE` entry declares its harmonic `n`, the
+> catalogue declares the reference and its ppm, and the entry is refused unless
+> `n` is at or below the harmonic cap and the product's RF position is within
+> `n · f_ref · ppm` of `n · f_ref`.
 
-Recorded here rather than as a comment beside the constant, because **entry 11
-is the demonstration of what a comment is worth**: a repair recorded in prose
-waits exactly as long as the prose does. The persistence margin and the 7-of-8
-requirement were on the same catalogue-analysis boundary and are now enforced by
-`SpurPersistenceObservation`; slope enforcement is what remains owed.
+The RF position needs the anchor tuning's centre frequency, which the entry
+does not carry today; carrying it is part of the repair, not a reason to
+defer it.
+
+---
 
 ## Drain record
 
@@ -340,6 +309,43 @@ what is still pending. This is a record, not a queue: nothing here is waiting.
 | 11 — the lock froze the method and not the instrument | `rf_promotion_envelope.py`, `rf_corpus_vocabulary.py`, `rf_validation_manifest.py` | `9e0efc8` |
 | 9 — publication step 1 asked for an attestation that did not exist | `rf_iq_ring.py`, `test_rf_window_attestation.py`, §5.24's implementation | `9b0bb06` |
 | 16 — `_payload_nbytes()` could race teardown | deleted from `rf_iq_ring.py` | `98e5a60` |
+| 15 — the frozen slope tolerance governed no analysis | `rf_promotion_envelope.py`, `SpurSlopeEstimate` and `CataloguedSpur` | #118 |
+| 10 — `THERMAL_NO_INPUT` and `RECEIVER_SPURS` may be one population counted twice | `rf_promotion_envelope.py`, `CapturePlanDeclaration` | #118 |
+
+Entries 15 and 10 **drained together**, because the second is answered by the
+analysis the first demanded. `SpurSlopeEstimate` is §5.21's retune analysis:
+a product's signed baseband offset over at least three **declared** retunes at
+one tuning, fitted, with the measured slope, the intercept and every residual
+recorded, and §5.22's frozen `0.01` applied to decide whether the slope is an
+integer member of the affine mixing family. A `CataloguedSpur` carries one and
+refuses a classification the slope does not support: a slope that matches no
+member cannot be `CONSISTENT_WITH_INTERNAL_MIXING`, one that matches −1 can be
+the reference class and nothing usable else, and a matched slope cannot hide
+behind `SPUR_CANDIDATE_UNRESOLVED`. That is entry 15's own repair sentence,
+verbatim, as a refusal at construction. The tolerance is applied in exactly one
+place, and the test that used to assert it governed nothing now asserts the
+boundary it governs.
+
+Entry 10 is the same model read at another LO. A catalogued product's
+intercept and slope say where it falls at every visit the plan schedules, so a
+plan refuses a **captured** `THERMAL_NO_INPUT` window at any visit where the
+catalogue puts a product in span, and refuses a `RECEIVER_SPURS` window at any
+visit where the eligible units put none. A slope-0 product is in span at every
+tuning, and a receiver that has one cannot capture a thermal window anywhere —
+the entry's third defect, stated as a refusal before the corpus rather than
+discovered inside it. `THERMAL_NO_INPUT` is regenerated today, so the check
+binds nothing yet; it binds the moment the stratum is captured, which is the
+trigger the entry named.
+
+**What this does not do, stated so it is not inferred.** No catalogue exists:
+the analysis has been run over no receiver, and every entry it has ever
+classified is a test fixture. `CONSISTENT_WITH_INTERNAL_REFERENCE` is gated on
+its slope here and **not** on the reference-comb match §5.21 also requires of
+it; the harmonic cap exists and nothing applies it to an entry. That is a
+narrower obligation than entry 15 was, it has a trigger — before a
+reference-class entry attests anything — and it is entry 17 below rather than
+a sentence here.
+
 
 Entry 16 **drained by deletion at `98e5a60`**, which is the path the entry
 itself named as valid. The method had no production caller and no role in

@@ -29,6 +29,7 @@ from typing import Any, Dict, Mapping, Sequence, Tuple
 from rf_promotion_envelope import (
     Band, CapturePlanDeclaration, CataloguedSpur, ChainMember, EligibleSpurTrial,
     FrontEnd, InstrumentChainEnvelope, SpurAllocation, SpurPersistenceObservation,
+    SpurSlopeEstimate,
     StratumTrialPlan, Tuning, Visit, declaration_digest, select_spur_trials,
 )
 
@@ -60,6 +61,8 @@ _DERIVED: Dict[str, Tuple[str, ...]] = {
                     "feedline_length_m"),
     "CataloguedSpur": ("required_confidence",),
     "SpurPersistenceObservation": ("qualifying", "persistent"),
+    "SpurSlopeEstimate": ("measured_slope", "intercept_hz", "residuals_hz",
+                          "matched_slope", "slope_tolerance"),
     # All four are computed from the members, so the envelope is rebuilt from
     # the members alone. Listing them is what makes a NEW derived key a
     # refusal rather than something silently ignored.
@@ -148,10 +151,23 @@ def _persistence(m: Mapping[str, Any]) -> SpurPersistenceObservation:
     return SpurPersistenceObservation(**d)
 
 
+def _slope(m: Mapping[str, Any]) -> SpurSlopeEstimate:
+    """The observations only. The slope, the intercept, the residuals and the
+    match are re-derived by the constructor, so a stored slope that disagreed
+    with its own observations could not be fed back."""
+    d = _declared(m, "SpurSlopeEstimate",
+                  ("tuning_id", "retune_delta_hz", "signed_baseband_hz"))
+    d["retune_delta_hz"] = tuple(d["retune_delta_hz"])
+    d["signed_baseband_hz"] = tuple(d["signed_baseband_hz"])
+    return SpurSlopeEstimate(**d)
+
+
 def _catalogued_spur(m: Mapping[str, Any]) -> CataloguedSpur:
     d = _declared(m, "CataloguedSpur",
-                  ("spur_id", "classification", "stability_class", "persistence"))
+                  ("spur_id", "classification", "stability_class", "persistence",
+                   "slope"))
     d["persistence"] = _persistence(d["persistence"])
+    d["slope"] = _slope(d["slope"])
     return CataloguedSpur(**d)
 
 
