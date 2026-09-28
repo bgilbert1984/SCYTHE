@@ -52,3 +52,11 @@ receiver, the site, the termination and the epochs. This file is that record.
 - [ ] Site named:
 - [ ] Termination part and connector:
 - [ ] Termination fitted (act recorded, date/time):
+
+## Addendum 2026-09-28 — operator declarations received
+
+**Site (operator's words, verbatim):** "12426 Mukilteo Speedway, Mukilteo, WA 98275 | no enclosure."
+
+**Termination (operator's words, verbatim):** "Telescopic Antenna 360mm extended on the magnetic base with a 5' cable going to the NESDR"
+
+**Sequencer's note:** the declared termination item is an antenna, not a 50 ohm load. The authorisation requires "a specific 50 ohm load and connector, physically fitted before the first window." An antenna does not satisfy this: it couples ambient RF into the receiver, which voids the terminated-input assumption the spur catalogue's classifications rest on. Under a true termination, mixing-slope products must be receiver-internal; with an antenna connected, ambient intermodulation in the frontend can produce them, so CONSISTENT_WITH_INTERNAL_MIXING claims would be unsound. The run is NOT authorised to proceed as a terminated catalogue on this declaration. Two honest paths: fit an actual 50 ohm load, or re-scope the run explicitly as an antenna-connected ambient survey with adjusted classification claims. Awaiting the operator's decision. No tuner operation has occurred.
