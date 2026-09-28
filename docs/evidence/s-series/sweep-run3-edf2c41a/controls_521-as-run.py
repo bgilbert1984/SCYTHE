@@ -24,17 +24,7 @@ R = "rf_corpus_reconstruction.py"
 ACCEPTED_IN_SCOPE = ()
 ACCEPTED_DEFERRED = {}
 
-# S33 and S34 RETIRED after run 3 at edf2c41a, which measured them at n=196
-# with failing sets EQUAL to S18's -- the reviewer refuses equal sets under
-# any allowance, and it is right to: the three mutations each drop one key
-# from the reconstruction authority list, and every rebuild in the suite then
-# refuses with RECONSTRUCTION_FIELD_NO_AUTHORITY whichever key it was. That is
-# one regime measured three times, not three properties. S18 stays as the
-# measurement of the regime; the entry-17 derived keys are covered by it, and
-# their direct witnesses (the two re-derivation tests in test_rf_eligible_set)
-# remain in the suite as tests, not as controls. The inventory gate refuses
-# either ID if it reappears.
-EARNED_IDS = frozenset("S%d" % n for n in range(1, 36)) - {"S33", "S34"}
+EARNED_IDS = frozenset("S%d" % n for n in range(1, 36))
 
 # S1 is declared broad BEFORE launch, with the witness that must keep firing.
 # A tolerance that is never applied matches every slope to its nearest
@@ -66,17 +56,28 @@ BROAD_DECLARED = {
                   "its slope record",
         "witness": "test_the_plan_rebuilds_to_the_exact_nominal_object",
     },
-    # Entry 17's intrinsically broad control, declared before run 3. S28
-    # moves every catalogued product off its RF position, so every reference
-    # entry in the fixture mismatches its comb, every fixture catalogue
-    # refuses, and every plan built on one refuses with it. Run 3 measured
-    # it at n=376 with the witness present.
+    # Entry 17's three intrinsically broad controls, declared before run 3.
+    # S28 moves every catalogued product off its RF position, so every
+    # reference entry in the fixture mismatches its comb, every fixture
+    # catalogue refuses, and every plan built on one refuses with it. S33
+    # and S34 are S18's shape exactly: a derived key the authority list stops
+    # naming refuses every rebuilt plan in the suite.
     "S28": {
         "reason": "the RF position ignores the anchor, so every reference "
                   "entry sits megahertz off its harmonic; the fixture "
                   "catalogue refuses at the comb and every plan built on it "
                   "refuses with it",
         "witness": "test_the_rf_position_is_the_anchor_plus_the_intercept",
+    },
+    "S33": {
+        "reason": "the comb's derived cap is a key no authority declares, "
+                  "which refuses every rebuilt plan in the suite",
+        "witness": "test_a_stored_harmonic_cap_is_re_derived_and_not_read",
+    },
+    "S34": {
+        "reason": "the entry's derived RF position is a key no authority "
+                  "declares, which refuses every rebuilt plan in the suite",
+        "witness": "test_a_stored_rf_position_is_re_derived_and_not_read",
     },
 }
 SUBSUMED = {}
@@ -147,6 +148,10 @@ WITNESS = {
             "test_an_entry_anchored_off_its_declared_tuning_refuses_at_the_plan"),
     "S32": ("test_rf_promotion_envelope.py",
             "test_an_entry_anchored_at_an_undeclared_tuning_refuses_at_the_plan"),
+    "S33": ("test_rf_eligible_set.py",
+            "test_a_stored_harmonic_cap_is_re_derived_and_not_read"),
+    "S34": ("test_rf_eligible_set.py",
+            "test_a_stored_rf_position_is_re_derived_and_not_read"),
     "S35": ("test_rf_promotion_envelope.py",
             "test_a_slope_record_carries_a_positive_finite_anchor"),
     "S21": ("test_rf_promotion_envelope.py",
@@ -279,6 +284,12 @@ CONTROLS = [
  ("S32 an anchor at an undeclared tuning passes the plan", [(E,
    "                if tuning is None:\n",
    "                if False:\n")]),
+ ("S33 the harmonic cap is a field no authority declares", [(R,
+   '    "ReferenceComb": ("harmonic_cap",),\n',
+   '    "ReferenceComb": (),\n')]),
+ ("S34 the RF position is a field no authority declares", [(R,
+   '    "CataloguedSpur": ("required_confidence", "rf_position_hz"),\n',
+   '    "CataloguedSpur": ("required_confidence",),\n')]),
  ("S35 an anchor need not be a frequency", [(E,
    "        if (not _finite(self.anchor_center_frequency_hz)\n"
    "                or self.anchor_center_frequency_hz <= 0):\n",

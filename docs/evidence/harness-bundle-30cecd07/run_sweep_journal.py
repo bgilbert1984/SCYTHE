@@ -72,17 +72,17 @@ subprocess.run(["git","worktree","remove","--force",str(tree)], cwd=str(REPO),
 shutil.rmtree(tree, ignore_errors=True)
 print(f"BASELINE  {cls}  {count} tests  exit {proc.returncode}  "
       f"{BASELINE_ELAPSED}s", flush=True)
-# 2422 is what the S22 commit collects, exactly: 39da055e's 2421 plus the one
-# witness the entry-17 controls needed. The journal's controlled file is
+# 2423 is what the S22 commit collects, exactly: 39da055e's 2421 plus the two
+# witnesses the entry-17 controls needed. The journal's controlled file is
 # blob-identical to a1cffd8 there, so the J-series certification carries, but
 # an exact-match gate written for an earlier tree refuses this one.
 # MANIFEST.txt carries the table
-# (2245 / 2254 / 2306 / 2322 / 2370 / 2392 / 2399 / 2421 / 2422). A baseline
-# that differs from 2422 means a different generation of the suite, which no
+# (2245 / 2254 / 2306 / 2322 / 2370 / 2392 / 2399 / 2421 / 2423). A baseline
+# that differs from 2423 means a different generation of the suite, which no
 # floor can report; the floor moves with the checkpoint and is never lowered.
-require_sane_baseline(cls, count, 2422, ids=ids, proc=proc,
+require_sane_baseline(cls, count, 2423, ids=ids, proc=proc,
                       report=Path(S) / "baseline-refused-journal.out",
-                      expected=2422)
+                      expected=2423)
 # Each control's bound is derived from the baseline this host just produced,
 # not from a constant calibrated elsewhere: a fixed 1800s makes a healthy
 # control on a slower or loaded host read as TIMED_OUT.

@@ -1,0 +1,66 @@
+==========================================================================
+BASELINE  ZERO_DISCRIMINATION  ran=2422  failing=0  OK
+checkpoint: edf2c41abaa6878a4e9bc968010a0b89c17a1e0b
+controls with rows: 35
+
+ID    CLASSIFICATION             n   ran    UNIQ
+--------------------------------------------------------------------------
+S1    TEST_FAILURE             378  2422       1
+S2    TEST_FAILURE               2  2422       0
+S3    TEST_FAILURE               2  2422       1
+S4    TEST_FAILURE               1  2422       1
+S5    TEST_FAILURE               1  2422       1
+S6    TEST_FAILURE               1  2422       1
+S7    TEST_FAILURE               1  2422       1
+S8    TEST_FAILURE               1  2422       1
+S9    TEST_FAILURE               2  2422       2
+S10   TEST_FAILURE               1  2422       1
+S11   TEST_FAILURE               1  2422       1
+S12   TEST_FAILURE               3  2422       0
+S13   TEST_FAILURE               2  2422       1
+S14   TEST_FAILURE               1  2422       0
+S15   TEST_FAILURE               1  2422       1
+S16   TEST_FAILURE               1  2422       0
+S17   TEST_FAILURE               1  2422       1
+S18   TEST_FAILURE             196  2422       0
+S19   TEST_FAILURE               1  2422       1
+S20   TEST_FAILURE               1  2422       1
+S21   TEST_FAILURE               1  2422       1
+S22   TEST_FAILURE               1  2422       1
+S23   TEST_FAILURE               1  2422       1
+S24   TEST_FAILURE               2  2422       1
+S25   TEST_FAILURE               2  2422       0
+S26   TEST_FAILURE               1  2422       1
+S27   TEST_FAILURE               2  2422       1
+S28   TEST_FAILURE             376  2422       3
+S29   TEST_FAILURE               3  2422       0
+S30   TEST_FAILURE               1  2422       0
+S31   TEST_FAILURE               1  2422       0
+S32   TEST_FAILURE               1  2422       0
+S33   TEST_FAILURE             196  2422       0
+S34   TEST_FAILURE             196  2422       0
+S35   TEST_FAILURE               1  2422       1
+
+ZEROS                : none
+DUPLICATE SETS       : [('S18', 'S33'), ('S18', 'S34'), ('S33', 'S34')]
+NOT MEASURED         : none
+COLLECTION (modal 2422): uniform
+MEASURED OVER 40     : ['S1(n=378)', 'S18(n=196)', 'S28(n=376)', 'S33(n=196)', 'S34(n=196)']
+UNDECLARED DETONATION: none
+  DECLARED BROAD S1   n=378 the tolerance is applied nowhere, so every measured slope matches its nearest integer; the fixture's unresolved products become matched, their entries refuse, and every plan built on the catalogue refuses with them
+      direct witness present: test_a_neighbouring_integer_is_outside_the_tolerance
+  DECLARED BROAD S18  n=196 a derived key the reconstruction authority list stops naming refuses every rebuilt plan in the suite, because every plan carries a catalogue and every entry carries its slope record
+      direct witness present: test_the_plan_rebuilds_to_the_exact_nominal_object
+  DECLARED BROAD S28  n=376 the RF position ignores the anchor, so every reference entry sits megahertz off its harmonic; the fixture catalogue refuses at the comb and every plan built on it refuses with it
+      direct witness present: test_the_rf_position_is_the_anchor_plus_the_intercept
+  DECLARED BROAD S33  n=196 the comb's derived cap is a key no authority declares, which refuses every rebuilt plan in the suite
+      direct witness present: test_a_stored_harmonic_cap_is_re_derived_and_not_read
+  DECLARED BROAD S34  n=196 the entry's derived RF position is a key no authority declares, which refuses every rebuilt plan in the suite
+      direct witness present: test_a_stored_rf_position_is_re_derived_and_not_read
+NO UNIQUE WITNESS    : among 30 narrow controls: ['S25']
+SUPPRESSION          : none
+CLASSIFICATIONS      : {'TEST_FAILURE': 35}
+COMPLETENESS         : 35/35 (controls_521)  missing=none  unexpected=none
+
+VERDICT: NOT certified -- see the flags above
+==========================================================================

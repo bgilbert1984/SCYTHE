@@ -7,13 +7,13 @@ from sweep import (REPO, WORKTREES, PYTHON, SUITE_FULL, git, checkpoint_blobs,
                    run_control, working_tree_hashes, classify, expand, unittest_argv,
                    require_sane_baseline, resolve_branch,
                    control_timeout, TIMEOUT, TIMEOUT_FACTOR)
-from controls_3c import (CONTROLS, INTRODUCES, ACCEPTED_IN_SCOPE,
+from controls_521 import (CONTROLS, INTRODUCES, ACCEPTED_IN_SCOPE,
                            ACCEPTED_DEFERRED, check_inventory,
                            check_mutations)
 
 # The slice branch. It is deleted when the slice merges, so it is named
 # here rather than hardcoded; SCYTHE_BRANCH selects the next one.
-BRANCH = os.environ.get("SCYTHE_BRANCH", "main")   # both §5.20 slices are merged
+BRANCH = os.environ.get("SCYTHE_BRANCH", "feat/5.21-controls")
 COMMIT = resolve_branch(BRANCH)
 WATCHED = sorted({rel for _c, ps in CONTROLS for rel, _o, _n in ps})
 BASE = checkpoint_blobs(COMMIT, WATCHED)
@@ -41,12 +41,12 @@ print("mutation audit: %d controls, no problems" % len(CONTROLS), flush=True)
 # The tree whose integrity matters is the BUILD worktree: the new modules
 # exist only on the branch, and a leak from a disposable worktree would land
 # there rather than in main's checkout.
-BUILD = Path(S) / "w3c"   # this host's worktree for the 3c-core slice
+BUILD = Path(S) / "w521"   # this host's worktree for the §5.21 slice
 import hashlib as _h
 def _build_hashes(paths):
     return {p: _h.sha256((BUILD / p).read_bytes()).hexdigest() for p in paths}
 BEFORE = _build_hashes(WATCHED)
-out = Path(S) / "sweep-3c.jsonl"
+out = Path(S) / "sweep-521.jsonl"
 out.write_text("")
 
 # The unmutated baseline, in its own worktree, so "collection degraded" is
@@ -72,17 +72,15 @@ subprocess.run(["git","worktree","remove","--force",str(tree)], cwd=str(REPO),
 shutil.rmtree(tree, ignore_errors=True)
 print(f"BASELINE  {cls}  {count} tests  exit {proc.returncode}  "
       f"{BASELINE_ELAPSED}s", flush=True)
-# 2423 is what the S22 commit (the twelve entry-17 controls and the two
-# witnesses they needed, on main after 39da055e) collects, exactly, with 2
-# pre-existing skips on a host without the pinned observation tree. The count
-# belongs to that checkpoint, not to the project: MANIFEST.txt carries the
-# table (2245 / 2254 / 2306 / 2322 / 2370 / 2392 / 2399 / 2421 / 2423). A
-# baseline that differs from it means the controls and the tree are from
-# different generations, which no floor can report; the floor moves with the
-# checkpoint and is never lowered.
-require_sane_baseline(cls, count, 2423, ids=ids, proc=proc,
-                      report=Path(S) / "baseline-refused-3c.out",
-                      expected=2423)
+# 2422 is what the S22 commit (main after 39da055e, plus the fourteen
+# entry-17 controls and the one witness they needed) collects, with 2
+# host-dependent skips (the pinned observation tree, a channelizer geometry).
+# The count belongs to that checkpoint, not to the project: a baseline that
+# differs means the controls and the tree are from different generations,
+# which no floor can report; the floor moves with the checkpoint.
+require_sane_baseline(cls, count, 2422, ids=ids, proc=proc,
+                      report=Path(S) / "baseline-refused-521.out",
+                      expected=2422)
 # Each control's bound is derived from the baseline this host just produced,
 # not from a constant calibrated elsewhere: a fixed 1800s makes a healthy
 # control on a slower or loaded host read as TIMED_OUT.
@@ -98,7 +96,7 @@ with out.open("a") as fh:
                          # so suppression is computable from the file alone,
                          # without the runner's in-memory state
                          "skipped":BASELINE_SKIPS,"skips_added":[],
-                         "controls_module":"controls_3c",
+                         "controls_module":"controls_521",
                          "elapsed_s":BASELINE_ELAPSED,
                          "control_timeout_s":CONTROL_TIMEOUT})+"\n")
 
