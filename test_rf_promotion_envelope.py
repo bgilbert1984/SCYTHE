@@ -41,6 +41,10 @@ from rf_promotion_envelope import (
     deltas_over_ceiling, retune_delta_ceiling_hz,
     generate_tunings, generate_visit_schedule,
     harmonic_cap,
+    ReferenceComb,
+    PLAN_REFERENCE_HARMONIC_UNDECLARED, PLAN_REFERENCE_ABOVE_HARMONIC_CAP,
+    PLAN_REFERENCE_COMB_MISMATCH, PLAN_REFERENCE_DISAGREES,
+    PLAN_SPUR_ANCHOR_DISAGREES,
     select_spur_trials, _canonical_bytes, SELECTION_REVISION,
     PLAN_SELECTION_NOT_REPRODUCIBLE,
     maximum_retune_delta_hz, usable_half_span_hz,
@@ -95,6 +99,24 @@ def _persistence(tuning_id="tuning-000", qualifying=8):
                                for i in range(8)))
 
 
+# The fixture's receiver: a 28.8 MHz reference known to ±1 ppm, the plan's
+# declared values, so the cap is 355 and the match window at harmonic 16 is
+# 460.8 Hz. The tunings are the ones the plan seed generates, so a fixture
+# anchor is the centre the plan declares for that tuning.
+_COMB = ReferenceComb(reference_hz=28_800_000.0, reference_ppm=1.0)
+_TUNINGS = generate_tunings(seed=SEED, bands=_bands())
+_CENTRE_HZ = {t.tuning_id: t.center_frequency_hz for t in _TUNINGS}
+# The one fixture tuning whose span holds a harmonic of that comb: tuning-054
+# at 461 035 418 Hz sits 235 418 Hz above 16 x 28.8 MHz, so a reference-class
+# entry is anchored there with the intercept that puts it on the harmonic.
+# Every other tuning is more than 800 kHz from any harmonic, which is the
+# ordinary case §5.22 predicts: an uncalibrated comb earns almost no matches.
+_REFERENCE_TUNING = "tuning-054"
+_REFERENCE_HARMONIC = 16
+_REFERENCE_INTERCEPT_HZ = (_COMB.harmonic_position_hz(_REFERENCE_HARMONIC)
+                           - _CENTRE_HZ[_REFERENCE_TUNING])
+assert _CENTRE_HZ[_REFERENCE_TUNING] == 461_035_418.0, _CENTRE_HZ[_REFERENCE_TUNING]
+
 # Zero-mean by default: four declared retunes, each delta in both directions.
 # An intercept is then the mean offset, so a fit whose intercept term went
 # wrong would predict correctly from these and be caught only where a witness
@@ -105,13 +127,21 @@ _SKEWED_DELTAS = (50_000.0, -100_000.0, 200_000.0)
 
 
 def _slope(tuning_id="tuning-000", slope=2.0, intercept=100_000.0,
-           deltas=_DELTAS, offsets=None):
+           deltas=_DELTAS, offsets=None, anchor=None):
     """Declared retunes at one tuning, on an exact line unless the offsets are
-    given by hand."""
+    given by hand, anchored at the centre the plan declares for that tuning."""
     if offsets is None:
         offsets = tuple(intercept + slope * d for d in deltas)
+    if anchor is None:
+        anchor = _CENTRE_HZ.get(tuning_id, 430_000_000.0)
     return SpurSlopeEstimate(tuning_id=tuning_id, retune_delta_hz=deltas,
-                             signed_baseband_hz=offsets)
+                             signed_baseband_hz=offsets,
+                             anchor_center_frequency_hz=anchor)
+
+
+def _reference_slope(slope=-1.0, intercept=_REFERENCE_INTERCEPT_HZ, **kwargs):
+    """A slope-−1 record anchored where the fixture comb has a harmonic."""
+    return _slope(_REFERENCE_TUNING, slope=slope, intercept=intercept, **kwargs)
 
 
 # The slope each class is supported by. VANISHES is decided by the load and
@@ -123,18 +153,56 @@ _SLOPE_BY_CLASS = {CONSISTENT_WITH_INTERNAL_MIXING: 2.0,
                    VANISHES_ON_DECLARED_TERMINATION: 0.0}
 
 
-def _catalogue(size=45, slopes=None):
+def _reference_anchor(comb=_COMB, tunings=_TUNINGS):
+    """The first tuning whose span holds a harmonic of `comb` at or below its
+    cap, as ``(tuning_id, centre_hz, harmonic)``, or None. With the default
+    comb and bands that is tuning-054 and harmonic 16; an uncalibrated dongle
+    at ±100 ppm caps at 3, and no harmonic of 28.8 MHz below the fourth is in
+    the UHF band, so it has none -- which is §5.22's predicted outcome and
+    not a fixture convenience."""
+    for tuning in tunings:
+        harmonic = int(round(tuning.center_frequency_hz / comb.reference_hz))
+        if 1 <= harmonic <= comb.harmonic_cap and abs(
+                tuning.center_frequency_hz
+                - comb.harmonic_position_hz(harmonic)) <= 800_000.0:
+            return tuning.tuning_id, tuning.center_frequency_hz, harmonic
+    return None
+
+
+def _catalogue(size=45, slopes=None, comb=_COMB, tunings=_TUNINGS):
+    """A catalogue matched against `comb`, anchored at `tunings`. Without a
+    reachable harmonic the catalogue holds the other three classes."""
     classes = (SESSION_SCOPED, RECONNECT_STABLE, POWER_CYCLE_STABLE)
     kinds = (CONSISTENT_WITH_INTERNAL_MIXING, CONSISTENT_WITH_INTERNAL_REFERENCE,
              SPUR_CANDIDATE_UNRESOLVED, VANISHES_ON_DECLARED_TERMINATION)
+    anchor = _reference_anchor(comb, tunings)
+    if anchor is None:
+        kinds = tuple(k for k in kinds if k != CONSISTENT_WITH_INTERNAL_REFERENCE)
+    centre = {t.tuning_id: t.center_frequency_hz for t in tunings}
     slopes = dict(_SLOPE_BY_CLASS, **(slopes or {}))
-    return tuple(CataloguedSpur(spur_id=f"spur-{i:03d}",
-                                classification=kinds[i % len(kinds)],
-                                stability_class=classes[i % len(classes)],
-                                persistence=_persistence(f"tuning-{i % 64:03d}"),
-                                slope=_slope(f"tuning-{i % 64:03d}",
-                                             slope=slopes[kinds[i % len(kinds)]]))
-                 for i in range(size))
+    entries = []
+    for i in range(size):
+        kind = kinds[i % len(kinds)]
+        if kind == CONSISTENT_WITH_INTERNAL_REFERENCE:
+            # Anchored where the comb has a harmonic, on it, and claiming it.
+            tuning_id, centre_hz, harmonic = anchor
+            entries.append(CataloguedSpur(
+                spur_id=f"spur-{i:03d}", classification=kind,
+                stability_class=classes[i % len(classes)],
+                persistence=_persistence(tuning_id),
+                slope=_slope(tuning_id, slope=slopes[kind],
+                             intercept=comb.harmonic_position_hz(harmonic) - centre_hz,
+                             anchor=centre_hz),
+                reference_harmonic=harmonic))
+        else:
+            tuning_id = f"tuning-{i % 64:03d}"
+            entries.append(CataloguedSpur(
+                spur_id=f"spur-{i:03d}", classification=kind,
+                stability_class=classes[i % len(classes)],
+                persistence=_persistence(tuning_id),
+                slope=_slope(tuning_id, slope=slopes[kind],
+                             anchor=centre.get(tuning_id))))
+    return tuple(entries)
 
 
 def _confidence_for(spur):
@@ -163,8 +231,9 @@ def _eligible_trials(catalogue, chains, epochs, needed, tunings=None):
 
 def _spur_allocation(trials=MINIMUM_WINDOWS_PER_STRATUM, size=45, epochs=2,
                      chains=None, eligible=None, selected=None,
-                     eligible_surplus=139, slopes=None):
-    catalogue = _catalogue(size, slopes=slopes)
+                     eligible_surplus=139, slopes=None, comb=_COMB,
+                     tunings=_TUNINGS):
+    catalogue = _catalogue(size, slopes=slopes, comb=comb, tunings=tunings)
     present = []
     for spur in catalogue:
         if spur.stability_class not in present:
@@ -175,7 +244,8 @@ def _spur_allocation(trials=MINIMUM_WINDOWS_PER_STRATUM, size=45, epochs=2,
         # A genuine eligible universe, larger than the sample drawn from it:
         # membership alone would let the sample be chosen after the results.
         eligible = _eligible_trials(catalogue, chains, epochs,
-                                    trials + (eligible_surplus or 0))
+                                    trials + (eligible_surplus or 0),
+                                    tunings=tunings)
     if selected is None:
         canonical = sorted(
             {_canonical_bytes(t.to_dict()).decode(): t for t in eligible}.values(),
@@ -183,7 +253,7 @@ def _spur_allocation(trials=MINIMUM_WINDOWS_PER_STRATUM, size=45, epochs=2,
         selected = select_spur_trials(eligible=canonical, seed=SEED,
                                       required=trials)
     return SpurAllocation(
-        catalogue=catalogue, epochs=epochs,
+        reference=comb, catalogue=catalogue, epochs=epochs,
         per_stability_class=tuple(
             (name, base + (1 if i < extra else 0))
             for i, name in enumerate(present)),
@@ -217,14 +287,25 @@ def _plan(envelope=None, seed=SEED, **kwargs):
     envelope = _envelope() if envelope is None else envelope
     chains = sorted(envelope.admissible_chain_hashes())
     default_spurs = ("spur_allocation" not in kwargs)
+    reference_hz = kwargs.pop("reference_hz", 28_800_000.0)
+    reference_ppm = kwargs.pop("reference_ppm", 1.0)
+    # The default catalogue is matched against the comb the plan declares,
+    # because the plan refuses a catalogue matched against any other.
+    comb = (_COMB if (reference_hz, reference_ppm) == (28_800_000.0, 1.0)
+            else ReferenceComb(reference_hz=reference_hz,
+                               reference_ppm=reference_ppm))
+    bands = kwargs.pop("bands", _bands())
+    # ... and anchored at the tunings the plan's seed and bands generate,
+    # because the plan refuses an anchor at a centre it does not declare.
+    tunings = (_TUNINGS if (seed, bands) == (SEED, _bands())
+               else generate_tunings(seed=seed, bands=bands))
     return declare_capture_plan(
-        seed=seed, envelope=envelope,
-        bands=kwargs.pop("bands", _bands()),
+        seed=seed, envelope=envelope, bands=bands,
         trial_plans=kwargs.pop("trial_plans", _trial_plans(envelope)),
-        spur_allocation=(_spur_allocation(chains=chains) if default_spurs
-                         else kwargs.pop("spur_allocation")),
-        reference_hz=kwargs.pop("reference_hz", 28_800_000.0),
-        reference_ppm=kwargs.pop("reference_ppm", 1.0), **kwargs)
+        spur_allocation=(_spur_allocation(chains=chains, comb=comb,
+                                          tunings=tunings)
+                         if default_spurs else kwargs.pop("spur_allocation")),
+        reference_hz=reference_hz, reference_ppm=reference_ppm, **kwargs)
 
 
 class NotACartesianProductTests(unittest.TestCase):
@@ -796,7 +877,7 @@ class SpurFeasibilityTests(unittest.TestCase):
             signed_baseband_hz=0.0,
             confidence=CONFIDENCE_MIXING_TERMINATION_AND_SECOND_TIME)
         with self.assertRaises(EnvelopeRefused) as caught:
-            SpurAllocation(catalogue=catalogue, epochs=2,
+            SpurAllocation(reference=_COMB, catalogue=catalogue, epochs=2,
                            per_stability_class=((SESSION_SCOPED, 1),
                                                 (RECONNECT_STABLE, 1),
                                                 (POWER_CYCLE_STABLE, 1)),
@@ -827,7 +908,7 @@ class SpurFeasibilityTests(unittest.TestCase):
 
     def test_an_empty_catalogue_refuses(self):
         with self.assertRaises(EnvelopeRefused) as caught:
-            SpurAllocation(catalogue=(), epochs=2,
+            SpurAllocation(reference=_COMB, catalogue=(), epochs=2,
                            per_stability_class=((SESSION_SCOPED, 1),),
                            eligible_trials=(), selected_trials=(),
                            selection_seed=SEED)
@@ -843,7 +924,7 @@ class SpurFeasibilityTests(unittest.TestCase):
         stratum where it is easiest."""
         catalogue = _catalogue(45)
         with self.assertRaises(EnvelopeRefused) as caught:
-            SpurAllocation(catalogue=catalogue, epochs=2,
+            SpurAllocation(reference=_COMB, catalogue=catalogue, epochs=2,
                            per_stability_class=((SESSION_SCOPED, 5_561),),
                            eligible_trials=(), selected_trials=(),
                            selection_seed=SEED)
@@ -852,7 +933,7 @@ class SpurFeasibilityTests(unittest.TestCase):
     def test_a_class_allocated_nothing_refuses(self):
         catalogue = _catalogue(45)
         with self.assertRaises(EnvelopeRefused) as caught:
-            SpurAllocation(catalogue=catalogue, epochs=2,
+            SpurAllocation(reference=_COMB, catalogue=catalogue, epochs=2,
                            per_stability_class=((SESSION_SCOPED, 5_561),
                                                 (RECONNECT_STABLE, 0),
                                                 (POWER_CYCLE_STABLE, 0)),
@@ -865,7 +946,7 @@ class SpurFeasibilityTests(unittest.TestCase):
         do not add up to the trials the stratum plans."""
         good = _spur_allocation()
         skewed = SpurAllocation(
-            catalogue=good.catalogue, epochs=good.epochs,
+            reference=_COMB, catalogue=good.catalogue, epochs=good.epochs,
             per_stability_class=tuple((name, 1) for name, _c
                                       in good.per_stability_class),
             eligible_trials=good.eligible_trials,
@@ -884,8 +965,9 @@ class SpurFeasibilityTests(unittest.TestCase):
         reference = CataloguedSpur(spur_id="s2",
                                    classification=CONSISTENT_WITH_INTERNAL_REFERENCE,
                                    stability_class=SESSION_SCOPED,
-                                   persistence=_persistence(),
-                                   slope=_slope(slope=-1.0))
+                                   persistence=_persistence(_REFERENCE_TUNING),
+                                   slope=_reference_slope(),
+                                   reference_harmonic=_REFERENCE_HARMONIC)
         self.assertEqual(mixing.required_confidence,
                          CONFIDENCE_MIXING_TERMINATION_AND_SECOND_TIME)
         self.assertEqual(reference.required_confidence,
@@ -1115,16 +1197,18 @@ class SlopeIsEstimatedTests(unittest.TestCase):
         retune cannot separate them, and §5.21 keeps the class that claims
         internality on that slope at the higher confidence. It is not
         mixing."""
-        minus_one = _slope(slope=-1.0)
+        minus_one = _reference_slope()
         self.assertEqual(minus_one.matched_slope, -1)
         CataloguedSpur(spur_id="s", classification=CONSISTENT_WITH_INTERNAL_REFERENCE,
-                       stability_class=SESSION_SCOPED, persistence=_persistence(),
-                       slope=minus_one)
+                       stability_class=SESSION_SCOPED,
+                       persistence=_persistence(_REFERENCE_TUNING),
+                       slope=minus_one, reference_harmonic=_REFERENCE_HARMONIC)
         with self.assertRaises(EnvelopeRefused) as caught:
             CataloguedSpur(spur_id="s",
                            classification=CONSISTENT_WITH_INTERNAL_MIXING,
                            stability_class=SESSION_SCOPED,
-                           persistence=_persistence(), slope=minus_one)
+                           persistence=_persistence(_REFERENCE_TUNING),
+                           slope=minus_one)
         self.assertEqual(caught.exception.code, PLAN_CLASSIFICATION_NOT_SUPPORTED)
 
     def test_a_slope_outside_the_family_is_unresolved_and_nothing_else(self):
@@ -1204,11 +1288,11 @@ class SlopeIsEstimatedTests(unittest.TestCase):
 
     def test_the_observations_are_two_of_one_thing(self):
         with self.assertRaises(EnvelopeRefused) as caught:
-            SpurSlopeEstimate(tuning_id="t", retune_delta_hz=_DELTAS,
+            SpurSlopeEstimate(anchor_center_frequency_hz=430_000_000.0, tuning_id="t", retune_delta_hz=_DELTAS,
                               signed_baseband_hz=(1.0, 2.0))
         self.assertEqual(caught.exception.code, PLAN_SLOPE_NOT_ESTIMATED)
         with self.assertRaises(EnvelopeRefused) as caught:
-            SpurSlopeEstimate(tuning_id="t", retune_delta_hz=_DELTAS,
+            SpurSlopeEstimate(anchor_center_frequency_hz=430_000_000.0, tuning_id="t", retune_delta_hz=_DELTAS,
                               signed_baseband_hz=(1.0, float("nan"), 3.0, 4.0))
         self.assertEqual(caught.exception.code, PLAN_QUANTITY_NOT_FINITE)
 
@@ -1534,7 +1618,7 @@ class TheUnitsAreRetainedTests(unittest.TestCase):
     def test_the_digest_is_reproducible_from_what_the_plan_holds(self):
         allocation = _plan().spur_allocation
         rebuilt = SpurAllocation(
-            catalogue=allocation.catalogue, epochs=allocation.epochs,
+            reference=_COMB, catalogue=allocation.catalogue, epochs=allocation.epochs,
             per_stability_class=allocation.per_stability_class,
             eligible_trials=allocation.eligible_trials, selected_trials=(), selection_seed=SEED)
         self.assertEqual(rebuilt.eligible_trials_digest(),
@@ -1584,7 +1668,7 @@ class TheUnitsAreRetainedTests(unittest.TestCase):
             confidence=first.confidence)
         with self.assertRaises(EnvelopeRefused) as caught:
             SpurAllocation(
-                catalogue=catalogue, epochs=2,
+                reference=_COMB, catalogue=catalogue, epochs=2,
                 per_stability_class=((SESSION_SCOPED, 1), (RECONNECT_STABLE, 1),
                                      (POWER_CYCLE_STABLE, 1)),
                 eligible_trials=(first, contradicting), selected_trials=(),
@@ -1602,7 +1686,7 @@ class TheUnitsAreRetainedTests(unittest.TestCase):
             stability_class=catalogue[2].stability_class,
             signed_baseband_hz=0.0, confidence=_confidence_for(catalogue[2]))
         allocation = SpurAllocation(
-            catalogue=catalogue, epochs=2,
+            reference=_COMB, catalogue=catalogue, epochs=2,
             per_stability_class=((SESSION_SCOPED, 1), (RECONNECT_STABLE, 1),
                                  (POWER_CYCLE_STABLE, 1)),
             eligible_trials=(trial, trial), selected_trials=(),
@@ -1641,11 +1725,11 @@ class CanonicalDuplicateTests(unittest.TestCase):
         assert a_again is not a and a_again == a
         per_class = ((SESSION_SCOPED, 1), (RECONNECT_STABLE, 1),
                      (POWER_CYCLE_STABLE, 1))
-        once = SpurAllocation(catalogue=catalogue, epochs=2,
+        once = SpurAllocation(reference=_COMB, catalogue=catalogue, epochs=2,
                               per_stability_class=per_class,
                               eligible_trials=(a, b), selected_trials=(),
                               selection_seed=SEED)
-        twice = SpurAllocation(catalogue=catalogue, epochs=2,
+        twice = SpurAllocation(reference=_COMB, catalogue=catalogue, epochs=2,
                                per_stability_class=per_class,
                                eligible_trials=(a, a_again, b), selected_trials=(),
                                selection_seed=SEED)
@@ -1680,11 +1764,11 @@ class CanonicalDuplicateTests(unittest.TestCase):
         units = _eligible_trials(catalogue, chains, 2, 40)
         per_class = ((SESSION_SCOPED, 1), (RECONNECT_STABLE, 1),
                      (POWER_CYCLE_STABLE, 1))
-        forward = SpurAllocation(catalogue=catalogue, epochs=2,
+        forward = SpurAllocation(reference=_COMB, catalogue=catalogue, epochs=2,
                                  per_stability_class=per_class,
                                  eligible_trials=units, selected_trials=(),
                                  selection_seed=SEED)
-        backward = SpurAllocation(catalogue=catalogue, epochs=2,
+        backward = SpurAllocation(reference=_COMB, catalogue=catalogue, epochs=2,
                                   per_stability_class=per_class,
                                   eligible_trials=tuple(reversed(units)),
                                   selected_trials=(), selection_seed=SEED)
@@ -1729,7 +1813,7 @@ class SelectionIsPrecommittedTests(unittest.TestCase):
             list(good.selected_trials[1:]) + [unchosen[0]]))
         self.assertEqual(len(swapped), len(good.selected_trials))
         with self.assertRaises(EnvelopeRefused) as caught:
-            SpurAllocation(catalogue=good.catalogue, epochs=good.epochs,
+            SpurAllocation(reference=_COMB, catalogue=good.catalogue, epochs=good.epochs,
                            per_stability_class=good.per_stability_class,
                            eligible_trials=good.eligible_trials,
                            selected_trials=swapped,
@@ -1739,7 +1823,7 @@ class SelectionIsPrecommittedTests(unittest.TestCase):
     def test_a_selection_of_the_wrong_size_refuses_at_the_plan(self):
         good = _spur_allocation()
         short = SpurAllocation(
-            catalogue=good.catalogue, epochs=good.epochs,
+            reference=_COMB, catalogue=good.catalogue, epochs=good.epochs,
             per_stability_class=good.per_stability_class,
             eligible_trials=good.eligible_trials,
             selected_trials=select_spur_trials(
@@ -1782,6 +1866,281 @@ class WhatThisModuleDoesNotDoTests(unittest.TestCase):
         returned True would be the inert admission entry 11 refuses."""
         import rf_promotion_envelope as module
         self.assertFalse(hasattr(module, "admit_captured_window"))
+
+
+class ReferenceCombGovernsTheReferenceClassTests(unittest.TestCase):
+    """PENDING_AMENDMENTS entry 17. §5.21 establishes the reference class by
+    slope −1, persistence under declared termination, AND a match to a
+    harmonic of the declared reference within ``n · f_ref · ppm``, below the
+    cap the ppm forces. The third is now enforced before an entry is usable."""
+
+    def test_the_comb_is_declared_and_its_cap_is_derived(self):
+        self.assertEqual(_COMB.harmonic_cap, 355)
+        self.assertEqual(ReferenceComb(reference_hz=28_800_000.0,
+                                       reference_ppm=100.0).harmonic_cap, 3)
+        for bad in (0.0, -1.0, float("nan"), float("inf")):
+            with self.assertRaises(EnvelopeRefused) as caught:
+                ReferenceComb(reference_hz=bad, reference_ppm=1.0)
+            self.assertEqual(caught.exception.code, PLAN_QUANTITY_NOT_FINITE)
+            with self.assertRaises(EnvelopeRefused) as caught:
+                ReferenceComb(reference_hz=28_800_000.0, reference_ppm=bad)
+            self.assertEqual(caught.exception.code, PLAN_QUANTITY_NOT_FINITE)
+        self.assertEqual(_COMB.to_dict(), {"reference_hz": 28_800_000.0,
+                                           "reference_ppm": 1.0,
+                                           "harmonic_cap": 355})
+
+    def test_the_window_grows_with_the_harmonic(self):
+        """``n · f_ref · ppm``: harmonic 16 at 1 ppm is matched inside
+        460.8 Hz, harmonic 1 inside 28.8 Hz. A window that did not grow would
+        make the cap pointless, and one that grew faster would make it
+        wrong."""
+        self.assertAlmostEqual(_COMB.match_window_hz(1), 28.8)
+        self.assertAlmostEqual(_COMB.match_window_hz(16), 460.8)
+        harmonic_16 = _COMB.harmonic_position_hz(16)
+        self.assertTrue(_COMB.matches(harmonic_16 + 460.0, 16))
+        self.assertFalse(_COMB.matches(harmonic_16 + 461.0, 16))
+        self.assertTrue(_COMB.matches(_COMB.harmonic_position_hz(1) + 28.0, 1))
+        self.assertFalse(_COMB.matches(_COMB.harmonic_position_hz(1) + 29.0, 1))
+
+    def test_at_the_window_is_inside_it(self):
+        """As at the slope tolerance and the persistence margin, and tolerant
+        of the last bit so a position exactly one window away is not read as
+        outside it."""
+        harmonic_16 = _COMB.harmonic_position_hz(16)
+        self.assertTrue(_COMB.matches(harmonic_16 + _COMB.match_window_hz(16), 16))
+        self.assertTrue(_COMB.matches(harmonic_16 - _COMB.match_window_hz(16), 16))
+
+    def test_the_rf_position_is_the_anchor_plus_the_intercept(self):
+        """A product's RF position at the anchor LO is the declared centre
+        plus the fitted intercept; for the m = 0 product that is n · f_ref
+        itself. The fixture's reference entry sits exactly on harmonic 16."""
+        record = _reference_slope()
+        self.assertAlmostEqual(record.rf_position_hz,
+                               _COMB.harmonic_position_hz(_REFERENCE_HARMONIC))
+        self.assertAlmostEqual(_slope("tuning-000", intercept=100_000.0).rf_position_hz,
+                               _CENTRE_HZ["tuning-000"] + 100_000.0)
+
+    def test_a_slope_record_carries_a_positive_finite_anchor(self):
+        for bad in (0.0, -430_000_000.0, float("nan"), float("inf")):
+            with self.assertRaises(EnvelopeRefused) as caught:
+                _slope(anchor=bad)
+            self.assertEqual(caught.exception.code, PLAN_QUANTITY_NOT_FINITE)
+        self.assertEqual(_slope().to_dict()["anchor_center_frequency_hz"],
+                         _CENTRE_HZ["tuning-000"])
+
+    def test_a_reference_entry_declares_its_harmonic(self):
+        """An entry that names no n has matched nothing, whatever its slope."""
+        for harmonic in (None, 0, -16, 16.0, "16"):
+            with self.assertRaises(EnvelopeRefused) as caught:
+                CataloguedSpur(spur_id="s",
+                               classification=CONSISTENT_WITH_INTERNAL_REFERENCE,
+                               stability_class=SESSION_SCOPED,
+                               persistence=_persistence(_REFERENCE_TUNING),
+                               slope=_reference_slope(),
+                               reference_harmonic=harmonic)
+            self.assertEqual(caught.exception.code,
+                             PLAN_REFERENCE_HARMONIC_UNDECLARED, harmonic)
+
+    def test_a_harmonic_on_any_other_class_is_refused(self):
+        """Only the reference class claims a harmonic; on any other class it
+        is a claim nothing checks."""
+        for classification, slope in ((CONSISTENT_WITH_INTERNAL_MIXING, 2.0),
+                                      (SPUR_CANDIDATE_UNRESOLVED, 0.5),
+                                      (VANISHES_ON_DECLARED_TERMINATION, 0.0)):
+            with self.assertRaises(EnvelopeRefused) as caught:
+                CataloguedSpur(spur_id="s", classification=classification,
+                               stability_class=SESSION_SCOPED,
+                               persistence=_persistence(),
+                               slope=_slope(slope=slope), reference_harmonic=16)
+            self.assertEqual(caught.exception.code,
+                             PLAN_CLASSIFICATION_NOT_SUPPORTED, classification)
+
+    def test_the_slope_is_checked_before_the_harmonic(self):
+        """A reference label on a slope-+2 record is refused for the slope,
+        with or without a harmonic; the harmonic check does not pre-empt the
+        analysis it is added to."""
+        for harmonic in (None, 16):
+            with self.assertRaises(EnvelopeRefused) as caught:
+                CataloguedSpur(spur_id="s",
+                               classification=CONSISTENT_WITH_INTERNAL_REFERENCE,
+                               stability_class=SESSION_SCOPED,
+                               persistence=_persistence(_REFERENCE_TUNING),
+                               slope=_reference_slope(slope=2.0),
+                               reference_harmonic=harmonic)
+            self.assertEqual(caught.exception.code, PLAN_CLASSIFICATION_NOT_SUPPORTED)
+
+    def _reference_entry(self, harmonic=_REFERENCE_HARMONIC, intercept=None,
+                         spur_id="ref"):
+        return CataloguedSpur(
+            spur_id=spur_id, classification=CONSISTENT_WITH_INTERNAL_REFERENCE,
+            stability_class=SESSION_SCOPED,
+            persistence=_persistence(_REFERENCE_TUNING),
+            slope=(_reference_slope() if intercept is None
+                   else _reference_slope(intercept=intercept)),
+            reference_harmonic=harmonic)
+
+    def test_a_reference_entry_on_the_harmonic_matches(self):
+        entry = self._reference_entry()
+        self.assertIsNone(entry.reference_match(_COMB))
+        self.assertEqual(entry.to_dict()["reference_harmonic"], _REFERENCE_HARMONIC)
+        self.assertAlmostEqual(entry.to_dict()["rf_position_hz"],
+                               _COMB.harmonic_position_hz(_REFERENCE_HARMONIC))
+
+    def test_a_reference_entry_above_the_harmonic_cap_refuses(self):
+        """At ±100 ppm the cap is 3. Harmonic 16 of an uncalibrated dongle's
+        reference is matched inside 46 kHz, which is barely a claim, and the
+        entry is refused rather than matched loosely."""
+        uncalibrated = ReferenceComb(reference_hz=28_800_000.0, reference_ppm=100.0)
+        self.assertEqual(uncalibrated.harmonic_cap, 3)
+        with self.assertRaises(EnvelopeRefused) as caught:
+            self._reference_entry().reference_match(uncalibrated)
+        self.assertEqual(caught.exception.code, PLAN_REFERENCE_ABOVE_HARMONIC_CAP)
+
+    def test_a_reference_entry_off_the_comb_refuses(self):
+        """One window plus one hertz away is outside it; one window away is
+        inside. The window is the harmonic's own, 460.8 Hz at 16."""
+        window = _COMB.match_window_hz(_REFERENCE_HARMONIC)
+        self._reference_entry(intercept=_REFERENCE_INTERCEPT_HZ + window).reference_match(_COMB)
+        with self.assertRaises(EnvelopeRefused) as caught:
+            self._reference_entry(
+                intercept=_REFERENCE_INTERCEPT_HZ + window + 1.0).reference_match(_COMB)
+        self.assertEqual(caught.exception.code, PLAN_REFERENCE_COMB_MISMATCH)
+        with self.assertRaises(EnvelopeRefused) as caught:
+            self._reference_entry(harmonic=15).reference_match(_COMB)
+        self.assertEqual(caught.exception.code, PLAN_REFERENCE_COMB_MISMATCH)
+
+    def test_the_match_is_against_a_comb_and_nothing_else(self):
+        with self.assertRaises(EnvelopeRefused) as caught:
+            self._reference_entry().reference_match((28_800_000.0, 1.0))
+        self.assertEqual(caught.exception.code, PLAN_ABSENT)
+
+    def test_any_other_class_has_nothing_to_match(self):
+        mixing = CataloguedSpur(spur_id="m",
+                                classification=CONSISTENT_WITH_INTERNAL_MIXING,
+                                stability_class=SESSION_SCOPED,
+                                persistence=_persistence(), slope=_slope(slope=2.0))
+        uncalibrated = ReferenceComb(reference_hz=28_800_000.0, reference_ppm=100.0)
+        self.assertIsNone(mixing.reference_match(uncalibrated))
+
+    def test_the_catalogue_declares_its_comb_and_matches_every_reference_entry(self):
+        """The catalogue is where the match is enforced, before anything reads
+        the class off an entry: a catalogue holding a reference entry the comb
+        does not support is refused at construction."""
+        good = _spur_allocation()
+        self.assertEqual(good.reference, _COMB)
+        self.assertEqual(good.to_dict()["reference"], _COMB.to_dict())
+        off = tuple(
+            self._reference_entry(intercept=_REFERENCE_INTERCEPT_HZ + 1_000.0,
+                                  spur_id=spur.spur_id)
+            if spur.classification == CONSISTENT_WITH_INTERNAL_REFERENCE else spur
+            for spur in good.catalogue)
+        with self.assertRaises(EnvelopeRefused) as caught:
+            SpurAllocation(reference=_COMB, catalogue=off, epochs=good.epochs,
+                           per_stability_class=good.per_stability_class,
+                           eligible_trials=good.eligible_trials,
+                           selected_trials=good.selected_trials,
+                           selection_seed=good.selection_seed)
+        self.assertEqual(caught.exception.code, PLAN_REFERENCE_COMB_MISMATCH)
+        with self.assertRaises(EnvelopeRefused) as caught:
+            SpurAllocation(reference=(28_800_000.0, 1.0), catalogue=good.catalogue,
+                           epochs=good.epochs,
+                           per_stability_class=good.per_stability_class,
+                           eligible_trials=good.eligible_trials,
+                           selected_trials=good.selected_trials,
+                           selection_seed=good.selection_seed)
+        self.assertEqual(caught.exception.code, PLAN_ABSENT)
+
+    def test_an_uncalibrated_comb_refuses_the_catalogue_at_the_cap(self):
+        good = _spur_allocation()
+        with self.assertRaises(EnvelopeRefused) as caught:
+            SpurAllocation(reference=ReferenceComb(reference_hz=28_800_000.0,
+                                                   reference_ppm=100.0),
+                           catalogue=good.catalogue, epochs=good.epochs,
+                           per_stability_class=good.per_stability_class,
+                           eligible_trials=good.eligible_trials,
+                           selected_trials=good.selected_trials,
+                           selection_seed=good.selection_seed)
+        self.assertEqual(caught.exception.code, PLAN_REFERENCE_ABOVE_HARMONIC_CAP)
+
+    def test_the_plan_and_the_catalogue_declare_one_reference(self):
+        """Declared twice because each is read without the other; a plan at
+        1 ppm over a catalogue matched at 2 ppm is two crystals."""
+        good = _spur_allocation()
+        looser = SpurAllocation(
+            reference=ReferenceComb(reference_hz=28_800_000.0, reference_ppm=2.0),
+            catalogue=good.catalogue, epochs=good.epochs,
+            per_stability_class=good.per_stability_class,
+            eligible_trials=good.eligible_trials,
+            selected_trials=good.selected_trials,
+            selection_seed=good.selection_seed)
+        with self.assertRaises(EnvelopeRefused) as caught:
+            _plan(spur_allocation=looser)
+        self.assertEqual(caught.exception.code, PLAN_REFERENCE_DISAGREES)
+        _plan(spur_allocation=looser, reference_ppm=2.0)
+
+    def _catalogue_with(self, replacement, index=0):
+        good = _spur_allocation()
+        catalogue = list(good.catalogue)
+        catalogue[index] = replacement(catalogue[index])
+        return SpurAllocation(
+            reference=_COMB, catalogue=tuple(catalogue), epochs=good.epochs,
+            per_stability_class=good.per_stability_class,
+            eligible_trials=good.eligible_trials,
+            selected_trials=good.selected_trials,
+            selection_seed=good.selection_seed)
+
+    def test_an_entry_anchored_off_its_declared_tuning_refuses_at_the_plan(self):
+        """The RF position the comb was matched at is an offset from an LO;
+        an anchor the plan declares at another centre is an LO the schedule
+        never set."""
+        def moved(spur):
+            return CataloguedSpur(
+                spur_id=spur.spur_id, classification=spur.classification,
+                stability_class=spur.stability_class,
+                persistence=spur.persistence,
+                slope=_slope(spur.slope.tuning_id, slope=2.0,
+                             anchor=spur.slope.anchor_center_frequency_hz + 1.0))
+        with self.assertRaises(EnvelopeRefused) as caught:
+            _plan(spur_allocation=self._catalogue_with(moved))
+        self.assertEqual(caught.exception.code, PLAN_SPUR_ANCHOR_DISAGREES)
+
+    def test_an_entry_anchored_at_an_undeclared_tuning_refuses_at_the_plan(self):
+        """Before entry 17 this was discovered only when a captured thermal
+        window asked where the product falls; a plan with no such window let
+        it through. Every catalogued product is now anchored at a tuning the
+        plan declares, whatever the plan captures."""
+        def elsewhere(spur):
+            return CataloguedSpur(
+                spur_id=spur.spur_id, classification=spur.classification,
+                stability_class=spur.stability_class,
+                persistence=_persistence("tuning-099"),
+                slope=_slope("tuning-099", slope=2.0))
+        with self.assertRaises(EnvelopeRefused) as caught:
+            _plan(spur_allocation=self._catalogue_with(elsewhere))
+        self.assertEqual(caught.exception.code, PLAN_TRIAL_NOT_ELIGIBLE)
+
+    def test_the_match_is_one_discriminator_and_not_a_second(self):
+        """A matched reference entry still attests only at the higher
+        accepted confidence: matching the model cannot upgrade an
+        OPERATOR_DECLARED termination into physical proof."""
+        entry = self._reference_entry()
+        entry.reference_match(_COMB)
+        self.assertEqual(entry.required_confidence,
+                         CONFIDENCE_REFERENCE_TERMINATION_AND_SECOND_SITE)
+
+    def test_the_plan_digest_carries_the_harmonic_and_the_comb(self):
+        data = _plan().to_dict()["spur_allocation"]
+        self.assertEqual(data["reference"]["harmonic_cap"], 355)
+        reference_entries = [e for e in data["catalogue"]
+                             if e["classification"] == CONSISTENT_WITH_INTERNAL_REFERENCE]
+        self.assertTrue(reference_entries)
+        for entry in reference_entries:
+            self.assertEqual(entry["reference_harmonic"], _REFERENCE_HARMONIC)
+            self.assertEqual(entry["slope"]["anchor_center_frequency_hz"],
+                             _CENTRE_HZ[_REFERENCE_TUNING])
+        for entry in data["catalogue"]:
+            if entry["classification"] != CONSISTENT_WITH_INTERNAL_REFERENCE:
+                self.assertIsNone(entry["reference_harmonic"])
 
 
 if __name__ == "__main__":

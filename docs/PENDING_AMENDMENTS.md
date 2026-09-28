@@ -257,34 +257,6 @@ it has already changed the denominator.
 
 ---
 
-## 17. The reference-comb match governs no reference-class entry
-
-**Trigger:** before a `CONSISTENT_WITH_INTERNAL_REFERENCE` entry attests to
-anything. Not before the catalogue exists — before that class is read off one.
-
-§5.21 establishes the reference class by three things: slope −1, persistence
-under declared termination, and a match to a rational multiple of the
-**declared** reference within the window `n · f_ref · ppm`, below the harmonic
-cap the declared ppm forces. The slope is now enforced at construction
-(entry 15, drained) and the harmonic cap is computed by `harmonic_cap`, but no
-entry declares the harmonic it claims and nothing checks the match. A slope-−1
-feature that persists terminated can therefore be catalogued as the reference
-class on the slope alone, which is exactly the coincidence §5.22's cap exists
-to keep from passing as a model match.
-
-The repair, when a reference-class entry is first made:
-
-> A `CONSISTENT_WITH_INTERNAL_REFERENCE` entry declares its harmonic `n`, the
-> catalogue declares the reference and its ppm, and the entry is refused unless
-> `n` is at or below the harmonic cap and the product's RF position is within
-> `n · f_ref · ppm` of `n · f_ref`.
-
-The RF position needs the anchor tuning's centre frequency, which the entry
-does not carry today; carrying it is part of the repair, not a reason to
-defer it.
-
----
-
 ## Drain record
 
 A landed entry leaves the list above. It is recorded here in one line, because
@@ -311,6 +283,7 @@ what is still pending. This is a record, not a queue: nothing here is waiting.
 | 16 — `_payload_nbytes()` could race teardown | deleted from `rf_iq_ring.py` | `98e5a60` |
 | 15 — the frozen slope tolerance governed no analysis | `rf_promotion_envelope.py`, `SpurSlopeEstimate` and `CataloguedSpur` | #118 |
 | 10 — `THERMAL_NO_INPUT` and `RECEIVER_SPURS` may be one population counted twice | `rf_promotion_envelope.py`, `CapturePlanDeclaration` | #118 |
+| 17 — the reference-comb match governed no reference-class entry | `rf_promotion_envelope.py`: `ReferenceComb`, `CataloguedSpur.reference_match`, `SpurAllocation`, `CapturePlanDeclaration` | #121 |
 
 Entries 15 and 10 **drained together**, because the second is answered by the
 analysis the first demanded. `SpurSlopeEstimate` is §5.21's retune analysis:
@@ -343,8 +316,33 @@ classified is a test fixture. `CONSISTENT_WITH_INTERNAL_REFERENCE` is gated on
 its slope here and **not** on the reference-comb match §5.21 also requires of
 it; the harmonic cap exists and nothing applies it to an entry. That is a
 narrower obligation than entry 15 was, it has a trigger — before a
-reference-class entry attests anything — and it is entry 17 below rather than
-a sentence here.
+reference-class entry attests anything — and it was entry 17 rather than a
+sentence here.
+
+Entry 17 **drained at `893a83d2` (#121)**, on the repair the entry wrote
+down. A slope record now carries its anchor tuning's centre, so a product has
+an RF position — the anchor plus the fitted intercept, which for the ``m = 0``
+product is ``n · f_ref`` itself. A `CONSISTENT_WITH_INTERNAL_REFERENCE` entry
+declares the harmonic ``n`` it claims, and no other class may. The catalogue
+declares a `ReferenceComb` — the reference and its ppm — and refuses any
+reference-class entry above the cap the ppm forces or outside
+``n · f_ref · ppm`` of ``n · f_ref``, before anything reads the class off it.
+The plan refuses a catalogue whose comb disagrees with its own declared
+reference, and any entry anchored at a tuning it does not declare or at a
+centre it declares differently — whatever the plan captures, where before
+only a captured thermal window asked. Reconstruction re-derives the cap and
+the position and reads neither.
+
+**What this does not do, again.** The match is one discriminator's worth of
+evidence and not a second; the class attests only at the higher accepted
+confidence, as before. A slope-−1 feature that persists terminated and
+matches no harmonic is now catalogued as nothing — it fits a modelled slope,
+so it is not unresolved, and it matches no comb, so it is not the reference
+class; §5.21's own table makes it ingress, and the protocol records it as a
+finding about the site. No catalogue exists. `docs/RF_SPUR_CATALOGUE_PROTOCOL.md`
+makes the bounded live run concrete for review and is proposed, not
+accepted; the run remains a separate authorisation that neither this drain
+nor that document grants.
 
 
 Entry 16 **drained by deletion at `98e5a60`**, which is the path the entry

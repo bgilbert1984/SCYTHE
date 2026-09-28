@@ -9,10 +9,10 @@
                 selftest, covered by the launch gates and verify_s_series.py.
 
 EXPECTED COUNT IS A PROPERTY OF A CHECKPOINT, NOT OF THIS PROJECT. Both gates
-now assert 2399, which is what
+now assert 2421, which is what
 
-    the S-series commit  (main after 4091d22e, plus §5.21's controls and
-                          the seven witness tests they needed)
+    the entry-17 commit  (main after 007f8e5d, plus the reference-comb match
+                          and the twenty-two witness tests it needed)
 
 collects exactly, with 2 pre-existing skips on a host without the pinned
 observation tree (the count gate reads `Ran N`, which includes them). Update them in the same commit as
@@ -27,7 +27,8 @@ is not self-correcting.
   2322    655bbaa  + 3c-wire                        3a5b7540's gates
   2370    66a544bf + 3d                             #116's gates
   2392    4091d22e + §5.21 catalogue analysis        #119's gates
-  2399    + S-series witnesses                       these gates
+  2399    007f8e5d + S-series witnesses              #120's gates
+  2421    + entry 17 reference-comb match            these gates
 
 The two certifications remain valid at THEIR counts. 2245 and 2254 were true of
 the trees they were measured on; neither is wrong, and neither is this one's.

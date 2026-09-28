@@ -361,6 +361,31 @@ class ReconstructionTests(unittest.TestCase):
         self.assertEqual(caught.exception.code,
                          RECONSTRUCTION_MAPPING_DISAGREES)
 
+    def test_a_stored_harmonic_cap_is_re_derived_and_not_read(self):
+        """The catalogue's reference comb holds the reference and its ppm;
+        the cap is derived from them on reconstruction, so a stored cap that
+        disagrees with its own tolerance cannot be fed back."""
+        mapping = json.loads(json.dumps(self.plan.to_dict()))
+        comb = mapping["spur_allocation"]["reference"]
+        self.assertIn("harmonic_cap", comb)
+        comb["harmonic_cap"] = comb["harmonic_cap"] + 1
+        with self.assertRaises(ReconstructionRefused) as caught:
+            self._plan_again(mapping=mapping)
+        self.assertEqual(caught.exception.code,
+                         RECONSTRUCTION_MAPPING_DISAGREES)
+
+    def test_a_stored_rf_position_is_re_derived_and_not_read(self):
+        """An entry's RF position is the anchor centre plus the fitted
+        intercept, both of which are stored; the position is not."""
+        mapping = json.loads(json.dumps(self.plan.to_dict()))
+        entry = mapping["spur_allocation"]["catalogue"][0]
+        self.assertIn("rf_position_hz", entry)
+        entry["rf_position_hz"] = entry["rf_position_hz"] + 1.0
+        with self.assertRaises(ReconstructionRefused) as caught:
+            self._plan_again(mapping=mapping)
+        self.assertEqual(caught.exception.code,
+                         RECONSTRUCTION_MAPPING_DISAGREES)
+
     def test_a_caller_supplied_selected_tuple_is_refused(self):
         """The selection is derived. A stored one would be a selection made
         after seeing the eligible population, which is the post-hoc choice the

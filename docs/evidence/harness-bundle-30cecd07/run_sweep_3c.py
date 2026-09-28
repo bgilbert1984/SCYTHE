@@ -72,17 +72,18 @@ subprocess.run(["git","worktree","remove","--force",str(tree)], cwd=str(REPO),
 shutil.rmtree(tree, ignore_errors=True)
 print(f"BASELINE  {cls}  {count} tests  exit {proc.returncode}  "
       f"{BASELINE_ELAPSED}s", flush=True)
-# 2399 is what the S-series commit (§5.21's controls and their seven
-# witness tests, on main after 4091d22e) collects, exactly, with 2
-# pre-existing skips on a host without the pinned observation tree. The count
-# belongs to that checkpoint, not to the project: MANIFEST.txt carries the
-# table (2245 / 2254 / 2306 / 2322 / 2370 / 2392 / 2399). A baseline that
+# 2421 is what the entry-17 commit (the reference-comb match over the
+# catalogue analysis, on main after 007f8e5d, with the twenty-two witness
+# tests it needed) collects, exactly, with 2 pre-existing skips on a host
+# without the pinned observation tree. The count belongs to that checkpoint,
+# not to the project: MANIFEST.txt carries the table
+# (2245 / 2254 / 2306 / 2322 / 2370 / 2392 / 2399 / 2421). A baseline that
 # differs from it means the controls and the tree are from different
 # generations, which no floor can report; the floor moves with the checkpoint
 # and is never lowered.
-require_sane_baseline(cls, count, 2399, ids=ids, proc=proc,
+require_sane_baseline(cls, count, 2421, ids=ids, proc=proc,
                       report=Path(S) / "baseline-refused-3c.out",
-                      expected=2399)
+                      expected=2421)
 # Each control's bound is derived from the baseline this host just produced,
 # not from a constant calibrated elsewhere: a fixed 1800s makes a healthy
 # control on a slower or loaded host read as TIMED_OUT.
