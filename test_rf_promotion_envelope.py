@@ -3,6 +3,7 @@
 import json
 import random
 import unittest
+from unittest import mock
 
 import test_scythe_verdict_vocabularies as vocab
 from rf_promotion_envelope import (
@@ -2049,6 +2050,27 @@ class ReferenceCombGovernsTheReferenceClassTests(unittest.TestCase):
                            selected_trials=good.selected_trials,
                            selection_seed=good.selection_seed)
         self.assertEqual(caught.exception.code, PLAN_ABSENT)
+
+    def test_the_catalogue_calls_the_match_for_every_entry(self):
+        """Whatever the match decides, the catalogue asks it of every entry
+        it holds. Checked by counting the calls rather than by a refusal,
+        because every refusal the match can raise is also raised by calling
+        it directly, and a catalogue that silently stopped asking would pass
+        every refusal test there is."""
+        good = _spur_allocation()
+        with mock.patch.object(CataloguedSpur, "reference_match",
+                               autospec=True) as asked:
+            SpurAllocation(reference=_COMB, catalogue=good.catalogue,
+                           epochs=good.epochs,
+                           per_stability_class=good.per_stability_class,
+                           eligible_trials=good.eligible_trials,
+                           selected_trials=good.selected_trials,
+                           selection_seed=good.selection_seed)
+        self.assertEqual(asked.call_count, len(good.catalogue))
+        self.assertEqual({call.args[0].spur_id for call in asked.call_args_list},
+                         {spur.spur_id for spur in good.catalogue})
+        for call in asked.call_args_list:
+            self.assertIs(call.args[1], _COMB)
 
     def test_an_uncalibrated_comb_refuses_the_catalogue_at_the_cap(self):
         good = _spur_allocation()
