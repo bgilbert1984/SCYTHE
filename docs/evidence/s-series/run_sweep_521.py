@@ -72,15 +72,16 @@ subprocess.run(["git","worktree","remove","--force",str(tree)], cwd=str(REPO),
 shutil.rmtree(tree, ignore_errors=True)
 print(f"BASELINE  {cls}  {count} tests  exit {proc.returncode}  "
       f"{BASELINE_ELAPSED}s", flush=True)
-# 2399 is what the S-series commit (main after 4091d22e, plus §5.21's
-# controls and the seven witness tests they needed) collects, with 2
-# host-dependent skips (the pinned observation tree, a channelizer geometry).
+# 2421 is what the entry-17 commit (main after 007f8e5d, plus the
+# reference-comb match and the twenty-two witness tests it needed) collects,
+# with 2 host-dependent skips (the pinned observation tree, a channelizer
+# geometry).
 # The count belongs to that checkpoint, not to the project: a baseline that
 # differs means the controls and the tree are from different generations,
 # which no floor can report; the floor moves with the checkpoint.
-require_sane_baseline(cls, count, 2399, ids=ids, proc=proc,
+require_sane_baseline(cls, count, 2421, ids=ids, proc=proc,
                       report=Path(S) / "baseline-refused-521.out",
-                      expected=2399)
+                      expected=2421)
 # Each control's bound is derived from the baseline this host just produced,
 # not from a constant calibrated elsewhere: a fixed 1800s makes a healthy
 # control on a slower or loaded host read as TIMED_OUT.

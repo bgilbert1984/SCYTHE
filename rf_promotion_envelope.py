@@ -58,6 +58,22 @@ A slope-0 product is in span everywhere, and a receiver that has one cannot
 capture a thermal window anywhere -- which is entry 10's third defect stated
 as a refusal rather than discovered after the corpus.
 
+Entry 17 closes the reference class the same way. §5.21 establishes
+``CONSISTENT_WITH_INTERNAL_REFERENCE`` by three things -- slope −1,
+persistence under declared termination, and a match to a harmonic of the
+**declared** reference -- and until now only the first was checked, so a
+slope-−1 feature that persisted terminated could be catalogued as the
+reference class on the slope alone, which is the coincidence §5.22's harmonic
+cap exists to keep from passing as a model match. Now a slope record carries
+the anchor tuning's centre, so the product has an RF position; a
+reference-class entry declares the harmonic ``n`` it claims; the catalogue
+declares a `ReferenceComb` -- the reference and its ppm -- and refuses any
+reference-class entry above the cap the ppm forces or outside
+``n · f_ref · ppm`` of ``n · f_ref``; and the plan refuses a catalogue whose
+comb or anchors disagree with the tunings and reference it declares itself.
+The match is one discriminator's worth of evidence and not a second: the
+class still attests only at the higher accepted confidence.
+
 Admission is enforced at **use time** -- `rf_validation_manifest._corpus_state`
 refuses to promote a chain the frozen envelope does not admit.  Captured-window
 admission, which would refuse a window on its way to disk, is **not implemented
@@ -164,6 +180,11 @@ PLAN_SLOPE_NOT_ESTIMATED = "PLAN_SLOPE_NOT_ESTIMATED"
 PLAN_CLASSIFICATION_NOT_SUPPORTED = "PLAN_CLASSIFICATION_NOT_SUPPORTED"
 PLAN_THERMAL_NOT_SPUR_FREE = "PLAN_THERMAL_NOT_SPUR_FREE"
 PLAN_SPUR_NOT_IN_SPAN = "PLAN_SPUR_NOT_IN_SPAN"
+PLAN_REFERENCE_HARMONIC_UNDECLARED = "PLAN_REFERENCE_HARMONIC_UNDECLARED"
+PLAN_REFERENCE_ABOVE_HARMONIC_CAP = "PLAN_REFERENCE_ABOVE_HARMONIC_CAP"
+PLAN_REFERENCE_COMB_MISMATCH = "PLAN_REFERENCE_COMB_MISMATCH"
+PLAN_REFERENCE_DISAGREES = "PLAN_REFERENCE_DISAGREES"
+PLAN_SPUR_ANCHOR_DISAGREES = "PLAN_SPUR_ANCHOR_DISAGREES"
 
 ENVELOPE_REFUSALS: Tuple[str, ...] = (
     ENVELOPE_ABSENT, ENVELOPE_ADMITS_NOTHING, ENVELOPE_GEOMETRY_REFUSED,
@@ -180,7 +201,9 @@ ENVELOPE_REFUSALS: Tuple[str, ...] = (
     PLAN_TRIAL_NOT_ELIGIBLE, PLAN_TRIAL_IDENTITY_AMBIGUOUS,
     PLAN_SELECTION_NOT_REPRODUCIBLE, PLAN_SLOPE_NOT_ESTIMATED,
     PLAN_CLASSIFICATION_NOT_SUPPORTED, PLAN_THERMAL_NOT_SPUR_FREE,
-    PLAN_SPUR_NOT_IN_SPAN,
+    PLAN_SPUR_NOT_IN_SPAN, PLAN_REFERENCE_HARMONIC_UNDECLARED,
+    PLAN_REFERENCE_ABOVE_HARMONIC_CAP, PLAN_REFERENCE_COMB_MISMATCH,
+    PLAN_REFERENCE_DISAGREES, PLAN_SPUR_ANCHOR_DISAGREES,
 )
 
 
@@ -650,6 +673,63 @@ def harmonic_cap(*, reference_hz: float, reference_ppm: float,
 
 
 @dataclass(frozen=True)
+class ReferenceComb:
+    """The declared reference oscillator, and how well it is known.
+
+    §5.21: the reference is **declared**, never assumed -- 28.8 MHz on most
+    R820T2 dongles and 24 MHz on some, and a protocol that guessed the crystal
+    would be inventing the instrument. The ppm is declared and justified with
+    it. Everything else about the comb is arithmetic over the two: where
+    harmonic ``n`` sits, the window ``n · f_ref · ppm`` a match has to fall
+    inside, and the cap §5.22 forces because that window grows with ``n``.
+
+    `PENDING_AMENDMENTS` entry 17: the comb is what a
+    ``CONSISTENT_WITH_INTERNAL_REFERENCE`` entry is matched against, and a
+    catalogue declares one so that no entry can be read as the reference class
+    on its slope alone.
+    """
+
+    reference_hz: float
+    reference_ppm: float
+
+    def __post_init__(self) -> None:
+        # `harmonic_cap` refuses a non-finite or non-positive reference, and a
+        # comb only found invalid when an entry is matched against it is not
+        # self-validating.
+        self.harmonic_cap
+
+    @property
+    def harmonic_cap(self) -> int:
+        """Derived from the declared tolerance, never transcribed."""
+        return harmonic_cap(reference_hz=self.reference_hz,
+                            reference_ppm=self.reference_ppm)
+
+    def harmonic_position_hz(self, harmonic: int) -> float:
+        return harmonic * self.reference_hz
+
+    def match_window_hz(self, harmonic: int) -> float:
+        """``n · f_ref · ppm``: the window grows with the harmonic, which is
+        why the cap exists."""
+        return harmonic * self.reference_hz * self.reference_ppm * 1e-6
+
+    def matches(self, rf_hz: float, harmonic: int) -> bool:
+        """Whether an RF position is within the window of harmonic ``n``.
+
+        At the window is inside it, as at the slope tolerance and the
+        persistence margin; the comparison tolerates the last bit so that a
+        position exactly one window away is not read as outside it.
+        """
+        distance = abs(rf_hz - self.harmonic_position_hz(harmonic))
+        window = self.match_window_hz(harmonic)
+        return distance <= window or math.isclose(distance, window, rel_tol=1e-9)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"reference_hz": float(self.reference_hz),
+                "reference_ppm": float(self.reference_ppm),
+                "harmonic_cap": self.harmonic_cap}
+
+
+@dataclass(frozen=True)
 class Band:
     """A declared band, in hertz, that the tunings are drawn from."""
 
@@ -1081,11 +1161,19 @@ class SpurSlopeEstimate:
     A repeated delta is admitted and contributes a second observation at one
     setting; a feature that moved between two visits to one setting shows as
     residual rather than being fitted through.
+
+    The anchor tuning's centre frequency is carried with the observations,
+    because the observations are meaningless without it: a baseband offset is
+    an offset from an LO, and the LO the schedule set is the declared centre
+    plus the declared delta. It is what puts the product at an RF position --
+    `PENDING_AMENDMENTS` entry 17 -- and the plan refuses a record whose
+    anchor disagrees with the tuning it names.
     """
 
     tuning_id: str
     retune_delta_hz: Tuple[float, ...]
     signed_baseband_hz: Tuple[float, ...]
+    anchor_center_frequency_hz: float
 
     def __post_init__(self) -> None:
         deltas = tuple(self.retune_delta_hz)
@@ -1095,6 +1183,12 @@ class SpurSlopeEstimate:
         if type(self.tuning_id) is not str or not self.tuning_id:
             raise EnvelopeRefused(
                 PLAN_ABSENT, "a slope estimate names the tuning it was made at")
+        if (not _finite(self.anchor_center_frequency_hz)
+                or self.anchor_center_frequency_hz <= 0):
+            raise EnvelopeRefused(
+                PLAN_QUANTITY_NOT_FINITE,
+                f"anchor_center_frequency_hz is {self.anchor_center_frequency_hz!r}; "
+                "an offset is an offset from an LO the schedule set")
         if len(deltas) != len(offsets):
             raise EnvelopeRefused(
                 PLAN_SLOPE_NOT_ESTIMATED,
@@ -1157,6 +1251,14 @@ class SpurSlopeEstimate:
                                      self.signed_baseband_hz))
 
     @property
+    def rf_position_hz(self) -> float:
+        """Where the product sits at RF at the anchor LO: the declared centre
+        plus the fitted intercept. For the ``m = 0`` product that is
+        ``n · f_ref`` itself, and for a received emission it is the carrier --
+        which is exactly the pair the reference-comb match has to separate."""
+        return self.anchor_center_frequency_hz + self.intercept_hz
+
+    @property
     def matched_slope(self) -> Optional[int]:
         """The family member within the frozen tolerance, or None."""
         return matched_mixing_slope(self.measured_slope)
@@ -1194,6 +1296,7 @@ class SpurSlopeEstimate:
             "residuals_hz": [float(r) for r in self.residuals_hz],
             "matched_slope": self.matched_slope,
             "slope_tolerance": PLAN_SLOPE_TOLERANCE,
+            "anchor_center_frequency_hz": float(self.anchor_center_frequency_hz),
         }
 
 
@@ -1207,6 +1310,12 @@ class CataloguedSpur:
     slope does not support. Termination is an ``OPERATOR_DECLARED`` act this
     module cannot check; the slope is arithmetic over declared observations,
     and it can.
+
+    A ``CONSISTENT_WITH_INTERNAL_REFERENCE`` entry declares the harmonic ``n``
+    it claims to be, and no other class may. The declaration is checked by
+    `reference_match` against the comb the catalogue declares, because the
+    entry alone does not know the reference: an entry that carried its own
+    ``f_ref`` could be matched against a crystal the receiver does not have.
     """
 
     spur_id: str
@@ -1214,6 +1323,7 @@ class CataloguedSpur:
     stability_class: str
     persistence: SpurPersistenceObservation
     slope: SpurSlopeEstimate
+    reference_harmonic: Optional[int] = None
 
     def __post_init__(self) -> None:
         if type(self.spur_id) is not str or not self.spur_id:
@@ -1272,6 +1382,63 @@ class CataloguedSpur:
                    if matched is None else f"matches slope {matched:+d}")
                 + f" within the {PLAN_SLOPE_TOLERANCE} tolerance. The class is "
                 "read off the analysis, not written beside it")
+        # Entry 17. The reference class is established by three things, and
+        # the third is a match to a harmonic of the DECLARED reference. An
+        # entry that names no harmonic makes no claim the comb can check, and
+        # a harmonic on any other class is a claim nothing checks at all.
+        harmonic = self.reference_harmonic
+        if self.classification == CONSISTENT_WITH_INTERNAL_REFERENCE:
+            if type(harmonic) is not int or harmonic < 1:
+                raise EnvelopeRefused(
+                    PLAN_REFERENCE_HARMONIC_UNDECLARED,
+                    f"{self.spur_id} is classified "
+                    f"{CONSISTENT_WITH_INTERNAL_REFERENCE} and declares "
+                    f"reference_harmonic={harmonic!r}. The class is a match to "
+                    "n · f_ref, and an entry that names no n has matched nothing")
+        elif harmonic is not None:
+            raise EnvelopeRefused(
+                PLAN_CLASSIFICATION_NOT_SUPPORTED,
+                f"{self.spur_id} is classified {self.classification} and "
+                f"declares reference_harmonic={harmonic!r}. Only the reference "
+                "class claims a harmonic; on any other class nothing checks it")
+
+    def reference_match(self, comb: ReferenceComb) -> None:
+        """Refuse a reference-class entry the declared comb does not support.
+
+        Two checks, both from §5.22: the harmonic is at or below the cap the
+        declared ppm forces, and the product's RF position is within
+        ``n · f_ref · ppm`` of ``n · f_ref``. Any other class returns without
+        checking anything -- it claimed no harmonic and there is nothing to
+        match. The catalogue calls this for every entry it holds, so a
+        reference-class entry is usable only after it has passed.
+        """
+        if type(comb) is not ReferenceComb:
+            raise EnvelopeRefused(
+                PLAN_ABSENT,
+                f"a reference match is against a ReferenceComb; got "
+                f"{type(comb).__name__}")
+        if self.classification != CONSISTENT_WITH_INTERNAL_REFERENCE:
+            return
+        harmonic = self.reference_harmonic
+        if harmonic > comb.harmonic_cap:
+            raise EnvelopeRefused(
+                PLAN_REFERENCE_ABOVE_HARMONIC_CAP,
+                f"{self.spur_id} claims harmonic {harmonic} of "
+                f"{comb.reference_hz:.0f} Hz, above the cap of "
+                f"{comb.harmonic_cap} that ±{comb.reference_ppm:g} ppm forces. "
+                "At that harmonic the match window is a fraction of the span "
+                "at which matching the comb is barely a claim")
+        rf_hz = self.slope.rf_position_hz
+        if not comb.matches(rf_hz, harmonic):
+            raise EnvelopeRefused(
+                PLAN_REFERENCE_COMB_MISMATCH,
+                f"{self.spur_id} sits at {rf_hz:.0f} Hz and claims harmonic "
+                f"{harmonic} at {comb.harmonic_position_hz(harmonic):.0f} Hz, "
+                f"{abs(rf_hz - comb.harmonic_position_hz(harmonic)):.0f} Hz "
+                f"away against a window of {comb.match_window_hz(harmonic):.0f} "
+                "Hz. A slope-−1 feature that persists terminated and matches no "
+                "harmonic is not the reference class; it is the coincidence "
+                "the cap exists to keep from passing as a model match")
 
     @property
     def required_confidence(self) -> Optional[str]:
@@ -1292,6 +1459,8 @@ class CataloguedSpur:
             "stability_class": self.stability_class,
             "persistence": self.persistence.to_dict(),
             "slope": self.slope.to_dict(),
+            "reference_harmonic": self.reference_harmonic,
+            "rf_position_hz": self.slope.rf_position_hz,
             "required_confidence": self.required_confidence,
         }
 
@@ -1402,6 +1571,7 @@ class SpurAllocation:
     eligible_trials: Tuple[EligibleSpurTrial, ...]
     selected_trials: Tuple[Tuple[str, str, str], ...]
     selection_seed: int
+    reference: ReferenceComb
     selection_revision: str = SELECTION_REVISION
 
     def __post_init__(self) -> None:
@@ -1427,6 +1597,17 @@ class SpurAllocation:
         if len({spur.spur_id for spur in catalogue}) != len(catalogue):
             raise EnvelopeRefused(
                 PLAN_ABSENT, "a spur catalogued twice is one product, counted twice")
+        # Entry 17: the catalogue declares the reference and its ppm, and every
+        # reference-class entry is matched against them here, before anything
+        # reads the class off it. The comb is the catalogue's and not the
+        # entry's, so one receiver's products are matched against one crystal.
+        if type(self.reference) is not ReferenceComb:
+            raise EnvelopeRefused(
+                PLAN_ABSENT,
+                "a catalogue declares the reference its products were matched "
+                f"against as a ReferenceComb; got {type(self.reference).__name__}")
+        for spur in catalogue:
+            spur.reference_match(self.reference)
         if type(self.epochs) is not int or self.epochs < 1:
             raise EnvelopeRefused(
                 PLAN_QUANTITY_NOT_FINITE, f"epochs is {self.epochs!r}")
@@ -1549,6 +1730,7 @@ class SpurAllocation:
         return {
             "catalogue": [spur.to_dict() for spur in self.catalogue],
             "catalogue_size": len(self.catalogue),
+            "reference": self.reference.to_dict(),
             "epochs": self.epochs,
             "cardinality_bound": self.cardinality_bound,
             "distinct_trial_units": self.distinct_trial_units,
@@ -1761,6 +1943,41 @@ class CapturePlanDeclaration:
         positions = {visit.position for visit in self.schedule}
         visits = {visit.position: visit for visit in self.schedule}
         by_index = {tuning.tuning_index: tuning for tuning in self.tunings}
+        if self.spur_allocation is not None:
+            # The plan and the catalogue each declare the reference, because
+            # each is read without the other; declared twice, it agrees or
+            # the plan is not one. And every catalogued product is anchored
+            # at a tuning this plan declares, at that tuning's centre: the
+            # RF position the comb was matched at is only a position if the
+            # LO it is an offset from is the one the schedule sets.
+            comb = self.spur_allocation.reference
+            if (comb.reference_hz, comb.reference_ppm) != (
+                    self.reference_hz, self.reference_ppm):
+                raise EnvelopeRefused(
+                    PLAN_REFERENCE_DISAGREES,
+                    f"the plan declares {self.reference_hz:.0f} Hz at "
+                    f"±{self.reference_ppm:g} ppm and the catalogue was matched "
+                    f"against {comb.reference_hz:.0f} Hz at "
+                    f"±{comb.reference_ppm:g} ppm. One receiver has one crystal")
+            by_tuning_id = {tuning.tuning_id: tuning for tuning in self.tunings}
+            for spur in self.spur_allocation.catalogue:
+                tuning = by_tuning_id.get(spur.slope.tuning_id)
+                if tuning is None:
+                    raise EnvelopeRefused(
+                        PLAN_TRIAL_NOT_ELIGIBLE,
+                        f"{spur.spur_id} is catalogued at {spur.slope.tuning_id}, "
+                        "which this plan does not declare, so nothing can say "
+                        "where it falls at any tuning the plan visits")
+                if tuning.center_frequency_hz != spur.slope.anchor_center_frequency_hz:
+                    raise EnvelopeRefused(
+                        PLAN_SPUR_ANCHOR_DISAGREES,
+                        f"{spur.spur_id} records its anchor "
+                        f"{spur.slope.tuning_id} at "
+                        f"{spur.slope.anchor_center_frequency_hz:.0f} Hz and "
+                        f"the plan declares it at "
+                        f"{tuning.center_frequency_hz:.0f} Hz. The RF position "
+                        "the comb was matched at is an offset from an LO the "
+                        "schedule never set")
         for plan in self.trial_plans:
             stray = sorted({p for p, _n in plan.per_visit} - positions)
             if stray:

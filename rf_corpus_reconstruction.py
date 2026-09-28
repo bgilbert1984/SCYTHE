@@ -29,7 +29,7 @@ from typing import Any, Dict, Mapping, Sequence, Tuple
 from rf_promotion_envelope import (
     Band, CapturePlanDeclaration, CataloguedSpur, ChainMember, EligibleSpurTrial,
     FrontEnd, InstrumentChainEnvelope, SpurAllocation, SpurPersistenceObservation,
-    SpurSlopeEstimate,
+    ReferenceComb, SpurSlopeEstimate,
     StratumTrialPlan, Tuning, Visit, declaration_digest, select_spur_trials,
 )
 
@@ -59,7 +59,8 @@ class ReconstructionRefused(RuntimeError):
 _DERIVED: Dict[str, Tuple[str, ...]] = {
     "ChainMember": ("chain_hash", "antenna", "extension_mm", "feedline",
                     "feedline_length_m"),
-    "CataloguedSpur": ("required_confidence",),
+    "CataloguedSpur": ("required_confidence", "rf_position_hz"),
+    "ReferenceComb": ("harmonic_cap",),
     "SpurPersistenceObservation": ("qualifying", "persistent"),
     "SpurSlopeEstimate": ("measured_slope", "intercept_hz", "residuals_hz",
                           "matched_slope", "slope_tolerance"),
@@ -156,7 +157,8 @@ def _slope(m: Mapping[str, Any]) -> SpurSlopeEstimate:
     match are re-derived by the constructor, so a stored slope that disagreed
     with its own observations could not be fed back."""
     d = _declared(m, "SpurSlopeEstimate",
-                  ("tuning_id", "retune_delta_hz", "signed_baseband_hz"))
+                  ("tuning_id", "retune_delta_hz", "signed_baseband_hz",
+                   "anchor_center_frequency_hz"))
     d["retune_delta_hz"] = tuple(d["retune_delta_hz"])
     d["signed_baseband_hz"] = tuple(d["signed_baseband_hz"])
     return SpurSlopeEstimate(**d)
@@ -165,10 +167,16 @@ def _slope(m: Mapping[str, Any]) -> SpurSlopeEstimate:
 def _catalogued_spur(m: Mapping[str, Any]) -> CataloguedSpur:
     d = _declared(m, "CataloguedSpur",
                   ("spur_id", "classification", "stability_class", "persistence",
-                   "slope"))
+                   "slope", "reference_harmonic"))
     d["persistence"] = _persistence(d["persistence"])
     d["slope"] = _slope(d["slope"])
     return CataloguedSpur(**d)
+
+
+def _reference_comb(m: Mapping[str, Any]) -> ReferenceComb:
+    """The reference and its ppm; the harmonic cap is derived from them."""
+    return ReferenceComb(**_declared(
+        m, "ReferenceComb", ("reference_hz", "reference_ppm")))
 
 
 def eligible_trial(m: Mapping[str, Any]) -> EligibleSpurTrial:
@@ -188,7 +196,7 @@ def spur_allocation(mapping: Mapping[str, Any], *,
     rather than merely performed.
     """
     d = _declared(mapping, "SpurAllocation",
-                  ("catalogue", "epochs", "per_stability_class",
+                  ("catalogue", "reference", "epochs", "per_stability_class",
                    "selection_seed", "selection_revision",
                    "selected_count", "eligible_trials_digest",
                    "selected_trials_digest", "cardinality_bound",
@@ -202,6 +210,7 @@ def spur_allocation(mapping: Mapping[str, Any], *,
         selection_revision=d["selection_revision"])
     allocation = SpurAllocation(
         catalogue=tuple(_catalogued_spur(row) for row in d["catalogue"]),
+        reference=_reference_comb(d["reference"]),
         epochs=d["epochs"],
         per_stability_class=_tuple_of_pairs(d["per_stability_class"]),
         eligible_trials=eligible,
