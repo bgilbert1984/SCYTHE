@@ -985,6 +985,7 @@ def spawn_instance():
     """Spawn a new isolated SCYTHE server instance."""
     body = request.get_json(silent=True) or {}
     name = body.get('name', '').strip()
+    safari = bool(body.get('safari'))
 
     instance_id = _generate_instance_id()
     port, _reserved_sock = _allocate_port()
@@ -1016,6 +1017,9 @@ def spawn_instance():
         '--eve-stream-http-url', _EVE_STREAM_HTTP_URL,
         '--internal-token', _INTERNAL_TOKEN,
     ]
+    if safari:
+        cmd.append('--safari')
+        log.info("  Safari mode: public read-only instance")
 
     log.info(f"Spawning instance '{display_name}' (id={instance_id}) on port {port}")
     log.info(f"  Command: {' '.join(cmd)}")

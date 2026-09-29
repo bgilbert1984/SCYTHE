@@ -3645,6 +3645,32 @@ if FLASK_AVAILABLE:
     app = Flask(__name__, static_folder='.')
     CORS(app)  # Enable CORS for all routes
 
+    # ── Safari gate (public read-only demo mode) ──────────────────────────
+    # When SAFARI_MODE is on, the instance serves the public: only safe HTTP
+    # methods pass without the internal token. /socket.io/ is exempt because
+    # the polling transport POSTs there and live updates must keep flowing;
+    # mutating Socket.IO events are gated separately at the event layer.
+    # Orchestrator<->instance calls carrying X-Internal-Token are exempt so
+    # health checks, registration and internal wiring keep working.
+    _SAFARI_SAFE_METHODS = frozenset({'GET', 'HEAD', 'OPTIONS'})
+
+    @app.before_request
+    def _safari_gate():
+        if not app.config.get('SAFARI_MODE'):
+            return None
+        if request.method in _SAFARI_SAFE_METHODS:
+            return None
+        if request.path.startswith('/socket.io'):
+            return None
+        internal = app.config.get('INTERNAL_TOKEN', '')
+        if internal and request.headers.get('X-Internal-Token') == internal:
+            return None
+        return jsonify({
+            'status': 'error',
+            'error': 'Forbidden',
+            'message': 'Safari mode: this is a public read-only instance',
+        }), 403
+
     # WSGI middleware to proactively reject websocket upgrade attempts to
     # the socket.io endpoint when running under the development server.
     # This prevents low-level websocket handshake errors from reaching
@@ -10585,6 +10611,124 @@ if FLASK_AVAILABLE:
         except Exception as e:
             logger.error(f"Error getting AIS search stats: {e}")
             return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+    # ========================================================================
+    # API ROUTES - ADS-B AIRCRAFT TRACKING (Safari / viz content)
+    # ========================================================================
+    # QUARANTINE: demo/visualization content only. Tracks are produced by the
+    # periodic bounded 1090 MHz capture pipeline (see
+    # /var/tmp/scythe-sweep/safari-proto/build_tracks.py); this server only
+    # reads the resulting JSON file. Nothing here touches the §5.21
+    # measurement chain, admission, journal, publication, or catalogue.
+    #
+    # Mirrors the AIS ingest pattern:
+    #   GET /api/adsb/tracks   cf. GET /api/ais/vessels   (REST snapshot)
+    #   GET /api/adsb/status   cf. GET /api/ais/status
+    #   "adsb_update"          cf. "ais_update"           (per-track broadcast)
+    #   "adsb_snapshot" on connect (positioned tracks only)
+
+    _ADSB_TRACKS_FILE = os.environ.get(
+        'SCYTHE_ADSB_TRACKS',
+        '/var/tmp/scythe-sweep/safari-proto/adsb_tracks.json')
+    _ADSB_REPLAY_INTERVAL_S = 2.0
+    _adsb_replay_thread = None
+
+    def _adsb_load_tracks():
+        """Read the live tracks JSON; the refresh script hot-swaps this file."""
+        try:
+            with open(_ADSB_TRACKS_FILE) as f:
+                data = json.load(f)
+                return data if isinstance(data, list) else []
+        except Exception:
+            return []
+
+    def _adsb_snapshot():
+        """Positioned tracks shaped for globe/REST consumers (fresh timestamps)."""
+        now = datetime.now(timezone.utc).isoformat()
+        out = []
+        for t in _adsb_load_tracks():
+            if t.get('lat') is None or t.get('lon') is None:
+                continue
+            out.append({
+                'icao': t['icao'],
+                'callsign': t.get('callsign') or t['icao'],
+                'lat': t['lat'],
+                'lon': t['lon'],
+                'alt_ft': t.get('alt_ft'),
+                'speed_kt': t.get('speed_kt'),
+                'n_msgs': t.get('n_msgs', 0),
+                'source': 'adsb-live',
+                'replay': True,
+                'timestamp': now,
+            })
+        return out
+
+    @app.route('/api/adsb/tracks', methods=['GET'])
+    def adsb_get_tracks():
+        """Get all ADS-B aircraft positions (positioned tracks only)"""
+        try:
+            tracks = _adsb_snapshot()
+            return jsonify({
+                'status': 'ok',
+                'track_count': len(tracks),
+                'tracks': tracks,
+                'timestamp': time.time(),
+            })
+        except Exception as e:
+            logger.error(f"Error getting ADS-B tracks: {e}")
+            return jsonify({'status': 'error', 'message': str(e)}), 500
+
+    @app.route('/api/adsb/status', methods=['GET'])
+    def adsb_get_status():
+        """ADS-B feed status"""
+        try:
+            tracks = _adsb_load_tracks()
+            positioned = sum(1 for t in tracks
+                             if t.get('lat') is not None and t.get('lon') is not None)
+            return jsonify({
+                'status': 'ok',
+                'total': len(tracks),
+                'positioned': positioned,
+                'replay_interval_s': _ADSB_REPLAY_INTERVAL_S,
+                'tracks_file': _ADSB_TRACKS_FILE,
+                'timestamp': time.time(),
+            })
+        except Exception as e:
+            logger.error(f"Error getting ADS-B status: {e}")
+            return jsonify({'status': 'error', 'message': str(e)}), 500
+
+    def _adsb_replay_loop():
+        """Broadcast adsb_update per positioned track every interval."""
+        while True:
+            try:
+                if socketio:
+                    for tr in _adsb_snapshot():
+                        # NB: python-socketio 5.x removed the broadcast=
+                        # kwarg (TypeError); server emit() broadcasts by
+                        # default when no room/to is given.
+                        socketio.emit('adsb_update', tr)
+            except Exception as e:
+                logger.error(f"Unhandled error in ADS-B replay loop: {e}")
+            time.sleep(_ADSB_REPLAY_INTERVAL_S)
+
+    def start_adsb_replay():
+        """Start the ADS-B replay broadcaster (idempotent)."""
+        global _adsb_replay_thread
+        if _adsb_replay_thread and _adsb_replay_thread.is_alive():
+            return
+        _adsb_replay_thread = threading.Thread(
+            target=_adsb_replay_loop, daemon=True, name='adsb-replay')
+        _adsb_replay_thread.start()
+        logger.info('ADS-B replay thread started (%.1fs interval, file %s)',
+                    _ADSB_REPLAY_INTERVAL_S, _ADSB_TRACKS_FILE)
+
+    def _emit_adsb_snapshot():
+        """Push positioned tracks to the just-connected socket client."""
+        try:
+            emit('adsb_snapshot', {'tracks': _adsb_snapshot()})
+        except Exception as e:
+            logger.debug(f"Could not emit adsb_snapshot: {e}")
 
     # ========================================================================
     # API ROUTES - AUTO RECONNAISSANCE
@@ -17770,6 +17914,19 @@ if FLASK_AVAILABLE:
     # WEBSOCKET EVENT HANDLERS (Flask-SocketIO)
     # ========================================================================
 
+    # ── Safari gate for mutating Socket.IO events ──────────────────────────
+    # The HTTP before_request gate exempts /socket.io/ so the polling
+    # transport keeps flowing in safari mode; mutating socket events are
+    # therefore gated here instead.
+    def _safari_socket_gate(fn):
+        @wraps(fn)
+        def _wrapper(*args, **kwargs):
+            if app.config.get('SAFARI_MODE'):
+                emit('error', {'message': 'Safari mode: this is a public read-only instance'})
+                return None
+            return fn(*args, **kwargs)
+        return _wrapper
+
     if SOCKETIO_AVAILABLE and socketio:
 
         @socketio.on('connect')
@@ -17800,6 +17957,7 @@ if FLASK_AVAILABLE:
                     return False
                 logger.info("[WebSocket] Anonymous connection accepted (no operator_manager)")
                 emit('connected', {'status': 'ok', 'operator': None, 'session_id': None})
+                _emit_adsb_snapshot()  # Safari: positioned tracks to the new client
                 return True
 
             # ── Authenticated mode ─────────────────────────────────────────
@@ -17831,6 +17989,7 @@ if FLASK_AVAILABLE:
                     'operator': operator.to_dict(),
                     'session_id': session.session_id
                 })
+                _emit_adsb_snapshot()  # Safari: positioned tracks to the new client
                 return True
 
             disconnect()
@@ -17905,6 +18064,7 @@ if FLASK_AVAILABLE:
                 emit('error', {'message': message})
 
         @socketio.on('create_room')
+        @_safari_socket_gate
         def ws_create_room(data):
             """Handle room creation via WebSocket"""
             from flask import session as flask_session
@@ -17945,6 +18105,7 @@ if FLASK_AVAILABLE:
             emit('rooms_list', {'status': 'ok', 'rooms': rooms})
 
         @socketio.on('publish_entity')
+        @_safari_socket_gate
         def ws_publish_entity(data):
             """Publish entity to room via WebSocket"""
             from flask import session as flask_session
@@ -18008,6 +18169,7 @@ if FLASK_AVAILABLE:
                 emit('entity_published', {'status': 'error', 'entity_id': entity_id, 'message': str(e)})
 
         @socketio.on('send_message')
+        @_safari_socket_gate
         def ws_send_message(data):
             """Send message to room via WebSocket"""
             from flask import session as flask_session
@@ -18164,6 +18326,7 @@ if FLASK_AVAILABLE:
                 emit('error', {'message': str(e)})
 
         @socketio.on('scrub_edges')
+        @_safari_socket_gate
         def ws_scrub_edges(data):
             """Adjust evaluation time for an existing subscription.
 
@@ -20208,6 +20371,7 @@ def main():
                         help='Per-instance data directory for SQLite, snapshots, and logs. '
                              'Defaults to "metrics_logs". Set per-instance for storage isolation.')
     parser.add_argument('--satellite-refresh', action='store_true', help='Enable background satellite TLE refresh from Celestrak')
+    parser.add_argument('--adsb-refresh', action='store_true', help='Enable ADS-B track replay broadcaster (reads SCYTHE_ADSB_TRACKS JSON, emits adsb_update every 2s)')
     parser.add_argument('--stream-relay-url', type=str, default='ws://localhost:8765/ws',
                         help='WebSocket URL of the local Go stream relay (default: ws://localhost:8765/ws)')
     parser.add_argument('--mcp-ws-url', type=str, default='ws://localhost:8766/ws',
@@ -20220,10 +20384,21 @@ def main():
                         help='HTTP base URL of the eve-streamer sensor daemon (default: http://localhost:8081)')
     parser.add_argument('--internal-token', type=str, default=None,
                         help='Shared secret for internal orchestrator↔instance calls (X-Internal-Token)')
+    parser.add_argument('--safari', action='store_true',
+                        help='Safari mode: public read-only demo instance. Non-safe HTTP methods '
+                             'and mutating Socket.IO events are rejected unless the request carries '
+                             'the internal token. Also enabled via SCYTHE_SAFARI=1.')
     args = parser.parse_args()
 
     # Store internal token for use in route handlers
     app.config['INTERNAL_TOKEN'] = args.internal_token or ''
+
+    # Safari mode (public read-only demo instance)
+    app.config['SAFARI_MODE'] = bool(
+        args.safari or os.environ.get('SCYTHE_SAFARI', '').strip().lower() in ('1', 'true', 'yes')
+    )
+    if app.config['SAFARI_MODE']:
+        logger.warning('SAFARI MODE enabled: public read-only instance; writes require X-Internal-Token')
 
     # ── Per-instance data directory (storage sovereignty) ──
     global _SCYTHE_DATA_DIR
@@ -20567,7 +20742,9 @@ def main():
 
                             # Broadcast via SocketIO if available
                             if socketio:
-                                socketio.emit('ais_update', vessel_data, broadcast=True)
+                                socketio.emit('ais_update', vessel_data)  # NB: broadcast= removed in
+                                # python-socketio 5.x (TypeError); server emit()
+                                # broadcasts by default with no room/to
 
                             logger.debug(f"[AISStream] Position update: Vessel {vessel_data['mmsi']} @ {vessel_data['lat']},{vessel_data['lon']}")
 
@@ -20709,6 +20886,7 @@ def main():
 ║    /api/nmap/*             - Network scanning                    ║
 ║    /api/ndpi/*             - Deep packet inspection              ║
 ║    /api/ais/*              - AIS vessel tracking                 ║
+║    /api/adsb/*             - ADS-B aircraft tracking             ║
 ║    /api/recon/*            - Auto-reconnaissance system          ║
 ║    /api/rooms/*            - Room/Channel management             ║
 ║    /api/status             - System status                       ║
@@ -20730,6 +20908,16 @@ def main():
             logger.warning(f'Could not start satellite refresh thread: {e}')
     else:
         logger.info('Satellite refresh disabled (use --satellite-refresh to enable)')
+
+    # Start ADS-B replay broadcaster if requested (or in safari mode, where the
+    # public demo should show aircraft without extra flags)
+    if args.adsb_refresh or app.config.get('SAFARI_MODE'):
+        try:
+            start_adsb_replay()
+        except Exception as e:
+            logger.warning(f'Could not start ADS-B replay thread: {e}')
+    else:
+        logger.info('ADS-B replay disabled (use --adsb-refresh to enable)')
 
     # Register MCP JSON-RPC endpoint on the Flask app (same port, /mcp path)
     try:

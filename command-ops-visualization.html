@@ -18819,6 +18819,29 @@ const originalComplete = options.complete;
                         self.handleVesselUpdate(vessel);
                     });
                 }
+
+                // Listen for ADS-B aircraft updates (Safari) — mirrors ais_update.
+                // The server also pushes an adsb_snapshot on connect.
+                if (WebSocketSync.socket) {
+                    WebSocketSync.socket.on('adsb_update', function(track) {
+                        self.handleAircraftUpdate(track);
+                    });
+                    WebSocketSync.socket.on('adsb_snapshot', function(data) {
+                        (data.tracks || []).forEach(function(track) {
+                            self.handleAircraftUpdate(track);
+                        });
+                    });
+                }
+
+                // REST fallback: seed aircraft from the latest tracks snapshot
+                fetch('/api/adsb/tracks').then(function(r) { return r.json(); })
+                    .then(function(d) {
+                        (d.tracks || []).forEach(function(track) {
+                            self.handleAircraftUpdate(track);
+                        });
+                    }).catch(function(e) {
+                        console.debug('[ADS-B] tracks seed failed:', e);
+                    });
                 
                 // Monitor camera changes to update bounding box
                 if (viewer && viewer.camera) {
@@ -18938,6 +18961,29 @@ const originalComplete = options.complete;
                 }
             },
             
+            // Handle real-time ADS-B aircraft update (Safari) — mirrors handleVesselUpdate.
+            // Shapes the track as a recon entity so the existing aircraft renderer
+            // (triangle icon + altitude line for ontology including 'aircraft') picks it up.
+            // QUARANTINE: viz content only, never measurement evidence.
+            handleAircraftUpdate: function(track) {
+                if (!track || !track.icao) return;
+                var entity = {
+                    entity_id: 'adsb_' + track.icao,
+                    name: track.callsign || track.icao,
+                    location: {
+                        lat: track.lat,
+                        lon: track.lon,
+                        altitude_m: (track.alt_ft || 0) * 0.3048
+                    },
+                    ontology: ['aircraft', 'ads-b', 'safari'],
+                    disposition: 'NEUTRAL',
+                    source: 'adsb-live'
+                };
+                if (window.AutoReconVisualization && AutoReconVisualization.addEntityMarker) {
+                    AutoReconVisualization.addEntityMarker(entity);
+                }
+            },
+
             // Handle real-time vessel update from WebSocket
             handleVesselUpdate: function(vessel) {
                 if (!vessel || !vessel.mmsi) return;
