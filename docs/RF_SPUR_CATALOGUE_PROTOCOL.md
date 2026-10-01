@@ -1,17 +1,32 @@
 # The Bounded Live Spur-Catalogue Run
 
 ```text
-Status:         PROPOSED for review. Not accepted, not authorised.
-Authority:      NON-NORMATIVE until an explicit acceptance commit names it.
+Status:         ACCEPTED as the procedure. Authorisation of live
+                contact is recorded separately in
+                RF_SPUR_CATALOGUE_AUTHORISATION.md (operator decision
+                2026-09-28, in chat, commit dd87b05e); this file
+                authorises nothing by itself.
+Authority:      NORMATIVE for the procedure it describes.
 Method:         §5.21 (ACCEPTED 2026-09-14) -- how a candidate is told apart
                 from a received emission.
 Parameters:     §5.22 (ACCEPTED 2026-09-14) -- K, R, the deltas, the
                 tolerances, the order, the confidences. None is set here.
 Analysis:       rf_promotion_envelope.py -- SpurSlopeEstimate, CataloguedSpur,
                 ReferenceComb, SpurAllocation -- run over no receiver.
-Live runner:    DOES NOT EXIST. Nothing in the tree drives a tuner for this.
-Device contact: NONE authorised by this document, by §5.21, by §5.22, or by
-                any merge that carried this file.
+Live runner:    EXISTS. rf_spur_catalogue_runner.py (post-capture auditor;
+                its THERMAL_NO_INPUT path refuses with
+                RUNNER_SPUR_CATALOGUE_ABSENT until a catalogue is declared)
+                and rf_spur_catalogue_sequencer.py (live driver; refuses
+                without operator declarations). Both on
+                feat/5.21-catalogue-runner.
+Device contact: AUTHORISED IN PART. Three THERMAL_NO_INPUT pre-catalogue
+                windows were captured 2026-09-30 on the declared receiver
+                (NESDR SMArt v5, SN 14530058) with the declared 50 Ω load
+                fitted, under operator authorisation in chat; they are
+                pre-catalogue evidence, not the catalogue. The K=64/R=8
+                catalogue schedule has NOT been executed and is NOT
+                authorised: bands, seed, gain, reference_hz/ppm and
+                justification remain operator declarations to be frozen.
 ```
 
 This document makes the run §5.21 describes concrete enough to review: what
@@ -20,10 +35,13 @@ part of the software would check or could not. It exists so that the
 authorisation decision, when it is taken, is taken over a procedure and not
 over a paragraph.
 
-**It is not that decision.** The bounded live catalogue run is a separate
-authorisation point. Merging this document, merging the analysis it
-describes, and certifying the controls over that analysis are three things
-that have happened; none of them is a fourth.
+**That decision has since been taken in part.** The bounded capture is
+authorised by RF_SPUR_CATALOGUE_AUTHORISATION.md (2026-09-28), under which
+the three pre-catalogue THERMAL_NO_INPUT windows were captured 2026-09-30.
+The K=64/R=8 catalogue schedule itself is a further separate authorisation
+point and has not been taken. Merging this document, merging the analysis
+it describes, and certifying the controls over that analysis remain three
+things that have happened; none of them is the catalogue run.
 
 ---
 
