@@ -103,7 +103,17 @@ CAPTURE_PLAN_SCHEMA = "scythe.rf-capture-plan.v1"
 # The algorithm that turns a seed into a schedule. Frozen beside the seed in
 # every declaration, because a seed alone determines nothing: revise the
 # generator and the same seed produces a different plan.
-SCHEDULE_GENERATOR_REVISION = "rf-visit-schedule.v1"
+# v2 (2026-10-03): v1 assigned each visit's signed delta independently by
+# position and never enforced three distinct deltas per tuning; ~44% of
+# tunings carried a duplicate, which SpurSlopeEstimate correctly refuses.
+# v2 assigns per tuning, from seed+tuning: all three magnitudes exactly once,
+# deterministic sign and order. The revision is bumped, not silently changed.
+SCHEDULE_GENERATOR_REVISION = "rf-visit-schedule.v2"
+
+TUNING_GENERATOR_REVISION = "rf-visit-schedule.v1"
+"""The tunings generator is untouched by the v2 visit-schedule repair: the
+same seed still yields the same 64 tuning frequencies. Only the per-visit
+delta assignment was defective, so only its revision moves."""
 
 # The algorithm that picks which eligible units the corpus will actually use.
 # Frozen beside the seed for the same reason the schedule generator is: the
@@ -922,7 +932,7 @@ def _tunings_per_band(bands: Tuple[Band, ...]) -> Tuple[int, ...]:
 
 
 def generate_tunings(*, seed: int, bands: Tuple[Band, ...],
-                     generator_revision: str = SCHEDULE_GENERATOR_REVISION,
+                     generator_revision: str = TUNING_GENERATOR_REVISION,
                      ) -> Tuple[Tuning, ...]:
     """§5.22's K tunings, at pseudorandom spacing from the declared seed.
 
@@ -934,10 +944,10 @@ def generate_tunings(*, seed: int, bands: Tuple[Band, ...],
     rest on float formatting, and the bin is 3.9 Hz wide, so a hertz is finer
     than anything the analysis can see.
     """
-    if generator_revision != SCHEDULE_GENERATOR_REVISION:
+    if generator_revision != TUNING_GENERATOR_REVISION:
         raise EnvelopeRefused(
             PLAN_SCHEDULE_NOT_REPRODUCIBLE,
-            f"{generator_revision!r} is not {SCHEDULE_GENERATOR_REVISION!r}")
+            f"{generator_revision!r} is not {TUNING_GENERATOR_REVISION!r}")
     if type(seed) is not int:
         raise EnvelopeRefused(
             PLAN_QUANTITY_NOT_FINITE, f"the seed is an int; got {type(seed).__name__}")
@@ -996,6 +1006,122 @@ def _signed_deltas() -> Tuple[float, ...]:
                  for delta in PLAN_RETUNE_DELTAS_HZ for sign in (1.0, -1.0))
 
 
+_V2_MAGNITUDE_PERMUTATIONS = (
+    (0, 1, 2), (0, 2, 1), (1, 0, 2),
+    (1, 2, 0), (2, 0, 1), (2, 1, 0),
+)
+"""The six orders three magnitudes can visit in. Indexed by digest, so the
+order varies per tuning and magnitude is not confounded with round/time."""
+
+
+def _v2_tuning_signed_deltas(seed: int, tuning_index: int
+                             ) -> "Tuple[float, float, float]":
+    """v2's three signed deltas for one tuning, in visit order.
+
+    All three magnitudes of PLAN_RETUNE_DELTAS_HZ exactly once -- three
+    genuinely distinct x-coordinates for the slope fit, by construction.
+    The order and the signs derive deterministically from seed+tuning, so
+    the same seed reproduces the same plan and magnitude does not ride
+    the round (time) structure.
+    """
+    rev = SCHEDULE_GENERATOR_REVISION
+    perm = _V2_MAGNITUDE_PERMUTATIONS[
+        _digest_int(f"{seed}|{rev}|v2|order|{tuning_index}", 6)]
+    mags = [PLAN_RETUNE_DELTAS_HZ[i] for i in perm]
+    signs = [1.0 if _digest_int(
+        f"{seed}|{rev}|v2|sign|{tuning_index}|{slot}", 2) == 0 else -1.0
+        for slot in range(PLAN_VISITS_PER_TUNING)]
+    deltas = tuple(s * m for s, m in zip(signs, mags))
+    assert len(set(deltas)) == PLAN_VISITS_PER_TUNING
+    assert sorted(abs(d) for d in deltas) == sorted(PLAN_RETUNE_DELTAS_HZ)
+    return deltas
+
+
+_ADMISSION_MIN_SIGNED_DELTA_USES = 16
+"""Each signed delta must appear at least this often across the schedule.
+Expectation under the v2 generator is 32 (192 visits / 6 signed deltas);
+16 is half of expectation -- a lax bound that only fails on a broken or
+hand-edited schedule, never on the generator's own output."""
+
+
+def admit_schedule(schedule, tunings, seed: int) -> str:
+    """Independently admit the visit schedule before tuner contact.
+
+    The generator constructs the plan; this function verifies it, from the
+    schedule's own data, without trusting the generator's internals. Every
+    tuning must carry exactly PLAN_VISITS_PER_TUNING visits with three
+    distinct signed deltas covering all three declared magnitudes; the
+    separation rule must hold; every signed delta must see real use in both
+    directions. On any failure, raises EnvelopeRefused naming the tuning
+    and the violated invariant -- before set_manual_gain_db and before the
+    first LO command, so a bad plan never touches the receiver.
+
+    Returns the schedule digest (canonical JSON, sha256) for the provenance
+    record.
+    """
+    import hashlib as _hashlib
+    import json as _json
+
+    n = len(tunings)
+    if n != PLAN_TUNING_COUNT:
+        raise EnvelopeRefused(
+            "PLAN_SCHEDULE_NOT_ADMITTED",
+            f"{n} tunings; §5.22 pins K = {PLAN_TUNING_COUNT}")
+    by_tuning = {}
+    for visit in schedule:
+        by_tuning.setdefault(visit.tuning_index, []).append(visit)
+    for tuning_index in range(n):
+        visits = by_tuning.get(tuning_index, [])
+        if len(visits) != PLAN_VISITS_PER_TUNING:
+            raise EnvelopeRefused(
+                "PLAN_SCHEDULE_NOT_ADMITTED",
+                f"tuning {tuning_index} has {len(visits)} visits; "
+                f"§5.22 requires {PLAN_VISITS_PER_TUNING}")
+        deltas = [v.retune_delta_hz for v in visits]
+        if len(set(deltas)) != PLAN_VISITS_PER_TUNING:
+            raise EnvelopeRefused(
+                "PLAN_SCHEDULE_NOT_ADMITTED",
+                f"tuning {tuning_index} has {len(set(deltas))} distinct "
+                f"signed deltas {sorted(set(deltas))}; §5.21 measures the "
+                "slope over at least three, because two points fit any line")
+        mags = sorted(abs(d) for d in deltas)
+        if mags != sorted(PLAN_RETUNE_DELTAS_HZ):
+            raise EnvelopeRefused(
+                "PLAN_SCHEDULE_NOT_ADMITTED",
+                f"tuning {tuning_index} magnitudes {mags} != declared "
+                f"{sorted(PLAN_RETUNE_DELTAS_HZ)}")
+    order = tuple(v.tuning_index for v in schedule)
+    if not _separations_hold(order):
+        raise EnvelopeRefused(
+            "PLAN_SCHEDULE_NOT_ADMITTED",
+            "the separation rule fails: a repeat sits within "
+            f"{PLAN_MINIMUM_SEPARATION} of its predecessor")
+    half = len(order) // 2
+    if not (set(order[:half]) == set(order[half:]) == set(range(n))):
+        raise EnvelopeRefused(
+            "PLAN_SCHEDULE_NOT_ADMITTED",
+            "the schedule is not counterbalanced across halves")
+    signed = _signed_deltas()
+    uses = {}
+    for visit in schedule:
+        uses[visit.retune_delta_hz] = uses.get(visit.retune_delta_hz, 0) + 1
+    short = {d: uses.get(d, 0) for d in signed
+             if uses.get(d, 0) < _ADMISSION_MIN_SIGNED_DELTA_USES}
+    if short:
+        raise EnvelopeRefused(
+            "PLAN_SCHEDULE_NOT_ADMITTED",
+            f"signed deltas underused {short}; §5.22 uses each delta in "
+            "both directions")
+    digest = _hashlib.sha256(_json.dumps(
+        {"seed": seed,
+         "generator_revision": SCHEDULE_GENERATOR_REVISION,
+         "visits": [{"position": v.position,
+                      "tuning_index": v.tuning_index,
+                      "retune_delta_hz": v.retune_delta_hz} for v in schedule]},
+        sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    return digest
+
+
 def generate_visit_schedule(*, seed: int, tunings: Tuple[Tuning, ...],
                             generator_revision: str = SCHEDULE_GENERATOR_REVISION,
                             ) -> Tuple[Visit, ...]:
@@ -1040,12 +1166,28 @@ def generate_visit_schedule(*, seed: int, tunings: Tuple[Tuning, ...],
             PLAN_SCHEDULE_UNSATISFIABLE,
             "the schedule is not counterbalanced: a tuning missing from one "
             "half confounds its frequency with the time it was visited")
-    signed = _signed_deltas()
+    # v2: deltas are assigned per tuning, not per visit. Each tuning's
+    # visits (one per round, in schedule order) receive the tuning's three
+    # signed deltas in order, so every tuning carries all three magnitudes
+    # exactly once by construction.
+    positions_by_tuning = {}
+    for position, tuning in enumerate(order):
+        positions_by_tuning.setdefault(tuning, []).append(position)
+    delta_by_position = {}
+    for tuning, positions in positions_by_tuning.items():
+        if len(positions) != PLAN_VISITS_PER_TUNING:
+            raise EnvelopeRefused(
+                PLAN_SCHEDULE_UNSATISFIABLE,
+                f"tuning {tuning} has {len(positions)} visits; §5.22 "
+                f"pins {PLAN_VISITS_PER_TUNING} per tuning")
+        for position, delta in zip(
+                positions, _v2_tuning_signed_deltas(seed, tuning)):
+            delta_by_position[position] = delta
     visits = tuple(
         Visit(position=position, tuning_index=tuning,
-              retune_delta_hz=signed[_digest_int(
-                  f"{seed}|{generator_revision}|delta|{position}", len(signed))])
+              retune_delta_hz=delta_by_position[position])
         for position, tuning in enumerate(order))
+    signed = _signed_deltas()
     used = {visit.retune_delta_hz for visit in visits}
     if used != set(signed):
         raise EnvelopeRefused(
@@ -1921,7 +2063,7 @@ class CapturePlanDeclaration:
 
         regenerated_tunings = generate_tunings(
             seed=self.seed, bands=self.bands,
-            generator_revision=self.schedule_generator_revision)
+            generator_revision=TUNING_GENERATOR_REVISION)
         if _canonical_bytes([t.to_dict() for t in self.tunings]) != \
                 _canonical_bytes([t.to_dict() for t in regenerated_tunings]):
             raise EnvelopeRefused(
@@ -2192,7 +2334,7 @@ def declare_capture_plan(*, seed: int, envelope: InstrumentChainEnvelope,
             f"{type(envelope).__name__}")
     bands = tuple(bands)
     tunings = generate_tunings(seed=seed, bands=bands,
-                               generator_revision=generator_revision)
+                               generator_revision=TUNING_GENERATOR_REVISION)
     plan = CapturePlanDeclaration(
         seed=seed, schedule_generator_revision=generator_revision,
         bands=bands, tunings=tunings,
