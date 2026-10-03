@@ -386,8 +386,14 @@ class MiniRunTests(unittest.TestCase):
             payload += _encode(windows)
 
         real_generators = (seq.generate_tunings, seq.generate_visit_schedule)
+        real_preatcontact = (seq.check_declaration_authorized,
+                             seq.admit_schedule)
         seq.generate_tunings = lambda **_k: tunings
         seq.generate_visit_schedule = lambda **_k: schedule
+        # synthetic 2-tuning schedule: authorization and the 64-tuning
+        # admission invariant are covered by their own tests
+        seq.check_declaration_authorized = lambda decl: None
+        seq.admit_schedule = lambda *a, **k: "test-schedule-digest"
         try:
             with tempfile.TemporaryDirectory() as tmpdir:
                 decl = _declaration(tmpdir)
@@ -410,6 +416,8 @@ class MiniRunTests(unittest.TestCase):
         finally:
             (seq.generate_tunings,
              seq.generate_visit_schedule) = real_generators
+            (seq.check_declaration_authorized,
+             seq.admit_schedule) = real_preatcontact
 
 
 if __name__ == "__main__":
