@@ -1205,8 +1205,11 @@ def write_artefacts(document: Dict[str, Any], decl: Dict[str, Any],
                    "events": document["events"]},
                   handle, indent=2, sort_keys=True)
     paths["log"] = log_path
-    return [paths["catalogue"], paths["chain"], paths["readme"],
-            paths["log"]]
+    if document.get("epoch_status") == "COMPLETE":
+        return [paths["catalogue"], paths["chain"],
+                paths["readme"], paths["log"]]
+    return [paths["incomplete_analysis"], paths["chain"],
+            paths["readme"], paths["log"]]
 
 
 def main(argv=None) -> int:
