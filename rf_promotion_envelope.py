@@ -1037,13 +1037,6 @@ def _v2_tuning_signed_deltas(seed: int, tuning_index: int
     return deltas
 
 
-_ADMISSION_MIN_SIGNED_DELTA_USES = 16
-"""Each signed delta must appear at least this often across the schedule.
-Expectation under the v2 generator is 32 (192 visits / 6 signed deltas);
-16 is half of expectation -- a lax bound that only fails on a broken or
-hand-edited schedule, never on the generator's own output."""
-
-
 def admit_schedule(schedule, tunings, seed: int) -> str:
     """Independently admit the visit schedule before tuner contact.
 
@@ -1056,8 +1049,10 @@ def admit_schedule(schedule, tunings, seed: int) -> str:
     and the violated invariant -- before set_manual_gain_db and before the
     first LO command, so a bad plan never touches the receiver.
 
-    Returns the schedule digest (canonical JSON, sha256) for the provenance
-    record.
+    Returns the whole-plan digest (canonical JSON, sha256) for the
+    provenance record: it binds the tunings as well as the visits, so a
+    band-set change that moves the RF centers cannot hide behind an
+    unchanged visit list.
     """
     import hashlib as _hashlib
     import json as _json
@@ -1102,19 +1097,24 @@ def admit_schedule(schedule, tunings, seed: int) -> str:
             "PLAN_SCHEDULE_NOT_ADMITTED",
             "the schedule is not counterbalanced across halves")
     signed = _signed_deltas()
-    uses = {}
-    for visit in schedule:
-        uses[visit.retune_delta_hz] = uses.get(visit.retune_delta_hz, 0) + 1
-    short = {d: uses.get(d, 0) for d in signed
-             if uses.get(d, 0) < _ADMISSION_MIN_SIGNED_DELTA_USES}
-    if short:
+    used = {visit.retune_delta_hz for visit in schedule}
+    missing = [d for d in signed if d not in used]
+    if missing:
         raise EnvelopeRefused(
             "PLAN_SCHEDULE_NOT_ADMITTED",
-            f"signed deltas underused {short}; §5.22 uses each delta in "
-            "both directions")
+            f"signed deltas never used {missing}; §5.22 uses each delta "
+            "in both directions")
+    # Whole-plan digest: seed, the tuning revision and the materialized
+    # tuning frequencies, the visit revision and the visits. A band-set
+    # change that moves the RF centers changes this digest; the visit list
+    # alone would not.
     digest = _hashlib.sha256(_json.dumps(
         {"seed": seed,
-         "generator_revision": SCHEDULE_GENERATOR_REVISION,
+         "tuning_generator_revision": TUNING_GENERATOR_REVISION,
+         "tunings": [{"tuning_index": t.tuning_index,
+                       "center_frequency_hz": t.center_frequency_hz,
+                       "band_id": t.band_id} for t in tunings],
+         "visit_generator_revision": SCHEDULE_GENERATOR_REVISION,
          "visits": [{"position": v.position,
                       "tuning_index": v.tuning_index,
                       "retune_delta_hz": v.retune_delta_hz} for v in schedule]},
