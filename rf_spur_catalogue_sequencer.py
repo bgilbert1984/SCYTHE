@@ -609,7 +609,7 @@ def run_epoch(decl: Dict[str, Any], tuner: RtlTcpTuner,
         tuning = tunings[visit.tuning_index]
         lo_hz = tuning.center_frequency_hz + visit.retune_delta_hz
         if progress:
-            progress(number, total, visit, lo_hz)
+            progress(number, total, visit, tuning.tuning_id, lo_hz)
         try:
             acquired = acquire_visit(
                 tuner, visit.position, tuning.tuning_id, visit.tuning_index,
@@ -786,9 +786,9 @@ def main(argv=None) -> int:
     with open(args.declaration) as handle:
         decl = json.load(handle)
 
-    def progress(number, total, visit, lo_hz):
+    def progress(number, total, visit, tuning_id, lo_hz):
         print(f"[{number:3d}/{total}] visit {visit.position}: "
-              f"{visit.tuning_id} LO {lo_hz:,.0f} Hz "
+              f"{tuning_id} LO {lo_hz:,.0f} Hz "
               f"(delta {visit.retune_delta_hz:+,.0f})", flush=True)
 
     with RtlTcpTuner(decl["rtl_tcp_host"], decl["rtl_tcp_port"]) as tuner:
