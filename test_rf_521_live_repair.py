@@ -224,20 +224,50 @@ class ClassificationRefusalTests(unittest.TestCase):
         return _authorized_declaration(tmpdir)
 
     def test_two_delta_track_refused_in_analysis(self):
+        # A 2-delta track is refused (not unresolved) even when the durable
+        # record reconciles: build a minimal 1-tuning spooled epoch, then
+        # force association to yield the short track.
+        from rf_promotion_envelope import Visit as V
         track = self._two_delta_track()
         tunings = (Tuning(tuning_index=0, center_frequency_hz=400e6,
                           band_id="UHF-400-470"),)
+        schedule = (V(position=0, tuning_index=0, retune_delta_hz=50_000.0),
+                    V(position=1, tuning_index=0, retune_delta_hz=-50_000.0),
+                    V(position=2, tuning_index=0, retune_delta_hz=100_000.0))
         real_associate = seq.associate_tracks
         seq.associate_tracks = lambda *a, **k: ([track], [], [])
         try:
             with tempfile.TemporaryDirectory() as tmpdir:
                 decl = self._decl(tmpdir)
+                out = decl["output_dir"]
+                os.makedirs(os.path.join(out, "spool"), exist_ok=True)
+                # journal: 3 acquired visits with valid spool objects
+                import hashlib as _hl
+                for pos in range(3):
+                    raw = bytes([pos]) * 8 * 1_048_576
+                    sp = os.path.join(out, "spool", f"visit_{pos:04d}.iq")
+                    with open(sp, "wb") as h:
+                        h.write(raw)
+                    rec = {"type": "visit_acquired", "position": pos,
+                           "tuning_index": 0, "tuning_id": "tuning-000",
+                           "lo_hz": 400_000_000.0,
+                           "retune_delta_hz": 50_000.0,
+                           "attempt": 1, "elapsed_s": 1.0,
+                           "spool_path": f"spool/visit_{pos:04d}.iq",
+                           "window_sha256": _hl.sha256(raw).hexdigest(),
+                           "window_bytes": len(raw),
+                           "candidates": [], "persistence": {},
+                           "retained": []}
+                    with open(os.path.join(
+                            out, "acquisition_journal.jsonl"), "a") as h:
+                        h.write(json.dumps(rec) + "\n")
                 comb = seq.ReferenceComb(
                     reference_hz=decl["reference_hz"],
                     reference_ppm=decl["reference_ppm"])
                 document = seq._analyze_epoch(
                     decl, tunings, comb, {0: []}, [], [], "digest",
-                    FROZEN_SEED, 3, tuner_type=5)
+                    FROZEN_SEED, 3, tuner_type=5,
+                    output_dir=out, schedule=schedule)
         finally:
             seq.associate_tracks = real_associate
         self.assertEqual(document["epoch_status"], "INCOMPLETE")
@@ -249,6 +279,38 @@ class ClassificationRefusalTests(unittest.TestCase):
         # never laundered into the catalogue entries, and never "unresolved"
         self.assertEqual(len(document["entries"]), 0)
         self.assertIn("incomplete_reason", document)
+
+    def test_narrow_catch_propagates_other_refusals(self):
+        # A non-slope refusal from classify_track must propagate, not become
+        # an ordinary classification refusal.
+        from rf_promotion_envelope import EnvelopeRefused as ER
+        tunings = (Tuning(tuning_index=0, center_frequency_hz=400e6,
+                          band_id="UHF-400-470"),)
+        real_classify = seq.classify_track
+
+        def _boom(track, comb, track_no):
+            raise ER("PLAN_RETUNE_NOT_DECLARED", "synthetic structural error")
+
+        seq.classify_track = _boom
+        real_associate = seq.associate_tracks
+        seq.associate_tracks = lambda *a, **k: (
+            [self._two_delta_track()], [], [])
+        try:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                decl = self._decl(tmpdir)
+                comb = seq.ReferenceComb(
+                    reference_hz=decl["reference_hz"],
+                    reference_ppm=decl["reference_ppm"])
+                with self.assertRaises(ER) as ctx:
+                    seq._analyze_epoch(
+                        decl, tunings, comb, {0: []}, [], [], "digest",
+                        FROZEN_SEED, 0, tuner_type=5,
+                        output_dir=tmpdir, schedule=())
+                self.assertEqual(ctx.exception.code,
+                                 "PLAN_RETUNE_NOT_DECLARED")
+        finally:
+            seq.classify_track = real_classify
+            seq.associate_tracks = real_associate
 
     def test_classify_track_raises_on_two_deltas(self):
         from rf_spur_catalogue_sequencer import classify_track
@@ -265,17 +327,17 @@ class DurableAcquisitionTests(unittest.TestCase):
     def test_spool_is_byte_exact(self):
         import types
         visit = types.SimpleNamespace(position=7)
-        windows = [np.arange(1_048_576, dtype=np.uint8),
-                   np.zeros(1_048_576, dtype=np.uint8)]
+        raw_windows = [bytes(range(256)) * 4096,  # 1,048,576 bytes
+                       b"\x00" * 1_048_576]
         with tempfile.TemporaryDirectory() as tmpdir:
             rel, digest, nbytes = seq._spool_visit_windows(
-                tmpdir, visit, windows)
+                tmpdir, visit, raw_windows)
             self.assertEqual(nbytes, 2 * 1_048_576)
             full = os.path.join(tmpdir, rel)
             self.assertTrue(os.path.exists(full))
             with open(full, "rb") as handle:
                 raw = handle.read()
-            self.assertEqual(raw, b"".join(w.tobytes() for w in windows))
+            self.assertEqual(raw, b"".join(raw_windows))
             self.assertEqual(hashlib.sha256(raw).hexdigest(), digest)
             # no temp file left behind
             self.assertEqual(os.listdir(os.path.join(tmpdir, "spool")),
@@ -310,6 +372,242 @@ class DurableAcquisitionTests(unittest.TestCase):
         self.assertAlmostEqual(vd.candidates[0].baseband_hz, 1000.0)
         self.assertEqual(vd.retained, [0])
         self.assertTrue(vd.persistence[0].persistent())
+
+
+class ReconciliationTests(unittest.TestCase):
+    """Change 4b: COMPLETE is earned by exact reconciliation."""
+
+    def _sched(self, n=3):
+        from rf_promotion_envelope import Visit as V
+        return tuple(V(position=i, tuning_index=0,
+                       retune_delta_hz=50_000.0) for i in range(n))
+
+    def _journal_acquired(self, out, pos, nbytes=8 * 1_048_576):
+        import hashlib as _hl
+        raw = bytes([pos % 256]) * nbytes
+        sp = os.path.join(out, "spool", f"visit_{pos:04d}.iq")
+        os.makedirs(os.path.dirname(sp), exist_ok=True)
+        with open(sp, "wb") as h:
+            h.write(raw)
+        rec = {"type": "visit_acquired", "position": pos,
+               "tuning_index": 0, "tuning_id": "tuning-000",
+               "lo_hz": 400_000_000.0, "retune_delta_hz": 50_000.0,
+               "attempt": 1, "elapsed_s": 1.0,
+               "spool_path": f"spool/visit_{pos:04d}.iq",
+               "window_sha256": _hl.sha256(raw).hexdigest(),
+               "window_bytes": len(raw),
+               "candidates": [], "persistence": {}, "retained": []}
+        with open(os.path.join(out, "acquisition_journal.jsonl"), "a") as h:
+            h.write(json.dumps(rec) + "\n")
+
+    def test_complete_reconciles(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sched = self._sched(3)
+            for pos in range(3):
+                self._journal_acquired(tmpdir, pos)
+            ok, reasons = seq._reconcile_durable_record(tmpdir, sched)
+            self.assertTrue(ok, reasons)
+            self.assertEqual(reasons, [])
+
+    def test_missing_position_fails(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sched = self._sched(3)
+            for pos in range(2):  # position 2 missing
+                self._journal_acquired(tmpdir, pos)
+            ok, reasons = seq._reconcile_durable_record(tmpdir, sched)
+            self.assertFalse(ok)
+            self.assertTrue(any("missing" in r for r in reasons))
+
+    def test_refused_visit_fails(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sched = self._sched(2)
+            self._journal_acquired(tmpdir, 0)
+            with open(os.path.join(
+                    tmpdir, "acquisition_journal.jsonl"), "a") as h:
+                h.write(json.dumps({"type": "visit_refused", "position": 1,
+                                    "reason": "synthetic"}) + "\n")
+            ok, reasons = seq._reconcile_durable_record(tmpdir, sched)
+            self.assertFalse(ok)
+            self.assertTrue(any("refused" in r for r in reasons))
+
+    def test_corrupt_spool_fails(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sched = self._sched(1)
+            self._journal_acquired(tmpdir, 0)
+            # corrupt the spool after journaling
+            with open(os.path.join(tmpdir, "spool",
+                                   "visit_0000.iq"), "r+b") as h:
+                h.seek(0)
+                h.write(b"\xff")
+            ok, reasons = seq._reconcile_durable_record(tmpdir, sched)
+            self.assertFalse(ok)
+            self.assertTrue(any("SHA-256" in r for r in reasons))
+
+
+class ArtefactBranchingTests(unittest.TestCase):
+    """Change 6: incomplete epochs never produce catalogue.json."""
+
+    def _doc(self, status):
+        return {"run_id": "t", "epoch": 1, "epoch_status": status,
+                "schedule_digest": "d" * 64, "chain_digest": "c" * 64,
+                "tuner_type": 5, "n_visits_acquired": 1,
+                "n_visits_scheduled": 1, "n_visits_refused": 0,
+                "entries": [], "ingress_findings": [],
+                "classification_refusals": [],
+                "unassociated_detections": [],
+                "ambiguous_associations": [],
+                "events": []}
+
+    def _decl(self, tmpdir):
+        return {"run_id": "t", "epoch": 1,
+                "receiver": {"sensor_id": "s", "description": "d"},
+                "reference_hz": 1.0, "reference_ppm": 1.0,
+                "ppm_justification": "j", "site": "s",
+                "termination": {"part": "p", "connector": "c",
+                                "fitted": True},
+                "gain_db": 1.0, "seed": 1}
+
+    def test_incomplete_writes_no_catalogue(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            paths = seq.write_artefacts(
+                self._doc("INCOMPLETE"), self._decl(tmpdir), tmpdir)
+            names = [os.path.basename(p) for p in paths]
+            self.assertIn("incomplete-analysis.json", names)
+            self.assertNotIn("catalogue.json", names)
+            self.assertFalse(
+                os.path.exists(os.path.join(tmpdir, "catalogue.json")))
+
+    def test_complete_writes_catalogue(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            paths = seq.write_artefacts(
+                self._doc("COMPLETE"), self._decl(tmpdir), tmpdir)
+            names = [os.path.basename(p) for p in paths]
+            self.assertIn("catalogue.json", names)
+            self.assertNotIn("incomplete-analysis.json", names)
+
+
+class CollisionProtectionTests(unittest.TestCase):
+    """Change 7: the live output directory is new per run."""
+
+    def test_refuses_existing_run_state(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            decl = _authorized_declaration(tmpdir)
+            out = decl["output_dir"]
+            os.makedirs(out, exist_ok=True)
+            with open(os.path.join(out, "schedule.json"), "w") as h:
+                h.write("{}")
+            tunings = (Tuning(tuning_index=0, center_frequency_hz=400e6,
+                              band_id="UHF-400-470"),)
+            schedule = ()
+            with self.assertRaises(seq.SequencerRefused) as ctx:
+                seq._materialize_precontact(decl, tunings, schedule,
+                                            "digest", out)
+            self.assertEqual(ctx.exception.code, "OUTPUT_DIR_NOT_EMPTY")
+
+
+class ReanalyzeFromIQTests(unittest.TestCase):
+    """Change 3: --reanalyze recomputes from the IQ spool."""
+
+    def test_reanalyze_verifies_and_recomputes(self):
+        # The journal claims a bogus candidate; reanalysis must recompute
+        # from the IQ spool, not trust the journal. We mock the heavy
+        # detection to return nothing, proving the journal's candidate
+        # is ignored (recomputation happened, journal not trusted).
+        import hashlib as _hl
+        with tempfile.TemporaryDirectory() as tmpdir:
+            decl = _authorized_declaration(tmpdir)
+            decl["bands"] = [{"band_id": "UHF_LOW", "low_hz": 400_000_000,
+                              "high_hz": 440_000_000}]
+            out = decl["output_dir"]
+            os.makedirs(os.path.join(out, "spool"), exist_ok=True)
+            with open(os.path.join(out, "declaration.json"), "w") as h:
+                json.dump(decl, h)
+            sched_doc = {
+                "seed": decl["seed"],
+                "generator_revision": "rf-visit-schedule.v2",
+                "schedule_digest": "d" * 64,
+                "visits": [{"position": i, "tuning_index": 0,
+                            "retune_delta_hz": 50_000.0}
+                           for i in range(2)],
+            }
+            with open(os.path.join(out, "schedule.json"), "w") as h:
+                json.dump(sched_doc, h)
+            raw = b"\x80" * 8 * 1_048_576
+            for pos in range(2):
+                sp = os.path.join(out, "spool", f"visit_{pos:04d}.iq")
+                with open(sp, "wb") as h:
+                    h.write(raw)
+                rec = {"type": "visit_acquired", "position": pos,
+                       "tuning_index": 0, "tuning_id": "tuning-000",
+                       "lo_hz": 400_000_000.0, "retune_delta_hz": 50_000.0,
+                       "attempt": 1, "elapsed_s": 1.0,
+                       "spool_path": f"spool/visit_{pos:04d}.iq",
+                       "window_sha256": _hl.sha256(raw).hexdigest(),
+                       "window_bytes": len(raw),
+                       # journal lies: claims a candidate
+                       "candidates": [{"baseband_hz": 999_999.0,
+                                       "excess_db": 50.0, "peak_bin": 1}],
+                       "persistence": {"0": {
+                           "tuning_id": "tuning-000",
+                           "repeat_excess_db": [50.0] * 8,
+                           "qualifying": 8, "persistent": True}},
+                       "retained": [0]}
+                with open(os.path.join(
+                        out, "acquisition_journal.jsonl"), "a") as h:
+                    h.write(json.dumps(rec) + "\n")
+            # mock detection to find nothing: if reanalysis trusted the
+            # journal, the bogus candidate would survive; recomputation
+            # drops it.
+            real_detect = seq.detect_candidates
+            seq.detect_candidates = lambda windows: []
+            try:
+                document = seq.reanalyze_from_spool(out)
+            finally:
+                seq.detect_candidates = real_detect
+            self.assertEqual(len(document["entries"]), 0)
+            self.assertEqual(
+                len(document["unassociated_detections"]), 0)
+            # and the spool was verified (SHA checked) during the run;
+            # a corrupt spool refuses (next test).
+
+    def test_reanalyze_refuses_corrupt_spool(self):
+        import hashlib as _hl
+        with tempfile.TemporaryDirectory() as tmpdir:
+            decl = _authorized_declaration(tmpdir)
+            decl["bands"] = [{"band_id": "UHF_LOW", "low_hz": 400_000_000,
+                              "high_hz": 440_000_000}]
+            out = decl["output_dir"]
+            os.makedirs(os.path.join(out, "spool"), exist_ok=True)
+            with open(os.path.join(out, "declaration.json"), "w") as h:
+                json.dump(decl, h)
+            sched_doc = {
+                "seed": decl["seed"],
+                "generator_revision": "rf-visit-schedule.v2",
+                "schedule_digest": "d" * 64,
+                "visits": [{"position": 0, "tuning_index": 0,
+                            "retune_delta_hz": 50_000.0}],
+            }
+            with open(os.path.join(out, "schedule.json"), "w") as h:
+                json.dump(sched_doc, h)
+            raw = b"\x80" * 8 * 1_048_576
+            sp = os.path.join(out, "spool", "visit_0000.iq")
+            with open(sp, "wb") as h:
+                h.write(raw)
+            # journal with a WRONG sha256
+            rec = {"type": "visit_acquired", "position": 0,
+                   "tuning_index": 0, "tuning_id": "tuning-000",
+                   "lo_hz": 400_000_000.0, "retune_delta_hz": 50_000.0,
+                   "attempt": 1, "elapsed_s": 1.0,
+                   "spool_path": "spool/visit_0000.iq",
+                   "window_sha256": "0" * 64,  # wrong
+                   "window_bytes": len(raw),
+                   "candidates": [], "persistence": {}, "retained": []}
+            with open(os.path.join(
+                    out, "acquisition_journal.jsonl"), "a") as h:
+                h.write(json.dumps(rec) + "\n")
+            with self.assertRaises(seq.SequencerRefused) as ctx:
+                seq.reanalyze_from_spool(out)
+            self.assertEqual(ctx.exception.code, "SPOOL_CORRUPT")
 
 
 if __name__ == "__main__":

@@ -230,6 +230,7 @@ def _visit_data(position, delta, candidates):
         visit=AcquiredVisit(position=position, tuning_index=0,
                             tuning_id="tuning-000", lo_hz=100e6 + delta,
                             retune_delta_hz=delta, windows=[],
+                            raw_windows=[],
                             elapsed_s=2.0, attempt=1),
         candidates=candidates,
         persistence={i: _persistent_obs() for i in range(len(candidates))},
