@@ -1,0 +1,9 @@
+[Unit]
+Description=Run rtl_tcp watchdog every 60s
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=60s
+
+[Install]
+WantedBy=timers.target

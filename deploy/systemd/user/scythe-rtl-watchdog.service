@@ -1,0 +1,6 @@
+[Unit]
+Description=rtl_tcp liveness watchdog (never disturbs active use)
+
+[Service]
+Type=oneshot
+ExecStart=%h/bin/scythe-rtl-watchdog.sh
