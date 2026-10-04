@@ -1,0 +1,34 @@
+{
+ "authorization": "\u00a75.21 catalogue run declaration, frozen 2026-09-30; reference_hz/reference_ppm declared PR #128 (2026-10-03)",
+ "bands": [
+  {
+   "band_id": "UHF_LOW",
+   "high_hz": 440000000,
+   "low_hz": 400000000
+  },
+  {
+   "band_id": "UHF_HIGH",
+   "high_hz": 470000000,
+   "low_hz": 440000000
+  }
+ ],
+ "epoch": 1,
+ "gain_db": 29.7,
+ "note": "Chain-defining fields. A run-time declaration must match the bound subset exactly; any mismatch is a pre-contact refusal (DECLARATION_NOT_AUTHORIZED). Bands are the frozen split UHF_LOW 400-440 MHz and UHF_HIGH 440-470 MHz (2026-09-30); band identity participates in tuning generation. Operational fields (run_id, epoch, site prose, rtl_tcp endpoint, output_dir) are the operator's launch choices and are not bound.",
+ "ppm_justification": "UNCALIBRATED_RECEIVER_CONSERVATIVE_BOUND. SN 14530058 physically identified 2026-10-03 (Y6 oscillator at reference position, FCC ID 2A8GD-SMArt-V5, PCB v5.2c1, USB descriptor 14530058) but not frequency-calibrated or disciplined; per the accepted \u00a75.21 procedure an uncalibrated dongle declares +/-100 ppm. Nooelec +/-0.5 ppm TCXO stability retained as corroborating hardware spec, not consumed as the ReferenceComb tolerance.",
+ "receiver": {
+  "description": "NESDR SMArt v5, USB 0bda:2838, FCC ID 2A8GD-SMArt-V5, PCB v5.2c1",
+  "sensor_id": "14530058"
+ },
+ "reference_hz": 28800000,
+ "reference_ppm": 100,
+ "run_id": "521-UHF-EPOCH1",
+ "seed": 7535194158483371716,
+ "site": "12502 Mukilteo Speedway, Mukilteo, WA 98275, no enclosure (no RF test enclosure; dongle in factory aluminum case)",
+ "termination": {
+  "connector": "SMA-male",
+  "fitted": true,
+  "note": "telescopic antenna removed; load direct-mated",
+  "part": "SMA-male 50 ohm termination load, user-ordered 2026-09-29"
+ }
+}
