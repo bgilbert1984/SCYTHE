@@ -382,30 +382,42 @@ class ReconciliationTests(unittest.TestCase):
         return tuple(V(position=i, tuning_index=0,
                        retune_delta_hz=50_000.0) for i in range(n))
 
-    def _journal_acquired(self, out, pos, nbytes=8 * 1_048_576):
+    def _tunings(self):
+        # tuning-000 centered so LO = center + 50 kHz = 400 MHz
+        return (Tuning(tuning_index=0, center_frequency_hz=399_950_000.0,
+                       band_id="UHF_LOW"),)
+
+    def _journal_acquired(self, out, pos, nbytes=8 * 1_048_576,
+                          delta_hz=50_000.0, tuning_id="tuning-000",
+                          lo_hz=400_000_000.0, rtype="visit_acquired",
+                          spool_name=None):
         import hashlib as _hl
         raw = bytes([pos % 256]) * nbytes
-        sp = os.path.join(out, "spool", f"visit_{pos:04d}.iq")
+        spool_name = spool_name or f"visit_{pos:04d}.iq"
+        sp = os.path.join(out, "spool", spool_name)
         os.makedirs(os.path.dirname(sp), exist_ok=True)
         with open(sp, "wb") as h:
             h.write(raw)
-        rec = {"type": "visit_acquired", "position": pos,
-               "tuning_index": 0, "tuning_id": "tuning-000",
-               "lo_hz": 400_000_000.0, "retune_delta_hz": 50_000.0,
+        rec = {"type": rtype, "position": pos,
+               "tuning_index": 0, "tuning_id": tuning_id,
+               "lo_hz": lo_hz, "retune_delta_hz": delta_hz,
                "attempt": 1, "elapsed_s": 1.0,
-               "spool_path": f"spool/visit_{pos:04d}.iq",
+               "spool_path": f"spool/{spool_name}",
                "window_sha256": _hl.sha256(raw).hexdigest(),
                "window_bytes": len(raw),
                "candidates": [], "persistence": {}, "retained": []}
         with open(os.path.join(out, "acquisition_journal.jsonl"), "a") as h:
             h.write(json.dumps(rec) + "\n")
 
+    def _reconcile(self, tmpdir, sched):
+        return seq._reconcile_durable_record(tmpdir, sched, self._tunings())
+
     def test_complete_reconciles(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             sched = self._sched(3)
             for pos in range(3):
                 self._journal_acquired(tmpdir, pos)
-            ok, reasons = seq._reconcile_durable_record(tmpdir, sched)
+            ok, reasons = self._reconcile(tmpdir, sched)
             self.assertTrue(ok, reasons)
             self.assertEqual(reasons, [])
 
@@ -414,7 +426,7 @@ class ReconciliationTests(unittest.TestCase):
             sched = self._sched(3)
             for pos in range(2):  # position 2 missing
                 self._journal_acquired(tmpdir, pos)
-            ok, reasons = seq._reconcile_durable_record(tmpdir, sched)
+            ok, reasons = self._reconcile(tmpdir, sched)
             self.assertFalse(ok)
             self.assertTrue(any("missing" in r for r in reasons))
 
@@ -426,7 +438,7 @@ class ReconciliationTests(unittest.TestCase):
                     tmpdir, "acquisition_journal.jsonl"), "a") as h:
                 h.write(json.dumps({"type": "visit_refused", "position": 1,
                                     "reason": "synthetic"}) + "\n")
-            ok, reasons = seq._reconcile_durable_record(tmpdir, sched)
+            ok, reasons = self._reconcile(tmpdir, sched)
             self.assertFalse(ok)
             self.assertTrue(any("refused" in r for r in reasons))
 
@@ -439,9 +451,54 @@ class ReconciliationTests(unittest.TestCase):
                                    "visit_0000.iq"), "r+b") as h:
                 h.seek(0)
                 h.write(b"\xff")
-            ok, reasons = seq._reconcile_durable_record(tmpdir, sched)
+            ok, reasons = self._reconcile(tmpdir, sched)
             self.assertFalse(ok)
             self.assertTrue(any("SHA-256" in r for r in reasons))
+
+    def test_right_position_wrong_delta_fails(self):
+        # The seam blocker 3 named: a record at the scheduled position but
+        # describing a different retune must not help earn COMPLETE.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sched = self._sched(1)
+            self._journal_acquired(tmpdir, 0, delta_hz=100_000.0)
+            ok, reasons = self._reconcile(tmpdir, sched)
+            self.assertFalse(ok)
+            self.assertTrue(any("retune_delta_hz" in r for r in reasons))
+
+    def test_wrong_tuning_id_fails(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sched = self._sched(1)
+            self._journal_acquired(tmpdir, 0, tuning_id="tuning-007")
+            ok, reasons = self._reconcile(tmpdir, sched)
+            self.assertFalse(ok)
+            self.assertTrue(any("tuning_id" in r for r in reasons))
+
+    def test_wrong_lo_fails(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sched = self._sched(1)
+            self._journal_acquired(tmpdir, 0, lo_hz=400_100_000.0)
+            ok, reasons = self._reconcile(tmpdir, sched)
+            self.assertFalse(ok)
+            self.assertTrue(any("lo_hz" in r for r in reasons))
+
+    def test_duplicate_spool_path_fails(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sched = self._sched(2)
+            self._journal_acquired(tmpdir, 0)
+            # position 1 claims position 0's spool object
+            self._journal_acquired(tmpdir, 1, spool_name="visit_0000.iq")
+            ok, reasons = self._reconcile(tmpdir, sched)
+            self.assertFalse(ok)
+            self.assertTrue(any("spool path" in r for r in reasons))
+
+    def test_unknown_record_type_fails(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sched = self._sched(1)
+            self._journal_acquired(tmpdir, 0, rtype="visit_maybe")
+            ok, reasons = self._reconcile(tmpdir, sched)
+            self.assertFalse(ok)
+            self.assertTrue(any("unknown journal record type" in r
+                               for r in reasons))
 
 
 class ArtefactBranchingTests(unittest.TestCase):
@@ -506,62 +563,75 @@ class CollisionProtectionTests(unittest.TestCase):
 
 
 class ReanalyzeFromIQTests(unittest.TestCase):
-    """Change 3: --reanalyze recomputes from the IQ spool."""
+    """Change 3: --reanalyze recomputes from the IQ spool.
+
+    The fixtures build a genuine epoch: the schedule.json is the real
+    materialized plan for the declaration (via _materialize_precontact),
+    and the journal records are bound to the schedule's visits. A
+    tampered schedule.json must be refused, not trusted.
+    """
+
+    def _materialize_epoch(self, tmpdir, positions, bogus_candidate=False):
+        """Genuine declaration.json + schedule.json; spool + journal the
+        given schedule positions with flat IQ."""
+        import hashlib as _hl
+        decl = _authorized_declaration(tmpdir)
+        decl["bands"] = [{"band_id": "UHF_LOW", "low_hz": 400_000_000,
+                          "high_hz": 440_000_000}]
+        out = decl["output_dir"]
+        bands = tuple(Band(band_id=b["band_id"], low_hz=b["low_hz"],
+                           high_hz=b["high_hz"]) for b in decl["bands"])
+        tunings = generate_tunings(seed=decl["seed"], bands=bands)
+        schedule = generate_visit_schedule(seed=decl["seed"], tunings=tunings)
+        digest = admit_schedule(schedule, tunings, decl["seed"])
+        seq._materialize_precontact(decl, tunings, schedule, digest, out)
+        by_pos = {v.position: v for v in schedule}
+        raw = b"\x80" * 8 * 1_048_576
+        for pos in positions:
+            v = by_pos[pos]
+            t = tunings[v.tuning_index]
+            lo = t.center_frequency_hz + v.retune_delta_hz
+            sp = os.path.join(out, "spool", f"visit_{pos:04d}.iq")
+            os.makedirs(os.path.dirname(sp), exist_ok=True)
+            with open(sp, "wb") as h:
+                h.write(raw)
+            rec = {"type": "visit_acquired", "position": pos,
+                   "tuning_index": v.tuning_index, "tuning_id": t.tuning_id,
+                   "lo_hz": lo, "retune_delta_hz": v.retune_delta_hz,
+                   "attempt": 1, "elapsed_s": 1.0,
+                   "spool_path": f"spool/visit_{pos:04d}.iq",
+                   "window_sha256": _hl.sha256(raw).hexdigest(),
+                   "window_bytes": len(raw),
+                   "candidates": [], "persistence": {}, "retained": []}
+            if bogus_candidate:
+                # journal lies: claims a candidate
+                rec["candidates"] = [{"baseband_hz": 999_999.0,
+                                      "excess_db": 50.0, "peak_bin": 1}]
+                rec["persistence"] = {
+                    "0": {"tuning_id": t.tuning_id,
+                          "repeat_excess_db": [50.0] * 8,
+                          "qualifying": 8, "persistent": True}}
+                rec["retained"] = [0]
+            with open(os.path.join(
+                    out, "acquisition_journal.jsonl"), "a") as h:
+                h.write(json.dumps(rec) + "\n")
+        return out, decl
 
     def test_reanalyze_verifies_and_recomputes(self):
         # The journal claims a bogus candidate; reanalysis must recompute
         # from the IQ spool, not trust the journal. We mock the heavy
         # detection to return nothing, proving the journal's candidate
         # is ignored (recomputation happened, journal not trusted).
-        import hashlib as _hl
         with tempfile.TemporaryDirectory() as tmpdir:
-            decl = _authorized_declaration(tmpdir)
-            decl["bands"] = [{"band_id": "UHF_LOW", "low_hz": 400_000_000,
-                              "high_hz": 440_000_000}]
-            out = decl["output_dir"]
-            os.makedirs(os.path.join(out, "spool"), exist_ok=True)
-            with open(os.path.join(out, "declaration.json"), "w") as h:
-                json.dump(decl, h)
-            sched_doc = {
-                "seed": decl["seed"],
-                "generator_revision": "rf-visit-schedule.v2",
-                "schedule_digest": "d" * 64,
-                "visits": [{"position": i, "tuning_index": 0,
-                            "retune_delta_hz": 50_000.0}
-                           for i in range(2)],
-            }
-            with open(os.path.join(out, "schedule.json"), "w") as h:
-                json.dump(sched_doc, h)
-            raw = b"\x80" * 8 * 1_048_576
-            for pos in range(2):
-                sp = os.path.join(out, "spool", f"visit_{pos:04d}.iq")
-                with open(sp, "wb") as h:
-                    h.write(raw)
-                rec = {"type": "visit_acquired", "position": pos,
-                       "tuning_index": 0, "tuning_id": "tuning-000",
-                       "lo_hz": 400_000_000.0, "retune_delta_hz": 50_000.0,
-                       "attempt": 1, "elapsed_s": 1.0,
-                       "spool_path": f"spool/visit_{pos:04d}.iq",
-                       "window_sha256": _hl.sha256(raw).hexdigest(),
-                       "window_bytes": len(raw),
-                       # journal lies: claims a candidate
-                       "candidates": [{"baseband_hz": 999_999.0,
-                                       "excess_db": 50.0, "peak_bin": 1}],
-                       "persistence": {"0": {
-                           "tuning_id": "tuning-000",
-                           "repeat_excess_db": [50.0] * 8,
-                           "qualifying": 8, "persistent": True}},
-                       "retained": [0]}
-                with open(os.path.join(
-                        out, "acquisition_journal.jsonl"), "a") as h:
-                    h.write(json.dumps(rec) + "\n")
+            out, _decl = self._materialize_epoch(
+                tmpdir, [0, 1], bogus_candidate=True)
             # mock detection to find nothing: if reanalysis trusted the
             # journal, the bogus candidate would survive; recomputation
             # drops it.
             real_detect = seq.detect_candidates
             seq.detect_candidates = lambda windows: []
             try:
-                document = seq.reanalyze_from_spool(out)
+                document, decl = seq.reanalyze_from_spool(out)
             finally:
                 seq.detect_candidates = real_detect
             self.assertEqual(len(document["entries"]), 0)
@@ -573,27 +643,9 @@ class ReanalyzeFromIQTests(unittest.TestCase):
     def test_reanalyze_refuses_corrupt_spool(self):
         import hashlib as _hl
         with tempfile.TemporaryDirectory() as tmpdir:
-            decl = _authorized_declaration(tmpdir)
-            decl["bands"] = [{"band_id": "UHF_LOW", "low_hz": 400_000_000,
-                              "high_hz": 440_000_000}]
-            out = decl["output_dir"]
-            os.makedirs(os.path.join(out, "spool"), exist_ok=True)
-            with open(os.path.join(out, "declaration.json"), "w") as h:
-                json.dump(decl, h)
-            sched_doc = {
-                "seed": decl["seed"],
-                "generator_revision": "rf-visit-schedule.v2",
-                "schedule_digest": "d" * 64,
-                "visits": [{"position": 0, "tuning_index": 0,
-                            "retune_delta_hz": 50_000.0}],
-            }
-            with open(os.path.join(out, "schedule.json"), "w") as h:
-                json.dump(sched_doc, h)
+            out, _decl = self._materialize_epoch(tmpdir, [0])
             raw = b"\x80" * 8 * 1_048_576
-            sp = os.path.join(out, "spool", "visit_0000.iq")
-            with open(sp, "wb") as h:
-                h.write(raw)
-            # journal with a WRONG sha256
+            # rewrite the journal with a WRONG sha256
             rec = {"type": "visit_acquired", "position": 0,
                    "tuning_index": 0, "tuning_id": "tuning-000",
                    "lo_hz": 400_000_000.0, "retune_delta_hz": 50_000.0,
@@ -603,11 +655,98 @@ class ReanalyzeFromIQTests(unittest.TestCase):
                    "window_bytes": len(raw),
                    "candidates": [], "persistence": {}, "retained": []}
             with open(os.path.join(
-                    out, "acquisition_journal.jsonl"), "a") as h:
+                    out, "acquisition_journal.jsonl"), "w") as h:
                 h.write(json.dumps(rec) + "\n")
             with self.assertRaises(seq.SequencerRefused) as ctx:
                 seq.reanalyze_from_spool(out)
             self.assertEqual(ctx.exception.code, "SPOOL_CORRUPT")
+
+    def test_reanalyze_refuses_tampered_schedule(self):
+        # Blocker 2's seam: schedule.json redefines a retune but stays
+        # internally self-consistent. Reanalysis must re-derive the plan
+        # from the preserved declaration and refuse the mismatch.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out, _decl = self._materialize_epoch(tmpdir, [0])
+            sched_path = os.path.join(out, "schedule.json")
+            with open(sched_path) as h:
+                sched_doc = json.load(h)
+            sched_doc["visits"][0]["retune_delta_hz"] = 123_456.0
+            with open(sched_path, "w") as h:
+                json.dump(sched_doc, h)
+            with self.assertRaises(seq.SequencerRefused) as ctx:
+                seq.reanalyze_from_spool(out)
+            self.assertEqual(ctx.exception.code, "SCHEDULE_TAMPERED")
+
+    def test_reanalyze_refuses_wrong_digest(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out, _decl = self._materialize_epoch(tmpdir, [0])
+            sched_path = os.path.join(out, "schedule.json")
+            with open(sched_path) as h:
+                sched_doc = json.load(h)
+            sched_doc["schedule_digest"] = "e" * 64
+            with open(sched_path, "w") as h:
+                json.dump(sched_doc, h)
+            with self.assertRaises(seq.SequencerRefused) as ctx:
+                seq.reanalyze_from_spool(out)
+            self.assertEqual(ctx.exception.code, "SCHEDULE_TAMPERED")
+
+    def test_reanalyze_returns_preserved_declaration(self):
+        # Blocker 1's seam: the declaration the artefacts are written
+        # against is the preserved one, not an external file.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out, decl = self._materialize_epoch(tmpdir, [0])
+            real_detect = seq.detect_candidates
+            seq.detect_candidates = lambda windows: []
+            try:
+                _document, rdecl = seq.reanalyze_from_spool(out)
+            finally:
+                seq.detect_candidates = real_detect
+            self.assertEqual(rdecl["run_id"], decl["run_id"])
+            self.assertEqual(rdecl["seed"], decl["seed"])
+            self.assertEqual(rdecl["gain_db"], 29.7)
+
+
+class MainCLITests(unittest.TestCase):
+    """Blocker 5: the CLI completion path must not die after writing."""
+
+    def test_reanalyze_cli_success_path(self):
+        # Exercises main() end to end on the reanalyze path, including the
+        # final print that used to NameError on unquoted identifiers.
+        import io
+        from contextlib import redirect_stdout
+        with tempfile.TemporaryDirectory() as tmpdir:
+            helper = ReanalyzeFromIQTests()
+            out, _decl = helper._materialize_epoch(tmpdir, [0, 1])
+            real_detect = seq.detect_candidates
+            seq.detect_candidates = lambda windows: []
+            buf = io.StringIO()
+            try:
+                with redirect_stdout(buf):
+                    rc = seq.main(["--reanalyze", out])
+            finally:
+                seq.detect_candidates = real_detect
+            self.assertEqual(rc, 0)
+            printed = buf.getvalue()
+            self.assertIn("epoch 1 [INCOMPLETE]", printed)
+            self.assertIn("wrote ", printed)
+            # artefacts went to <out>/reanalysis, against the preserved
+            # declaration: no external --declaration was passed.
+            rdir = os.path.join(out, "reanalysis")
+            self.assertTrue(os.path.isfile(
+                os.path.join(rdir, "incomplete-analysis.json")))
+            self.assertFalse(os.path.isfile(
+                os.path.join(rdir, "catalogue.json")))
+            with open(os.path.join(rdir, "chain.json")) as h:
+                chain = json.load(h)
+            # the preserved declaration's frozen gain, not an external file's
+            self.assertEqual(chain["gain_db"], 29.7)
+
+    def test_live_run_requires_declaration(self):
+        # --declaration is still mandatory for a live run (argparse errors
+        # with exit code 2); --reanalyze must not require it.
+        with self.assertRaises(SystemExit) as ctx:
+            seq.main([])
+        self.assertEqual(ctx.exception.code, 2)
 
 
 if __name__ == "__main__":

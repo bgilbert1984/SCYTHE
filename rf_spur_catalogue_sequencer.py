@@ -74,6 +74,7 @@ from rf_promotion_envelope import (
     matched_mixing_slope,
     PLAN_SLOPE_NOT_ESTIMATED,
     SCHEDULE_GENERATOR_REVISION,
+    TUNING_GENERATOR_REVISION,
     Visit,
     usable_half_span_hz,
     CONSISTENT_WITH_INTERNAL_MIXING,
@@ -720,26 +721,32 @@ def _materialize_precontact(decl: Dict[str, Any], tunings, schedule,
         (json.dumps(decl, indent=1, sort_keys=True) + "\n").encode())
     sched_doc = {
         "seed": decl["seed"],
-        "generator_revision": SCHEDULE_GENERATOR_REVISION,
+        "tuning_generator_revision": TUNING_GENERATOR_REVISION,
+        "visit_generator_revision": SCHEDULE_GENERATOR_REVISION,
         "schedule_digest": schedule_digest,
         "tunings": [t.to_dict() for t in tunings],
-        "visits": [{"position": v.position,
-                     "tuning_index": v.tuning_index,
-                     "retune_delta_hz": v.retune_delta_hz}
-                    for v in schedule],
+        "visits": [v.to_dict() for v in schedule],
     }
     _durably_write(
         os.path.join(output_dir, "schedule.json"),
         (json.dumps(sched_doc, indent=1, sort_keys=True) + "\n").encode())
 
 
-def _reconcile_durable_record(output_dir: str, schedule) -> "Tuple[bool, List[str]]":
+def _reconcile_durable_record(output_dir: str, schedule,
+                              tunings) -> "Tuple[bool, List[str]]":
     """Verify the durable record reconciles exactly with the schedule.
 
     COMPLETE is earned, not defaulted: every scheduled position appears
     exactly once in the journal, all visits were acquired (zero refused),
-    and each acquired position has one spool object whose byte count and
-    SHA-256 match the journal. Returns (is_complete, reasons).
+    each acquired position has one spool object whose byte count and
+    SHA-256 match the journal, and -- critically -- each journal record's
+    metadata is bound back to the scheduled visit it claims to be: the
+    right position is not enough, the tuning_index, retune_delta_hz,
+    tuning_id, and expected LO must agree with the schedule, spool paths
+    must be one-to-one, and unknown record types are refused. A record at
+    the right position describing the wrong retune cannot help earn
+    COMPLETE while the analyzer trusts its metadata. Returns
+    (is_complete, reasons).
     """
     reasons: List[str] = []
     journal_path = os.path.join(output_dir, ACQUISITION_JOURNAL_NAME)
@@ -748,8 +755,15 @@ def _reconcile_durable_record(output_dir: str, schedule) -> "Tuple[bool, List[st
             records = [json.loads(line) for line in handle if line.strip()]
     except FileNotFoundError:
         return False, ["acquisition journal missing"]
+    expected_visit = {v.position: v for v in schedule}
     by_position: Dict[int, Dict] = {}
     for rec in records:
+        rtype = rec.get("type")
+        if rtype not in ("visit_acquired", "visit_refused"):
+            reasons.append(
+                f"position {rec.get('position')}: unknown journal record "
+                f"type {rtype!r}")
+            continue
         pos = rec["position"]
         if pos in by_position:
             reasons.append(f"position {pos} journaled more than once")
@@ -766,21 +780,55 @@ def _reconcile_durable_record(output_dir: str, schedule) -> "Tuple[bool, List[st
     if refused:
         reasons.append(
             f"{len(refused)} refused visit(s); COMPLETE requires zero")
+    seen_spool_paths = set()
     for rec in records:
         if rec.get("type") != "visit_acquired":
             continue
-        spool_path = os.path.join(output_dir, rec["spool_path"])
+        pos = rec["position"]
+        visit = expected_visit.get(pos)
+        if visit is None:
+            continue  # already reported as extra above
+        tuning = tunings[visit.tuning_index]
+        expected_lo = tuning.center_frequency_hz + visit.retune_delta_hz
+        if rec.get("tuning_index") != visit.tuning_index:
+            reasons.append(
+                f"position {pos}: journal tuning_index "
+                f"{rec.get('tuning_index')} != scheduled "
+                f"{visit.tuning_index}")
+        if rec.get("retune_delta_hz") != visit.retune_delta_hz:
+            reasons.append(
+                f"position {pos}: journal retune_delta_hz "
+                f"{rec.get('retune_delta_hz')} != scheduled "
+                f"{visit.retune_delta_hz}")
+        if rec.get("tuning_id") != tuning.tuning_id:
+            reasons.append(
+                f"position {pos}: journal tuning_id {rec.get('tuning_id')!r} "
+                f"!= scheduled {tuning.tuning_id!r}")
+        if rec.get("lo_hz") != expected_lo:
+            reasons.append(
+                f"position {pos}: journal lo_hz {rec.get('lo_hz')} != "
+                f"expected {expected_lo}")
+        spool_rel = rec.get("spool_path")
+        if spool_rel in seen_spool_paths:
+            reasons.append(
+                f"position {pos}: spool path {spool_rel!r} already claimed "
+                f"by another journal record")
+        seen_spool_paths.add(spool_rel)
+        if not spool_rel:
+            reasons.append(f"position {pos}: journal record has no spool_path")
+            continue
+        spool_path = os.path.join(output_dir, spool_rel)
         if not os.path.isfile(spool_path):
-            reasons.append(f"position {rec['position']}: spool object missing")
+            reasons.append(f"position {pos}: spool object missing")
             continue
         with open(spool_path, "rb") as handle:
             raw = handle.read()
         if len(raw) != rec["window_bytes"]:
             reasons.append(
-                f"position {rec['position']}: byte count {len(raw)} != "
+                f"position {pos}: byte count {len(raw)} != "
                 f"journal {rec['window_bytes']}")
         if hashlib.sha256(raw).hexdigest() != rec["window_sha256"]:
-            reasons.append(f"position {rec['position']}: SHA-256 mismatch")
+            reasons.append(f"position {pos}: SHA-256 mismatch")
     return (len(reasons) == 0), reasons
 
 
@@ -833,7 +881,8 @@ def _analyze_epoch(decl: Dict[str, Any], tunings, comb, by_tuning,
                 assert spur is not None
                 entries.append(spur.to_dict())
     reconciled, recon_reasons = _reconcile_durable_record(output_dir,
-                                                        schedule)
+                                                        schedule,
+                                                        tunings)
     incomplete_reasons = list(recon_reasons)
     if classification_refusals:
         codes = sorted({r["refusal_code"] for r in classification_refusals})
@@ -951,26 +1000,86 @@ def _recompute_visit_data(output_dir: str, rec: Dict[str, Any]
                            persistence=persistence, retained=retained)
 
 
-def reanalyze_from_spool(output_dir: str) -> Dict[str, Any]:
+def _verify_schedule_against_declaration(
+        decl: Dict[str, Any], sched_doc: Dict[str, Any]
+) -> "Tuple[tuple, tuple, str]":
+    """Re-derive the expected plan from the preserved declaration and
+    require the materialized schedule.json to match it exactly.
+
+    Reanalysis must not trust schedule.json's visits or digest on their
+    own word: a modified schedule.json could redefine the retunes the
+    reanalysis runs against while staying internally self-consistent
+    with its journal. The declaration is the authority. The tunings are
+    re-derived from it, then the visits, then the independent admission
+    digest; the stored document must agree field for field, including
+    both generator revisions.
+    """
+    checked = check_declaration(decl)
+    if sched_doc.get("tuning_generator_revision") != TUNING_GENERATOR_REVISION:
+        raise SequencerRefused(
+            "SCHEDULE_TAMPERED",
+            "schedule.json tuning_generator_revision "
+            f"{sched_doc.get('tuning_generator_revision')!r} != "
+            f"{TUNING_GENERATOR_REVISION!r}")
+    if sched_doc.get("visit_generator_revision") != SCHEDULE_GENERATOR_REVISION:
+        raise SequencerRefused(
+            "SCHEDULE_TAMPERED",
+            "schedule.json visit_generator_revision "
+            f"{sched_doc.get('visit_generator_revision')!r} != "
+            f"{SCHEDULE_GENERATOR_REVISION!r}")
+    if sched_doc.get("seed") != decl["seed"]:
+        raise SequencerRefused(
+            "SCHEDULE_TAMPERED",
+            "schedule.json seed does not match the preserved declaration")
+    tunings = generate_tunings(seed=decl["seed"],
+                               bands=tuple(checked["bands"]))
+    schedule = generate_visit_schedule(seed=decl["seed"], tunings=tunings)
+    if sched_doc.get("tunings") != [t.to_dict() for t in tunings]:
+        raise SequencerRefused(
+            "SCHEDULE_TAMPERED",
+            "schedule.json tunings differ from the plan re-derived from "
+            "the preserved declaration")
+    if sched_doc.get("visits") != [v.to_dict() for v in schedule]:
+        raise SequencerRefused(
+            "SCHEDULE_TAMPERED",
+            "schedule.json visits differ from the plan re-derived from "
+            "the preserved declaration")
+    try:
+        digest = admit_schedule(schedule, tunings, decl["seed"])
+    except EnvelopeRefused as exc:
+        raise SequencerRefused(
+            "SCHEDULE_NOT_ADMITTED",
+            f"re-derived schedule failed independent admission: {exc}"
+        ) from exc
+    if digest != sched_doc.get("schedule_digest"):
+        raise SequencerRefused(
+            "SCHEDULE_TAMPERED",
+            "schedule.json digest does not match the re-derived "
+            "whole-plan digest")
+    return tunings, schedule, digest
+
+
+def reanalyze_from_spool(output_dir: str) -> "Tuple[Dict[str, Any], Dict[str, Any]]":
     """Re-run analysis from the IQ spool. No tuner contact.
 
     For the "fix the analyzer, rerun over the same evidence" workflow:
-    loads declaration.json and schedule.json, verifies each spool object
-    against the journal (byte count, SHA-256), recomputes candidate
-    detection and persistence measurement from the byte-exact windows,
-    then runs association and classification.
+    loads declaration.json and schedule.json, requires the schedule to
+    match the plan re-derived from the preserved declaration (both
+    generator revisions, tunings, visits, and the whole-plan digest),
+    verifies each spool object against the journal (byte count, SHA-256),
+    recomputes candidate detection and persistence measurement from the
+    byte-exact windows, then runs association and classification.
+
+    Returns (document, decl): the declaration is the one preserved in
+    the evidence directory, and it is the declaration the artefacts are
+    written against -- no external declaration is consulted.
     """
     with open(os.path.join(output_dir, "declaration.json")) as handle:
         decl = json.load(handle)
     with open(os.path.join(output_dir, "schedule.json")) as handle:
         sched_doc = json.load(handle)
-    checked = check_declaration(decl)
-    tunings = generate_tunings(seed=decl["seed"],
-                               bands=tuple(checked["bands"]))
-    schedule = tuple(
-        Visit(position=v["position"], tuning_index=v["tuning_index"],
-              retune_delta_hz=v["retune_delta_hz"])
-        for v in sched_doc["visits"])
+    tunings, schedule, digest = _verify_schedule_against_declaration(
+        decl, sched_doc)
     comb = ReferenceComb(reference_hz=decl["reference_hz"],
                          reference_ppm=decl["reference_ppm"])
     by_tuning: Dict[int, List] = {}
@@ -995,10 +1104,11 @@ def reanalyze_from_spool(output_dir: str) -> Dict[str, Any]:
                                "position": rec["position"],
                                "tuning_id": rec["tuning_id"],
                                "recomputed_from_spool": True})
-    return _analyze_epoch(decl, tunings, comb, by_tuning, refused_visits,
-                          events, sched_doc["schedule_digest"], decl["seed"],
-                          len(schedule), tuner_type=None,
-                          output_dir=output_dir, schedule=schedule)
+    document = _analyze_epoch(decl, tunings, comb, by_tuning, refused_visits,
+                              events, digest, decl["seed"],
+                              len(schedule), tuner_type=None,
+                              output_dir=output_dir, schedule=schedule)
+    return document, decl
 
 
 def run_epoch(decl: Dict[str, Any], tuner: RtlTcpTuner,
@@ -1053,6 +1163,13 @@ def run_epoch(decl: Dict[str, Any], tuner: RtlTcpTuner,
                            "position": visit.position,
                            "reason": str(exc)})
             continue
+        # Durable first: the visit's bytes reach the spool before any
+        # analysis touches them. A bug, OOM, or exception in detection or
+        # persistence cannot eat a successfully acquired visit -- once the
+        # receiver has delivered it, analysis is incapable of making those
+        # bytes disappear. Temp file, SHA-256, fsync, atomic rename.
+        spool_rel, window_sha256, window_bytes = _spool_visit_windows(
+            output_dir, visit, acquired.raw_windows)
         candidates = detect_candidates(acquired.windows)
         persistence = {}
         retained = []
@@ -1064,11 +1181,8 @@ def run_epoch(decl: Dict[str, Any], tuner: RtlTcpTuner,
             persistence[idx] = obs
             if obs.persistent():
                 retained.append(idx)
-        # Durable spool before the windows leave memory: temp, sha256,
-        # fsync, rename, then the journal record. The arrays are dropped
-        # here -- they live on disk now, not in the process image.
-        spool_rel, window_sha256, window_bytes = _spool_visit_windows(
-            output_dir, visit, acquired.raw_windows)
+        # The windows leave memory here -- they live on disk now, in the
+        # spool, not in the process image.
         acquired.windows.clear()
         acquired.raw_windows.clear()
         record = {
@@ -1215,14 +1329,16 @@ def write_artefacts(document: Dict[str, Any], decl: Dict[str, Any],
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(
         description="§5.21 catalogue run, §7.1: the tuner-sequencing module")
-    parser.add_argument("--declaration", required=True,
-                        help="JSON run declaration (the OPERATOR_DECLARED inputs)")
+    parser.add_argument("--declaration", required=False, default=None,
+                        help="JSON run declaration (the OPERATOR_DECLARED "
+                             "inputs); required for a live run, not for "
+                             "--reanalyze, which loads the preserved "
+                             "declaration.json from the evidence directory "
+                             "and writes artefacts against it")
     parser.add_argument("--reanalyze", metavar="OUTPUT_DIR", default=None,
                         help="re-run analysis from a spooled epoch; "
                              "no tuner contact")
     args = parser.parse_args(argv)
-    with open(args.declaration) as handle:
-        decl = json.load(handle)
 
     def progress(number, total, visit, tuning_id, lo_hz):
         print(f"[{number:3d}/{total}] visit {visit.position}: "
@@ -1230,19 +1346,26 @@ def main(argv=None) -> int:
               f"(delta {visit.retune_delta_hz:+,.0f})", flush=True)
 
     if args.reanalyze:
-        document = reanalyze_from_spool(args.reanalyze)
+        # The declaration comes from the evidence directory, all the way
+        # through artefact production: a reanalysis calculates from one
+        # declaration and must not describe another.
+        document, decl = reanalyze_from_spool(args.reanalyze)
         out_dir = os.path.join(args.reanalyze, "reanalysis")
     else:
+        if not args.declaration:
+            parser.error("--declaration is required for a live run")
+        with open(args.declaration) as handle:
+            decl = json.load(handle)
         with RtlTcpTuner(decl["rtl_tcp_host"], decl["rtl_tcp_port"]) as tuner:
             print(f"tuner type {tuner.tuner_type}, "
                   f"{tuner.gain_count} gain steps reported", flush=True)
             document = run_epoch(decl, tuner, progress=progress)
         out_dir = decl["output_dir"]
     paths = write_artefacts(document, decl, out_dir)
-    print(f"epoch {document[epoch]} [{document[epoch_status]}]: "
-          f"{len(document[entries])} entries, "
-          f"{document[n_visits_refused]} refused visits, "
-          f"{len(document[classification_refusals])} classification refusals")
+    print(f"epoch {document['epoch']} [{document['epoch_status']}]: "
+          f"{len(document['entries'])} entries, "
+          f"{document['n_visits_refused']} refused visits, "
+          f"{len(document['classification_refusals'])} classification refusals")
     for path in paths:
         print(f"wrote {path}")
     return 0
