@@ -1073,9 +1073,16 @@ def reanalyze_from_spool(output_dir: str) -> "Tuple[Dict[str, Any], Dict[str, An
     Returns (document, decl): the declaration is the one preserved in
     the evidence directory, and it is the declaration the artefacts are
     written against -- no external declaration is consulted.
+
+    Both routes capable of producing a catalogue consume the same frozen
+    authorization: the preserved declaration is checked against the
+    authorization before schedule verification or analysis, so an
+    internally self-consistent spooled run made under an unauthorized
+    chain cannot be reanalyzed into a catalogue.
     """
     with open(os.path.join(output_dir, "declaration.json")) as handle:
         decl = json.load(handle)
+    check_declaration_authorized(decl)
     with open(os.path.join(output_dir, "schedule.json")) as handle:
         sched_doc = json.load(handle)
     tunings, schedule, digest = _verify_schedule_against_declaration(
@@ -1092,18 +1099,28 @@ def reanalyze_from_spool(output_dir: str) -> "Tuple[Dict[str, Any], Dict[str, An
             if not line:
                 continue
             rec = json.loads(line)
-            if rec.get("type") == "visit_refused":
+            rtype = rec.get("type")
+            if rtype == "visit_refused":
                 refused_visits.append(rec)
                 events.append({"type": "visit_refused",
                                "position": rec["position"],
                                "reason": rec["reason"]})
-            else:
+            elif rtype == "visit_acquired":
                 by_tuning.setdefault(rec["tuning_index"], []).append(
                     _recompute_visit_data(output_dir, rec))
                 events.append({"type": "visit_acquired",
                                "position": rec["position"],
                                "tuning_id": rec["tuning_id"],
                                "recomputed_from_spool": True})
+            else:
+                # The reconciler also rejects unknown types, but the
+                # consumer must not outrun it: treating anything
+                # non-refused as acquired would crash on the missing
+                # acquired fields before reconciliation gets its say.
+                raise SequencerRefused(
+                    "JOURNAL_RECORD_UNKNOWN_TYPE",
+                    f"position {rec.get('position')}: unknown journal "
+                    f"record type {rtype!r}")
     document = _analyze_epoch(decl, tunings, comb, by_tuning, refused_visits,
                               events, digest, decl["seed"],
                               len(schedule), tuner_type=None,

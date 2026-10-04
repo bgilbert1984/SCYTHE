@@ -576,8 +576,9 @@ class ReanalyzeFromIQTests(unittest.TestCase):
         given schedule positions with flat IQ."""
         import hashlib as _hl
         decl = _authorized_declaration(tmpdir)
-        decl["bands"] = [{"band_id": "UHF_LOW", "low_hz": 400_000_000,
-                          "high_hz": 440_000_000}]
+        # Keep the frozen two-band declaration intact: the authorization
+        # check binds bands, gain, seed, and reference, so the fixture
+        # must be authorized to reach the reanalysis under test.
         out = decl["output_dir"]
         bands = tuple(Band(band_id=b["band_id"], low_hz=b["low_hz"],
                            high_hz=b["high_hz"]) for b in decl["bands"])
@@ -704,6 +705,56 @@ class ReanalyzeFromIQTests(unittest.TestCase):
             self.assertEqual(rdecl["run_id"], decl["run_id"])
             self.assertEqual(rdecl["seed"], decl["seed"])
             self.assertEqual(rdecl["gain_db"], 29.7)
+
+    def test_reanalyze_refuses_unauthorized_chain(self):
+        # Modeled on the 2026-10-03 incident: a self-consistent spooled
+        # epoch made under gain 20.7 dB (frozen authorization is 29.7 dB)
+        # must be refused before any detector executes -- the
+        # authorization binding guards catalogue creation, not just
+        # acquisition.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            decl = _authorized_declaration(tmpdir)
+            decl["gain_db"] = 20.7  # the incident: frozen is 29.7
+            out = decl["output_dir"]
+            bands = tuple(Band(band_id=b["band_id"], low_hz=b["low_hz"],
+                               high_hz=b["high_hz"]) for b in decl["bands"])
+            tunings = generate_tunings(seed=decl["seed"], bands=bands)
+            schedule = generate_visit_schedule(seed=decl["seed"],
+                                               tunings=tunings)
+            digest = admit_schedule(schedule, tunings, decl["seed"])
+            seq._materialize_precontact(decl, tunings, schedule, digest, out)
+
+            def _boom(windows):
+                raise AssertionError("detector must not execute")
+
+            real_detect = seq.detect_candidates
+            seq.detect_candidates = _boom
+            try:
+                with self.assertRaises(seq.SequencerRefused) as ctx:
+                    seq.reanalyze_from_spool(out)
+            finally:
+                seq.detect_candidates = real_detect
+            self.assertEqual(ctx.exception.code,
+                             "DECLARATION_NOT_AUTHORIZED")
+
+    def test_reanalyze_refuses_unknown_journal_type(self):
+        # The journal consumer must refuse an unknown record type itself,
+        # not treat it as acquired and crash on the missing fields.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out, _decl = self._materialize_epoch(tmpdir, [0])
+            with open(os.path.join(
+                    out, "acquisition_journal.jsonl"), "a") as h:
+                h.write(json.dumps({"type": "visit_maybe", "position": 1})
+                        + "\n")
+            real_detect = seq.detect_candidates
+            seq.detect_candidates = lambda windows: []
+            try:
+                with self.assertRaises(seq.SequencerRefused) as ctx:
+                    seq.reanalyze_from_spool(out)
+            finally:
+                seq.detect_candidates = real_detect
+            self.assertEqual(ctx.exception.code,
+                             "JOURNAL_RECORD_UNKNOWN_TYPE")
 
 
 class MainCLITests(unittest.TestCase):
