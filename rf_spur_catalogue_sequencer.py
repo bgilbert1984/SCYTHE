@@ -49,6 +49,7 @@ Design decisions, all recorded where they bite:
 from __future__ import annotations
 
 import argparse
+import os
 import hashlib
 import json
 import math
@@ -63,11 +64,18 @@ import numpy as np
 from rf_promotion_envelope import (
     Band,
     CataloguedSpur,
+    EnvelopeRefused,
     ReferenceComb,
+    SpurPersistenceObservation,
     SpurSlopeEstimate,
+    admit_schedule,
     generate_tunings,
     generate_visit_schedule,
     matched_mixing_slope,
+    PLAN_SLOPE_NOT_ESTIMATED,
+    SCHEDULE_GENERATOR_REVISION,
+    TUNING_GENERATOR_REVISION,
+    Visit,
     usable_half_span_hz,
     CONSISTENT_WITH_INTERNAL_MIXING,
     CONSISTENT_WITH_INTERNAL_REFERENCE,
@@ -217,10 +225,14 @@ class RtlTcpTuner:
         self._command(_RTL_TCP_SET_GAIN_MODE, _GAIN_MODE_MANUAL)
         self._command(_RTL_TCP_SET_GAIN, int(round(gain_db * 10.0)))
 
+    def read_window_raw(self) -> bytes:
+        """One byte-exact 256 ms window, raw wire bytes (offset-binary u8)."""
+        return self._read_exactly(self._sock, WINDOW_BYTES,
+                                 WINDOW_DEADLINE_S)
+
     def read_window(self) -> np.ndarray:
         """One byte-exact 256 ms window, decoded."""
-        return _decode_iq(self._read_exactly(self._sock, WINDOW_BYTES,
-                                             WINDOW_DEADLINE_S))
+        return _decode_iq(self.read_window_raw())
 
     def discard(self, seconds: float) -> None:
         """Read and drop post-retune bytes: the PLL's settling is not data."""
@@ -241,6 +253,7 @@ class AcquiredVisit:
     lo_hz: float
     retune_delta_hz: float
     windows: List[np.ndarray]
+    raw_windows: List[bytes]  # byte-exact wire bytes, the spool source
     elapsed_s: float
     attempt: int
 
@@ -260,12 +273,14 @@ def acquire_visit(tuner: RtlTcpTuner, position: int, tuning_id: str,
             tuner.set_lo_hz(lo_hz)
             tuner.discard(SETTLE_S)
             started = time.monotonic()
-            windows = [tuner.read_window()
-                       for _ in range(WINDOWS_PER_VISIT)]
+            raw_windows = [tuner.read_window_raw()
+                           for _ in range(WINDOWS_PER_VISIT)]
+            windows = [_decode_iq(raw) for raw in raw_windows]
             return AcquiredVisit(
                 position=position, tuning_index=tuning_index,
                 tuning_id=tuning_id, lo_hz=lo_hz,
                 retune_delta_hz=retune_delta_hz, windows=windows,
+                raw_windows=raw_windows,
                 elapsed_s=time.monotonic() - started, attempt=attempt)
         except VisitRefused as exc:
             last = exc
@@ -584,22 +599,542 @@ def _chain_digest(decl: Dict[str, Any]) -> str:
     return hashlib.sha256(canonical.encode()).hexdigest()
 
 
+# ---------------------------------------------------------------------------
+# Repair 2026-10-03 (first live contact): authorization binding, durable
+# acquisition, graceful classification refusal.
+# ---------------------------------------------------------------------------
+
+_AUTHORIZED_DECLARATION_PATH = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    "docs", "521_AUTHORIZED_RUN_DECLARATION.json")
+
+
+def _authorized_chain_subset(decl: Dict[str, Any]) -> Dict[str, Any]:
+    """The chain-defining fields bound to the frozen authorization."""
+    return {
+        "sensor_id": decl["receiver"]["sensor_id"],
+        "gain_db": decl["gain_db"],
+        "termination_part": decl["termination"]["part"],
+        "termination_connector": decl["termination"]["connector"],
+        "bands": [(b["band_id"], b["low_hz"], b["high_hz"])
+                  for b in decl["bands"]],
+        "seed": decl["seed"],
+        "reference_hz": decl["reference_hz"],
+        "reference_ppm": decl["reference_ppm"],
+    }
+
+
+def check_declaration_authorized(decl: Dict[str, Any]) -> None:
+    """Refuse before tuner contact unless the declaration matches the frozen
+    authorization on every chain-defining field.
+
+    20.7 dB against an authorized 29.7 dB becomes a pre-contact refusal here,
+    not a post-hoc discovery after 192 visits. Operational fields (run_id,
+    epoch, site prose, rtl_tcp endpoint, output_dir) are the operator's launch
+    choices and are not bound.
+    """
+    with open(_AUTHORIZED_DECLARATION_PATH) as handle:
+        authorized = json.load(handle)
+    want = json.dumps(_authorized_chain_subset(authorized),
+                      sort_keys=True, separators=(",", ":"))
+    got = json.dumps(_authorized_chain_subset(decl),
+                     sort_keys=True, separators=(",", ":"))
+    if hashlib.sha256(want.encode()).hexdigest() != \
+            hashlib.sha256(got.encode()).hexdigest():
+        a, b = (_authorized_chain_subset(authorized),
+                _authorized_chain_subset(decl))
+        diffs = [f"{k}: authorized {a[k]!r}, supplied {b[k]!r}"
+                 for k in a if a[k] != b[k]]
+        raise SequencerRefused(
+            "DECLARATION_NOT_AUTHORIZED",
+            "the run-time declaration does not match the frozen "
+            f"authorization ({_AUTHORIZED_DECLARATION_PATH}); "
+            + "; ".join(diffs))
+
+
+SPOOL_DIRNAME = "spool"
+ACQUISITION_JOURNAL_NAME = "acquisition_journal.jsonl"
+
+
+def _durably_write(path: str, data: bytes) -> None:
+    """Temp file, fsync, atomic rename, fsync the parent directory.
+
+    The record exists whole or not at all, and the rename itself is
+    crash-durable: without the directory fsync, a crash can lose the
+    rename even though the file bytes reached disk.
+    """
+    tmp = path + f".tmp-{os.getpid()}"
+    with open(tmp, "wb") as handle:
+        handle.write(data)
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.rename(tmp, path)
+    dirfd = os.open(os.path.dirname(path) or ".", os.O_DIRECTORY)
+    try:
+        os.fsync(dirfd)
+    finally:
+        os.close(dirfd)
+
+
+def _spool_visit_windows(output_dir: str, visit, raw_windows):
+    """Spool one visit's byte-exact wire bytes. Returns (relpath, sha256, bytes)."""
+    spool_dir = os.path.join(output_dir, SPOOL_DIRNAME)
+    os.makedirs(spool_dir, exist_ok=True)
+    raw = b"".join(raw_windows)
+    digest = hashlib.sha256(raw).hexdigest()
+    name = f"visit_{visit.position:04d}.iq"
+    _durably_write(os.path.join(spool_dir, name), raw)
+    return os.path.join(SPOOL_DIRNAME, name), digest, len(raw)
+
+
+def _append_journal(output_dir: str, record: Dict[str, Any]) -> None:
+    path = os.path.join(output_dir, ACQUISITION_JOURNAL_NAME)
+    with open(path, "a") as handle:
+        handle.write(json.dumps(record, sort_keys=True) + "\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+
+
+_RUN_STATE_NAMES = ("declaration.json", "schedule.json",
+                     ACQUISITION_JOURNAL_NAME, SPOOL_DIRNAME)
+
+
+def _materialize_precontact(decl: Dict[str, Any], tunings, schedule,
+                            schedule_digest: str, output_dir: str) -> None:
+    """Declaration + schedule on disk before the first tuner command.
+
+    A live output directory is immutable and new per run: if it already
+    contains run state, refuse rather than overwrite declaration.json,
+    schedule.json, or spool files while appending to an old journal.
+    """
+    os.makedirs(output_dir, exist_ok=True)
+    clobber = [n for n in _RUN_STATE_NAMES
+               if os.path.exists(os.path.join(output_dir, n))]
+    if clobber:
+        raise SequencerRefused(
+            "OUTPUT_DIR_NOT_EMPTY",
+            f"{output_dir} already contains run state {clobber}; the live "
+            "output directory is new per run -- point output_dir at a "
+            "fresh directory instead of overwriting evidence")
+    _durably_write(
+        os.path.join(output_dir, "declaration.json"),
+        (json.dumps(decl, indent=1, sort_keys=True) + "\n").encode())
+    sched_doc = {
+        "seed": decl["seed"],
+        "tuning_generator_revision": TUNING_GENERATOR_REVISION,
+        "visit_generator_revision": SCHEDULE_GENERATOR_REVISION,
+        "schedule_digest": schedule_digest,
+        "tunings": [t.to_dict() for t in tunings],
+        "visits": [v.to_dict() for v in schedule],
+    }
+    _durably_write(
+        os.path.join(output_dir, "schedule.json"),
+        (json.dumps(sched_doc, indent=1, sort_keys=True) + "\n").encode())
+
+
+def _reconcile_durable_record(output_dir: str, schedule,
+                              tunings) -> "Tuple[bool, List[str]]":
+    """Verify the durable record reconciles exactly with the schedule.
+
+    COMPLETE is earned, not defaulted: every scheduled position appears
+    exactly once in the journal, all visits were acquired (zero refused),
+    each acquired position has one spool object whose byte count and
+    SHA-256 match the journal, and -- critically -- each journal record's
+    metadata is bound back to the scheduled visit it claims to be: the
+    right position is not enough, the tuning_index, retune_delta_hz,
+    tuning_id, and expected LO must agree with the schedule, spool paths
+    must be one-to-one, and unknown record types are refused. A record at
+    the right position describing the wrong retune cannot help earn
+    COMPLETE while the analyzer trusts its metadata. Returns
+    (is_complete, reasons).
+    """
+    reasons: List[str] = []
+    journal_path = os.path.join(output_dir, ACQUISITION_JOURNAL_NAME)
+    try:
+        with open(journal_path) as handle:
+            records = [json.loads(line) for line in handle if line.strip()]
+    except FileNotFoundError:
+        return False, ["acquisition journal missing"]
+    expected_visit = {v.position: v for v in schedule}
+    by_position: Dict[int, Dict] = {}
+    for rec in records:
+        rtype = rec.get("type")
+        if rtype not in ("visit_acquired", "visit_refused"):
+            reasons.append(
+                f"position {rec.get('position')}: unknown journal record "
+                f"type {rtype!r}")
+            continue
+        pos = rec["position"]
+        if pos in by_position:
+            reasons.append(f"position {pos} journaled more than once")
+        by_position[pos] = rec
+    scheduled = {v.position for v in schedule}
+    journaled = set(by_position)
+    missing = scheduled - journaled
+    extra = journaled - scheduled
+    if missing:
+        reasons.append(f"positions missing from journal: {sorted(missing)}")
+    if extra:
+        reasons.append(f"journal positions not in schedule: {sorted(extra)}")
+    refused = [r for r in records if r.get("type") == "visit_refused"]
+    if refused:
+        reasons.append(
+            f"{len(refused)} refused visit(s); COMPLETE requires zero")
+    seen_spool_paths = set()
+    for rec in records:
+        if rec.get("type") != "visit_acquired":
+            continue
+        pos = rec["position"]
+        visit = expected_visit.get(pos)
+        if visit is None:
+            continue  # already reported as extra above
+        tuning = tunings[visit.tuning_index]
+        expected_lo = tuning.center_frequency_hz + visit.retune_delta_hz
+        if rec.get("tuning_index") != visit.tuning_index:
+            reasons.append(
+                f"position {pos}: journal tuning_index "
+                f"{rec.get('tuning_index')} != scheduled "
+                f"{visit.tuning_index}")
+        if rec.get("retune_delta_hz") != visit.retune_delta_hz:
+            reasons.append(
+                f"position {pos}: journal retune_delta_hz "
+                f"{rec.get('retune_delta_hz')} != scheduled "
+                f"{visit.retune_delta_hz}")
+        if rec.get("tuning_id") != tuning.tuning_id:
+            reasons.append(
+                f"position {pos}: journal tuning_id {rec.get('tuning_id')!r} "
+                f"!= scheduled {tuning.tuning_id!r}")
+        if rec.get("lo_hz") != expected_lo:
+            reasons.append(
+                f"position {pos}: journal lo_hz {rec.get('lo_hz')} != "
+                f"expected {expected_lo}")
+        spool_rel = rec.get("spool_path")
+        if spool_rel in seen_spool_paths:
+            reasons.append(
+                f"position {pos}: spool path {spool_rel!r} already claimed "
+                f"by another journal record")
+        seen_spool_paths.add(spool_rel)
+        if not spool_rel:
+            reasons.append(f"position {pos}: journal record has no spool_path")
+            continue
+        spool_path = os.path.join(output_dir, spool_rel)
+        if not os.path.isfile(spool_path):
+            reasons.append(f"position {pos}: spool object missing")
+            continue
+        with open(spool_path, "rb") as handle:
+            raw = handle.read()
+        if len(raw) != rec["window_bytes"]:
+            reasons.append(
+                f"position {pos}: byte count {len(raw)} != "
+                f"journal {rec['window_bytes']}")
+        if hashlib.sha256(raw).hexdigest() != rec["window_sha256"]:
+            reasons.append(f"position {pos}: SHA-256 mismatch")
+    return (len(reasons) == 0), reasons
+
+
+def _analyze_epoch(decl: Dict[str, Any], tunings, comb, by_tuning,
+                   refused_visits, events, schedule_digest: str, seed: int,
+                   n_scheduled: int, tuner_type, output_dir: str,
+                   schedule) -> Dict[str, Any]:
+    """Associate and classify from the journaled lightweight visit data.
+
+    A track the protocol cannot estimate a slope for is refused and recorded
+    in classification_refusals, and the epoch is marked INCOMPLETE: preserved
+    evidence, not a catalogue. It is never laundered into
+    SPUR_CANDIDATE_UNRESOLVED, which means a validly measured slope matched
+    no permitted family member -- a track with two distinct retunes has no
+    §5.21 slope estimate at all.
+    """
+    entries: List[Dict] = []
+    ingress_findings: List[Dict] = []
+    unassociated: List[Dict] = []
+    ambiguous: List[Dict] = []
+    classification_refusals: List[Dict] = []
+    for tuning_index in sorted(by_tuning):
+        tuning = tunings[tuning_index]
+        tracks, una, amb = associate_tracks(
+            tuning.tuning_id, tuning.center_frequency_hz,
+            by_tuning[tuning_index])
+        unassociated.extend(una)
+        ambiguous.extend(amb)
+        for track_no, track in enumerate(tracks):
+            try:
+                spur, finding = classify_track(track, comb, track_no)
+            except EnvelopeRefused as exc:
+                if exc.code != PLAN_SLOPE_NOT_ESTIMATED:
+                    # Structural refusals (undeclared retunes, malformed
+                    # quantities, anchor disagreement) are not ordinary
+                    # incompleteness; they propagate.
+                    raise
+                classification_refusals.append({
+                    "tuning_id": track.tuning_id,
+                    "track_no": track_no,
+                    "visit_positions": list(track.visit_positions),
+                    "retune_deltas_hz": list(track.deltas),
+                    "refusal_code": exc.code,
+                    "refusal_detail": exc.detail,
+                })
+                continue
+            if finding is not None:
+                ingress_findings.append(finding)
+            else:
+                assert spur is not None
+                entries.append(spur.to_dict())
+    reconciled, recon_reasons = _reconcile_durable_record(output_dir,
+                                                        schedule,
+                                                        tunings)
+    incomplete_reasons = list(recon_reasons)
+    if classification_refusals:
+        codes = sorted({r["refusal_code"] for r in classification_refusals})
+        incomplete_reasons.append(
+            f"{len(classification_refusals)} track(s) refused classification "
+            f"({', '.join(codes)})")
+    epoch_status = "COMPLETE" if not incomplete_reasons else "INCOMPLETE"
+    document = {
+        "run_id": decl["run_id"],
+        "epoch": decl["epoch"],
+        "epoch_status": epoch_status,
+        "sequencer_revision": SEQUENCER_REVISION,
+        "schedule_generator_revision": SCHEDULE_GENERATOR_REVISION,
+        "seed": seed,
+        "schedule_digest": schedule_digest,
+        "n_tunings": len(tunings),
+        "n_visits_scheduled": n_scheduled,
+        "n_visits_acquired": sum(len(v) for v in by_tuning.values()),
+        "n_visits_refused": len(refused_visits),
+        "reference": {"reference_hz": decl["reference_hz"],
+                      "reference_ppm": decl["reference_ppm"]},
+        "chain_digest": _chain_digest(decl),
+        "tuner_type": tuner_type,
+        "entries": entries,
+        "ingress_findings": ingress_findings,
+        "refused_visits": refused_visits,
+        "classification_refusals": classification_refusals,
+        "unassociated_detections": unassociated,
+        "ambiguous_associations": ambiguous,
+        "events": events,
+    }
+    if incomplete_reasons:
+        document["incomplete_reason"] = (
+            "; ".join(incomplete_reasons)
+            + "; the epoch is preserved evidence, not a catalogue")
+    document["reconciliation"] = {
+        "reconciled": reconciled,
+        "reasons": recon_reasons,
+    }
+    return document
+
+
+def _visit_data_from_record(rec: Dict[str, Any]) -> "TuningVisitData":
+    """Rebuild lightweight visit data from a journal record (no windows)."""
+    visit = AcquiredVisit(
+        position=rec["position"], tuning_index=rec["tuning_index"],
+        tuning_id=rec["tuning_id"], lo_hz=rec["lo_hz"],
+        retune_delta_hz=rec["retune_delta_hz"], windows=[],
+        raw_windows=[],
+        elapsed_s=rec["elapsed_s"], attempt=rec["attempt"])
+    candidates = [CandidateFeature(baseband_hz=c["baseband_hz"],
+                                   excess_db=c["excess_db"],
+                                   peak_bin=c["peak_bin"])
+                  for c in rec["candidates"]]
+    persistence = {int(k): SpurPersistenceObservation(
+        tuning_id=v["tuning_id"],
+        repeat_excess_db=tuple(v["repeat_excess_db"]))
+        for k, v in rec["persistence"].items()}
+    return TuningVisitData(visit=visit, candidates=candidates,
+                           persistence=persistence,
+                           retained=list(rec["retained"]))
+
+
+def _recompute_visit_data(output_dir: str, rec: Dict[str, Any]
+                          ) -> "TuningVisitData":
+    """Rebuild visit data by recomputing from the IQ spool, not the journal.
+
+    Verifies the spool object's byte count and SHA-256 against the journal,
+    then re-runs candidate detection and persistence measurement on the
+    byte-exact windows. This is reanalysis from evidence; the journal's
+    derived data is not trusted.
+    """
+    spool_path = os.path.join(output_dir, rec["spool_path"])
+    try:
+        with open(spool_path, "rb") as handle:
+            raw = handle.read()
+    except FileNotFoundError:
+        raise SequencerRefused(
+            "SPOOL_MISSING",
+            f"position {rec['position']}: {rec['spool_path']} not on disk")
+    if len(raw) != rec["window_bytes"]:
+        raise SequencerRefused(
+            "SPOOL_CORRUPT",
+            f"position {rec['position']}: {len(raw)} bytes on disk != "
+            f"journal {rec['window_bytes']}")
+    if hashlib.sha256(raw).hexdigest() != rec["window_sha256"]:
+        raise SequencerRefused(
+            "SPOOL_CORRUPT",
+            f"position {rec['position']}: SHA-256 mismatch")
+    if len(raw) != WINDOWS_PER_VISIT * WINDOW_BYTES:
+        raise SequencerRefused(
+            "SPOOL_CORRUPT",
+            f"position {rec['position']}: {len(raw)} bytes != "
+            f"{WINDOWS_PER_VISIT} windows")
+    windows = [_decode_iq(raw[i * WINDOW_BYTES:(i + 1) * WINDOW_BYTES])
+               for i in range(WINDOWS_PER_VISIT)]
+    candidates = detect_candidates(windows)
+    persistence: Dict[int, Any] = {}
+    retained: List[int] = []
+    for idx, cand in enumerate(candidates):
+        obs = measure_persistence(
+            tuning_id=rec["tuning_id"], windows=windows,
+            sample_rate_hz=SAMPLE_RATE_HZ,
+            feature_baseband_hz=cand.baseband_hz)
+        persistence[idx] = obs
+        if obs.persistent():
+            retained.append(idx)
+    visit = AcquiredVisit(
+        position=rec["position"], tuning_index=rec["tuning_index"],
+        tuning_id=rec["tuning_id"], lo_hz=rec["lo_hz"],
+        retune_delta_hz=rec["retune_delta_hz"], windows=[],
+        raw_windows=[],
+        elapsed_s=rec["elapsed_s"], attempt=rec["attempt"])
+    return TuningVisitData(visit=visit, candidates=candidates,
+                           persistence=persistence, retained=retained)
+
+
+def _verify_schedule_against_declaration(
+        decl: Dict[str, Any], sched_doc: Dict[str, Any]
+) -> "Tuple[tuple, tuple, str]":
+    """Re-derive the expected plan from the preserved declaration and
+    require the materialized schedule.json to match it exactly.
+
+    Reanalysis must not trust schedule.json's visits or digest on their
+    own word: a modified schedule.json could redefine the retunes the
+    reanalysis runs against while staying internally self-consistent
+    with its journal. The declaration is the authority. The tunings are
+    re-derived from it, then the visits, then the independent admission
+    digest; the stored document must agree field for field, including
+    both generator revisions.
+    """
+    checked = check_declaration(decl)
+    if sched_doc.get("tuning_generator_revision") != TUNING_GENERATOR_REVISION:
+        raise SequencerRefused(
+            "SCHEDULE_TAMPERED",
+            "schedule.json tuning_generator_revision "
+            f"{sched_doc.get('tuning_generator_revision')!r} != "
+            f"{TUNING_GENERATOR_REVISION!r}")
+    if sched_doc.get("visit_generator_revision") != SCHEDULE_GENERATOR_REVISION:
+        raise SequencerRefused(
+            "SCHEDULE_TAMPERED",
+            "schedule.json visit_generator_revision "
+            f"{sched_doc.get('visit_generator_revision')!r} != "
+            f"{SCHEDULE_GENERATOR_REVISION!r}")
+    if sched_doc.get("seed") != decl["seed"]:
+        raise SequencerRefused(
+            "SCHEDULE_TAMPERED",
+            "schedule.json seed does not match the preserved declaration")
+    tunings = generate_tunings(seed=decl["seed"],
+                               bands=tuple(checked["bands"]))
+    schedule = generate_visit_schedule(seed=decl["seed"], tunings=tunings)
+    if sched_doc.get("tunings") != [t.to_dict() for t in tunings]:
+        raise SequencerRefused(
+            "SCHEDULE_TAMPERED",
+            "schedule.json tunings differ from the plan re-derived from "
+            "the preserved declaration")
+    if sched_doc.get("visits") != [v.to_dict() for v in schedule]:
+        raise SequencerRefused(
+            "SCHEDULE_TAMPERED",
+            "schedule.json visits differ from the plan re-derived from "
+            "the preserved declaration")
+    try:
+        digest = admit_schedule(schedule, tunings, decl["seed"])
+    except EnvelopeRefused as exc:
+        raise SequencerRefused(
+            "SCHEDULE_NOT_ADMITTED",
+            f"re-derived schedule failed independent admission: {exc}"
+        ) from exc
+    if digest != sched_doc.get("schedule_digest"):
+        raise SequencerRefused(
+            "SCHEDULE_TAMPERED",
+            "schedule.json digest does not match the re-derived "
+            "whole-plan digest")
+    return tunings, schedule, digest
+
+
+def reanalyze_from_spool(output_dir: str) -> "Tuple[Dict[str, Any], Dict[str, Any]]":
+    """Re-run analysis from the IQ spool. No tuner contact.
+
+    For the "fix the analyzer, rerun over the same evidence" workflow:
+    loads declaration.json and schedule.json, requires the schedule to
+    match the plan re-derived from the preserved declaration (both
+    generator revisions, tunings, visits, and the whole-plan digest),
+    verifies each spool object against the journal (byte count, SHA-256),
+    recomputes candidate detection and persistence measurement from the
+    byte-exact windows, then runs association and classification.
+
+    Returns (document, decl): the declaration is the one preserved in
+    the evidence directory, and it is the declaration the artefacts are
+    written against -- no external declaration is consulted.
+    """
+    with open(os.path.join(output_dir, "declaration.json")) as handle:
+        decl = json.load(handle)
+    with open(os.path.join(output_dir, "schedule.json")) as handle:
+        sched_doc = json.load(handle)
+    tunings, schedule, digest = _verify_schedule_against_declaration(
+        decl, sched_doc)
+    comb = ReferenceComb(reference_hz=decl["reference_hz"],
+                         reference_ppm=decl["reference_ppm"])
+    by_tuning: Dict[int, List] = {}
+    refused_visits: List[Dict] = []
+    events: List[Dict] = []
+    journal_path = os.path.join(output_dir, ACQUISITION_JOURNAL_NAME)
+    with open(journal_path) as handle:
+        for line in handle:
+            line = line.strip()
+            if not line:
+                continue
+            rec = json.loads(line)
+            if rec.get("type") == "visit_refused":
+                refused_visits.append(rec)
+                events.append({"type": "visit_refused",
+                               "position": rec["position"],
+                               "reason": rec["reason"]})
+            else:
+                by_tuning.setdefault(rec["tuning_index"], []).append(
+                    _recompute_visit_data(output_dir, rec))
+                events.append({"type": "visit_acquired",
+                               "position": rec["position"],
+                               "tuning_id": rec["tuning_id"],
+                               "recomputed_from_spool": True})
+    document = _analyze_epoch(decl, tunings, comb, by_tuning, refused_visits,
+                              events, digest, decl["seed"],
+                              len(schedule), tuner_type=None,
+                              output_dir=output_dir, schedule=schedule)
+    return document, decl
+
+
 def run_epoch(decl: Dict[str, Any], tuner: RtlTcpTuner,
               progress=None) -> Dict[str, Any]:
-    """Perform the epoch. Returns the catalogue document."""
+    """Perform the epoch. Returns the catalogue document.
+
+    Pre-contact (no tuner motion): declaration well-formedness, authorization
+    binding, schedule generation, independent schedule admission, and
+    materialization of declaration.json + schedule.json. Acquisition spools
+    every visit's windows durably, journals the lightweight record, and drops
+    the arrays from memory; analysis runs from the journaled data.
+    """
     checked = check_declaration(decl)
+    check_declaration_authorized(decl)
     bands = checked["bands"]
     seed = decl["seed"]
     tunings = generate_tunings(seed=seed, bands=tuple(bands))
     schedule = generate_visit_schedule(seed=seed, tunings=tuple(tunings))
+    schedule_digest = admit_schedule(schedule, tuple(tunings), seed)
     comb = ReferenceComb(reference_hz=decl["reference_hz"],
                          reference_ppm=decl["reference_ppm"])
-    tuner.set_manual_gain_db(decl["gain_db"])
+    output_dir = decl["output_dir"]
+    _materialize_precontact(decl, tunings, schedule, schedule_digest,
+                            output_dir)
 
-    schedule_digest = hashlib.sha256(json.dumps(
-        {"tunings": [t.to_dict() for t in tunings],
-         "visits": [v.to_dict() for v in schedule]},
-        sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    tuner.set_manual_gain_db(decl["gain_db"])  # first tuner contact
 
     by_tuning: Dict[int, List[TuningVisitData]] = {}
     refused_visits: List[Dict] = []
@@ -609,22 +1144,32 @@ def run_epoch(decl: Dict[str, Any], tuner: RtlTcpTuner,
         tuning = tunings[visit.tuning_index]
         lo_hz = tuning.center_frequency_hz + visit.retune_delta_hz
         if progress:
-            progress(number, total, visit, lo_hz)
+            progress(number, total, visit, tuning.tuning_id, lo_hz)
         try:
             acquired = acquire_visit(
                 tuner, visit.position, tuning.tuning_id, visit.tuning_index,
                 lo_hz, visit.retune_delta_hz)
         except VisitRefused as exc:
-            refused_visits.append({
-                "position": visit.position,
-                "tuning_id": tuning.tuning_id,
-                "lo_hz": lo_hz,
-                "reason": str(exc),
-            })
+            rec = {"type": "visit_refused",
+                   "position": visit.position,
+                   "tuning_index": visit.tuning_index,
+                   "tuning_id": tuning.tuning_id,
+                   "lo_hz": lo_hz,
+                   "retune_delta_hz": visit.retune_delta_hz,
+                   "reason": str(exc)}
+            refused_visits.append(rec)
+            _append_journal(output_dir, rec)
             events.append({"type": "visit_refused",
                            "position": visit.position,
                            "reason": str(exc)})
             continue
+        # Durable first: the visit's bytes reach the spool before any
+        # analysis touches them. A bug, OOM, or exception in detection or
+        # persistence cannot eat a successfully acquired visit -- once the
+        # receiver has delivered it, analysis is incapable of making those
+        # bytes disappear. Temp file, SHA-256, fsync, atomic rename.
+        spool_rel, window_sha256, window_bytes = _spool_visit_windows(
+            output_dir, visit, acquired.raw_windows)
         candidates = detect_candidates(acquired.windows)
         persistence = {}
         retained = []
@@ -636,6 +1181,31 @@ def run_epoch(decl: Dict[str, Any], tuner: RtlTcpTuner,
             persistence[idx] = obs
             if obs.persistent():
                 retained.append(idx)
+        # The windows leave memory here -- they live on disk now, in the
+        # spool, not in the process image.
+        acquired.windows.clear()
+        acquired.raw_windows.clear()
+        record = {
+            "type": "visit_acquired",
+            "position": visit.position,
+            "tuning_index": visit.tuning_index,
+            "tuning_id": tuning.tuning_id,
+            "lo_hz": lo_hz,
+            "retune_delta_hz": visit.retune_delta_hz,
+            "attempt": acquired.attempt,
+            "elapsed_s": round(acquired.elapsed_s, 3),
+            "spool_path": spool_rel,
+            "window_sha256": window_sha256,
+            "window_bytes": window_bytes,
+            "candidates": [{"baseband_hz": c.baseband_hz,
+                            "excess_db": c.excess_db,
+                            "peak_bin": c.peak_bin}
+                           for c in candidates],
+            "persistence": {str(i): obs.to_dict()
+                            for i, obs in persistence.items()},
+            "retained": retained,
+        }
+        _append_journal(output_dir, record)
         by_tuning.setdefault(visit.tuning_index, []).append(TuningVisitData(
             visit=acquired, candidates=candidates, persistence=persistence,
             retained=retained))
@@ -646,62 +1216,38 @@ def run_epoch(decl: Dict[str, Any], tuner: RtlTcpTuner,
                        "attempt": acquired.attempt,
                        "elapsed_s": round(acquired.elapsed_s, 3),
                        "candidates": len(candidates),
-                       "retained": len(retained)})
+                       "retained": len(retained),
+                       "spool_sha256": window_sha256})
 
-    entries: List[Dict] = []
-    ingress_findings: List[Dict] = []
-    unassociated: List[Dict] = []
-    ambiguous: List[Dict] = []
-    for tuning_index in sorted(by_tuning):
-        tuning = tunings[tuning_index]
-        tracks, una, amb = associate_tracks(
-            tuning.tuning_id, tuning.center_frequency_hz,
-            by_tuning[tuning_index])
-        unassociated.extend(una)
-        ambiguous.extend(amb)
-        for track_no, track in enumerate(tracks):
-            spur, finding = classify_track(track, comb, track_no)
-            if finding is not None:
-                ingress_findings.append(finding)
-            else:
-                assert spur is not None
-                entries.append(spur.to_dict())
-
-    return {
-        "run_id": decl["run_id"],
-        "epoch": decl["epoch"],
-        "sequencer_revision": SEQUENCER_REVISION,
-        "seed": seed,
-        "schedule_digest": schedule_digest,
-        "n_tunings": len(tunings),
-        "n_visits_scheduled": len(schedule),
-        "n_visits_acquired": sum(len(v) for v in by_tuning.values()),
-        "n_visits_refused": len(refused_visits),
-        "reference": {"reference_hz": decl["reference_hz"],
-                      "reference_ppm": decl["reference_ppm"]},
-        "chain_digest": _chain_digest(decl),
-        "tuner_type": tuner.tuner_type,
-        "entries": entries,
-        "ingress_findings": ingress_findings,
-        "refused_visits": refused_visits,
-        "unassociated_detections": unassociated,
-        "ambiguous_associations": ambiguous,
-        "events": events,
-    }
+    return _analyze_epoch(decl, tunings, comb, by_tuning, refused_visits,
+                          events, schedule_digest, seed, total,
+                          tuner.tuner_type, output_dir, schedule)
 
 
 def write_artefacts(document: Dict[str, Any], decl: Dict[str, Any],
                     output_dir: str) -> List[str]:
-    """catalogue.json, chain.json, README-provenance.txt, run-log.json."""
+    """catalogue.json (COMPLETE only) or incomplete-analysis.json,
+    plus chain.json, README-provenance.txt, run-log.json.
+
+    An incomplete epoch is preserved evidence, not a catalogue: it must
+    not produce a file named catalogue.json.
+    """
     import os
     os.makedirs(output_dir, exist_ok=True)
     paths = {}
 
-    catalogue_path = os.path.join(output_dir, "catalogue.json")
-    with open(catalogue_path, "w") as handle:
-        json.dump({k: document[k] for k in document if k != "events"},
-                  handle, indent=2, sort_keys=True)
-    paths["catalogue"] = catalogue_path
+    if document.get("epoch_status") == "COMPLETE":
+        catalogue_path = os.path.join(output_dir, "catalogue.json")
+        with open(catalogue_path, "w") as handle:
+            json.dump({k: document[k] for k in document if k != "events"},
+                      handle, indent=2, sort_keys=True)
+        paths["catalogue"] = catalogue_path
+    else:
+        incomplete_path = os.path.join(output_dir, "incomplete-analysis.json")
+        with open(incomplete_path, "w") as handle:
+            json.dump({k: document[k] for k in document if k != "events"},
+                      handle, indent=2, sort_keys=True)
+        paths["incomplete_analysis"] = incomplete_path
 
     chain_path = os.path.join(output_dir, "chain.json")
     with open(chain_path, "w") as handle:
@@ -773,31 +1319,53 @@ def write_artefacts(document: Dict[str, Any], decl: Dict[str, Any],
                    "events": document["events"]},
                   handle, indent=2, sort_keys=True)
     paths["log"] = log_path
-    return [paths["catalogue"], paths["chain"], paths["readme"],
-            paths["log"]]
+    if document.get("epoch_status") == "COMPLETE":
+        return [paths["catalogue"], paths["chain"],
+                paths["readme"], paths["log"]]
+    return [paths["incomplete_analysis"], paths["chain"],
+            paths["readme"], paths["log"]]
 
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(
         description="§5.21 catalogue run, §7.1: the tuner-sequencing module")
-    parser.add_argument("--declaration", required=True,
-                        help="JSON run declaration (the OPERATOR_DECLARED inputs)")
+    parser.add_argument("--declaration", required=False, default=None,
+                        help="JSON run declaration (the OPERATOR_DECLARED "
+                             "inputs); required for a live run, not for "
+                             "--reanalyze, which loads the preserved "
+                             "declaration.json from the evidence directory "
+                             "and writes artefacts against it")
+    parser.add_argument("--reanalyze", metavar="OUTPUT_DIR", default=None,
+                        help="re-run analysis from a spooled epoch; "
+                             "no tuner contact")
     args = parser.parse_args(argv)
-    with open(args.declaration) as handle:
-        decl = json.load(handle)
 
-    def progress(number, total, visit, lo_hz):
+    def progress(number, total, visit, tuning_id, lo_hz):
         print(f"[{number:3d}/{total}] visit {visit.position}: "
-              f"{visit.tuning_id} LO {lo_hz:,.0f} Hz "
+              f"{tuning_id} LO {lo_hz:,.0f} Hz "
               f"(delta {visit.retune_delta_hz:+,.0f})", flush=True)
 
-    with RtlTcpTuner(decl["rtl_tcp_host"], decl["rtl_tcp_port"]) as tuner:
-        print(f"tuner type {tuner.tuner_type}, "
-              f"{tuner.gain_count} gain steps reported", flush=True)
-        document = run_epoch(decl, tuner, progress=progress)
-    paths = write_artefacts(document, decl, decl["output_dir"])
-    print(f"epoch {document[epoch]}: {len(document[entries])} entries, "
-          f"{document[n_visits_refused]} refused visits")
+    if args.reanalyze:
+        # The declaration comes from the evidence directory, all the way
+        # through artefact production: a reanalysis calculates from one
+        # declaration and must not describe another.
+        document, decl = reanalyze_from_spool(args.reanalyze)
+        out_dir = os.path.join(args.reanalyze, "reanalysis")
+    else:
+        if not args.declaration:
+            parser.error("--declaration is required for a live run")
+        with open(args.declaration) as handle:
+            decl = json.load(handle)
+        with RtlTcpTuner(decl["rtl_tcp_host"], decl["rtl_tcp_port"]) as tuner:
+            print(f"tuner type {tuner.tuner_type}, "
+                  f"{tuner.gain_count} gain steps reported", flush=True)
+            document = run_epoch(decl, tuner, progress=progress)
+        out_dir = decl["output_dir"]
+    paths = write_artefacts(document, decl, out_dir)
+    print(f"epoch {document['epoch']} [{document['epoch_status']}]: "
+          f"{len(document['entries'])} entries, "
+          f"{document['n_visits_refused']} refused visits, "
+          f"{len(document['classification_refusals'])} classification refusals")
     for path in paths:
         print(f"wrote {path}")
     return 0
