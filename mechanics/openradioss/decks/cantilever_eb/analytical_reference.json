@@ -11,16 +11,41 @@
  },
  "load": {
   "P_N": 1000.0,
+  "type": "distributed_end_face_traction",
+  "weighting": "tributary_area",
   "direction": "-Z",
   "ramp_s": 0.1
+ },
+ "element_formulation": {
+  "Isolid": 1,
+  "description": "one-point 8-node brick, viscous hourglass stabilization",
+  "note": "verdict scoped to this formulation; see NOTES.md"
  },
  "analytical": {
   "tip_deflection_m": 0.0031999999999999993,
   "reaction_Fz_N": 1000.0,
-  "reaction_My_Nm": 1000.0,
+  "reaction_My_Nm": -1000.0,
+  "reaction_My_note": "support (wall balancing) reaction about Y; external tip moment is +Y*P*L",
   "f1_Hz": 40.76903532939421,
+  "f1_status": "NOT_YET_VERIFIED",
   "shear_correction_m": 6.2399999999999995e-06,
   "shear_fraction": 0.0019500000000000003
+ },
+ "static_estimator": {
+  "definition": "mean(DZ_face_avg, t in [0.20, 0.50] s)",
+  "record": [
+   "tail_std",
+   "tail_peak_to_peak",
+   "kinetic_energy_history"
+  ],
+  "frozen": "2026-10-05"
+ },
+ "acceptance": {
+  "e_fine_le": 0.02,
+  "monotonic": "e_coarse > e_medium > e_fine (strict)",
+  "observed_orders": "recorded, not gated",
+  "reaction_Fz_tol": 0.01,
+  "frozen": "2026-10-05"
  },
  "meshes": {
   "coarse": {
