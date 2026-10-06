@@ -209,18 +209,24 @@ def write_starter(path, nodes, bricks, wall, face_all, loads):
     for cload_id, (title, nids, fnode) in enumerate(loads, start=1):
         A_(f"/CLOAD/{cload_id}")
         A_(title)
-        A_(f"{1:>10}{'Z':>10}{0:>10}{0:>10}{grnod_id:>10}{0:>20.1f}{fnode:>20.4f}")
+        # 6x10-char: fct_ID, Dir, skew_ID, sens_ID, grnd_ID, Itypfun=1 (abscissa is time)
+        # 2x20-char: Ascale_x=1.0, Fscale_y (MUST NOT be 0.0; t/Ascale_x scales the function)
+        A_(f"{1:>10}{'Z':>10}{0:>10}{0:>10}{grnod_id:>10}{1:>10}{1.0:>20.4f}{fnode:>20.4f}")
         A_(f"/GRNOD/NODE/{grnod_id}")
         A_(title)
         for i in range(0, len(nids), 8):
             A_("".join(f10(v) for v in nids[i:i + 8]))
         A_(RULER)
         grnod_id += 1
+    # load function: two 20-char fields per point (X, Y). NOT f10!
+    # (2026-10-05: f10 produced 20-char lines, Y blank -> zero force)
+    def funct_point(x, y):
+        return f"{x:20.12g}{y:20.12g}"
     A_("/FUNCT/1")
     A_("load ramp 0->-1")
-    A_("".join(f10(v) for v in [0.0, 0.0]))
-    A_("".join(f10(v) for v in [RAMP_T, -1.0]))
-    A_("".join(f10(v) for v in [10.0, -1.0]))
+    A_(funct_point(0.0, 0.0))
+    A_(funct_point(RAMP_T, -1.0))
+    A_(funct_point(10.0, -1.0))
     A_(RULER)
     # TH: end-face DZ for all face nodes (averaged by post-processor),
     # plus wall reactions.
@@ -247,6 +253,7 @@ def write_engine(path):
     A_(RULER)
     A_("/ANIM/DT")
     A_("".join(f10(v) for v in [0.0, 0.05]))
+    A_("/ANIM/VECT/DISP")
     A_("/DT")
     A_("".join(f10(v) for v in [0.9, 0.0]))
     A_("/TFILE")
