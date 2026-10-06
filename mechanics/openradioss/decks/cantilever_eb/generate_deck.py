@@ -36,7 +36,9 @@ I = B * H**3 / 12.0
 BETA1L = 1.87510407
 
 # ------------------------------------------------------- analytical refs
-d_tip = P * L**3 / (3 * E * I)
+# Signed: load is -Z, so the Z-displacement is negative.
+d_tip_z = -P * L**3 / (3 * E * I)  # ≈ -0.0032 m
+d_tip_mag = P * L**3 / (3 * E * I)  # +0.0032 m magnitude
 f1 = (BETA1L**2 / (2 * math.pi)) * math.sqrt(E * I / (RHO * A * L**4))
 G = E / (2 * (1 + NU))
 k_shear = 5.0 / 6.0
@@ -44,11 +46,13 @@ d_shear = P * L / (k_shear * A * G)
 # Support reaction moment: beam along +X, load in -Z at x=L.
 # External tip moment about wall = +Y*P*L; wall balancing reaction = -Y*P*L.
 reaction_My = -P * L
+# Wall Z-reaction balances the -Z applied load: +1000 N.
+reaction_Fz = P
 
 print(f"I = {I:.6e} m^4")
-print(f"tip deflection (EB) = {d_tip*1e3:.6f} mm")
-print(f"shear correction    = {d_shear*1e3:.6f} mm ({d_shear/d_tip*100:.3f}%)")
-print(f"reaction Fz = {P:.1f} N, My = {reaction_My:.1f} N m (support reaction)")
+print(f"tip DZ (EB, signed) = {d_tip_z*1e3:.6f} mm")
+print(f"shear correction    = {d_shear*1e3:.6f} mm ({d_shear/d_tip_mag*100:.3f}%)")
+print(f"reaction Fz = {reaction_Fz:.1f} N, My = {reaction_My:.1f} N m (support)")
 print(f"f1 = {f1:.4f} Hz [NOT_YET_VERIFIED - separate dynamic gate]")
 
 MESHES = {
@@ -57,7 +61,8 @@ MESHES = {
     "fine":   (40, 8, 8),
 }
 
-OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)))
+OUT = os.path.dirname(os.path.abspath(__file__))
+# Filenames match committed canonical decks: cantilever_{mesh}_0000.rad)
 
 
 def node_id(ix, iy, iz, ny, nz):
@@ -253,17 +258,24 @@ def write_engine(path):
 
 
 def main():
-    os.makedirs(OUT, exist_ok=True)
+    # Track serialized load totals (after formatting) for the record.
+    serialized_totals = {}
     for name, (nx, ny, nz) in MESHES.items():
-        d = os.path.join(OUT, name)
-        os.makedirs(d, exist_ok=True)
         nodes, bricks, wall, face_all, loads = build_mesh(nx, ny, nz)
-        write_starter(os.path.join(d, "cantilever_0000.rad"),
-                      nodes, bricks, wall, face_all, loads)
-        write_engine(os.path.join(d, "cantilever_0001.rad"))
+        s_path = os.path.join(OUT, f"cantilever_{name}_0000.rad")
+        e_path = os.path.join(OUT, f"cantilever_{name}_0001.rad")
+        write_starter(s_path, nodes, bricks, wall, face_all, loads)
+        write_engine(e_path)
+        # Compute serialized total: re-parse the formatted Fscaley values.
+        total = 0.0
+        for _, nids, fnode in loads:
+            # fnode formatted as >20.4f in the deck; replicate rounding
+            f_ser = float(f"{fnode:>20.4f}")
+            total += len(nids) * f_ser
+        serialized_totals[name] = total
         n_load = sum(len(nids) for _, nids, _ in loads)
         print(f"{name}: {len(nodes)} nodes, {len(bricks)} bricks, "
-              f"{n_load} loaded face nodes")
+              f"{n_load} loaded face nodes, serialized total {total:.4f} N")
     ref = {
         "geometry": {"L_m": L, "B_m": B, "H_m": H},
         "material": {"E_Pa": E, "nu": NU, "rho_kg_m3": RHO},
@@ -273,6 +285,9 @@ def main():
             "weighting": "tributary_area",
             "direction": "-Z",
             "ramp_s": RAMP_T,
+            "serialized_total_N": serialized_totals,
+            "serialized_note": "Sum of formatted Fscaley values in committed decks; "
+                               "differs from 1000 N by rounding only.",
         },
         "element_formulation": {
             "Isolid": 1,
@@ -280,24 +295,36 @@ def main():
             "note": "verdict scoped to this formulation; see NOTES.md",
         },
         "analytical": {
-            "tip_deflection_m": d_tip,
-            "reaction_Fz_N": P,
+            "tip_displacement_z_m": d_tip_z,
+            "tip_displacement_z_note": "Signed: load is -Z, DZ is negative. "
+                                       "Error formula uses signed values.",
+            "tip_deflection_magnitude_m": d_tip_mag,
+            "reaction_Fz_N": reaction_Fz,
             "reaction_My_Nm": reaction_My,
             "reaction_My_note": "support (wall balancing) reaction about Y; "
                                 "external tip moment is +Y*P*L",
             "f1_Hz": f1,
             "f1_status": "NOT_YET_VERIFIED",
             "shear_correction_m": d_shear,
-            "shear_fraction": d_shear / d_tip,
+            "shear_fraction": d_shear / d_tip_mag,
         },
         "static_estimator": {
-            "definition": "mean(DZ_face_avg, t in [0.20, 0.50] s)",
-            "record": ["tail_std", "tail_peak_to_peak", "kinetic_energy_history"],
+            "displacement": "u = mean(DZ_face_avg(t), t in [0.20, 0.50] s)",
+            "displacement_note": "DZ_face_avg(t) = mean over end-face nodes. "
+                                 "Compare signed u against tip_displacement_z_m.",
+            "reaction": "Rz = mean(sum(REACZ_wall(t)), t in [0.20, 0.50] s)",
+            "reaction_note": "Sum over wall nodes, then time-mean. "
+                             "Compare against reaction_Fz_N (+1000 N).",
+            "record": ["tail_std", "tail_peak_to_peak"],
+            "kinetic_energy": "diagnostic-only for this qualification; "
+                              "no frozen pass/fail criterion. Recorded for "
+                              "engineering judgment, not gating.",
             "frozen": "2026-10-05",
         },
         "acceptance": {
             "e_fine_le": 0.02,
             "monotonic": "e_coarse > e_medium > e_fine (strict)",
+            "error_formula": "|u - u_exact| / |u_exact| with signed values",
             "observed_orders": "recorded, not gated",
             "reaction_Fz_tol": 0.01,
             "frozen": "2026-10-05",
