@@ -40,13 +40,32 @@ Every record emitted here carries `state_class`:
 A simulation never becomes a measurement. The schema enforces the label;
 the importer refuses to emit anything else.
 
+## Evidence discipline (merge-gated)
+
+Three rules the importer and provenance helpers enforce, with negative
+controls in `test_scythe_mechanics.py`:
+
+1. **Absence never means zero.** A missing solver channel column aborts the
+   import naming the absent channels (`MissingChannelError`). A blank cell
+   refuses that timestep — it is not emitted, and the refusal count is
+   reported. Nothing is ever zero-filled.
+2. **Orientation is never assumed.** `antenna_normal` has no default; it
+   must be derived from deck geometry (boresight node minus phase-center
+   node) and passed in, or derived from boresight channels in the export.
+3. **Provenance must be internally satisfiable.** Every record carries the
+   full chain — deck, mesh, materials, boundary conditions, solver commit,
+   export. An embedded mesh binds `mesh_sha256` to `deck_sha256` (one
+   artifact, one digest); material and boundary-condition digests are
+   required, never empty. `provenance_complete()` is the gate.
+
 ## Layout
 
 - `schema/` — the interchange contract (`mechanical_state.v1.json`) plus a
   worked example. Versioned; v1 freezes once first used in anger.
 - `importers/` — converts solver exports into schema instances.
-  `openradioss_history.py` reads `th_to_csv` output. Stub: the exact
-  `th_to_csv` column contract gets pinned on the first real deck.
+  `openradioss_history.py` reads `th_to_csv` output and refuses absent
+  evidence (see above). Stub: the exact `th_to_csv` column contract gets
+  pinned on the first real deck.
 - `openradioss/` — decks and the documented solver invocation. Decks are
   *data*: versioned, hashed, never executed by SCYTHE.
 - `provenance.py` — hashing helpers. Every record carries the full chain:

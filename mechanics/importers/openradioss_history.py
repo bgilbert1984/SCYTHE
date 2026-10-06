@@ -1,17 +1,24 @@
-"""Importer stub: OpenCourant/OpenRadioss time-history -> mechanical_state.v1.
+"""Importer: OpenCourant/OpenRadioss time-history -> mechanical_state.v1.
 
 Reads the CSV produced by the solver's `th_to_csv` converter and emits
 schema-conformant SIMULATED_MECHANICAL_STATE records, one per timestep.
 
-STATUS: stub. The exact `th_to_csv` column contract (node/element channel
-naming, units, time column header) gets pinned against the first real deck
-run. Until then this defines the interface: the contract the importer
-expects, the mapping it performs, and the label it refuses to violate.
+EVIDENCE DISCIPLINE (load-bearing):
+- Absent solver evidence is a REFUSAL, never a zero. A missing channel
+  column aborts the import naming the absent channels (MissingChannelError).
+  A blank cell refuses that timestep: it is not emitted, and the refusal
+  count is reported. Nothing is ever zero-filled.
+- Antenna orientation is never assumed. It must be derived from deck
+  geometry (boresight node minus phase-center node) and passed in, or
+  derived from boresight channels in the export. There is no default.
+- phase_center_m is nominal_position + displacement (simulation frame),
+  never displacement alone. nominal_position comes from the deck.
 
 Hard boundary: this module reads solver *exports*. It never imports,
 links, shells to, or vendors the solver. AGPL-3.0 stays on its side.
 """
 
+import argparse
 import csv
 import json
 import math
@@ -20,22 +27,25 @@ import sys
 SCHEMA_ID = "scythe.mechanical-state.v1"
 STATE_CLASS = "SIMULATED_MECHANICAL_STATE"
 
-# Expected CSV contract (to be pinned against th_to_csv output):
-#   time,<node>_dx,<node>_dy,<node>_dz,<node>_vx,...
-# where <node> is the phase-center / antenna-mount node id from the deck.
-# Units: metres, m/s, seconds. Column names are matched case-insensitively.
 TIME_HEADERS = {"time", "t", "time_s"}
+
+# Channels required to build a complete receiver block. All nine must be
+# present as columns; any absence is a refusal, not a zero.
+REQUIRED_SUFFIXES = ("dx", "dy", "dz", "vx", "vy", "vz", "ax", "ay", "az")
+
+
+class MissingChannelError(ValueError):
+    """Absent solver evidence. Raised, never converted to 0.0."""
 
 
 def _find_time_column(fieldnames):
     for i, name in enumerate(fieldnames):
         if name.strip().lower() in TIME_HEADERS:
             return i
-    raise ValueError(f"no time column in {fieldnames!r}")
+    raise MissingChannelError(f"no time column in {fieldnames!r}")
 
 
 def _channel_index(fieldnames, node, suffix):
-    """Locate e.g. node 1042's 'dx' channel. Returns None if absent."""
     want = f"{node}_{suffix}".lower()
     for i, name in enumerate(fieldnames):
         if name.strip().lower() == want:
@@ -43,77 +53,183 @@ def _channel_index(fieldnames, node, suffix):
     return None
 
 
-def parse_th_csv(path, node):
-    """Yield (t, channels) per row. channels maps suffix -> float.
+def parse_th_csv(path, node, boresight_node=None):
+    """Parse th_to_csv output.
 
-    Suffixes understood: dx, dy, dz (displacement, m),
-    vx, vy, vz (velocity, m/s), ax, ay, az (acceleration, m/s^2).
-    Missing suffixes yield None (record degrades gracefully; the
-    schema marks which receiver fields are required).
+    Returns (rows, refused_count). rows is a list of (t, channels) where
+    every REQUIRED_SUFFIXES channel was observed. refused_count is the
+    number of timesteps refused for blank cells — reported, never filled.
+
+    Raises MissingChannelError if any required channel column (or any
+    requested boresight channel column) is absent from the file.
     """
     with open(path, newline="") as fh:
         reader = csv.reader(fh)
         fieldnames = next(reader)
         ti = _find_time_column(fieldnames)
-        idx = {s: _channel_index(fieldnames, node, s) for s in
-               ("dx", "dy", "dz", "vx", "vy", "vz", "ax", "ay", "az")}
+
+        idx = {}
+        missing = []
+        for s in REQUIRED_SUFFIXES:
+            i = _channel_index(fieldnames, node, s)
+            if i is None:
+                missing.append(f"{node}_{s}")
+            idx[s] = i
+
+        bidx = {}
+        if boresight_node is not None:
+            for s in ("x", "y", "z"):
+                i = _channel_index(fieldnames, boresight_node, s)
+                if i is None:
+                    missing.append(f"{boresight_node}_{s}")
+                bidx[s] = i
+
+        if missing:
+            raise MissingChannelError(
+                "absent solver channels — refusing, not zero-filling: "
+                + ", ".join(missing)
+            )
+
+        rows, refused = [], 0
         for row in reader:
-            if not row or not row[ti].strip():
+            if not row or ti >= len(row) or not row[ti].strip():
+                refused += 1
                 continue
-            ch = {}
+            ch, bad = {}, False
             for s, i in idx.items():
-                ch[s] = float(row[i]) if i is not None and row[i].strip() else None
-            yield float(row[ti]), ch
+                v = row[i].strip() if i < len(row) else ""
+                if not v:
+                    bad = True
+                    break
+                ch[s] = float(v)
+            bch = {}
+            if not bad:
+                for s, i in bidx.items():
+                    v = row[i].strip() if i < len(row) else ""
+                    if not v:
+                        bad = True
+                        break
+                    bch[s] = float(v)
+            if bad:
+                refused += 1
+                continue
+            if bch:
+                ch["boresight"] = bch
+            rows.append((float(row[ti]), ch))
+    return rows, refused
 
 
-def _vec(ch, *suffixes):
-    return [ch[s] if ch[s] is not None else 0.0 for s in suffixes]
+def derive_antenna_normal(phase_pos, boresight_pos):
+    """Antenna boresight unit vector from deck geometry.
 
-
-def _normalize(v):
+    normal = normalize(boresight_position - phase_center_position),
+    both in the same frame. Refuses on degenerate input.
+    """
+    v = [b - p for b, p in zip(boresight_pos, phase_pos)]
     n = math.sqrt(sum(x * x for x in v))
-    return [x / n for x in v] if n > 0 else v
+    if n <= 0:
+        raise ValueError(
+            "cannot derive antenna normal: boresight coincides with phase center"
+        )
+    return [x / n for x in v]
 
 
-def to_mechanical_state(t, ch, solver, provenance, antenna_normal=(0.0, 0.0, 1.0)):
-    """Build one schema instance from a single timestep's channels."""
-    disp = _vec(ch, "dx", "dy", "dz")
-    vel = _vec(ch, "vx", "vy", "vz")
-    acc = _vec(ch, "ax", "ay", "az")
+def to_mechanical_state(t, ch, solver, provenance, nominal_position,
+                        antenna_normal):
+    """Build one schema instance from a single timestep. Refuses on absence.
+
+    nominal_position: deck-geometry nominal phase-center position (m);
+        phase_center_m = nominal_position + displacement.
+    antenna_normal: unit vector derived from deck geometry. There is no
+        default: orientation evidence the solver did not provide must not
+        be fabricated.
+    """
+    if nominal_position is None:
+        raise MissingChannelError(
+            "nominal phase-center position is required: "
+            "phase_center_m = nominal_position + displacement"
+        )
+    if antenna_normal is None:
+        raise MissingChannelError(
+            "antenna_normal is required: derive it from deck geometry "
+            "(boresight node minus phase-center node); never assume it"
+        )
+    disp = [ch["dx"], ch["dy"], ch["dz"]]
+    pos = [n + d for n, d in zip(nominal_position, disp)]
     return {
         "schema": SCHEMA_ID,
-        # The label is a constant. This importer MUST NOT emit anything else.
+        # The label is a constant. This importer MUST NOT emit anything else,
+        # and no caller parameter can override it.
         "state_class": STATE_CLASS,
         "solver": solver,
         "simulation_time_s": t,
         "receiver": {
             "phase_center_displacement_m": disp,
-            "phase_center_m": disp,  # sim frame; nominal offset applied by consumer
-            "velocity_mps": vel,
-            "acceleration_mps2": acc,
-            "antenna_normal": _normalize(list(antenna_normal)),
+            "phase_center_m": pos,
+            "velocity_mps": [ch["vx"], ch["vy"], ch["vz"]],
+            "acceleration_mps2": [ch["ax"], ch["ay"], ch["az"]],
+            "antenna_normal": list(antenna_normal),
         },
         "provenance": provenance,
     }
 
 
-def main(argv):
-    if len(argv) != 4:
-        print("usage: openradioss_history.py <th.csv> <node-id> <provenance.json>",
-              file=sys.stderr)
-        print("emits one JSON record per timestep to stdout", file=sys.stderr)
-        return 2
-    csv_path, node, prov_path = argv[1], argv[2], argv[3]
-    provenance = json.load(open(prov_path))
+def _parse_vec(text, name):
+    try:
+        v = [float(x) for x in text.split(",")]
+    except ValueError:
+        raise ValueError(f"--{name} must be three comma-separated numbers")
+    if len(v) != 3:
+        raise ValueError(f"--{name} must be three comma-separated numbers")
+    return v
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(
+        description="th_to_csv -> scythe.mechanical-state.v1 records. "
+                    "Absent evidence is refused, never zero-filled.")
+    ap.add_argument("csv", help="th_to_csv output")
+    ap.add_argument("node", help="phase-center node id in the deck")
+    ap.add_argument("provenance", help="provenance.json from provenance.py")
+    ap.add_argument("--nominal", required=True,
+                    help="nominal phase-center position x,y,z (m), from deck geometry")
+    src = ap.add_mutually_exclusive_group(required=True)
+    src.add_argument("--antenna-normal",
+                     help="boresight unit vector x,y,z, derived from deck geometry")
+    src.add_argument("--boresight-node",
+                     help="boresight node id; normal derived from its x/y/z channels")
+    args = ap.parse_args(argv)
+
+    provenance = json.load(open(args.provenance))
+    nominal = _parse_vec(args.nominal, "nominal")
+
+    if args.antenna_normal:
+        antenna_normal = _parse_vec(args.antenna_normal, "antenna-normal")
+    else:
+        antenna_normal = None  # derived per-timestep below
+
+    rows, refused = parse_th_csv(args.csv, args.node,
+                                 boresight_node=args.boresight_node)
     solver = {
         "name": "OpenCourant",
         "commit": provenance.get("solver_commit", ""),
         "build": provenance.get("solver_build", ""),
     }
-    for t, ch in parse_th_csv(csv_path, node):
-        print(json.dumps(to_mechanical_state(t, ch, solver, provenance)))
+    for t, ch in rows:
+        if antenna_normal is None:
+            b = ch["boresight"]
+            n = derive_antenna_normal(
+                [nominal[i] + ch[d] for i, d in enumerate(("dx", "dy", "dz"))],
+                [b["x"], b["y"], b["z"]])
+        else:
+            n = antenna_normal
+        print(json.dumps(to_mechanical_state(t, ch, solver, provenance,
+                                             nominal, n)))
+    if refused:
+        print(f"refused {refused} timestep(s) with blank cells "
+              f"(not emitted, not zero-filled)", file=sys.stderr)
     return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv))
+    sys.exit(main())
