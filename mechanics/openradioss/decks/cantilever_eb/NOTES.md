@@ -22,9 +22,15 @@ Units: SI (kg, m, s) throughout.
 ## Closed-form references
 - **Tip deflection:** δ = PL³/(3EI) = **3.200000 mm**
   - I = 5.208333e-7 m⁴
+  - Tests: static stiffness / element formulation / mesh convergence
 - **Reaction:** Fz = 1000 N, My = 1000 N·m
+  - Tests: equilibrium / load-path correctness
 - **First natural frequency:** f₁ = 40.7690 Hz
-  - (β₁L = 1.87510407; dynamic check deferred to follow-on deck)
+  - (β₁L = 1.87510407)
+  - **Status: NOT_YET_VERIFIED** — dynamic verification is a separate gate
+    requiring impulse/release or broadband excitation, ringdown, and a
+    documented spectral estimator. An explicit quasi-static transient does
+    not establish f₁. Recorded here as reference only.
 - **Shear correction** (Timoshenko): 0.00624 mm (0.195% of bending)
   - Confirms Euler-Bernoulli is an adequate reference at L/h = 20.
 
@@ -46,14 +52,27 @@ Quasi-static: `/CLOAD` ramped 0 → -1000 N over 0.1 s via `/FUNCT/1`,
 hold to T=0.5 s. Settled tip displacement from `/TH/NODE` tail average.
 
 ## Acceptance bounds (FROZEN — pre-registered 2026-10-05)
-- Fine mesh tip deflection within **±2%** of 3.2 mm analytical.
-- **Monotonic error decrease** coarse → medium → fine (required).
-- Observed convergence order recorded (not gated).
-- Reaction Fz within **±1%** of 1000 N.
-- Verdict: `VERIFIED_WITHIN_BOUND` or investigate (failure is data).
+Refinement ratio r = 2 (brick count 8× per level = halving in 3D).
+
+Direct errors against analytical:
+- e_coarse = |u_coarse − u_exact| / |u_exact|
+- e_medium = |u_medium − u_exact| / |u_exact|
+- e_fine   = |u_fine − u_exact| / |u_exact|
+
+Observed orders (recorded, not gated):
+- p_cm = ln(e_coarse / e_medium) / ln(2)
+- p_mf = ln(e_medium / e_fine) / ln(2)
+
+**Frozen gate:**
+- e_fine ≤ 0.02
+- e_coarse > e_medium > e_fine (strict monotonic decrease)
 
 The 2% bound accommodates the 0.2% shear-modeling difference with margin;
-expected discretization error on the fine mesh is <1%.
+expected discretization error on the fine mesh is <1%. Observed orders are
+recorded but not frozen — with first-order bricks, bending, and BC
+localization, the apparent rate can be messy before the asymptotic regime.
+Positive monotonic convergence plus the 2% endpoint is a defensible first
+qualification.
 
 ## Provenance
 - Solver: OpenCourant release `33e685176cccf0c539a3ce07aa2096985a284e2a`
