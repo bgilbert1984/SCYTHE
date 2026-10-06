@@ -1,0 +1,79 @@
+{
+ "geometry": {
+  "L_m": 1.0,
+  "B_m": 0.05,
+  "H_m": 0.05
+ },
+ "material": {
+  "E_Pa": 200000000000.0,
+  "nu": 0.3,
+  "rho_kg_m3": 7850.0
+ },
+ "load": {
+  "P_N": 1000.0,
+  "type": "distributed_end_face_traction",
+  "weighting": "tributary_area",
+  "direction": "-Z",
+  "ramp_s": 0.1,
+  "serialized_total_N": {
+   "coarse": 1000.0,
+   "medium": 1000.0,
+   "fine": 999.9998
+  },
+  "serialized_note": "Sum of formatted Fscaley values in committed decks; differs from 1000 N by rounding only."
+ },
+ "element_formulation": {
+  "Isolid": 1,
+  "description": "one-point 8-node brick, viscous hourglass stabilization",
+  "note": "verdict scoped to this formulation; see NOTES.md"
+ },
+ "analytical": {
+  "tip_displacement_z_m": -0.0031999999999999993,
+  "tip_displacement_z_note": "Signed: load is -Z, DZ is negative. Error formula uses signed values.",
+  "tip_deflection_magnitude_m": 0.0031999999999999993,
+  "reaction_Fz_N": 1000.0,
+  "reaction_My_Nm": -1000.0,
+  "reaction_My_note": "support (wall balancing) reaction about Y; external tip moment is +Y*P*L",
+  "f1_Hz": 40.76903532939421,
+  "f1_status": "NOT_YET_VERIFIED",
+  "shear_correction_m": 6.2399999999999995e-06,
+  "shear_fraction": 0.0019500000000000003
+ },
+ "static_estimator": {
+  "displacement": "u = mean(DZ_face_avg(t), t in [0.20, 0.50] s)",
+  "displacement_note": "DZ_face_avg(t) = mean over end-face nodes. Compare signed u against tip_displacement_z_m.",
+  "reaction": "Rz = mean(sum(REACZ_wall(t)), t in [0.20, 0.50] s)",
+  "reaction_note": "Sum over wall nodes, then time-mean. Compare against reaction_Fz_N (+1000 N).",
+  "record": [
+   "tail_std",
+   "tail_peak_to_peak"
+  ],
+  "kinetic_energy": "diagnostic-only for this qualification; no frozen pass/fail criterion. Recorded for engineering judgment, not gating.",
+  "frozen": "2026-10-05"
+ },
+ "acceptance": {
+  "e_fine_le": 0.02,
+  "monotonic": "e_coarse > e_medium > e_fine (strict)",
+  "error_formula": "|u - u_exact| / |u_exact| with signed values",
+  "observed_orders": "recorded, not gated",
+  "reaction_Fz_tol": 0.01,
+  "frozen": "2026-10-05"
+ },
+ "meshes": {
+  "coarse": {
+   "nx": 10,
+   "ny": 2,
+   "nz": 2
+  },
+  "medium": {
+   "nx": 20,
+   "ny": 4,
+   "nz": 4
+  },
+  "fine": {
+   "nx": 40,
+   "ny": 8,
+   "nz": 8
+  }
+ }
+}
