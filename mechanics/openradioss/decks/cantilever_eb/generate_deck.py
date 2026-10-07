@@ -184,11 +184,15 @@ def write_starter(path, nodes, bricks, wall, face_all, loads):
         A_("".join(f10(v) for v in b))
     A_(RULER)
     # property: Isolid=1 one-point brick, viscous hourglass (byte-exact q_a/q_b)
+    # Intended formulation: Isolid=1 (under-integrated brick), Ismstr=0, Icpre=0,
+    #   Iframe=0, Iint=2; stabilization via viscous hourglass h=0.1, qa=qb=1E-30.
+    # The third data line present in earlier revisions was malformed (warning 100217:
+    #   parser still inside PROP block at /PART/1) and caused the solver to fall back
+    #   to defaults (Ismstr=4, Icpre=3, Iframe=2). Removed per version-matched spec.
     A_("/PROP/SOLID/1")
     A_("cantilever solid")
     A_("         1         0                   0         0         0         0         2                   0")
     A_("               1E-30               1E-30                   0                   0                   0")
-    A_("                   0")
     A_(RULER)
     A_("/PART/1")
     A_("cantilever")
