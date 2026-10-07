@@ -128,3 +128,133 @@ def extract_reaction(th_csv_path, wall_node_ids, t_start=T_START, t_end=T_END):
     # Sample-based mean of signed sums
     rz = sum(sums) / len(sums)
     return rz, len(sums), len(wall_node_ids)
+# ---------------------------------------------------------------------------
+# Versioned method for irregular timestamps: trapezoidal_v1
+#
+# Added 2026-10-06: the th_to_csv converter labels channels as
+#   "<title>  <node_id>  var <N>" (e.g. "wall reaction ... 1 ... var 53"),
+# not with the Radioss variable names (REACX/REACY/REACZ). The uniform-cadence
+# extractor above (extract_reaction) requires REACZ in the header and uniform
+# sampling; it is PRESERVED unchanged. This v1 method handles the converter
+# output format explicitly:
+#
+# - Channel resolution: parse the "var N" suffix and node ID from the label.
+#   For /TH/NODE/2 requesting REACX, REACY, REACZ for nodes 1..9, the converter
+#   assigns var 51,52,53 to node 1; 54,55,56 to node 2; etc. REACZ for node k
+#   (1-indexed) is var (50 + 3*k). The caller supplies the expected var numbers;
+#   the extractor verifies them against the parsed labels as a cross-check.
+# - Time-weighting: trapezoidal integration over the actual timestamps, divided
+#   by the observed span. No uniformity assumption. The observed endpoints are
+#   reported explicitly; integrating to a nominal endpoint (e.g. 0.50 s) requires
+#   an explicit endpoint rule, which this method does NOT apply.
+# - Refusal: missing nodes, absent/NaN values, or var-number mismatch all raise
+#   IncompleteCoverageError. Non-uniform sampling does NOT raise here (that is
+#   the point of this method); the uniform-cadence method remains available.
+# ---------------------------------------------------------------------------
+
+def extract_reaction_trapezoidal_v1(th_csv_path, wall_node_ids,
+                                    reacz_var_numbers,
+                                    t_start=T_START, t_end=T_END):
+    """Extract Rz via trapezoidal time-weighting (v1, for converter output).
+
+    Args:
+        th_csv_path: Path to th_to_csv output. Headers are expected in the
+            converter format: '"<title>" ... <node_id> ... var <N>'.
+        wall_node_ids: List of wall node IDs (1-indexed) that must all be present.
+        reacz_var_numbers: List of var numbers for the REACZ channel of each
+            wall node, in the same order as wall_node_ids. E.g. for nodes
+            1..9 with /TH/NODE/2 requesting REACX,REACY,REACZ: [53,56,...,77].
+            These are cross-checked against the parsed header labels.
+        t_start, t_end: Time window [s], inclusive.
+
+    Returns:
+        (Rz, t_observed_start, t_observed_end, n_samples, n_nodes):
+        Rz is the time-weighted mean of the signed wall-node REACZ sum.
+        t_observed_* are the actual first/last timestamps used.
+
+    Raises:
+        IncompleteCoverageError: on missing nodes, absent/NaN values,
+            or var-number/label mismatch.
+    """
+    import re
+
+    wall_list = list(wall_node_ids)
+    if len(set(wall_list)) != len(wall_list):
+        raise IncompleteCoverageError("Duplicate node IDs in wall_node_ids")
+    if len(reacz_var_numbers) != len(wall_list):
+        raise IncompleteCoverageError(
+            "reacz_var_numbers length %d != wall_node_ids length %d" %
+            (len(reacz_var_numbers), len(wall_list)))
+
+    # Expected: node_id -> var number
+    expected_var = dict(zip(wall_list, reacz_var_numbers))
+
+    with open(th_csv_path, newline="") as f:
+        reader = csv.DictReader(f)
+        headers = reader.fieldnames
+        if not headers:
+            raise IncompleteCoverageError("Empty CSV header")
+
+        # Parse converter labels: '"wall reaction ... 1 ... var 53"'
+        # Extract node ID and var number from each header.
+        col_map = {}  # node_id -> header, for REACZ channels only
+        for h in headers[1:]:
+            # Find var number
+            m_var = re.search(r"var\s+(\d+)", h)
+            if not m_var:
+                continue
+            var_num = int(m_var.group(1))
+            # Find which wall node this var belongs to (reverse lookup)
+            for nid, expected in expected_var.items():
+                if var_num == expected:
+                    # Cross-check: header should also mention the node ID
+                    # (as a standalone integer token)
+                    tokens = re.findall(r"\b\d+\b", h)
+                    if str(nid) in tokens and nid not in col_map:
+                        col_map[nid] = h
+                    break
+
+        missing = set(wall_list) - set(col_map.keys())
+        if missing:
+            raise IncompleteCoverageError(
+                "Wall nodes missing from TH data (var cross-check failed): %s" %
+                sorted(missing))
+
+        times = []
+        sums = []
+        for row in reader:
+            t = float(row[headers[0]])
+            if t < t_start or t > t_end:
+                continue
+            s = 0.0
+            for nid in wall_list:
+                val = row[col_map[nid]].strip()
+                if val == "" or val.lower() in ("nan", "inf", "-inf"):
+                    raise IncompleteCoverageError(
+                        "Absent REACZ for node %d at t=%.7f s" % (nid, t))
+                s += float(val)
+            times.append(t)
+            sums.append(s)
+
+    if not times:
+        raise IncompleteCoverageError(
+            "No TH samples in window [%.2f, %.2f] s" % (t_start, t_end))
+
+    # Trapezoidal integration over actual timestamps
+    integral = 0.0
+    for i in range(len(times) - 1):
+        dt = times[i+1] - times[i]
+        if dt <= 0:
+            raise IncompleteCoverageError(
+                "Non-monotonic timestamps at index %d: t=%.7f -> %.7f" %
+                (i, times[i], times[i+1]))
+        integral += 0.5 * (sums[i] + sums[i+1]) * dt
+
+    t_obs0, t_obs1 = times[0], times[-1]
+    span = t_obs1 - t_obs0
+    if span <= 0:
+        raise IncompleteCoverageError("Zero time span in window")
+
+    rz = integral / span
+    return rz, t_obs0, t_obs1, len(times), len(wall_list)
+
