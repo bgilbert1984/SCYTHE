@@ -193,7 +193,7 @@ def write_starter(path, nodes, bricks, wall, face_all, loads):
     A_("cantilever solid")
     # 8x10-char: Isolid, Ismstr, Icpre, Icor3, Iframe, Iint, Iform, Irat
     A_(f"{1:>10}{0:>10}{0:>10}{0:>10}{0:>10}{2:>10}{0:>10}{0:>10}")
-    A_("               1E-30               1E-30                   0                   0                   0")
+    A_(f"{1e-30:>20.3e}{1e-30:>20.3e}{0:>20}{0:>20}{0:>20}{0:>20}")
     A_(RULER)
     A_("/PART/1")
     A_("cantilever")
