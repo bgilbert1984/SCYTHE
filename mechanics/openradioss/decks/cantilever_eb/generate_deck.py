@@ -185,15 +185,26 @@ def write_starter(path, nodes, bricks, wall, face_all, loads):
     A_(RULER)
     # property: Isolid=1 one-point brick, viscous hourglass (byte-exact q_a/q_b)
     # Intended formulation: Isolid=1 (under-integrated brick), Ismstr=0, Icpre=0,
-    #   Iframe=0, Iint=2; stabilization via viscous hourglass h=0.1, qa=qb=1E-30.
-    # The third data line present in earlier revisions was malformed (warning 100217:
-    #   parser still inside PROP block at /PART/1) and caused the solver to fall back
-    #   to defaults (Ismstr=4, Icpre=3, Iframe=2). Removed per version-matched spec.
+    # Documented 3-card /PROP/SOLID layout (user correction 2026-10-07):
+    #   Card 1: 8x10-char ints (Isolid, Ismstr, Iale, Icpre, Itetra10,
+    #           Inpts, Itetra4, Iframe) + 20-char dn  -> 100 chars
+    #   Card 2: 5x20-char reals (qa, qb, h, lambda_v, mu_v) -> 100 chars
+    #   Card 3: 5x20-char reals (dt_min, Vdef_min, Vdef_max, ASP_max,
+    #           COL_min) -> 100 chars
+    # Notes: Ismstr=4 selects full geometric nonlinearities explicitly
+    # (0 would delegate to /DEF_SOLID, default 4). Iframe=1 selects the
+    # non-co-rotational frame explicitly (0 delegates, default 1).
+    # Icpre is inapplicable to Isolid=1 (only 14/17/18/24). h=0.1 is the
+    # viscous hourglass coefficient; qa/qb are bulk-viscosity coefficients.
     A_("/PROP/SOLID/1")
     A_("cantilever solid")
-    # 8x10-char: Isolid, Ismstr, Icpre, Icor3, Iframe, Iint, Iform, Irat
-    A_(f"{1:>10}{0:>10}{0:>10}{0:>10}{0:>10}{2:>10}{0:>10}{0:>10}")
-    A_(f"{1e-30:>20.3e}{1e-30:>20.3e}{0:>20}{0:>20}{0:>20}{0:>20}")
+    # Card 1: Isolid, Ismstr, Iale, Icpre, Itetra10, Inpts, Itetra4, Iframe; dn
+    A_("".join(f"{v:10d}" for v in (1, 4, 0, 0, 0, 0, 0, 1))
+      + f"{0.0:20.12E}")
+    # Card 2: qa, qb, h, lambda_v, mu_v
+    A_("".join(f"{v:20.12E}" for v in (0.0, 0.0, 0.1, 0.0, 0.0)))
+    # Card 3: dt_min, Vdef_min, Vdef_max, ASP_max, COL_min
+    A_("".join(f"{v:20.12E}" for v in (0.0,) * 5))
     A_(RULER)
     A_("/PART/1")
     A_("cantilever")
