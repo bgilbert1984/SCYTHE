@@ -205,6 +205,11 @@ def write_starter(path, nodes, bricks, wall, face_all, loads):
     A_("".join(f"{v:20.12E}" for v in (0.0, 0.0, 0.1, 0.0, 0.0)))
     # Card 3: dt_min, Vdef_min, Vdef_max, ASP_max, COL_min
     A_("".join(f"{v:20.12E}" for v in (0.0,) * 5))
+    # Card 4: Ndir, sphpart_ID (Sol2SPH control; zeros = inactive).
+    # Shown in the official 2023.1 example as a fourth data card even
+    # though labeled optional. Documented next Starter-only test
+    # (user correction 2026-10-07).
+    A_(f"{0:10d}{0:10d}".ljust(100))
     A_(RULER)
     A_("/PART/1")
     A_("cantilever")
