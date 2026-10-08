@@ -191,7 +191,8 @@ def write_starter(path, nodes, bricks, wall, face_all, loads):
     #   to defaults (Ismstr=4, Icpre=3, Iframe=2). Removed per version-matched spec.
     A_("/PROP/SOLID/1")
     A_("cantilever solid")
-    A_("         1         0                   0         0         0         0         2                   0")
+    # 8x10-char: Isolid, Ismstr, Icpre, Icor3, Iframe, Iint, Iform, Irat
+    A_(f"{1:>10}{0:>10}{0:>10}{0:>10}{0:>10}{2:>10}{0:>10}{0:>10}")
     A_("               1E-30               1E-30                   0                   0                   0")
     A_(RULER)
     A_("/PART/1")
