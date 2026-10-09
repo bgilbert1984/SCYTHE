@@ -147,6 +147,14 @@ def extract_reaction(th_csv_path, wall_node_ids, t_start=T_START, t_end=T_END):
 #   by the observed span. No uniformity assumption. The observed endpoints are
 #   reported explicitly; integrating to a nominal endpoint (e.g. 0.50 s) requires
 #   an explicit endpoint rule, which this method does NOT apply.
+# - Channel representation (2026-10-08 correction): th_to_csv may emit REAC
+#   channels as cumulative IMPULSE (N s) rather than force (N). OpenRadioss
+#   guidance states T01 stores reaction impulses; the converter differentiates
+#   them into forces only when the required /TH/TITLE information is present.
+#   Evidence for impulse in a given CSV: (a) project guidance, (b) monotonically
+#   rising channel values under steady load, (c) generic "var N" labels without
+#   force-unit metadata. The caller selects via channel_kind; the choice must
+#   rest on such evidence, NOT on which interpretation closes a balance.
 # - Refusal: missing nodes, absent/NaN values, or var-number mismatch all raise
 #   IncompleteCoverageError. Non-uniform sampling does NOT raise here (that is
 #   the point of this method); the uniform-cadence method remains available.
@@ -154,7 +162,8 @@ def extract_reaction(th_csv_path, wall_node_ids, t_start=T_START, t_end=T_END):
 
 def extract_reaction_trapezoidal_v1(th_csv_path, wall_node_ids,
                                     reacz_var_numbers,
-                                    t_start=T_START, t_end=T_END):
+                                    t_start=T_START, t_end=T_END,
+                                    channel_kind="force"):
     """Extract Rz via trapezoidal time-weighting (v1, for converter output).
 
     Args:
@@ -166,15 +175,22 @@ def extract_reaction_trapezoidal_v1(th_csv_path, wall_node_ids,
             1..9 with /TH/NODE/2 requesting REACX,REACY,REACZ: [53,56,...,77].
             These are cross-checked against the parsed header labels.
         t_start, t_end: Time window [s], inclusive.
+        channel_kind: "force" (default) -- channels carry force; the mean is
+            the trapezoidal time-average. "impulse" -- channels carry
+            cumulative impulse; the mean force is
+            (sum(t1) - sum(t0)) / (t1 - t0) from the observed endpoints.
+            Choose on evidence (converter docs/version, monotonic-rise
+            signature, TH metadata), NOT on which value closes a balance.
 
     Returns:
         (Rz, t_observed_start, t_observed_end, n_samples, n_nodes):
-        Rz is the time-weighted mean of the signed wall-node REACZ sum.
-        t_observed_* are the actual first/last timestamps used.
+        Rz is the mean wall-reaction force in N under the channel_kind
+        interpretation. t_observed_* are the actual first/last timestamps.
+        The caller MUST record which channel_kind was used and its basis.
 
     Raises:
         IncompleteCoverageError: on missing nodes, absent/NaN values,
-            or var-number/label mismatch.
+            var-number/label mismatch, or unknown channel_kind.
     """
     import re
 
@@ -255,6 +271,15 @@ def extract_reaction_trapezoidal_v1(th_csv_path, wall_node_ids,
     if span <= 0:
         raise IncompleteCoverageError("Zero time span in window")
 
-    rz = integral / span
+    if channel_kind == "force":
+        rz = integral / span
+    elif channel_kind == "impulse":
+        # Cumulative impulse: mean force is the endpoint difference rate.
+        # A trapezoidal mean of J(t) would return N s mislabeled as N.
+        rz = (sums[-1] - sums[0]) / span
+    else:
+        raise IncompleteCoverageError(
+            "Unknown channel_kind %r (expected 'force' or 'impulse')"
+            % (channel_kind,))
     return rz, t_obs0, t_obs1, len(times), len(wall_list)
 
