@@ -1,0 +1,65 @@
+{
+ "protocol_id": "dynamic-protocol-2026-10-08-v2-amendment-2",
+ "amendment_to": "dynamic-protocol-2026-10-08-v2 (commit 12857053) as amended by amendment-1 (commit 097c6c79)",
+ "date": "2026-10-09",
+ "status": "FINAL \u2014 reviewed and accepted 2026-10-09. v2 INCONCLUSIVE verdict preserved.",
+ "reason": "v2 returned INCONCLUSIVE on the strict sampling-uniformity check (|dt-0.0005| < 1e-6 s). Investigation of the timing mechanism shows the v2 threshold conflated permitted timing variation with numerical comparison strictness. This amendment derives the sampling rule from the verified output-timing mechanism.",
+ "investigation": {
+  "decimal_arithmetic": {
+   "method": "Python decimal module (28-digit precision) on raw CSV timestamp strings; measurement window [0.6, 2.6] s, 4001 samples.",
+   "finding": "Maximum |dt - 0.0005| is EXACTLY 0.000001 s (1 us). 2330 intervals deviate by exactly 1 us; 0 intervals exceed 1 us.",
+   "correction": "The earlier reported 1.0000000004169e-06 s was floating-point representation noise. The boundary equality itself (exactly 1 us) fails the strict < 1e-6 s rule. The 4e-16 s excess does not explain the failure; the failure is at the boundary."
+  },
+  "timing_mechanism": {
+   "source": "OpenCourant 33e68517, engine/source/output/th/hist2.F, line 277: THIS0_DOUBLE=MAX(TT_DOUBLE,THIS0_DOUBLE+DTHIS0_DOUBLE).",
+   "verified_behavior": "TH output is written at the first solver step with simulation time TT >= the scheduled mark. The timestamp written is the actual step time TT (which overshoots the mark), not the mark itself. The next output is scheduled at mark + /TFILE (schedule remains anchored to marks).",
+   "consequence": "Each output time t_k = mark_k + u_k, where u_k in [0, dt_solver) is the overshoot. Inter-output intervals satisfy |dt_k - 0.0005| = |u_{k+1} - u_k| < dt_solver.",
+   "distinguishing_test": "All 4001 overshoots (t_i - i*0.0005) are >= 0 (never negative), consistent with 'first step past mark'. Maximum written overshoot 1.1 us. Timestamp strings carry 7 significant digits; a 1-us overshoot exceeds the 0.05-us rounding quantum, confirming genuine step-time overshoot, not CSV quantization of exact marks.",
+   "solver_dt": "Engine log reports DT=1.0602E-06 s (element-stable, constant). The overshoot bound is therefore dt_solver = 1.0602 us."
+  },
+  "one_us_bound_assessment": {
+   "question": "Is an inclusive <= 1 us bound justified?",
+   "answer": "No. The verified mechanism permits overshoot up to dt_solver_max = 1.0602 us, which exceeds 1 us. Observed written overshoot reaches 1.1 us.",
+   "conservative_bound_derivation": "Let true output time = mark + e_i, e_i in [0, dt_solver_max). Then dt_i - dt_scheduled = e_{i+1} - e_i, so |dt_i - dt_scheduled| < dt_solver_max. Written timestamps add rounding rho_i with |rho_i| <= r_i. Conservative written-interval bound: |dt_i - dt_scheduled| <= dt_solver_max + r_i + r_{i+1} = 1.0602 + 0.5 + 0.5 = 2.0602 us (using the larger rounding above 1 s to cover the full window).",
+   "justified_bound": "|dt - 0.0005| <= 2.0602e-6 s. The earlier draft value of 1.2e-6 s is withdrawn; it used the sub-1-s rounding quantum across the whole window."
+  },
+  "estimator_validation_extension": {
+   "method": "Mechanism-faithful validation (validate_interp_v4.py): true times t_k = k*0.0005 + u_k with u_k ~ Uniform[0, 1.0602e-6) s; written timestamps rounded to 7 significant digits (%.6e); signal synthesized at true times; estimator derives f_s from written timestamps and assumes uniform spacing (as the protocol does). Same 1440-case grid (3 quantities x 480).",
+   "finding": "Maximum observed errors: logmag 0.001838 Hz, magnitude 0.001934 Hz, power 0.002029 Hz (480 cases each).",
+   "scope_note": "Observed maximum over the tested conditions (mechanism-faithful jitter plus timestamp formatting). Not a general accuracy bound for all possible signals."
+  },
+  "timestamp_format": {
+   "method": "Empirical inspection of all 5400 CSV timestamp strings; converter source in separate repo (OpenRadioss/Tools), not inspected.",
+   "finding": "All timestamps match %.6e (7 significant digits). Format confirmed empirically, not from source.",
+   "rounding_by_magnitude": {
+    "0.6_to_1_s": "decimal spacing 0.1 us; max rounding error 0.05 us per timestamp",
+    "1_to_2.6_s": "decimal spacing 1 us; max rounding error 0.5 us per timestamp"
+   },
+   "correction": "An earlier draft used a constant 0.05 us rounding uncertainty across the window. This was wrong: above 1 s the spacing is 1 us, so per-timestamp rounding reaches 0.5 us and the combined interval uncertainty reaches 1.0 us."
+  },
+  "solver_dt": {
+   "method": "Engine log DT reports (25,469 samples).",
+   "finding": "DT is 1.0601e-6 or 1.0602e-6 s throughout; dt_solver_max = 1.0602e-6 s."
+  }
+ },
+ "clauses": {
+  "revised_sampling_rule": {
+   "exact_clause": "Inter-sample intervals in the measurement window must satisfy |dt - 0.0005| <= 2.0602e-6 s, where dt is computed from the output timestamps. The bound is derived from the verified TH output-timing mechanism (hist2.F: output at first solver step with TT >= mark; |e_{i+1} - e_i| < dt_solver_max = 1.0602e-6 s per engine log) plus timestamp representation rounding (%.6e format confirmed empirically on all 5400 timestamps; r = 0.5 us per timestamp at/above 1 s, conservative for the full window): 1.0602 + 0.5 + 0.5 = 2.0602 us.",
+   "replaces": "v2 adequacy_checks.checks.sampling_uniformity.criterion (|dt - 0.0005| < 1e-6 s) and amendment-1 detail_3_sampling to the extent it references the v2 uniformity threshold."
+  },
+  "comparison_tolerance": {
+   "exact_clause": "Numerical comparisons against the 2.0602e-6 s bound use inclusive <= with timestamps compared as exact decimals (or floating-point with epsilon 1e-12 s). The comparison tolerance (numerical) is separate from the permitted timing variation (physical, 2.0602e-6 s). A deviation of exactly 2.0602e-6 s passes; a deviation exceeding 2.0602e-6 s by more than the numerical epsilon fails.",
+   "note": "This separates the two concepts v2 conflated: how much timing variation the mechanism permits vs how strictly we compare numbers."
+  },
+  "estimator_validation_scope": {
+   "exact_clause": "The estimator accuracy validation is extended to the mechanism-faithful timestamp conditions: true output times t_k = k*0.0005 + u_k with u_k ~ Uniform[0, 1.0602e-6) s, written timestamps rounded to 7 significant digits (%.6e format), signal synthesized at true times, estimator deriving f_s from written timestamps (validate_interp_v4.py). The maximum observed error from the extended sweep (logmag: 0.001838 Hz over 480 cases) applies to these tested conditions. The v2 bound (0.00184 Hz maximum observed error) remains valid only for the uniform-sampling conditions actually tested in v2.",
+   "replaces": "v2 estimator.validation conclusion language to the extent it implies the bound covers non-uniform sampling."
+  }
+ },
+ "preserved": {
+  "v2_verdict": "INCONCLUSIVE (2026-10-09 run) stands unchanged under v2+amendment-1. This amendment does not retroactively alter it.",
+  "diagnostic_findings": "f1 = 40.3768 Hz (0.962% below 40.7690 Hz reference); release checks A and B PASS (J_A = -2.00046 N-s, J_B = 0.00108 N-s); all other adequacy checks PASS. Preserved as diagnostic findings alongside the terminal v2 verdict.",
+  "reanalysis_label": "Any v3 analysis of the 2026-10-09 artifacts is REANALYSIS of previously observed data, not a new measurement. It must cite this amendment and the revised rule before execution."
+ },
+ "date_finalized": "2026-10-09"
+}
