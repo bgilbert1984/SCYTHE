@@ -1,0 +1,34 @@
+* { box-sizing: border-box; }
+html, body { min-height: 100%; }
+body.auth-page {
+    margin: 0;
+    display: grid;
+    place-items: center;
+    padding: 24px;
+    color: #e4f1ef;
+    background: #071416;
+    font-family: "Titillium Web", "Segoe UI", sans-serif;
+}
+.auth-card {
+    width: min(100%, 460px);
+    padding: 42px 38px;
+    border: 1px solid rgba(0, 206, 201, .32);
+    border-radius: 10px;
+    background: rgba(10, 27, 29, .96);
+    box-shadow: 0 22px 70px rgba(0, 0, 0, .4);
+}
+.eyebrow { margin: 0 0 12px; color: #00cec9; font: 600 .76rem/1.2 "Roboto Mono", monospace; letter-spacing: 1.5px; text-transform: uppercase; }
+h1 { margin: 0 0 10px; color: #f2fffd; font-size: 2.15rem; }
+.auth-copy { margin: 0 0 26px; color: #9ab3b1; line-height: 1.5; }
+label { display: block; margin: 16px 0 7px; color: #b8ccca; font-size: .9rem; }
+input { width: 100%; padding: 12px 13px; border: 1px solid #315150; border-radius: 5px; color: #f2fffd; background: #0d2224; font: 1rem "Roboto Mono", monospace; }
+input:focus { outline: 2px solid rgba(0, 206, 201, .35); border-color: #00cec9; }
+button { width: 100%; margin-top: 24px; padding: 13px 16px; border: 0; border-radius: 5px; color: #041012; background: #00cec9; font: 700 1rem "Titillium Web", sans-serif; cursor: pointer; }
+button:disabled { opacity: .6; cursor: wait; }
+#statusMessage { min-height: 24px; margin: 16px 0 0; padding: 10px; border-radius: 5px; line-height: 1.35; }
+#statusMessage:empty { padding: 0; }
+#statusMessage.success { color: #b7efc0; background: rgba(76, 175, 80, .14); }
+#statusMessage.error { color: #ffb4ad; background: rgba(244, 67, 54, .14); }
+#statusMessage.loading { color: #a9d9ff; background: rgba(33, 150, 243, .14); }
+.back-link { display: inline-block; margin-top: 22px; color: #71e4df; text-decoration: none; }
+.back-link:hover { text-decoration: underline; }
