@@ -579,5 +579,83 @@ class ThresholdDeclarationTests(unittest.TestCase):
                 self.assertNotIn("DIGITAL", value.upper(), key)
 
 
+class BandLimitedNoiseSpecificityTests(unittest.TestCase):
+    """KNOWN FALSE CROSSINGS, pinned so they cannot go unnoticed.
+
+    A read-only audit (300 seeds per width, noise only, production channelizer,
+    threshold 2.5 unchanged) found that stationary band-limited Gaussian noise
+    crosses the threshold at 30-50 kHz and not at 60 kHz and wider. The mechanism is
+    the smooth falling squared-envelope spectrum meeting a local-median floor at the
+    lower search edge (KNOWN_FALSE_POSITIVE_MODES). These tests describe the CURRENT
+    frozen method. They are not acceptance of the behaviour: the 30/50 kHz assertions
+    are characterisations of a false crossing. A method correction must change them
+    deliberately, together with METHOD_REVISION, rather than let them drift. The
+    inputs are synthetic; no rate here is a false-alarm probability.
+    """
+
+    MODE = "STATIONARY_BANDLIMITED_NOISE_SLOPING_CYCLIC_SPECTRUM"
+    CARRIER = np.exp(2j * np.pi * 400_000.0 * np.arange(524_288) / 2_048_000.0)
+
+    def _noise_verdict(self, width_hz, seed):
+        result, ring = _real_channelization(
+            (_band_limited_noise(width_hz, seed=seed) * self.CARRIER).astype(np.complex64))
+        self.assertEqual(result.product.outcome, "CHANNELIZED", result.product.reason)
+        return detect(result, ring=ring)
+
+    def test_the_failure_mode_is_named_and_the_older_one_is_kept(self):
+        self.assertIn(self.MODE, KNOWN_FALSE_POSITIVE_MODES)
+        self.assertIn("SLOWLY_SLOPING_CYCLIC_SPECTRUM", KNOWN_FALSE_POSITIVE_MODES)
+        text = KNOWN_FALSE_POSITIVE_MODES[self.MODE]
+        self.assertIn("SYNTHETIC", text)
+        self.assertIn("NOT A FALSE-ALARM PROBABILITY", text)
+        self.assertEqual(detector_status()["known_false_positive_modes"][self.MODE], text)
+
+    def test_narrow_band_noise_is_a_known_false_crossing_under_the_frozen_method(self):
+        for width_hz in (30_000.0, 50_000.0):
+            for seed in (0, 3, 17, 99):
+                with self.subTest(width_hz=width_hz, seed=seed):
+                    verdict = self._noise_verdict(width_hz, seed)
+                    self.assertEqual(verdict.outcome, "SYMBOL_CLOCK_LIKE_FEATURE")
+                    self.assertEqual(verdict.threshold_comparison, "THRESHOLD_EXCEEDED_IN_SHADOW_MODE")
+                    # Margin: the lowest of 300 audited seeds was 3.04 (30 kHz) and 3.44 (50 kHz).
+                    self.assertGreater(verdict.detection_statistic, 2.75)
+                    # Nothing about it reaches a family claim or promotion.
+                    self.assertFalse(verdict.promotes)
+                    self.assertEqual(verdict.family_summary, "NOT_DERIVED")
+                    self.assertEqual(verdict.promotion_state, "SHADOW_NO_PROMOTION")
+
+    def test_the_false_crossing_sits_at_the_search_floor_not_at_a_localised_line(self):
+        """The reported rate is the lower search edge. Over 300 audited seeds the peak was never more
+        than 27 bins above it (of a 416-bin band); a genuine line is measured elsewhere (below)."""
+        for width_hz in (30_000.0, 50_000.0):
+            for seed in (0, 3, 17, 99):
+                with self.subTest(width_hz=width_hz, seed=seed):
+                    verdict = self._noise_verdict(width_hz, seed)
+                    offset_bins = ((verdict.symbol_rate_hz - verdict.search_floor_hz)
+                                   / verdict.cyclic_resolution_hz)
+                    self.assertGreaterEqual(offset_bins, -1e-6)
+                    self.assertLessEqual(offset_bins, 32.0)
+
+    def test_the_same_noise_at_100_khz_does_not_cross(self):
+        for seed in (0, 3, 17, 99):
+            with self.subTest(seed=seed):
+                verdict = self._noise_verdict(100_000.0, seed)
+                self.assertEqual(verdict.outcome, "NO_SYMBOL_CLOCK")
+                self.assertEqual(verdict.threshold_comparison, "BELOW_THRESHOLD_IN_SHADOW_MODE")
+                self.assertLess(verdict.detection_statistic, 2.0)    # audited maximum over 300 seeds: 1.80
+
+    def test_a_real_symbol_clock_is_measured_away_from_the_search_floor(self):
+        baseband = _psk(100_000.0, count=524_288, rate_hz=2_048_000.0, noise=0.02)
+        result, ring = _real_channelization((baseband * self.CARRIER).astype(np.complex64))
+        self.assertEqual(result.product.outcome, "CHANNELIZED", result.product.reason)
+        verdict = detect(result, ring=ring)
+        self.assertEqual(verdict.outcome, "SYMBOL_CLOCK_LIKE_FEATURE")
+        realised = 2_048_000.0 / round(2_048_000.0 / 100_000.0)
+        self.assertLess(abs(verdict.symbol_rate_hz - realised), 5.0 * verdict.cyclic_resolution_hz)
+        self.assertGreater(verdict.detection_statistic, 20.0)         # audited: 57.1
+        self.assertGreater((verdict.symbol_rate_hz - verdict.search_floor_hz)
+                           / verdict.cyclic_resolution_hz, 64.0)
+
+
 if __name__ == "__main__":
     unittest.main()
