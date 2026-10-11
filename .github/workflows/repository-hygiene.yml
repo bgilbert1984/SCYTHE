@@ -98,3 +98,29 @@ jobs:
           grep -q 'fftBufferHeld = true' assets/SDRPlusPlus-master/core/src/gui/widgets/waterfall.cpp
           grep -q 'if (!fftBufferHeld) { return; }' assets/SDRPlusPlus-master/core/src/gui/widgets/waterfall.cpp
           grep -q 'fftBufferHeld = false' assets/SDRPlusPlus-master/core/src/gui/widgets/waterfall.cpp
+
+
+  rtl-watchdog:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # Drives the deployed guard script against fake rtl_tcp servers and a
+      # fake systemctl (stdlib only, no packages). It binds 127.0.0.1:1234 and
+      # waits through the guard's own sleeps, so it takes about half a minute.
+      # SSGUARD_TEST_REQUIRE_RUN makes the module's host-protection skip a
+      # failure here; the checks after the run refuse a log with no tests in it
+      # or any skip in it.
+      - name: Run rtl_tcp watchdog tests
+        env:
+          SSGUARD_TEST_REQUIRE_RUN: "1"
+        run: |
+          set -o pipefail
+          python deploy/rtl-watchdog/tests/test_ssguard.py 2>&1 | tee "$RUNNER_TEMP/ssguard.log"
+          grep -Eq '^Ran [1-9][0-9]* tests?' "$RUNNER_TEMP/ssguard.log"
+          if grep -Eq 'skipped' "$RUNNER_TEMP/ssguard.log"; then
+            echo "error: watchdog tests were skipped" >&2
+            exit 1
+          fi
