@@ -16,6 +16,10 @@ Run from deploy/rtl-watchdog/:
 
 Requires 127.0.0.1:1234 free; the module skips otherwise (e.g. on scythe-1
 itself, where the real rtl_tcp lives -- these tests must never touch it).
+
+CI sets SSGUARD_TEST_REQUIRE_RUN=1, which turns that skip into a failure: a
+runner where the tests cannot run is a broken runner, not a passing one. On a
+developer host the variable is unset and the skip protects the real receiver.
 """
 import os
 import shutil
@@ -50,14 +54,23 @@ def rtl_sdr_running():
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0
 
 
+def _cannot_run(reason):
+    """Skip on a developer host; fail where the run is required (CI)."""
+    if os.environ.get("SSGUARD_TEST_REQUIRE_RUN") == "1":
+        raise AssertionError(
+            "SSGUARD_TEST_REQUIRE_RUN=1 but the guard tests cannot run: "
+            + reason)
+    raise unittest.SkipTest(reason)
+
+
 def setUpModule():
     assert os.path.isfile(GUARD), "guard script not found: %s" % GUARD
     if not port_free():
-        raise unittest.SkipTest(
+        _cannot_run(
             "127.0.0.1:%d in use (real rtl_tcp?) -- refusing to test against it"
             % PORT)
     if rtl_sdr_running():
-        raise unittest.SkipTest("rtl_sdr is running on this host")
+        _cannot_run("rtl_sdr is running on this host")
 
 
 class GuardTest(unittest.TestCase):
