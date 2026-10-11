@@ -50,6 +50,29 @@ jobs:
       - name: Run GraphOps workbench tests
         run: python -m unittest -v test_graphops_workbench.py test_graphops_rf_ingest.py test_graphops_full_fidelity.py
 
+  python-mechanics:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # Found, not listed, for the same reason the RF globs above are: the
+      # cantilever extractor tests lived under mechanics/ and matched none of
+      # them, so CI was green without ever running them. Each file runs in its
+      # own process because the test modules import their sibling modules by
+      # path, and unittest discovery does not descend into directories that
+      # are not packages.
+      - name: Run mechanics tests
+        run: |
+          set -e
+          files=$(find mechanics -name 'test_*.py' | sort)
+          test -n "$files"
+          for f in $files; do
+            echo "== $f"
+            python "$f"
+          done
+
   node-scythe-web:
     runs-on: ubuntu-latest
     defaults:
