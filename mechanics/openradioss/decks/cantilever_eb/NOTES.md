@@ -93,6 +93,16 @@ captures the resolved Starter hourglass parameters.
 - Analytical reference: `analytical_reference.json`
 - Regression test: `test_scythe_solver_verification_deck.py` (in CI glob)
 
+## Deck families (added 2026-10-12)
+- **Historical family** (`cantilever_<mesh>_000{0,1}.rad`): the decks behind the recorded solver results. Frozen. Their
+  `/MAT/ELAST` data lines use 10-character fields, so the starter read **nu = 0** (shear modulus E/2), not the declared 0.3, and
+  raised no warning. A controlled medium-mesh run reproduced the historical CSV byte-for-byte and showed that re-encoding only those
+  two lines changes the starter state to nu = 0.3.
+- **Corrected family** (`cantilever_<mesh>_matfmt20_000{0,1}.rad`, `generate_deck.py --material-layout fields20`): identical except for
+  the two `/MAT/ELAST` data lines, written as 20-character fields. Identity record: `deck_family_matfmt20_identity.json`.
+  New baseline; it does not replace or reinterpret anything in the historical family.
+- Results from the two families are not interchangeable and must not be mixed in one comparison.
+
 ## Status
 - [x] Generator reproduces committed decks
 - [x] Decks pass starter (0 volume errors, all meshes)
@@ -101,6 +111,9 @@ captures the resolved Starter hourglass parameters.
 - [ ] Residuals and SOLVER_VERIFICATION record
 
 ## Format notes (hard-won)
+- `/MAT/ELAST` (law 1) data lines are **20-char fields** (`%20lg%20lg`: rho, ref rho / E, nu). 10-char fields put nu inside
+  the E field and the starter reads nu = 0 with no warning. The historical family has this defect; `matfmt20` fixes it.
+  Enforced by `test_scythe_material_card_layout.py`.
 - `/NODE` coordinates: **20-char fields** (not 10-char). 10-char silently
   misparses → zero-volume errors. Enforced by regression test.
 - `/PROP/SOLID` q_a/q_b: `1E-30` in 20-char fields (byte-exact).
