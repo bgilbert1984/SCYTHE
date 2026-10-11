@@ -88,7 +88,9 @@ from rf_promotion_envelope import (
 from rf_spur_retention_estimator import measure_persistence
 
 
-SEQUENCER_REVISION = "seq-7.1-1"
+SEQUENCER_REVISION = "seq-7.2-1-hann"
+# v2-Hann: Hann windowing + log-power interpolation in detect_candidates().
+# Retention estimator unchanged (was already Hann-windowed).
 SAMPLE_RATE_HZ = 2048000
 assert SAMPLE_RATE_HZ == PROMOTION_SAMPLE_RATE_HZ, (
     "the sequencer samples at the promotion rate the plan analyses; "
@@ -300,10 +302,22 @@ class CandidateFeature:
 
 
 def _parabolic_peak_offset(mag: np.ndarray, k: int) -> float:
-    """Sub-bin peak location by parabolic interpolation, in bins."""
+    """Sub-bin peak location by parabolic interpolation on LOG-POWER, in bins.
+
+    Domain: L[k] = ln(P[k]) where P[k] is the power spectrum value.
+    Formula: delta = 0.5 * (L[k-1] - L[k+1]) / (L[k-1] - 2*L[k] + L[k+1])
+
+    Rationale (v2-Hann): For a windowed tone, ln(power) near the peak is
+    closer to parabolic than power itself, reducing interpolation bias for
+    off-bin tones. Evaluated on 72-fixture development set + 36-fixture
+    holdout; fixes 0.3-0.4 bin localization failure of power-domain version.
+    """
     if k <= 0 or k >= len(mag) - 1:
         return float(k)
-    a, b, c = mag[k - 1], mag[k], mag[k + 1]
+    a_p, b_p, c_p = mag[k - 1], mag[k], mag[k + 1]
+    if a_p <= 0 or b_p <= 0 or c_p <= 0:
+        return float(k)
+    a, b, c = math.log(a_p), math.log(b_p), math.log(c_p)
     denom = a - 2.0 * b + c
     if denom == 0.0:
         return float(k)
@@ -317,9 +331,18 @@ def detect_candidates(windows: Sequence[np.ndarray]) -> List[CandidateFeature]:
     survives detection is already halfway to surviving retention. The floor
     is the median of that median spectrum: robust to the very spurs it
     hunts.
+
+    v2-Hann: Each window is Hann-windowed before the FFT, consistent with
+    the retention estimator (rf_spur_retention_estimator) which Hann-windows
+    per repeat. Hann sidelobes (-31 dB) vs rectangular (-13 dB) suppress
+    leakage-generated extra candidates. Interpolation is parabolic on
+    log-power domain.
     """
     n = len(windows[0])
-    spectra = np.abs(np.fft.fft(np.stack(windows), axis=1)) ** 2
+    # v2-Hann: Hann window before FFT (consistent with retention estimator)
+    hann = 0.5 * (1.0 - np.cos(2.0 * np.pi * np.arange(n) / (n - 1)))
+    windowed = np.stack(windows) * hann[np.newaxis, :]
+    spectra = np.abs(np.fft.fft(windowed, axis=1)) ** 2
     median_spec = np.median(spectra, axis=0)
     floor = float(np.median(median_spec))
     if not math.isfinite(floor) or floor <= 0.0:
