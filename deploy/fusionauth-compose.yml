@@ -1,0 +1,63 @@
+services:
+  fusionauth-db:
+    image: postgres:16-bookworm
+    container_name: scythe-fusionauth-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: fusionauth
+      POSTGRES_USER: fusionauth
+      POSTGRES_PASSWORD: ${FUSIONAUTH_DB_PASSWORD:?set FUSIONAUTH_DB_PASSWORD}
+    volumes:
+      - fusionauth-db:/var/lib/postgresql/data
+
+  fusionauth-search:
+    image: opensearchproject/opensearch:2.11.0
+    container_name: scythe-fusionauth-search
+    restart: unless-stopped
+    environment:
+      cluster.name: fusionauth
+      discovery.type: single-node
+      node.name: fusionauth-search
+      plugins.security.disabled: "true"
+      bootstrap.memory_lock: "true"
+      OPENSEARCH_JAVA_OPTS: "-Xms256m -Xmx256m"
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    volumes:
+      - fusionauth-search:/usr/share/opensearch/data
+
+  fusionauth:
+    image: fusionauth/fusionauth-app:latest
+    container_name: scythe-fusionauth
+    restart: unless-stopped
+    depends_on:
+      fusionauth-db:
+        condition: service_started
+      fusionauth-search:
+        condition: service_started
+    ports:
+      - "127.0.0.1:9011:9011"
+    environment:
+      DATABASE_URL: jdbc:postgresql://fusionauth-db:5432/fusionauth
+      DATABASE_USERNAME: fusionauth
+      DATABASE_PASSWORD: ${FUSIONAUTH_DB_PASSWORD:?set FUSIONAUTH_DB_PASSWORD}
+      SEARCH_SERVERS: http://fusionauth-search:9200
+      SEARCH_TYPE: elasticsearch
+      FUSIONAUTH_APP_URL: http://fusionauth:9011
+      FUSIONAUTH_APP_MEMORY: ${FUSIONAUTH_APP_MEMORY:-512M}
+      FUSIONAUTH_APP_RUNTIME_MODE: development
+      FUSIONAUTH_APP_KICKSTART_FILE: /usr/local/fusionauth/kickstart/kickstart.json
+      FUSIONAUTH_API_KEY: ${FUSIONAUTH_API_KEY:?set FUSIONAUTH_API_KEY}
+    volumes:
+      - fusionauth-config:/usr/local/fusionauth/config
+      - ./fusionauth-bootstrap-kickstart.json:/usr/local/fusionauth/kickstart/kickstart.json:ro
+
+volumes:
+  fusionauth-db:
+  fusionauth-search:
+  fusionauth-config:

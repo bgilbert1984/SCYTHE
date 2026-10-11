@@ -1,0 +1,11 @@
+{
+  "variables": {
+    "apiKey": "#{ENV.FUSIONAUTH_API_KEY}"
+  },
+  "apiKeys": [
+    {
+      "key": "#{apiKey}",
+      "description": "SCYTHE broker API access"
+    }
+  ]
+}

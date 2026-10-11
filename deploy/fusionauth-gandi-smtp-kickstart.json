@@ -1,0 +1,28 @@
+{
+  "variables": {
+    "defaultTenantId": "#{DEFAULT_TENANT_ID()}",
+    "smtpPassword": "#{PROMPT_HIDDEN('Gandi mailbox password')}"
+  },
+  "requests": [
+    {
+      "method": "PATCH",
+      "url": "/api/tenant/#{defaultTenantId}",
+      "body": {
+        "tenant": {
+          "emailConfiguration": {
+            "debug": false,
+            "defaultFromEmail": "no-reply@spectrcyde.com",
+            "defaultFromName": "SCYTHE",
+            "host": "mail.gandi.net",
+            "username": "no-reply@spectrcyde.com",
+            "password": "#{smtpPassword}",
+            "port": 587,
+            "security": "TLS",
+            "verifyEmail": false,
+            "forgotPasswordEmailTemplateId": "75d6344c-f523-47b0-bc31-c63020371f22"
+          }
+        }
+      }
+    }
+  ]
+}
