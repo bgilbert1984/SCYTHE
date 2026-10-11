@@ -120,6 +120,11 @@ def _parse_ping_measurement(output):
 # ────────────────────────────────────────────────────────────────────
 # NETWORK INGRESS AGGREGATOR
 # ────────────────────────────────────────────────────────────────────
+# The logger exists before any optional import can fail and want to report it.
+# getLogger has no side effects; logging.basicConfig below still sets the
+# handlers and format, so records emitted before it use the last-resort handler.
+logger = logging.getLogger('rf_scythe_server')
+
 try:
     import network_ingress_aggregator
     _ingress_aggregator_available = True
@@ -313,7 +318,6 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
-logger = logging.getLogger('rf_scythe_server')
 
 # ── Module-level UAV registry (route handlers use `global`, so this MUST ──────
 # ── be at module scope — not inside register_routes() which is a closure) ─────
