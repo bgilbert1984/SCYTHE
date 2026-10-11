@@ -29,6 +29,14 @@
   "cantilever_fine_matfmt20_0001.rad": {
    "sha256": "94894b74ecfb825cdb41c32f2f2cc803d440b121914d1cf3312c270134c49402",
    "bytes": 282
+  },
+  "cantilever_dynamic_matfmt20_0000.rad": {
+   "sha256": "042a6f2089ef5a3a2ce8eb859a2ead085306c1cccde7fa8d332219f56ccbbb1d",
+   "bytes": 477559
+  },
+  "cantilever_dynamic_matfmt20_0001.rad": {
+   "sha256": "2bcee7d089f858200dba7dc5563c8203d7f84bb9dc4f510df0167fd9ef691cc4",
+   "bytes": 282
   }
  },
  "historical_counterparts": {
@@ -49,6 +57,12 @@
    "starter_sha256": "a8439555771dc27c7d3d8166df15796c23a20442a629fe5fef4d09cbf9c6f02f",
    "engine": "cantilever_fine_0001.rad",
    "engine_sha256": "94894b74ecfb825cdb41c32f2f2cc803d440b121914d1cf3312c270134c49402"
+  },
+  "dynamic": {
+   "starter": "cantilever_dynamic_0000.rad",
+   "starter_sha256": "e4f8535c71a7cb8dfa31f10770de93551d44acab315697257e8486ddf93c0c39",
+   "engine": "cantilever_dynamic_0001.rad",
+   "engine_sha256": "2bcee7d089f858200dba7dc5563c8203d7f84bb9dc4f510df0167fd9ef691cc4"
   }
  },
  "executed_with": {
@@ -127,7 +141,31 @@
   "note": "contemporaneous = written by the session that ran the solver, immediately afterwards; not a historical manifest of the 2026-10-09 runs"
  },
  "not_in_this_family": [
-  "dynamic (cantilever_dynamic_*): still the historical hand-edit of the fine deck with the 10-character encoding; no corrected dynamic family has been generated or run; the dynamic f1 gate remains open"
+  "generator output for dynamic: the dynamic decks are committed as files and derived from the historical dynamic deck by a two-line re-encoding; generate_deck.py does not produce them"
  ],
- "does_not_establish": "This record identifies input decks only. It makes no claim about solver results, mesh convergence or the benchmark verdict, which remains NOT_VERIFIED."
+ "does_not_establish": "This record identifies input decks only. It makes no claim about solver results, mesh convergence or the benchmark verdict; results and their scoped classification are in results_matfmt20_2026-10-12.md.",
+ "dynamic_decks_provenance": {
+  "generated_by": "not generate_deck.py: the dynamic decks are a hand-edit of the fine deck (see cantilever_dynamic_0000.rad history) and the generator does not emit them",
+  "derivation": "cantilever_dynamic_matfmt20_0000.rad = the historical cantilever_dynamic_0000.rad with only lines 16-17 (the two /MAT/ELAST data lines) re-encoded as 20-character %20.6E fields; the engine deck is byte-identical to the historical one",
+  "executed_with": {
+   "run_directory": "/var/tmp/scythe-sweep/cantilever-dynamic-matfmt-20261012/B",
+   "starter_deck_sha256": "042a6f2089ef5a3a2ce8eb859a2ead085306c1cccde7fa8d332219f56ccbbb1d",
+   "engine_deck_sha256": "2bcee7d089f858200dba7dc5563c8203d7f84bb9dc4f510df0167fd9ef691cc4",
+   "starter_reported": {
+    "density": 7850.0,
+    "E": 200000000000.0,
+    "nu": 0.3,
+    "G_echo_4sf": 76920000000.0,
+    "solid_formulation": 1.0,
+    "small_strain": 4.0,
+    "corotational": 1.0,
+    "hourglass_viscosity": 0.1
+   },
+   "engine": {
+    "termination": "NORMAL TERMINATION",
+    "total_cycles": 2955184
+   }
+  },
+  "evidence": "cantilever-dynamic-matfmt-20261012/SHA256SUMS.contemporaneous (contemporaneous, not historical); results record results_matfmt20_2026-10-12.md"
+ }
 }
