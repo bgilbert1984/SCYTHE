@@ -132,7 +132,7 @@ starter/engine output.
 | coarse B, fine B | `/var/tmp/scythe-sweep/cantilever-matfmt-cf-20261012` | `matfmt_coarsefine_experiment/` |
 | dynamic B (fine mesh) | `/var/tmp/scythe-sweep/cantilever-dynamic-matfmt-20261012` | `matfmt_dynamic_experiment/` (95 files, 71 MB, verified) |
 
-### Input decks (corrected starter decks are committed beside this record, except dynamic)
+### Input decks (all committed beside this record; the dynamic pair was added after this record was first written)
 
 | Deck | SHA-256 |
 |---|---|
@@ -140,13 +140,14 @@ starter/engine output.
 | `cantilever_medium_matfmt20_0000.rad` | `508c28bf3b0f42be8d8609a71b799c8a87802e6beb87dba19948f0cd4788088c` |
 | `cantilever_fine_matfmt20_0000.rad` | `b07b181c255d7e4f412b58c1606afccf8eef5d349c1b483e8a9105d0ac370ada` |
 | `cantilever_{coarse,medium,fine}_matfmt20_0001.rad` (engine; identical to historical `_0001`) | `94894b74ecfb825cdb41c32f2f2cc803d440b121914d1cf3312c270134c49402` |
-| dynamic starter deck `cantilever_dynamic_0000.rad` (corrected; NOT in the committed family) | `042a6f2089ef5a3a2ce8eb859a2ead085306c1cccde7fa8d332219f56ccbbb1d` |
-| dynamic engine deck `cantilever_dynamic_0001.rad` (identical to historical) | `2bcee7d089f858200dba7dc5563c8203d7f84bb9dc4f510df0167fd9ef691cc4` |
+| dynamic starter deck `cantilever_dynamic_matfmt20_0000.rad` (corrected) | `042a6f2089ef5a3a2ce8eb859a2ead085306c1cccde7fa8d332219f56ccbbb1d` |
+| dynamic engine deck `cantilever_dynamic_matfmt20_0001.rad` (identical to historical `cantilever_dynamic_0001.rad`) | `2bcee7d089f858200dba7dc5563c8203d7f84bb9dc4f510df0167fd9ef691cc4` |
 
 The dynamic deck derives from the retained historical dynamic deck (`e4f8535c…0c39`, the
 bytes the 2026-10-09 solver read) with only the two `/MAT/ELAST` data lines re-encoded
-(`gate1_record.json`, `gate1_diff.txt`). It exists only in the experiment directory and
-its copy; committing it to the family is a separate change.
+(`gate1_record.json`, `gate1_diff.txt`). It is committed as
+`cantilever_dynamic_matfmt20_000{0,1}.rad` and is not generator output (see
+`deck_family_matfmt20_identity.json`, `dynamic_decks_provenance`).
 
 ### Executables (verified before and after every run)
 

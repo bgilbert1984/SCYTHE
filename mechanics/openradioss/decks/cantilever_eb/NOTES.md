@@ -101,6 +101,9 @@ captures the resolved Starter hourglass parameters.
 - **Corrected family** (`cantilever_<mesh>_matfmt20_000{0,1}.rad`, `generate_deck.py --material-layout fields20`): identical except for
   the two `/MAT/ELAST` data lines, written as 20-character fields. Identity record: `deck_family_matfmt20_identity.json`.
   New baseline; it does not replace or reinterpret anything in the historical family.
+  The dynamic pair (`cantilever_dynamic_matfmt20_000{0,1}.rad`) is part of the family but is **not generator output**: it is the
+  historical dynamic deck with lines 16-17 (the `/MAT/ELAST` data) re-encoded; the engine deck is byte-identical to the historical one.
+  Both are the bytes read by the 2026-10-12 dynamic run; provenance is in the identity record. Results: `results_matfmt20_2026-10-12.md`.
 - Results from the two families are not interchangeable and must not be mixed in one comparison.
 
 ## Status

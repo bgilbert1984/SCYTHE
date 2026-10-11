@@ -286,8 +286,38 @@ class GeneratedAndCommittedDeckTests(unittest.TestCase):
         # the relation to the historical family is stated, and the historical digests are not touched
         for mesh in MESHES:
             self.assertEqual(record["historical_counterparts"][mesh]["starter_sha256"], _sha256(os.path.join(DECK_DIR, f"cantilever_{mesh}_0000.rad")))
-        self.assertTrue(any("dynamic" in item for item in record["not_in_this_family"]))
-        self.assertIn("NOT_VERIFIED", record["does_not_establish"])
+        self.assertTrue(any("generator output for dynamic" in item for item in record["not_in_this_family"]))
+        self.assertIn("benchmark verdict", record["does_not_establish"])
+
+    # The dynamic decks are not generator output: they are the historical dynamic deck with its two
+    # /MAT/ELAST data lines re-encoded (the bytes the 2026-10-12 solver run read).
+    DYNAMIC_STARTER_DIGEST = "042a6f2089ef5a3a2ce8eb859a2ead085306c1cccde7fa8d332219f56ccbbb1d"
+    DYNAMIC_ENGINE_DIGEST = "2bcee7d089f858200dba7dc5563c8203d7f84bb9dc4f510df0167fd9ef691cc4"
+
+    def test_dynamic_corrected_decks_are_the_historical_deck_with_only_the_material_lines_reencoded(self):
+        historical = _read(os.path.join(DECK_DIR, "cantilever_dynamic_0000.rad")).split("\n")
+        corrected = _read(os.path.join(DECK_DIR, "cantilever_dynamic_matfmt20_0000.rad")).split("\n")
+        self.assertEqual(len(historical), len(corrected))
+        differing = [i for i, (a, b) in enumerate(zip(historical, corrected)) if a != b]
+        self.assertEqual(differing, [15, 16])      # lines 16-17: the two /MAT/ELAST data lines
+        self.assertEqual(corrected[15:17], corrected_card().split("\n")[2:4])
+        self.assertEqual(validate_material_card("\n".join(corrected)), [])
+        self.assertEqual(read_fields_as_observed("\n".join(corrected))["MAT_NU"], 0.3)
+        self.assertEqual(_sha256(os.path.join(DECK_DIR, "cantilever_dynamic_matfmt20_0001.rad")),
+                         _sha256(os.path.join(DECK_DIR, "cantilever_dynamic_0001.rad")))
+
+    def test_dynamic_corrected_digests_are_pinned_and_recorded(self):
+        with open(IDENTITY_RECORD, encoding="utf-8") as handle:
+            record = json.load(handle)
+        for name, expected in (("cantilever_dynamic_matfmt20_0000.rad", self.DYNAMIC_STARTER_DIGEST),
+                               ("cantilever_dynamic_matfmt20_0001.rad", self.DYNAMIC_ENGINE_DIGEST)):
+            with self.subTest(name):
+                self.assertEqual(_sha256(os.path.join(DECK_DIR, name)), expected)
+                self.assertEqual(record["decks"][name]["sha256"], expected)
+        self.assertEqual(record["historical_counterparts"]["dynamic"]["starter_sha256"],
+                         _sha256(os.path.join(DECK_DIR, "cantilever_dynamic_0000.rad")))
+        self.assertEqual(record["dynamic_decks_provenance"]["executed_with"]["starter_deck_sha256"],
+                         self.DYNAMIC_STARTER_DIGEST)
 
 
 if __name__ == "__main__":
