@@ -9,6 +9,17 @@ pollutes mesh convergence). Closed-form references:
 
 Writes decks + analytical_reference.json. The generator is the source of
 truth: it must reproduce the committed .rad files.
+
+Deck families (--material-layout):
+  legacy10  (default)  the historical decks. /MAT/ELAST data lines use
+            10-character fields. The card definition requires 20-character
+            fields, so the starter reads nu as 0 (see NOTES.md). The default
+            exists so the committed decks, and the digests anchored to the
+            solver evidence run from them, stay reproducible. Never changes.
+  fields20             the corrected family: identical except for the two
+            /MAT/ELAST data lines, written as 20-character fields. Files are
+            named cantilever_<mesh>_matfmt20_000{0,1}.rad so both families can
+            coexist. analytical_reference.json is not rewritten in this mode.
 """
 
 import json
@@ -62,6 +73,9 @@ MESHES = {
 }
 
 OUT = os.path.dirname(os.path.abspath(__file__))
+
+MAT_LAYOUTS = ("legacy10", "fields20")
+FAMILY_SUFFIX = {"legacy10": "", "fields20": "_matfmt20"}
 # Filenames match committed canonical decks: cantilever_{mesh}_0000.rad)
 
 
@@ -145,7 +159,7 @@ def f20(v):
 RULER = "#---1----|----2----|----3----|----4----|----5----|----6----|----7----|----8----|----9----|---10----|"
 
 
-def write_starter(path, nodes, bricks, wall, face_all, loads):
+def write_starter(path, nodes, bricks, wall, face_all, loads, mat_layout="legacy10"):
     L_ = []
     A_ = L_.append
     A_("#RADIOSS STARTER")
@@ -164,8 +178,15 @@ def write_starter(path, nodes, bricks, wall, face_all, loads):
     # material (must precede /ANALY per starter card-order requirement)
     A_("/MAT/ELAST/1")
     A_("steel")
-    A_("".join(f10(x) for x in [RHO, 0]))
-    A_("".join(f10(x) for x in [E, NU]))
+    if mat_layout == "legacy10":
+        A_("".join(f10(x) for x in [RHO, 0]))
+        A_("".join(f10(x) for x in [E, NU]))
+    elif mat_layout == "fields20":
+        # /MAT/ELAST: CARD("%20lg%20lg", RHO_I, RHO_O) / CARD("%20lg%20lg", E, nu)
+        A_("".join(f"{x:20.6E}" for x in [RHO, 0.0]))
+        A_("".join(f"{x:20.6E}" for x in [E, NU]))
+    else:
+        raise ValueError(f"unknown material layout {mat_layout!r}; expected one of {MAT_LAYOUTS}")
     A_(RULER)
     A_("/ANALY")
     A_("         0                   0         0")
@@ -285,14 +306,17 @@ def write_engine(path):
     open(path, "w").write("\n".join(L_) + "\n")
 
 
-def main():
+def main(mat_layout="legacy10"):
+    if mat_layout not in MAT_LAYOUTS:
+        raise ValueError(f"unknown material layout {mat_layout!r}; expected one of {MAT_LAYOUTS}")
+    suffix = FAMILY_SUFFIX[mat_layout]
     # Track serialized load totals (after formatting) for the record.
     serialized_totals = {}
     for name, (nx, ny, nz) in MESHES.items():
         nodes, bricks, wall, face_all, loads = build_mesh(nx, ny, nz)
-        s_path = os.path.join(OUT, f"cantilever_{name}_0000.rad")
-        e_path = os.path.join(OUT, f"cantilever_{name}_0001.rad")
-        write_starter(s_path, nodes, bricks, wall, face_all, loads)
+        s_path = os.path.join(OUT, f"cantilever_{name}{suffix}_0000.rad")
+        e_path = os.path.join(OUT, f"cantilever_{name}{suffix}_0001.rad")
+        write_starter(s_path, nodes, bricks, wall, face_all, loads, mat_layout)
         write_engine(e_path)
         # Compute serialized total: re-parse the formatted Fscaley values.
         total = 0.0
@@ -359,9 +383,17 @@ def main():
         },
         "meshes": {k: {"nx": v[0], "ny": v[1], "nz": v[2]} for k, v in MESHES.items()},
     }
-    json.dump(ref, open(os.path.join(OUT, "analytical_reference.json"), "w"), indent=1)
-    print("wrote analytical_reference.json")
+    if mat_layout == "legacy10":
+        json.dump(ref, open(os.path.join(OUT, "analytical_reference.json"), "w"), indent=1)
+        print("wrote analytical_reference.json")
+    else:
+        print("analytical_reference.json not rewritten (frozen; unchanged for this family)")
 
 
 if __name__ == "__main__":
-    main()
+    import argparse
+    parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    parser.add_argument("--material-layout", choices=MAT_LAYOUTS, default="legacy10",
+                        help="legacy10 (default) reproduces the committed historical decks; "
+                             "fields20 writes the corrected deck family")
+    main(parser.parse_args().material_layout)

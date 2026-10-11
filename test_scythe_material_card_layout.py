@@ -24,14 +24,14 @@ nu = 0, G = E/2), not read from source: the tokenizing code is in the prebuilt h
 library, which is not in the OpenCourant clone. `read_fields_as_observed` reproduces the
 observation (first value in each field, blank = 0) and is labelled as such.
 
-KNOWN DEFECT. The generator has not been corrected (a separate change, after the controlled
-experiment). `test_generator_emits_a_valid_material_card` is therefore an expected failure.
-When the generator is fixed it will report an UNEXPECTED SUCCESS, which unittest counts as a
-failure: remove the decorator in that same change. The committed decks, which are the
-evidence for recorded solver results, keep the historical encoding; the characterization
-test pins that, and will need to change together with their digests if they are regenerated.
+TWO DECK FAMILIES. The default generator output ("legacy10") is the historical encoding and must keep
+reproducing the committed decks, which are the evidence for recorded solver results and are never
+regenerated. The corrected family ("fields20", files named *_matfmt20_*) writes the same decks with
+20-character /MAT/ELAST fields. The corrected decks are committed as new files and identified by
+deck_family_matfmt20_identity.json; both families coexist, and results from the two are not interchangeable.
 """
 
+import json
 import os
 import re
 import shutil
@@ -159,49 +159,135 @@ class MaterialCardSpecificationTests(unittest.TestCase):
         self.assertEqual(read_fields_as_observed(card)["MAT_NU"], 0.3)
 
 
+MESHES = ("coarse", "medium", "fine")
+IDENTITY_RECORD = os.path.join(DECK_DIR, "deck_family_matfmt20_identity.json")
+# NEW_BASELINE (established 2026-10-12): digests of the corrected family. These are the decks that were
+# actually run: the generator output was verified byte-identical to the executed solver inputs.
+CORRECTED_STARTER_DIGESTS = {
+    "coarse": "8bf74526591d23b2da2d4f4235c7f21871c1c3ad327c185550998176c36a5143",
+    "medium": "508c28bf3b0f42be8d8609a71b799c8a87802e6beb87dba19948f0cd4788088c",
+    "fine": "b07b181c255d7e4f412b58c1606afccf8eef5d349c1b483e8a9105d0ac370ada",
+}
+ENGINE_DECK_DIGEST = "94894b74ecfb825cdb41c32f2f2cc803d440b121914d1cf3312c270134c49402"   # identical in both families
+
+
+def _run_generator(out_dir, *args):
+    copy = os.path.join(out_dir, "generate_deck.py")
+    shutil.copyfile(GENERATOR, copy)              # an unmodified copy writes beside itself
+    return subprocess.run([sys.executable, copy, *args], cwd=out_dir, capture_output=True, text=True,
+                          timeout=120, env=dict(os.environ, PYTHONDONTWRITEBYTECODE="1"))
+
+
+def _read(path):
+    with open(path, encoding="utf-8") as handle:
+        return handle.read()
+
+
+def _sha256(path):
+    import hashlib
+    with open(path, "rb") as handle:
+        return hashlib.sha256(handle.read()).hexdigest()
+
+
 class GeneratedAndCommittedDeckTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
         cls.out = tempfile.mkdtemp(prefix="scythe-matcard-")
-        cls.addClassCleanup(shutil.rmtree, cls.out, ignore_errors=True)
-        copy = os.path.join(cls.out, "generate_deck.py")
-        shutil.copyfile(GENERATOR, copy)          # an unmodified copy writes beside itself
-        proc = subprocess.run([sys.executable, copy], cwd=cls.out, capture_output=True, text=True,
-                              timeout=120, env=dict(os.environ, PYTHONDONTWRITEBYTECODE="1"))
-        if proc.returncode != 0:
-            raise RuntimeError(f"generator failed:\n{proc.stdout}\n{proc.stderr}")
+        cls.out20 = tempfile.mkdtemp(prefix="scythe-matcard20-")
+        for directory in (cls.out, cls.out20):
+            cls.addClassCleanup(shutil.rmtree, directory, ignore_errors=True)
+        for directory, args in ((cls.out, ()), (cls.out20, ("--material-layout", "fields20"))):
+            proc = _run_generator(directory, *args)
+            if proc.returncode != 0:
+                raise RuntimeError(f"generator {args} failed:\n{proc.stdout}\n{proc.stderr}")
 
-    @unittest.expectedFailure
-    def test_generator_emits_a_valid_material_card(self):
-        """KNOWN DEFECT: the generator writes 10-character fields. Remove this decorator in
-        the change that corrects it; until then an UNEXPECTED SUCCESS here is the signal."""
-        for mesh in ("coarse", "medium", "fine"):
+    def test_corrected_family_emits_a_valid_material_card(self):
+        for mesh in MESHES:
             with self.subTest(mesh):
-                with open(os.path.join(self.out, f"cantilever_{mesh}_0000.rad")) as handle:
-                    self.assertEqual(validate_material_card(handle.read()), [])
+                text = _read(os.path.join(self.out20, f"cantilever_{mesh}_matfmt20_0000.rad"))
+                self.assertEqual(validate_material_card(text), [])
+                values = read_fields_as_observed(text)
+                self.assertEqual((values["MAT_RHO"], values["MAT_E"], values["MAT_NU"]), (7850.0, 2.0e11, 0.3))
 
-    def test_generator_output_has_the_historical_encoding(self):
-        """The current behaviour, stated positively, so the expected failure above is
-        a statement about the card and not an accident of the test."""
-        for mesh in ("coarse", "medium", "fine"):
+    def test_default_output_is_still_the_historical_encoding(self):
+        """The default must not change: it is what reproduces the committed historical decks."""
+        for mesh in MESHES:
             with self.subTest(mesh):
-                with open(os.path.join(self.out, f"cantilever_{mesh}_0000.rad")) as handle:
-                    text = handle.read()
+                text = _read(os.path.join(self.out, f"cantilever_{mesh}_0000.rad"))
                 self.assertEqual(len(validate_material_card(text)), 2)
                 self.assertEqual(read_fields_as_observed(text)["MAT_NU"], 0.0)
 
+    def test_default_output_equals_the_committed_historical_decks(self):
+        for mesh in MESHES:
+            for number in ("0000", "0001"):
+                with self.subTest(mesh=mesh, deck=number):
+                    name = f"cantilever_{mesh}_{number}.rad"
+                    self.assertEqual(_sha256(os.path.join(self.out, name)), _sha256(os.path.join(DECK_DIR, name)))
+
+    def test_corrected_family_differs_from_the_historical_decks_only_in_the_material_data_lines(self):
+        for mesh in MESHES:
+            with self.subTest(mesh):
+                historical = _read(os.path.join(DECK_DIR, f"cantilever_{mesh}_0000.rad")).split("\n")
+                corrected = _read(os.path.join(self.out20, f"cantilever_{mesh}_matfmt20_0000.rad")).split("\n")
+                self.assertEqual(len(historical), len(corrected))
+                header = next(i for i, line in enumerate(historical) if line.startswith("/MAT/ELAST/"))
+                changed = [i for i, (a, b) in enumerate(zip(historical, corrected)) if a != b]
+                self.assertEqual(changed, [header + 2, header + 3])
+                self.assertEqual(_sha256(os.path.join(self.out20, f"cantilever_{mesh}_matfmt20_0001.rad")),
+                                 _sha256(os.path.join(DECK_DIR, f"cantilever_{mesh}_0001.rad")))
+
+    def test_the_frozen_reference_is_not_rewritten_in_the_corrected_mode(self):
+        self.assertNotIn("analytical_reference.json", os.listdir(self.out20))
+
+    def test_unknown_layout_is_refused(self):
+        with tempfile.TemporaryDirectory(prefix="scythe-matcard-bad-") as directory:
+            proc = _run_generator(directory, "--material-layout", "bogus")
+            self.assertNotEqual(proc.returncode, 0)
+            self.assertEqual([f for f in os.listdir(directory) if f.endswith(".rad")], [])
+
     def test_committed_decks_carry_the_historical_encoding(self):
-        """The decks behind the recorded solver results. They are evidence and are not
-        regenerated; this fails if one changes without the others being reviewed."""
+        """The decks behind the recorded solver results. They are evidence and are not regenerated."""
         for name in ("coarse", "medium", "fine", "dynamic"):
             with self.subTest(name):
-                with open(os.path.join(DECK_DIR, f"cantilever_{name}_0000.rad")) as handle:
-                    text = handle.read()
+                text = _read(os.path.join(DECK_DIR, f"cantilever_{name}_0000.rad"))
                 problems = validate_material_card(text)
                 self.assertEqual(len(problems), 2, problems)
                 values = read_fields_as_observed(text)
                 self.assertEqual((values["MAT_E"], values["MAT_NU"]), (2.0e11, 0.0))
+
+    def test_committed_corrected_family_is_the_generator_output(self):
+        for mesh in MESHES:
+            for number in ("0000", "0001"):
+                with self.subTest(mesh=mesh, deck=number):
+                    name = f"cantilever_{mesh}_matfmt20_{number}.rad"
+                    self.assertEqual(_sha256(os.path.join(DECK_DIR, name)), _sha256(os.path.join(self.out20, name)))
+
+    def test_committed_corrected_family_has_a_valid_material_card(self):
+        for mesh in MESHES:
+            with self.subTest(mesh):
+                self.assertEqual(validate_material_card(_read(os.path.join(DECK_DIR, f"cantilever_{mesh}_matfmt20_0000.rad"))), [])
+
+    def test_corrected_family_digests_are_the_new_baseline(self):
+        for mesh in MESHES:
+            with self.subTest(mesh):
+                self.assertEqual(_sha256(os.path.join(DECK_DIR, f"cantilever_{mesh}_matfmt20_0000.rad")), CORRECTED_STARTER_DIGESTS[mesh])
+                self.assertEqual(_sha256(os.path.join(DECK_DIR, f"cantilever_{mesh}_matfmt20_0001.rad")), ENGINE_DECK_DIGEST)
+
+    def test_identity_record_agrees_with_the_decks_and_labels_itself_a_new_baseline(self):
+        with open(IDENTITY_RECORD, encoding="utf-8") as handle:
+            record = json.load(handle)
+        self.assertEqual(record["authority"], "NEW_BASELINE")
+        for mesh in MESHES:
+            for number, expected in (("0000", CORRECTED_STARTER_DIGESTS[mesh]), ("0001", ENGINE_DECK_DIGEST)):
+                entry = record["decks"][f"cantilever_{mesh}_matfmt20_{number}.rad"]
+                self.assertEqual(entry["sha256"], expected)
+                self.assertEqual(entry["sha256"], _sha256(os.path.join(DECK_DIR, f"cantilever_{mesh}_matfmt20_{number}.rad")))
+        # the relation to the historical family is stated, and the historical digests are not touched
+        for mesh in MESHES:
+            self.assertEqual(record["historical_counterparts"][mesh]["starter_sha256"], _sha256(os.path.join(DECK_DIR, f"cantilever_{mesh}_0000.rad")))
+        self.assertTrue(any("dynamic" in item for item in record["not_in_this_family"]))
+        self.assertIn("NOT_VERIFIED", record["does_not_establish"])
 
 
 if __name__ == "__main__":

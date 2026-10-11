@@ -1,0 +1,133 @@
+{
+ "schema": "deck-family-identity/1",
+ "family": "matfmt20",
+ "authority": "NEW_BASELINE",
+ "established": "2026-10-12",
+ "generator": "generate_deck.py --material-layout fields20",
+ "relation_to_historical": "Identical to the historical family except the two /MAT/ELAST data lines of each starter deck, written as 20-character fields (%20.6E). Engine decks are byte-identical to the historical engine decks. The historical decks, their digests and their provenance are unchanged.",
+ "decks": {
+  "cantilever_coarse_matfmt20_0000.rad": {
+   "sha256": "8bf74526591d23b2da2d4f4235c7f21871c1c3ad327c185550998176c36a5143",
+   "bytes": 14895
+  },
+  "cantilever_coarse_matfmt20_0001.rad": {
+   "sha256": "94894b74ecfb825cdb41c32f2f2cc803d440b121914d1cf3312c270134c49402",
+   "bytes": 282
+  },
+  "cantilever_medium_matfmt20_0000.rad": {
+   "sha256": "508c28bf3b0f42be8d8609a71b799c8a87802e6beb87dba19948f0cd4788088c",
+   "bytes": 71617
+  },
+  "cantilever_medium_matfmt20_0001.rad": {
+   "sha256": "94894b74ecfb825cdb41c32f2f2cc803d440b121914d1cf3312c270134c49402",
+   "bytes": 282
+  },
+  "cantilever_fine_matfmt20_0000.rad": {
+   "sha256": "b07b181c255d7e4f412b58c1606afccf8eef5d349c1b483e8a9105d0ac370ada",
+   "bytes": 477459
+  },
+  "cantilever_fine_matfmt20_0001.rad": {
+   "sha256": "94894b74ecfb825cdb41c32f2f2cc803d440b121914d1cf3312c270134c49402",
+   "bytes": 282
+  }
+ },
+ "historical_counterparts": {
+  "coarse": {
+   "starter": "cantilever_coarse_0000.rad",
+   "starter_sha256": "22036f430ccc786fcddf92539618b1fb8affdc73dced51169788aca502bb6604",
+   "engine": "cantilever_coarse_0001.rad",
+   "engine_sha256": "94894b74ecfb825cdb41c32f2f2cc803d440b121914d1cf3312c270134c49402"
+  },
+  "medium": {
+   "starter": "cantilever_medium_0000.rad",
+   "starter_sha256": "5807e3a9830743d85ecb0b8d9781a1a578214ac5ea13064bd7f048dbeab04bd4",
+   "engine": "cantilever_medium_0001.rad",
+   "engine_sha256": "94894b74ecfb825cdb41c32f2f2cc803d440b121914d1cf3312c270134c49402"
+  },
+  "fine": {
+   "starter": "cantilever_fine_0000.rad",
+   "starter_sha256": "a8439555771dc27c7d3d8166df15796c23a20442a629fe5fef4d09cbf9c6f02f",
+   "engine": "cantilever_fine_0001.rad",
+   "engine_sha256": "94894b74ecfb825cdb41c32f2f2cc803d440b121914d1cf3312c270134c49402"
+  }
+ },
+ "executed_with": {
+  "coarse": {
+   "run_directory": "/var/tmp/scythe-sweep/cantilever-matfmt-cf-20261012/coarse_B",
+   "starter_deck_sha256": "8bf74526591d23b2da2d4f4235c7f21871c1c3ad327c185550998176c36a5143",
+   "engine_deck_sha256": "94894b74ecfb825cdb41c32f2f2cc803d440b121914d1cf3312c270134c49402",
+   "starter_reported": {
+    "density": 7850.0,
+    "E": 200000000000.0,
+    "nu": 0.3,
+    "G_echo_4sf": 76920000000.0,
+    "solid_formulation": 1.0,
+    "small_strain": 4.0,
+    "corotational": 1.0,
+    "hourglass_viscosity": 0.1
+   },
+   "engine": {
+    "termination": "NORMAL TERMINATION",
+    "total_cycles": 136825
+   }
+  },
+  "medium": {
+   "run_directory": "/var/tmp/scythe-sweep/cantilever-matfmt-20261012/B",
+   "starter_deck_sha256": "508c28bf3b0f42be8d8609a71b799c8a87802e6beb87dba19948f0cd4788088c",
+   "engine_deck_sha256": "94894b74ecfb825cdb41c32f2f2cc803d440b121914d1cf3312c270134c49402",
+   "starter_reported": {
+    "density": 7850.0,
+    "E": 200000000000.0,
+    "nu": 0.3,
+    "G_echo_4sf": 76920000000.0,
+    "solid_formulation": 1.0,
+    "small_strain": 4.0,
+    "corotational": 1.0,
+    "hourglass_viscosity": 0.1
+   },
+   "engine": {
+    "termination": "NORMAL TERMINATION",
+    "total_cycles": 273636
+   }
+  },
+  "fine": {
+   "run_directory": "/var/tmp/scythe-sweep/cantilever-matfmt-cf-20261012/fine_B",
+   "starter_deck_sha256": "b07b181c255d7e4f412b58c1606afccf8eef5d349c1b483e8a9105d0ac370ada",
+   "engine_deck_sha256": "94894b74ecfb825cdb41c32f2f2cc803d440b121914d1cf3312c270134c49402",
+   "starter_reported": {
+    "density": 7850.0,
+    "E": 200000000000.0,
+    "nu": 0.3,
+    "G_echo_4sf": 76920000000.0,
+    "solid_formulation": 1.0,
+    "small_strain": 4.0,
+    "corotational": 1.0,
+    "hourglass_viscosity": 0.1
+   },
+   "engine": {
+    "termination": "NORMAL TERMINATION",
+    "total_cycles": 547265
+   }
+  }
+ },
+ "solver": {
+  "commit": "33e685176cccf0c539a3ce07aa2096985a284e2a",
+  "executables_sha256": {
+   "starter_linux64_gf": "8b7709aef7b78ffb9a7387653603345578c193984365870a1c0cbba0bb9ba13b",
+   "engine_linux64_gf": "06cee40f73c3d39648c712e24142ebb58b1e7ab0e248ee6e8f2d399e5f92ec9e",
+   "th_to_csv_linux64_gf": "704d647331ae4befd329d18b991d644f2af930abd117c5d204c23925f75fc8db"
+  },
+  "thread_setting": "OMP_NUM_THREADS=1 (the engine does not report its thread count; the starter reported 1 thread)"
+ },
+ "evidence": {
+  "contemporaneous_manifests": [
+   "cantilever-matfmt-20261012/SHA256SUMS.contemporaneous (medium)",
+   "cantilever-matfmt-cf-20261012/SHA256SUMS.contemporaneous (coarse, fine)"
+  ],
+  "note": "contemporaneous = written by the session that ran the solver, immediately afterwards; not a historical manifest of the 2026-10-09 runs"
+ },
+ "not_in_this_family": [
+  "dynamic (cantilever_dynamic_*): still the historical hand-edit of the fine deck with the 10-character encoding; no corrected dynamic family has been generated or run; the dynamic f1 gate remains open"
+ ],
+ "does_not_establish": "This record identifies input decks only. It makes no claim about solver results, mesh convergence or the benchmark verdict, which remains NOT_VERIFIED."
+}
