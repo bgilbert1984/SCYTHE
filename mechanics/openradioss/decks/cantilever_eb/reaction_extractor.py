@@ -23,12 +23,39 @@ It does not touch measured receiver data.
 
 import csv
 import math
+import re
 
 
 # Frozen estimator parameters
 T_START = 0.20  # s, inclusive
 T_END = 0.50    # s, inclusive
 DT_TOLERANCE = 1e-9  # s, max deviation from uniform sampling
+
+
+def _finite_value(val, node_id, t):
+    """Parse a TH cell to a finite float, or refuse.
+
+    Rejects empty cells and anything that is not a finite number ('nan', 'inf',
+    '+inf', 'Infinity', '+nan', unparseable text, ...) instead of enumerating
+    spellings; absent data must never reach the sum.
+    """
+    try:
+        x = float(val)
+    except ValueError:
+        x = float("nan")
+    if not math.isfinite(x):
+        raise IncompleteCoverageError(
+            "Absent or non-finite REACZ %r for node %d at t=%.7f s "
+            "(refusing to substitute zero)" % (val, node_id, t))
+    return x
+
+
+def _header_mentions_node(header, node_id):
+    """True if node_id appears in header as a whole integer (not a substring).
+
+    'REACZ node 1' mentions node 1; 'REACZ node 51' does not.
+    """
+    return re.search(r"(?<!\d)%d(?!\d)" % node_id, header) is not None
 
 
 class IncompleteCoverageError(Exception):
@@ -41,7 +68,8 @@ class NonUniformSamplingError(Exception):
     pass
 
 
-def extract_reaction(th_csv_path, wall_node_ids, t_start=T_START, t_end=T_END):
+def extract_reaction(th_csv_path, wall_node_ids, t_start=T_START, t_end=T_END,
+                     dt_tolerance=DT_TOLERANCE):
     """Extract Rz from TH CSV output.
 
     Args:
@@ -50,6 +78,10 @@ def extract_reaction(th_csv_path, wall_node_ids, t_start=T_START, t_end=T_END):
             contain the node ID and "REACZ" (case-insensitive).
         wall_node_ids: List of wall node IDs that must all be present.
         t_start, t_end: Time window [s], inclusive.
+        dt_tolerance: max deviation [s] of a timestep from the mean step.
+            Defaults to the frozen DT_TOLERANCE (1e-9 s). Real TH output may
+            not be uniform to that precision; for irregular timestamps use
+            extract_reaction_trapezoidal_v1 instead of loosening this.
 
     Returns:
         (Rz, n_samples, n_nodes): Rz is the signed sum averaged over
@@ -60,7 +92,7 @@ def extract_reaction(th_csv_path, wall_node_ids, t_start=T_START, t_end=T_END):
         IncompleteCoverageError: if any wall node is missing from the
             TH data, or any REACZ value in the window is absent/NaN.
         NonUniformSamplingError: if timesteps in the window are not
-            uniform within DT_TOLERANCE.
+            uniform within dt_tolerance.
     """
     wall_set = set(wall_node_ids)
     if len(wall_set) != len(wall_node_ids):
@@ -81,11 +113,16 @@ def extract_reaction(th_csv_path, wall_node_ids, t_start=T_START, t_end=T_END):
             hl = h.lower()
             if "reacz" not in hl:
                 continue
-            # Extract node ID from header (assumes ID appears as integer)
-            for nid in wall_set:
-                if str(nid) in h and nid not in col_map:
-                    col_map[nid] = h
-                    break
+            # The node ID must appear as a whole integer in the header; a
+            # substring test would let node 1 claim 'REACZ node 51'.
+            matched = [nid for nid in sorted(wall_set)
+                       if _header_mentions_node(h, nid)]
+            if len(matched) > 1:
+                raise IncompleteCoverageError(
+                    "Header %r is ambiguous: it mentions wall nodes %s "
+                    "(refusing to guess the column)" % (h, matched))
+            if matched and matched[0] not in col_map:
+                col_map[matched[0]] = h
 
         missing = wall_set - set(col_map.keys())
         if missing:
@@ -102,12 +139,7 @@ def extract_reaction(th_csv_path, wall_node_ids, t_start=T_START, t_end=T_END):
                 continue
             s = 0.0
             for nid in wall_node_ids:
-                val = row[col_map[nid]].strip()
-                if val == "" or val.lower() in ("nan", "inf", "-inf"):
-                    raise IncompleteCoverageError(
-                        "Absent REACZ for node %d at t=%.6f s "
-                        "(refusing to substitute zero)" % (nid, t))
-                s += float(val)  # SIGNED sum
+                s += _finite_value(row[col_map[nid]].strip(), nid, t)  # SIGNED sum
             times.append(t)
             sums.append(s)
 
@@ -119,11 +151,12 @@ def extract_reaction(th_csv_path, wall_node_ids, t_start=T_START, t_end=T_END):
     if len(times) > 1:
         dts = [times[i+1] - times[i] for i in range(len(times)-1)]
         dt_mean = sum(dts) / len(dts)
-        if any(abs(dt - dt_mean) > DT_TOLERANCE for dt in dts):
+        if any(abs(dt - dt_mean) > dt_tolerance for dt in dts):
             raise NonUniformSamplingError(
                 "TH timesteps not uniform: max deviation %.2e s "
-                "exceeds tolerance %.2e s" % (
-                    max(abs(dt - dt_mean) for dt in dts), DT_TOLERANCE))
+                "exceeds tolerance %.2e s (for irregular timestamps use "
+                "extract_reaction_trapezoidal_v1)" % (
+                    max(abs(dt - dt_mean) for dt in dts), dt_tolerance))
 
     # Sample-based mean of signed sums
     rz = sum(sums) / len(sums)
@@ -192,8 +225,6 @@ def extract_reaction_trapezoidal_v1(th_csv_path, wall_node_ids,
         IncompleteCoverageError: on missing nodes, absent/NaN values,
             var-number/label mismatch, or unknown channel_kind.
     """
-    import re
-
     wall_list = list(wall_node_ids)
     if len(set(wall_list)) != len(wall_list):
         raise IncompleteCoverageError("Duplicate node IDs in wall_node_ids")
@@ -244,11 +275,7 @@ def extract_reaction_trapezoidal_v1(th_csv_path, wall_node_ids,
                 continue
             s = 0.0
             for nid in wall_list:
-                val = row[col_map[nid]].strip()
-                if val == "" or val.lower() in ("nan", "inf", "-inf"):
-                    raise IncompleteCoverageError(
-                        "Absent REACZ for node %d at t=%.7f s" % (nid, t))
-                s += float(val)
+                s += _finite_value(row[col_map[nid]].strip(), nid, t)
             times.append(t)
             sums.append(s)
 

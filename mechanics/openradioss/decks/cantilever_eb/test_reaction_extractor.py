@@ -21,7 +21,8 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from reaction_extractor import (
-    extract_reaction, IncompleteCoverageError, NonUniformSamplingError,
+    extract_reaction, extract_reaction_trapezoidal_v1,
+    IncompleteCoverageError, NonUniformSamplingError,
     T_START, T_END,
 )
 
@@ -149,6 +150,83 @@ class TestReactionExtractor(unittest.TestCase):
         write_th_csv(self.path, times, nids, vals)
         with self.assertRaises(IncompleteCoverageError):
             extract_reaction(self.path, nids)
+
+
+def write_raw_csv(path, headers, rows):
+    with open(path, "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(headers)
+        w.writerows(rows)
+
+
+class TestReviewFixes(unittest.TestCase):
+    """Regression tests for the 2026-10-11 review findings."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.path = os.path.join(self.tmp, "th.csv")
+
+    def _rows(self, n_cols, val="250.0"):
+        return [["%.6f" % t] + [val] * n_cols
+                for t in (0.20, 0.25, 0.30)]
+
+    def test_header_node_is_whole_integer_not_substring(self):
+        """Node 1 must not claim a 'REACZ node 51' column."""
+        write_raw_csv(self.path, ["time", "REACZ node 51"], self._rows(1))
+        with self.assertRaises(IncompleteCoverageError):
+            extract_reaction(self.path, [1])
+
+    def test_header_matching_is_order_independent(self):
+        """Nodes 1 and 51 each resolve to their own column."""
+        write_raw_csv(self.path, ["time", "REACZ node 51", "REACZ node 1"],
+                      [["0.200000", "100.0", "7.0"],
+                       ["0.250000", "100.0", "7.0"],
+                       ["0.300000", "100.0", "7.0"]])
+        rz, n, k = extract_reaction(self.path, [1, 51])
+        self.assertAlmostEqual(rz, 107.0)
+        self.assertEqual(k, 2)
+
+    def test_ambiguous_header_refused(self):
+        """A header naming two wall nodes is refused, not guessed."""
+        write_raw_csv(self.path, ["time", "REACZ nodes 1 2"], self._rows(1))
+        with self.assertRaises(IncompleteCoverageError):
+            extract_reaction(self.path, [1, 2])
+
+    def test_non_finite_spellings_refused(self):
+        for bad in ("+inf", "Infinity", "-Infinity", "+nan", "NaN", "inf",
+                    "", "n/a"):
+            rows = self._rows(2)
+            rows[1][2] = bad
+            write_raw_csv(self.path, ["time", "REACZ node 1", "REACZ node 2"],
+                          rows)
+            with self.assertRaises(IncompleteCoverageError, msg=repr(bad)):
+                extract_reaction(self.path, [1, 2])
+
+    def test_dt_tolerance_is_a_parameter(self):
+        """Default stays frozen at 1e-9; a caller may pass an explicit one."""
+        times = [0.20, 0.2005, 0.2010 + 2e-8, 0.2015]
+        rows = [["%.9f" % t, "10.0"] for t in times]
+        write_raw_csv(self.path, ["time", "REACZ node 1"], rows)
+        with self.assertRaises(NonUniformSamplingError):
+            extract_reaction(self.path, [1])
+        rz, n, k = extract_reaction(self.path, [1], dt_tolerance=1e-6)
+        self.assertAlmostEqual(rz, 10.0)
+
+    def test_v1_non_finite_refused(self):
+        headers = ["time", '"wall reaction" 1 var 53', '"wall reaction" 2 var 56']
+        for bad in ("+inf", "Infinity", "+nan", "nan", ""):
+            rows = self._rows(2)
+            rows[1][1] = bad
+            write_raw_csv(self.path, headers, rows)
+            with self.assertRaises(IncompleteCoverageError, msg=repr(bad)):
+                extract_reaction_trapezoidal_v1(self.path, [1, 2], [53, 56])
+
+    def test_v1_finite_still_works(self):
+        headers = ["time", '"wall reaction" 1 var 53', '"wall reaction" 2 var 56']
+        write_raw_csv(self.path, headers, self._rows(2))
+        rz, t0, t1, n, k = extract_reaction_trapezoidal_v1(
+            self.path, [1, 2], [53, 56])
+        self.assertAlmostEqual(rz, 500.0)
 
 
 if __name__ == "__main__":
