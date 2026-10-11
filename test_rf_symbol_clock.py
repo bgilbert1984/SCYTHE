@@ -54,6 +54,26 @@ def _raised_cosine(samples_per_symbol, span=8, beta=0.35):
     return pulse / np.sqrt((pulse ** 2).sum())
 
 
+def _band_limited_noise(width_hz, *, count=524_288, rate_hz=2_048_000.0, seed=17, noise=0.01):
+    """Unit-power complex noise confined to `width_hz`, with a raised edge over 20% of the width.
+
+    The channelizer will not isolate white noise: the occupancy walk never reaches a floor, so
+    it correctly refuses (OCCUPIED_BANDWIDTH_UNRESOLVED). A signal with a finite occupied band
+    and no symbol structure is the admissible non-crossing input. 100 kHz is chosen on purpose:
+    narrower masks (50 kHz) produced detector statistics above the threshold on shaped noise
+    with no symbol clock in it, and 20 kHz is below the method's minimum window.
+    """
+    rng = np.random.default_rng(seed)
+    white = rng.normal(0, 1, count) + 1j * rng.normal(0, 1, count)
+    freq = np.fft.fftfreq(count, 1.0 / rate_hz)
+    edge = width_hz * 0.2
+    mask = np.clip((width_hz / 2.0 - np.abs(freq)) / edge + 0.5, 0.0, 1.0)
+    shaped = np.fft.ifft(np.fft.fft(white) * mask)
+    shaped = shaped / np.sqrt(np.mean(np.abs(shaped) ** 2))
+    shaped = shaped + noise * (rng.normal(0, 1, count) + 1j * rng.normal(0, 1, count))
+    return shaped.astype(np.complex64)
+
+
 def _psk(symbol_rate_hz, *, count=COUNT, rate_hz=RATE, noise=0.0, seed=3,
          constant_envelope=False):
     """A raised-cosine shaped signal with a known symbol rate."""
@@ -507,17 +527,48 @@ class ThresholdDeclarationTests(unittest.TestCase):
         self.assertFalse(verdict.promotes)
 
     def test_a_non_crossing_says_so_in_the_same_vocabulary(self):
+        """Reaches the assertion: the input is admissible, and a refusal fails instead of skipping.
+
+        The earlier fixture was seeded white noise, which the channelizer refuses, so this
+        test skipped every time and never ran its assertion.
+        """
+        carrier = np.exp(2j * np.pi * 400_000.0 * np.arange(524_288) / 2_048_000.0)
+        result, ring = _real_channelization(
+            (_band_limited_noise(100_000.0) * carrier).astype(np.complex64))
+        self.assertEqual(result.product.outcome, "CHANNELIZED", result.product.reason)
+        verdict = detect(result, ring=ring)
+        self.assertEqual(verdict.outcome, "NO_SYMBOL_CLOCK")
+        self.assertEqual(verdict.threshold_comparison, "BELOW_THRESHOLD_IN_SHADOW_MODE")
+        self.assertEqual(verdict.axis_value, "NO_SYMBOL_CLOCK_DETECTED")
+        self.assertLess(verdict.detection_statistic, threshold_declaration()["threshold"])
+        self.assertFalse(verdict.promotes)
+
+    def test_a_non_crossing_is_not_seed_luck(self):
+        carrier = np.exp(2j * np.pi * 400_000.0 * np.arange(524_288) / 2_048_000.0)
+        for seed in (3, 5, 99):
+            with self.subTest(seed=seed):
+                result, ring = _real_channelization(
+                    (_band_limited_noise(100_000.0, seed=seed) * carrier).astype(np.complex64))
+                self.assertEqual(result.product.outcome, "CHANNELIZED", result.product.reason)
+                verdict = detect(result, ring=ring)
+                self.assertEqual(verdict.outcome, "NO_SYMBOL_CLOCK")
+                self.assertEqual(verdict.threshold_comparison, "BELOW_THRESHOLD_IN_SHADOW_MODE")
+
+    def test_white_noise_is_refused_by_the_channelizer_and_never_detected_on(self):
+        """The refusal path the old fixture hit by accident, now stated on purpose."""
         rng = np.random.default_rng(17)
         noise = ((rng.normal(0, 0.1, 524_288) + 1j * rng.normal(0, 0.1, 524_288))
                  .astype(np.complex64))
         carrier = np.exp(2j * np.pi * 400_000.0 * np.arange(524_288) / 2_048_000.0)
-        result, ring = _real_channelization(
-            (noise * carrier).astype(np.complex64))
-        if not result.product.channelized:
-            self.skipTest("channelizer refused this geometry")
+        result, ring = _real_channelization((noise * carrier).astype(np.complex64))
+        self.assertEqual(result.product.outcome, "OCCUPIED_BANDWIDTH_UNRESOLVED")
+        self.assertFalse(result.product.channelized)
         verdict = detect(result, ring=ring)
-        self.assertIn(verdict.threshold_comparison,
-                      ("BELOW_THRESHOLD_IN_SHADOW_MODE", "NOT_COMPARED"))
+        self.assertEqual(verdict.outcome, "SOURCE_PRODUCT_UNVERIFIED")
+        self.assertEqual(verdict.axis_value, "NOT_ATTEMPTED")
+        self.assertEqual(verdict.threshold_comparison, "NOT_COMPARED")
+        self.assertIsNone(verdict.detection_statistic)
+        self.assertFalse(verdict.promotes)
 
     def test_no_verdict_field_carries_the_word_digital(self):
         """The one word a shadow detector may never emit."""
