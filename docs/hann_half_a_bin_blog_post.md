@@ -128,8 +128,10 @@ prototype reproduces the original retention exactly.
 On the synthetic sweep, the corrected persistent fraction at 12 dB stays at
 0.6–0.8 out to 0.45 bin (against 0.25 uncorrected there), with repeat-count
 scatter unchanged. It does under-correct at exactly half a bin (0.47
-against 0.68 with the true offset), because the detector's offset noise can
-only fold toward the bin center there. On the recordings:
+against 0.68 with the true offset). We have not tested why. Our working
+guess is that the detector's offset noise can only fold toward the bin
+center at exactly half a bin, but that is a hypothesis, not a result. On the
+recordings:
 
 - Epoch 5's +825 kHz line goes from 31 to 49 of 58 visits under 7.2.
 - The −774 kHz line, a stable tone in epochs 1–4, gains five visits that
