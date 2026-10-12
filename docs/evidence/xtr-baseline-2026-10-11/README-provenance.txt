@@ -39,10 +39,20 @@ INPUT STATE
 50 ohm load fitted before capture and held through the run -- terminated
 input throughout, same procedure as the other receiver's pre-catalogue
 windows. This measures the receiver's own noise floor, not an
-over-the-air signal. Load fitting re-confirmed after capture and
-analysis both completed, at 2026-10-12T02:24:15Z (host UTC clock at
-logging time, ~6 min after final.json was written). Receiver idle and
-safe to leave terminated or unplug from this point.
+over-the-air signal.
+
+Load fitting was explicitly confirmed once, at 2026-10-12T02:24:15Z
+(host UTC clock at logging time, ~6 min after final.json was written).
+That confirmation covers the state between the three baseline captures
+and the retune test below -- it does not by itself cover anything after
+it. The retune capture at 02:46:00Z (see RETUNE TEST) declares the same
+held 50 ohm termination, since no device-contact event occurred between
+02:24 and the retune capture other than the retune capture itself, but
+that continuation was not independently re-logged at its own timestamp.
+No load-fit confirmation was logged after the retune capture completed;
+treat the receiver's state past 02:46:00Z as undetermined in this
+record until a separate check is logged, rather than assuming it is
+idle or safe to unplug.
 
 CAPTURE
 
@@ -56,7 +66,11 @@ Capture timeline (local PDT / UTC):
   f400.iq    captured 18:55:52 PDT (2026-10-12 01:55:52Z)
   f1500.iq   captured 18:57:00 PDT (2026-10-12 01:57:00Z)
   final.json written 19:18:47 PDT (2026-10-12 02:18:47Z)
-  load refit confirmed      2026-10-12 02:24:15Z
+  load fitting confirmed (baseline only, see INPUT STATE)
+                             2026-10-12 02:24:15Z
+  f1500r.iq  captured 19:46:00 PDT (2026-10-12 02:46:00Z) -- retune
+             test, see RETUNE TEST; no separate load-fit confirmation
+             logged for this capture or afterward
 
 ANALYSIS
 
@@ -124,9 +138,11 @@ VERDICT: the +2.5 kHz feature at 1500 MHz is a receiver-internal,
 tuning-dependent artifact of the E4000's own synthesis at this center --
 not an external signal, and not a fixed clock/EMI spur. Nothing reached
 it to be external anyway: the input was 50 ohm terminated throughout
-both captures. Raw f1500r.iq (245,760,000 bytes) remains at
-/tmp/xtr_base on this host, same disposition question as the three
-baseline captures.
+both captures. Raw f1500r.iq (245,760,000 bytes) is retained, with the
+other three baseline captures, at
+~/scythe-local-provenance/raw-iq/xtr-baseline-2026-10-11/ (outside
+git, owner-only permissions) -- see FILES AND HASHES below for its
+custody record.
 
 DC offset at every center: about -0.11 LSB on I, -0.14 LSB on Q
 (mean - 127.5).
@@ -139,12 +155,38 @@ FILES AND HASHES
 
 Not carried into this repo (raw captures are large and nothing here
 needed re-derivation from them -- see "No raw IQ unless something looks
-wrong" in the evidence pattern this follows). Recorded only as hashes;
-files remain at /tmp/xtr_base on this host:
+wrong" in the evidence pattern this follows).
+
+RAW IQ RETENTION (post-migration)
+
+All four raw captures (three baseline, plus the retune capture above)
+are retained outside git at
+~/scythe-local-provenance/raw-iq/xtr-baseline-2026-10-11/, owner-only
+permissions (chmod 700 dir / 600 files). Each was verified against the
+digest below both before the move (against the /tmp/xtr_base
+originals) and after (against the retained copy, independently, before
+the /tmp/xtr_base originals were deleted). The retained copy's own
+MANIFEST.md and per-file SHA256 sidecars in that directory are the
+custody reference; the digests here are the ones both verification
+passes were checked against:
 
   SHA256(f100.iq)   = 4bb5a340417d2406f5c88e354d5c3bec2b54b9e3bb4ca6a5b5cfb53d15a4bd18
   SHA256(f400.iq)   = bb346a376eee9d12d55b1f62119fa520d0a8b41fb89322a295008765035a0c5b
   SHA256(f1500.iq)  = a2043691d2d7ea6dba099ea863b854c0e29b08e7105eea8a02445b28b6851d51
+  SHA256(f1500r.iq) = d4ae31f356d8da812b1a26678fc492aab1c04ba52f1013f584261facf30022f5
+
+Disposition: RETAINED_PENDING_MANIFEST_CONTROLLED_RETIREMENT. Not
+scheduled for deletion; retiring this evidence set requires a future
+explicit decision, not a timer or disk-space pressure.
+
+The r100.json / r400.json / r1500.json intermediate FFT outputs (one
+per baseline frequency, pre-dating final.json's merge) are not
+separately retained -- they are reproducible from the retained raw
+bytes plus red.c unmodified, and are not authoritative raw evidence.
+They were left in /tmp/xtr_base as ordinary scratch; their eventual
+removal is not a retirement of evidence and needs no manifest entry.
+Hashes, for completeness only:
+
   SHA256(r100.json) = d02dc29b3474674277271ad0042d75e9a39971144a67d4d5e3d7f19fdc205f31
   SHA256(r400.json) = aec7bc351cbb66d594f39774214b1e8954143964a9aaca27cbbe39fc2669213f
   SHA256(r1500.json)= f7a7ab4bcfbebfbab7a763d4a32ca8a8fdec8e4e668c4e21734f4f213b9a384e
