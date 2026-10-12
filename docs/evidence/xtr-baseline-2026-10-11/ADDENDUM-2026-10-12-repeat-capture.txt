@@ -1,0 +1,97 @@
+Addendum to README-provenance.txt — repeat capture, repeatability/drift check.
+
+CONTEXT
+
+This is a second bounded characterization run against the same XTR unit
+(SN 71874552), repeating the original 2026-10-11 baseline protocol exactly:
+same three centers (100/400/1500 MHz), same gain (29.00 dB), same sample
+rate (2,048,000 S/s), same sample count (122,880,000 samples / 60.0 s
+nominal), same termination (50 ohm load fitted, no antenna), same analysis
+pipeline (red.c reducer -> post.py feature extraction, MARGIN=6.0 dB over a
+129-bin local median, hit in >=7 of 8 segments). This is a repeatability
+check against the original baseline, not a new measurement class.
+
+INPUT STATE
+
+50 ohm load confirmed fitted by the operator immediately before capture, at
+2026-10-12T19:35:34Z. `rtl_tcp` (scythe-rtl-tcp.service, retargeted to this
+unit on 2026-10-11) was stopped before this capture to give `rtl_sdr`
+exclusive access to the device, and restarted immediately after the third
+capture completed; this is unrelated to termination state. `lsusb` confirmed
+only the XTR (0bda:2838, SN 71874552) was physically attached throughout; no
+antenna connected at any point in this run.
+
+CAPTURES
+
+All three captured with `rtl_sdr -d 71874552 -f <freq> -s 2048000 -g 29
+-n 122880000`, device banner self-reporting "Nooelec, SMArt XTR v5, SN:
+71874552" / Elonics E4000 tuner (same naming-collision caveat as the
+original baseline record: this "v5" is Nooelec's own product-revision
+label, unrelated to "the v5" elsewhere in this project). No overflow/clip
+warnings in any capture's stderr log; each file is exactly 245,760,000
+bytes (matches the original baseline's capture size exactly).
+
+| File      | Center freq | Completed (local / UTC)                  | Size (bytes) | SHA-256 |
+|-----------|-------------|-------------------------------------------|--------------|---------|
+| f100.iq   | 100 MHz     | 2026-10-12 12:36:43 PDT / 19:36:43Z       | 245,760,000  | 9a9bdf55195ba9bcb6e95436ea9a21ba27875202e324fffc1ab2d000c03cf6d2 |
+| f400.iq   | 400 MHz     | 2026-10-12 12:37:50 PDT / 19:37:50Z       | 245,760,000  | dbccc35155fd46918940446243849774900f9d3fdda94d69a471fa2f10ee3d6d |
+| f1500.iq  | 1500 MHz    | 2026-10-12 12:38:57 PDT / 19:38:57Z       | 245,760,000  | 6e7c922149c295625c686f3e2199b7b44ad2b9615513a20b5a4bc1c8419a04e2 |
+
+(Timestamps are file-completion times; nominal start-of-capture is
+~60.0 s before each, not independently logged.)
+
+RESULTS vs. 2026-10-11 BASELINE
+
+| Center | Floor (dB/bin) orig -> repeat | DC-bin excess orig -> repeat | +-1 kHz skirt (8/8 segs) orig -> repeat |
+|--------|-------------------------------|-------------------------------|-------------------------------------------|
+| 100 MHz  | -41.87 -> -42.53 | 12.85 -> 13.42 | 8.6/8.5 -> 8.2/8.2 |
+| 400 MHz  | -42.07 -> -42.59 | 13.19 -> 13.65 | 8.9/8.8 -> 8.5/8.5 |
+| 1500 MHz | -42.31 -> -44.06 | 13.59 -> 15.07 | 9.8/9.8 -> 9.7/9.7 |
+
+Floor dropped 0.6-1.75 dB across bands relative to the original baseline
+(largest at 1500 MHz). This is treated as ordinary measurement variation
+(different ambient/thermal conditions, ~34 hours apart, no enclosure
+change) -- not flagged as anomalous and not a basis for any verdict change.
+No narrow feature (>=6 dB over local median, >=7/8 segments) appeared at
+any new location at any center.
+
+1500 MHz +2.5 kHz feature: reappeared at the identical location and
+magnitude as both the original baseline and the retune test --
++2500 Hz, 6.5 dB, 8/8 segments, unchanged to one decimal place. The
+retune test already classified this as RECEIVER_INTERNAL_TUNING_DEPENDENT
+(follows the LO, not a fixed absolute frequency). This repeat adds a
+third independent observation of the same feature at the same offset and
+magnitude, now also across a service stop/restart and a ~34 hour gap --
+consistent with a stable, repeatable tuner/mixer artifact of this specific
+E4000 unit. This does not change the verdict; it strengthens confidence in
+it.
+
+DERIVED FILES
+
+`repeat-2026-10-12-r100.json`, `repeat-2026-10-12-r400.json`,
+`repeat-2026-10-12-r1500.json` -- per-segment power spectra (output of the
+unmodified `red.c` reducer already committed in this directory; diffed
+byte-identical against the committed source before use).
+
+`repeat-2026-10-12-post.py` -- same reduction logic as the committed
+`post.py`, with only the input/output directory constant changed to this
+run's working directory. `repeat-2026-10-12-final.json` is its output,
+reproduced inline above.
+
+WHAT THIS DOES NOT CHANGE
+
+No verdict, classification, or figure in README-provenance.txt or the
+2026-10-12 termination-reconfirmation addendum is corrected or superseded
+by this addendum. The XTR's reference oscillator remains NOT_DECLARED;
+nothing here measures or infers it. This run supplies no catalogue
+evidence and does not advance the receiver past bounded-characterization
+status.
+
+RAW IQ RETENTION
+
+Per the same procedure used for the original baseline: raw `.iq` files are
+retained outside git at
+`~/scythe-local-provenance/raw-iq/xtr-repeat-2026-10-12/` (chmod 700 dir /
+600 files), with their own MANIFEST.md and `.sha256` sidecars, after
+independent re-verification against the digests recorded above. Not
+committed to this repository.
