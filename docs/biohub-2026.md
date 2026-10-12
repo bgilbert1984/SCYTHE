@@ -1,3 +1,8 @@
+> **Archived 2026-10-11.** BioHub CellOps was built for the Kaggle "Biohub - Cell Tracking During
+> Development" competition, which has ended. The code (`biohub_cellops/`, `kaggle/`) was removed from
+> `main`; the last tree that contains it is the git tag `archive/biohub-kaggle-2026`. This document is
+> kept as a historical record. Paths, routes and commands below no longer exist on `main`.
+
 # Biohub 2026 CellOps Intelligence Layer: Implemented State and Integration Plan
 
 This document maps the biological CellOps runtime in `biohub_cellops/core.py` to
