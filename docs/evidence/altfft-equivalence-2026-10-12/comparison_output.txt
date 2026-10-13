@@ -1,0 +1,21 @@
+== numpy
+fixtures=36 candidates=52 max_freq_delta=0.0 max_excess_delta=0.0 max_match_error_delta=0.0 exact_equal=True
+unmatched_persistent_fixtures=0 max_tone_match_error_hz=0.2697
+MISMATCHES: none
+compare_exit=0
+inexact_float_fields=0 max_freq_delta=0.0 max_excess_delta=0.0
+first_inexact=None
+== scipy
+fixtures=36 candidates=52 max_freq_delta=0.0 max_excess_delta=7.105427357601002e-15 max_match_error_delta=0.0 exact_equal=False
+unmatched_persistent_fixtures=0 max_tone_match_error_hz=0.2697
+MISMATCHES: none
+compare_exit=0
+inexact_float_fields=6 max_freq_delta=0.0 max_excess_delta=7.105427357601002e-15
+first_inexact=('HA_s-f0.45a0.075', 'excess_db', '30.34071754038941', '30.340717540389413')
+== pyfftw
+fixtures=36 candidates=52 max_freq_delta=0.0 max_excess_delta=7.105427357601002e-15 max_match_error_delta=0.0 exact_equal=False
+unmatched_persistent_fixtures=0 max_tone_match_error_hz=0.2697
+MISMATCHES: none
+compare_exit=0
+inexact_float_fields=16 max_freq_delta=0.0 max_excess_delta=7.105427357601002e-15
+first_inexact=('HA_s-f0.05a0.075', 'excess_db', '31.421866369767525', '31.42186636976752')

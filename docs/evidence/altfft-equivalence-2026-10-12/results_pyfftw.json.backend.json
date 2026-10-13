@@ -1,0 +1,15 @@
+{
+ "backend": "pyfftw",
+ "identity": {
+  "module": "pyfftw.interfaces.numpy_fft",
+  "name": "fft",
+  "pyfftw": "0.15.1",
+  "fftw_version": "3.3.5"
+ },
+ "numpy": "2.5.1",
+ "calls_by_site": {
+  "rf_spur_catalogue_sequencer:detect_candidates": 36,
+  "rf_spur_retention_estimator:_power_db": 416
+ },
+ "total_calls": 452
+}
