@@ -303,6 +303,12 @@ DUPLICATE_DECLARATIONS = {
     "RETUNE_TRANSIENTS": (ONE_CONCEPT, "one stratum key, declared as tuner-required by the manifest and as capture-granted by §5.20's boundary"),
     "RECEIVER_SPURS": (ONE_CONCEPT, "one stratum key, declared as tuner-required by the manifest and as capture-granted by §5.20's boundary"),
 
+    # One concept: rf_symbol_clock_v2 is a parallel shadow revision of rf_symbol_clock
+    # and deliberately uses the same two postures with the same meaning. v2 is not
+    # registered in rf_signal_family and promotes nothing, exactly as v1.
+    "PROVISIONAL": (ONE_CONCEPT, "a threshold's status: development-informed, no measured false-alarm probability; declared by symbol-clock v1 and its parallel shadow revision v2"),
+    "SHADOW_NO_PROMOTION": (ONE_CONCEPT, "the promotion state of a shadow-mode method; declared by symbol-clock v1 and its parallel shadow revision v2"),
+
     # One concept, one vocabulary deliberately reused across subsystems.
     "ARMED": (ONE_CONCEPT, "the same three postures, applied to recovery and to promotion"),
     "SHADOW": (ONE_CONCEPT, "the same three postures, applied to recovery and to promotion"),
