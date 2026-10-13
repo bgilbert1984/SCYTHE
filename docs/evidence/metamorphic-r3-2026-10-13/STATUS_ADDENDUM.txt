@@ -1,0 +1,19 @@
+CLASSIFICATION: STATUS_LOG_APPEND_AFTER_HASH
+
+The job script generated JOB_SHA256SUMS and then appended one terminal status line to STATUS.txt, so the sealed digest does not cover the final log.
+That is not evidence of corrupt numerical output. The original sealed manifests are preserved UNCHANGED; the complete final log is recorded here.
+FUTURE JOBS: generate the final job-level checksum manifest only after the terminal status record is written and flushed.
+
+[dedirock]
+  sealed digest (JOB_SHA256SUMS, unchanged): e40c9d61e4478cb2f0e1db86043dfc6409dbd2c76deb40bf1a766ab61ac69212
+  digest of ORIGINAL file minus the last line: e40c9d61e4478cb2f0e1db86043dfc6409dbd2c76deb40bf1a766ab61ac69212
+  digest of ORIGINAL complete final status log: 71e9c866b331de5442f381fae41abbe83faf0b8a081d667370cddb9e80daf227
+  lines appended after sealing: 1 -> 2026-10-13T12:54:32+05:30 DONE harness_rc=0 gate_rc=0 (outputs retained on this host until independently verified)
+  digest of the committed (path-redacted) copy: d1a4d959cb9982b0e658a48b65276e6fe4f35783b67b1312a646bb012f8e3ed2
+
+[local]
+  sealed digest (JOB_SHA256SUMS, unchanged): 4f99e82380e0f63cc32aecd86b65c24c7c5245d851ad2961a3235a0d646a6c07
+  digest of ORIGINAL file minus the last line: 4f99e82380e0f63cc32aecd86b65c24c7c5245d851ad2961a3235a0d646a6c07
+  digest of ORIGINAL complete final status log: a497fc0742d6967e0a73cef02e4fc6df7f4138de1c6c2e21ab692c8110d55e70
+  lines appended after sealing: 1 -> 2026-10-13T00:46:25-07:00 DONE harness_rc=0 gate_rc=0 (outputs retained on this host until independently verified)
+  digest of the committed (path-redacted) copy: 6c4b4d8cb4bc81b38fd3613956b64fd8facfe73144e9037573e08ea0e5f27cdc

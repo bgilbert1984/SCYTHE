@@ -1,0 +1,9 @@
+........IDENTITY fake: EQUAL
+IDENTITY VERDICT: IDENTITY_AND_NAMESPACE_VERIFIED
+.IDENTITY fake: MISMATCH
+IDENTITY VERDICT: IDENTITY_FAILED
+........
+----------------------------------------------------------------------
+Ran 17 tests in 2.165s
+
+OK

@@ -1,0 +1,5 @@
+r2-vs-r3 equivalence exit=0
+smoke exit=0
+smoke gate exit=0
+full exit=0
+full gate exit=0

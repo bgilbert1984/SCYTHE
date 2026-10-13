@@ -1,0 +1,16 @@
+./fixtures/fixture_hashes.sha256: OK
+./fixtures/generate_holdout.py: OK
+./fixtures/synth_521_holdout_frozen.json: OK
+./fixtures/synth521_holdout_index.json: OK
+./job/gate_results.py: OK
+./job/run_job.sh: OK
+./README.txt: OK
+./rf_corpus_vocabulary.py: OK
+./rf_promotion_envelope.py: OK
+./rf_promotion_geometry.py: OK
+./rf_signal_chain_identity.py: OK
+./rf_spur_catalogue_sequencer.py: OK
+./rf_spur_retention_estimator.py: OK
+./test_rf_metamorphic_controls.py: OK
+./tools/rf_metamorphic_harness.py: OK
+./tools/rf_metamorphic_r3_equivalence_check.py: OK

@@ -1,0 +1,340 @@
+IDENTITY HA_s+f0.05a0.075.npy: EQUAL
+IDENTITY HA_s+f0.05a0.15.npy: EQUAL
+IDENTITY HA_s+f0.15a0.075.npy: EQUAL
+IDENTITY HA_s+f0.15a0.15.npy: EQUAL
+IDENTITY HA_s+f0.25a0.075.npy: EQUAL
+IDENTITY HA_s+f0.25a0.15.npy: EQUAL
+IDENTITY HA_s+f0.35a0.075.npy: EQUAL
+IDENTITY HA_s+f0.35a0.15.npy: EQUAL
+IDENTITY HA_s+f0.45a0.075.npy: EQUAL
+IDENTITY HA_s+f0.45a0.15.npy: EQUAL
+IDENTITY HA_s-f0.05a0.075.npy: EQUAL
+IDENTITY HA_s-f0.05a0.15.npy: EQUAL
+IDENTITY HA_s-f0.15a0.075.npy: EQUAL
+IDENTITY HA_s-f0.15a0.15.npy: EQUAL
+IDENTITY HA_s-f0.25a0.075.npy: EQUAL
+IDENTITY HA_s-f0.25a0.15.npy: EQUAL
+IDENTITY HA_s-f0.35a0.075.npy: EQUAL
+IDENTITY HA_s-f0.35a0.15.npy: EQUAL
+IDENTITY HA_s-f0.45a0.075.npy: EQUAL
+IDENTITY HA_s-f0.45a0.15.npy: EQUAL
+IDENTITY HB_sep4r-15p0.79f0.15.npy: EQUAL
+IDENTITY HB_sep4r-15p0.79f0.35.npy: EQUAL
+IDENTITY HB_sep4r-15p3.14f0.15.npy: EQUAL
+IDENTITY HB_sep4r-15p3.14f0.35.npy: EQUAL
+IDENTITY HB_sep4r-9p0.79f0.15.npy: EQUAL
+IDENTITY HB_sep4r-9p0.79f0.35.npy: EQUAL
+IDENTITY HB_sep4r-9p3.14f0.15.npy: EQUAL
+IDENTITY HB_sep4r-9p3.14f0.35.npy: EQUAL
+IDENTITY HB_sep9r-15p0.79f0.15.npy: EQUAL
+IDENTITY HB_sep9r-15p0.79f0.35.npy: EQUAL
+IDENTITY HB_sep9r-15p3.14f0.15.npy: EQUAL
+IDENTITY HB_sep9r-15p3.14f0.35.npy: EQUAL
+IDENTITY HB_sep9r-9p0.79f0.15.npy: EQUAL
+IDENTITY HB_sep9r-9p0.79f0.35.npy: EQUAL
+IDENTITY HB_sep9r-9p3.14f0.15.npy: EQUAL
+IDENTITY HB_sep9r-9p3.14f0.35.npy: EQUAL
+IDENTITY VERDICT: IDENTITY_AND_NAMESPACE_VERIFIED
+(t=27s)
+A HA_s+f0.05a0.075.npy: cands=1 violated=[] t=38s
+A HA_s+f0.05a0.15.npy: cands=1 violated=[] t=47s
+A HA_s+f0.15a0.075.npy: cands=1 violated=[] t=55s
+A HA_s+f0.15a0.15.npy: cands=1 violated=[] t=66s
+A HA_s+f0.25a0.075.npy: cands=1 violated=[] t=78s
+A HA_s+f0.25a0.15.npy: cands=1 violated=[] t=90s
+A HA_s+f0.35a0.075.npy: cands=1 violated=[] t=101s
+A HA_s+f0.35a0.15.npy: cands=1 violated=[] t=109s
+A HA_s+f0.45a0.075.npy: cands=1 violated=[] t=118s
+A HA_s+f0.45a0.15.npy: cands=1 violated=[] t=128s
+A HA_s-f0.05a0.075.npy: cands=1 violated=[] t=136s
+A HA_s-f0.05a0.15.npy: cands=1 violated=[] t=144s
+A HA_s-f0.15a0.075.npy: cands=1 violated=[] t=155s
+A HA_s-f0.15a0.15.npy: cands=1 violated=[] t=165s
+A HA_s-f0.25a0.075.npy: cands=1 violated=[] t=174s
+A HA_s-f0.25a0.15.npy: cands=1 violated=[] t=182s
+A HA_s-f0.35a0.075.npy: cands=1 violated=[] t=190s
+A HA_s-f0.35a0.15.npy: cands=1 violated=[] t=198s
+A HA_s-f0.45a0.075.npy: cands=1 violated=[] t=206s
+A HA_s-f0.45a0.15.npy: cands=1 violated=[] t=214s
+A HB_sep4r-15p0.79f0.15.npy: cands=2 violated=[] t=224s
+A HB_sep4r-15p0.79f0.35.npy: cands=2 violated=[] t=236s
+A HB_sep4r-15p3.14f0.15.npy: cands=2 violated=[] t=248s
+A HB_sep4r-15p3.14f0.35.npy: cands=2 violated=[] t=258s
+A HB_sep4r-9p0.79f0.15.npy: cands=2 violated=[] t=268s
+A HB_sep4r-9p0.79f0.35.npy: cands=2 violated=[] t=278s
+A HB_sep4r-9p3.14f0.15.npy: cands=2 violated=[] t=288s
+A HB_sep4r-9p3.14f0.35.npy: cands=2 violated=[] t=298s
+A HB_sep9r-15p0.79f0.15.npy: cands=2 violated=[] t=308s
+A HB_sep9r-15p0.79f0.35.npy: cands=2 violated=[] t=322s
+A HB_sep9r-15p3.14f0.15.npy: cands=2 violated=[] t=332s
+A HB_sep9r-15p3.14f0.35.npy: cands=2 violated=[] t=343s
+A HB_sep9r-9p0.79f0.15.npy: cands=2 violated=[] t=353s
+A HB_sep9r-9p0.79f0.35.npy: cands=2 violated=[] t=363s
+A HB_sep9r-9p3.14f0.15.npy: cands=2 violated=[] t=372s
+A HB_sep9r-9p3.14f0.35.npy: cands=2 violated=[] t=383s
+B absolute_floor HA_s+f0.05a0.075.npy: cands=139979 COMPLETED t=403s
+B absolute_floor HA_s+f0.05a0.15.npy: cands=139909 COMPLETED t=422s
+B absolute_floor HA_s+f0.15a0.075.npy: cands=140081 COMPLETED t=441s
+B absolute_floor HA_s+f0.15a0.15.npy: cands=140065 COMPLETED t=464s
+B absolute_floor HA_s+f0.25a0.075.npy: cands=140023 COMPLETED t=491s
+B absolute_floor HA_s+f0.25a0.15.npy: cands=139905 COMPLETED t=513s
+B sign_dropped HA_s+f0.05a0.075.npy: cands=1 COMPLETED t=520s
+B sign_dropped HA_s+f0.05a0.15.npy: cands=1 COMPLETED t=526s
+B sign_dropped HA_s+f0.15a0.075.npy: cands=1 COMPLETED t=533s
+B sign_dropped HA_s+f0.15a0.15.npy: cands=1 COMPLETED t=539s
+B sign_dropped HA_s+f0.25a0.075.npy: cands=1 COMPLETED t=547s
+B sign_dropped HA_s+f0.25a0.15.npy: cands=1 COMPLETED t=555s
+B first_repeat_only HA_s+f0.05a0.075.npy: cands=436 COMPLETED t=563s
+B first_repeat_only HA_s+f0.05a0.15.npy: cands=424 COMPLETED t=569s
+B first_repeat_only HA_s+f0.15a0.075.npy: cands=404 COMPLETED t=573s
+B first_repeat_only HA_s+f0.15a0.15.npy: cands=407 COMPLETED t=579s
+B first_repeat_only HA_s+f0.25a0.075.npy: cands=411 COMPLETED t=584s
+B first_repeat_only HA_s+f0.25a0.15.npy: cands=406 COMPLETED t=589s
+B span_limit_removed HA_s+f0.05a0.075.npy: cands=1 COMPLETED t=596s
+B span_limit_removed HA_s+f0.05a0.15.npy: cands=1 COMPLETED t=603s
+B span_limit_removed HA_s+f0.15a0.075.npy: cands=1 COMPLETED t=610s
+B span_limit_removed HA_s+f0.15a0.15.npy: cands=1 COMPLETED t=617s
+B span_limit_removed HA_s+f0.25a0.075.npy: cands=1 COMPLETED t=624s
+B span_limit_removed HA_s+f0.25a0.15.npy: cands=1 COMPLETED t=632s
+{
+ "manifest": {
+  "ok": 62,
+  "bad": [],
+  "missing": []
+ },
+ "relation_summary": {
+  "CONJ": {
+   "RELATION_SATISFIED": 36
+  },
+  "NOISE weak": {
+   "RELATION_SATISFIED": 36
+  },
+  "ONE_REPEAT_REPLACED (detector)": {
+   "RELATION_SATISFIED": 36
+  },
+  "PERMUTE reverse": {
+   "RELATION_SATISFIED": 36
+  },
+  "PERMUTE rot3": {
+   "RELATION_SATISFIED": 36
+  },
+  "PHASE 0.449": {
+   "RELATION_SATISFIED": 36
+  },
+  "PHASE 1.571": {
+   "RELATION_SATISFIED": 36
+  },
+  "SCALE x0.001": {
+   "RELATION_SATISFIED": 36
+  },
+  "SCALE x0.37": {
+   "RELATION_SATISFIED": 36
+  },
+  "SCALE x1000": {
+   "RELATION_SATISFIED": 36
+  },
+  "SHIFT +1000 bins": {
+   "RELATION_SATISFIED": 36
+  },
+  "SHIFT +100000 bins": {
+   "RELATION_SATISFIED": 36
+  },
+  "SHIFT -2500 bins": {
+   "RELATION_SATISFIED": 36
+  }
+ },
+ "persistence_summary": {
+  "CONJ": {
+   "RELATION_SATISFIED": 52
+  },
+  "ONE_REPEAT_REPLACED (persistence)": {
+   "RELATION_SATISFIED": 52
+  },
+  "PERMUTE (qualifying count, multiset of excesses)": {
+   "RELATION_SATISFIED": 52
+  },
+  "PHASE 0.449": {
+   "RELATION_SATISFIED": 52
+  },
+  "SCALE x0.37": {
+   "RELATION_SATISFIED": 52
+  }
+ },
+ "mutant_matrix": {
+  "absolute_floor": {
+   "CONJ": {
+    "MUTANT_DETECTED": 4,
+    "MUTANT_SURVIVED": 2
+   },
+   "NOISE weak": {
+    "MUTANT_DETECTED": 6
+   },
+   "ONE_REPEAT_REPLACED (detector)": {
+    "MUTANT_SURVIVED": 6
+   },
+   "PERMUTE reverse": {
+    "MUTANT_SURVIVED": 6
+   },
+   "PERMUTE rot3": {
+    "MUTANT_SURVIVED": 6
+   },
+   "PHASE 0.449": {
+    "MUTANT_SURVIVED": 6
+   },
+   "PHASE 1.571": {
+    "MUTANT_SURVIVED": 6
+   },
+   "SCALE x0.001": {
+    "MUTANT_DETECTED": 6
+   },
+   "SCALE x0.37": {
+    "MUTANT_DETECTED": 6
+   },
+   "SCALE x1000": {
+    "MUTANT_DETECTED": 6
+   },
+   "SHIFT +1000 bins": {
+    "MUTANT_DETECTED": 3,
+    "MUTANT_SURVIVED": 3
+   },
+   "SHIFT +100000 bins": {
+    "MUTANT_DETECTED": 4,
+    "MUTANT_SURVIVED": 2
+   },
+   "SHIFT -2500 bins": {
+    "MUTANT_DETECTED": 3,
+    "MUTANT_SURVIVED": 3
+   }
+  },
+  "first_repeat_only": {
+   "CONJ": {
+    "MUTANT_SURVIVED": 6
+   },
+   "NOISE weak": {
+    "MUTANT_SURVIVED": 6
+   },
+   "ONE_REPEAT_REPLACED (detector)": {
+    "MUTANT_DETECTED": 6
+   },
+   "PERMUTE reverse": {
+    "MUTANT_DETECTED": 6
+   },
+   "PERMUTE rot3": {
+    "MUTANT_DETECTED": 6
+   },
+   "PHASE 0.449": {
+    "MUTANT_SURVIVED": 6
+   },
+   "PHASE 1.571": {
+    "MUTANT_SURVIVED": 6
+   },
+   "SCALE x0.001": {
+    "MUTANT_SURVIVED": 6
+   },
+   "SCALE x0.37": {
+    "MUTANT_SURVIVED": 6
+   },
+   "SCALE x1000": {
+    "MUTANT_SURVIVED": 6
+   },
+   "SHIFT +1000 bins": {
+    "MUTANT_SURVIVED": 6
+   },
+   "SHIFT +100000 bins": {
+    "MUTANT_SURVIVED": 6
+   },
+   "SHIFT -2500 bins": {
+    "MUTANT_SURVIVED": 6
+   }
+  },
+  "sign_dropped": {
+   "CONJ": {
+    "MUTANT_DETECTED": 6
+   },
+   "NOISE weak": {
+    "MUTANT_SURVIVED": 6
+   },
+   "ONE_REPEAT_REPLACED (detector)": {
+    "MUTANT_SURVIVED": 6
+   },
+   "PERMUTE reverse": {
+    "MUTANT_SURVIVED": 6
+   },
+   "PERMUTE rot3": {
+    "MUTANT_SURVIVED": 6
+   },
+   "PHASE 0.449": {
+    "MUTANT_SURVIVED": 6
+   },
+   "PHASE 1.571": {
+    "MUTANT_SURVIVED": 6
+   },
+   "SCALE x0.001": {
+    "MUTANT_SURVIVED": 6
+   },
+   "SCALE x0.37": {
+    "MUTANT_SURVIVED": 6
+   },
+   "SCALE x1000": {
+    "MUTANT_SURVIVED": 6
+   },
+   "SHIFT +1000 bins": {
+    "MUTANT_SURVIVED": 6
+   },
+   "SHIFT +100000 bins": {
+    "MUTANT_SURVIVED": 6
+   },
+   "SHIFT -2500 bins": {
+    "MUTANT_SURVIVED": 6
+   }
+  },
+  "span_limit_removed": {
+   "CONJ": {
+    "MUTANT_SURVIVED": 6
+   },
+   "NOISE weak": {
+    "MUTANT_SURVIVED": 6
+   },
+   "ONE_REPEAT_REPLACED (detector)": {
+    "MUTANT_SURVIVED": 6
+   },
+   "PERMUTE reverse": {
+    "MUTANT_SURVIVED": 6
+   },
+   "PERMUTE rot3": {
+    "MUTANT_SURVIVED": 6
+   },
+   "PHASE 0.449": {
+    "MUTANT_SURVIVED": 6
+   },
+   "PHASE 1.571": {
+    "MUTANT_SURVIVED": 6
+   },
+   "SCALE x0.001": {
+    "MUTANT_SURVIVED": 6
+   },
+   "SCALE x0.37": {
+    "MUTANT_SURVIVED": 6
+   },
+   "SCALE x1000": {
+    "MUTANT_SURVIVED": 6
+   },
+   "SHIFT +1000 bins": {
+    "MUTANT_SURVIVED": 6
+   },
+   "SHIFT +100000 bins": {
+    "MUTANT_SURVIVED": 6
+   },
+   "SHIFT -2500 bins": {
+    "MUTANT_SURVIVED": 6
+   }
+  }
+ },
+ "mutant_verdict": {
+  "absolute_floor": "MUTANT_DETECTED",
+  "first_repeat_only": "MUTANT_DETECTED",
+  "sign_dropped": "MUTANT_DETECTED",
+  "span_limit_removed": "MUTANT_SURVIVED_OR_NOT_COMPARABLE"
+ },
+ "identity_verdict": "IDENTITY_AND_NAMESPACE_VERIFIED"
+}
