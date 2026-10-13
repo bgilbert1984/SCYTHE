@@ -1,0 +1,14 @@
+unmodified pair exit==0: True
+mutation 'excess_db +1e-6 (> 1e-9)': exit=1 rejected=True
+mutation 'baseband_hz +1e-6 (> 1e-9)': exit=1 rejected=True
+mutation 'persistence flipped': exit=1 rejected=True
+mutation 'peak_bin +1': exit=1 rejected=True
+mutation 'candidate dropped': exit=2 rejected=True
+mutation 'candidate dropped, count updated consistently': exit=1 rejected=True
+mutation 'candidate_count altered, list intact': exit=2 rejected=True
+mutation 'last fixture dropped': exit=1 rejected=True
+mutation 'first fixture dropped': exit=1 rejected=True
+mutation 'extra fixture appended': exit=1 rejected=True
+mutation 'module hash changed': exit=1 rejected=True
+mutation 'both inputs identically incoherent': exit=2 rejected=True
+NEGATIVE_CONTROL: PASS

@@ -7,10 +7,28 @@ Exit 0 only if code hashes match and every compared field agrees.
 import json, sys
 TOL = 1e-9
 a, b = (json.load(open(p)) for p in sys.argv[1:3])
+
+
+def check_coherent(doc, label):
+    """Each input must be internally coherent before it is compared."""
+    for f in doc["per_fixture"]:
+        if len(f["candidates"]) != f["candidate_count"]:
+            raise ValueError(f"CANDIDATE_COUNT_MISMATCH: {label} {f['name']}: "
+                             f"len(candidates)={len(f['candidates'])} candidate_count={f['candidate_count']}")
+
+
+try:
+    check_coherent(a, sys.argv[1])
+    check_coherent(b, sys.argv[2])
+except ValueError as exc:
+    print(exc)
+    sys.exit(2)
 bad = []
 if a["code"] != b["code"]:
     bad.append("code hashes differ")
 pa, pb = a["per_fixture"], b["per_fixture"]
+if len(pa) != len(pb):
+    bad.append(f"fixture list length {len(pa)} != {len(pb)}")
 if [f["name"] for f in pa] != [f["name"] for f in pb]:
     bad.append("fixture lists differ")
 n = 0; maxf = maxe = maxm = 0.0

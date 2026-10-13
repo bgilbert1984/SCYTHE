@@ -61,3 +61,25 @@ LIMITS
   lengths used by these fixtures only. Not shown: real IQ, other FFT lengths, other CPU
   architectures, future library releases. Exact equality is not preserved under a different FFT
   algorithm (last-digit differences), and none is claimed.
+
+AMENDMENT 2026-10-12 (comparator hardening; historical results unchanged)
+  Reviewer asked for the per-input coherence invariant already adopted for the Dedirock evidence
+  (PR #159) and for explicit fixture-list handling, since the comparators use zip().
+  Changes to compare_hosts.py (previous version retained as compare_hosts.pre_hardening.py):
+    1. each input is checked for internal coherence (len(candidates) == candidate_count) on BOTH
+       compared files; a violation prints CANDIDATE_COUNT_MISMATCH and exits 2;
+    2. fixture-list lengths are compared explicitly (the ordered name-list comparison that was
+       already present also catches a missing or extra fixture; the explicit check is additive).
+  Results files, sidecars and the original outputs (comparison_output.txt, negative_control_output.txt)
+  are unchanged. Hardened positive comparison output is byte-identical to the original
+  (comparison_output.hardened.txt).
+  Negative control now has 12 cases: the earlier six, "candidate dropped, count updated
+  consistently", "candidate_count altered, list intact", "last fixture dropped", "first fixture
+  dropped", "extra fixture appended", and "both inputs identically incoherent".
+    hardened comparator:       PASS, 12/12 rejected     (negative_control_output.hardened.txt)
+    pre-hardening comparator:  FAIL on exactly one case, "both inputs identically incoherent"
+                               (exit 0): two inputs with the same internal inconsistency compare
+                               equal, and only the per-input check rejects them
+                               (negative_control_output_pre_hardening_comparator.txt).
+  The dropped-fixture cases were already rejected by the pre-hardening comparator; no defect was
+  found there, and none is claimed. The conclusions in this record are unaffected.
