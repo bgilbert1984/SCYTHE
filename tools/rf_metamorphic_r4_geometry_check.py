@@ -4,9 +4,10 @@
 Layer A: the frequency grid and the span predicate variants, evaluated directly (no detector).
 Layer B: the PRODUCTION `detect_candidates` and single-edit mutants of its source, called directly on synthetic
          one-tone windows whose tone sits exactly on a chosen bin, to confirm the design's predictions.
-Layer B at n != 524,288 is a FUNCTION-LEVEL check only: the sequencer's acquisition path refuses any window that is not
-byte-exact 1,048,576 bytes (524,288 complex samples), and detect_candidates scales sub-bin offsets by a fixed
-BIN_HZ = 3.90625, so reported frequencies at other n are not production values.
+EVERY Layer B row is FUNCTION-LEVEL (a direct call to detect_candidates), including those at the production length n = 524,288;
+none of them exercises the sequencer's acquisition path, which refuses any window that is not byte-exact 1,048,576 bytes
+(524,288 complex samples). At n != 524,288 the rows are additionally non-production geometries: detect_candidates scales sub-bin
+offsets by a fixed BIN_HZ = 3.90625, so reported frequencies there are not production values.
     python3 tools/rf_metamorphic_r4_geometry_check.py > output.txt
 """
 import inspect, os, sys
