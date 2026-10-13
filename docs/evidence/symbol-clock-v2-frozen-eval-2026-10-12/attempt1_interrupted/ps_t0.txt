@@ -1,0 +1,21 @@
+Mon Oct 12 10:32:02 PM PDT 2026
+    PID    PPID NLWP STAT     ELAPSED     TIME %CPU COMMAND         COMMAND
+ 786729  786703    8 Rl         49:24 01:27:46  177 python          ~/SCYTHE/.venv/bin/python tools/rf_symbol_clock_v2_frozen_eval.py -
+ 786730  786703    8 Rl         49:24 01:27:31  177 python          ~/SCYTHE/.venv/bin/python tools/rf_symbol_clock_v2_frozen_eval.py -
+ 786727  786703    8 Rl         49:24 01:27:04  176 python          ~/SCYTHE/.venv/bin/python tools/rf_symbol_clock_v2_frozen_eval.py -
+ 786728  786703    8 Rl         49:24 01:26:43  175 python          ~/SCYTHE/.venv/bin/python tools/rf_symbol_clock_v2_frozen_eval.py -
+ 805456  805453    1 R          00:00 00:00:00 33.3 ps              ps -eo pid,ppid,nlwp,stat,etime,time,pcpu,comm,args --sort=-pcpu
+    450     230   57 Ssl   2-07:21:49 07:20:24 13.2 python3         ~/SCYTHE/.venv/bin/python3 ~/SCYTHE/rf_scythe_api_se
+    240     176   15 Ssl   2-07:21:52 03:12:37  5.7 eve-streamer    ~/SCYTHE/assets/eve-streamer-main/bin/eve-streamer -mode suricata -
+ 730808  577577   14 Rl+     03:37:06 00:08:54  4.1 claude          claude
+ 577482  576480   13 Sl+     12:49:56 00:21:33  2.8 MainThread      ~/.vscode-server-insiders/bin/2dfd3b41fbc30a7270f0b84db51d67ab7568e
+ 577508  576480   20 Rl+     12:49:54 00:18:46  2.4 MainThread      ~/.vscode-server-insiders/bin/2dfd3b41fbc30a7270f0b84db51d67ab7568e
+ 805443  576699    1 S+         00:00 00:00:00  1.1 cpuUsage.sh     /bin/bash ~/.vscode-server-insiders/bin/2dfd3b41fbc30a7270f0b84db51
+    375     230   13 Ssl   2-07:21:51 00:19:15  0.5 python3         ~/SCYTHE/.venv/bin/python3 ~/SCYTHE/scythe_grpc_serv
+    230     176    4 Ssl   2-07:21:52 00:16:22  0.4 python3         ~/SCYTHE/.venv/bin/python3 ~/SCYTHE/scythe_orchestra
+ 576480  576476   11 Sl+     12:50:56 00:03:42  0.4 MainThread      ~/.vscode-server-insiders/bin/2dfd3b41fbc30a7270f0b84db51d67ab7568e
+ 785846  785840    7 Ssl+       51:01 00:00:14  0.4 MainThread      ~/.vscode-server-insiders/bin/2dfd3b41fbc30a7270f0b84db51d67ab7568e
+    121       1   19 Ssl   2-07:21:53 00:13:25  0.4 tailscaled      /usr/sbin/tailscaled --state=/var/lib/tailscale/tailscaled.state --socket=/run/tai
+ 576699  576480   13 Sl+     12:50:44 00:02:34  0.3 MainThread      ~/.vscode-server-insiders/bin/2dfd3b41fbc30a7270f0b84db51d67ab7568e
+ 576631  576581   30 Sl+     12:50:49 00:01:40  0.2 copilot-runtime ~/.vscode-server-insiders/bin/2dfd3b41fbc30a7270f0b84db51d67ab7568e
+    373     230   15 Ssl   2-07:21:51 00:06:50  0.2 python3         ~/SCYTHE/.venv/bin/python3 ~/SCYTHE/rf_voxel_process

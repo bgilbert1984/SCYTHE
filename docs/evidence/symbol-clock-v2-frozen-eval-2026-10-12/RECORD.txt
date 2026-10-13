@@ -1,0 +1,124 @@
+EXPERIMENT: SYMBOL_CLOCK_V2_FROZEN_HOLDOUT_EVALUATION
+DATE: 2026-10-12
+
+PROTOCOL_DISPOSITION:
+  SUPPORTED_FOR_FURTHER_SHADOW_VALIDATION
+
+EVIDENCE_CLASSIFICATION:
+  FROZEN_SYNTHETIC_HOLDOUT_PASS
+
+DEPLOYMENT_CLASSIFICATION:
+  SHADOW_RESEARCH_ONLY
+
+G2_WEAK_SIGNAL_COVERAGE:
+  NOT_EVALUATED_DUE_TO_CHANNELIZER_REFUSAL
+
+LOWER_SEARCH_EDGE_ARTIFACT:
+  PERSISTENT_BELOW_THRESHOLD
+
+THRESHOLD_SELECTION:
+  DEVELOPMENT_INFORMED
+
+PRODUCTION_REPLACEMENT:
+  NOT_AUTHORIZED
+
+GATE SUMMARY (original protocol verdicts preserved; qualifiers added, not substituted)
+  G1  PASS
+  G2  PASS (original protocol verdict)  +  WEAK_SIGNAL_SENSITIVITY_NOT_ESTABLISHED
+  G3  PASS
+  G4  no blocking finding (original protocol verdict)  ->  PASS_WITH_COVERAGE_LIMIT (two_band analysable at 100 kHz only)
+
+NOTE ON THE G2 COVERAGE FAILURE: the 480 refused trials were refused by the upstream channelizer
+(OCCUPIED_BANDWIDTH_UNRESOLVED) before either detector executed. That is an end-to-end coverage failure of the
+experimental design, not a detector failure. A future protocol must separate channelizer admission rate, conditional
+sensitivity among admitted inputs, and end-to-end sensitivity, and must define minimum coverage per condition
+before a sensitivity gate can be declared passed. This protocol is not amended retroactively.
+
+NOTE ON THE LOWER-EDGE ARTIFACT: do not tune the 5.0 threshold in response. Whether channel bandwidth, spectral slope,
+window length or noise shape can push the residual above threshold is a separate research hypothesis.
+
+This evaluation does not change accepted production detector behaviour, METHOD_REVISION, the v1 threshold (2.5),
+promotion, or admission semantics. It does not establish weak-signal sensitivity, a false-alarm probability, or any
+real-IQ performance.
+
+----- original record follows (unchanged) -----
+DISPOSITION (protocol rule, applied as written): SUPPORTED FOR FURTHER SHADOW VALIDATION
+READING:  FROZEN_SYNTHETIC_HOLDOUT_PASS WITH COVERAGE LIMITS -- SHADOW_RESEARCH_ONLY.  NOT PRODUCTION_VALIDATED.
+          Not a recommendation to replace v1 or change any production threshold.
+
+FROZEN INPUTS (unchanged from freeze; verified on disk before and after)
+  protocol  docs/research/symbol_clock_v2/protocol.json  1129321a91d5cb3b8697488ab3748d615985f90c5e553ecc356e6aad581fb9aa
+  runner    tools/rf_symbol_clock_v2_frozen_eval.py      364c3b790f2a812697ba125167b2854086125b45d7381db79ee4c78129f8f1ae
+  v1        rf_symbol_clock.py                           b74870080c717a755a373ecae5686e704ae176c691eb43d2aabfd70813f23ea0
+  v2        rf_symbol_clock_v2.py                        5bd473bd19760e8891cc681604ef03b42b38131cd6cd787240667fd942ef5159
+  thresholds v1 2.5, v2 5.0 (retuning disallowed).  v2's 5.0 is DEVELOPMENT-INFORMED: it was chosen from
+  development data (seeds 0-99) before this holdout (seeds >= 1000).  Frozen before these trials; its
+  development history is not erased by them.
+
+EXECUTION
+  ATTEMPT_1: INTERRUPTED_PERFORMANCE  (attempt1_interrupted/)  Pool(4), no thread limits, 8 OpenBLAS-pool threads per
+             worker (32 on 8 cores), load ~34; no log line after 1600/2550 for ~50 min; SIGTERM ignored, SIGKILL.
+             No result file.  Scientifically unresolved, not failed.
+  ATTEMPT_2: RESTARTED_SINGLE_THREAD_NUMERICAL_LIBRARIES  OPENBLAS/OMP/MKL/NUMEXPR_NUM_THREADS=1 set before
+             Python start; Pool(4); same protocol/runner/seeds/thresholds/gates.  Exited normally; 2550 trials recorded,
+             0 ERROR trials.  Python 3.12.13, NumPy 2.5.1 (scipy-openblas 0.3.33).
+  Cause of attempt 1's stall: CONSISTENT WITH thread oversubscription (evidence: thread counts, CPU time, library
+  map, attempt 2 passing the same stage). NOT conclusively attributed: default-thread vs single-thread timing on an
+  idle machine, the full am_random_walk trial cost, and the np.convolve execution path were not measured.
+  A single-thread np.convolve (524288 x 20000, original construction) took 2.5 s on the idle machine afterwards.
+  Output of attempt 2 is not claimed byte-identical to a hypothetical complete attempt 1.
+
+COMPLETENESS
+  2550 trials = 1440 adverse + 270 novel + 720 sensitivity + 120 edge.  ANALYSED 2010; INSUFFICIENT_WINDOW 30;
+  CHANNELIZER_OCCUPIED_BANDWIDTH_UNRESOLVED 510.  G1, G2, G3, G4 all present.
+
+GATES (reported independently; see analysis_output.txt for every cell)
+  G1 adverse specificity   PASS.  18 cells x 80 seeds: v2 crossings 0 in every cell (Wilson 95% upper 0.0458 per cell).
+        v1 on the same trials: raised 40/50 kHz 80/80; Gaussian 40/50/60 kHz 80/80, 80 kHz 11/80, 100 kHz 4/80;
+        brick 40 kHz 10/80, 50 kHz 1/80.  Pooled v2 0/1440 -> rough one-sided 95% bound ~0.21% (rule of three) IF trials
+        were independent and representative; they share synthetic families, so that bound is optimistic.
+        Largest v2 noise statistic 3.430 (Gaussian 40 kHz) = 1.46x below the 5.0 threshold.
+  G2 sensitivity retention PASS, WITH A COVERAGE LIMIT.  Only noise_sigma = 0.02 was analysable: all 480 trials at
+        0.3 and 0.7 were refused by the production channelizer (OCCUPIED_BANDWIDTH_UNRESOLVED) before either detector
+        ran.  G2 therefore says nothing about weaker signals.  The protocol did not require minimum analysable coverage
+        per cell; that is a protocol gap, recorded, not retroactively amended.
+        On the 12 analysable cells v2 detected 20/20 in every cell, all at the correct rate.
+        Roll-off 0.5: v1 20/20, v2 20/20 at every rate (v2 statistic slightly lower than v1, e.g. 40 kBd min 36.6 vs 44.8).
+        Roll-off 0.2: v1 detected 0/20 at 40, 50, 64, 100 kBd (v1 statistic ~1.2-1.6, below noise; AUC 0.03-0.44) while v2
+        detected 20/20 at the correct rate (v2 min statistic 12.1-33.6, AUC 1.000); at 128 and 200 kBd both detect 20/20.
+        This is an improvement over v1 in the low-roll-off regime, not merely a retention of it.
+  G3 minimum windows       PASS.  Lengths 32768/36000/45000/65536 (direct statistic, out of contract): v2 noise
+        crossings 0/90 at every length; v2 clock detections 30/30.  v1 noise crossings 61/90 at 32768-45000, 0/90 at 65536.
+  G4 novel noise           No v2 crossing (no blocking finding).  Coverage: two_band was analysable only at 100 kHz
+        (60 kHz INSUFFICIENT_WINDOW, 150 kHz refused).  Highest novel v2 statistic 2.356 (am_random_walk 60 kHz).
+
+THE FOUR PRE-RUN RISKS
+  Development-selected threshold: see above; 5.0 is development-informed.
+  Roll-off sensitivity: reported per roll-off.  No sensitivity loss; low-roll-off sensitivity improved.
+  Median-filter boundary behaviour: NOT eliminated.  226 of the 250 noise trials with v2 >= 2.0 peak within 5 bins of the
+        lower search edge (top values at offset 0-1 bins).  v2 suppresses the slope mechanism below the threshold; it does not
+        remove the edge excess.  The excess grows as width narrows (Gaussian 3.05 @ 60 kHz, 3.06 @ 50, 3.43 @ 40).
+        Widths below 40 kHz are not reachable by this path (INSUFFICIENT_WINDOW).
+  Short-band regime (< 129 bins): not reachable.  CYCLIC_SEGMENT_MIN = 1024 gives a search band of at least 416 bins at
+        every analysable length, so no trial was in that regime; the question is not answered, it does not arise here.
+
+LIMITS
+  Synthetic only; one raised-cosine QPSK family; noise families as listed; production channelizer refuses weak
+  signals so low-SNR behaviour is unmeasured; the periodic transport artefact (a genuine cyclic line) is not addressed;
+  no real-IQ data; no false-alarm probability is established.
+
+FILES  see SHA256SUMS
+
+REDACTION NOTE: in attempt1_interrupted/ps_t0.txt, attempt1_interrupted/ATTEMPT1_RECORD.txt and ATTEMPT2_RECORD.txt
+only absolute local paths were replaced (home directory -> "~", session scratchpad -> "<scratchpad>"). No other
+content was changed. Originals are retained outside the repository. All other files are verbatim captures,
+including trailing whitespace, and the frozen runner is byte-identical to the digest above.
+
+AMENDMENT (review of PR #162)
+  1. Execution logs: frozen_full_attempt2.log and attempt1_interrupted/attempt1_stdout.log were present in the
+     original SHA256SUMS but were NOT in the first commit: the repository's .gitignore rule `*.log` silently
+     excluded them. They are the original, unmodified captures and are now committed with `git add -f`. No log was
+     recreated. SHA256SUMS is unchanged for them and now verifies in a clean checkout.
+  2. Documentation: rf_symbol_clock_v2.py docstring corrected (see docstring_edit_check.txt). The evaluated
+     digest (5bd473bd...) is retained in frozen_digests_pre_run.txt; the post-amendment digest is 36873ba2... .
+     Executable code is AST-identical.

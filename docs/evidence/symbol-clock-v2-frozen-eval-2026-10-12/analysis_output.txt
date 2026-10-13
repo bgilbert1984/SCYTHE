@@ -1,0 +1,82 @@
+trials 2550 status {'ANALYSED': 2010, 'INSUFFICIENT_WINDOW': 30, 'CHANNELIZER_OCCUPIED_BANDWIDTH_UNRESOLVED': 510} errors 0
+protocol 1129321a91d5cb3b8697488ab3748d615985f90c5e553ecc356e6aad581fb9aa
+runner 364c3b790f2a812697ba125167b2854086125b45d7381db79ee4c78129f8f1ae
+numpy 2.5.1
+
+non-analysed by cell:
+  ('novel', 'two_band', 60000, 'INSUFFICIENT_WINDOW') 30
+  ('novel', 'two_band', 150000, 'CHANNELIZER_OCCUPIED_BANDWIDTH_UNRESOLVED') 30
+  ('sensitivity', 'clock', 40000, 'CHANNELIZER_OCCUPIED_BANDWIDTH_UNRESOLVED') 80
+  ('sensitivity', 'clock', 50000, 'CHANNELIZER_OCCUPIED_BANDWIDTH_UNRESOLVED') 80
+  ('sensitivity', 'clock', 64000, 'CHANNELIZER_OCCUPIED_BANDWIDTH_UNRESOLVED') 80
+  ('sensitivity', 'clock', 100000, 'CHANNELIZER_OCCUPIED_BANDWIDTH_UNRESOLVED') 80
+  ('sensitivity', 'clock', 128000, 'CHANNELIZER_OCCUPIED_BANDWIDTH_UNRESOLVED') 80
+  ('sensitivity', 'clock', 200000, 'CHANNELIZER_OCCUPIED_BANDWIDTH_UNRESOLVED') 80
+
+G1: True
+  brick@40000 {'n': 80, 'v1_crossings': 10, 'v2_crossings': 0, 'v2_wilson_upper': 0.0458, 'pass': True, 'v2_stat_max': 1.7855}
+  brick@50000 {'n': 80, 'v1_crossings': 1, 'v2_crossings': 0, 'v2_wilson_upper': 0.0458, 'pass': True, 'v2_stat_max': 1.6769}
+  brick@60000 {'n': 80, 'v1_crossings': 0, 'v2_crossings': 0, 'v2_wilson_upper': 0.0458, 'pass': True, 'v2_stat_max': 1.6346}
+  brick@80000 {'n': 80, 'v1_crossings': 0, 'v2_crossings': 0, 'v2_wilson_upper': 0.0458, 'pass': True, 'v2_stat_max': 1.776}
+  brick@100000 {'n': 80, 'v1_crossings': 0, 'v2_crossings': 0, 'v2_wilson_upper': 0.0458, 'pass': True, 'v2_stat_max': 1.4741}
+  brick@150000 {'n': 80, 'v1_crossings': 0, 'v2_crossings': 0, 'v2_wilson_upper': 0.0458, 'pass': True, 'v2_stat_max': 1.6368}
+  gaussian@40000 {'n': 80, 'v1_crossings': 80, 'v2_crossings': 0, 'v2_wilson_upper': 0.0458, 'pass': True, 'v2_stat_max': 3.4296}
+  gaussian@50000 {'n': 80, 'v1_crossings': 80, 'v2_crossings': 0, 'v2_wilson_upper': 0.0458, 'pass': True, 'v2_stat_max': 3.0616}
+  gaussian@60000 {'n': 80, 'v1_crossings': 80, 'v2_crossings': 0, 'v2_wilson_upper': 0.0458, 'pass': True, 'v2_stat_max': 3.0492}
+  gaussian@80000 {'n': 80, 'v1_crossings': 11, 'v2_crossings': 0, 'v2_wilson_upper': 0.0458, 'pass': True, 'v2_stat_max': 1.7758}
+  gaussian@100000 {'n': 80, 'v1_crossings': 4, 'v2_crossings': 0, 'v2_wilson_upper': 0.0458, 'pass': True, 'v2_stat_max': 1.7168}
+  gaussian@150000 {'n': 80, 'v1_crossings': 0, 'v2_crossings': 0, 'v2_wilson_upper': 0.0458, 'pass': True, 'v2_stat_max': 1.5938}
+  raised@40000 {'n': 80, 'v1_crossings': 80, 'v2_crossings': 0, 'v2_wilson_upper': 0.0458, 'pass': True, 'v2_stat_max': 1.8048}
+  raised@50000 {'n': 80, 'v1_crossings': 80, 'v2_crossings': 0, 'v2_wilson_upper': 0.0458, 'pass': True, 'v2_stat_max': 1.8872}
+  raised@60000 {'n': 80, 'v1_crossings': 0, 'v2_crossings': 0, 'v2_wilson_upper': 0.0458, 'pass': True, 'v2_stat_max': 1.6742}
+  raised@80000 {'n': 80, 'v1_crossings': 0, 'v2_crossings': 0, 'v2_wilson_upper': 0.0458, 'pass': True, 'v2_stat_max': 1.4928}
+  raised@100000 {'n': 80, 'v1_crossings': 0, 'v2_crossings': 0, 'v2_wilson_upper': 0.0458, 'pass': True, 'v2_stat_max': 1.4759}
+  raised@150000 {'n': 80, 'v1_crossings': 0, 'v2_crossings': 0, 'v2_wilson_upper': 0.0458, 'pass': True, 'v2_stat_max': 1.4618}
+
+G2: True
+  rate=40000,beta=0.2,sigma=0.02 {'n': 20, 'v1_detect': 0, 'v2_detect': 20, 'binding': False, 'pass': True, 'v1_correct_rate': 0, 'v2_correct_rate': 20, 'auc_v1': 0.44416666666666665, 'auc_v2': 1.0}
+  rate=40000,beta=0.5,sigma=0.02 {'n': 20, 'v1_detect': 20, 'v2_detect': 20, 'binding': True, 'pass': True, 'v1_correct_rate': 20, 'v2_correct_rate': 20, 'auc_v1': 1.0, 'auc_v2': 1.0}
+  rate=50000,beta=0.2,sigma=0.02 {'n': 20, 'v1_detect': 0, 'v2_detect': 20, 'binding': False, 'pass': True, 'v1_correct_rate': 0, 'v2_correct_rate': 20, 'auc_v1': 0.3975520833333333, 'auc_v2': 1.0}
+  rate=50000,beta=0.5,sigma=0.02 {'n': 20, 'v1_detect': 20, 'v2_detect': 20, 'binding': True, 'pass': True, 'v1_correct_rate': 20, 'v2_correct_rate': 20, 'auc_v1': 1.0, 'auc_v2': 1.0}
+  rate=64000,beta=0.2,sigma=0.02 {'n': 20, 'v1_detect': 0, 'v2_detect': 20, 'binding': False, 'pass': True, 'v1_correct_rate': 0, 'v2_correct_rate': 20, 'auc_v1': 0.08637152777777778, 'auc_v2': 1.0}
+  rate=64000,beta=0.5,sigma=0.02 {'n': 20, 'v1_detect': 20, 'v2_detect': 20, 'binding': True, 'pass': True, 'v1_correct_rate': 20, 'v2_correct_rate': 20, 'auc_v1': 1.0, 'auc_v2': 1.0}
+  rate=100000,beta=0.2,sigma=0.02 {'n': 20, 'v1_detect': 0, 'v2_detect': 20, 'binding': False, 'pass': True, 'v1_correct_rate': 0, 'v2_correct_rate': 20, 'auc_v1': 0.028524305555555556, 'auc_v2': 1.0}
+  rate=100000,beta=0.5,sigma=0.02 {'n': 20, 'v1_detect': 20, 'v2_detect': 20, 'binding': True, 'pass': True, 'v1_correct_rate': 20, 'v2_correct_rate': 20, 'auc_v1': 1.0, 'auc_v2': 1.0}
+  rate=128000,beta=0.2,sigma=0.02 {'n': 20, 'v1_detect': 20, 'v2_detect': 20, 'binding': True, 'pass': True, 'v1_correct_rate': 20, 'v2_correct_rate': 20, 'auc_v1': 1.0, 'auc_v2': 1.0}
+  rate=128000,beta=0.5,sigma=0.02 {'n': 20, 'v1_detect': 20, 'v2_detect': 20, 'binding': True, 'pass': True, 'v1_correct_rate': 20, 'v2_correct_rate': 20, 'auc_v1': 1.0, 'auc_v2': 1.0}
+  rate=200000,beta=0.2,sigma=0.02 {'n': 20, 'v1_detect': 20, 'v2_detect': 20, 'binding': True, 'pass': True, 'v1_correct_rate': 20, 'v2_correct_rate': 20, 'auc_v1': 1.0, 'auc_v2': 1.0}
+  rate=200000,beta=0.5,sigma=0.02 {'n': 20, 'v1_detect': 20, 'v2_detect': 20, 'binding': True, 'pass': True, 'v1_correct_rate': 20, 'v2_correct_rate': 20, 'auc_v1': 1.0, 'auc_v2': 1.0}
+
+G3: True
+  32768 {'noise_n': 90, 'v1_noise_cross': 61, 'v2_noise_cross': 0, 'clock_n': 30, 'v1_clock_det': 30, 'v2_clock_det': 30, 'pass': True}
+  36000 {'noise_n': 90, 'v1_noise_cross': 61, 'v2_noise_cross': 0, 'clock_n': 30, 'v1_clock_det': 30, 'v2_clock_det': 30, 'pass': True}
+  45000 {'noise_n': 90, 'v1_noise_cross': 61, 'v2_noise_cross': 0, 'clock_n': 30, 'v1_clock_det': 30, 'v2_clock_det': 30, 'pass': True}
+  65536 {'noise_n': 90, 'v1_noise_cross': 0, 'v2_noise_cross': 0, 'clock_n': 30, 'v1_clock_det': 30, 'v2_clock_det': 30, 'pass': True}
+
+G4 blocking: False
+  am_random_walk@60000 {'n': 30, 'v1_crossings': 0, 'v2_crossings': 0, 'v2_stat_max': 2.3555}
+  am_random_walk@100000 {'n': 30, 'v1_crossings': 0, 'v2_crossings': 0, 'v2_stat_max': 1.8292}
+  am_random_walk@150000 {'n': 30, 'v1_crossings': 0, 'v2_crossings': 0, 'v2_stat_max': 2.0734}
+  butterworth4@60000 {'n': 30, 'v1_crossings': 0, 'v2_crossings': 0, 'v2_stat_max': 1.5968}
+  butterworth4@100000 {'n': 30, 'v1_crossings': 0, 'v2_crossings': 0, 'v2_stat_max': 1.4557}
+  butterworth4@150000 {'n': 30, 'v1_crossings': 0, 'v2_crossings': 0, 'v2_stat_max': 1.437}
+  two_band@100000 {'n': 30, 'v1_crossings': 0, 'v2_crossings': 0, 'v2_stat_max': 1.7166}
+
+sensitivity coverage (analysed, refused) by (noise_sigma, rolloff):
+  (0.02, 0.2) [120, 0]
+  (0.02, 0.5) [120, 0]
+  (0.3, 0.2) [0, 120]
+  (0.3, 0.5) [0, 120]
+  (0.7, 0.2) [0, 120]
+  (0.7, 0.5) [0, 120]
+
+top v2 noise statistics (stat, kind, family, width, offset from lower search edge in bins):
+  3.430 adverse gaussian@40000 offset=1.0
+  3.405 adverse gaussian@40000 offset=0.0
+  3.290 adverse gaussian@40000 offset=0.0
+  3.179 adverse gaussian@40000 offset=1.0
+  3.073 adverse gaussian@40000 offset=0.0
+  3.062 adverse gaussian@50000 offset=0.0
+  3.049 adverse gaussian@60000 offset=0.0
+  3.047 adverse gaussian@50000 offset=0.0
+noise trials with v2>=2.0: 250  within 5 bins of lower edge: 226

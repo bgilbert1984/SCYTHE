@@ -1,0 +1,10 @@
+ATTEMPT_2: RESTARTED_SINGLE_THREAD_NUMERICAL_LIBRARIES
+started_local: 2026-10-12T22:36:04-07:00
+reason: attempt 1 interrupted for performance (see attempt1_diag/ATTEMPT1_RECORD.txt)
+protocol/runner/code digests: identical to freeze (diff against frozen_digests_pre_run.txt clean)
+environment change (only): OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1, exported before Python starts
+unchanged: Pool(4), seeds, thresholds, gates, runner source
+python: 3.12.13 numpy 2.5.1
+output: frozen_full_attempt2.json / frozen_full_attempt2.log
+note: byte-identical output to a hypothetical complete attempt 1 is not claimed
+pid 807404
