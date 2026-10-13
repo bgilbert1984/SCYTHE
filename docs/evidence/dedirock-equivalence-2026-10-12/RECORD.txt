@@ -1,0 +1,51 @@
+EXPERIMENT: DEDIROCK_SYNTHETIC_EQUIVALENCE
+DATE: 2026-10-12
+
+PACKAGE: dedirock_equiv_pkg.tar.gz
+PACKAGE_SHA256: afb107b03d6dcfc345af8ee5c7aafc5aa5afa67ccc2ca4f9d476f0a4ea6e6bd7
+FIXTURE_INTEGRITY: PASS (36/36 regenerated on each host, matched fixture_hashes.sha256)
+PRODUCTION_MODULE_HASHES: IDENTICAL on both hosts
+  rf_spur_catalogue_sequencer.py  e1e82172cc2e56f05709d60b9586b4c675890f5472824eaaa90f6a461b211b82  (seq-7.2-1-hann)
+  rf_spur_retention_estimator.py  fea25501c2584dbe04e836246a9907c358c371e660458925649741592145e9db
+
+HOSTS (RUN ENVIRONMENT, AS RECORDED IN THE RESULT FILES)
+  local     x86_64 Intel i5-8250U   Python 3.12.13  NumPy 2.5.1  GCC 14.3.1  repo 9da51af
+  dedirock  x86_64 Intel i9-14900K  Python 3.12.14  NumPy 2.5.3  GCC 11.5.0  repo 741a7c5c
+  Both: numpy.fft (pocketfft). Both repo HEADs contain 68283192 (pinned merge commit).
+  Pinned local_commit 693ed7f8 does not exist on either host's repo; not required, since
+  the two modules above are byte-identical.
+
+HOST_COMPARISON (compare_hosts.py, output in comparison_output.txt)
+  FIXTURE_OUTPUT_EQUALITY: EXACT
+  CANDIDATES_COMPARED: 52 across 36 fixtures
+  MAX_FREQUENCY_DELTA_HZ: 0.0
+  MAX_EXCESS_DELTA_DB: 0.0
+  TOLERANCE_HZ_DB: 1e-9 (unchanged)
+
+SANITY
+  UNMATCHED_PERSISTENT: 0
+  MAX_TONE_MATCH_ERROR_HZ: 0.2697
+  TONE_MATCH_WINDOW_HZ: 1.0
+
+DISPOSITION
+  CROSS_HOST_EQUIVALENCE: VERIFIED (36 synthetic fixtures, two x86_64 hosts, as above)
+  REVIEWED_REFERENCE_CONCORDANCE: REVIEWED_REFERENCE_NOT_AVAILABLE
+      The pin names ~/workspace/synth521_holdout_results.json (v2_hann section) and
+      ~/workspace/v2_hann_review/fixture_hashes.sha256. Searched 2026-10-12: neither
+      host has ~/workspace; no file of that name exists on either host's filesystem
+      search; no git branch visible from the local repo carries it. The README's
+      expected counts (20/20 in tolerance, 16/16 strong, 16/16 weak, 0 false) were NOT
+      used as a substitute and the 20/16/16 breakdown was NOT evaluated here.
+  REAL_IQ_GENERALIZATION: NOT_EVALUATED
+  ALTERNATE_FFT_GENERALIZATION: NOT_EVALUATED
+  OTHER_CPU_ARCHITECTURE_OR_OS: NOT_EVALUATED
+
+LIMITS
+  Exact equality on a finite synthetic set does not establish numerical invariance
+  across operating systems, architectures, or future library versions. The local
+  results are the comparison baseline; they are not the reviewed reference.
+
+PROVENANCE
+  Dedirock files originate from ~/dedirock_equiv_run_20261012/ on dedirock-919498765
+  (fresh directory; ~/SCYTHE was not modified). Local files from the same package.
+  Raw fixtures (.npy) are deterministically regenerable and are not stored here.
