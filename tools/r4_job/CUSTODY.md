@@ -8,11 +8,23 @@ How a finished r4 job directory is sealed, what the seal proves, and what it doe
 
 | Terminal record | Meaning |
 |---|---|
-| `DONE harness_rc=0 gate_rc=0 …` | the full harness run and its acceptance gate both succeeded |
+| `DONE COMPUTATION_COMPLETED harness_rc=0 gate_rc=0 …` | the full harness run and its acceptance gate both succeeded. **This is not acceptance** (see Dispositions) |
 | `FAILED harness_rc=<a> gate_rc=<b> …` | the full run reached its end but the harness or the gate returned nonzero; both codes are preserved |
 | `FAILED <stage> …` | an earlier stage failed (package verification, controls, fixtures, smoke, smoke gate); later stages did not run |
 
 A consumer must read the *word* (`DONE` or `FAILED`), not merely the presence of a terminal line. The process exit status follows the same rule. Every failure path also seals its terminal record.
+
+## Dispositions (r4.1): three separate statements
+
+`DONE` only says the computation finished. Gate 3 of the first r4 package showed why that is not enough: the harness and its gate passed, then custody refused to seal. `run_job.sh` therefore reports three dispositions, written **outside** the sealed directory to `JOB_DIR.disposition.txt`:
+
+| Disposition | Meaning | Produced by |
+|---|---|---|
+| `COMPUTATION_COMPLETED: YES/NO` | the harness and the scientific gate completed (terminal `DONE`) | `run_job.sh` |
+| `EVIDENCE_SEALED: YES/NO` | the manifest was published and then **read back** and found consistent with the files and the fixture pins | `seal_job.py` |
+| `JOB_ACCEPTED: YES/NO` | the separately implemented `verify_job.py` passed **and** the terminal record is `DONE` | `verify_job.py` |
+
+A verified `FAILED` job is an intact record of a failure: independent verification passes, `JOB_ACCEPTED` is `NO`. `DONE` alone must never be read as `JOB_ACCEPTED`. If a completed computation cannot be sealed, `run_job.sh` exits 20.
 
 ## Order of custody
 
@@ -26,18 +38,22 @@ The sealer refuses to seal without a terminal `DONE`/`FAILED` record and refuses
 
 ## Fixtures: what is sealed and what is re-verified
 
-The regenerated fixture set (`holdout/`, about 1.2 GB) is **not** hashed into `JOB_SHA256SUMS`. Instead:
+`holdout/` (about 1.2 GB) is **not** hashed into `JOB_SHA256SUMS`. Two pin lists are copied into the job and so **are** sealed:
 
-- the fixture hash **list** (`fixture_hashes.sha256`) is copied into the job and is therefore **sealed** by the manifest: the *expected* hashes are bound;
-- at **seal time** the actual files under `holdout/` are re-verified against that list, and the sealer **refuses to seal** on any mismatch, missing file or extra file;
-- at **independent verification** the actual files are re-verified again against the sealed list.
+- `fixture_hashes.sha256`: the 36 frozen `.npy` hashes (unchanged since the equivalence package; list digest `d42892ec…0b63e41`);
+- `generated_artifacts.sha256` (r4.1): the separately pinned generated artifact `index.json`, written by the frozen generator (digest `f52adb19…88eca3`, identical to the committed `synth521_holdout_index.json`).
 
-So the manifest proves the list; the re-verification step proves the bytes. The fixture-generation log and the hash-verification log are records that a check happened — they are not a substitute for checking the current bytes.
+`holdout/` must contain **exactly** the 37 pinned files. The sealer refuses to seal, and both verifiers refuse the job, on any missing, modified, duplicate, unexpected or non-regular entry. The generated index is also
+cross-checked against the fixtures it claims to describe (every pinned `.npy` named once, none invented, unique integer seeds), because a hash-pinned index that contradicts its fixtures is not evidence of consistency.
+(It is a structural check; it does not re-derive tone frequencies from the IQ.) When the sealer sits in a package, the sealed pins must equal the package's own copies. The first r4 package (`a7fd10b1…`) lacked the second pin and could not seal a real generated directory.
+
+So the manifest proves the lists; the re-verification step proves the bytes.
 
 ## Independent verification
 
 ```
-python3 tools/r4_job/seal_job.py JOB_DIR --verify [--require-fixtures]
+python3 tools/r4_job/seal_job.py JOB_DIR --verify [--require-fixtures]   # the sealer's own check
+python3 tools/r4_job/verify_job.py JOB_DIR --require-fixtures            # separately implemented; pins from the package, not the job; prints the three dispositions
 ```
 
 It prints two separate outcomes and never merges them:
