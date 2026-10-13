@@ -1,0 +1,4 @@
+2026-10-13T12:25:52+05:30 START job=~/metamorphic_r2_20261012 pkg=~/metamorphic_r2_pkg_20261012/pkg pid=978988
+2026-10-13T12:25:52+05:30 OK package verified
+2026-10-13T12:25:52+05:30 OK 12 bounded controls (Ran 12 tests in 0.154s)
+2026-10-13T12:26:01+05:30 OK fixtures regenerated, 36/36 hashes verified

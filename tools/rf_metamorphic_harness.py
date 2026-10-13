@@ -1,8 +1,14 @@
 #!/usr/bin/env python3
 """Read-only metamorphic harness r2 for the §5.21 spur detector and persistence estimator.
 
-REVISION r2 (replaces the interrupted r1, whose comparator was O(N^2) in candidate count and
-stalled on a 139,958-candidate mutant; the r1 source is preserved in the evidence directory).
+REVISION r3.  History: r1 was interrupted (comparator O(N^2) in candidate count, stalled on a
+139,958-candidate mutant); r2 fixed that and was interrupted on Dedirock because the one-repeat
+worst-case check recomputed the whole-spectrum floor (a median over 8x524,288 values, 0.095 s) once
+per strong candidate, about 3.9 hours for the same mutant.  r3 computes that floor once per fixture and
+evaluates all strong bins in one vectorised pass.  The floor is defined from the ORIGINAL spectra, so it
+is independent of both the candidate and the simulated loss of a repeat: caching it is exact, not an
+approximation.  The r2 function is retained below as the reference for the equivalence controls only.
+Both earlier sources are preserved in the evidence directory.
 
 Three layers, reported separately: execution fidelity, metamorphic validity, mutation
 sensitivity.  There is no re-implementation of the detector; mutants are single exact textual
@@ -45,7 +51,7 @@ from rf_spur_catalogue_sequencer import BIN_HZ, SAMPLE_RATE_HZ, usable_half_span
 from rf_spur_retention_estimator import measure_persistence
 from rf_promotion_envelope import PLAN_PERSISTENCE_MARGIN_DB
 
-REVISION = "metamorphic-harness.r2"
+REVISION = "metamorphic-harness.r3"
 S, V, P, A, U = ("RELATION_SATISFIED", "RELATION_VIOLATED", "PRECONDITION_NOT_MET",
                  "NUMERICAL_AMBIGUITY", "TRANSFORM_OR_ORACLE_UNVERIFIED")
 TOL_HZ = TOL_DB = 1e-9
@@ -255,12 +261,41 @@ def relations(detector, windows, base):
 
 
 def worst_case_excess_after_loss(spectra, bin_index):
-    """Independent of the detector's candidate logic: median power at `bin_index` if one repeat's
-    power there were as low as possible, against the median-of-median floor."""
+    """R2 REFERENCE implementation, retained only for the r2-versus-r3 equivalence controls.
+    Not used on the run path (it recomputes the floor on every call)."""
     vals = np.sort(spectra[:, bin_index])
     worst = np.sort(np.concatenate([[0.0], vals[:-1]]))
     floor = float(np.median(np.median(spectra, axis=0)))
     return 10.0 * math.log10(max(0.5 * (worst[3] + worst[4]), 1e-300) / floor)
+
+
+def spectra_floor(spectra):
+    """Median-of-median floor of the ORIGINAL spectra: one number per fixture (candidate-independent)."""
+    return float(np.median(np.median(spectra, axis=0)))
+
+
+def worst_case_excess_batch(spectra, bins, floor=None):
+    """Vectorised, floor-once equivalent of the r2 reference for many bins.
+
+    With the repeat powers at a bin sorted ascending (v0..v7), removing the strongest and adding a zero
+    gives [0, v0..v6], whose 4th and 5th order statistics are v2 and v3.  The log is taken with math.log10
+    per element (not np.log10) so the result, and therefore every >= headroom decision, is bit-identical to r2.
+    """
+    bins = np.asarray(bins, dtype=np.int64)
+    if bins.size == 0:
+        return []
+    fl = spectra_floor(spectra) if floor is None else floor
+    srt = np.sort(spectra[:, bins], axis=0)
+    medians = (0.5 * (srt[2] + srt[3])).tolist()
+    return [10.0 * math.log10(max(m, 1e-300) / fl) for m in medians]
+
+
+def tolerant_bins(spectra, strong, floor=None):
+    """Strong candidates whose independent worst-case excess stays >= headroom above the margin."""
+    if not strong:
+        return []
+    ex = worst_case_excess_batch(spectra, [b[2] for b in strong], floor)
+    return [b for b, e in zip(strong, ex) if e - PLAN_PERSISTENCE_MARGIN_DB >= ONE_REPEAT_HEADROOM_DB]
 
 
 def one_repeat_relation(windows, base, detector):
@@ -268,8 +303,7 @@ def one_repeat_relation(windows, base, detector):
     hann = 0.5 * (1.0 - np.cos(2.0 * np.pi * np.arange(n) / (n - 1)))
     spectra = np.abs(np.fft.fft(np.stack(windows) * hann[None, :], axis=1)) ** 2
     strong = [b for b in base if b[1] >= STRONG_DB]
-    tolerant = [b for b in strong if worst_case_excess_after_loss(spectra, b[2])
-                - PLAN_PERSISTENCE_MARGIN_DB >= ONE_REPEAT_HEADROOM_DB]
+    tolerant = tolerant_bins(spectra, strong)
     if not tolerant:
         return {"ONE_REPEAT_REPLACED (detector)": (P, {"reason": "no candidate with independent "
                                                        "worst-case headroom", "strong": len(strong)})}
@@ -402,7 +436,7 @@ def identity_phase(names, loader, mp, rd, stop_on_fail=True):
 def run(args):
     rd = args.results_dir
     if os.path.exists(rd) and os.listdir(rd):
-        raise SystemExit(f"results dir {rd} is not empty; r2 never overwrites earlier evidence")
+        raise SystemExit(f"results dir {rd} is not empty; the harness never overwrites earlier evidence")
     for sub in ("phaseA", "phaseB"):
         os.makedirs(os.path.join(rd, sub), exist_ok=True)
     mp = os.path.join(rd, "MANIFEST.sha256")

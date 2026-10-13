@@ -132,6 +132,76 @@ class IdentityStopsInterpretation(unittest.TestCase):
             shutil.rmtree(d, ignore_errors=True)
 
 
+class WorstCaseEquivalenceR2R3(unittest.TestCase):
+    """r3 computes the whole-spectrum floor once and vectorises over bins. It must agree with the r2
+    reference (which recomputed the floor per candidate and caused the 3.9-hour mutant run)."""
+
+    @staticmethod
+    def spectra(seed=0, bins=20000):
+        return np.random.default_rng(seed).exponential(1.0, size=(8, bins)) + 1e-3
+
+    def test_batch_equals_the_r2_reference_within_the_declared_tolerance(self):
+        sp = self.spectra()
+        rng = np.random.default_rng(1)
+        bins = sorted(rng.choice(sp.shape[1], size=300, replace=False).tolist())
+        ref = [H.worst_case_excess_after_loss(sp, b) for b in bins]
+        new = H.worst_case_excess_batch(sp, bins)
+        self.assertEqual(len(ref), len(new))
+        self.assertLessEqual(max(abs(a - b) for a, b in zip(ref, new)), 1e-9)
+
+    def test_the_floor_is_independent_of_the_candidate_so_caching_it_is_exact(self):
+        sp = self.spectra(2)
+        floors = {H.spectra_floor(sp) for _ in range(3)}
+        self.assertEqual(len(floors), 1)
+        # the reference recomputes the same number for every bin
+        a = H.worst_case_excess_after_loss(sp, 10)
+        b = H.worst_case_excess_batch(sp, [10], floor=H.spectra_floor(sp))[0]
+        self.assertEqual(a, b)
+
+    def test_decisions_agree_exactly_across_the_3_dB_boundary(self):
+        sp = self.spectra(3, bins=2001)
+        target_db = H.PLAN_PERSISTENCE_MARGIN_DB + H.ONE_REPEAT_HEADROOM_DB
+        b = 700
+        floor = H.spectra_floor(sp)
+        for _ in range(4):                                       # settle: the column feeds the floor slightly
+            T = floor * 10 ** (target_db / 10)
+            sp[:, b] = [T * f for f in (0.01, 0.02, 1.0, 1.0, 2.0, 3.0, 4.0, 5.0)]
+            floor = H.spectra_floor(sp)
+        results = []
+        for delta in (-1e-9, -1e-12, -1e-15, 0.0, 1e-15, 1e-12, 1e-9):
+            col = sp[:, b].copy()
+            sp[:, b] = [v * (1 + delta) if i in (2, 3) else v for i, v in enumerate(col)]
+            ref = H.worst_case_excess_after_loss(sp, b) - H.PLAN_PERSISTENCE_MARGIN_DB >= H.ONE_REPEAT_HEADROOM_DB
+            new = bool(H.tolerant_bins(sp, [(0.0, 20.0, b)]))
+            self.assertEqual(ref, new, f"decision differs at delta={delta}")
+            results.append(new)
+            sp[:, b] = col
+        self.assertIn(True, results); self.assertIn(False, results)   # the test really straddles the boundary
+
+    def test_the_139958_candidate_worst_case_completes_in_budget_and_computes_the_floor_once(self):
+        sp = np.random.default_rng(4).exponential(1.0, size=(8, 524288)) + 1e-3
+        strong = [(float(b), 50.0, b) for b in range(1, 139_959)]
+        calls = [0]
+        real = H.spectra_floor
+        H.spectra_floor = lambda x: (calls.__setitem__(0, calls[0] + 1), real(x))[1]
+        try:
+            t = time.time()
+            kept = H.tolerant_bins(sp, strong)
+            elapsed = time.time() - t
+        finally:
+            H.spectra_floor = real
+        self.assertEqual(calls[0], 1, "the whole-spectrum floor must be computed exactly once")
+        self.assertLess(elapsed, 15.0, f"139,958-candidate worst-case took {elapsed:.1f}s")   # r2: ~3.9 h
+        # independent spot check against the r2 reference on a bounded subset
+        for b in (1, 777, 50_000, 139_958):
+            ref = H.worst_case_excess_after_loss(sp, b) - H.PLAN_PERSISTENCE_MARGIN_DB >= H.ONE_REPEAT_HEADROOM_DB
+            self.assertEqual(ref, any(k[2] == b for k in kept))
+
+    def test_no_candidates_returns_immediately(self):
+        self.assertEqual(H.tolerant_bins(self.spectra(), []), [])
+        self.assertEqual(H.worst_case_excess_batch(self.spectra(), []), [])
+
+
 class MutationEdits(unittest.TestCase):
     def test_every_mutation_matches_production_source_exactly_once(self):
         for name, edit in H.MUTATIONS.items():
