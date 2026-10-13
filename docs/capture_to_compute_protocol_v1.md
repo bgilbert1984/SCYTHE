@@ -164,25 +164,46 @@ refuses to proceed without a matching record.
 
 ## 5. State machine
 
+**This section is the single canonical definition of the lifecycle.** §9 and §12 refer back to it and do not
+restate it.
+
 ```
 CAPTURED → SOURCE_VERIFIED → TRANSFER_STAGED → INTAKE_VERIFIED
-        → JOB_COMPLETED → RESULT_RETURNED → RESULT_VERIFIED
+        → JOB_COMPLETED → RESULT_SEALED → RESULT_RETURNED
+        → RESULT_VERIFIED → RESULT_ACKNOWLEDGED
         → ADMISSION_DECISION   (separate authority; see §9)
 ```
 
 Any failure produces a refusal record and the state does **not** advance. A refused package
-is never partially processed.
+is never partially processed. An attempted transition that skips a predecessor is refused
+(`STATE_TRANSITION_INVALID`).
 
-| State | Entered when | Evidence recorded |
-|---|---|---|
-| `CAPTURED` | bytes and manifest written at acquisition | manifest, device banner, local sha256 |
-| `SOURCE_VERIFIED` | SCYTHE re-hashes the file, checks every required field, verifies its own signature | verification record |
-| `TRANSFER_STAGED` | package fully uploaded into `incoming/` | transfer log: source and destination sizes and times |
-| `INTAKE_VERIFIED` | signature valid, byte count and sha256 equal, fields present, id/digest not already bound to different bytes; input published to the content-addressed `verified/` directory | intake record with computed digests |
-| `JOB_COMPLETED` | one-shot job exited and its output directory was sealed | job record: exit status, timings |
-| `RESULT_RETURNED` | SCYTHE pulled the result package | transfer log |
-| `RESULT_VERIFIED` | SCYTHE recomputed result hashes and checked the result manifest against the input digest and the pin | verification record |
-| `ADMISSION_DECISION` | an authorized reviewer accepts, rejects or defers | decision record, authority, reason |
+| State | Entered when | Evidence recorded | Side |
+|---|---|---|---|
+| `CAPTURED` | bytes and manifest written at acquisition | manifest, device banner, local sha256 | source |
+| `SOURCE_VERIFIED` | SCYTHE re-hashes the file, checks every required field, verifies its own signature | verification record | source |
+| `TRANSFER_STAGED` | package fully uploaded into `incoming/` | transfer log: source and destination sizes and times | compute |
+| `INTAKE_VERIFIED` | signature valid, byte count and sha256 equal, fields present, id/digest not already bound to different bytes; input published to the content-addressed `verified/` directory; a signed intake receipt (§12.1) is available to the source | intake record with computed digests | compute |
+| `JOB_COMPLETED` | the one-shot job **process exited** | job record: exit status, timings | compute |
+| `RESULT_SEALED` | the result manifest and every output hash are complete and verified on the compute host, committed to durable storage, and the output is read-only | sealed result manifest and digests | compute |
+| `RESULT_RETURNED` | SCYTHE retrieved the sealed package | transfer log | source |
+| `RESULT_VERIFIED` | SCYTHE recomputed result hashes and checked the result manifest against the input digest and the pin (**receiving-side integrity verification**) | verification record | source |
+| `RESULT_ACKNOWLEDGED` | the dedicated custody identity (§12.2) signed an acknowledgment naming the verified result digest and retrieval time; the compute host recorded it (**authenticated custody acknowledgment**) | signed acknowledgment | both |
+| `ADMISSION_DECISION` | an authorized reviewer accepts, rejects or defers | decision record, authority, reason | source |
+
+### 5.1 Invariants
+
+1. `JOB_COMPLETED` does not imply `RESULT_SEALED`: a process can exit without a complete or durable output.
+2. `RESULT_SEALED` requires a complete, verified output manifest **and** durable publication; otherwise
+   `RESULT_NOT_SEALED`.
+3. `RESULT_RETURNED` does not imply `RESULT_VERIFIED`: bytes arriving are not bytes checked.
+4. `RESULT_VERIFIED` does not imply `RESULT_ACKNOWLEDGED`: verification is a local event; the acknowledgment is a
+   separate authenticated act by a separate identity.
+5. `RESULT_ACKNOWLEDGED` establishes custody transfer and integrity only. It does **not** establish computational
+   correctness or scientific validity (§9.1), and it cannot trigger automatic scientific admission.
+6. Neither retrieval nor acknowledgment authorizes automatic deletion. Retention and release are separate,
+   explicit controls (§11, §12.2): an acknowledged package is *eligible to be considered* for deletion, never
+   deleted by that fact.
 
 Each transition appends one line to an append-only audit record containing UTC time, state,
 `capture_id`, `job_id`, actor identity and the digests it relied on. The audit file is hashed
@@ -209,6 +230,8 @@ into a periodic checkpoint that SCYTHE holds.
 | `UPLOAD_RESUME_MISMATCH` | resumed upload does not match the stored prefix digest, capture ID or expected object digest |
 | `COMPLETED_OBJECT_REPLACEMENT` | a resumed or repeated upload attempted to replace an already-published object |
 | `CLOCK_SKEW_EXCEEDED` | source clock uncertainty or source-versus-receiver skew exceeds the declared bound |
+| `STATE_TRANSITION_INVALID` | an attempted transition skips a required predecessor state (§5) |
+| `RESULT_NOT_SEALED` | the result manifest or output hashes are incomplete, or the output is not durably published and read-only |
 | `RESULT_ACK_MISSING` | results exist but SCYTHE has not recorded a verified retrieval acknowledgment |
 | `NOT_AUTHORIZED` | authorization record absent, expired, not yet valid, revoked, unknown-key, or its capture digest, destination, purpose or job-definition digest does not match |
 
@@ -256,9 +279,11 @@ results/<job_id>/
 
 ## 9. Return, verification and admission
 
-SCYTHE pulls `results/<job_id>/` read-only, then independently recomputes every output hash,
-checks `input_sha256` against its own `CAPTURED` record, and checks the pin fields. Only then is
-`RESULT_VERIFIED` recorded.
+The states are defined once, in §5. The return workflow is: the compute host seals the result
+(`RESULT_SEALED`); SCYTHE pulls `results/<job_id>/` read-only (`RESULT_RETURNED`); SCYTHE independently
+recomputes every output hash, checks `input_sha256` against its own `CAPTURED` record, and checks the pin fields
+(`RESULT_VERIFIED`); and only then does the custody identity sign the acknowledgment (`RESULT_ACKNOWLEDGED`, §12.2).
+Each step requires its predecessor, and none implies the next (§5.1).
 
 ### 9.1 Result integrity is not computational trust
 
@@ -270,11 +295,12 @@ equivalence work did for the synthetic fixtures), independent reanalysis of a sa
 environments. Until such a control has been applied to a given result, the result record says so.
 
 **Transfer success is not classification and not admission.** `RESULT_VERIFIED` means the result
-is authentic and intact, nothing more. Admission into the SCYTHE evidence store is a separate
+is authentic and intact, and `RESULT_ACKNOWLEDGED` records that custody was transferred; neither says the
+calculation was honest or the finding valid. Admission into the SCYTHE evidence store is a separate
 decision by a separate authority and must cite the method's validation status; a result from an
 unvalidated or shadow-mode method (for example the symbol-clock detectors) stays labelled
-shadow regardless of how cleanly it transferred. There is no automatic path from `RESULT_VERIFIED`
-to admission, and a test asserts that none exists.
+shadow regardless of how cleanly it transferred. There is no automatic path from `RESULT_VERIFIED` or
+`RESULT_ACKNOWLEDGED` to admission, and a test asserts that none exists.
 
 ## 10. Acceptance tests — first fixture
 
@@ -302,13 +328,17 @@ transport testing. These tests exercise transport and custody only.
 | A14 | Result retrieved; result hashes recomputed | `RESULT_VERIFIED` |
 | A15 | Result file altered after the job | `RESULT_HASH_MISMATCH` |
 | A16 | Result manifest names a different input digest | `RESULT_INPUT_MISMATCH` |
-| A17 | Completed, verified job | **no** admission record created |
+| A17 | Completed, verified job (including after `RESULT_ACKNOWLEDGED`) | **no** admission record created |
 | A18 | Compute host attempts any connection to the SCYTHE host or SDR | refused: no credential and no configured route. This demonstrates the configured isolation; it does not prove connections are categorically impossible |
 | A22 | Upload dropped mid-transfer, then resumed | prefix verified before continuing; completes with matching digest |
 | A23 | Resume attempt whose prefix differs from the stored prefix | `UPLOAD_RESUME_MISMATCH`; partial quarantined |
 | A24 | Second upload (resumed or fresh) for an already-published capture ID with different bytes | `COMPLETED_OBJECT_REPLACEMENT`; published object unchanged |
 | A25 | Source offline when the job finishes | results retained; no outbound attempt by the compute host; retrieved and acknowledged later |
-| A26 | SSH transfer of results completes but no acknowledgment is recorded | package stays unacknowledged (`RESULT_ACK_MISSING`); not deleted |
+| A30 | Job process exits but the output manifest is incomplete or not durably published | `JOB_COMPLETED` only; `RESULT_NOT_SEALED`; no seal |
+| A31 | A retrieval session opens and transfers some bytes, then drops | state stays `RESULT_SEALED`; result retained; not `RESULT_RETURNED` |
+| A32 | An acknowledgment is attempted for a package that is `RESULT_RETURNED` but not `RESULT_VERIFIED` | `STATE_TRANSITION_INVALID`; no acknowledgment recorded |
+| A33 | `RESULT_ACKNOWLEDGED` recorded | no deletion occurs and no admission record is created |
+| A26 | SSH transfer of results completes but no acknowledgment is recorded | package stays unacknowledged (`RESULT_ACK_MISSING`); retained; never inferred as acknowledged |
 | A27 | Receipt with a bad signature, or naming a different digest | source treats the upload as unconfirmed |
 | A28 | Signing key reported lost; revocation initiated without the device | key `REVOKED`; later-signed packages `KEY_REVOKED` and quarantined |
 | A29 | Source clock uncertainty or skew above the declared bound | `CLOCK_SKEW_EXCEEDED` recorded; timestamp not altered |
@@ -388,27 +418,24 @@ acquisition signing key**: the capture-signing key establishes the *origin* of t
 establishes that SCYTHE *received and verified* a particular result package. Ideally the custody identity is held by
 an independently administered custody service, not by the key carried on the field laptop, so that a stolen
 laptop does not automatically yield both capture-signing and custody-release authority. The compute
-host records the acknowledgment and only then marks the package `RETRIEVED_ACKNOWLEDGED`. It must not
+host records the acknowledgment and only then marks the package `RESULT_ACKNOWLEDGED` (§5). It must not
 infer receipt from an SSH or SFTP transfer having finished, and it must not delete or garbage-collect
 an unacknowledged package (`RESULT_ACK_MISSING` is the state of a package that has none). Retention and
-deletion on the compute host remain explicit, two-step and receipted (§11).
+deletion on the compute host remain explicit, two-step and receipted (§11). Naming a separate acknowledgment key is
+not sufficient if both private keys remain reachable on the same stolen, unlocked laptop; where the custody identity
+is held, how it is enrolled and how it is revoked are therefore open (§11) and must be resolved before any
+operational authorization.
 
-### 12.2.1 Result custody states
+### 12.2.1 Custody rules for retained results
 
-Computational completion and custody transfer are separate facts and carry separate states:
+The lifecycle (`JOB_COMPLETED`, `RESULT_SEALED`, `RESULT_RETURNED`, `RESULT_VERIFIED`, `RESULT_ACKNOWLEDGED`) is defined in
+§5 and is not restated here. For a mobile source the consequences are:
 
-| State | Meaning |
-|---|---|
-| `JOB_COMPLETED` | the analysis process exited |
-| `RESULT_SEALED` | the result manifest and output hashes are committed to durable storage and the output is read-only |
-| `RESULT_RETURNED` | SCYTHE retrieved the sealed package |
-| `RESULT_ACKNOWLEDGED` | SCYTHE independently verified the package and issued an authenticated acknowledgment |
-
-The compute host never deletes a retained result because a retrieval session opened or transferred some bytes;
-only `RESULT_ACKNOWLEDGED`, followed by the explicit two-step deletion policy, permits deletion. A package that is
-`RESULT_SEALED` but unacknowledged is `RESULT_ACK_MISSING` (above). This refines the state list in §5, which the
-implementation must reflect (`JOB_COMPLETED` -> `RESULT_SEALED` -> `RESULT_RETURNED` -> `RESULT_ACKNOWLEDGED`
-precede `RESULT_VERIFIED` on the SCYTHE side).
+- A package that is `RESULT_SEALED` or `RESULT_RETURNED` but not `RESULT_ACKNOWLEDGED` is `RESULT_ACK_MISSING`
+  and is retained.
+- The compute host never deletes a retained result because a retrieval session opened or transferred some bytes.
+- Even `RESULT_ACKNOWLEDGED` does not delete anything: it makes the package *eligible to be considered* under
+  the explicit two-step deletion policy (§5.1 item 6, §11).
 
 ### 12.3 Resumable uploads
 
@@ -440,8 +467,10 @@ time of last synchronization, estimated uncertainty). The receiver records its o
 record. The clock is governed by a **declared uncertainty budget**, not by an assumption that the workstation clock is
 synchronized. Each capture records the clock source, the last synchronization observation, the estimated UTC
 uncertainty, and monotonic elapsed time where available. For v1 the proposed bound is **5 seconds maximum
-uncertainty for routine custody timestamps**. That bound is explicitly insufficient for any timing-dependent
-analysis (for example TDOA geolocation needs far better); such analysis is **refused whenever its required
+uncertainty for routine custody timestamps** only. It is a proposed custody threshold, not a universal RF timing
+requirement. That bound is explicitly insufficient for any timing-dependent
+analysis (for example TDOA geolocation needs far better); analyses needing subsecond or nanosecond synchronization
+must enforce their own, independently established clock-quality bounds, and such analysis is **refused whenever its required
 timing precision exceeds the demonstrated clock quality**. An excessive uncertainty does not destroy otherwise
 valid RF evidence: it prevents unsupported *time-dependent* conclusions, and the capture remains usable for
 analyses that do not depend on absolute time. When the source's asserted time and the receiver's time differ by
@@ -464,4 +493,5 @@ authorization record name it. The default manifest carries no location beyond wh
 | Fixture-based tests in §10 | defined only; not run |
 | Signing keys, key registry, authorization records | design only; none created |
 | Field-mobility behaviors (§12) | design only; nothing implemented or deployed |
+| Open questions of §11 (clock bounds per analysis, custody-identity placement, enrollment and revocation) | must be resolved before any operational authorization |
 | Automatic evidence admission | **prohibited by design** |
