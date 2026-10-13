@@ -1,0 +1,56 @@
+{
+  "schema": "scythe.symbol-clock-v2-evaluation-protocol.v1",
+  "frozen": true,
+  "frozen_utc": "2026-10-12",
+  "question": "Can stationary band-limited noise be rejected without losing legitimate symbol-clock detections?",
+  "methods": {
+    "v1": {"id": "squared-envelope-cyclic.v1", "threshold": 2.5, "retuning_allowed": false},
+    "v2": {"id": "squared-envelope-cyclic.v2-detrended", "threshold": 5.0, "retuning_allowed": false}
+  },
+  "seeds": {
+    "holdout_base": 1000,
+    "note": "Development used seeds 0-99 (noise) and 0-24 (clocks) and test seeds 0,3,17,99. Every seed here is >= 1000."
+  },
+  "path": "production: ring -> channelize (STRUCTURE_CHANNEL) -> detect(); INSUFFICIENT_WINDOW and channelizer refusals are counted separately and never as crossings or misses",
+  "adverse_noise": {
+    "role": "PINNED adverse controls (v1 failure mechanism); gate G1",
+    "masks": ["raised", "gaussian", "brick"],
+    "widths_hz": [40000, 50000, 60000, 80000, 100000, 150000],
+    "seeds_per_cell": 80
+  },
+  "novel_noise": {
+    "role": "families NOT used during v2 development; exploratory, flagged not gated; gate G4",
+    "families": {
+      "butterworth4": "PSD = 1/(1+(f/fc)^8), fc = width/2",
+      "two_band": "two passbands, each width/2 wide, centred at +/- width/2",
+      "am_random_walk": "raised-edge noise multiplied by a slowly varying positive envelope (random walk, low-passed)"
+    },
+    "widths_hz": [60000, 100000, 150000],
+    "seeds_per_cell": 30
+  },
+  "sensitivity": {
+    "role": "known-positive raised-cosine QPSK; gate G2",
+    "symbol_rates_hz": [40000, 50000, 64000, 100000, 128000, 200000],
+    "rolloffs": [0.2, 0.5],
+    "noise_sigma": [0.02, 0.3, 0.7],
+    "seeds_per_cell": 20,
+    "note": "noise_sigma is the per-component std added to a unit-power-pulse-normalised signal, as in the existing fixtures; it is not an SNR claim"
+  },
+  "edge_window": {
+    "role": "direct statistic on the first N channelized samples; gate G3",
+    "lengths": [32768, 36000, 45000, 65536],
+    "noise_cases": [["raised", 100000], ["gaussian", 100000], ["brick", 100000]],
+    "clock_rate_hz": 100000,
+    "seeds_per_cell": 30,
+    "note": "OUT OF CONTRACT: production refuses N < 32768 (INSUFFICIENT_WINDOW); lengths are at or above that"
+  },
+  "gates": {
+    "G1_specificity": "for EVERY adverse_noise cell, v2 crossings == 0 of the analysable trials (Wilson 95% upper bound <= 0.05 at n=80)",
+    "G2_sensitivity": "for EVERY sensitivity cell where v1 detects >= 18 of 20, v2 detects >= 18 of 20",
+    "G3_edge": "v2 has 0 noise crossings at every length, and v2 clock detections >= v1 clock detections - 3 of 30 at every length",
+    "G4_novel": "reported; ANY v2 crossing is recorded as a blocking finding for any replacement recommendation but does not alter G1",
+    "decision": "G1 and G2 and G3 all pass => 'SUPPORTED FOR FURTHER SHADOW VALIDATION'. Otherwise 'NOT SUPPORTED'. No outcome of this protocol is a recommendation to replace v1 or change a production threshold."
+  },
+  "threshold_independent": "ROC AUC of (noise statistic vs clock statistic) is reported per sensitivity condition against pooled adverse noise, for v1 and v2, as a check that the shipped threshold is not carrying the result",
+  "parallelism": 4
+}

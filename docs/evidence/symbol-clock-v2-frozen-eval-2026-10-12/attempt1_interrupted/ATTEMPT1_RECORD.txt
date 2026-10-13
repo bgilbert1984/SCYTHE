@@ -1,0 +1,21 @@
+ATTEMPT_1: INTERRUPTED_PERFORMANCE
+recorded_local: 2026-10-12T22:35:35-07:00
+runner_pid: 786703 workers: 786727 786728 786729 786730 (Pool(4))
+command: ~/SCYTHE/.venv/bin/python tools/rf_symbol_clock_v2_frozen_eval.py --out <scratchpad>/frozen_full.json 
+started_elapsed:       52:57
+cwd: ~/SCYTHE-symbol-clock-v2
+python: 3.12.13 numpy 2.5.1
+thread env vars set: none (OPENBLAS/OMP/MKL/NUMEXPR_NUM_THREADS absent)
+threads per worker: 8 (32 total) on 8 cores; loadavg 34.50 34.47 33.36
+cpu_s per worker sample1 (10:32:02): 786703 cpu_s=1.53 state=S 786727 cpu_s=5225.67 state=R 786728 cpu_s=5204.31 state=R 786729 cpu_s=5267.46 state=R 786730 cpu_s=5252.31 state=R 799375 cpu_s=0.15 state=S 
+cpu_s per worker sample2 (10:35:20): 786727=5576.33 786728=5567.43 786729=5632.84 786730=5618.09
+last progress line: 1600/2550 (log mtime 21:45:20); result file written: no
+digests now: 
+1129321a91d5cb3b8697488ab3748d615985f90c5e553ecc356e6aad581fb9aa  docs/research/symbol_clock_v2/protocol.json
+364c3b790f2a812697ba125167b2854086125b45d7381db79ee4c78129f8f1ae  tools/rf_symbol_clock_v2_frozen_eval.py
+b74870080c717a755a373ecae5686e704ae176c691eb43d2aabfd70813f23ea0  rf_symbol_clock.py
+5bd473bd19760e8891cc681604ef03b42b38131cd6cd787240667fd942ef5159  rf_symbol_clock_v2.py
+DIGESTS UNCHANGED since freeze
+stopped_by: operator SIGTERM at 2026-10-12T22:35:51-07:00; result file never written; reason: oversubscribed OpenBLAS pools, no log progress for ~50 min
+termination detail: SIGTERM did not stop the processes within 6 s; SIGKILL sent. exit status: killed (no clean exit, no result file).
+single-thread timing of the heavy step on the idle machine afterwards: np.convolve(524288 x 20000) = 2.5 s (OPENBLAS_NUM_THREADS=1)
