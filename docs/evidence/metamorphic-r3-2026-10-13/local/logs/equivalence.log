@@ -1,0 +1,37 @@
+HA_s+f0.05a0.075.npy: production=1 diff=0.00e+00, absolute_floor_subset=300 diff=0.00e+00
+HA_s+f0.05a0.15.npy: production=1 diff=0.00e+00, absolute_floor_subset=300 diff=0.00e+00
+HA_s+f0.15a0.075.npy: production=1 diff=0.00e+00
+HA_s+f0.15a0.15.npy: production=1 diff=0.00e+00
+HA_s+f0.25a0.075.npy: production=1 diff=0.00e+00
+HA_s+f0.25a0.15.npy: production=1 diff=0.00e+00
+HA_s+f0.35a0.075.npy: production=1 diff=0.00e+00
+HA_s+f0.35a0.15.npy: production=1 diff=0.00e+00
+HA_s+f0.45a0.075.npy: production=1 diff=0.00e+00
+HA_s+f0.45a0.15.npy: production=1 diff=0.00e+00
+HA_s-f0.05a0.075.npy: production=1 diff=0.00e+00
+HA_s-f0.05a0.15.npy: production=1 diff=0.00e+00
+HA_s-f0.15a0.075.npy: production=1 diff=0.00e+00
+HA_s-f0.15a0.15.npy: production=1 diff=0.00e+00
+HA_s-f0.25a0.075.npy: production=1 diff=0.00e+00
+HA_s-f0.25a0.15.npy: production=1 diff=0.00e+00
+HA_s-f0.35a0.075.npy: production=1 diff=0.00e+00
+HA_s-f0.35a0.15.npy: production=1 diff=0.00e+00
+HA_s-f0.45a0.075.npy: production=1 diff=0.00e+00
+HA_s-f0.45a0.15.npy: production=1 diff=0.00e+00
+HB_sep4r-15p0.79f0.15.npy: production=2 diff=0.00e+00
+HB_sep4r-15p0.79f0.35.npy: production=2 diff=0.00e+00
+HB_sep4r-15p3.14f0.15.npy: production=2 diff=0.00e+00
+HB_sep4r-15p3.14f0.35.npy: production=2 diff=0.00e+00
+HB_sep4r-9p0.79f0.15.npy: production=2 diff=0.00e+00
+HB_sep4r-9p0.79f0.35.npy: production=2 diff=0.00e+00
+HB_sep4r-9p3.14f0.15.npy: production=2 diff=0.00e+00
+HB_sep4r-9p3.14f0.35.npy: production=2 diff=0.00e+00
+HB_sep9r-15p0.79f0.15.npy: production=2 diff=0.00e+00
+HB_sep9r-15p0.79f0.35.npy: production=2 diff=0.00e+00
+HB_sep9r-15p3.14f0.15.npy: production=2 diff=0.00e+00
+HB_sep9r-15p3.14f0.35.npy: production=2 diff=0.00e+00
+HB_sep9r-9p0.79f0.15.npy: production=2 diff=0.00e+00
+HB_sep9r-9p0.79f0.35.npy: production=2 diff=0.00e+00
+HB_sep9r-9p3.14f0.15.npy: production=2 diff=0.00e+00
+HB_sep9r-9p3.14f0.35.npy: production=2 diff=0.00e+00
+EQUIVALENCE: EQUIVALENT max |diff| dB = 0.0

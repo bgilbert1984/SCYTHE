@@ -1,0 +1,6 @@
+IDENTITY HA_s+f0.05a0.075.npy: EQUAL
+IDENTITY HA_s+f0.05a0.15.npy: EQUAL
+IDENTITY VERDICT: IDENTITY_AND_NAMESPACE_VERIFIED
+(t=1s)
+A HA_s+f0.05a0.075.npy: cands=1 violated=[] t=4s
+A HA_s+f0.05a0.15.npy: cands=1 violated=[] t=8s

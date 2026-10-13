@@ -1,0 +1,314 @@
+{
+ "verdict": "EQUIVALENT",
+ "max_abs_diff_db": 0.0,
+ "tolerance_db": 1e-09,
+ "failures": [],
+ "fixtures": 36,
+ "rows": [
+  {
+   "fixture": "HA_s+f0.05a0.075.npy",
+   "set": "production",
+   "bins": 1,
+   "max_abs_diff_db": 0.0,
+   "decisions_identical": true,
+   "tolerant": 1
+  },
+  {
+   "fixture": "HA_s+f0.05a0.075.npy",
+   "set": "absolute_floor_subset",
+   "bins": 300,
+   "max_abs_diff_db": 0.0,
+   "decisions_identical": true,
+   "tolerant": 0
+  },
+  {
+   "fixture": "HA_s+f0.05a0.15.npy",
+   "set": "production",
+   "bins": 1,
+   "max_abs_diff_db": 0.0,
+   "decisions_identical": true,
+   "tolerant": 1
+  },
+  {
+   "fixture": "HA_s+f0.05a0.15.npy",
+   "set": "absolute_floor_subset",
+   "bins": 300,
+   "max_abs_diff_db": 0.0,
+   "decisions_identical": true,
+   "tolerant": 0
+  },
+  {
+   "fixture": "HA_s+f0.15a0.075.npy",
+   "set": "production",
+   "bins": 1,
+   "max_abs_diff_db": 0.0,
+   "decisions_identical": true,
+   "tolerant": 1
+  },
+  {
+   "fixture": "HA_s+f0.15a0.15.npy",
+   "set": "production",
+   "bins": 1,
+   "max_abs_diff_db": 0.0,
+   "decisions_identical": true,
+   "tolerant": 1
+  },
+  {
+   "fixture": "HA_s+f0.25a0.075.npy",
+   "set": "production",
+   "bins": 1,
+   "max_abs_diff_db": 0.0,
+   "decisions_identical": true,
+   "tolerant": 1
+  },
+  {
+   "fixture": "HA_s+f0.25a0.15.npy",
+   "set": "production",
+   "bins": 1,
+   "max_abs_diff_db": 0.0,
+   "decisions_identical": true,
+   "tolerant": 1
+  },
+  {
+   "fixture": "HA_s+f0.35a0.075.npy",
+   "set": "production",
+   "bins": 1,
+   "max_abs_diff_db": 0.0,
+   "decisions_identical": true,
+   "tolerant": 1
+  },
+  {
+   "fixture": "HA_s+f0.35a0.15.npy",
+   "set": "production",
+   "bins": 1,
+   "max_abs_diff_db": 0.0,
+   "decisions_identical": true,
+   "tolerant": 1
+  },
+  {
+   "fixture": "HA_s+f0.45a0.075.npy",
+   "set": "production",
+   "bins": 1,
+   "max_abs_diff_db": 0.0,
+   "decisions_identical": true,
+   "tolerant": 1
+  },
+  {
+   "fixture": "HA_s+f0.45a0.15.npy",
+   "set": "production",
+   "bins": 1,
+   "max_abs_diff_db": 0.0,
+   "decisions_identical": true,
+   "tolerant": 1
+  },
+  {
+   "fixture": "HA_s-f0.05a0.075.npy",
+   "set": "production",
+   "bins": 1,
+   "max_abs_diff_db": 0.0,
+   "decisions_identical": true,
+   "tolerant": 1
+  },
+  {
+   "fixture": "HA_s-f0.05a0.15.npy",
+   "set": "production",
+   "bins": 1,
+   "max_abs_diff_db": 0.0,
+   "decisions_identical": true,
+   "tolerant": 1
+  },
+  {
+   "fixture": "HA_s-f0.15a0.075.npy",
+   "set": "production",
+   "bins": 1,
+   "max_abs_diff_db": 0.0,
+   "decisions_identical": true,
+   "tolerant": 1
+  },
+  {
+   "fixture": "HA_s-f0.15a0.15.npy",
+   "set": "production",
+   "bins": 1,
+   "max_abs_diff_db": 0.0,
+   "decisions_identical": true,
+   "tolerant": 1
+  },
+  {
+   "fixture": "HA_s-f0.25a0.075.npy",
+   "set": "production",
+   "bins": 1,
+   "max_abs_diff_db": 0.0,
+   "decisions_identical": true,
+   "tolerant": 1
+  },
+  {
+   "fixture": "HA_s-f0.25a0.15.npy",
+   "set": "production",
+   "bins": 1,
+   "max_abs_diff_db": 0.0,
+   "decisions_identical": true,
+   "tolerant": 1
+  },
+  {
+   "fixture": "HA_s-f0.35a0.075.npy",
+   "set": "production",
+   "bins": 1,
+   "max_abs_diff_db": 0.0,
+   "decisions_identical": true,
+   "tolerant": 1
+  },
+  {
+   "fixture": "HA_s-f0.35a0.15.npy",
+   "set": "production",
+   "bins": 1,
+   "max_abs_diff_db": 0.0,
+   "decisions_identical": true,
+   "tolerant": 1
+  },
+  {
+   "fixture": "HA_s-f0.45a0.075.npy",
+   "set": "production",
+   "bins": 1,
+   "max_abs_diff_db": 0.0,
+   "decisions_identical": true,
+   "tolerant": 1
+  },
+  {
+   "fixture": "HA_s-f0.45a0.15.npy",
+   "set": "production",
+   "bins": 1,
+   "max_abs_diff_db": 0.0,
+   "decisions_identical": true,
+   "tolerant": 1
+  },
+  {
+   "fixture": "HB_sep4r-15p0.79f0.15.npy",
+   "set": "production",
+   "bins": 2,
+   "max_abs_diff_db": 0.0,
+   "decisions_identical": true,
+   "tolerant": 2
+  },
+  {
+   "fixture": "HB_sep4r-15p0.79f0.35.npy",
+   "set": "production",
+   "bins": 2,
+   "max_abs_diff_db": 0.0,
+   "decisions_identical": true,
+   "tolerant": 2
+  },
+  {
+   "fixture": "HB_sep4r-15p3.14f0.15.npy",
+   "set": "production",
+   "bins": 2,
+   "max_abs_diff_db": 0.0,
+   "decisions_identical": true,
+   "tolerant": 2
+  },
+  {
+   "fixture": "HB_sep4r-15p3.14f0.35.npy",
+   "set": "production",
+   "bins": 2,
+   "max_abs_diff_db": 0.0,
+   "decisions_identical": true,
+   "tolerant": 2
+  },
+  {
+   "fixture": "HB_sep4r-9p0.79f0.15.npy",
+   "set": "production",
+   "bins": 2,
+   "max_abs_diff_db": 0.0,
+   "decisions_identical": true,
+   "tolerant": 2
+  },
+  {
+   "fixture": "HB_sep4r-9p0.79f0.35.npy",
+   "set": "production",
+   "bins": 2,
+   "max_abs_diff_db": 0.0,
+   "decisions_identical": true,
+   "tolerant": 2
+  },
+  {
+   "fixture": "HB_sep4r-9p3.14f0.15.npy",
+   "set": "production",
+   "bins": 2,
+   "max_abs_diff_db": 0.0,
+   "decisions_identical": true,
+   "tolerant": 2
+  },
+  {
+   "fixture": "HB_sep4r-9p3.14f0.35.npy",
+   "set": "production",
+   "bins": 2,
+   "max_abs_diff_db": 0.0,
+   "decisions_identical": true,
+   "tolerant": 2
+  },
+  {
+   "fixture": "HB_sep9r-15p0.79f0.15.npy",
+   "set": "production",
+   "bins": 2,
+   "max_abs_diff_db": 0.0,
+   "decisions_identical": true,
+   "tolerant": 2
+  },
+  {
+   "fixture": "HB_sep9r-15p0.79f0.35.npy",
+   "set": "production",
+   "bins": 2,
+   "max_abs_diff_db": 0.0,
+   "decisions_identical": true,
+   "tolerant": 2
+  },
+  {
+   "fixture": "HB_sep9r-15p3.14f0.15.npy",
+   "set": "production",
+   "bins": 2,
+   "max_abs_diff_db": 0.0,
+   "decisions_identical": true,
+   "tolerant": 2
+  },
+  {
+   "fixture": "HB_sep9r-15p3.14f0.35.npy",
+   "set": "production",
+   "bins": 2,
+   "max_abs_diff_db": 0.0,
+   "decisions_identical": true,
+   "tolerant": 2
+  },
+  {
+   "fixture": "HB_sep9r-9p0.79f0.15.npy",
+   "set": "production",
+   "bins": 2,
+   "max_abs_diff_db": 0.0,
+   "decisions_identical": true,
+   "tolerant": 2
+  },
+  {
+   "fixture": "HB_sep9r-9p0.79f0.35.npy",
+   "set": "production",
+   "bins": 2,
+   "max_abs_diff_db": 0.0,
+   "decisions_identical": true,
+   "tolerant": 2
+  },
+  {
+   "fixture": "HB_sep9r-9p3.14f0.15.npy",
+   "set": "production",
+   "bins": 2,
+   "max_abs_diff_db": 0.0,
+   "decisions_identical": true,
+   "tolerant": 2
+  },
+  {
+   "fixture": "HB_sep9r-9p3.14f0.35.npy",
+   "set": "production",
+   "bins": 2,
+   "max_abs_diff_db": 0.0,
+   "decisions_identical": true,
+   "tolerant": 2
+  }
+ ],
+ "elapsed_s": 111.42495942115784
+}

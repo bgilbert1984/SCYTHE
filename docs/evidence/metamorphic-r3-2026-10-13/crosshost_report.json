@@ -1,0 +1,25 @@
+{
+ "compared": {
+  "EXACT": 6176,
+  "TOLERANCE": 1760,
+  "VERDICT": 1688
+ },
+ "max_tolerance_diff": 0.0,
+ "out_of_tolerance": [],
+ "exact_differences": [],
+ "verdict_differences": [],
+ "structure_differences": [],
+ "unclassified": [],
+ "files": 62,
+ "header_informational": {
+  "revision": [
+   "metamorphic-harness.r3",
+   "metamorphic-harness.r3"
+  ],
+  "numpy": [
+   "2.5.1",
+   "2.5.3"
+  ]
+ },
+ "verdict": "CROSS_HOST_AGREEMENT"
+}

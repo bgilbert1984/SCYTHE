@@ -1,0 +1,219 @@
+{
+ "ROLL": {
+  "INFORMATIONAL_ONLY": true,
+  "max_freq_dev_bins": 5.8088451623916626e-08,
+  "n_base": 1,
+  "n_other": 1
+ },
+ "candidates": 1,
+ "fixture": "HA_s-f0.15a0.075.npy",
+ "persistence": {
+  "0": {
+   "CONJ": {
+    "max_dev_db": 7.105427357601002e-15,
+    "qualifying": [
+     8,
+     8
+    ],
+    "verdict": "RELATION_SATISFIED"
+   },
+   "ONE_REPEAT_REPLACED (persistence)": {
+    "persistent": [
+     true,
+     true
+    ],
+    "qualifying": [
+     8,
+     7
+    ],
+    "verdict": "RELATION_SATISFIED"
+   },
+   "PERMUTE (qualifying count, multiset of excesses)": {
+    "max_dev_db": 0.0,
+    "qualifying": [
+     8,
+     8
+    ],
+    "verdict": "RELATION_SATISFIED"
+   },
+   "PHASE 0.449": {
+    "max_dev_db": 1.4210854715202004e-14,
+    "qualifying": [
+     8,
+     8
+    ],
+    "verdict": "RELATION_SATISFIED"
+   },
+   "SCALE x0.37": {
+    "max_dev_db": 1.4210854715202004e-14,
+    "qualifying": [
+     8,
+     8
+    ],
+    "verdict": "RELATION_SATISFIED"
+   }
+  }
+ },
+ "relations": {
+  "CONJ": {
+   "extra_bins": [],
+   "max_excess_dev_db": 3.552713678800501e-15,
+   "max_freq_dev_hz": 1.0186340659856796e-10,
+   "missing_bins": [],
+   "n_base": 1,
+   "n_extra": 0,
+   "n_missing": 0,
+   "n_other": 1,
+   "not_applicable": 0,
+   "unobservable_entrants": 0,
+   "verdict": "RELATION_SATISFIED"
+  },
+  "NOISE weak": {
+   "lost": [],
+   "max_excess_dev_db": 0.08522197198437453,
+   "max_freq_dev_bins": 0.0003696733005344868,
+   "near_boundary_skipped": 0,
+   "strong": 1,
+   "verdict": "RELATION_SATISFIED"
+  },
+  "ONE_REPEAT_REPLACED (detector)": {
+   "candidates_with_headroom": 1,
+   "lost": [],
+   "max_excess_dev_db": 0.24723428127382263,
+   "max_freq_dev_bins": 0.00022314977645874023,
+   "near_boundary_skipped": 0,
+   "strong": 1,
+   "verdict": "RELATION_SATISFIED"
+  },
+  "PERMUTE reverse": {
+   "extra_bins": [],
+   "max_excess_dev_db": 0.0,
+   "max_freq_dev_hz": 0.0,
+   "missing_bins": [],
+   "n_base": 1,
+   "n_extra": 0,
+   "n_missing": 0,
+   "n_other": 1,
+   "not_applicable": 0,
+   "unobservable_entrants": 0,
+   "verdict": "RELATION_SATISFIED"
+  },
+  "PERMUTE rot3": {
+   "extra_bins": [],
+   "max_excess_dev_db": 0.0,
+   "max_freq_dev_hz": 0.0,
+   "missing_bins": [],
+   "n_base": 1,
+   "n_extra": 0,
+   "n_missing": 0,
+   "n_other": 1,
+   "not_applicable": 0,
+   "unobservable_entrants": 0,
+   "verdict": "RELATION_SATISFIED"
+  },
+  "PHASE 0.449": {
+   "extra_bins": [],
+   "max_excess_dev_db": 3.552713678800501e-15,
+   "max_freq_dev_hz": 0.0,
+   "missing_bins": [],
+   "n_base": 1,
+   "n_extra": 0,
+   "n_missing": 0,
+   "n_other": 1,
+   "not_applicable": 0,
+   "unobservable_entrants": 0,
+   "verdict": "RELATION_SATISFIED"
+  },
+  "PHASE 1.571": {
+   "extra_bins": [],
+   "max_excess_dev_db": 0.0,
+   "max_freq_dev_hz": 0.0,
+   "missing_bins": [],
+   "n_base": 1,
+   "n_extra": 0,
+   "n_missing": 0,
+   "n_other": 1,
+   "not_applicable": 0,
+   "unobservable_entrants": 0,
+   "verdict": "RELATION_SATISFIED"
+  },
+  "SCALE x0.001": {
+   "extra_bins": [],
+   "max_excess_dev_db": 0.0,
+   "max_freq_dev_hz": 0.0,
+   "missing_bins": [],
+   "n_base": 1,
+   "n_extra": 0,
+   "n_missing": 0,
+   "n_other": 1,
+   "not_applicable": 0,
+   "unobservable_entrants": 0,
+   "verdict": "RELATION_SATISFIED"
+  },
+  "SCALE x0.37": {
+   "extra_bins": [],
+   "max_excess_dev_db": 3.552713678800501e-15,
+   "max_freq_dev_hz": 0.0,
+   "missing_bins": [],
+   "n_base": 1,
+   "n_extra": 0,
+   "n_missing": 0,
+   "n_other": 1,
+   "not_applicable": 0,
+   "unobservable_entrants": 0,
+   "verdict": "RELATION_SATISFIED"
+  },
+  "SCALE x1000": {
+   "extra_bins": [],
+   "max_excess_dev_db": 0.0,
+   "max_freq_dev_hz": 0.0,
+   "missing_bins": [],
+   "n_base": 1,
+   "n_extra": 0,
+   "n_missing": 0,
+   "n_other": 1,
+   "not_applicable": 0,
+   "unobservable_entrants": 0,
+   "verdict": "RELATION_SATISFIED"
+  },
+  "SHIFT +1000 bins": {
+   "extra_bins": [],
+   "max_excess_dev_db": 7.105427357601002e-15,
+   "max_freq_dev_hz": 2.9103830456733704e-11,
+   "missing_bins": [],
+   "n_base": 1,
+   "n_extra": 0,
+   "n_missing": 0,
+   "n_other": 1,
+   "not_applicable": 0,
+   "unobservable_entrants": 0,
+   "verdict": "RELATION_SATISFIED"
+  },
+  "SHIFT +100000 bins": {
+   "extra_bins": [],
+   "max_excess_dev_db": 0.0,
+   "max_freq_dev_hz": 1.1641532182693481e-10,
+   "missing_bins": [],
+   "n_base": 1,
+   "n_extra": 0,
+   "n_missing": 0,
+   "n_other": 1,
+   "not_applicable": 0,
+   "unobservable_entrants": 0,
+   "verdict": "RELATION_SATISFIED"
+  },
+  "SHIFT -2500 bins": {
+   "extra_bins": [],
+   "max_excess_dev_db": 7.105427357601002e-15,
+   "max_freq_dev_hz": 2.9103830456733704e-11,
+   "missing_bins": [],
+   "n_base": 1,
+   "n_extra": 0,
+   "n_missing": 0,
+   "n_other": 1,
+   "not_applicable": 0,
+   "unobservable_entrants": 0,
+   "verdict": "RELATION_SATISFIED"
+  }
+ }
+}

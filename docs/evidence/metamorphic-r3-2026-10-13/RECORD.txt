@@ -1,0 +1,70 @@
+EXPERIMENT: SCYTHE_METAMORPHIC_RF_R3
+DATE: 2026-10-13
+
+EXECUTION:
+  DEDIROCK_FULL_GATE: PASS
+  LOCAL_REPLAY_FULL_GATE: PASS
+  RETURNED_EVIDENCE_INTEGRITY: VERIFIED
+    (rf_metamorphic_verify_returned.py: job and harness manifests, source/production/fixture digests, identity and
+     namespace 36/36, 36 Phase A + 24 Phase B records, summary == records, no refusal carrying credit; run on BOTH job directories)
+  STATUS_LOG: STATUS_LOG_APPEND_AFTER_HASH  (see STATUS_ADDENDUM.txt; sealed manifests preserved unchanged)
+  CROSS_HOST_REPLAY: VERIFIED
+    classification: CROSS_HOST_METAMORPHIC_REPRODUCIBILITY_VERIFIED
+    scope: two environments and these 36 synthetic fixtures only (see ENVIRONMENTS)
+
+ENVIRONMENTS (independent executions of the same package, tarball sha256 33e2991c705ec592f4cbe2d708e46cc7871d68bc93a3193a948e840702445936)
+  dedirock  EL9 kernel 5.14, Python 3.12.14, GCC 11.5.0, NumPy 2.5.3
+  local     WSL2 kernel 6.18, Python 3.12.13, GCC 14.3.1, NumPy 2.5.1
+  both      harness r3 (sha256 e1e655f68fa0...; commit 3037194), one process, OPENBLAS/OMP/MKL/NUMEXPR_NUM_THREADS=1,
+            production modules rf_spur_catalogue_sequencer.py e1e82172cc2e56f05709d60b9586b4c675890f5472824eaaa90f6a461b211b82 and
+            rf_spur_retention_estimator.py fea25501c2584dbe04e836246a9907c358c371e660458925649741592145e9db (byte-identical to origin/main)
+
+CROSS_HOST_COMPARISON (rf_metamorphic_compare_runs.py; crosshost_report.json)
+  files compared 62; leaves compared: EXACT identity 6176, EXACT verdict 1688, TOLERANCE (1e-9) 1760
+  first mismatch: NONE
+  exact identity differences 0; verdict differences 0; unclassified keys 0; structure differences 0
+  maximum numerical difference: 0.0 (below the frozen 1e-9; tolerance was not relaxed)
+  decision-instability (a tiny numerical difference changing a verdict): none observed
+  the comparator was validated before use: agreement on self-comparison, rejection of a tampered copy in each class
+
+PRODUCTION_RELATIONS (analysis_dedirock.txt == analysis_local.txt, byte-identical):
+  36 fixtures (20 with 1 candidate, 16 with 2; 52 candidates), 13 detector relations: RELATION_SATISFIED on all 36 each.
+  5 persistence relations: RELATION_SATISFIED on all 52 candidates each.
+  Exact-map relations (scale, phase, permute, conjugate, shift): all 52 candidates comparable (not-applicable 0);
+    worst deviation 1.75e-10 Hz and 1.07e-14 dB. Weak-noise: 52 strong, 0 lost, <= 0.0082 bins / 0.12 dB.
+    One-repeat replaced: <= 0.032 bins / 0.96 dB (declared limits 0.05 / 1.5; the relation nearest its tolerance).
+  ROLL (informational only): <= 0.002 bins, no candidate-count change.
+
+MUTATION_FINDINGS (6 fixtures x 4 mutants, all COMPLETED, no resource refusals):
+  ABSOLUTE_FLOOR: DETECTED        (scale x3, weak noise, conjugation, shifts; 139,905-140,081 candidates per fixture)
+  FIRST_REPEAT_ONLY: DETECTED     (permutations x2 and one-repeat replacement, on all 6 fixtures)
+  SIGN_DROPPED: DETECTED          (conjugation only, on all 6 fixtures)
+  SPAN_LIMIT_REMOVED: SURVIVED    (no relation, on any of 6 fixtures; 1 candidate, same as production)
+
+SPAN_LIMIT_COVERAGE:
+  NOT_EXERCISED_BY_DECLARED_SHIFTS
+  The declared shifts (+1000, -2500, +100000 bins) never moved any candidate beyond the +/-921,600 Hz usable half-span:
+  every shift had not-applicable = 0. No fixture has an out-of-span peak above the margin. The surviving mutant is a
+  harness coverage gap, not evidence of correct or incorrect production behaviour.
+OTHER_UNEXERCISED_PATHS:
+  near-margin skipping (0 candidates near the persistence margin); span-boundary precondition path; dense or interacting spectra.
+KNOWN_LATENT_LIMITATION (r3, not affecting these results): span applicability is decided from the REPORTED (sub-bin) frequency, while
+  production decides on the bin-centre frequency (<=, inclusive). No candidate came within a bin of the boundary. r4 must use bin centres.
+
+PERFORMANCE HISTORY (all preserved under interrupted_attempts/ and in this PR):
+  r1 INTERRUPTED_HARNESS_DEFECT  O(N^2) comparator; stalled on a 139,958-candidate mutant (never reported an identity result).
+  r2 INTERRUPTED_HARNESS_DEFECT  whole-spectrum floor recomputed per strong candidate (0.095 s each, ~3.9 h per mutant-fixture).
+  r3  floor computed once, vectorised; r2-vs-r3 equivalence max |diff| 0.0 dB on 36 fixtures + bounded mutant subsets
+      (equivalence_r2_vs_r3.json in each job), 17 bounded controls passing.
+  Smoke stages preserved: results_smoke/ in each job.
+
+INTERPRETATION:
+  Production relations are evaluated only where their preconditions hold.
+  Mutation survival is a harness coverage gap, not proof of correct or incorrect production behaviour.
+  A passing sweep on 36 synthetic one/two-tone fixtures says nothing about real IQ, dense spectra, or the span edge.
+
+REDACTIONS: eight files carry path-redacted copies (REDACTIONS.txt lists original and committed digests). In the committed copies
+  the harness-level MANIFEST.sha256 entry for run_header.json therefore differs from the file; verify the ORIGINAL job directories
+  with tools/rf_metamorphic_verify_returned.py. JOB_SHA256SUMS and MANIFEST.sha256 files are committed unchanged.
+
+PRODUCTION_METHOD_CHANGES: NONE
