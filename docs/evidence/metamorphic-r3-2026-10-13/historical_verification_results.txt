@@ -1,0 +1,23 @@
+HISTORICAL VERIFICATION OF THE ORIGINAL (UNREDACTED) JOB DIRECTORIES -- run 2026-10-13 on the host that retained them.
+This is a record of what was verified then. A clean checkout does not re-run it (see ORIGINAL_JOB_INTEGRITY in verify_committed_evidence.py).
+
+== rf_metamorphic_verify_returned.py on the retained dedirock job directory (expected harness digest from commit 3037194)
+VERIFICATION PASS
+  note: STATUS.txt: recorded digest matches the file minus lines appended after hashing (expected ordering artifact)
+  note: results_smoke: 12 manifest entries verified
+  note: results_full: 62 manifest entries verified
+
+== rf_metamorphic_verify_returned.py on the retained local job directory (expected harness digest from commit 3037194)
+VERIFICATION PASS
+  note: STATUS.txt: recorded digest matches the file minus lines appended after hashing (expected ordering artifact)
+  note: results_smoke: 12 manifest entries verified
+  note: results_full: 62 manifest entries verified
+
+== cross-host comparison of the retained originals
+CROSS_HOST_AGREEMENT | files compared: 62 | compared leaves: {'EXACT': 6176, 'TOLERANCE': 1760, 'VERDICT': 1688} | max tolerance diff: 0.000e+00
+  out_of_tolerance: 0 
+  exact_differences: 0 
+  verdict_differences: 0 
+  structure_differences: 0 
+  unclassified: 0 
+  header (informational): {"revision": ["metamorphic-harness.r3", "metamorphic-harness.r3"], "numpy": ["2.5.1", "2.5.3"]}

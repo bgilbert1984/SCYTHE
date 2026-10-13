@@ -68,3 +68,20 @@ REDACTIONS: eight files carry path-redacted copies (REDACTIONS.txt lists origina
   with tools/rf_metamorphic_verify_returned.py. JOB_SHA256SUMS and MANIFEST.sha256 files are committed unchanged.
 
 PRODUCTION_METHOD_CHANGES: NONE
+
+AMENDMENT (review of PR #163): redaction-aware verification of the committed tree
+  Added tools/verify_committed_evidence.py, tools/test_verify_committed_evidence.py and historical_verification_results.txt.
+  The verifier reports separate outcomes and never merges them:
+    COMMITTED_EVIDENCE_INTEGRITY: the outer SHA256SUMS describes exactly the committed bytes (no missing, altered or undeclared file).
+    ORIGINAL_MANIFEST_ENTRIES_VS_RECORDED_ORIGINAL_DIGESTS: every entry of every inner manifest (the harness MANIFEST.sha256 files and
+      JOB_SHA256SUMS, committed unchanged) matches the committed file, except for the files declared in REDACTIONS.txt, whose entry must
+      equal the recorded ORIGINAL digest. Mismatches are accepted only for exactly the declared set (328 entries read; 8 declared mismatches).
+      STATUS.txt is checked against STATUS_ADDENDUM.txt.
+    ORIGINAL_JOB_INTEGRITY: VERIFIED_FROM_RETAINED_ORIGINALS only when --originals points at the retained directories;
+      otherwise NOT_REVERIFIED_FROM_THIS_CHECKOUT, with the earlier verification preserved as historical evidence.
+  8 tamper tests confirm that undeclared alterations are rejected (altered results, altered redacted files, added and removed files,
+  an inner-manifest mismatch even when the outer manifest is refreshed, a wrong recorded original digest, and a declared redaction that
+  changed nothing).
+  Correction found by the verifier: the first outer SHA256SUMS omitted the two nested SHA256SUMS files under interrupted_attempts/ (my
+  generation excluded every file of that name). They are committed unchanged and are now listed.
+  Unchanged: the 36-fixture results, mutation matrices, frozen tolerances and the original manifests.
