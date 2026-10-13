@@ -1,0 +1,61 @@
+{
+ "manifest": {
+  "ok": 5,
+  "bad": [],
+  "missing": []
+ },
+ "relation_summary": {},
+ "persistence_summary": {},
+ "mutant_matrix": {},
+ "mutant_verdict": {},
+ "identity_verdict": "IDENTITY_AND_NAMESPACE_VERIFIED",
+ "boundary": {
+  "layer_A": {
+   "500000": {
+    "computed_exactly_on_boundary": [
+     225000
+    ],
+    "ideal_on_boundary_bins": [
+     225000
+    ]
+   },
+   "524280": {
+    "computed_exactly_on_boundary": [],
+    "ideal_on_boundary_bins": [
+     235926
+    ]
+   },
+   "524288": {
+    "computed_exactly_on_boundary": [],
+    "ideal_on_boundary_bins": []
+   }
+  },
+  "layer_B_prime": {
+   "production_path": false,
+   "cases": 12,
+   "production_violations": 0,
+   "credits": {
+    "span_limit_removed:MUTANT_SURVIVED_EQUIVALENT_ON_GRID": 6,
+    "span_limit_strict:MUTANT_SURVIVED_EQUIVALENT_ON_GRID": 10,
+    "span_limit_widened:MUTANT_SURVIVED_EQUIVALENT_ON_GRID": 6,
+    "span_limit_strict:MUTANT_DETECTED": 2,
+    "span_limit_removed:MUTANT_DETECTED": 6,
+    "span_limit_widened:MUTANT_DETECTED": 6
+   }
+  },
+  "layer_B": {
+   "fixtures": 1,
+   "cases_evaluated": 8,
+   "cases_precondition_not_met": 0,
+   "production_violations": 0,
+   "credits": {
+    "span_limit_removed:MUTANT_SURVIVED_EQUIVALENT_ON_GRID": 2,
+    "span_limit_strict:MUTANT_SURVIVED_EQUIVALENT_ON_GRID": 8,
+    "span_limit_widened:MUTANT_SURVIVED_EQUIVALENT_ON_GRID": 4,
+    "span_limit_removed:MUTANT_DETECTED": 6,
+    "span_limit_widened:MUTANT_DETECTED": 4
+   },
+   "production_path": false
+  }
+ }
+}

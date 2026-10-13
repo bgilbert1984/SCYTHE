@@ -1,0 +1,202 @@
+{
+ "detector_involved": false,
+ "geometries": {
+  "500000": {
+   "bin_spacing_hz": 4.096,
+   "computed_exactly_on_boundary": [
+    225000
+   ],
+   "ideal_on_boundary_bins": [
+    225000
+   ],
+   "production_length": false,
+   "rows": [
+    {
+     "bin": 224998,
+     "computed_hz": "921591.8080000001",
+     "ideal_minus_usable_hz": -8.192,
+     "predicates": {
+      "production": true,
+      "span_limit_removed": true,
+      "span_limit_strict": true,
+      "span_limit_widened": true
+     }
+    },
+    {
+     "bin": 224999,
+     "computed_hz": "921595.904",
+     "ideal_minus_usable_hz": -4.096,
+     "predicates": {
+      "production": true,
+      "span_limit_removed": true,
+      "span_limit_strict": true,
+      "span_limit_widened": true
+     }
+    },
+    {
+     "bin": 225000,
+     "computed_hz": "921600.0",
+     "ideal_minus_usable_hz": 0.0,
+     "predicates": {
+      "production": true,
+      "span_limit_removed": true,
+      "span_limit_strict": false,
+      "span_limit_widened": true
+     }
+    },
+    {
+     "bin": 225001,
+     "computed_hz": "921604.096",
+     "ideal_minus_usable_hz": 4.096,
+     "predicates": {
+      "production": false,
+      "span_limit_removed": true,
+      "span_limit_strict": false,
+      "span_limit_widened": true
+     }
+    },
+    {
+     "bin": 225002,
+     "computed_hz": "921608.192",
+     "ideal_minus_usable_hz": 8.192,
+     "predicates": {
+      "production": false,
+      "span_limit_removed": true,
+      "span_limit_strict": false,
+      "span_limit_widened": true
+     }
+    }
+   ]
+  },
+  "524280": {
+   "bin_spacing_hz": 3.906309605554284,
+   "computed_exactly_on_boundary": [],
+   "ideal_on_boundary_bins": [
+    235926
+   ],
+   "production_length": false,
+   "rows": [
+    {
+     "bin": 235924,
+     "computed_hz": "921592.187380789",
+     "ideal_minus_usable_hz": -7.812619211108568,
+     "predicates": {
+      "production": true,
+      "span_limit_removed": true,
+      "span_limit_strict": true,
+      "span_limit_widened": true
+     }
+    },
+    {
+     "bin": 235925,
+     "computed_hz": "921596.0936903945",
+     "ideal_minus_usable_hz": -3.906309605554284,
+     "predicates": {
+      "production": true,
+      "span_limit_removed": true,
+      "span_limit_strict": true,
+      "span_limit_widened": true
+     }
+    },
+    {
+     "bin": 235926,
+     "computed_hz": "921600.0000000001",
+     "ideal_minus_usable_hz": 0.0,
+     "predicates": {
+      "production": false,
+      "span_limit_removed": true,
+      "span_limit_strict": false,
+      "span_limit_widened": true
+     }
+    },
+    {
+     "bin": 235927,
+     "computed_hz": "921603.9063096056",
+     "ideal_minus_usable_hz": 3.906309605554284,
+     "predicates": {
+      "production": false,
+      "span_limit_removed": true,
+      "span_limit_strict": false,
+      "span_limit_widened": true
+     }
+    },
+    {
+     "bin": 235928,
+     "computed_hz": "921607.8126192112",
+     "ideal_minus_usable_hz": 7.812619211108568,
+     "predicates": {
+      "production": false,
+      "span_limit_removed": true,
+      "span_limit_strict": false,
+      "span_limit_widened": true
+     }
+    }
+   ]
+  },
+  "524288": {
+   "bin_spacing_hz": 3.90625,
+   "computed_exactly_on_boundary": [],
+   "ideal_on_boundary_bins": [],
+   "production_length": true,
+   "rows": [
+    {
+     "bin": 235928,
+     "computed_hz": "921593.75",
+     "ideal_minus_usable_hz": -6.25,
+     "predicates": {
+      "production": true,
+      "span_limit_removed": true,
+      "span_limit_strict": true,
+      "span_limit_widened": true
+     }
+    },
+    {
+     "bin": 235929,
+     "computed_hz": "921597.65625",
+     "ideal_minus_usable_hz": -2.34375,
+     "predicates": {
+      "production": true,
+      "span_limit_removed": true,
+      "span_limit_strict": true,
+      "span_limit_widened": true
+     }
+    },
+    {
+     "bin": 235930,
+     "computed_hz": "921601.5625",
+     "ideal_minus_usable_hz": 1.5625,
+     "predicates": {
+      "production": false,
+      "span_limit_removed": true,
+      "span_limit_strict": false,
+      "span_limit_widened": true
+     }
+    },
+    {
+     "bin": 235931,
+     "computed_hz": "921605.46875",
+     "ideal_minus_usable_hz": 5.46875,
+     "predicates": {
+      "production": false,
+      "span_limit_removed": true,
+      "span_limit_strict": false,
+      "span_limit_widened": true
+     }
+    },
+    {
+     "bin": 235932,
+     "computed_hz": "921609.375",
+     "ideal_minus_usable_hz": 9.375,
+     "predicates": {
+      "production": false,
+      "span_limit_removed": true,
+      "span_limit_strict": false,
+      "span_limit_widened": true
+     }
+    }
+   ]
+  }
+ },
+ "layer": "A_PREDICATE_GRID",
+ "usable_hz": 921600.0
+}

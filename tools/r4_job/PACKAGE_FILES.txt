@@ -1,0 +1,14 @@
+# Source files an r4 job package must contain (import closure of the harness and the four test modules, computed 2026-10-13).
+# The package ALSO needs: tools/rf_metamorphic_harness.py, tools/r4_job/{run_job.sh,seal_job.py,gate_results.py}, and fixtures/ (generate_holdout.py,
+# synth_521_holdout_frozen.json, synth521_holdout_index.json, fixture_hashes.sha256) taken from the merged equivalence package. Packaging is NOT authorized yet.
+rf_corpus_vocabulary.py
+rf_promotion_envelope.py
+rf_promotion_geometry.py
+rf_signal_chain_identity.py
+rf_spur_catalogue_sequencer.py
+rf_spur_retention_estimator.py
+test_rf_metamorphic_controls.py
+test_rf_metamorphic_r4_controls.py
+test_rf_metamorphic_r4_job.py
+test_rf_metamorphic_r4_production_path.py
+test_rf_spur_catalogue_sequencer.py
