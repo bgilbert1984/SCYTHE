@@ -206,6 +206,10 @@ into a periodic checkpoint that SCYTHE holds.
 | `OUTPUT_ESCAPE` | worker output outside its job directory |
 | `RESULT_HASH_MISMATCH` | result files differ from the result manifest |
 | `RESULT_INPUT_MISMATCH` | result manifest names a different input digest |
+| `UPLOAD_RESUME_MISMATCH` | resumed upload does not match the stored prefix digest, capture ID or expected object digest |
+| `COMPLETED_OBJECT_REPLACEMENT` | a resumed or repeated upload attempted to replace an already-published object |
+| `CLOCK_SKEW_EXCEEDED` | source clock uncertainty or source-versus-receiver skew exceeds the declared bound |
+| `RESULT_ACK_MISSING` | results exist but SCYTHE has not recorded a verified retrieval acknowledgment |
 | `NOT_AUTHORIZED` | authorization record absent, expired, not yet valid, revoked, unknown-key, or its capture digest, destination, purpose or job-definition digest does not match |
 
 A refusal is a recorded outcome, not an error to retry silently.
@@ -300,6 +304,14 @@ transport testing. These tests exercise transport and custody only.
 | A16 | Result manifest names a different input digest | `RESULT_INPUT_MISMATCH` |
 | A17 | Completed, verified job | **no** admission record created |
 | A18 | Compute host attempts any connection to the SCYTHE host or SDR | refused: no credential and no configured route. This demonstrates the configured isolation; it does not prove connections are categorically impossible |
+| A22 | Upload dropped mid-transfer, then resumed | prefix verified before continuing; completes with matching digest |
+| A23 | Resume attempt whose prefix differs from the stored prefix | `UPLOAD_RESUME_MISMATCH`; partial quarantined |
+| A24 | Second upload (resumed or fresh) for an already-published capture ID with different bytes | `COMPLETED_OBJECT_REPLACEMENT`; published object unchanged |
+| A25 | Source offline when the job finishes | results retained; no outbound attempt by the compute host; retrieved and acknowledged later |
+| A26 | SSH transfer of results completes but no acknowledgment is recorded | package stays unacknowledged (`RESULT_ACK_MISSING`); not deleted |
+| A27 | Receipt with a bad signature, or naming a different digest | source treats the upload as unconfirmed |
+| A28 | Signing key reported lost; revocation initiated without the device | key `REVOKED`; later-signed packages `KEY_REVOKED` and quarantined |
+| A29 | Source clock uncertainty or skew above the declared bound | `CLOCK_SKEW_EXCEEDED` recorded; timestamp not altered |
 | A19 | Authorization record absent, expired, revoked, or with a mismatched digest / destination / purpose / job definition | `NOT_AUTHORIZED` at source release and again at intake |
 | A20 | Manifest signed by an unknown, retired-before-issue, or revoked key | `KEY_UNKNOWN` / `KEY_REVOKED` |
 | A21 | Manifest bytes not in canonical JCS form (same content, different whitespace or key order) | `SIGNATURE_INVALID` |
@@ -335,8 +347,85 @@ Still open:
 6. Clock trust: manifest times are asserted by SCYTHE; the compute host adds its own receive time in the audit record; how skew is flagged.
 7. Who the authorized reviewers are, how they are enrolled, and how their keys are managed (the authorization key may be distinct from the capture-manifest key).
 8. Which second control (second host re-run, sampled independent reanalysis) is required before a returned result is treated as a trusted calculation (§9.1).
+9. The declared bounds for clock uncertainty and source-versus-receiver skew (§12.5), and whether a breach refuses or quarantines.
+10. How the retrieval acknowledgment key is held relative to the signing key, given that both live on a travelling device.
 
-## 12. Authorization status
+
+## 12. Field mobility (mobile acquisition host)
+
+The acquisition host (`scythe-1`) is a mobile workstation that is powered on only during sessions: it
+takes samples, pushes them, and then moves or powers down while the compute host works. v1 therefore
+cannot assume the source is online when intake refuses a package or when a job finishes. This section
+adds the required behavior; it does not change the trust boundary of §3 (the compute host still has no
+credential for, and no route to, the acquisition host).
+
+| Condition | Required v1 behavior |
+|---|---|
+| Source temporarily offline | The compute host retains completed results **and** refusal records durably in `results/` for later SCYTHE-initiated retrieval. It never pushes them. |
+| Source custody | The source deletes nothing until the result is `RESULT_VERIFIED` **and** an explicit release authorization is recorded. |
+| Interrupted upload | Uploads are resumable and integrity-checked, with atomic publication (§12.3). |
+| Mobile signing-key exposure | Full-disk encryption, a protected signing identity, and an explicit compromise response (§12.4). |
+| Clock and location | Clock uncertainty is recorded and bounded; location data is minimized and access-controlled (§12.5). |
+
+### 12.1 Intake receipt
+
+Upload completion is not intake. Before the source leaves a location it should wait for an
+`INTAKE_VERIFIED` **receipt**, which contains: the capture ID, the capture (IQ) digest, the manifest
+digest, the receiving host's identity (its registered key ID), the verification time, and an
+**authenticated acknowledgment** (a signature by the receiving host over the canonical receipt bytes,
+constructed like §4.3 with prefix `scythe.intake-receipt.v1\n`). The source verifies that signature
+against a pinned intake-host key. A receipt proves that an intake copy passed verification at that
+moment. It is **not** proof that the only remaining copy will survive: the acquisition copy is kept
+until the retention and release policy permits deletion. If no receipt arrives, the source treats the
+upload as unconfirmed and keeps retrying while it is online.
+
+### 12.2 Offline results and refusal records
+
+Result and refusal packages are stored durably on the compute host. SCYTHE pulls them when it is next
+online, recomputes every hash (§9), and then writes a **retrieval acknowledgment** (signed by the
+SCYTHE authorization or release key) that names the result digest and the retrieval time. The compute
+host records the acknowledgment and only then marks the package `RETRIEVED_ACKNOWLEDGED`. It must not
+infer receipt from an SSH or SFTP transfer having finished, and it must not delete or garbage-collect
+an unacknowledged package (`RESULT_ACK_MISSING` is the state of a package that has none). Retention and
+deletion on the compute host remain explicit, two-step and receipted (§11).
+
+### 12.3 Resumable uploads
+
+A resumable upload is bound to one capture ID and one expected object digest (both taken from the
+signed manifest). Chunks are written into `incoming/<capture_id>.partial/` with a running prefix digest
+recorded by the receiver. On reconnect the receiver reports the length and prefix digest it holds, the
+sender verifies that prefix against its own bytes, and only then continues; any mismatch is
+`UPLOAD_RESUME_MISMATCH` and the partial is quarantined, never repaired in place. Publication is a single
+atomic rename after the full digest verifies. A completed object is never replaced: a later upload, whether
+resumed or fresh, for an already-published capture ID is `COMPLETED_OBJECT_REPLACEMENT` unless the bytes are
+identical (idempotent re-upload is acknowledged without rewriting).
+
+### 12.4 Mobile signing key
+
+A laptop that travels can be lost or stolen while unlocked, so encryption at rest is necessary but not
+sufficient. v1 requires: full-disk encryption on the acquisition host; a **passphrase-protected** signing
+identity (not an unlocked key file); **short-lived authorization records** (§4.5 `expires` kept short, so a
+stolen key cannot authorize releases for long); and a documented **compromise response** that can be
+initiated **independently of the missing device**, by the registry administrator over the out-of-band
+channel: (1) mark the key `REVOKED` in the registry, effective from a stated time; (2) quarantine every
+capture signed under that key since the last known-good time (`KEY_REVOKED`); (3) re-verify quarantined
+packages by independent means and re-sign under a new key only after review; (4) record the incident
+and the new key's activation. The device's loss does not require the device's cooperation to revoke.
+
+### 12.5 Clock and location
+
+The manifest records the **clock source and uncertainty** (for example NTP/GPS-disciplined or free-running,
+time of last synchronization, estimated uncertainty). The receiver records its own receipt time in the audit
+record. When the source's asserted time and the receiver's time differ by more than a declared bound, or the
+source's declared uncertainty exceeds it, intake records `CLOCK_SKEW_EXCEEDED` (a refusal or a quarantine, by
+policy), and the timestamp is never silently "corrected".
+
+Precise GPS coordinates are **not mandatory** in generic RF capture manifests. If a capture's purpose requires
+them, they go in a **separate, protected location record** linked from the manifest only by its digest and
+disclosed to authorized roles only; the compute job does not receive it unless the job definition and the
+authorization record name it. The default manifest carries no location beyond what the purpose declares.
+
+## 13. Authorization status
 
 | Item | Status |
 |---|---|
@@ -346,4 +435,5 @@ Still open:
 | Software installation on a compute host | **not authorized** |
 | Fixture-based tests in §10 | defined only; not run |
 | Signing keys, key registry, authorization records | design only; none created |
+| Field-mobility behaviors (§12) | design only; nothing implemented or deployed |
 | Automatic evidence admission | **prohibited by design** |
