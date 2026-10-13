@@ -1,0 +1,62 @@
+usable half-span = 921600.0 Hz ; fs = 2048000 Hz ; production window n = 524288 samples (WINDOW_BYTES = 1048576 bytes)
+
+=== LAYER A: frequency grid and predicate variants (no detector) ===
+
+n=524288  bin spacing 3.90625 Hz   usable/spacing = 235929.6
+     bin       np.fft.fftfreq value   ideal rational - U    production(<=)         strict(<)  widened(<=1.01u)           removed
+  235928      np.float64(921593.75)           -6.250e+00              True              True              True              True
+  235929   np.float64(921597.65625)           -2.344e+00              True              True              True              True
+  235930    np.float64(921601.5625)            1.562e+00             False             False              True              True
+  235931   np.float64(921605.46875)            5.469e+00             False             False              True              True
+  235932     np.float64(921609.375)            9.375e+00             False             False              True              True
+  bin whose IDEAL (rational) frequency equals U: none
+
+n=524280  bin spacing 3.906309605554284 Hz   usable/spacing = 235926.0
+     bin       np.fft.fftfreq value   ideal rational - U    production(<=)         strict(<)  widened(<=1.01u)           removed
+  235924 np.float64(921592.187380789)           -7.813e+00              True              True              True              True
+  235925 np.float64(921596.0936903945)           -3.906e+00              True              True              True              True
+  235926 np.float64(921600.0000000001)            0.000e+00             False             False              True              True
+  235927 np.float64(921603.9063096056)            3.906e+00             False             False              True              True
+  235928 np.float64(921607.8126192112)            7.813e+00             False             False              True              True
+  bin whose IDEAL (rational) frequency equals U: [235926] ; computed value equals U exactly: False  (<= evaluates False)
+
+n=500000  bin spacing 4.096 Hz   usable/spacing = 225000.0
+     bin       np.fft.fftfreq value   ideal rational - U    production(<=)         strict(<)  widened(<=1.01u)           removed
+  224998 np.float64(921591.8080000001)           -8.192e+00              True              True              True              True
+  224999     np.float64(921595.904)           -4.096e+00              True              True              True              True
+  225000       np.float64(921600.0)            0.000e+00              True             False              True              True
+  225001     np.float64(921604.096)            4.096e+00             False             False              True              True
+  225002     np.float64(921608.192)            8.192e+00             False             False              True              True
+  bin whose IDEAL (rational) frequency equals U: [225000] ; computed value equals U exactly: True  (<= evaluates True)
+
+=== LAYER B: production detect_candidates and single-edit mutants on one-tone windows (function-level) ===
+Each row: tone placed exactly on bin b; 'P' = a candidate with peak_bin == b is listed, '-' = not listed;
+predicted = the Layer A predicate for that variant evaluated on the computed bin-centre frequency.
+
+      n     bin        f(bin) Hz      production(<=)           strict(<)    widened(<=1.01u)             removed   all-predictions-match
+ 524288  100000     390625.00000           P(pred P)           P(pred P)           P(pred P)           P(pred P)   True
+ 524288  424288    -390625.00000           P(pred P)           P(pred P)           P(pred P)           P(pred P)   True
+ 524288  235928     921593.75000           P(pred P)           P(pred P)           P(pred P)           P(pred P)   True
+ 524288  288360    -921593.75000           P(pred P)           P(pred P)           P(pred P)           P(pred P)   True
+ 524288  235929     921597.65625           P(pred P)           P(pred P)           P(pred P)           P(pred P)   True
+ 524288  288359    -921597.65625           P(pred P)           P(pred P)           P(pred P)           P(pred P)   True
+ 524288  235930     921601.56250           -(pred -)           -(pred -)           P(pred P)           P(pred P)   True
+ 524288  288358    -921601.56250           -(pred -)           -(pred -)           P(pred P)           P(pred P)   True
+ 524288  235931     921605.46875           -(pred -)           -(pred -)           P(pred P)           P(pred P)   True
+ 524288  288357    -921605.46875           -(pred -)           -(pred -)           P(pred P)           P(pred P)   True
+ 524288  249037     972800.78125           -(pred -)           -(pred -)           -(pred -)           P(pred P)   True
+ 524288  275251    -972800.78125           -(pred -)           -(pred -)           -(pred -)           P(pred P)   True
+ 524280  235925     921596.09369           P(pred P)           P(pred P)           P(pred P)           P(pred P)   True
+ 524280  288355    -921596.09369           P(pred P)           P(pred P)           P(pred P)           P(pred P)   True
+ 524280  235926     921600.00000           -(pred -)           -(pred -)           P(pred P)           P(pred P)   True
+ 524280  288354    -921600.00000           -(pred -)           -(pred -)           P(pred P)           P(pred P)   True
+ 524280  235927     921603.90631           -(pred -)           -(pred -)           P(pred P)           P(pred P)   True
+ 524280  288353    -921603.90631           -(pred -)           -(pred -)           P(pred P)           P(pred P)   True
+ 500000  224999     921595.90400           P(pred P)           P(pred P)           P(pred P)           P(pred P)   True
+ 500000  275001    -921595.90400           P(pred P)           P(pred P)           P(pred P)           P(pred P)   True
+ 500000  225000     921600.00000           P(pred P)           -(pred -)           P(pred P)           P(pred P)   True
+ 500000  275000    -921600.00000           P(pred P)           -(pred -)           P(pred P)           P(pred P)   True
+ 500000  225001     921604.09600           -(pred -)           -(pred -)           P(pred P)           P(pred P)   True
+ 500000  274999    -921604.09600           -(pred -)           -(pred -)           P(pred P)           P(pred P)   True
+
+rows whose observed presence disagrees with the Layer A prediction: 0
