@@ -347,8 +347,8 @@ Still open:
 6. Clock trust: manifest times are asserted by SCYTHE; the compute host adds its own receive time in the audit record; how skew is flagged.
 7. Who the authorized reviewers are, how they are enrolled, and how their keys are managed (the authorization key may be distinct from the capture-manifest key).
 8. Which second control (second host re-run, sampled independent reanalysis) is required before a returned result is treated as a trusted calculation (§9.1).
-9. The declared bounds for clock uncertainty and source-versus-receiver skew (§12.5), and whether a breach refuses or quarantines.
-10. How the retrieval acknowledgment key is held relative to the signing key, given that both live on a travelling device.
+9. Clock bounds (§12.5): 5 s routine-custody uncertainty is proposed; the per-analysis precision requirements (for example for geolocation) and the exact skew threshold between source and receiver remain to be declared.
+10. Custody identity (§12.2): the dedicated acknowledgment identity is proposed as separate from the signing key; where it is held (an independently administered custody service versus another device) and how it is enrolled remain open.
 
 
 ## 12. Field mobility (mobile acquisition host)
@@ -382,12 +382,33 @@ upload as unconfirmed and keeps retrying while it is online.
 ### 12.2 Offline results and refusal records
 
 Result and refusal packages are stored durably on the compute host. SCYTHE pulls them when it is next
-online, recomputes every hash (§9), and then writes a **retrieval acknowledgment** (signed by the
-SCYTHE authorization or release key) that names the result digest and the retrieval time. The compute
+online, recomputes every hash (§9), and then writes a **retrieval acknowledgment** that names the result digest
+and the retrieval time. The acknowledgment is signed by a **dedicated custody identity that is separate from the
+acquisition signing key**: the capture-signing key establishes the *origin* of the data, while the acknowledgment
+establishes that SCYTHE *received and verified* a particular result package. Ideally the custody identity is held by
+an independently administered custody service, not by the key carried on the field laptop, so that a stolen
+laptop does not automatically yield both capture-signing and custody-release authority. The compute
 host records the acknowledgment and only then marks the package `RETRIEVED_ACKNOWLEDGED`. It must not
 infer receipt from an SSH or SFTP transfer having finished, and it must not delete or garbage-collect
 an unacknowledged package (`RESULT_ACK_MISSING` is the state of a package that has none). Retention and
 deletion on the compute host remain explicit, two-step and receipted (§11).
+
+### 12.2.1 Result custody states
+
+Computational completion and custody transfer are separate facts and carry separate states:
+
+| State | Meaning |
+|---|---|
+| `JOB_COMPLETED` | the analysis process exited |
+| `RESULT_SEALED` | the result manifest and output hashes are committed to durable storage and the output is read-only |
+| `RESULT_RETURNED` | SCYTHE retrieved the sealed package |
+| `RESULT_ACKNOWLEDGED` | SCYTHE independently verified the package and issued an authenticated acknowledgment |
+
+The compute host never deletes a retained result because a retrieval session opened or transferred some bytes;
+only `RESULT_ACKNOWLEDGED`, followed by the explicit two-step deletion policy, permits deletion. A package that is
+`RESULT_SEALED` but unacknowledged is `RESULT_ACK_MISSING` (above). This refines the state list in §5, which the
+implementation must reflect (`JOB_COMPLETED` -> `RESULT_SEALED` -> `RESULT_RETURNED` -> `RESULT_ACKNOWLEDGED`
+precede `RESULT_VERIFIED` on the SCYTHE side).
 
 ### 12.3 Resumable uploads
 
@@ -416,9 +437,16 @@ and the new key's activation. The device's loss does not require the device's co
 
 The manifest records the **clock source and uncertainty** (for example NTP/GPS-disciplined or free-running,
 time of last synchronization, estimated uncertainty). The receiver records its own receipt time in the audit
-record. When the source's asserted time and the receiver's time differ by more than a declared bound, or the
-source's declared uncertainty exceeds it, intake records `CLOCK_SKEW_EXCEEDED` (a refusal or a quarantine, by
-policy), and the timestamp is never silently "corrected".
+record. The clock is governed by a **declared uncertainty budget**, not by an assumption that the workstation clock is
+synchronized. Each capture records the clock source, the last synchronization observation, the estimated UTC
+uncertainty, and monotonic elapsed time where available. For v1 the proposed bound is **5 seconds maximum
+uncertainty for routine custody timestamps**. That bound is explicitly insufficient for any timing-dependent
+analysis (for example TDOA geolocation needs far better); such analysis is **refused whenever its required
+timing precision exceeds the demonstrated clock quality**. An excessive uncertainty does not destroy otherwise
+valid RF evidence: it prevents unsupported *time-dependent* conclusions, and the capture remains usable for
+analyses that do not depend on absolute time. When the source's asserted time and the receiver's time differ by
+more than the bound, or the source's declared uncertainty exceeds it, intake records `CLOCK_SKEW_EXCEEDED`
+(quarantining time-dependent use, not discarding the package), and the timestamp is never silently "corrected".
 
 Precise GPS coordinates are **not mandatory** in generic RF capture manifests. If a capture's purpose requires
 them, they go in a **separate, protected location record** linked from the manifest only by its digest and
