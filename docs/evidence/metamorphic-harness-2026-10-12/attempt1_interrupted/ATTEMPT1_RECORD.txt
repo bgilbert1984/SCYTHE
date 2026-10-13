@@ -1,0 +1,27 @@
+ATTEMPT_1: INTERRUPTED_HARNESS_DEFECT
+harness revision: r1 (unversioned first draft)
+pid: 810894
+command: ~/SCYTHE/.venv/bin/python tools/rf_metamorphic_harness.py --holdout <scratchpad>/equiv_local/holdout --hashes docs/evidence/dedirock-equivalence-2026-10-12/fixture_hashes.sha256 --out <scratchpad>/meta/metamorphic_results.json 
+started (etime at record): 38:54 ; record time: 2026-10-12T23:23:06-07:00
+state: R; threads: 1; rss_kb: 255212
+cpu_s: 2328.2 (about 100% of one core for the whole run)
+environment (thread limits): NUMEXPR_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 
+stdout bytes: 0; stderr: merged into stdout
+harness r1 sha256: 1854c9cee7495ba8d512f64d297f2158822b9124b08b3b0f8281d93429fde7c5
+pre-run digests:
+  1854c9cee7495ba8d512f64d297f2158822b9124b08b3b0f8281d93429fde7c5  tools/rf_metamorphic_harness.py
+  e1e82172cc2e56f05709d60b9586b4c675890f5472824eaaa90f6a461b211b82  rf_spur_catalogue_sequencer.py
+  fea25501c2584dbe04e836246a9907c358c371e660458925649741592145e9db  rf_spur_retention_estimator.py
+  d42892ec15932b1883e8c59391625e1cdcd7d2171f588a275521b2b0d0b63e41  docs/evidence/dedirock-equivalence-2026-10-12/fixture_hashes.sha256
+OBSERVED_CARDINALITIES (one fixture, separate ~5 s diagnostic, run on a spare core):
+  PRODUCTION_CANDIDATES: 1
+  ABSOLUTE_FLOOR_MUTANT_CANDIDATES: 139958
+  MATCHING_COMPLEXITY: O(N^2)  (~9.79e9 pairwise steps per relation)
+ROOT_CAUSE: HARNESS_COMPARATOR_SCALING
+SCYTHE_PRODUCTION_DEFECT: NOT_ESTABLISHED
+identity/namespace result: computed in memory for the first fixture, never written, never independently recovered; NOT reported as PASS.
+termination: SIGTERM, process exited at 2026-10-12T23:23:07-07:00
+
+NOTE: this record was committed as a WIP preservation commit. Absolute local paths were replaced ("~", "<scratchpad>");
+nothing else was changed. stdout.log is the empty (0-byte) original: r1 printed nothing before it was stopped.
+rf_metamorphic_harness.r1.py is the interrupted r1 source, byte-identical to the file that ran (digest above).
