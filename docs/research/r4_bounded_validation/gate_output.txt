@@ -1,0 +1,2 @@
+GATE PASS
+  info: layer B: 8 cases evaluated, 0 PRECONDITION_NOT_MET, production violations (a FINDING, not a gate failure): 0

@@ -1,0 +1,25 @@
+[B_PRIME_FUNCTION_LEVEL_NON_PRODUCTION_LENGTH]  production_path=False
+      n  target sign        bin-centre Hz expected                  production          span_limit_removed          span_limit_widened           span_limit_strict
+ 500000  224999    +           921595.904        P                      P SAT     P SAT MUTANT_SURVIVED_EQ    P SAT MUTANT_SURVIVED_EQ    P SAT MUTANT_SURVIVED_EQ
+ 500000  275001    -          -921595.904        P                      P SAT     P SAT MUTANT_SURVIVED_EQ    P SAT MUTANT_SURVIVED_EQ    P SAT MUTANT_SURVIVED_EQ
+ 500000  225000    +             921600.0        P                      P SAT     P SAT MUTANT_SURVIVED_EQ    P SAT MUTANT_SURVIVED_EQ       - VIO MUTANT_DETECTED
+ 500000  275000    -            -921600.0        P                      P SAT     P SAT MUTANT_SURVIVED_EQ    P SAT MUTANT_SURVIVED_EQ       - VIO MUTANT_DETECTED
+ 500000  225001    +           921604.096        -                      - SAT        P VIO MUTANT_DETECTED       P VIO MUTANT_DETECTED    - SAT MUTANT_SURVIVED_EQ
+ 500000  274999    -          -921604.096        -                      - SAT        P VIO MUTANT_DETECTED       P VIO MUTANT_DETECTED    - SAT MUTANT_SURVIVED_EQ
+ 524280  235925    +    921596.0936903945        P                      P SAT     P SAT MUTANT_SURVIVED_EQ    P SAT MUTANT_SURVIVED_EQ    P SAT MUTANT_SURVIVED_EQ
+ 524280  288355    -   -921596.0936903945        P                      P SAT     P SAT MUTANT_SURVIVED_EQ    P SAT MUTANT_SURVIVED_EQ    P SAT MUTANT_SURVIVED_EQ
+ 524280  235926    +    921600.0000000001        -                      - SAT        P VIO MUTANT_DETECTED       P VIO MUTANT_DETECTED    - SAT MUTANT_SURVIVED_EQ
+ 524280  288354    -   -921600.0000000001        -                      - SAT        P VIO MUTANT_DETECTED       P VIO MUTANT_DETECTED    - SAT MUTANT_SURVIVED_EQ
+ 524280  235927    +    921603.9063096056        -                      - SAT        P VIO MUTANT_DETECTED       P VIO MUTANT_DETECTED    - SAT MUTANT_SURVIVED_EQ
+ 524280  288353    -   -921603.9063096056        -                      - SAT        P VIO MUTANT_DETECTED       P VIO MUTANT_DETECTED    - SAT MUTANT_SURVIVED_EQ
+
+[B_FUNCTION_LEVEL_PRODUCTION_LENGTH]  production_path=False
+      n  target sign        bin-centre Hz expected                  production          span_limit_removed          span_limit_widened           span_limit_strict
+ 524288  235929    +         921597.65625        P                      P SAT     P SAT MUTANT_SURVIVED_EQ    P SAT MUTANT_SURVIVED_EQ    P SAT MUTANT_SURVIVED_EQ
+ 524288  288359    -        -921597.65625        P                      P SAT     P SAT MUTANT_SURVIVED_EQ    P SAT MUTANT_SURVIVED_EQ    P SAT MUTANT_SURVIVED_EQ
+ 524288  235930    +          921601.5625        -                      - SAT        P VIO MUTANT_DETECTED       P VIO MUTANT_DETECTED    - SAT MUTANT_SURVIVED_EQ
+ 524288  288358    -         -921601.5625        -                      - SAT        P VIO MUTANT_DETECTED       P VIO MUTANT_DETECTED    - SAT MUTANT_SURVIVED_EQ
+ 524288  235931    +         921605.46875        -                      - SAT        P VIO MUTANT_DETECTED       P VIO MUTANT_DETECTED    - SAT MUTANT_SURVIVED_EQ
+ 524288  288357    -        -921605.46875        -                      - SAT        P VIO MUTANT_DETECTED       P VIO MUTANT_DETECTED    - SAT MUTANT_SURVIVED_EQ
+ 524288  249037    +         972800.78125        -                      - SAT        P VIO MUTANT_DETECTED    - SAT MUTANT_SURVIVED_EQ    - SAT MUTANT_SURVIVED_EQ
+ 524288  275251    -        -972800.78125        -                      - SAT        P VIO MUTANT_DETECTED    - SAT MUTANT_SURVIVED_EQ    - SAT MUTANT_SURVIVED_EQ
