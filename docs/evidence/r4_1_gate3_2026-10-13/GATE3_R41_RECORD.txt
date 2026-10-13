@@ -1,0 +1,22 @@
+REPLACEMENT GATE 3 RECORD (local, disposable; r4.1 package)
+PACKAGE_SHA256: 2b2e3251b678a5e83735ee663176f7763482a6948a7d5cb57f244dac1142874a  (verified before extraction; SHA256SUMS clean and no bytecode after the run)
+SOURCE_COMMIT: 8d34de9ac0b1f4758cda3412b364582b4271ffe1
+PYTHON: 3.12.13 / numpy 2.5.1, PYTHON explicit, four thread limits = 1
+CONTROLS: 88 tests, 0 failures, exit 0 (includes the real-generator integration class)
+FIXTURES: 36/36 original hashes; index.json pin verified; holdout/ = exactly 37 regular files
+IDENTITY_AND_NAMESPACE: IDENTITY_AND_NAMESPACE_VERIFIED (1 fixture)
+LAYER_A: detector not involved; no computed bin exactly on boundary at 524288 and 524280, bin 225000 exactly on boundary at 500000
+LAYER_B: 1 fixture, 8 cases evaluated, 0 preconditions refused, 0 production violations (function-level, not production path)
+LAYER_B_PRIME: 12 cases, 0 production violations (function-level)
+MUTATION_ATTRIBUTION (B): removed detected 6 / equivalent 2; widened detected 4 / equivalent 4; strict equivalent 8   (B'): removed 6/6, widened 6/6, strict detected 2 / equivalent 10
+BOUNDARY_GATE: PASS (harness rc 0, gate rc 0; --limit 1 --boundary-only; no Phase B, no full run)
+TERMINAL_STATUS: DONE COMPUTATION_COMPLETED (written and fsynced before sealing)
+DISPOSITION (job_ok.disposition.txt, outside the sealed directory): COMPUTATION_COMPLETED YES / EVIDENCE_SEALED YES / JOB_ACCEPTED YES
+JOB_MANIFEST_SHA256: 2104894ce26198e66b45fa30b7ac7c528691bfe2d27be83d903ac18621675882 (19 entries; unchanged after all tamper controls)
+INDEPENDENT_VERIFICATION: verify_job.py PASS; separately implemented indep_inventory_check.py PASS (19/19 files, 37/37 fixture-directory files, no missing/extra)
+FAILED_PREFLIGHT (job_fail): FAILED, driver exit 10, sealed, COMPUTATION NO / SEALED YES / ACCEPTED NO
+TAMPER (disposable copies): missing index.json, modified index.json, unexpected holdout file, modified .npy, STATUS.txt appended after sealing -> all REFUSED by both verifiers; unmodified copy ACCEPTED
+DISPOSITION_CLASS: R4_1_PACKAGED_CUSTODY_VALIDATION_PASS (local custody validation only; no r4 scientific acceptance; no cross-host reproducibility; no 36-fixture run)
+f08d3f903bab9cc791264614d9536b23db1d5919707d68a1506cb172d19bc055  gate3_r41_driver.py
+e44a2a97621285b6fc2f8e89b88d201227d0e229e4f507bee5ed5f17f960e6f7  indep_inventory_check.py
+b9dfe1e85af38a581e35aa0f99cb0ea558d1db970840acab01dad38cc85fabea  tamper_controls.sh

@@ -1,0 +1,19 @@
+GATE 3 VALIDATION RECORD (local, disposable; frozen package untouched: sha256sum -c SHA256SUMS clean after run, no __pycache__)
+PACKAGE_SHA256: a7fd10b1c43dde66d60804c3f23209b4b37e7129abc99cd6dc4f3c6cba9efb7c (verified before extraction)
+PYTHON: 3.12.13 / numpy 2.5.1 (PYTHON set explicitly; four thread limits =1)
+CONTROLS: 68 tests, 0 failures, exit 0
+FIXTURE_REGENERATION: 36/36 expected hashes
+IDENTITY_AND_NAMESPACE: IDENTITY_AND_NAMESPACE_VERIFIED
+ONE_FIXTURE_RUN: harness --limit 1 --boundary-only rc=0; gate --boundary-only rc=0 (GATE PASS); Layer B 8 evaluated, 0 precondition refusals, 0 production violations; Layer B' 12 cases
+TERMINAL_STATUS (job_ok): DONE (written, fsynced)
+SEAL (job_ok): REFUSED by packaged seal_job.py: "fixture not in the sealed list index.json" -> job_ok is UNSEALED  ** DEFECT **
+FAILURE_PATH (job_fail): FAILED, exit 10, sealed, independently verified PASS (--failure-record)
+SEALED_DIAGNOSTIC (job_diag = copy of job_ok minus holdout/index.json): sealed, independent PASS (17 files, 36/36 fixtures)
+FIXTURE_TAMPER (job_tamper): 1 byte flipped; independent verifier FAIL, packaged verifier FAIL, manifest alone still VERIFIED
+POST_SEAL_APPEND (job_append): independent FAIL
+fe9a48a99cc7479fb8856e41068c452dc09202987fa025840304f0fe296e2a11  gate3_driver.py
+3f2c565d9304bcd847f9a6e95ca24211862ec9e9bb72e8bcc52f92c36653a0c8  indep_verify_job.py
+3aadea492f8aabcb6089c75aa847f0190ae6571dba9e640e4fd9f5cc812ff64c  $HOME/r4_package_build/build_package.py
+fefb020ea9d997defe87ff7f36e58398230fa939db487c36eb798780633a9f3a  $HOME/r4_package_build/make_record.py
+61a3900fe91afc49ccec864f6c3307fc7c3355e8b01509a53d78e0e126712943  $HOME/r4_package_build/neg_controls.py
+2054065aea04f2169bd9dfc264146903d2cfa09482ce70491e081b3c0b171e73  $HOME/r4_package_build/verify_package.py

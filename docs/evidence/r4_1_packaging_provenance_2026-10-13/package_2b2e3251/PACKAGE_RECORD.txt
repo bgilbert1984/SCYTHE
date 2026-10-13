@@ -1,0 +1,44 @@
+EXPERIMENT: SCYTHE_METAMORPHIC_RF_R4
+REVISION: r4.1 (replaces package a7fd10b1c43dde66d60804c3f23209b4b37e7129abc99cd6dc4f3c6cba9efb7c, which stays a historical failed artifact)
+STAGE: FROZEN_PACKAGE_PREPARATION
+SOURCE_COMMIT: 8d34de9ac0b1f4758cda3412b364582b4271ffe1
+SOURCE_CLOSURE: VERIFIED
+PACKAGE_SHA256: 2b2e3251b678a5e83735ee663176f7763482a6948a7d5cb57f244dac1142874a
+PACKAGE_CONTENTS: 29 files
+FIXTURE_HASH_MANIFEST: d42892ec15932b1883e8c59391625e1cdcd7d2171f588a275521b2b0d0b63e41  (36 fixture hashes)
+GENERATED_ARTIFACT_PIN: a0c1ffc167d28f6b8e648bfafac115e59774b92a355ddf7fb82fa392a7d3ccdb  (pins holdout/index.json = f52adb1974dce642bc62bf748add6733036db1cbc7bcba482691a221ad88eca3; the directory must hold exactly 37 files)
+CLEAN_ARCHIVE_COMPARISON: PASS
+INDEPENDENT_EXTRACTION_VERIFICATION: PASS
+EXECUTION_AUTHORIZED: NO
+DEDIROCK_TRANSFER_AUTHORIZED: NO
+
+ARCHIVE: scythe_r4_1_pkg_8d34de9ac0b1.tar.gz   (deterministic: two independent builds are byte-identical)
+SOURCE: the complete commit above (merged to main as PR #166, disposition R4_1_FIXTURE_CUSTODY_CORRECTION_ACCEPTED). The package was built only from "git archive" / "git show" of that commit and never from a working tree.
+CONTENTS: the r4 harness; the production modules its execution imports (source closure from tools/r4_job/PACKAGE_FILES.txt); the bounded controls; the job runner
+  (run_job.sh, seal_job.py, the separately implemented verify_job.py, gate_results.py, generated_artifacts.sha256, CUSTODY.md); the fixture generator and frozen specification (members of the equivalence-package tarball blob at the same commit);
+  the 36-line fixture hash manifest; the r4 design, implementation and r4.1 custody notes; SHA256SUMS (inventory with content digests); PACKAGE_INVENTORY.json (per-file provenance);
+  PACKAGE_IDENTITY.txt. Raw r3 results are NOT included (no declared dependency on them).
+
+VERIFICATION (18 of 18 checks passed; verification_output.txt):
+  archive digest; safe extraction into a fresh directory; extracted file set == inventory; sha256sum -c; inventory digests; clean-archive comparison of every file
+  against BOTH "git show" and an independent "git archive" extraction (26 files compared; the 3 generated files are excluded); r4.1 custody completeness (verify_job.py and the pin present; the pin equals the digest of the frozen index and names only index.json; 36 fixture hashes none naming the index; identity records the pin and revision); source closure resolved in an isolated
+  interpreter (-I -B) with only the package on the path (11 repository-local modules, all inside the package; third-party: numpy, plus the venv's _distutils_hack shim,
+  which is not a dependency); every .py compiles and every .sh passes bash -n; no caches, links, oversize files, absolute local paths, credential patterns or operator identities.
+VERIFIER NEGATIVE CONTROLS (negative_controls_output.txt): 11 deliberately damaged packages (byte-tampered with and without refreshed manifests; closure module removed;
+  undeclared file; absolute path; bytecode cache; credential pattern; plus the four r4.1 cases) are all REJECTED through named checks; 0 accepted. Four cases are specific to r4.1 (verifier removed; wrong index pin; sealer tampered; index pin removed). Every case is rejected by a named check, not by a crash.
+
+DEPENDENCIES (what the package needs from its host; found by this verification, not hidden):
+  numpy (imports verified with Python 3.12.13, numpy 2.5.1; the earlier r3 runs used numpy 2.5.1 and 2.5.3). Only these interpreters have been used; other versions are untested.
+  bash and GNU coreutils (sha256sum, nproc, df, uname, sync, mkdir, cp) used by run_job.sh.
+  OBSERVATION (unchanged from the first package): run_job.sh defaults its interpreter to $HOME/SCYTHE/.venv/bin/python when PYTHON is unset, a host-specific path. Gate 3 must set PYTHON explicitly; the package carries no interpreter.
+  No missing or unexpected repository dependency was found.
+
+BUILD TOOLS (outside the package; digests recorded):
+  build_package.py b78aee2ed803b357b8e091664b45584c7568e67053d9f1656d2f169f74af0ef8
+  verify_package.py dae1bfd5c517a28e9fd23705ba5575884e35ce1ba5234d4efe76ff2e88244371
+  neg_controls.py 3c09c6dcff396f9d1b7f48447d20850d5cb032fbf88216c8a838a4527f206c41
+  make_record.py 87ac5a36e080e1f83b035d4fa29cda007c3db08deb06ac0a54eca47af2a36299
+
+LIMITS: this establishes artifact integrity and the completeness of the source closure. It does not establish that the r4 experiment passes, that the boundary relation holds across the
+  36 fixtures, or that two environments agree. The packaged unit controls (which include the real-generator integration test) and the runner were NOT executed here; only imports and compilation were exercised.
+  The replacement Gate 3, the full run, cross-host replay and any Dedirock transfer each need their own authorization. The external build tools are not yet in a reviewed source record.
