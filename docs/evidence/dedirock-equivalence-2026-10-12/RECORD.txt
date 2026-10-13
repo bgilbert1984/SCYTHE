@@ -49,3 +49,19 @@ PROVENANCE
   Dedirock files originate from ~/dedirock_equiv_run_20261012/ on dedirock-919498765
   (fresh directory; ~/SCYTHE was not modified). Local files from the same package.
   Raw fixtures (.npy) are deterministically regenerable and are not stored here.
+
+AMENDMENT 2026-10-12 (comparator completeness; historical results unchanged)
+  Found by the negative control developed for the alternate-FFT evidence (PR #160): the original
+  compare_hosts.py compared candidate_count but not the candidate list length, so a dropped
+  candidate with an unchanged count was not rejected. Fixed here:
+    1. each input is checked for internal coherence first (len(candidates) == candidate_count on
+       BOTH compared files); a violation prints CANDIDATE_COUNT_MISMATCH and exits 2;
+    2. the two sides' candidate list lengths are compared explicitly.
+  The original comparator is retained unchanged as compare_hosts.original.py.
+  Positive comparison re-run with the amended comparator: output identical to the original
+  (comparison_output_amended.txt; comparison_output.txt is preserved). Results files unchanged.
+  Negative control (comparator_negative_control.py, 8 mutations; all apply to this schema since the
+  results come from the same runner): amended comparator PASS, 8/8 rejected
+  (negative_control_output.txt). Original comparator on the same controls: FAIL on
+  "candidate dropped" only (negative_control_output_original_comparator.txt), which documents the gap.
+  The conclusion above is unaffected: the full per_fixture structures were already exactly equal.

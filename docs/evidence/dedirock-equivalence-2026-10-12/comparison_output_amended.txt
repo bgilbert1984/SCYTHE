@@ -1,0 +1,3 @@
+fixtures=36 candidates=52 max_freq_delta=0.0 max_excess_delta=0.0 max_match_error_delta=0.0 exact_equal=True
+unmatched_persistent_fixtures=0 max_tone_match_error_hz=0.2697
+MISMATCHES: none
