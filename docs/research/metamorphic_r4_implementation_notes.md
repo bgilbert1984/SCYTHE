@@ -14,9 +14,9 @@ Implements the protocol frozen in `metamorphic_r4_span_boundary_design.md` (PR #
 | `tools/rf_metamorphic_harness.py` | revision **r4**: the r3 harness (relations, durable output, identity/namespace, keyed matching, cardinality guard, resource caps) plus the span-boundary protocol |
 | `test_rf_metamorphic_r4_controls.py` | 18 bounded controls: oracle, attribution gate, credit rules, preconditions, layer separation |
 | `test_rf_metamorphic_r4_production_path.py` | 8 tests through the real sequencer entry point (see §3) |
-| `test_rf_metamorphic_r4_job.py` | 9 evidence-custody tests for the job runner (sealing order) |
+| `test_rf_metamorphic_r4_job.py` | 25 evidence-custody tests: sealing order, terminal DONE/FAILED, fixture custody, and behavioural runs of the real `run_job.sh` |
 | `test_rf_metamorphic_controls.py` | the r3 controls (17), unchanged, still passing against r4 |
-| `tools/r4_job/{run_job.sh,seal_job.py,gate_results.py,PACKAGE_FILES.txt}` | runner with corrected sealing order, fail-closed sealer, acceptance gate, package source closure |
+| `tools/r4_job/{run_job.sh,seal_job.py,gate_results.py,CUSTODY.md,PACKAGE_FILES.txt}` | runner (terminal DONE/FAILED, seal last), fail-closed sealer with fixture custody, acceptance gate, custody documentation, package source closure |
 | `docs/research/r4_bounded_validation/` | outputs of the one-fixture bounded validation (non-evidentiary) |
 
 The r3 harness lineage: the r3 source is preserved in the merged r3 evidence package (`package/rf_metamorphic_harness.r3.py`, PR #163).
@@ -43,9 +43,13 @@ stored verdict and credit from the stored observations and rejects a detection c
 transformations, integer-modulo phase ramps, declared tolerances, cardinality guards, resource caps, durable temp+fsync+rename output with a checksummed manifest, and the
 floor-once vectorised one-repeat check.
 
-**E. Evidence custody.** `run_job.sh` writes the terminal status record, then exit codes, then **seals last** with `seal_job.py`, and writes nothing afterwards (the r3 defect was
-`STATUS_LOG_APPEND_AFTER_HASH`). `seal_job.py` refuses to seal without a terminal `DONE`/`FAILED` record and refuses to overwrite a manifest; every failure path also seals a
-terminal record. The control count in the status line is read from the unittest output, not hard-coded. Nine tests, including a static ordering check of the script.
+**E. Evidence custody** (see `tools/r4_job/CUSTODY.md`). `run_job.sh` records exit codes, writes the terminal status record, **seals last** with `seal_job.py`, and writes nothing afterwards (the r3 defect was
+`STATUS_LOG_APPEND_AFTER_HASH`). The terminal record is **`DONE` only if both the harness and its gate succeeded; otherwise `FAILED`, with both return codes preserved** (review correction A).
+`seal_job.py` refuses to seal without a terminal record and refuses to overwrite a manifest; every failure path also seals a terminal record. The fixture bytes (`holdout/`, ~1.2 GB) are not hashed into the manifest:
+the fixture hash **list** is sealed, the actual files are **re-verified against it at seal time** (the sealer refuses on any mismatch) and **again at independent verification**, where absent bytes are the explicit
+`NOT_PRESENT_NOT_REVERIFIED` and `--require-fixtures` makes that a failure (review correction B). Counts in status lines are read from the data, not hard-coded. 25 tests, including behavioural tests that run the real
+`run_job.sh` with a stub interpreter for success, a failed full run, a failed full gate, both failing, a failed smoke, a failed smoke gate, failed controls and failed fixture generation, and mutation tests showing that a
+fixture changed, deleted or added after sealing cannot pass verification.
 
 ## 3. Production-path validation
 
