@@ -1,0 +1,4 @@
+RETENTION (measure_persistence) is given a feature frequency; it does not apply the usable-span predicate (only |f| <= fs/2):
+  bin 235929 f=921597.65625 Hz  in_span=True   ADMITTED by detect_candidates: True   retention measurement: qualifying=8 persistent=True
+  bin 235930 f=921601.56250 Hz  in_span=False  ADMITTED by detect_candidates: False  retention measurement: qualifying=8 persistent=True
+  bin 249037 f=972800.78125 Hz  in_span=False  ADMITTED by detect_candidates: False  retention measurement: qualifying=8 persistent=True
