@@ -1,0 +1,10 @@
+Docstring-only amendment to rf_symbol_clock_v2.py after the frozen evaluation (review of PR #162).
+  sha256 as evaluated (commit 6fbd77d, matches frozen_digests_pre_run.txt): 5bd473bd19760e8891cc681604ef03b42b38131cd6cd787240667fd942ef5159
+  sha256 after amendment:                                                  36873ba29c73fc66f818d595a4e7decd1415801d03c4296d78b7098c5da0fd45
+  Check: ast.dump() of both versions with module/function/class docstrings stripped -> identical (True).
+  Executable code, constants (including OBSERVED_SYNTHETIC and DECISION_THRESHOLD = 5.0) and behaviour are unchanged.
+  Edits: (1) the categorical statement that a slope "can no longer be the peak" is replaced by
+  "Detrending reduces the observed slope-driven excess under the tested conditions; residual lower-edge
+  concentration remains and is not established to be eliminated."  (2) the development evidence is labelled
+  as development evidence (seeds 0-99; threshold development-informed).  (3) a pointer to the frozen holdout
+  evidence is added (largest v2 noise statistic 3.43 vs 3.30 in development; weak-signal sensitivity not established).

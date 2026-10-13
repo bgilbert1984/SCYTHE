@@ -18,16 +18,22 @@ its own local median from the slope alone.
 
 v2 divides the whole search band by a wide running median first (edge-replicated),
 chooses the peak on that ratio, and reports ``max(ratio) / median(ratio)`` with the
-peak neighbourhood excluded from the denominator.  A slope is removed before the
-peak is chosen, so it can no longer be the peak.
+peak neighbourhood excluded from the denominator.  Detrending reduces the observed
+slope-driven excess under the tested conditions; residual lower-edge concentration
+remains and is not established to be eliminated.
 
-Evidence (synthetic only; ``tools/rf_symbol_clock_normalization_study.py``)
+Development evidence (synthetic only; ``tools/rf_symbol_clock_normalization_study.py``;
+seeds 0-99; the threshold below is development-informed)
 --------------------------------------------------------------------------
 Noise-only, production channelizer, raised-edge / Gaussian / brick-wall masks at
 30-100 kHz, 60 seeds per cell: no v2 statistic above 3.30.  Raised-cosine QPSK at
 50 / 100 / 200 kBd: no v2 statistic below 23.8.  v1 crossed its threshold on every
 raised-edge trial at 30-50 kHz, on every Gaussian trial at 30-60 kHz (statistic up
 to 25), and on part of the brick-wall 30-40 kHz cells.
+
+Frozen holdout evidence (seeds >= 1000): docs/evidence/symbol-clock-v2-frozen-eval-2026-10-12/.
+The largest v2 noise statistic there was 3.43 (the development maximum above is 3.30), and
+weak-signal sensitivity was not established because the channelizer refused those inputs.
 
 What it does not establish
 --------------------------

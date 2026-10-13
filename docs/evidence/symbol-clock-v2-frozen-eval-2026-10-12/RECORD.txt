@@ -113,3 +113,12 @@ REDACTION NOTE: in attempt1_interrupted/ps_t0.txt, attempt1_interrupted/ATTEMPT1
 only absolute local paths were replaced (home directory -> "~", session scratchpad -> "<scratchpad>"). No other
 content was changed. Originals are retained outside the repository. All other files are verbatim captures,
 including trailing whitespace, and the frozen runner is byte-identical to the digest above.
+
+AMENDMENT (review of PR #162)
+  1. Execution logs: frozen_full_attempt2.log and attempt1_interrupted/attempt1_stdout.log were present in the
+     original SHA256SUMS but were NOT in the first commit: the repository's .gitignore rule `*.log` silently
+     excluded them. They are the original, unmodified captures and are now committed with `git add -f`. No log was
+     recreated. SHA256SUMS is unchanged for them and now verifies in a clean checkout.
+  2. Documentation: rf_symbol_clock_v2.py docstring corrected (see docstring_edit_check.txt). The evaluated
+     digest (5bd473bd...) is retained in frozen_digests_pre_run.txt; the post-amendment digest is 36873ba2... .
+     Executable code is AST-identical.
