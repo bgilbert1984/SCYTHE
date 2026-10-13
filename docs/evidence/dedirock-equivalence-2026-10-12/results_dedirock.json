@@ -1,0 +1,899 @@
+{
+  "environment": {
+    "python": "3.12.14 (main, Aug 13 2026, 00:00:00) [GCC 11.5.0 20240719 (Red Hat 11.5.0-14)]",
+    "numpy": "2.5.3",
+    "fft_backend": "numpy.fft",
+    "fft_pocketfft": true
+  },
+  "code": {
+    "sequencer_revision": "seq-7.2-1-hann",
+    "sequencer_sha256": "e1e82172cc2e56f05709d60b9586b4c675890f5472824eaaa90f6a461b211b82",
+    "retention_sha256": "fea25501c2584dbe04e836246a9907c358c371e660458925649741592145e9db"
+  },
+  "tolerances": {
+    "freq_hz": 1e-09,
+    "match_hz": 1.0
+  },
+  "per_fixture": [
+    {
+      "name": "HA_s-f0.05a0.075",
+      "fixture_sha256_16": "cbb6fa6466123518",
+      "candidate_count": 1,
+      "matched_tones": [
+        0
+      ],
+      "unmatched_count": 0,
+      "candidates": [
+        {
+          "peak_bin": 498688,
+          "baseband_hz": -100000.2148164965,
+          "excess_db": 31.421866369767525,
+          "qualifying_repeats": 8,
+          "persistent": true,
+          "matched_tone": 0,
+          "match_error_hz": 0.019503996503772214
+        }
+      ]
+    },
+    {
+      "name": "HA_s-f0.05a0.15",
+      "fixture_sha256_16": "d3eb665e7de7bec2",
+      "candidate_count": 1,
+      "matched_tones": [
+        0
+      ],
+      "unmatched_count": 0,
+      "candidates": [
+        {
+          "peak_bin": 498688,
+          "baseband_hz": -100000.2052694465,
+          "excess_db": 37.44163614710474,
+          "qualifying_repeats": 8,
+          "persistent": true,
+          "matched_tone": 0,
+          "match_error_hz": 0.009956946494639851
+        }
+      ]
+    },
+    {
+      "name": "HA_s-f0.15a0.075",
+      "fixture_sha256_16": "18b5a71de26e97c5",
+      "candidate_count": 1,
+      "matched_tones": [
+        0
+      ],
+      "unmatched_count": 0,
+      "candidates": [
+        {
+          "peak_bin": 498688,
+          "baseband_hz": -100000.63695514199,
+          "excess_db": 31.272190199475197,
+          "qualifying_repeats": 8,
+          "persistent": true,
+          "matched_tone": 0,
+          "match_error_hz": 0.05101764199207537
+        }
+      ]
+    },
+    {
+      "name": "HA_s-f0.15a0.15",
+      "fixture_sha256_16": "4736b26f516c3b14",
+      "candidate_count": 1,
+      "matched_tones": [
+        0
+      ],
+      "unmatched_count": 0,
+      "candidates": [
+        {
+          "peak_bin": 498688,
+          "baseband_hz": -100000.62390775906,
+          "excess_db": 37.251444084206746,
+          "qualifying_repeats": 8,
+          "persistent": true,
+          "matched_tone": 0,
+          "match_error_hz": 0.0379702590580564
+        }
+      ]
+    },
+    {
+      "name": "HA_s-f0.25a0.075",
+      "fixture_sha256_16": "9c221f12c0e003b7",
+      "candidate_count": 1,
+      "matched_tones": [
+        0
+      ],
+      "unmatched_count": 0,
+      "candidates": [
+        {
+          "peak_bin": 498688,
+          "baseband_hz": -100000.98057085347,
+          "excess_db": 31.33409917288795,
+          "qualifying_repeats": 8,
+          "persistent": true,
+          "matched_tone": 0,
+          "match_error_hz": 0.00400835346954409
+        }
+      ]
+    },
+    {
+      "name": "HA_s-f0.25a0.15",
+      "fixture_sha256_16": "a75f961d27c58abd",
+      "candidate_count": 1,
+      "matched_tones": [
+        0
+      ],
+      "unmatched_count": 0,
+      "candidates": [
+        {
+          "peak_bin": 498688,
+          "baseband_hz": -100001.04940358574,
+          "excess_db": 37.125368989564045,
+          "qualifying_repeats": 8,
+          "persistent": true,
+          "matched_tone": 0,
+          "match_error_hz": 0.07284108574094716
+        }
+      ]
+    },
+    {
+      "name": "HA_s-f0.35a0.075",
+      "fixture_sha256_16": "6157564f12212705",
+      "candidate_count": 1,
+      "matched_tones": [
+        0
+      ],
+      "unmatched_count": 0,
+      "candidates": [
+        {
+          "peak_bin": 498688,
+          "baseband_hz": -100001.43930960576,
+          "excess_db": 30.705094735199467,
+          "qualifying_repeats": 8,
+          "persistent": true,
+          "matched_tone": 0,
+          "match_error_hz": 0.07212210576108191
+        }
+      ]
+    },
+    {
+      "name": "HA_s-f0.35a0.15",
+      "fixture_sha256_16": "bd7cf29127007f9d",
+      "candidate_count": 1,
+      "matched_tones": [
+        0
+      ],
+      "unmatched_count": 0,
+      "candidates": [
+        {
+          "peak_bin": 498688,
+          "baseband_hz": -100001.44004281332,
+          "excess_db": 36.74520556233173,
+          "qualifying_repeats": 8,
+          "persistent": true,
+          "matched_tone": 0,
+          "match_error_hz": 0.07285531332308892
+        }
+      ]
+    },
+    {
+      "name": "HA_s-f0.45a0.075",
+      "fixture_sha256_16": "bddff39fc25d8f61",
+      "candidate_count": 1,
+      "matched_tones": [
+        0
+      ],
+      "unmatched_count": 0,
+      "candidates": [
+        {
+          "peak_bin": 498688,
+          "baseband_hz": -100001.79076953509,
+          "excess_db": 30.34071754038941,
+          "qualifying_repeats": 8,
+          "persistent": true,
+          "matched_tone": 0,
+          "match_error_hz": 0.0329570350877475
+        }
+      ]
+    },
+    {
+      "name": "HA_s-f0.45a0.15",
+      "fixture_sha256_16": "467806c163b98da0",
+      "candidate_count": 1,
+      "matched_tones": [
+        0
+      ],
+      "unmatched_count": 0,
+      "candidates": [
+        {
+          "peak_bin": 498688,
+          "baseband_hz": -100001.78921604651,
+          "excess_db": 36.33917270361171,
+          "qualifying_repeats": 8,
+          "persistent": true,
+          "matched_tone": 0,
+          "match_error_hz": 0.031403546512592584
+        }
+      ]
+    },
+    {
+      "name": "HA_s+f0.05a0.075",
+      "fixture_sha256_16": "e7dd31ab731ea1e9",
+      "candidate_count": 1,
+      "matched_tones": [
+        0
+      ],
+      "unmatched_count": 0,
+      "candidates": [
+        {
+          "peak_bin": 25600,
+          "baseband_hz": 100000.17675410265,
+          "excess_db": 31.544548992077832,
+          "qualifying_repeats": 8,
+          "persistent": true,
+          "matched_tone": 0,
+          "match_error_hz": 0.018558397350716405
+        }
+      ]
+    },
+    {
+      "name": "HA_s+f0.05a0.15",
+      "fixture_sha256_16": "83917c6ed9239c44",
+      "candidate_count": 1,
+      "matched_tones": [
+        0
+      ],
+      "unmatched_count": 0,
+      "candidates": [
+        {
+          "peak_bin": 25600,
+          "baseband_hz": 100000.21280692988,
+          "excess_db": 37.52068058837195,
+          "qualifying_repeats": 8,
+          "persistent": true,
+          "matched_tone": 0,
+          "match_error_hz": 0.017494429877842776
+        }
+      ]
+    },
+    {
+      "name": "HA_s+f0.15a0.075",
+      "fixture_sha256_16": "f59690ccfdc9448e",
+      "candidate_count": 1,
+      "matched_tones": [
+        0
+      ],
+      "unmatched_count": 0,
+      "candidates": [
+        {
+          "peak_bin": 25600,
+          "baseband_hz": 100000.64689808372,
+          "excess_db": 31.424396472257733,
+          "qualifying_repeats": 8,
+          "persistent": true,
+          "matched_tone": 0,
+          "match_error_hz": 0.06096058372349944
+        }
+      ]
+    },
+    {
+      "name": "HA_s+f0.15a0.15",
+      "fixture_sha256_16": "994999c2ebe0e1f8",
+      "candidate_count": 1,
+      "matched_tones": [
+        0
+      ],
+      "unmatched_count": 0,
+      "candidates": [
+        {
+          "peak_bin": 25600,
+          "baseband_hz": 100000.6431920541,
+          "excess_db": 37.316215795302625,
+          "qualifying_repeats": 8,
+          "persistent": true,
+          "matched_tone": 0,
+          "match_error_hz": 0.05725455410720315
+        }
+      ]
+    },
+    {
+      "name": "HA_s+f0.25a0.075",
+      "fixture_sha256_16": "f51efeff32b231a6",
+      "candidate_count": 1,
+      "matched_tones": [
+        0
+      ],
+      "unmatched_count": 0,
+      "candidates": [
+        {
+          "peak_bin": 25600,
+          "baseband_hz": 100001.07918070514,
+          "excess_db": 30.947566195554824,
+          "qualifying_repeats": 8,
+          "persistent": true,
+          "matched_tone": 0,
+          "match_error_hz": 0.10261820514278952
+        }
+      ]
+    },
+    {
+      "name": "HA_s+f0.25a0.15",
+      "fixture_sha256_16": "7e0f30d5b31cc949",
+      "candidate_count": 1,
+      "matched_tones": [
+        0
+      ],
+      "unmatched_count": 0,
+      "candidates": [
+        {
+          "peak_bin": 25600,
+          "baseband_hz": 100001.0587472813,
+          "excess_db": 36.975844226947565,
+          "qualifying_repeats": 8,
+          "persistent": true,
+          "matched_tone": 0,
+          "match_error_hz": 0.08218478130584117
+        }
+      ]
+    },
+    {
+      "name": "HA_s+f0.35a0.075",
+      "fixture_sha256_16": "148b792efb019dd1",
+      "candidate_count": 1,
+      "matched_tones": [
+        0
+      ],
+      "unmatched_count": 0,
+      "candidates": [
+        {
+          "peak_bin": 25600,
+          "baseband_hz": 100001.48882593212,
+          "excess_db": 30.800610262558568,
+          "qualifying_repeats": 8,
+          "persistent": true,
+          "matched_tone": 0,
+          "match_error_hz": 0.12163843211601488
+        }
+      ]
+    },
+    {
+      "name": "HA_s+f0.35a0.15",
+      "fixture_sha256_16": "53bd49b84a9800da",
+      "candidate_count": 1,
+      "matched_tones": [
+        0
+      ],
+      "unmatched_count": 0,
+      "candidates": [
+        {
+          "peak_bin": 25600,
+          "baseband_hz": 100001.43114373939,
+          "excess_db": 36.69169426884214,
+          "qualifying_repeats": 8,
+          "persistent": true,
+          "matched_tone": 0,
+          "match_error_hz": 0.06395623939170036
+        }
+      ]
+    },
+    {
+      "name": "HA_s+f0.45a0.075",
+      "fixture_sha256_16": "5d03192f3cff3d69",
+      "candidate_count": 1,
+      "matched_tones": [
+        0
+      ],
+      "unmatched_count": 0,
+      "candidates": [
+        {
+          "peak_bin": 25600,
+          "baseband_hz": 100001.84620204015,
+          "excess_db": 30.077340502517398,
+          "qualifying_repeats": 8,
+          "persistent": true,
+          "matched_tone": 0,
+          "match_error_hz": 0.08838954014936462
+        }
+      ]
+    },
+    {
+      "name": "HA_s+f0.45a0.15",
+      "fixture_sha256_16": "41acafd820f0d514",
+      "candidate_count": 1,
+      "matched_tones": [
+        0
+      ],
+      "unmatched_count": 0,
+      "candidates": [
+        {
+          "peak_bin": 25600,
+          "baseband_hz": 100001.77831511998,
+          "excess_db": 36.31895753780545,
+          "qualifying_repeats": 8,
+          "persistent": true,
+          "matched_tone": 0,
+          "match_error_hz": 0.020502619983744808
+        }
+      ]
+    },
+    {
+      "name": "HB_sep4r-9p0.79f0.15",
+      "fixture_sha256_16": "0561a3a4efd2300b",
+      "candidate_count": 2,
+      "matched_tones": [
+        0,
+        1
+      ],
+      "unmatched_count": 0,
+      "candidates": [
+        {
+          "peak_bin": 25600,
+          "baseband_hz": 100000.64682681023,
+          "excess_db": 33.83201632296427,
+          "qualifying_repeats": 8,
+          "persistent": true,
+          "matched_tone": 0,
+          "match_error_hz": 0.06088931023259647
+        },
+        {
+          "peak_bin": 25604,
+          "baseband_hz": 100016.26157602269,
+          "excess_db": 24.733494174375355,
+          "qualifying_repeats": 8,
+          "persistent": true,
+          "matched_tone": 1,
+          "match_error_hz": 0.050638522690860555
+        }
+      ]
+    },
+    {
+      "name": "HB_sep4r-9p0.79f0.35",
+      "fixture_sha256_16": "1fc5ad6ddaaa5f45",
+      "candidate_count": 2,
+      "matched_tones": [
+        0,
+        1
+      ],
+      "unmatched_count": 0,
+      "candidates": [
+        {
+          "peak_bin": 25600,
+          "baseband_hz": 100001.42392473317,
+          "excess_db": 33.19122398025898,
+          "qualifying_repeats": 8,
+          "persistent": true,
+          "matched_tone": 0,
+          "match_error_hz": 0.05673723317158874
+        },
+        {
+          "peak_bin": 25604,
+          "baseband_hz": 100016.9829934063,
+          "excess_db": 24.398368015366366,
+          "qualifying_repeats": 8,
+          "persistent": true,
+          "matched_tone": 1,
+          "match_error_hz": 0.009194093698170036
+        }
+      ]
+    },
+    {
+      "name": "HB_sep4r-9p3.14f0.15",
+      "fixture_sha256_16": "ae70b8c682d5d8f6",
+      "candidate_count": 2,
+      "matched_tones": [
+        0,
+        1
+      ],
+      "unmatched_count": 0,
+      "candidates": [
+        {
+          "peak_bin": 25600,
+          "baseband_hz": 100000.64363523522,
+          "excess_db": 33.82830975964011,
+          "qualifying_repeats": 8,
+          "persistent": true,
+          "matched_tone": 0,
+          "match_error_hz": 0.05769773521751631
+        },
+        {
+          "peak_bin": 25604,
+          "baseband_hz": 100016.20910385696,
+          "excess_db": 24.914864525343553,
+          "qualifying_repeats": 8,
+          "persistent": true,
+          "matched_tone": 1,
+          "match_error_hz": 0.0018336430366616696
+        }
+      ]
+    },
+    {
+      "name": "HB_sep4r-9p3.14f0.35",
+      "fixture_sha256_16": "dcd83622bd1a3954",
+      "candidate_count": 2,
+      "matched_tones": [
+        0,
+        1
+      ],
+      "unmatched_count": 0,
+      "candidates": [
+        {
+          "peak_bin": 25600,
+          "baseband_hz": 100001.42388057681,
+          "excess_db": 33.239420578216375,
+          "qualifying_repeats": 8,
+          "persistent": true,
+          "matched_tone": 0,
+          "match_error_hz": 0.056693076810915954
+        },
+        {
+          "peak_bin": 25604,
+          "baseband_hz": 100017.06919604508,
+          "excess_db": 23.942822882983513,
+          "qualifying_repeats": 8,
+          "persistent": true,
+          "matched_tone": 1,
+          "match_error_hz": 0.07700854507857002
+        }
+      ]
+    },
+    {
+      "name": "HB_sep4r-15p0.79f0.15",
+      "fixture_sha256_16": "00b045672bbaefd4",
+      "candidate_count": 2,
+      "matched_tones": [
+        0,
+        1
+      ],
+      "unmatched_count": 0,
+      "candidates": [
+        {
+          "peak_bin": 25600,
+          "baseband_hz": 100000.61546889553,
+          "excess_db": 33.86554928740026,
+          "qualifying_repeats": 8,
+          "persistent": true,
+          "matched_tone": 0,
+          "match_error_hz": 0.02953139552846551
+        },
+        {
+          "peak_bin": 25604,
+          "baseband_hz": 100016.39688640233,
+          "excess_db": 19.06593082631662,
+          "qualifying_repeats": 8,
+          "persistent": true,
+          "matched_tone": 1,
+          "match_error_hz": 0.18594890233362094
+        }
+      ]
+    },
+    {
+      "name": "HB_sep4r-15p0.79f0.35",
+      "fixture_sha256_16": "ae8e42115b5b3ad8",
+      "candidate_count": 2,
+      "matched_tones": [
+        0,
+        1
+      ],
+      "unmatched_count": 0,
+      "candidates": [
+        {
+          "peak_bin": 25600,
+          "baseband_hz": 100001.40850384565,
+          "excess_db": 33.31957706820597,
+          "qualifying_repeats": 8,
+          "persistent": true,
+          "matched_tone": 0,
+          "match_error_hz": 0.041316345654195175
+        },
+        {
+          "peak_bin": 25604,
+          "baseband_hz": 100017.13459572714,
+          "excess_db": 18.272378689185167,
+          "qualifying_repeats": 8,
+          "persistent": true,
+          "matched_tone": 1,
+          "match_error_hz": 0.14240822714054957
+        }
+      ]
+    },
+    {
+      "name": "HB_sep4r-15p3.14f0.15",
+      "fixture_sha256_16": "4545ea0391d7c7cf",
+      "candidate_count": 2,
+      "matched_tones": [
+        0,
+        1
+      ],
+      "unmatched_count": 0,
+      "candidates": [
+        {
+          "peak_bin": 25600,
+          "baseband_hz": 100000.59785503487,
+          "excess_db": 33.81863270849659,
+          "qualifying_repeats": 8,
+          "persistent": true,
+          "matched_tone": 0,
+          "match_error_hz": 0.01191753486637026
+        },
+        {
+          "peak_bin": 25604,
+          "baseband_hz": 100016.24919275225,
+          "excess_db": 18.468013803913863,
+          "qualifying_repeats": 8,
+          "persistent": true,
+          "matched_tone": 1,
+          "match_error_hz": 0.038255252249655314
+        }
+      ]
+    },
+    {
+      "name": "HB_sep4r-15p3.14f0.35",
+      "fixture_sha256_16": "fc2ec7a7dd9218d4",
+      "candidate_count": 2,
+      "matched_tones": [
+        0,
+        1
+      ],
+      "unmatched_count": 0,
+      "candidates": [
+        {
+          "peak_bin": 25600,
+          "baseband_hz": 100001.43107451905,
+          "excess_db": 33.250955690593386,
+          "qualifying_repeats": 8,
+          "persistent": true,
+          "matched_tone": 0,
+          "match_error_hz": 0.06388701904506888
+        },
+        {
+          "peak_bin": 25604,
+          "baseband_hz": 100017.17512415725,
+          "excess_db": 17.800114968008103,
+          "qualifying_repeats": 8,
+          "persistent": true,
+          "matched_tone": 1,
+          "match_error_hz": 0.18293665724922903
+        }
+      ]
+    },
+    {
+      "name": "HB_sep9r-9p0.79f0.15",
+      "fixture_sha256_16": "37a4695316d225a8",
+      "candidate_count": 2,
+      "matched_tones": [
+        0,
+        1
+      ],
+      "unmatched_count": 0,
+      "candidates": [
+        {
+          "peak_bin": 25600,
+          "baseband_hz": 100000.65084436194,
+          "excess_db": 33.78105545773978,
+          "qualifying_repeats": 8,
+          "persistent": true,
+          "matched_tone": 0,
+          "match_error_hz": 0.06490686193865258
+        },
+        {
+          "peak_bin": 25609,
+          "baseband_hz": 100035.81385881767,
+          "excess_db": 24.768331966168628,
+          "qualifying_repeats": 8,
+          "persistent": true,
+          "matched_tone": 1,
+          "match_error_hz": 0.07167131766618695
+        }
+      ]
+    },
+    {
+      "name": "HB_sep9r-9p0.79f0.35",
+      "fixture_sha256_16": "0a4b883dcece170f",
+      "candidate_count": 2,
+      "matched_tones": [
+        0,
+        1
+      ],
+      "unmatched_count": 0,
+      "candidates": [
+        {
+          "peak_bin": 25600,
+          "baseband_hz": 100001.42758843079,
+          "excess_db": 33.21190512374612,
+          "qualifying_repeats": 8,
+          "persistent": true,
+          "matched_tone": 0,
+          "match_error_hz": 0.06040093078627251
+        },
+        {
+          "peak_bin": 25609,
+          "baseband_hz": 100036.57333444175,
+          "excess_db": 24.362444447212127,
+          "qualifying_repeats": 8,
+          "persistent": true,
+          "matched_tone": 1,
+          "match_error_hz": 0.04989694175310433
+        }
+      ]
+    },
+    {
+      "name": "HB_sep9r-9p3.14f0.15",
+      "fixture_sha256_16": "67ae52853d3bb4bc",
+      "candidate_count": 2,
+      "matched_tones": [
+        0,
+        1
+      ],
+      "unmatched_count": 0,
+      "candidates": [
+        {
+          "peak_bin": 25600,
+          "baseband_hz": 100000.62491813768,
+          "excess_db": 33.7972717697473,
+          "qualifying_repeats": 8,
+          "persistent": true,
+          "matched_tone": 0,
+          "match_error_hz": 0.038980637677013874
+        },
+        {
+          "peak_bin": 25609,
+          "baseband_hz": 100035.74005138915,
+          "excess_db": 24.6095602008236,
+          "qualifying_repeats": 8,
+          "persistent": true,
+          "matched_tone": 1,
+          "match_error_hz": 0.002136110852006823
+        }
+      ]
+    },
+    {
+      "name": "HB_sep9r-9p3.14f0.35",
+      "fixture_sha256_16": "5d6bf591c1a1025e",
+      "candidate_count": 2,
+      "matched_tones": [
+        0,
+        1
+      ],
+      "unmatched_count": 0,
+      "candidates": [
+        {
+          "peak_bin": 25600,
+          "baseband_hz": 100001.40328282373,
+          "excess_db": 33.23559217630303,
+          "qualifying_repeats": 8,
+          "persistent": true,
+          "matched_tone": 0,
+          "match_error_hz": 0.036095323725021444
+        },
+        {
+          "peak_bin": 25609,
+          "baseband_hz": 100036.7005359319,
+          "excess_db": 24.291658499370175,
+          "qualifying_repeats": 8,
+          "persistent": true,
+          "matched_tone": 1,
+          "match_error_hz": 0.17709843190095853
+        }
+      ]
+    },
+    {
+      "name": "HB_sep9r-15p0.79f0.15",
+      "fixture_sha256_16": "fcdda9436faf5c45",
+      "candidate_count": 2,
+      "matched_tones": [
+        0,
+        1
+      ],
+      "unmatched_count": 0,
+      "candidates": [
+        {
+          "peak_bin": 25600,
+          "baseband_hz": 100000.57758297834,
+          "excess_db": 33.881448876436686,
+          "qualifying_repeats": 8,
+          "persistent": true,
+          "matched_tone": 0,
+          "match_error_hz": 0.008354521662113257
+        },
+        {
+          "peak_bin": 25609,
+          "baseband_hz": 100035.91520407924,
+          "excess_db": 18.72241092957393,
+          "qualifying_repeats": 8,
+          "persistent": true,
+          "matched_tone": 1,
+          "match_error_hz": 0.1730165792396292
+        }
+      ]
+    },
+    {
+      "name": "HB_sep9r-15p0.79f0.35",
+      "fixture_sha256_16": "1cc1632d388f4f05",
+      "candidate_count": 2,
+      "matched_tones": [
+        0,
+        1
+      ],
+      "unmatched_count": 0,
+      "candidates": [
+        {
+          "peak_bin": 25600,
+          "baseband_hz": 100001.44618645958,
+          "excess_db": 33.273250666995274,
+          "qualifying_repeats": 8,
+          "persistent": true,
+          "matched_tone": 0,
+          "match_error_hz": 0.07899895957962144
+        },
+        {
+          "peak_bin": 25609,
+          "baseband_hz": 100036.61066763832,
+          "excess_db": 18.49989018349256,
+          "qualifying_repeats": 8,
+          "persistent": true,
+          "matched_tone": 1,
+          "match_error_hz": 0.08723013832059223
+        }
+      ]
+    },
+    {
+      "name": "HB_sep9r-15p3.14f0.15",
+      "fixture_sha256_16": "ccab3eb1ac87b551",
+      "candidate_count": 2,
+      "matched_tones": [
+        0,
+        1
+      ],
+      "unmatched_count": 0,
+      "candidates": [
+        {
+          "peak_bin": 25600,
+          "baseband_hz": 100000.63924156575,
+          "excess_db": 33.885642999675184,
+          "qualifying_repeats": 8,
+          "persistent": true,
+          "matched_tone": 0,
+          "match_error_hz": 0.05330406574648805
+        },
+        {
+          "peak_bin": 25609,
+          "baseband_hz": 100035.65104014253,
+          "excess_db": 19.547343522231884,
+          "qualifying_repeats": 8,
+          "persistent": true,
+          "matched_tone": 1,
+          "match_error_hz": 0.09114735746697988
+        }
+      ]
+    },
+    {
+      "name": "HB_sep9r-15p3.14f0.35",
+      "fixture_sha256_16": "496f763d6c2d86dc",
+      "candidate_count": 2,
+      "matched_tones": [
+        0,
+        1
+      ],
+      "unmatched_count": 0,
+      "candidates": [
+        {
+          "peak_bin": 25600,
+          "baseband_hz": 100001.39740723008,
+          "excess_db": 33.237532437706015,
+          "qualifying_repeats": 8,
+          "persistent": true,
+          "matched_tone": 0,
+          "match_error_hz": 0.030219730077078566
+        },
+        {
+          "peak_bin": 25609,
+          "baseband_hz": 100036.79309656669,
+          "excess_db": 18.168594467263933,
+          "qualifying_repeats": 8,
+          "persistent": true,
+          "matched_tone": 1,
+          "match_error_hz": 0.2696590666892007
+        }
+      ]
+    }
+  ]
+}
