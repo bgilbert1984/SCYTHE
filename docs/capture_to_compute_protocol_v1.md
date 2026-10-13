@@ -31,17 +31,21 @@ Protected: capture integrity, provenance claims, the SDR control path, and the e
 |---|---|---|
 | T1 | Corruption or truncation in transit | sha256 + byte count verified at intake; truncation → `INCOMPLETE` |
 | T2 | Substitution of a different file under the same job id | job ids are bound to the manifest digest; a replay with different bytes is refused (`JOB_ID_REPLAY`) |
-| T3 | Modification of an input after verification | verified input is an immutable snapshot; the analysis identity cannot write to it (see §5.3) |
+| T3 | Modification of an input after verification | verified input lives in a verifier-owned, content-addressed directory exposed to the worker only through a read-only bind mount; the bytes are re-hashed before and after the run (§7). A privileged host administrator is outside this control (§2.1) |
 | T4 | Forged or altered provenance (wrong device, gain, time) | signed canonical manifest, key pinned out of band (§4.3). SHA256SUMS and SSH do not provide this |
-| T5 | Compute host compromised or buggy | it holds no key that can sign captures, no credential that can push to SCYTHE, and no SDR control path; its results are untrusted until re-verified |
-| T6 | Compromised analysis job escalating to upload/transfer credentials | transfer and analysis run as different identities; the analysis identity has no transfer credential |
+| T5 | Compute host compromised or buggy | it holds no key that can sign captures, no credential that can push to SCYTHE, and no SDR control path. Its results are verifiable *as returned artifacts* but are not thereby trusted computations (§9.1) |
+| T6 | Compromised analysis job escalating to upload/transfer credentials, or exfiltrating data | transfer and analysis run as different identities; the analysis identity has no transfer credential and is subject to OS-enforced egress denial (§8) |
 | T7 | Result presented as accepted evidence automatically | admission is a separate authority (§9); no code path from `RESULT_VERIFIED` to admission |
 | T8 | Silent environment drift changes results | result manifest records code commit, module hashes, package versions and executed FFT backend identity; a mismatch against the pin is a refusal |
 | T9 | Stale or replayed manifest | manifest carries a capture id and monotonic issue time; intake refuses duplicates with different digests |
 | T10 | Disk exhaustion or hostile file at intake | size cap declared in the manifest and enforced; intake directory is non-executable and not world-readable |
 
-Not defended in v1: a malicious SCYTHE host or stolen signing key (detect by out-of-band key
-fingerprint comparison and rotation, not by this protocol), physical access, and side channels.
+Not defended in v1: a malicious SCYTHE host or stolen signing key (handled by revocation and rotation, §4.4, not prevented by this protocol), physical access, and side channels.
+
+### 2.1 Recorded trust limitations
+
+- A read-only bind mount enforces the *worker* boundary. It is not a guarantee against modification by a privileged administrator or a compromised kernel on the compute host. Rehashing before and after a job detects such a change after the fact; it does not prevent it.
+- Hash verification shows that bytes arrived intact. It does not show that the computation that produced a result was honest (§9.1).
 
 ## 3. Roles, identities and filesystem boundaries
 
@@ -49,7 +53,8 @@ SCYTHE is the **capture authority**; the compute host is **compute only**.
 
 | Role | Host | Identity | May | May not |
 |---|---|---|---|---|
-| Capture authority | SCYTHE | `capture` | operate the SDR, write manifests, sign them, push approved packages | — |
+| Capture authority | SCYTHE | `capture` | operate the SDR, write manifests, request signatures, push approved packages | read the signing private key |
+| Signing service | SCYTHE | `scythe-sign` (dedicated) | read the Ed25519 private key and sign canonical manifests and authorization records | be readable by, or share a key with, the transfer or analysis identities |
 | Transfer receiver | compute | `scythe-intake` (dedicated, restricted) | accept uploads into `incoming/` via a forced-command SFTP subsystem or equivalent restricted service | read other directories, run commands, read results, write `verified/` |
 | Intake verifier | compute | `scythe-verify` | read `incoming/`, verify, publish to `verified/` | write signing keys, push anywhere |
 | Analysis worker | compute | `scythe-worker` (unprivileged) | read `verified/`, write only its own `jobs/<job_id>/out/` | write `verified/` or `incoming/`, open network connections, hold any transfer or signing credential |
@@ -59,7 +64,7 @@ Directory layout on the compute host (illustrative):
 
 ```
 incoming/<capture_id>/      scythe-intake: write-only; not executable; not readable by worker
-verified/<capture_id>/      scythe-verify: write; scythe-worker: read-only; immutable once published
+verified/sha256/<digest>/   scythe-verify: write; scythe-worker: read-only (bind mount); content-addressed
 jobs/<job_id>/out/          scythe-worker: write; sealed (read-only) at job end
 results/<job_id>/           scythe-verify: write (copy of sealed out + result manifest)
 audit/                      append-only transition records
@@ -75,13 +80,14 @@ SCYTHE. SCYTHE never exposes a service to the compute host.
 ```
 <capture_id>/
   capture.iq            raw bytes, exactly as recorded
-  capture.manifest.json canonical JSON (RFC 8785-style: sorted keys, no insignificant whitespace, UTF-8)
-  capture.manifest.sig  detached signature over the manifest bytes
+  capture.manifest.json manifest, stored as its RFC 8785 (JCS) canonical form
+  capture.manifest.sig  detached Ed25519 signature over the signing bytes (§4.3)
+  authorization.json    signed authorization record for this release (§4.5)
 ```
 
 ### 4.2 Required manifest fields
 
-A missing or empty required field is `FIELD_MISSING` and the package is refused.
+A missing or empty required field is `FIELD_MISSING` and the package is refused. Because JCS requires I-JSON, integers must lie within ±(2^53 − 1); a quantity that can exceed that (e.g. a byte count) is carried as a decimal string, and the schema states which fields are strings.
 
 | Field | Notes |
 |---|---|
@@ -97,21 +103,64 @@ A missing or empty required field is `FIELD_MISSING` and the package is refused.
 | `authorization_ref` | pointer to the decision authorizing this capture and its processing |
 | `max_bytes` | intake size cap |
 | `issued_utc`, `issuer` | manifest issue time and signing identity |
+| `signature_key` | `{key_id, algorithm: "Ed25519", fingerprint}` of the signing key (§4.4) |
+| `provenance` | per-field map: each field is `RECORDED_AT_ACQUISITION` or `IMPORTED_HISTORICAL` with its source (§10.1); `signed_at_acquisition` is a boolean and must be truthful |
 | `limits` | free-text statement of what the capture does not establish |
 
 Metadata must be recorded at acquisition time, not reconstructed later.
 
 ### 4.3 Integrity and authenticity are separate claims
 
-- **Integrity:** sha256 over the IQ and over the manifest, byte count equality. This detects
-  corruption and substitution *relative to the manifest*. A `SHA256SUMS` file proves nothing about who wrote it.
-- **Authenticity:** an Ed25519 signature over the canonical manifest, made by a capture-authority
-  key held on the SCYTHE host (not on the compute host). The verifying public key is pinned on the
-  compute host out of band (fingerprint compared by a human at provisioning and recorded).
-  SSH authenticates the *endpoint*; it does not vouch for the provenance claims in the manifest.
+- **Integrity:** sha256 over the IQ, and byte count equality. This detects corruption and
+  substitution *relative to the manifest*. A `SHA256SUMS` file proves nothing about who wrote it.
+- **Authenticity:** an Ed25519 signature made on SCYTHE by `scythe-sign`. SSH authenticates the
+  *endpoint*; it does not vouch for the provenance claims in the manifest.
+- **Signing bytes (exact):** `S = ASCII("scythe.capture-manifest.v1\n") || JCS(M)`, where `M` is the
+  manifest JSON object and `JCS(M)` is its UTF-8 encoding under RFC 8785 (JSON Canonicalization
+  Scheme) with the signature file excluded. The prefix is a domain separator so a manifest signature
+  cannot be replayed as any other signed object. The signature is `Ed25519(sk, S)`. The same
+  construction, with prefix `scythe.authorization.v1\n`, signs authorization records (§4.5). A
+  verifier recomputes `JCS(M)` from the parsed object and rejects a file whose bytes are not
+  already canonical, so there is exactly one byte string to verify.
 - Intake verifies the signature **before** trusting any manifest field, including `iq_sha256`.
-- Key compromise or rotation is handled by a new key fingerprint and a new pin; old captures
-  remain verifiable against the key fingerprint recorded with them.
+
+### 4.4 Signing-key custody, registry and rotation
+
+- A dedicated Ed25519 capture-manifest key exists on the SCYTHE acquisition host. The private key
+  never leaves that host and is readable only by `scythe-sign`, not by the transfer or analysis
+  identities, and not on the compute host at all.
+- Each signed manifest records `key_id`, algorithm and fingerprint (`SHA-256` of the raw public key).
+- The compute host pins public keys through a **key registry** provisioned over an independently
+  authenticated channel (fingerprint read and compared by a person at provisioning; the comparison is recorded).
+  Each registry entry carries `key_id`, algorithm, fingerprint, public key, `active_from`,
+  `retired_on` (optional) and `status` ∈ {`ACTIVE`, `RETIRED`, `REVOKED`}.
+- **Rotation** is an explicit, audited registry update with activation and retirement dates. Old
+  public keys are kept so historical manifests stay verifiable. A manifest signed with a key that
+  was not `ACTIVE` at `issued_utc`, or that is unknown, is refused (`KEY_UNKNOWN`).
+- **Revocation** is an explicit audited registry update. Manifests signed by a `REVOKED` key are
+  refused (`KEY_REVOKED`) unless an authorized reviewer re-signs them under a new key after review.
+  A suspected compromise triggers revocation first and investigation second.
+
+### 4.5 Authorization record
+
+`authorization_ref` is not a pointer to a document; it resolves to a signed, verifiable
+**authorization record** that binds exactly:
+
+| Field | Meaning |
+|---|---|
+| `capture_id`, `iq_sha256` | the specific capture and its digest |
+| `destination` | the compute host identity the release is approved for |
+| `purpose` | the approved use (e.g. `TRANSPORT_TEST`, `RETAINED_IQ_REANALYSIS`) |
+| `job_definition_sha256` | the exact analysis-job definition approved |
+| `approver`, `approved_utc`, `not_before`, `expires` | a named authorized reviewer and the validity window |
+| `key_id`, signature | signed with the same construction as §4.3 |
+
+A named authorized reviewer approves the release of that capture digest, to that destination, for
+that purpose, with that job definition. The system then enforces the authorization **mechanically
+at source release and again at destination intake**: any field that does not match the package,
+the destination or the job, or a record that is absent, expired, not yet valid, revoked or
+signed by an unknown key, yields `NOT_AUTHORIZED`. Human approval decides; the machine only
+refuses to proceed without a matching record.
 
 ## 5. State machine
 
@@ -129,7 +178,7 @@ is never partially processed.
 | `CAPTURED` | bytes and manifest written at acquisition | manifest, device banner, local sha256 |
 | `SOURCE_VERIFIED` | SCYTHE re-hashes the file, checks every required field, verifies its own signature | verification record |
 | `TRANSFER_STAGED` | package fully uploaded into `incoming/` | transfer log: source and destination sizes and times |
-| `INTAKE_VERIFIED` | signature valid, byte count and sha256 equal, fields present, id/digest not already bound to different bytes; snapshot published to `verified/` | intake record with computed digests |
+| `INTAKE_VERIFIED` | signature valid, byte count and sha256 equal, fields present, id/digest not already bound to different bytes; input published to the content-addressed `verified/` directory | intake record with computed digests |
 | `JOB_COMPLETED` | one-shot job exited and its output directory was sealed | job record: exit status, timings |
 | `RESULT_RETURNED` | SCYTHE pulled the result package | transfer log |
 | `RESULT_VERIFIED` | SCYTHE recomputed result hashes and checked the result manifest against the input digest and the pin | verification record |
@@ -144,18 +193,20 @@ into a periodic checkpoint that SCYTHE holds.
 | Code | Meaning |
 |---|---|
 | `MANIFEST_MISSING` | no manifest, or no signature |
-| `SIGNATURE_INVALID` | signature does not verify against the pinned key |
+| `SIGNATURE_INVALID` | signature does not verify, or the manifest bytes are not canonical JCS |
+| `KEY_UNKNOWN` | signing key absent from the registry or not `ACTIVE` at `issued_utc` |
+| `KEY_REVOKED` | signing key is `REVOKED` |
 | `FIELD_MISSING` | a required manifest field is absent or empty |
 | `HASH_MISMATCH` | computed sha256 differs from the manifest |
 | `INCOMPLETE` | byte count differs from `iq_bytes` or the upload did not finish |
 | `SIZE_EXCEEDED` | larger than `max_bytes` |
 | `JOB_ID_REPLAY` | `capture_id`/`job_id` already bound to a different digest |
-| `INPUT_NOT_IMMUTABLE` | snapshot could not be made read-only |
+| `INPUT_NOT_IMMUTABLE` | published input could not be exposed read-only, or its digest changed between the pre-run and post-run re-hash |
 | `PIN_MISMATCH` | code commit, module hashes or package versions differ from the pinned job definition |
 | `OUTPUT_ESCAPE` | worker output outside its job directory |
 | `RESULT_HASH_MISMATCH` | result files differ from the result manifest |
 | `RESULT_INPUT_MISMATCH` | result manifest names a different input digest |
-| `NOT_AUTHORIZED` | no valid `authorization_ref` for this capture and processing |
+| `NOT_AUTHORIZED` | authorization record absent, expired, not yet valid, revoked, unknown-key, or its capture digest, destination, purpose or job-definition digest does not match |
 
 A refusal is a recorded outcome, not an error to retry silently.
 
@@ -165,12 +216,15 @@ A refusal is a recorded outcome, not an error to retry silently.
 2. `SOURCE_VERIFIED` is recorded.
 3. SCYTHE pushes the package to `incoming/<capture_id>.partial/` as `scythe-intake` (forced-command SFTP or equivalent), then renames it to `incoming/<capture_id>/` only when complete, so a partial upload is never visible as a finished one.
 4. Intake verification (§5) runs as `scythe-verify`.
-5. On success the verifier publishes an **immutable snapshot** into `verified/<capture_id>/`.
-   Plain filesystem write permission is not a write-once guarantee, so publication must do all of:
-   copy (or hard-link) from a source the uploader can no longer write to; hash the *published* bytes
-   and compare with the manifest; make the published files non-writable for every identity
-   including the owner (read-only bind mount, immutable attribute, or equivalent); and record the
-   published inode/device and digest. Later upload attempts to the same `capture_id` cannot change what a job reads.
+5. On success the verifier publishes the input into a **verifier-owned, content-addressed
+   directory**, `verified/sha256/<iq_sha256>/`, which `scythe-intake` and `scythe-worker` cannot write.
+   The verifier re-hashes the *published* bytes and compares them with the manifest. The worker sees
+   the input only through a **read-only bind mount** into its sandbox, and has no write access to the
+   underlying storage. The same bytes are re-hashed immediately before and after the job. v1
+   deliberately does not rely on filesystem snapshots or immutable attributes (`chattr +i`), which add
+   filesystem-specific behavior and operational complexity. Because the directory is addressed by its
+   content hash, a later upload cannot change which bytes a given digest names. Limitation: this
+   enforces the worker boundary, not protection against privileged host modification (§2.1).
 6. A job's identity is `(job_id, input_sha256, job_definition_sha256)`. Re-using a `job_id`
    with different bytes or a different definition is `JOB_ID_REPLAY`.
 
@@ -182,7 +236,7 @@ The analysis worker runs a single job definition (pinned file, recorded by diges
 - code: a named commit and the sha256 of every module the job imports from SCYTHE, checked against the pin before the run (`PIN_MISMATCH` otherwise);
 - environment: Python and package versions recorded, including the **executed** FFT callable's module and function names (not the runner's self-reported `fft_backend`, which has been shown to be uninformative);
 - parameters: explicit, recorded, with the frozen tolerances and thresholds unchanged;
-- network off, no outbound credentials, no write access outside `jobs/<job_id>/out/`, bounded CPU/memory/time;
+- **OS-enforced egress denial** for the worker identity, e.g. a network namespace with no routable interface, or a default-drop firewall rule scoped to that uid; absence of credentials alone is not isolation. The configuration is part of the recorded job environment; no write access outside `jobs/<job_id>/out/`; bounded CPU/memory/time;
 - exits when done; no daemon, no retry loop.
 
 ### Result package
@@ -201,6 +255,15 @@ results/<job_id>/
 SCYTHE pulls `results/<job_id>/` read-only, then independently recomputes every output hash,
 checks `input_sha256` against its own `CAPTURED` record, and checks the pin fields. Only then is
 `RESULT_VERIFIED` recorded.
+
+### 9.1 Result integrity is not computational trust
+
+A verified hash shows the returned bytes are the bytes the compute host produced and that the
+result manifest is consistent. It does not show that a compromised or faulty compute host performed
+an honest calculation. A result is therefore verifiable *as an artifact*; whether it can be relied
+on as a calculation depends on further controls: re-running on a second host (as the Dedirock
+equivalence work did for the synthetic fixtures), independent reanalysis of a sample, and pinned
+environments. Until such a control has been applied to a given result, the result record says so.
 
 **Transfer success is not classification and not admission.** `RESULT_VERIFIED` means the result
 is authentic and intact, nothing more. Admission into the SCYTHE evidence store is a separate
@@ -229,28 +292,49 @@ transport testing. These tests exercise transport and custody only.
 | A8 | A required field removed (each field, in turn) | `FIELD_MISSING` |
 | A9 | Same `job_id`, different bytes | `JOB_ID_REPLAY` |
 | A10 | Worker attempts to modify the verified input | denied by the filesystem; input digest unchanged |
-| A11 | Worker attempts to write outside its output directory, or to open a network connection | denied |
+| A11 | Worker attempts to write outside its output directory, or to open a network connection | denied by the configured filesystem and egress controls |
 | A12 | Re-upload under the same `capture_id` after publication | does not change the input a job reads |
 | A13 | Job pin differs from the recorded pin | `PIN_MISMATCH` |
 | A14 | Result retrieved; result hashes recomputed | `RESULT_VERIFIED` |
 | A15 | Result file altered after the job | `RESULT_HASH_MISMATCH` |
 | A16 | Result manifest names a different input digest | `RESULT_INPUT_MISMATCH` |
 | A17 | Completed, verified job | **no** admission record created |
-| A18 | Compute host attempts any connection to the SCYTHE host or SDR | impossible (no credential, no route) |
+| A18 | Compute host attempts any connection to the SCYTHE host or SDR | refused: no credential and no configured route. This demonstrates the configured isolation; it does not prove connections are categorically impossible |
+| A19 | Authorization record absent, expired, revoked, or with a mismatched digest / destination / purpose / job definition | `NOT_AUTHORIZED` at source release and again at intake |
+| A20 | Manifest signed by an unknown, retired-before-issue, or revoked key | `KEY_UNKNOWN` / `KEY_REVOKED` |
+| A21 | Manifest bytes not in canonical JCS form (same content, different whitespace or key order) | `SIGNATURE_INVALID` |
+
+### 10.1 Historical provenance of the fixture
+
+The October 11 XTR capture **predates** this protocol and was not signed at acquisition. Its test
+manifest must say so. Fields taken from the recorded provenance (`MANIFEST.md`, the
+`<file>.iq.sha256` sidecar, the `.err` device banner, and the evidence commit `4ae886d`) are marked
+`IMPORTED_HISTORICAL` with that source; only fields genuinely produced at packaging time
+(`issued_utc`, `issuer`, `signature_key`, `authorization_ref`, `max_bytes`) are marked as such.
+`signed_at_acquisition` is `false`, and the signature attests only that the named issuer imported
+the recorded metadata at `issued_utc` and that the bytes match the recorded digest — **not** that
+the capture was signed or attested when it was made. A newly signed manifest must never imply otherwise.
 
 The first analysis is deliberately trivial and read-only — byte count, sha256 and a bounded
 spectrum summary — so a failure is attributable to transport, not to detector behaviour. Negative
 tests (A4–A9, A12, A15, A16) must be run against the verifier as a *control*, as the evidence comparators
 now are: a verifier that cannot be made to refuse has not been tested.
 
-## 11. Open questions for review before any authorization
+## 11. Design decisions and remaining questions
 
-1. Immutable publication mechanism on the compute host (read-only bind mount vs immutable attribute vs a snapshot-capable filesystem); this depends on what the host supports and who may administer it.
-2. Signing-key custody and rotation on SCYTHE, and how the fingerprint is conveyed out of band.
-3. Whether `authorization_ref` is checked mechanically (against a signed authorization list) or by a human at release.
+Resolved for v1 (design level):
+
+1. **Input immutability:** verifier-owned content-addressed directory, read-only bind mount into an unprivileged sandbox, re-hash before and after; no reliance on snapshots or `chattr +i`; privileged-host limitation recorded (§2.1, §7).
+2. **Signing keys:** dedicated Ed25519 key on SCYTHE, readable only by `scythe-sign`; `key_id`, algorithm and fingerprint in every manifest; audited key registry with activation/retirement dates; explicit revocation (§4.4).
+3. **Authorization:** human release approval plus mechanical verification at source release and at intake, against a signed record binding capture digest, destination, purpose and job definition (§4.5).
+
+Still open:
+
 4. Retention and deletion of verified inputs on the compute host (default: delete on instruction only, never on a timer).
-5. Size and rate limits, and whether the compute host's disk may hold more than one 245 MB capture at a time.
-6. Clock trust: manifest times are asserted by SCYTHE; whether the compute host should add its own receive time (it does, in the audit record) and how skew is flagged.
+5. Size and rate limits, and whether the compute host may hold more than one 245 MB capture at a time.
+6. Clock trust: manifest times are asserted by SCYTHE; the compute host adds its own receive time in the audit record; how skew is flagged.
+7. Who the authorized reviewers are, how they are enrolled, and how their keys are managed (the authorization key may be distinct from the capture-manifest key).
+8. Which second control (second host re-run, sampled independent reanalysis) is required before a returned result is treated as a trusted calculation (§9.1).
 
 ## 12. Authorization status
 
@@ -261,4 +345,5 @@ now are: a verifier that cannot be made to refuse has not been tested.
 | Accounts, keys, services or configuration on a compute host | **not authorized** |
 | Software installation on a compute host | **not authorized** |
 | Fixture-based tests in §10 | defined only; not run |
+| Signing keys, key registry, authorization records | design only; none created |
 | Automatic evidence admission | **prohibited by design** |
