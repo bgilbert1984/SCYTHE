@@ -166,7 +166,7 @@ esac
             for i in ("01", "02", "03"): fh.write(f"{hashlib.sha256(f'fixture {i}\n'.encode()).hexdigest()}  fx{i}.npy\n")
         with open(os.path.join(d, "SHA256SUMS"), "w") as fh:
             fh.write(f"{hashlib.sha256(b'{}\n').hexdigest()}  fixtures/synth_521_holdout_frozen.json\n")
-        stub = os.path.join(d, "fakepy"); 
+        stub = os.path.join(d, "fakepy")
         with open(stub, "w") as fh: fh.write(self.STUB)
         os.chmod(stub, 0o755)
         return d, stub
