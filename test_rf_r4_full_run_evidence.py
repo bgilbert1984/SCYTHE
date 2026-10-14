@@ -65,7 +65,7 @@ class FullRunEvidence(unittest.TestCase):
         def forge(d):
             p = pathlib.Path(d, EV, "job", "added.txt"); p.write_text("x"); row = f"job/added.txt | {sha(b'x')} | {sha(b'x')} | 0\n"
             self.forge_manifest(d, lambda b: b + row.encode())
-        self.refused(forge, "job file not listed by the job manifest")
+        self.refused(forge, "not listed by any original manifest")
 
     def test_reversal_with_the_wrong_prefix_fails_and_a_crash_has_its_own_marker(self):
         r = self.check(self.fresh(), "--original-prefix", "/home/nobody"); self.assertIn("REDACTION_TRANSFORM_REVERSAL: FAILED", r.stdout); self.assertEqual(r.returncode, 1)
@@ -122,7 +122,7 @@ class FullRunEvidence(unittest.TestCase):
         man = f"{EV}/REDACTION_MANIFEST.txt"
         self.refused(lambda d: self.forge_manifest(d, lambda b: b.replace(b"OMITTED | preflight/record_check_only_1/scythe_r4_1_pkg_8d34de9ac0b1.tar.gz | 2b2e", b"OMITTED | preflight/record_check_only_1/scythe_r4_1_pkg_8d34de9ac0b1.tar.gz | 0000", 1)), "records a different digest for the declared-omitted")
         self.refused(lambda d: self.forge_manifest(d, lambda b: b"\n".join(l for l in b.split(b"\n") if not l.startswith(b"OMITTED | preflight/record_check_only_1")) ), "unexplained reference")
-        self.refused(lambda d: self.forge_manifest(d, lambda b: b.replace(b"OMITTED | ", b"OMITTED | preflight/never_referenced.bin | " + b"1" * 64 + b" | invented\nOMITTED | ", 1)), "is not referenced by any original manifest")
+        self.refused(lambda d: self.forge_manifest(d, lambda b: b.replace(b"\nOMITTED | ", b"\nOMITTED | preflight/never_referenced.bin | " + b"1" * 64 + b" | invented\nOMITTED | ", 1)), "is not referenced by any original manifest")
 
     def test_a_committed_file_that_no_original_manifest_lists_is_refused(self):
         def forge(d, where):
