@@ -1,0 +1,1091 @@
+{
+ "base_candidates": 2,
+ "cases": [
+  {
+   "anchor_bin": 25600,
+   "anchor_excess_db": 33.885642999675184,
+   "attribution_ok": true,
+   "bin_centre_hz": "921597.65625",
+   "expected_bins": [
+    235929
+   ],
+   "judgments": {
+    "production": {
+     "credit": null,
+     "verdict": "RELATION_SATISFIED"
+    },
+    "span_limit_removed": {
+     "credit": "MUTANT_SURVIVED_EQUIVALENT_ON_GRID",
+     "verdict": "RELATION_VIOLATED"
+    },
+    "span_limit_strict": {
+     "credit": "MUTANT_SURVIVED_EQUIVALENT_ON_GRID",
+     "verdict": "RELATION_SATISFIED"
+    },
+    "span_limit_widened": {
+     "credit": "MUTANT_SURVIVED_EQUIVALENT_ON_GRID",
+     "verdict": "RELATION_VIOLATED"
+    }
+   },
+   "observed": {
+    "production": {
+     "bins": [
+      235929
+     ],
+     "n_candidates": 1,
+     "target_present": true
+    },
+    "span_limit_removed": {
+     "bins": [
+      235929,
+      235938
+     ],
+     "n_candidates": 2,
+     "target_present": true
+    },
+    "span_limit_strict": {
+     "bins": [
+      235929
+     ],
+     "n_candidates": 1,
+     "target_present": true
+    },
+    "span_limit_widened": {
+     "bins": [
+      235929,
+      235938
+     ],
+     "n_candidates": 2,
+     "target_present": true
+    }
+   },
+   "pair_ok": true,
+   "predicate_at_target": {
+    "production": true,
+    "span_limit_removed": true,
+    "span_limit_strict": true,
+    "span_limit_widened": true
+   },
+   "shift_bins": 210329,
+   "sign": "+",
+   "status": "EVALUATED",
+   "t0": 235929,
+   "target": 235929
+  },
+  {
+   "anchor_bin": 25600,
+   "anchor_excess_db": 33.885642999675184,
+   "attribution_ok": true,
+   "bin_centre_hz": "-921597.65625",
+   "expected_bins": [
+    288359,
+    288368
+   ],
+   "judgments": {
+    "production": {
+     "credit": null,
+     "verdict": "RELATION_SATISFIED"
+    },
+    "span_limit_removed": {
+     "credit": "MUTANT_SURVIVED_EQUIVALENT_ON_GRID",
+     "verdict": "RELATION_SATISFIED"
+    },
+    "span_limit_strict": {
+     "credit": "MUTANT_SURVIVED_EQUIVALENT_ON_GRID",
+     "verdict": "RELATION_SATISFIED"
+    },
+    "span_limit_widened": {
+     "credit": "MUTANT_SURVIVED_EQUIVALENT_ON_GRID",
+     "verdict": "RELATION_SATISFIED"
+    }
+   },
+   "observed": {
+    "production": {
+     "bins": [
+      288359,
+      288368
+     ],
+     "n_candidates": 2,
+     "target_present": true
+    },
+    "span_limit_removed": {
+     "bins": [
+      288359,
+      288368
+     ],
+     "n_candidates": 2,
+     "target_present": true
+    },
+    "span_limit_strict": {
+     "bins": [
+      288359,
+      288368
+     ],
+     "n_candidates": 2,
+     "target_present": true
+    },
+    "span_limit_widened": {
+     "bins": [
+      288359,
+      288368
+     ],
+     "n_candidates": 2,
+     "target_present": true
+    }
+   },
+   "pair_ok": true,
+   "predicate_at_target": {
+    "production": true,
+    "span_limit_removed": true,
+    "span_limit_strict": true,
+    "span_limit_widened": true
+   },
+   "shift_bins": 262759,
+   "sign": "-",
+   "status": "EVALUATED",
+   "t0": 235929,
+   "target": 288359
+  },
+  {
+   "anchor_bin": 25600,
+   "anchor_excess_db": 33.885642999675184,
+   "attribution_ok": true,
+   "bin_centre_hz": "921601.5625",
+   "expected_bins": [],
+   "judgments": {
+    "production": {
+     "credit": null,
+     "verdict": "RELATION_SATISFIED"
+    },
+    "span_limit_removed": {
+     "credit": "MUTANT_DETECTED",
+     "verdict": "RELATION_VIOLATED"
+    },
+    "span_limit_strict": {
+     "credit": "MUTANT_SURVIVED_EQUIVALENT_ON_GRID",
+     "verdict": "RELATION_SATISFIED"
+    },
+    "span_limit_widened": {
+     "credit": "MUTANT_DETECTED",
+     "verdict": "RELATION_VIOLATED"
+    }
+   },
+   "observed": {
+    "production": {
+     "bins": [],
+     "n_candidates": 0,
+     "target_present": false
+    },
+    "span_limit_removed": {
+     "bins": [
+      235930,
+      235939
+     ],
+     "n_candidates": 2,
+     "target_present": true
+    },
+    "span_limit_strict": {
+     "bins": [],
+     "n_candidates": 0,
+     "target_present": false
+    },
+    "span_limit_widened": {
+     "bins": [
+      235930,
+      235939
+     ],
+     "n_candidates": 2,
+     "target_present": true
+    }
+   },
+   "pair_ok": true,
+   "predicate_at_target": {
+    "production": false,
+    "span_limit_removed": true,
+    "span_limit_strict": false,
+    "span_limit_widened": true
+   },
+   "shift_bins": 210330,
+   "sign": "+",
+   "status": "EVALUATED",
+   "t0": 235930,
+   "target": 235930
+  },
+  {
+   "anchor_bin": 25600,
+   "anchor_excess_db": 33.885642999675184,
+   "attribution_ok": true,
+   "bin_centre_hz": "-921601.5625",
+   "expected_bins": [
+    288367
+   ],
+   "judgments": {
+    "production": {
+     "credit": null,
+     "verdict": "RELATION_SATISFIED"
+    },
+    "span_limit_removed": {
+     "credit": "MUTANT_DETECTED",
+     "verdict": "RELATION_VIOLATED"
+    },
+    "span_limit_strict": {
+     "credit": "MUTANT_SURVIVED_EQUIVALENT_ON_GRID",
+     "verdict": "RELATION_SATISFIED"
+    },
+    "span_limit_widened": {
+     "credit": "MUTANT_DETECTED",
+     "verdict": "RELATION_VIOLATED"
+    }
+   },
+   "observed": {
+    "production": {
+     "bins": [
+      288367
+     ],
+     "n_candidates": 1,
+     "target_present": false
+    },
+    "span_limit_removed": {
+     "bins": [
+      288358,
+      288367
+     ],
+     "n_candidates": 2,
+     "target_present": true
+    },
+    "span_limit_strict": {
+     "bins": [
+      288367
+     ],
+     "n_candidates": 1,
+     "target_present": false
+    },
+    "span_limit_widened": {
+     "bins": [
+      288358,
+      288367
+     ],
+     "n_candidates": 2,
+     "target_present": true
+    }
+   },
+   "pair_ok": true,
+   "predicate_at_target": {
+    "production": false,
+    "span_limit_removed": true,
+    "span_limit_strict": false,
+    "span_limit_widened": true
+   },
+   "shift_bins": 262758,
+   "sign": "-",
+   "status": "EVALUATED",
+   "t0": 235930,
+   "target": 288358
+  },
+  {
+   "anchor_bin": 25600,
+   "anchor_excess_db": 33.885642999675184,
+   "attribution_ok": true,
+   "bin_centre_hz": "921605.46875",
+   "expected_bins": [],
+   "judgments": {
+    "production": {
+     "credit": null,
+     "verdict": "RELATION_SATISFIED"
+    },
+    "span_limit_removed": {
+     "credit": "MUTANT_DETECTED",
+     "verdict": "RELATION_VIOLATED"
+    },
+    "span_limit_strict": {
+     "credit": "MUTANT_SURVIVED_EQUIVALENT_ON_GRID",
+     "verdict": "RELATION_SATISFIED"
+    },
+    "span_limit_widened": {
+     "credit": "MUTANT_DETECTED",
+     "verdict": "RELATION_VIOLATED"
+    }
+   },
+   "observed": {
+    "production": {
+     "bins": [],
+     "n_candidates": 0,
+     "target_present": false
+    },
+    "span_limit_removed": {
+     "bins": [
+      235931,
+      235940
+     ],
+     "n_candidates": 2,
+     "target_present": true
+    },
+    "span_limit_strict": {
+     "bins": [],
+     "n_candidates": 0,
+     "target_present": false
+    },
+    "span_limit_widened": {
+     "bins": [
+      235931,
+      235940
+     ],
+     "n_candidates": 2,
+     "target_present": true
+    }
+   },
+   "pair_ok": true,
+   "predicate_at_target": {
+    "production": false,
+    "span_limit_removed": true,
+    "span_limit_strict": false,
+    "span_limit_widened": true
+   },
+   "shift_bins": 210331,
+   "sign": "+",
+   "status": "EVALUATED",
+   "t0": 235931,
+   "target": 235931
+  },
+  {
+   "anchor_bin": 25600,
+   "anchor_excess_db": 33.885642999675184,
+   "attribution_ok": true,
+   "bin_centre_hz": "-921605.46875",
+   "expected_bins": [
+    288366
+   ],
+   "judgments": {
+    "production": {
+     "credit": null,
+     "verdict": "RELATION_SATISFIED"
+    },
+    "span_limit_removed": {
+     "credit": "MUTANT_DETECTED",
+     "verdict": "RELATION_VIOLATED"
+    },
+    "span_limit_strict": {
+     "credit": "MUTANT_SURVIVED_EQUIVALENT_ON_GRID",
+     "verdict": "RELATION_SATISFIED"
+    },
+    "span_limit_widened": {
+     "credit": "MUTANT_DETECTED",
+     "verdict": "RELATION_VIOLATED"
+    }
+   },
+   "observed": {
+    "production": {
+     "bins": [
+      288366
+     ],
+     "n_candidates": 1,
+     "target_present": false
+    },
+    "span_limit_removed": {
+     "bins": [
+      288357,
+      288366
+     ],
+     "n_candidates": 2,
+     "target_present": true
+    },
+    "span_limit_strict": {
+     "bins": [
+      288366
+     ],
+     "n_candidates": 1,
+     "target_present": false
+    },
+    "span_limit_widened": {
+     "bins": [
+      288357,
+      288366
+     ],
+     "n_candidates": 2,
+     "target_present": true
+    }
+   },
+   "pair_ok": true,
+   "predicate_at_target": {
+    "production": false,
+    "span_limit_removed": true,
+    "span_limit_strict": false,
+    "span_limit_widened": true
+   },
+   "shift_bins": 262757,
+   "sign": "-",
+   "status": "EVALUATED",
+   "t0": 235931,
+   "target": 288357
+  },
+  {
+   "anchor_bin": 25600,
+   "anchor_excess_db": 33.885642999675184,
+   "attribution_ok": true,
+   "bin_centre_hz": "972800.78125",
+   "expected_bins": [],
+   "judgments": {
+    "production": {
+     "credit": null,
+     "verdict": "RELATION_SATISFIED"
+    },
+    "span_limit_removed": {
+     "credit": "MUTANT_DETECTED",
+     "verdict": "RELATION_VIOLATED"
+    },
+    "span_limit_strict": {
+     "credit": "MUTANT_SURVIVED_EQUIVALENT_ON_GRID",
+     "verdict": "RELATION_SATISFIED"
+    },
+    "span_limit_widened": {
+     "credit": "MUTANT_SURVIVED_EQUIVALENT_ON_GRID",
+     "verdict": "RELATION_SATISFIED"
+    }
+   },
+   "observed": {
+    "production": {
+     "bins": [],
+     "n_candidates": 0,
+     "target_present": false
+    },
+    "span_limit_removed": {
+     "bins": [
+      249037,
+      249046
+     ],
+     "n_candidates": 2,
+     "target_present": true
+    },
+    "span_limit_strict": {
+     "bins": [],
+     "n_candidates": 0,
+     "target_present": false
+    },
+    "span_limit_widened": {
+     "bins": [],
+     "n_candidates": 0,
+     "target_present": false
+    }
+   },
+   "pair_ok": true,
+   "predicate_at_target": {
+    "production": false,
+    "span_limit_removed": true,
+    "span_limit_strict": false,
+    "span_limit_widened": false
+   },
+   "shift_bins": 223437,
+   "sign": "+",
+   "status": "EVALUATED",
+   "t0": 249037,
+   "target": 249037
+  },
+  {
+   "anchor_bin": 25600,
+   "anchor_excess_db": 33.885642999675184,
+   "attribution_ok": true,
+   "bin_centre_hz": "-972800.78125",
+   "expected_bins": [],
+   "judgments": {
+    "production": {
+     "credit": null,
+     "verdict": "RELATION_SATISFIED"
+    },
+    "span_limit_removed": {
+     "credit": "MUTANT_DETECTED",
+     "verdict": "RELATION_VIOLATED"
+    },
+    "span_limit_strict": {
+     "credit": "MUTANT_SURVIVED_EQUIVALENT_ON_GRID",
+     "verdict": "RELATION_SATISFIED"
+    },
+    "span_limit_widened": {
+     "credit": "MUTANT_SURVIVED_EQUIVALENT_ON_GRID",
+     "verdict": "RELATION_SATISFIED"
+    }
+   },
+   "observed": {
+    "production": {
+     "bins": [],
+     "n_candidates": 0,
+     "target_present": false
+    },
+    "span_limit_removed": {
+     "bins": [
+      275251,
+      275260
+     ],
+     "n_candidates": 2,
+     "target_present": true
+    },
+    "span_limit_strict": {
+     "bins": [],
+     "n_candidates": 0,
+     "target_present": false
+    },
+    "span_limit_widened": {
+     "bins": [],
+     "n_candidates": 0,
+     "target_present": false
+    }
+   },
+   "pair_ok": true,
+   "predicate_at_target": {
+    "production": false,
+    "span_limit_removed": true,
+    "span_limit_strict": false,
+    "span_limit_widened": false
+   },
+   "shift_bins": 249651,
+   "sign": "-",
+   "status": "EVALUATED",
+   "t0": 249037,
+   "target": 275251
+  },
+  {
+   "anchor_bin": 25609,
+   "anchor_excess_db": 19.547343522231884,
+   "attribution_ok": true,
+   "bin_centre_hz": "921597.65625",
+   "expected_bins": [
+    235920,
+    235929
+   ],
+   "judgments": {
+    "production": {
+     "credit": null,
+     "verdict": "RELATION_SATISFIED"
+    },
+    "span_limit_removed": {
+     "credit": "MUTANT_SURVIVED_EQUIVALENT_ON_GRID",
+     "verdict": "RELATION_SATISFIED"
+    },
+    "span_limit_strict": {
+     "credit": "MUTANT_SURVIVED_EQUIVALENT_ON_GRID",
+     "verdict": "RELATION_SATISFIED"
+    },
+    "span_limit_widened": {
+     "credit": "MUTANT_SURVIVED_EQUIVALENT_ON_GRID",
+     "verdict": "RELATION_SATISFIED"
+    }
+   },
+   "observed": {
+    "production": {
+     "bins": [
+      235920,
+      235929
+     ],
+     "n_candidates": 2,
+     "target_present": true
+    },
+    "span_limit_removed": {
+     "bins": [
+      235920,
+      235929
+     ],
+     "n_candidates": 2,
+     "target_present": true
+    },
+    "span_limit_strict": {
+     "bins": [
+      235920,
+      235929
+     ],
+     "n_candidates": 2,
+     "target_present": true
+    },
+    "span_limit_widened": {
+     "bins": [
+      235920,
+      235929
+     ],
+     "n_candidates": 2,
+     "target_present": true
+    }
+   },
+   "pair_ok": true,
+   "predicate_at_target": {
+    "production": true,
+    "span_limit_removed": true,
+    "span_limit_strict": true,
+    "span_limit_widened": true
+   },
+   "shift_bins": 210320,
+   "sign": "+",
+   "status": "EVALUATED",
+   "t0": 235929,
+   "target": 235929
+  },
+  {
+   "anchor_bin": 25609,
+   "anchor_excess_db": 19.547343522231884,
+   "attribution_ok": true,
+   "bin_centre_hz": "-921597.65625",
+   "expected_bins": [
+    288359
+   ],
+   "judgments": {
+    "production": {
+     "credit": null,
+     "verdict": "RELATION_SATISFIED"
+    },
+    "span_limit_removed": {
+     "credit": "MUTANT_SURVIVED_EQUIVALENT_ON_GRID",
+     "verdict": "RELATION_VIOLATED"
+    },
+    "span_limit_strict": {
+     "credit": "MUTANT_SURVIVED_EQUIVALENT_ON_GRID",
+     "verdict": "RELATION_SATISFIED"
+    },
+    "span_limit_widened": {
+     "credit": "MUTANT_SURVIVED_EQUIVALENT_ON_GRID",
+     "verdict": "RELATION_VIOLATED"
+    }
+   },
+   "observed": {
+    "production": {
+     "bins": [
+      288359
+     ],
+     "n_candidates": 1,
+     "target_present": true
+    },
+    "span_limit_removed": {
+     "bins": [
+      288350,
+      288359
+     ],
+     "n_candidates": 2,
+     "target_present": true
+    },
+    "span_limit_strict": {
+     "bins": [
+      288359
+     ],
+     "n_candidates": 1,
+     "target_present": true
+    },
+    "span_limit_widened": {
+     "bins": [
+      288350,
+      288359
+     ],
+     "n_candidates": 2,
+     "target_present": true
+    }
+   },
+   "pair_ok": true,
+   "predicate_at_target": {
+    "production": true,
+    "span_limit_removed": true,
+    "span_limit_strict": true,
+    "span_limit_widened": true
+   },
+   "shift_bins": 262750,
+   "sign": "-",
+   "status": "EVALUATED",
+   "t0": 235929,
+   "target": 288359
+  },
+  {
+   "anchor_bin": 25609,
+   "anchor_excess_db": 19.547343522231884,
+   "attribution_ok": true,
+   "bin_centre_hz": "921601.5625",
+   "expected_bins": [
+    235921
+   ],
+   "judgments": {
+    "production": {
+     "credit": null,
+     "verdict": "RELATION_SATISFIED"
+    },
+    "span_limit_removed": {
+     "credit": "MUTANT_DETECTED",
+     "verdict": "RELATION_VIOLATED"
+    },
+    "span_limit_strict": {
+     "credit": "MUTANT_SURVIVED_EQUIVALENT_ON_GRID",
+     "verdict": "RELATION_SATISFIED"
+    },
+    "span_limit_widened": {
+     "credit": "MUTANT_DETECTED",
+     "verdict": "RELATION_VIOLATED"
+    }
+   },
+   "observed": {
+    "production": {
+     "bins": [
+      235921
+     ],
+     "n_candidates": 1,
+     "target_present": false
+    },
+    "span_limit_removed": {
+     "bins": [
+      235921,
+      235930
+     ],
+     "n_candidates": 2,
+     "target_present": true
+    },
+    "span_limit_strict": {
+     "bins": [
+      235921
+     ],
+     "n_candidates": 1,
+     "target_present": false
+    },
+    "span_limit_widened": {
+     "bins": [
+      235921,
+      235930
+     ],
+     "n_candidates": 2,
+     "target_present": true
+    }
+   },
+   "pair_ok": true,
+   "predicate_at_target": {
+    "production": false,
+    "span_limit_removed": true,
+    "span_limit_strict": false,
+    "span_limit_widened": true
+   },
+   "shift_bins": 210321,
+   "sign": "+",
+   "status": "EVALUATED",
+   "t0": 235930,
+   "target": 235930
+  },
+  {
+   "anchor_bin": 25609,
+   "anchor_excess_db": 19.547343522231884,
+   "attribution_ok": true,
+   "bin_centre_hz": "-921601.5625",
+   "expected_bins": [],
+   "judgments": {
+    "production": {
+     "credit": null,
+     "verdict": "RELATION_SATISFIED"
+    },
+    "span_limit_removed": {
+     "credit": "MUTANT_DETECTED",
+     "verdict": "RELATION_VIOLATED"
+    },
+    "span_limit_strict": {
+     "credit": "MUTANT_SURVIVED_EQUIVALENT_ON_GRID",
+     "verdict": "RELATION_SATISFIED"
+    },
+    "span_limit_widened": {
+     "credit": "MUTANT_DETECTED",
+     "verdict": "RELATION_VIOLATED"
+    }
+   },
+   "observed": {
+    "production": {
+     "bins": [],
+     "n_candidates": 0,
+     "target_present": false
+    },
+    "span_limit_removed": {
+     "bins": [
+      288349,
+      288358
+     ],
+     "n_candidates": 2,
+     "target_present": true
+    },
+    "span_limit_strict": {
+     "bins": [],
+     "n_candidates": 0,
+     "target_present": false
+    },
+    "span_limit_widened": {
+     "bins": [
+      288349,
+      288358
+     ],
+     "n_candidates": 2,
+     "target_present": true
+    }
+   },
+   "pair_ok": true,
+   "predicate_at_target": {
+    "production": false,
+    "span_limit_removed": true,
+    "span_limit_strict": false,
+    "span_limit_widened": true
+   },
+   "shift_bins": 262749,
+   "sign": "-",
+   "status": "EVALUATED",
+   "t0": 235930,
+   "target": 288358
+  },
+  {
+   "anchor_bin": 25609,
+   "anchor_excess_db": 19.547343522231884,
+   "attribution_ok": true,
+   "bin_centre_hz": "921605.46875",
+   "expected_bins": [
+    235922
+   ],
+   "judgments": {
+    "production": {
+     "credit": null,
+     "verdict": "RELATION_SATISFIED"
+    },
+    "span_limit_removed": {
+     "credit": "MUTANT_DETECTED",
+     "verdict": "RELATION_VIOLATED"
+    },
+    "span_limit_strict": {
+     "credit": "MUTANT_SURVIVED_EQUIVALENT_ON_GRID",
+     "verdict": "RELATION_SATISFIED"
+    },
+    "span_limit_widened": {
+     "credit": "MUTANT_DETECTED",
+     "verdict": "RELATION_VIOLATED"
+    }
+   },
+   "observed": {
+    "production": {
+     "bins": [
+      235922
+     ],
+     "n_candidates": 1,
+     "target_present": false
+    },
+    "span_limit_removed": {
+     "bins": [
+      235922,
+      235931
+     ],
+     "n_candidates": 2,
+     "target_present": true
+    },
+    "span_limit_strict": {
+     "bins": [
+      235922
+     ],
+     "n_candidates": 1,
+     "target_present": false
+    },
+    "span_limit_widened": {
+     "bins": [
+      235922,
+      235931
+     ],
+     "n_candidates": 2,
+     "target_present": true
+    }
+   },
+   "pair_ok": true,
+   "predicate_at_target": {
+    "production": false,
+    "span_limit_removed": true,
+    "span_limit_strict": false,
+    "span_limit_widened": true
+   },
+   "shift_bins": 210322,
+   "sign": "+",
+   "status": "EVALUATED",
+   "t0": 235931,
+   "target": 235931
+  },
+  {
+   "anchor_bin": 25609,
+   "anchor_excess_db": 19.547343522231884,
+   "attribution_ok": true,
+   "bin_centre_hz": "-921605.46875",
+   "expected_bins": [],
+   "judgments": {
+    "production": {
+     "credit": null,
+     "verdict": "RELATION_SATISFIED"
+    },
+    "span_limit_removed": {
+     "credit": "MUTANT_DETECTED",
+     "verdict": "RELATION_VIOLATED"
+    },
+    "span_limit_strict": {
+     "credit": "MUTANT_SURVIVED_EQUIVALENT_ON_GRID",
+     "verdict": "RELATION_SATISFIED"
+    },
+    "span_limit_widened": {
+     "credit": "MUTANT_DETECTED",
+     "verdict": "RELATION_VIOLATED"
+    }
+   },
+   "observed": {
+    "production": {
+     "bins": [],
+     "n_candidates": 0,
+     "target_present": false
+    },
+    "span_limit_removed": {
+     "bins": [
+      288348,
+      288357
+     ],
+     "n_candidates": 2,
+     "target_present": true
+    },
+    "span_limit_strict": {
+     "bins": [],
+     "n_candidates": 0,
+     "target_present": false
+    },
+    "span_limit_widened": {
+     "bins": [
+      288348,
+      288357
+     ],
+     "n_candidates": 2,
+     "target_present": true
+    }
+   },
+   "pair_ok": true,
+   "predicate_at_target": {
+    "production": false,
+    "span_limit_removed": true,
+    "span_limit_strict": false,
+    "span_limit_widened": true
+   },
+   "shift_bins": 262748,
+   "sign": "-",
+   "status": "EVALUATED",
+   "t0": 235931,
+   "target": 288357
+  },
+  {
+   "anchor_bin": 25609,
+   "anchor_excess_db": 19.547343522231884,
+   "attribution_ok": true,
+   "bin_centre_hz": "972800.78125",
+   "expected_bins": [],
+   "judgments": {
+    "production": {
+     "credit": null,
+     "verdict": "RELATION_SATISFIED"
+    },
+    "span_limit_removed": {
+     "credit": "MUTANT_DETECTED",
+     "verdict": "RELATION_VIOLATED"
+    },
+    "span_limit_strict": {
+     "credit": "MUTANT_SURVIVED_EQUIVALENT_ON_GRID",
+     "verdict": "RELATION_SATISFIED"
+    },
+    "span_limit_widened": {
+     "credit": "MUTANT_SURVIVED_EQUIVALENT_ON_GRID",
+     "verdict": "RELATION_SATISFIED"
+    }
+   },
+   "observed": {
+    "production": {
+     "bins": [],
+     "n_candidates": 0,
+     "target_present": false
+    },
+    "span_limit_removed": {
+     "bins": [
+      249028,
+      249037
+     ],
+     "n_candidates": 2,
+     "target_present": true
+    },
+    "span_limit_strict": {
+     "bins": [],
+     "n_candidates": 0,
+     "target_present": false
+    },
+    "span_limit_widened": {
+     "bins": [],
+     "n_candidates": 0,
+     "target_present": false
+    }
+   },
+   "pair_ok": true,
+   "predicate_at_target": {
+    "production": false,
+    "span_limit_removed": true,
+    "span_limit_strict": false,
+    "span_limit_widened": false
+   },
+   "shift_bins": 223428,
+   "sign": "+",
+   "status": "EVALUATED",
+   "t0": 249037,
+   "target": 249037
+  },
+  {
+   "anchor_bin": 25609,
+   "anchor_excess_db": 19.547343522231884,
+   "attribution_ok": true,
+   "bin_centre_hz": "-972800.78125",
+   "expected_bins": [],
+   "judgments": {
+    "production": {
+     "credit": null,
+     "verdict": "RELATION_SATISFIED"
+    },
+    "span_limit_removed": {
+     "credit": "MUTANT_DETECTED",
+     "verdict": "RELATION_VIOLATED"
+    },
+    "span_limit_strict": {
+     "credit": "MUTANT_SURVIVED_EQUIVALENT_ON_GRID",
+     "verdict": "RELATION_SATISFIED"
+    },
+    "span_limit_widened": {
+     "credit": "MUTANT_SURVIVED_EQUIVALENT_ON_GRID",
+     "verdict": "RELATION_SATISFIED"
+    }
+   },
+   "observed": {
+    "production": {
+     "bins": [],
+     "n_candidates": 0,
+     "target_present": false
+    },
+    "span_limit_removed": {
+     "bins": [
+      275242,
+      275251
+     ],
+     "n_candidates": 2,
+     "target_present": true
+    },
+    "span_limit_strict": {
+     "bins": [],
+     "n_candidates": 0,
+     "target_present": false
+    },
+    "span_limit_widened": {
+     "bins": [],
+     "n_candidates": 0,
+     "target_present": false
+    }
+   },
+   "pair_ok": true,
+   "predicate_at_target": {
+    "production": false,
+    "span_limit_removed": true,
+    "span_limit_strict": false,
+    "span_limit_widened": false
+   },
+   "shift_bins": 249642,
+   "sign": "-",
+   "status": "EVALUATED",
+   "t0": 249037,
+   "target": 275251
+  }
+ ],
+ "fixture": "HB_sep9r-15p3.14f0.15.npy",
+ "layer": "B_FUNCTION_LEVEL_PRODUCTION_LENGTH",
+ "n": 524288,
+ "production_path": false
+}

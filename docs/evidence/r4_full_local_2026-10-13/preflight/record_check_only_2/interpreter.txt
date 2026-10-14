@@ -1,0 +1,6 @@
+$ $HOME/SCYTHE/.venv/bin/python -I -c import sys,numpy,json;print(json.dumps({'version':list(sys.version_info[:3]),'full':sys.version,'numpy':numpy.__version__,'numpy_file':numpy.__file__,'prefix':sys.prefix,'executable':sys.executable}))
+{"version": [3, 12, 13], "full": "3.12.13 (main, Jul 10 2026, 00:00:00) [GCC 14.3.1 20251022 (Red Hat 14.3.1-4)]", "numpy": "2.5.1", "numpy_file": "$HOME/SCYTHE/.venv/lib64/python3.12/site-packages/numpy/__init__.py", "prefix": "$HOME/SCYTHE/.venv", "executable": "$HOME/SCYTHE/.venv/bin/python"}
+
+--- stderr
+
+--- rc 0

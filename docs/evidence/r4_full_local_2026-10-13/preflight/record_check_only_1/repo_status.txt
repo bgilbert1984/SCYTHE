@@ -1,0 +1,5 @@
+$ git -C $HOME/SCYTHE-r4decl status --porcelain
+
+--- stderr
+
+--- rc 0

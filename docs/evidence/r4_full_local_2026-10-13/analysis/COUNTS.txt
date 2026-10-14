@@ -1,0 +1,152 @@
+identity verdict: IDENTITY_AND_NAMESPACE_VERIFIED (36 fixtures)
+LAYER A (grid and predicates; detector involved: False)
+  n=500000: computed-exactly-on-boundary bins [225000], ideal-on-boundary bins [225000]
+  n=524280: computed-exactly-on-boundary bins [], ideal-on-boundary bins [235926]
+  n=524288: computed-exactly-on-boundary bins [], ideal-on-boundary bins []
+LAYER B' (function-level; production_path=False; 12 cases; production non-satisfied: 0)
+  by mutant and credit:
+    span_limit_removed | MUTANT_DETECTED: 6
+    span_limit_removed | MUTANT_SURVIVED_EQUIVALENT_ON_GRID: 6
+    span_limit_strict | MUTANT_DETECTED: 2
+    span_limit_strict | MUTANT_SURVIVED_EQUIVALENT_ON_GRID: 10
+    span_limit_widened | MUTANT_DETECTED: 6
+    span_limit_widened | MUTANT_SURVIVED_EQUIVALENT_ON_GRID: 6
+  by length, mutant and credit:
+    n=500000 | span_limit_removed | MUTANT_DETECTED: 2
+    n=500000 | span_limit_removed | MUTANT_SURVIVED_EQUIVALENT_ON_GRID: 4
+    n=500000 | span_limit_strict | MUTANT_DETECTED: 2
+    n=500000 | span_limit_strict | MUTANT_SURVIVED_EQUIVALENT_ON_GRID: 4
+    n=500000 | span_limit_widened | MUTANT_DETECTED: 2
+    n=500000 | span_limit_widened | MUTANT_SURVIVED_EQUIVALENT_ON_GRID: 4
+    n=524280 | span_limit_removed | MUTANT_DETECTED: 4
+    n=524280 | span_limit_removed | MUTANT_SURVIVED_EQUIVALENT_ON_GRID: 2
+    n=524280 | span_limit_strict | MUTANT_SURVIVED_EQUIVALENT_ON_GRID: 6
+    n=524280 | span_limit_widened | MUTANT_DETECTED: 4
+    n=524280 | span_limit_widened | MUTANT_SURVIVED_EQUIVALENT_ON_GRID: 2
+LAYER B (function-level, production length; production_path=False; 36 fixtures; 288 cases evaluated; production non-satisfied: 0)
+  by mutant and credit:
+    span_limit_removed | MUTANT_DETECTED: 216
+    span_limit_removed | MUTANT_SURVIVED_EQUIVALENT_ON_GRID: 72
+    span_limit_strict | MUTANT_SURVIVED_EQUIVALENT_ON_GRID: 288
+    span_limit_widened | MUTANT_DETECTED: 144
+    span_limit_widened | MUTANT_SURVIVED_EQUIVALENT_ON_GRID: 144
+  by family, mutant and credit:
+    HA | span_limit_removed | MUTANT_DETECTED: 120
+    HA | span_limit_removed | MUTANT_SURVIVED_EQUIVALENT_ON_GRID: 40
+    HA | span_limit_strict | MUTANT_SURVIVED_EQUIVALENT_ON_GRID: 160
+    HA | span_limit_widened | MUTANT_DETECTED: 80
+    HA | span_limit_widened | MUTANT_SURVIVED_EQUIVALENT_ON_GRID: 80
+    HB | span_limit_removed | MUTANT_DETECTED: 96
+    HB | span_limit_removed | MUTANT_SURVIVED_EQUIVALENT_ON_GRID: 32
+    HB | span_limit_strict | MUTANT_SURVIVED_EQUIVALENT_ON_GRID: 128
+    HB | span_limit_widened | MUTANT_DETECTED: 64
+    HB | span_limit_widened | MUTANT_SURVIVED_EQUIVALENT_ON_GRID: 64
+  not evaluated:
+    HB | PRECONDITION_NOT_MET | COLLISION_WITH_OTHER_MAPPED_CANDIDATE: 128
+PHASE A (production relations; 36 fixtures)
+  detector relations by verdict:
+    CONJ | RELATION_SATISFIED: 36
+    NOISE weak | RELATION_SATISFIED: 36
+    ONE_REPEAT_REPLACED (detector) | RELATION_SATISFIED: 36
+    PERMUTE reverse | RELATION_SATISFIED: 36
+    PERMUTE rot3 | RELATION_SATISFIED: 36
+    PHASE 0.449 | RELATION_SATISFIED: 36
+    PHASE 1.571 | RELATION_SATISFIED: 36
+    SCALE x0.001 | RELATION_SATISFIED: 36
+    SCALE x0.37 | RELATION_SATISFIED: 36
+    SCALE x1000 | RELATION_SATISFIED: 36
+    SHIFT +1000 bins | RELATION_SATISFIED: 36
+    SHIFT +100000 bins | RELATION_SATISFIED: 36
+    SHIFT -2500 bins | RELATION_SATISFIED: 36
+  persistence relations by verdict (one per candidate):
+    CONJ | RELATION_SATISFIED: 52
+    ONE_REPEAT_REPLACED (persistence) | RELATION_SATISFIED: 52
+    PERMUTE (qualifying count, multiset of excesses) | RELATION_SATISFIED: 52
+    PHASE 0.449 | RELATION_SATISFIED: 52
+    SCALE x0.37 | RELATION_SATISFIED: 52
+PHASE B (mutants on the first fixtures)
+  record status:
+    COMPLETED: 36
+  mutant | relation | outcome:
+    absolute_floor | CONJ | production=RELATION_SATISFIED mutant=RELATION_SATISFIED credit=MUTANT_SURVIVED: 2
+    absolute_floor | CONJ | production=RELATION_SATISFIED mutant=RELATION_VIOLATED credit=MUTANT_DETECTED: 4
+    absolute_floor | NOISE weak | production=RELATION_SATISFIED mutant=RELATION_VIOLATED credit=MUTANT_DETECTED: 6
+    absolute_floor | ONE_REPEAT_REPLACED (detector) | production=RELATION_SATISFIED mutant=RELATION_SATISFIED credit=MUTANT_SURVIVED: 6
+    absolute_floor | PERMUTE reverse | production=RELATION_SATISFIED mutant=RELATION_SATISFIED credit=MUTANT_SURVIVED: 6
+    absolute_floor | PERMUTE rot3 | production=RELATION_SATISFIED mutant=RELATION_SATISFIED credit=MUTANT_SURVIVED: 6
+    absolute_floor | PHASE 0.449 | production=RELATION_SATISFIED mutant=RELATION_SATISFIED credit=MUTANT_SURVIVED: 6
+    absolute_floor | PHASE 1.571 | production=RELATION_SATISFIED mutant=RELATION_SATISFIED credit=MUTANT_SURVIVED: 6
+    absolute_floor | SCALE x0.001 | production=RELATION_SATISFIED mutant=RELATION_VIOLATED credit=MUTANT_DETECTED: 6
+    absolute_floor | SCALE x0.37 | production=RELATION_SATISFIED mutant=RELATION_VIOLATED credit=MUTANT_DETECTED: 6
+    absolute_floor | SCALE x1000 | production=RELATION_SATISFIED mutant=RELATION_VIOLATED credit=MUTANT_DETECTED: 6
+    absolute_floor | SHIFT +1000 bins | production=RELATION_SATISFIED mutant=RELATION_SATISFIED credit=MUTANT_SURVIVED: 3
+    absolute_floor | SHIFT +1000 bins | production=RELATION_SATISFIED mutant=RELATION_VIOLATED credit=MUTANT_DETECTED: 3
+    absolute_floor | SHIFT +100000 bins | production=RELATION_SATISFIED mutant=RELATION_SATISFIED credit=MUTANT_SURVIVED: 2
+    absolute_floor | SHIFT +100000 bins | production=RELATION_SATISFIED mutant=RELATION_VIOLATED credit=MUTANT_DETECTED: 4
+    absolute_floor | SHIFT -2500 bins | production=RELATION_SATISFIED mutant=RELATION_SATISFIED credit=MUTANT_SURVIVED: 3
+    absolute_floor | SHIFT -2500 bins | production=RELATION_SATISFIED mutant=RELATION_VIOLATED credit=MUTANT_DETECTED: 3
+    first_repeat_only | CONJ | production=RELATION_SATISFIED mutant=RELATION_SATISFIED credit=MUTANT_SURVIVED: 6
+    first_repeat_only | NOISE weak | production=RELATION_SATISFIED mutant=RELATION_SATISFIED credit=MUTANT_SURVIVED: 6
+    first_repeat_only | ONE_REPEAT_REPLACED (detector) | production=RELATION_SATISFIED mutant=RELATION_VIOLATED credit=MUTANT_DETECTED: 6
+    first_repeat_only | PERMUTE reverse | production=RELATION_SATISFIED mutant=RELATION_VIOLATED credit=MUTANT_DETECTED: 6
+    first_repeat_only | PERMUTE rot3 | production=RELATION_SATISFIED mutant=RELATION_VIOLATED credit=MUTANT_DETECTED: 6
+    first_repeat_only | PHASE 0.449 | production=RELATION_SATISFIED mutant=RELATION_SATISFIED credit=MUTANT_SURVIVED: 6
+    first_repeat_only | PHASE 1.571 | production=RELATION_SATISFIED mutant=RELATION_SATISFIED credit=MUTANT_SURVIVED: 6
+    first_repeat_only | SCALE x0.001 | production=RELATION_SATISFIED mutant=RELATION_SATISFIED credit=MUTANT_SURVIVED: 6
+    first_repeat_only | SCALE x0.37 | production=RELATION_SATISFIED mutant=RELATION_SATISFIED credit=MUTANT_SURVIVED: 6
+    first_repeat_only | SCALE x1000 | production=RELATION_SATISFIED mutant=RELATION_SATISFIED credit=MUTANT_SURVIVED: 6
+    first_repeat_only | SHIFT +1000 bins | production=RELATION_SATISFIED mutant=RELATION_SATISFIED credit=MUTANT_SURVIVED: 6
+    first_repeat_only | SHIFT +100000 bins | production=RELATION_SATISFIED mutant=RELATION_SATISFIED credit=MUTANT_SURVIVED: 6
+    first_repeat_only | SHIFT -2500 bins | production=RELATION_SATISFIED mutant=RELATION_SATISFIED credit=MUTANT_SURVIVED: 6
+    sign_dropped | CONJ | production=RELATION_SATISFIED mutant=RELATION_VIOLATED credit=MUTANT_DETECTED: 6
+    sign_dropped | NOISE weak | production=RELATION_SATISFIED mutant=RELATION_SATISFIED credit=MUTANT_SURVIVED: 6
+    sign_dropped | ONE_REPEAT_REPLACED (detector) | production=RELATION_SATISFIED mutant=RELATION_SATISFIED credit=MUTANT_SURVIVED: 6
+    sign_dropped | PERMUTE reverse | production=RELATION_SATISFIED mutant=RELATION_SATISFIED credit=MUTANT_SURVIVED: 6
+    sign_dropped | PERMUTE rot3 | production=RELATION_SATISFIED mutant=RELATION_SATISFIED credit=MUTANT_SURVIVED: 6
+    sign_dropped | PHASE 0.449 | production=RELATION_SATISFIED mutant=RELATION_SATISFIED credit=MUTANT_SURVIVED: 6
+    sign_dropped | PHASE 1.571 | production=RELATION_SATISFIED mutant=RELATION_SATISFIED credit=MUTANT_SURVIVED: 6
+    sign_dropped | SCALE x0.001 | production=RELATION_SATISFIED mutant=RELATION_SATISFIED credit=MUTANT_SURVIVED: 6
+    sign_dropped | SCALE x0.37 | production=RELATION_SATISFIED mutant=RELATION_SATISFIED credit=MUTANT_SURVIVED: 6
+    sign_dropped | SCALE x1000 | production=RELATION_SATISFIED mutant=RELATION_SATISFIED credit=MUTANT_SURVIVED: 6
+    sign_dropped | SHIFT +1000 bins | production=RELATION_SATISFIED mutant=RELATION_SATISFIED credit=MUTANT_SURVIVED: 6
+    sign_dropped | SHIFT +100000 bins | production=RELATION_SATISFIED mutant=RELATION_SATISFIED credit=MUTANT_SURVIVED: 6
+    sign_dropped | SHIFT -2500 bins | production=RELATION_SATISFIED mutant=RELATION_SATISFIED credit=MUTANT_SURVIVED: 6
+    span_limit_removed | CONJ | production=RELATION_SATISFIED mutant=RELATION_SATISFIED credit=MUTANT_SURVIVED: 6
+    span_limit_removed | NOISE weak | production=RELATION_SATISFIED mutant=RELATION_SATISFIED credit=MUTANT_SURVIVED: 6
+    span_limit_removed | ONE_REPEAT_REPLACED (detector) | production=RELATION_SATISFIED mutant=RELATION_SATISFIED credit=MUTANT_SURVIVED: 6
+    span_limit_removed | PERMUTE reverse | production=RELATION_SATISFIED mutant=RELATION_SATISFIED credit=MUTANT_SURVIVED: 6
+    span_limit_removed | PERMUTE rot3 | production=RELATION_SATISFIED mutant=RELATION_SATISFIED credit=MUTANT_SURVIVED: 6
+    span_limit_removed | PHASE 0.449 | production=RELATION_SATISFIED mutant=RELATION_SATISFIED credit=MUTANT_SURVIVED: 6
+    span_limit_removed | PHASE 1.571 | production=RELATION_SATISFIED mutant=RELATION_SATISFIED credit=MUTANT_SURVIVED: 6
+    span_limit_removed | SCALE x0.001 | production=RELATION_SATISFIED mutant=RELATION_SATISFIED credit=MUTANT_SURVIVED: 6
+    span_limit_removed | SCALE x0.37 | production=RELATION_SATISFIED mutant=RELATION_SATISFIED credit=MUTANT_SURVIVED: 6
+    span_limit_removed | SCALE x1000 | production=RELATION_SATISFIED mutant=RELATION_SATISFIED credit=MUTANT_SURVIVED: 6
+    span_limit_removed | SHIFT +1000 bins | production=RELATION_SATISFIED mutant=RELATION_SATISFIED credit=MUTANT_SURVIVED: 6
+    span_limit_removed | SHIFT +100000 bins | production=RELATION_SATISFIED mutant=RELATION_SATISFIED credit=MUTANT_SURVIVED: 6
+    span_limit_removed | SHIFT -2500 bins | production=RELATION_SATISFIED mutant=RELATION_SATISFIED credit=MUTANT_SURVIVED: 6
+    span_limit_strict | CONJ | production=RELATION_SATISFIED mutant=RELATION_SATISFIED credit=MUTANT_SURVIVED: 6
+    span_limit_strict | NOISE weak | production=RELATION_SATISFIED mutant=RELATION_SATISFIED credit=MUTANT_SURVIVED: 6
+    span_limit_strict | ONE_REPEAT_REPLACED (detector) | production=RELATION_SATISFIED mutant=RELATION_SATISFIED credit=MUTANT_SURVIVED: 6
+    span_limit_strict | PERMUTE reverse | production=RELATION_SATISFIED mutant=RELATION_SATISFIED credit=MUTANT_SURVIVED: 6
+    span_limit_strict | PERMUTE rot3 | production=RELATION_SATISFIED mutant=RELATION_SATISFIED credit=MUTANT_SURVIVED: 6
+    span_limit_strict | PHASE 0.449 | production=RELATION_SATISFIED mutant=RELATION_SATISFIED credit=MUTANT_SURVIVED: 6
+    span_limit_strict | PHASE 1.571 | production=RELATION_SATISFIED mutant=RELATION_SATISFIED credit=MUTANT_SURVIVED: 6
+    span_limit_strict | SCALE x0.001 | production=RELATION_SATISFIED mutant=RELATION_SATISFIED credit=MUTANT_SURVIVED: 6
+    span_limit_strict | SCALE x0.37 | production=RELATION_SATISFIED mutant=RELATION_SATISFIED credit=MUTANT_SURVIVED: 6
+    span_limit_strict | SCALE x1000 | production=RELATION_SATISFIED mutant=RELATION_SATISFIED credit=MUTANT_SURVIVED: 6
+    span_limit_strict | SHIFT +1000 bins | production=RELATION_SATISFIED mutant=RELATION_SATISFIED credit=MUTANT_SURVIVED: 6
+    span_limit_strict | SHIFT +100000 bins | production=RELATION_SATISFIED mutant=RELATION_SATISFIED credit=MUTANT_SURVIVED: 6
+    span_limit_strict | SHIFT -2500 bins | production=RELATION_SATISFIED mutant=RELATION_SATISFIED credit=MUTANT_SURVIVED: 6
+    span_limit_widened | CONJ | production=RELATION_SATISFIED mutant=RELATION_SATISFIED credit=MUTANT_SURVIVED: 6
+    span_limit_widened | NOISE weak | production=RELATION_SATISFIED mutant=RELATION_SATISFIED credit=MUTANT_SURVIVED: 6
+    span_limit_widened | ONE_REPEAT_REPLACED (detector) | production=RELATION_SATISFIED mutant=RELATION_SATISFIED credit=MUTANT_SURVIVED: 6
+    span_limit_widened | PERMUTE reverse | production=RELATION_SATISFIED mutant=RELATION_SATISFIED credit=MUTANT_SURVIVED: 6
+    span_limit_widened | PERMUTE rot3 | production=RELATION_SATISFIED mutant=RELATION_SATISFIED credit=MUTANT_SURVIVED: 6
+    span_limit_widened | PHASE 0.449 | production=RELATION_SATISFIED mutant=RELATION_SATISFIED credit=MUTANT_SURVIVED: 6
+    span_limit_widened | PHASE 1.571 | production=RELATION_SATISFIED mutant=RELATION_SATISFIED credit=MUTANT_SURVIVED: 6
+    span_limit_widened | SCALE x0.001 | production=RELATION_SATISFIED mutant=RELATION_SATISFIED credit=MUTANT_SURVIVED: 6
+    span_limit_widened | SCALE x0.37 | production=RELATION_SATISFIED mutant=RELATION_SATISFIED credit=MUTANT_SURVIVED: 6
+    span_limit_widened | SCALE x1000 | production=RELATION_SATISFIED mutant=RELATION_SATISFIED credit=MUTANT_SURVIVED: 6
+    span_limit_widened | SHIFT +1000 bins | production=RELATION_SATISFIED mutant=RELATION_SATISFIED credit=MUTANT_SURVIVED: 6
+    span_limit_widened | SHIFT +100000 bins | production=RELATION_SATISFIED mutant=RELATION_SATISFIED credit=MUTANT_SURVIVED: 6
+    span_limit_widened | SHIFT -2500 bins | production=RELATION_SATISFIED mutant=RELATION_SATISFIED credit=MUTANT_SURVIVED: 6

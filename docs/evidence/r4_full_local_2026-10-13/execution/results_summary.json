@@ -1,0 +1,375 @@
+{
+ "manifest": {
+  "ok": 112,
+  "bad": [],
+  "missing": []
+ },
+ "relation_summary": {
+  "CONJ": {
+   "RELATION_SATISFIED": 36
+  },
+  "NOISE weak": {
+   "RELATION_SATISFIED": 36
+  },
+  "ONE_REPEAT_REPLACED (detector)": {
+   "RELATION_SATISFIED": 36
+  },
+  "PERMUTE reverse": {
+   "RELATION_SATISFIED": 36
+  },
+  "PERMUTE rot3": {
+   "RELATION_SATISFIED": 36
+  },
+  "PHASE 0.449": {
+   "RELATION_SATISFIED": 36
+  },
+  "PHASE 1.571": {
+   "RELATION_SATISFIED": 36
+  },
+  "SCALE x0.001": {
+   "RELATION_SATISFIED": 36
+  },
+  "SCALE x0.37": {
+   "RELATION_SATISFIED": 36
+  },
+  "SCALE x1000": {
+   "RELATION_SATISFIED": 36
+  },
+  "SHIFT +1000 bins": {
+   "RELATION_SATISFIED": 36
+  },
+  "SHIFT +100000 bins": {
+   "RELATION_SATISFIED": 36
+  },
+  "SHIFT -2500 bins": {
+   "RELATION_SATISFIED": 36
+  }
+ },
+ "persistence_summary": {
+  "CONJ": {
+   "RELATION_SATISFIED": 52
+  },
+  "ONE_REPEAT_REPLACED (persistence)": {
+   "RELATION_SATISFIED": 52
+  },
+  "PERMUTE (qualifying count, multiset of excesses)": {
+   "RELATION_SATISFIED": 52
+  },
+  "PHASE 0.449": {
+   "RELATION_SATISFIED": 52
+  },
+  "SCALE x0.37": {
+   "RELATION_SATISFIED": 52
+  }
+ },
+ "mutant_matrix": {
+  "absolute_floor": {
+   "CONJ": {
+    "MUTANT_DETECTED": 4,
+    "MUTANT_SURVIVED": 2
+   },
+   "NOISE weak": {
+    "MUTANT_DETECTED": 6
+   },
+   "ONE_REPEAT_REPLACED (detector)": {
+    "MUTANT_SURVIVED": 6
+   },
+   "PERMUTE reverse": {
+    "MUTANT_SURVIVED": 6
+   },
+   "PERMUTE rot3": {
+    "MUTANT_SURVIVED": 6
+   },
+   "PHASE 0.449": {
+    "MUTANT_SURVIVED": 6
+   },
+   "PHASE 1.571": {
+    "MUTANT_SURVIVED": 6
+   },
+   "SCALE x0.001": {
+    "MUTANT_DETECTED": 6
+   },
+   "SCALE x0.37": {
+    "MUTANT_DETECTED": 6
+   },
+   "SCALE x1000": {
+    "MUTANT_DETECTED": 6
+   },
+   "SHIFT +1000 bins": {
+    "MUTANT_DETECTED": 3,
+    "MUTANT_SURVIVED": 3
+   },
+   "SHIFT +100000 bins": {
+    "MUTANT_DETECTED": 4,
+    "MUTANT_SURVIVED": 2
+   },
+   "SHIFT -2500 bins": {
+    "MUTANT_DETECTED": 3,
+    "MUTANT_SURVIVED": 3
+   }
+  },
+  "first_repeat_only": {
+   "CONJ": {
+    "MUTANT_SURVIVED": 6
+   },
+   "NOISE weak": {
+    "MUTANT_SURVIVED": 6
+   },
+   "ONE_REPEAT_REPLACED (detector)": {
+    "MUTANT_DETECTED": 6
+   },
+   "PERMUTE reverse": {
+    "MUTANT_DETECTED": 6
+   },
+   "PERMUTE rot3": {
+    "MUTANT_DETECTED": 6
+   },
+   "PHASE 0.449": {
+    "MUTANT_SURVIVED": 6
+   },
+   "PHASE 1.571": {
+    "MUTANT_SURVIVED": 6
+   },
+   "SCALE x0.001": {
+    "MUTANT_SURVIVED": 6
+   },
+   "SCALE x0.37": {
+    "MUTANT_SURVIVED": 6
+   },
+   "SCALE x1000": {
+    "MUTANT_SURVIVED": 6
+   },
+   "SHIFT +1000 bins": {
+    "MUTANT_SURVIVED": 6
+   },
+   "SHIFT +100000 bins": {
+    "MUTANT_SURVIVED": 6
+   },
+   "SHIFT -2500 bins": {
+    "MUTANT_SURVIVED": 6
+   }
+  },
+  "sign_dropped": {
+   "CONJ": {
+    "MUTANT_DETECTED": 6
+   },
+   "NOISE weak": {
+    "MUTANT_SURVIVED": 6
+   },
+   "ONE_REPEAT_REPLACED (detector)": {
+    "MUTANT_SURVIVED": 6
+   },
+   "PERMUTE reverse": {
+    "MUTANT_SURVIVED": 6
+   },
+   "PERMUTE rot3": {
+    "MUTANT_SURVIVED": 6
+   },
+   "PHASE 0.449": {
+    "MUTANT_SURVIVED": 6
+   },
+   "PHASE 1.571": {
+    "MUTANT_SURVIVED": 6
+   },
+   "SCALE x0.001": {
+    "MUTANT_SURVIVED": 6
+   },
+   "SCALE x0.37": {
+    "MUTANT_SURVIVED": 6
+   },
+   "SCALE x1000": {
+    "MUTANT_SURVIVED": 6
+   },
+   "SHIFT +1000 bins": {
+    "MUTANT_SURVIVED": 6
+   },
+   "SHIFT +100000 bins": {
+    "MUTANT_SURVIVED": 6
+   },
+   "SHIFT -2500 bins": {
+    "MUTANT_SURVIVED": 6
+   }
+  },
+  "span_limit_removed": {
+   "CONJ": {
+    "MUTANT_SURVIVED": 6
+   },
+   "NOISE weak": {
+    "MUTANT_SURVIVED": 6
+   },
+   "ONE_REPEAT_REPLACED (detector)": {
+    "MUTANT_SURVIVED": 6
+   },
+   "PERMUTE reverse": {
+    "MUTANT_SURVIVED": 6
+   },
+   "PERMUTE rot3": {
+    "MUTANT_SURVIVED": 6
+   },
+   "PHASE 0.449": {
+    "MUTANT_SURVIVED": 6
+   },
+   "PHASE 1.571": {
+    "MUTANT_SURVIVED": 6
+   },
+   "SCALE x0.001": {
+    "MUTANT_SURVIVED": 6
+   },
+   "SCALE x0.37": {
+    "MUTANT_SURVIVED": 6
+   },
+   "SCALE x1000": {
+    "MUTANT_SURVIVED": 6
+   },
+   "SHIFT +1000 bins": {
+    "MUTANT_SURVIVED": 6
+   },
+   "SHIFT +100000 bins": {
+    "MUTANT_SURVIVED": 6
+   },
+   "SHIFT -2500 bins": {
+    "MUTANT_SURVIVED": 6
+   }
+  },
+  "span_limit_strict": {
+   "CONJ": {
+    "MUTANT_SURVIVED": 6
+   },
+   "NOISE weak": {
+    "MUTANT_SURVIVED": 6
+   },
+   "ONE_REPEAT_REPLACED (detector)": {
+    "MUTANT_SURVIVED": 6
+   },
+   "PERMUTE reverse": {
+    "MUTANT_SURVIVED": 6
+   },
+   "PERMUTE rot3": {
+    "MUTANT_SURVIVED": 6
+   },
+   "PHASE 0.449": {
+    "MUTANT_SURVIVED": 6
+   },
+   "PHASE 1.571": {
+    "MUTANT_SURVIVED": 6
+   },
+   "SCALE x0.001": {
+    "MUTANT_SURVIVED": 6
+   },
+   "SCALE x0.37": {
+    "MUTANT_SURVIVED": 6
+   },
+   "SCALE x1000": {
+    "MUTANT_SURVIVED": 6
+   },
+   "SHIFT +1000 bins": {
+    "MUTANT_SURVIVED": 6
+   },
+   "SHIFT +100000 bins": {
+    "MUTANT_SURVIVED": 6
+   },
+   "SHIFT -2500 bins": {
+    "MUTANT_SURVIVED": 6
+   }
+  },
+  "span_limit_widened": {
+   "CONJ": {
+    "MUTANT_SURVIVED": 6
+   },
+   "NOISE weak": {
+    "MUTANT_SURVIVED": 6
+   },
+   "ONE_REPEAT_REPLACED (detector)": {
+    "MUTANT_SURVIVED": 6
+   },
+   "PERMUTE reverse": {
+    "MUTANT_SURVIVED": 6
+   },
+   "PERMUTE rot3": {
+    "MUTANT_SURVIVED": 6
+   },
+   "PHASE 0.449": {
+    "MUTANT_SURVIVED": 6
+   },
+   "PHASE 1.571": {
+    "MUTANT_SURVIVED": 6
+   },
+   "SCALE x0.001": {
+    "MUTANT_SURVIVED": 6
+   },
+   "SCALE x0.37": {
+    "MUTANT_SURVIVED": 6
+   },
+   "SCALE x1000": {
+    "MUTANT_SURVIVED": 6
+   },
+   "SHIFT +1000 bins": {
+    "MUTANT_SURVIVED": 6
+   },
+   "SHIFT +100000 bins": {
+    "MUTANT_SURVIVED": 6
+   },
+   "SHIFT -2500 bins": {
+    "MUTANT_SURVIVED": 6
+   }
+  }
+ },
+ "mutant_verdict": {
+  "absolute_floor": "MUTANT_DETECTED",
+  "first_repeat_only": "MUTANT_DETECTED",
+  "sign_dropped": "MUTANT_DETECTED",
+  "span_limit_removed": "MUTANT_SURVIVED_OR_NOT_COMPARABLE",
+  "span_limit_strict": "MUTANT_SURVIVED_OR_NOT_COMPARABLE",
+  "span_limit_widened": "MUTANT_SURVIVED_OR_NOT_COMPARABLE"
+ },
+ "identity_verdict": "IDENTITY_AND_NAMESPACE_VERIFIED",
+ "boundary": {
+  "layer_A": {
+   "500000": {
+    "computed_exactly_on_boundary": [
+     225000
+    ],
+    "ideal_on_boundary_bins": [
+     225000
+    ]
+   },
+   "524280": {
+    "computed_exactly_on_boundary": [],
+    "ideal_on_boundary_bins": [
+     235926
+    ]
+   },
+   "524288": {
+    "computed_exactly_on_boundary": [],
+    "ideal_on_boundary_bins": []
+   }
+  },
+  "layer_B_prime": {
+   "production_path": false,
+   "cases": 12,
+   "production_violations": 0,
+   "credits": {
+    "span_limit_removed:MUTANT_SURVIVED_EQUIVALENT_ON_GRID": 6,
+    "span_limit_strict:MUTANT_SURVIVED_EQUIVALENT_ON_GRID": 10,
+    "span_limit_widened:MUTANT_SURVIVED_EQUIVALENT_ON_GRID": 6,
+    "span_limit_strict:MUTANT_DETECTED": 2,
+    "span_limit_removed:MUTANT_DETECTED": 6,
+    "span_limit_widened:MUTANT_DETECTED": 6
+   }
+  },
+  "layer_B": {
+   "fixtures": 36,
+   "cases_evaluated": 288,
+   "cases_precondition_not_met": 128,
+   "production_violations": 0,
+   "credits": {
+    "span_limit_removed:MUTANT_SURVIVED_EQUIVALENT_ON_GRID": 72,
+    "span_limit_strict:MUTANT_SURVIVED_EQUIVALENT_ON_GRID": 288,
+    "span_limit_widened:MUTANT_SURVIVED_EQUIVALENT_ON_GRID": 144,
+    "span_limit_removed:MUTANT_DETECTED": 216,
+    "span_limit_widened:MUTANT_DETECTED": 144
+   },
+   "production_path": false
+  }
+ }
+}

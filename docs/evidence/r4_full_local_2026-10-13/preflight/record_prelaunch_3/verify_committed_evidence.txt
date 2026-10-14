@@ -1,0 +1,20 @@
+$ $HOME/SCYTHE/.venv/bin/python $HOME/SCYTHE-r4decl/tools/r4_package/verify_committed_evidence.py $HOME/r4_full_run_preflight/record_prelaunch_3/pristine_evidence/docs/evidence $HOME/r4_full_run_preflight/record_prelaunch_3/pristine_evidence/docs/research/r4_package_tools_provenance.md
+files: 33 committed evidence files; 28 manifest rows; 4 verbatim tool copies; 9 rows declared-only (no retained original manifest lists them)
+COMMITTED_EVIDENCE_INTEGRITY: VERIFIED
+ORIGINAL_MANIFEST_ENTRIES_VS_RECORDED_ORIGINAL_DIGESTS: CONSISTENT
+ORIGINAL_JOB_INTEGRITY: NOT_REVERIFIED_FROM_THIS_CHECKOUT
+REDACTION_TRANSFORM_REVERSAL: NOT_EVALUATED (no --original-prefix supplied; the prefix is deliberately not committed)
+  declared-only (no retained original manifest lists it): r4_1_gate3_2026-10-13/GATE3_R41_SHA256SUMS
+  declared-only (no retained original manifest lists it): r4_1_gate3_2026-10-13/job_fail/JOB_SHA256SUMS
+  declared-only (no retained original manifest lists it): r4_1_packaging_provenance_2026-10-13/external_tools_r4_for_a7fd10b1/FINAL_SHA256SUMS
+  declared-only (no retained original manifest lists it): r4_1_packaging_provenance_2026-10-13/external_tools_r4_for_a7fd10b1/build_package.py
+  declared-only (no retained original manifest lists it): r4_1_packaging_provenance_2026-10-13/external_tools_r4_for_a7fd10b1/make_record.py
+  declared-only (no retained original manifest lists it): r4_1_packaging_provenance_2026-10-13/external_tools_r4_for_a7fd10b1/neg_controls.py
+  declared-only (no retained original manifest lists it): r4_1_packaging_provenance_2026-10-13/external_tools_r4_for_a7fd10b1/verify_package.py
+  declared-only (no retained original manifest lists it): r4_1_packaging_provenance_2026-10-13/failed_gate3_a7fd10b1/GATE3_RECORD.txt
+  declared-only (no retained original manifest lists it): r4_1_packaging_provenance_2026-10-13/package_2b2e3251/FINAL_SHA256SUMS
+EVIDENCE_VERIFICATION: PASS
+
+--- stderr
+
+--- rc 0

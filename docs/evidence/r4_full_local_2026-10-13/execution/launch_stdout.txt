@@ -1,0 +1,21 @@
+COMPUTATION_COMPLETED: YES
+EVIDENCE_SEALED: YES
+JOB_ACCEPTED: YES
+--- sealer
+sealed $HOME/r4_full_run_job_20261013_a1
+EVIDENCE_SEALED: YES (manifest written and read back; this is not JOB_ACCEPTED)
+--- independent verifier
+MANIFEST_SYNTAX: 150 entries, bad lines []
+FILES_LISTED_AND_PRESENT: 150/150
+HASH_MISMATCHES: []
+UNLISTED_FILES: []
+SYMLINKS: []
+TERMINAL_RECORD_IS_THE_LAST_LINE: 2026-10-13T19:55:02-07:00 DONE COMPUTATION_COMPLETED harness_rc=0 gate_rc=0 (thi
+NOTHING_WRITTEN_AFTER_THE_MANIFEST: []
+PINS: 36 fixtures + 1 generated artifacts = 37 expected files
+FIXTURE_BYTES: 37 files; 37/37 match; missing=[] mismatched=[] unexpected=[] non-regular=[]
+INDEX_DESCRIBES_THE_PINNED_FIXTURE_SET: 36 described vs 36 pinned
+INDEPENDENT_VERIFICATION: PASS []
+TERMINAL_STATUS: DONE
+JOB_ACCEPTED: YES
+run_job.sh exit=0

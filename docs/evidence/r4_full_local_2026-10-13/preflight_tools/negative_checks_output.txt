@@ -1,0 +1,6 @@
+wrong interpreter (no NumPy 2.5.1 venv) | rc=1 | expected-failure-line-present=1 | job_dir_absent | REFUSED
+job directory already exists | rc=1 | expected-failure-line-present=1 | job_dir_absent | REFUSED
+tampered archive | rc=1 | expected-failure-line-present=1 | job_dir_absent | REFUSED
+relative PYTHON path | rc=1 | expected-failure-line-present=1 | job_dir_absent | REFUSED
+mode LAUNCH | rc=1 | job_dir_absent | no_record_written
+competing r4 job process | rc=1 | expected-failure-line-present=1 | job_dir_absent | REFUSED
