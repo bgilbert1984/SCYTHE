@@ -1,0 +1,11 @@
+$ $HOME/SCYTHE/.venv/bin/python $HOME/SCYTHE-r4decl/tools/r4_package/verify_package.py $HOME/SCYTHE-r4decl 8d34de9ac0b1f4758cda3412b364582b4271ffe1 $HOME/r4_full_run_preflight/record_check_only_1/scythe_r4_1_pkg_8d34de9ac0b1.tar.gz $HOME/r4_full_run_preflight/record_check_only_1/verify_extract --python $HOME/SCYTHE/.venv/bin/python
+VERIFIER_CRASH: FileNotFoundError [Errno 2] No such file or directory: '$HOME/r4_full_run_preflight/record_check_only_1/scythe_r4_1_pkg_8d34de9ac0b1.tar.gz.sha256'
+
+--- stderr
+Traceback (most recent call last):
+  File "$HOME/SCYTHE-r4decl/tools/r4_package/verify_package.py", line 38, in <module>
+    want = open(archive + ".sha256").read().split()[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: '$HOME/r4_full_run_preflight/record_check_only_1/scythe_r4_1_pkg_8d34de9ac0b1.tar.gz.sha256'
+
+--- rc 2

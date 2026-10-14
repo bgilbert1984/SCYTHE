@@ -1,0 +1,421 @@
+IDENTITY HA_s+f0.05a0.075.npy: EQUAL
+IDENTITY HA_s+f0.05a0.15.npy: EQUAL
+IDENTITY VERDICT: IDENTITY_AND_NAMESPACE_VERIFIED
+(t=2s)
+[B_PRIME_FUNCTION_LEVEL_NON_PRODUCTION_LENGTH]  production_path=False
+      n  target sign        bin-centre Hz expected                  production          span_limit_removed          span_limit_widened           span_limit_strict
+ 500000  224999    +           921595.904        P                      P SAT     P SAT MUTANT_SURVIVED_EQ    P SAT MUTANT_SURVIVED_EQ    P SAT MUTANT_SURVIVED_EQ
+ 500000  275001    -          -921595.904        P                      P SAT     P SAT MUTANT_SURVIVED_EQ    P SAT MUTANT_SURVIVED_EQ    P SAT MUTANT_SURVIVED_EQ
+ 500000  225000    +             921600.0        P                      P SAT     P SAT MUTANT_SURVIVED_EQ    P SAT MUTANT_SURVIVED_EQ       - VIO MUTANT_DETECTED
+ 500000  275000    -            -921600.0        P                      P SAT     P SAT MUTANT_SURVIVED_EQ    P SAT MUTANT_SURVIVED_EQ       - VIO MUTANT_DETECTED
+ 500000  225001    +           921604.096        -                      - SAT        P VIO MUTANT_DETECTED       P VIO MUTANT_DETECTED    - SAT MUTANT_SURVIVED_EQ
+ 500000  274999    -          -921604.096        -                      - SAT        P VIO MUTANT_DETECTED       P VIO MUTANT_DETECTED    - SAT MUTANT_SURVIVED_EQ
+ 524280  235925    +    921596.0936903945        P                      P SAT     P SAT MUTANT_SURVIVED_EQ    P SAT MUTANT_SURVIVED_EQ    P SAT MUTANT_SURVIVED_EQ
+ 524280  288355    -   -921596.0936903945        P                      P SAT     P SAT MUTANT_SURVIVED_EQ    P SAT MUTANT_SURVIVED_EQ    P SAT MUTANT_SURVIVED_EQ
+ 524280  235926    +    921600.0000000001        -                      - SAT        P VIO MUTANT_DETECTED       P VIO MUTANT_DETECTED    - SAT MUTANT_SURVIVED_EQ
+ 524280  288354    -   -921600.0000000001        -                      - SAT        P VIO MUTANT_DETECTED       P VIO MUTANT_DETECTED    - SAT MUTANT_SURVIVED_EQ
+ 524280  235927    +    921603.9063096056        -                      - SAT        P VIO MUTANT_DETECTED       P VIO MUTANT_DETECTED    - SAT MUTANT_SURVIVED_EQ
+ 524280  288353    -   -921603.9063096056        -                      - SAT        P VIO MUTANT_DETECTED       P VIO MUTANT_DETECTED    - SAT MUTANT_SURVIVED_EQ
+
+B HA_s+f0.05a0.075.npy: cases=8 evaluated=8 production_violations=0 t=61s
+B HA_s+f0.05a0.15.npy: cases=8 evaluated=8 production_violations=0 t=75s
+[B_FUNCTION_LEVEL_PRODUCTION_LENGTH]  production_path=False
+      n  target sign        bin-centre Hz expected                  production          span_limit_removed          span_limit_widened           span_limit_strict
+ 524288  235929    +         921597.65625        P                      P SAT     P SAT MUTANT_SURVIVED_EQ    P SAT MUTANT_SURVIVED_EQ    P SAT MUTANT_SURVIVED_EQ
+ 524288  288359    -        -921597.65625        P                      P SAT     P SAT MUTANT_SURVIVED_EQ    P SAT MUTANT_SURVIVED_EQ    P SAT MUTANT_SURVIVED_EQ
+ 524288  235930    +          921601.5625        -                      - SAT        P VIO MUTANT_DETECTED       P VIO MUTANT_DETECTED    - SAT MUTANT_SURVIVED_EQ
+ 524288  288358    -         -921601.5625        -                      - SAT        P VIO MUTANT_DETECTED       P VIO MUTANT_DETECTED    - SAT MUTANT_SURVIVED_EQ
+ 524288  235931    +         921605.46875        -                      - SAT        P VIO MUTANT_DETECTED       P VIO MUTANT_DETECTED    - SAT MUTANT_SURVIVED_EQ
+ 524288  288357    -        -921605.46875        -                      - SAT        P VIO MUTANT_DETECTED       P VIO MUTANT_DETECTED    - SAT MUTANT_SURVIVED_EQ
+ 524288  249037    +         972800.78125        -                      - SAT        P VIO MUTANT_DETECTED    - SAT MUTANT_SURVIVED_EQ    - SAT MUTANT_SURVIVED_EQ
+ 524288  275251    -        -972800.78125        -                      - SAT        P VIO MUTANT_DETECTED    - SAT MUTANT_SURVIVED_EQ    - SAT MUTANT_SURVIVED_EQ
+
+A HA_s+f0.05a0.075.npy: cands=1 violated=[] t=86s
+A HA_s+f0.05a0.15.npy: cands=1 violated=[] t=96s
+B absolute_floor HA_s+f0.05a0.075.npy: cands=139979 COMPLETED t=115s
+B absolute_floor HA_s+f0.05a0.15.npy: cands=139909 COMPLETED t=139s
+B sign_dropped HA_s+f0.05a0.075.npy: cands=1 COMPLETED t=145s
+B sign_dropped HA_s+f0.05a0.15.npy: cands=1 COMPLETED t=151s
+B first_repeat_only HA_s+f0.05a0.075.npy: cands=436 COMPLETED t=156s
+B first_repeat_only HA_s+f0.05a0.15.npy: cands=424 COMPLETED t=161s
+B span_limit_removed HA_s+f0.05a0.075.npy: cands=1 COMPLETED t=167s
+B span_limit_removed HA_s+f0.05a0.15.npy: cands=1 COMPLETED t=173s
+B span_limit_widened HA_s+f0.05a0.075.npy: cands=1 COMPLETED t=179s
+B span_limit_widened HA_s+f0.05a0.15.npy: cands=1 COMPLETED t=185s
+B span_limit_strict HA_s+f0.05a0.075.npy: cands=1 COMPLETED t=191s
+B span_limit_strict HA_s+f0.05a0.15.npy: cands=1 COMPLETED t=199s
+{
+ "manifest": {
+  "ok": 20,
+  "bad": [],
+  "missing": []
+ },
+ "relation_summary": {
+  "CONJ": {
+   "RELATION_SATISFIED": 2
+  },
+  "NOISE weak": {
+   "RELATION_SATISFIED": 2
+  },
+  "ONE_REPEAT_REPLACED (detector)": {
+   "RELATION_SATISFIED": 2
+  },
+  "PERMUTE reverse": {
+   "RELATION_SATISFIED": 2
+  },
+  "PERMUTE rot3": {
+   "RELATION_SATISFIED": 2
+  },
+  "PHASE 0.449": {
+   "RELATION_SATISFIED": 2
+  },
+  "PHASE 1.571": {
+   "RELATION_SATISFIED": 2
+  },
+  "SCALE x0.001": {
+   "RELATION_SATISFIED": 2
+  },
+  "SCALE x0.37": {
+   "RELATION_SATISFIED": 2
+  },
+  "SCALE x1000": {
+   "RELATION_SATISFIED": 2
+  },
+  "SHIFT +1000 bins": {
+   "RELATION_SATISFIED": 2
+  },
+  "SHIFT +100000 bins": {
+   "RELATION_SATISFIED": 2
+  },
+  "SHIFT -2500 bins": {
+   "RELATION_SATISFIED": 2
+  }
+ },
+ "persistence_summary": {
+  "CONJ": {
+   "RELATION_SATISFIED": 2
+  },
+  "ONE_REPEAT_REPLACED (persistence)": {
+   "RELATION_SATISFIED": 2
+  },
+  "PERMUTE (qualifying count, multiset of excesses)": {
+   "RELATION_SATISFIED": 2
+  },
+  "PHASE 0.449": {
+   "RELATION_SATISFIED": 2
+  },
+  "SCALE x0.37": {
+   "RELATION_SATISFIED": 2
+  }
+ },
+ "mutant_matrix": {
+  "absolute_floor": {
+   "CONJ": {
+    "MUTANT_DETECTED": 1,
+    "MUTANT_SURVIVED": 1
+   },
+   "NOISE weak": {
+    "MUTANT_DETECTED": 2
+   },
+   "ONE_REPEAT_REPLACED (detector)": {
+    "MUTANT_SURVIVED": 2
+   },
+   "PERMUTE reverse": {
+    "MUTANT_SURVIVED": 2
+   },
+   "PERMUTE rot3": {
+    "MUTANT_SURVIVED": 2
+   },
+   "PHASE 0.449": {
+    "MUTANT_SURVIVED": 2
+   },
+   "PHASE 1.571": {
+    "MUTANT_SURVIVED": 2
+   },
+   "SCALE x0.001": {
+    "MUTANT_DETECTED": 2
+   },
+   "SCALE x0.37": {
+    "MUTANT_DETECTED": 2
+   },
+   "SCALE x1000": {
+    "MUTANT_DETECTED": 2
+   },
+   "SHIFT +1000 bins": {
+    "MUTANT_DETECTED": 1,
+    "MUTANT_SURVIVED": 1
+   },
+   "SHIFT +100000 bins": {
+    "MUTANT_DETECTED": 1,
+    "MUTANT_SURVIVED": 1
+   },
+   "SHIFT -2500 bins": {
+    "MUTANT_DETECTED": 1,
+    "MUTANT_SURVIVED": 1
+   }
+  },
+  "first_repeat_only": {
+   "CONJ": {
+    "MUTANT_SURVIVED": 2
+   },
+   "NOISE weak": {
+    "MUTANT_SURVIVED": 2
+   },
+   "ONE_REPEAT_REPLACED (detector)": {
+    "MUTANT_DETECTED": 2
+   },
+   "PERMUTE reverse": {
+    "MUTANT_DETECTED": 2
+   },
+   "PERMUTE rot3": {
+    "MUTANT_DETECTED": 2
+   },
+   "PHASE 0.449": {
+    "MUTANT_SURVIVED": 2
+   },
+   "PHASE 1.571": {
+    "MUTANT_SURVIVED": 2
+   },
+   "SCALE x0.001": {
+    "MUTANT_SURVIVED": 2
+   },
+   "SCALE x0.37": {
+    "MUTANT_SURVIVED": 2
+   },
+   "SCALE x1000": {
+    "MUTANT_SURVIVED": 2
+   },
+   "SHIFT +1000 bins": {
+    "MUTANT_SURVIVED": 2
+   },
+   "SHIFT +100000 bins": {
+    "MUTANT_SURVIVED": 2
+   },
+   "SHIFT -2500 bins": {
+    "MUTANT_SURVIVED": 2
+   }
+  },
+  "sign_dropped": {
+   "CONJ": {
+    "MUTANT_DETECTED": 2
+   },
+   "NOISE weak": {
+    "MUTANT_SURVIVED": 2
+   },
+   "ONE_REPEAT_REPLACED (detector)": {
+    "MUTANT_SURVIVED": 2
+   },
+   "PERMUTE reverse": {
+    "MUTANT_SURVIVED": 2
+   },
+   "PERMUTE rot3": {
+    "MUTANT_SURVIVED": 2
+   },
+   "PHASE 0.449": {
+    "MUTANT_SURVIVED": 2
+   },
+   "PHASE 1.571": {
+    "MUTANT_SURVIVED": 2
+   },
+   "SCALE x0.001": {
+    "MUTANT_SURVIVED": 2
+   },
+   "SCALE x0.37": {
+    "MUTANT_SURVIVED": 2
+   },
+   "SCALE x1000": {
+    "MUTANT_SURVIVED": 2
+   },
+   "SHIFT +1000 bins": {
+    "MUTANT_SURVIVED": 2
+   },
+   "SHIFT +100000 bins": {
+    "MUTANT_SURVIVED": 2
+   },
+   "SHIFT -2500 bins": {
+    "MUTANT_SURVIVED": 2
+   }
+  },
+  "span_limit_removed": {
+   "CONJ": {
+    "MUTANT_SURVIVED": 2
+   },
+   "NOISE weak": {
+    "MUTANT_SURVIVED": 2
+   },
+   "ONE_REPEAT_REPLACED (detector)": {
+    "MUTANT_SURVIVED": 2
+   },
+   "PERMUTE reverse": {
+    "MUTANT_SURVIVED": 2
+   },
+   "PERMUTE rot3": {
+    "MUTANT_SURVIVED": 2
+   },
+   "PHASE 0.449": {
+    "MUTANT_SURVIVED": 2
+   },
+   "PHASE 1.571": {
+    "MUTANT_SURVIVED": 2
+   },
+   "SCALE x0.001": {
+    "MUTANT_SURVIVED": 2
+   },
+   "SCALE x0.37": {
+    "MUTANT_SURVIVED": 2
+   },
+   "SCALE x1000": {
+    "MUTANT_SURVIVED": 2
+   },
+   "SHIFT +1000 bins": {
+    "MUTANT_SURVIVED": 2
+   },
+   "SHIFT +100000 bins": {
+    "MUTANT_SURVIVED": 2
+   },
+   "SHIFT -2500 bins": {
+    "MUTANT_SURVIVED": 2
+   }
+  },
+  "span_limit_strict": {
+   "CONJ": {
+    "MUTANT_SURVIVED": 2
+   },
+   "NOISE weak": {
+    "MUTANT_SURVIVED": 2
+   },
+   "ONE_REPEAT_REPLACED (detector)": {
+    "MUTANT_SURVIVED": 2
+   },
+   "PERMUTE reverse": {
+    "MUTANT_SURVIVED": 2
+   },
+   "PERMUTE rot3": {
+    "MUTANT_SURVIVED": 2
+   },
+   "PHASE 0.449": {
+    "MUTANT_SURVIVED": 2
+   },
+   "PHASE 1.571": {
+    "MUTANT_SURVIVED": 2
+   },
+   "SCALE x0.001": {
+    "MUTANT_SURVIVED": 2
+   },
+   "SCALE x0.37": {
+    "MUTANT_SURVIVED": 2
+   },
+   "SCALE x1000": {
+    "MUTANT_SURVIVED": 2
+   },
+   "SHIFT +1000 bins": {
+    "MUTANT_SURVIVED": 2
+   },
+   "SHIFT +100000 bins": {
+    "MUTANT_SURVIVED": 2
+   },
+   "SHIFT -2500 bins": {
+    "MUTANT_SURVIVED": 2
+   }
+  },
+  "span_limit_widened": {
+   "CONJ": {
+    "MUTANT_SURVIVED": 2
+   },
+   "NOISE weak": {
+    "MUTANT_SURVIVED": 2
+   },
+   "ONE_REPEAT_REPLACED (detector)": {
+    "MUTANT_SURVIVED": 2
+   },
+   "PERMUTE reverse": {
+    "MUTANT_SURVIVED": 2
+   },
+   "PERMUTE rot3": {
+    "MUTANT_SURVIVED": 2
+   },
+   "PHASE 0.449": {
+    "MUTANT_SURVIVED": 2
+   },
+   "PHASE 1.571": {
+    "MUTANT_SURVIVED": 2
+   },
+   "SCALE x0.001": {
+    "MUTANT_SURVIVED": 2
+   },
+   "SCALE x0.37": {
+    "MUTANT_SURVIVED": 2
+   },
+   "SCALE x1000": {
+    "MUTANT_SURVIVED": 2
+   },
+   "SHIFT +1000 bins": {
+    "MUTANT_SURVIVED": 2
+   },
+   "SHIFT +100000 bins": {
+    "MUTANT_SURVIVED": 2
+   },
+   "SHIFT -2500 bins": {
+    "MUTANT_SURVIVED": 2
+   }
+  }
+ },
+ "mutant_verdict": {
+  "absolute_floor": "MUTANT_DETECTED",
+  "first_repeat_only": "MUTANT_DETECTED",
+  "sign_dropped": "MUTANT_DETECTED",
+  "span_limit_removed": "MUTANT_SURVIVED_OR_NOT_COMPARABLE",
+  "span_limit_strict": "MUTANT_SURVIVED_OR_NOT_COMPARABLE",
+  "span_limit_widened": "MUTANT_SURVIVED_OR_NOT_COMPARABLE"
+ },
+ "identity_verdict": "IDENTITY_AND_NAMESPACE_VERIFIED",
+ "boundary": {
+  "layer_A": {
+   "500000": {
+    "computed_exactly_on_boundary": [
+     225000
+    ],
+    "ideal_on_boundary_bins": [
+     225000
+    ]
+   },
+   "524280": {
+    "computed_exactly_on_boundary": [],
+    "ideal_on_boundary_bins": [
+     235926
+    ]
+   },
+   "524288": {
+    "computed_exactly_on_boundary": [],
+    "ideal_on_boundary_bins": []
+   }
+  },
+  "layer_B_prime": {
+   "production_path": false,
+   "cases": 12,
+   "production_violations": 0,
+   "credits": {
+    "span_limit_removed:MUTANT_SURVIVED_EQUIVALENT_ON_GRID": 6,
+    "span_limit_strict:MUTANT_SURVIVED_EQUIVALENT_ON_GRID": 10,
+    "span_limit_widened:MUTANT_SURVIVED_EQUIVALENT_ON_GRID": 6,
+    "span_limit_strict:MUTANT_DETECTED": 2,
+    "span_limit_removed:MUTANT_DETECTED": 6,
+    "span_limit_widened:MUTANT_DETECTED": 6
+   }
+  },
+  "layer_B": {
+   "fixtures": 2,
+   "cases_evaluated": 16,
+   "cases_precondition_not_met": 0,
+   "production_violations": 0,
+   "credits": {
+    "span_limit_removed:MUTANT_SURVIVED_EQUIVALENT_ON_GRID": 4,
+    "span_limit_strict:MUTANT_SURVIVED_EQUIVALENT_ON_GRID": 16,
+    "span_limit_widened:MUTANT_SURVIVED_EQUIVALENT_ON_GRID": 8,
+    "span_limit_removed:MUTANT_DETECTED": 12,
+    "span_limit_widened:MUTANT_DETECTED": 8
+   },
+   "production_path": false
+  }
+ }
+}

@@ -1,0 +1,7 @@
+ATTEMPT_ID: R4FULL-20261014T023003Z-2b2e3251b678-SCYTHE-30d8a2f0
+PREFLIGHT_RECORD: record_prelaunch_3 (verdict PASS; PREFLIGHT_SHA256SUMS digest ae3232ba9a685657f915a8c4350f2360edf0f4b6ad8a19e94b5f482d92230b04)
+AUTHORIZATION: operator reply "Authorize the full local r4 run now; lid and hibernation are covered." (see OPERATOR_CONFIRMATION_5b.txt, digest in OPERATOR_CONFIRMATION_5b.sha256)
+COMMAND: PYTHON=<venv python> PYTHONDONTWRITEBYTECODE=1 bash <extracted package>/tools/r4_job/run_job.sh <job dir>   (unmodified runner; package extracted and verified by the preflight)
+LAUNCH_UTC: 2026-10-14T02:30:11Z
+RUNNER_EXIT: run_job.sh exit=0
+JOB_MANIFEST_SHA256: ff5f86a29971a1870d3040fbe03a8a3e4dfc4c63448b6848e853f1aadc2721d2

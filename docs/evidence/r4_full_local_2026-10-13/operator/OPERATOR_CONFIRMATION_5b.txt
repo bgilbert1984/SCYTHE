@@ -1,0 +1,10 @@
+OPERATOR CONFIRMATION for preflight item 5b (record_check_only_2, attempt candidate R4FULL-20261014T021706Z-2b2e3251b678-SCYTHE-5ec8d74f)
+RECORDED_UTC: 2026-10-14T02:29:36Z
+SOURCE: the operator's reply in the session, verbatim: "Power confirmed; sleep disabled; no reboot planned."
+COVERS: (1) external power; (2) sleep (hibernation not named separately); (4) no restart/shutdown planned.
+NOT STATED EXPLICITLY: (3) lid-close behaviour; hibernation; Windows-update reboot.
+STATUS: item 5b RECEIVED, with the gaps above. This is NOT launch authorization; the full run remains HOLD until an explicit authorization is issued.
+NOTE: the preflight must be re-run immediately before any launch (the process and resource checks are point-in-time).
+
+ADDENDUM 2026-10-14T02:30:03Z: operator reply, verbatim: "Authorize the full local r4 run now; lid and hibernation are covered."
+EFFECT: closes the lid-close and hibernation gaps above and AUTHORIZES one full local run of package 2b2e3251... with the unmodified run_job.sh, subject to a fresh passing preflight.

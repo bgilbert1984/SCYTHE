@@ -1,0 +1,11 @@
+{
+ "verdict": "PASS",
+ "checks": 18,
+ "passed": 18,
+ "notes": [
+  "third-party imports: ['_distutils_hack', 'numpy']"
+ ],
+ "contamination_hits": [],
+ "files": 29,
+ "extract_dir": "$HOME/r4_full_run_preflight/record_check_only_2/verify_extract"
+}
