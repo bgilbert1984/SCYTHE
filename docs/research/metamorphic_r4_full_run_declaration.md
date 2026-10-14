@@ -34,9 +34,12 @@ Preflight resolves `PYTHON` (`realpath`), requires `sys.version_info[:3] == (3, 
 1. The archive's SHA-256 equals the declared package digest; it is extracted into a **new, empty directory** (safe extraction: no absolute paths, `..`, links or devices), and `sha256sum -c SHA256SUMS` passes there. The extracted package is not modified afterwards.
 2. The interpreter rule of §2.
 3. The job directory is an absolute path that **does not exist**, on a filesystem satisfying §4. `run_job.sh` itself refuses an existing job directory; nothing is overwritten or deleted, before, during or after the run.
-4. The package-tools verifier and the redaction-aware evidence verifier from the merged tools pass on the declared package record (artifact integrity only).
+4. Two **separate** verification checks, each applied to its own target:
+   - **4a (package):** the repository package verifier (`tools/r4_package/verify_package.py`) validates the frozen archive against its recorded source commit (clean-archive comparison, source closure, inventory). Its target is the archive `2b2e3251…`.
+   - **4b (committed evidence):** the redaction-aware evidence verifier (`tools/r4_package/verify_committed_evidence.py`) validates the committed historical evidence under `docs/evidence` in a pristine checkout or archive of the repository. It does **not** operate on the package archive, which is not its supported interface, and a pass of 4b says nothing about the package (nor 4a about the evidence).
 5. Host condition (§4): powered, not on battery-only operation if that can be detected, and sleep/hibernation suspended.
 6. No other r4 job is running; the workstation's other load is recorded.
+7. **Attempt identity, recorded before the runner is invoked.** The external preflight record names a unique attempt ID and binds it to the package SHA-256, the host identity (hostname, kernel, and the resolved interpreter identity of §2) and the selected absolute job-directory path, with a timestamp. The record is written and checksummed **before** `run_job.sh` is started, so an attempt that is interrupted before the job writes its first status record is still identifiable. A retry uses a new attempt ID and a new job directory.
 
 The preflight output is saved beside, not inside, the job directory, and checksummed with the final execution record.
 
