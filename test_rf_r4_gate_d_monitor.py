@@ -1,4 +1,4 @@
-"""Synthetic failure-injection tests for tools/r4_package/gate_d_monitor.py (docs/research/metamorphic_r4_gate_d_protocol.md section 5).
+"""Synthetic failure-injection tests for tools/r4_package/gate_d_monitor.py (docs/research/metamorphic_r4_gate_d_protocol.md section 5, Revision 2).
 No Dedirock connection, transfer, preflight, or replay execution: everything here runs a short-lived local child process."""
 import hashlib, json, os, pathlib, shutil, signal, subprocess, sys, tempfile, time, unittest
 
@@ -34,9 +34,12 @@ class GateDMonitor(unittest.TestCase):
         self.n += 1
         return os.path.join(self.tmp, f"rec{self.n}")
 
-    def pid_file(self, pid):
+    def pid_file_path(self):
         self.n += 1
-        path = os.path.join(self.tmp, f"launch{self.n}.pid")
+        return os.path.join(self.tmp, f"launch{self.n}.pid")
+
+    def pid_file(self, pid):
+        path = self.pid_file_path()
         pathlib.Path(path).write_text(str(pid) + "\n")
         return path
 
@@ -45,11 +48,15 @@ class GateDMonitor(unittest.TestCase):
         self.children.append(p)
         return p
 
-    def run_monitor(self, launch_pid_file, interpreter_sha256=None, record_dir=None, extra=(), interval=0.2, grace=3, wait=True):
+    def run_monitor(self, launch_pid_file, interpreter_sha256=None, record_dir=None, extra=(), interval=0.2,
+                     grace=3, wait=True, test_mode=True):
         record_dir = record_dir or self.record_dir()
         args = [sys.executable, TOOL, "--launch-pid-file", launch_pid_file, "--record-dir", record_dir,
                 "--interpreter-sha256", interpreter_sha256 if interpreter_sha256 is not None else PY_SHA256,
-                "--interval-seconds", str(interval), "--startup-grace-samples", str(grace), *extra]
+                "--interval-seconds", str(interval), "--startup-grace-samples", str(grace)]
+        if test_mode:
+            args.append("--test-mode")
+        args += list(extra)
         p = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         if wait:
             try:
@@ -70,6 +77,7 @@ class GateDMonitor(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, err)
         log = read_log(record_dir)
         self.assertEqual(len(events(log, "MONITOR_START")), 1)
+        self.assertEqual(len(events(log, "MONITOR_READY")), 1)
         confirmed = events(log, "MONITOR_START_CONFIRMED")
         self.assertEqual(len(confirmed), 1)
         self.assertEqual(confirmed[0]["bound_pid"], child.pid)
@@ -77,14 +85,49 @@ class GateDMonitor(unittest.TestCase):
         self.assertGreater(len(samples), 0)
         for s in samples:
             self.assertIn(child.pid, s["pid_tree"])
-            self.assertGreaterEqual(s["vmrss_bytes"], 0)
-            self.assertGreaterEqual(s["peak_authoritative_bytes"], max(s["vmhwm_live_bytes"], s["vmhwm_running_sum_bytes"]))
+            self.assertGreaterEqual(s["vmrss_tree_bytes"], 0)
+            self.assertGreaterEqual(s["peak_sampled_tree_rss_bytes"], s["vmrss_tree_bytes"])
+            self.assertGreaterEqual(s["sum_observed_process_hwm_bytes"], 0)
+            self.assertIsNone(s["peak_job_memory_bytes"])
         stop = events(log, "MONITOR_STOP")
         self.assertEqual(len(stop), 1)
         self.assertTrue(stop[0]["clean"])
         self.assertEqual(stop[0]["reason"], "SIGTERM")
         self.assertEqual(events(log, "HARNESS_PROCESS_ENDED"), [])  # the harness was still running at stop
         child.kill(); child.wait(timeout=5)
+
+    # -- MONITOR_READY precedes binding; the monitor can start before the harness does ------
+    def test_monitor_ready_emitted_before_pid_file_exists_then_binds_once_it_appears(self):
+        pid_file = self.pid_file_path()
+        self.assertFalse(os.path.exists(pid_file))
+        proc, record_dir = self.run_monitor(pid_file, grace=20, interval=0.2, wait=False)
+        time.sleep(0.4)
+        log = read_log(record_dir)
+        self.assertEqual(len(events(log, "MONITOR_READY")), 1)
+        self.assertEqual(events(log, "MONITOR_START_CONFIRMED"), [])  # not yet: pid file still absent
+        child = self.spawn_sleeper(10)
+        pathlib.Path(pid_file).write_text(str(child.pid) + "\n")
+        time.sleep(1.0)
+        proc.send_signal(signal.SIGTERM)
+        out, err = proc.communicate(timeout=10)
+        self.assertEqual(proc.returncode, 0, err)
+        log = read_log(record_dir)
+        confirmed = events(log, "MONITOR_START_CONFIRMED")
+        self.assertEqual(len(confirmed), 1)
+        self.assertEqual(confirmed[0]["bound_pid"], child.pid)
+        child.kill(); child.wait(timeout=5)
+
+    def test_startup_failure_when_pid_file_never_appears(self):
+        pid_file = self.pid_file_path()
+        rc, out, err, record_dir = self.run_monitor(pid_file, grace=2, interval=0.1)
+        self.assertEqual(rc, 3, err)
+        log = read_log(record_dir)
+        self.assertEqual(len(events(log, "MONITOR_READY")), 1)
+        fail = events(log, "MONITOR_FAILURE")
+        self.assertEqual(len(fail), 1)
+        self.assertEqual(fail[0]["phase"], "STARTUP")
+        self.assertIn("not yet readable", fail[0]["detail"])
+        self.assertEqual(events(log, "MONITOR_START_CONFIRMED"), [])
 
     # -- absent / short-lived process --------------------------------------
     def test_absent_pid_is_startup_failure(self):
@@ -109,7 +152,7 @@ class GateDMonitor(unittest.TestCase):
         self.assertEqual(events(log, "MONITOR_START_CONFIRMED"), [])
         self.assertEqual(events(log, "MONITOR_FAILURE")[0]["phase"], "STARTUP")
 
-    # -- wrong interpreter: monitor fails, harness is never touched --------
+    # -- wrong interpreter: monitor fails, harness is never touched, never a permit-to-relaunch --
     def test_wrong_interpreter_digest_is_startup_failure_and_harness_is_left_running(self):
         child = self.spawn_sleeper(30)
         wrong_digest = sha(b"not the interpreter")
@@ -177,7 +220,7 @@ class GateDMonitor(unittest.TestCase):
         self.assertFalse(events(log, "OOM_OBSERVABILITY")[0]["available"])
         for s in events(log, "SAMPLE"):
             self.assertEqual(s["oom_observability"], "UNAVAILABLE")
-            self.assertIsNone(s["oom_events_since_start"])
+            self.assertIsNone(s["oom_related_log_lines_since_baseline"])
 
     def test_oom_observability_available_counts_increase(self):
         counter = os.path.join(self.tmp, "oom_counter.txt")
@@ -197,9 +240,46 @@ class GateDMonitor(unittest.TestCase):
         self.assertTrue(events(log, "OOM_OBSERVABILITY")[0]["available"])
         samples = events(log, "SAMPLE")
         self.assertTrue(samples)
-        counts = [s["oom_events_since_start"] for s in samples]
+        counts = [s["oom_related_log_lines_since_baseline"] for s in samples]
         self.assertTrue(all(c is not None for c in counts))
         self.assertEqual(counts, sorted(counts))  # non-decreasing as the fake source's count climbs
+
+    def test_oom_observability_transitions_to_unavailable_then_reacquires_mid_run(self):
+        # a stateful fake source: succeeds on calls 1-2, fails on calls 3-4, succeeds again from call 5
+        state = os.path.join(self.tmp, "oom_calls.txt")
+        pathlib.Path(state).write_text("0")
+        script = os.path.join(self.tmp, "flaky_oom_source.py")
+        pathlib.Path(script).write_text(
+            "import sys\n"
+            f"p = {state!r}\n"
+            "n = int(open(p).read()) + 1\n"
+            "open(p, 'w').write(str(n))\n"
+            "if 3 <= n <= 4:\n"
+            "    sys.exit(1)\n"
+            "print('oom-kill event')\n"
+        )
+        child = self.spawn_sleeper(10)
+        pid_file = self.pid_file(child.pid)
+        proc, record_dir = self.run_monitor(
+            pid_file, extra=["--oom-check-command", f"{sys.executable} {script}"], interval=0.3, wait=False,
+        )
+        time.sleep(2.2)  # several sampling intervals: enough to cross the fail-then-recover window
+        proc.send_signal(signal.SIGTERM)
+        out, err = proc.communicate(timeout=10)
+        self.assertEqual(proc.returncode, 0, err)
+        log = read_log(record_dir)
+        availability_events = events(log, "OOM_OBSERVABILITY")
+        reasons = [e.get("reason") for e in availability_events]
+        self.assertIn("SOURCE_FAILED_MID_RUN", reasons)
+        self.assertIn("SOURCE_REACQUIRED", reasons)
+        samples = events(log, "SAMPLE")
+        statuses = [s["oom_observability"] for s in samples]
+        self.assertIn("UNAVAILABLE", statuses)
+        self.assertIn("AVAILABLE", statuses)
+        for s in samples:
+            if s["oom_observability"] == "UNAVAILABLE":
+                self.assertIsNone(s["oom_related_log_lines_since_baseline"])
+        child.kill(); child.wait(timeout=5)
 
     # -- crash path: never reported as a clean stop -------------------------
     def test_malformed_oom_command_is_monitor_failure_not_clean(self):
@@ -213,6 +293,60 @@ class GateDMonitor(unittest.TestCase):
         self.assertFalse(stop[0]["clean"])
         self.assertEqual(stop[0]["reason"], "CRASH")
         self.assertIn("MONITOR_FAILURE: CRASH", out + err)
+
+    # -- production-mode guardrails: refused before any record dir is created ----------
+    def test_oom_check_command_without_test_mode_is_rejected(self):
+        child = self.spawn_sleeper(5)
+        record_dir = self.record_dir()
+        rc, out, err, _ = self.run_monitor(self.pid_file(child.pid), record_dir=record_dir,
+                                            extra=["--oom-check-command", "false"], test_mode=False)
+        self.assertNotEqual(rc, 0)
+        self.assertIn("--test-mode", out + err)
+        self.assertFalse(os.path.exists(record_dir))
+
+    def test_fast_interval_without_test_mode_is_rejected(self):
+        child = self.spawn_sleeper(5)
+        record_dir = self.record_dir()
+        rc, out, err, _ = self.run_monitor(self.pid_file(child.pid), record_dir=record_dir,
+                                            interval=1.0, test_mode=False)
+        self.assertNotEqual(rc, 0)
+        self.assertIn("--test-mode", out + err)
+        self.assertFalse(os.path.exists(record_dir))
+
+    def test_production_interval_floor_is_exactly_five_seconds(self):
+        # 5.0 itself is accepted without --test-mode (only below the floor is rejected); use a PID that
+        # will never match so this exits quickly as a startup failure rather than actually waiting 5s+.
+        record_dir = self.record_dir()
+        args = [sys.executable, TOOL, "--launch-pid-file", self.pid_file(2**22), "--record-dir", record_dir,
+                "--interpreter-sha256", PY_SHA256, "--interval-seconds", "5.0", "--startup-grace-samples", "1"]
+        r = subprocess.run(args, capture_output=True, text=True, timeout=15)
+        self.assertNotIn("--test-mode", r.stdout + r.stderr)  # rejected for a different reason (startup failure), not the floor
+        self.assertTrue(os.path.exists(record_dir))
+
+    def test_invalid_interpreter_sha256_rejected_before_record_dir_created(self):
+        child = self.spawn_sleeper(5)
+        record_dir = self.record_dir()
+        rc, out, err, _ = self.run_monitor(self.pid_file(child.pid), record_dir=record_dir,
+                                            interpreter_sha256="not-a-digest")
+        self.assertNotEqual(rc, 0)
+        self.assertIn("64 hex", out + err)
+        self.assertFalse(os.path.exists(record_dir))
+
+    def test_nonpositive_interval_rejected_before_record_dir_created(self):
+        child = self.spawn_sleeper(5)
+        record_dir = self.record_dir()
+        rc, out, err, _ = self.run_monitor(self.pid_file(child.pid), record_dir=record_dir, interval=0)
+        self.assertNotEqual(rc, 0)
+        self.assertIn("positive", out + err)
+        self.assertFalse(os.path.exists(record_dir))
+
+    def test_nonpositive_startup_grace_samples_rejected_before_record_dir_created(self):
+        child = self.spawn_sleeper(5)
+        record_dir = self.record_dir()
+        rc, out, err, _ = self.run_monitor(self.pid_file(child.pid), record_dir=record_dir, grace=0)
+        self.assertNotEqual(rc, 0)
+        self.assertIn("positive integer", out + err)
+        self.assertFalse(os.path.exists(record_dir))
 
     # -- custody of the record directory ------------------------------------
     def test_record_dir_must_not_already_exist(self):
