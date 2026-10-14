@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 """Gate C preflight for the replay host (stdlib only; runs ON the replay host). Derived from the local full-run preflight; differences in docs/research/metamorphic_r4_gate_c_preflight.md.
 
-  gate_c_preflight.py --mode CHECK_ONLY --archive A --python /abs/python --job-dir /abs/new --record-dir /abs/new/record [--reference-preflight JSON] [--operator-confirms-window]
-  gate_c_preflight.py --mode RECHECK    --archive A --python /abs/python --job-dir /abs/new --record-dir /abs/new/recheck --prior-record DIR [--operator-confirms-window]
+  gate_c_preflight.py --mode CHECK_ONLY --archive A --python /abs/python --job-dir /abs/new --record-dir /abs/new/record [--reference-preflight JSON] [--operator-declaration FILE]
+  gate_c_preflight.py --mode RECHECK    --archive A --python /abs/python --job-dir /abs/new --record-dir /abs/new/recheck --prior-record DIR --operator-declaration FILE
 
 CHECK_ONLY records the replay environment (it is NOT required to equal the reference: protocol section 5.3) and checks package identity, interpreter, resources, job-directory isolation and absence
 of a competing job. RECHECK, run immediately before launch, requires the environment to equal the CHECK_ONLY record exactly (otherwise the replay is refused).
+Field classes (record schema 2): FROZEN (must be equal at RECHECK: package, runner and harness digests, every requirement/threshold, the job path, the interpreter and numerical environment, the declaration identity);
+REMEASURED (free space, memory, load, competing processes, job-directory absence: measured again and judged against the FROZEN thresholds, never compared for equality); RECONFIRMED (the operator declaration: same identity,
+and independently still valid at RECHECK: inside its window, not withdrawn). A changed measurement is acceptable while the frozen requirement still holds; a changed requirement is refused.
 It never creates the job directory, never starts a job, never writes outside --record-dir, never deletes, never installs. Exit 0 iff no item FAILED; a crash exits 2 (GATE_C_TOOL_FAILURE).
 """
 import argparse, datetime, hashlib, json, os, platform, re, secrets, shutil, socket, subprocess, sys, tarfile, tempfile, traceback
@@ -21,12 +24,16 @@ DECL = {"package_sha256": "2b2e3251b678a5e83735ee663176f7763482a6948a7d5cb57f244
         "window_hours": 4, "local_runtime_baseline_s": {"total": 1491, "bounded_controls": 162, "fixtures_and_pins": 24, "smoke_and_gate": 203, "full_harness_and_gate": 1101}}
 ap = argparse.ArgumentParser()
 for f in ("--mode", "--archive", "--python", "--job-dir", "--record-dir"): ap.add_argument(f, required=True)
-ap.add_argument("--reference-preflight"); ap.add_argument("--prior-record"); ap.add_argument("--declaration"); ap.add_argument("--operator-confirms-window", action="store_true")
+ap.add_argument("--reference-preflight"); ap.add_argument("--prior-record"); ap.add_argument("--declaration"); ap.add_argument("--operator-declaration"); ap.add_argument("--now-utc")
 a = ap.parse_args()
 if a.mode not in ("CHECK_ONLY", "RECHECK"): sys.exit("modes: CHECK_ONLY or RECHECK; launching is not part of this tool")
 override = False
 if a.declaration:                       # tests only: a declaration override makes the verdict permanently invalid for Gate C
     DECL.update(json.load(open(a.declaration))); override = True
+if a.now_utc and not override: sys.exit("--now-utc is a test hook and is only honoured together with --declaration (which invalidates the verdict)")
+SCHEMA_VERSION = 2
+SCOPE = "no planned maintenance, reboot or reclaim of the host during the window"
+REQUIREMENT_KEYS = ("package_sha256", "source_commit", "min_free_gb", "min_mem_gb", "run_job_sha256", "harness_sha256", "window_hours")
 for p in (a.python, a.job_dir, a.record_dir):
     if not os.path.isabs(p): sys.exit("PYTHON, job dir and record dir must be absolute paths")
 if os.path.exists(a.record_dir): sys.exit("record dir exists; refusing to overwrite a preflight record")
@@ -46,7 +53,7 @@ def sh(args, log, **k):
     with open(os.path.join(a.record_dir, log), "w") as fh: fh.write(f"$ {' '.join(map(str, args))}\n{r.stdout}\n--- stderr\n{r.stderr}\n--- rc {r.returncode}\n")
     return r
 
-now = datetime.datetime.now(datetime.timezone.utc)
+now = datetime.datetime.fromisoformat(a.now_utc) if a.now_utc else datetime.datetime.now(datetime.timezone.utc)
 # ---- package
 arc = os.path.join(a.record_dir, os.path.basename(a.archive)); shutil.copyfile(a.archive, arc)
 d = fsha(arc); item("1 archive SHA-256 equals the declared package digest", d == DECL["package_sha256"], d)
@@ -101,9 +108,38 @@ for pid in filter(str.isdigit, os.listdir("/proc")):
     if int(pid) != os.getpid() and pat.search(cmd) and "gate_c_preflight" not in cmd: comp.append((pid, cmd[:100]))
 item("4 no competing r4 job process is running", not comp, str(comp[:3]))
 
-# ---- operator condition (a server: no planned maintenance, reboot or reclaim during the window)
-item(f"5 host available for the whole {DECL['window_hours']} h window; no planned maintenance or reboot (operator statement)", a.operator_confirms_window,
-     "operator statement given" if a.operator_confirms_window else "OPERATOR CONFIRMATION REQUIRED before any launch", pending=not a.operator_confirms_window)
+# ---- operator declaration (RECONFIRMED): a structured, digest-bound statement made by the operator (the trusted workflow is documented; the tool never creates one)
+def utc(x): return datetime.datetime.fromisoformat(x.replace("Z", "+00:00"))
+def check_declaration(path, mode, prior_identity):
+    """Return (status, detail, identity). CHECK_ONLY: missing -> PENDING. RECHECK: missing, changed, expired, withdrawn or invalid -> FAIL."""
+    if not path: return ("PENDING" if mode == "CHECK_ONLY" else "FAIL"), "no operator declaration given", None
+    if not os.path.isfile(path): return "FAIL", "operator declaration file missing", None
+    raw = open(path, "rb").read(); ident = {"sha256": sha(raw)}
+    try:
+        o = json.loads(raw); need = ("schema", "operator", "host", "package_sha256", "window_start_utc", "window_end_utc", "declared_at_utc", "scope")
+        if o.get("schema") != "gate-c-operator-declaration/1" or any(not isinstance(o.get(k), str) or not o[k].strip() for k in need): return "FAIL", "operator declaration is malformed or incomplete", ident
+        start, end, at = utc(o["window_start_utc"]), utc(o["window_end_utc"]), utc(o["declared_at_utc"])
+    except (ValueError, TypeError, AttributeError) as exc: return "FAIL", f"operator declaration unreadable: {exc}", ident
+    ident.update({k: o[k] for k in ("operator", "host", "package_sha256", "window_start_utc", "window_end_utc", "declared_at_utc")})
+    why = []
+    if o["host"] != env["hostname"]: why.append(f"declared host {o['host']!r} is not this host")
+    if o["package_sha256"] != d: why.append("declaration names a different package")
+    if o["scope"] != SCOPE: why.append("declaration scope text differs from the required scope")
+    if end - start != datetime.timedelta(hours=DECL["window_hours"]): why.append(f"window is not exactly {DECL['window_hours']} h")
+    if at > now: why.append("declared in the future")
+    if os.path.exists(path + ".withdrawn"): why.append("declaration WITHDRAWN")
+    if mode == "CHECK_ONLY" and not now < end: why.append("window already expired")
+    if mode == "RECHECK" and not start <= now < end: why.append("launch-time is outside the declared window (expired or not yet open)")
+    if mode == "RECHECK":
+        if not prior_identity: why.append("the CHECK_ONLY record holds no declaration identity")
+        elif prior_identity != ident: why.append("declaration identity differs from the one frozen in the CHECK_ONLY record")
+    return ("FAIL" if why else "PASS"), ("; ".join(why) or f"operator {o['operator']!r}, host {o['host']}, window {o['window_start_utc']} to {o['window_end_utc']}, digest {ident['sha256'][:16]}..."), ident
+
+prior = None
+if a.mode == "RECHECK":
+    pj = os.path.join(a.prior_record, "PREFLIGHT_RECORD.json"); prior = json.load(open(pj))
+st, detail, decl_ident = check_declaration(a.operator_declaration, a.mode, (prior or {}).get("operator_declaration"))
+results.append(("5 operator declaration" + (" (reconfirmed at launch time)" if a.mode == "RECHECK" else "") + f": host available for the whole {DECL['window_hours']} h window, {SCOPE}", st, detail)); print(f"{st:7s} {results[-1][0]}  {detail}")
 
 # ---- environment table against the reference, and the RECHECK equality
 ref_env = None
@@ -112,16 +148,32 @@ if a.reference_preflight:
     ref_env = {"hostname": rr.get("host", {}).get("hostname"), "kernel": rr.get("host", {}).get("kernel"), "logical_cpus": rr.get("nproc"), "python_version": ri.get("version"), "numpy": ri.get("numpy"),
                "interpreter_binary_sha256": ri.get("binary_sha256"), "numpy_file": ri.get("numpy_file")}
 if a.mode == "RECHECK":
-    prior = json.load(open(os.path.join(a.prior_record, "PREFLIGHT_RECORD.json")))
-    diffs = [f"{k}: {prior['environment'].get(k)!r} -> {env.get(k)!r}" for k in env if prior["environment"].get(k) != env.get(k)]
-    item("6 the launch-time environment equals the Gate C CHECK_ONLY record exactly (otherwise the replay is refused)", not diffs and prior.get("package_sha256") == d, "; ".join(diffs[:4]) or "identical")
+    sums = os.path.join(a.prior_record, "PREFLIGHT_SHA256SUMS"); bad_sum = []
+    if not os.path.isfile(sums): bad_sum.append("PREFLIGHT_SHA256SUMS missing")
+    else:
+        for line in open(sums).read().split("\n"):
+            if line.strip():
+                dg, nm = line.split(None, 1); pth = os.path.join(a.prior_record, nm.strip())
+                if not os.path.isfile(pth) or fsha(pth) != dg: bad_sum.append(nm.strip())
+    item("6s the prior record is schema 2 and its checksum file verifies (an immutable reference; older or incomplete records are rejected)", prior.get("schema_version") == SCHEMA_VERSION and not bad_sum,
+         f"schema_version={prior.get('schema_version')!r}" + (f"; checksum problems {bad_sum[:3]}" if bad_sum else ""))
+    want_verdict = "INVALID_FOR_GATE_C_DECLARATION_OVERRIDE_PASS" if override else "PASS"
+    item("6p the prior record's verdict is PASS (a pending or failed CHECK_ONLY cannot be rechecked into a pass)", prior.get("verdict") == want_verdict, str(prior.get("verdict")))
+    diffs = [f"{k}: {prior.get('environment', {}).get(k)!r} -> {env.get(k)!r}" for k in env if prior.get("environment", {}).get(k) != env.get(k)]
+    item("6 FROZEN: the launch-time environment equals the Gate C CHECK_ONLY record exactly (otherwise the replay is refused)", not diffs and prior.get("package_sha256") == d, "; ".join(diffs[:4]) or "identical")
+    req_now = {k: DECL[k] for k in REQUIREMENT_KEYS}; req_prior = prior.get("requirements", {})
+    item("6r FROZEN: requirements, thresholds, package and job path equal the record's (a changed measurement may vary; a changed requirement may not)", req_prior == req_now and prior.get("job_dir") == a.job_dir,
+         "; ".join(f"{k}: {req_prior.get(k)!r} -> {req_now[k]!r}" for k in req_now if req_prior.get(k) != req_now[k]) or ("job path differs" if prior.get("job_dir") != a.job_dir else "identical"))
     item("6a the host has not rebooted since the CHECK_ONLY record (informational: a reboot is reported, not failed)", True, "same boot" if prior["host"]["boot_id"] == boot_id else "BOOT ID CHANGED since the CHECK_ONLY record")
 
 attempt_id = f"R4REPLAY-{now.strftime('%Y%m%dT%H%M%SZ')}-{DECL['package_sha256'][:12]}-{env['hostname']}-{secrets.token_hex(4)}"
 fails = [n for n, s, _ in results if s == "FAIL"]; pend = [n for n, s, _ in results if s == "PENDING"]
 verdict = "FAIL" if fails else ("PASS_OPERATOR_CONFIRMATION_PENDING" if pend else "PASS")
 if override: verdict = "INVALID_FOR_GATE_C_DECLARATION_OVERRIDE_" + verdict
-rec = {"preflight_mode": a.mode, "launch": "NOT_PERFORMED", "attempt_id_candidate": attempt_id, "timestamp_utc": now.isoformat(timespec="seconds"), "package_sha256": d, "job_dir": a.job_dir, "record_dir": a.record_dir,
+fclass = {"FROZEN": ["package_sha256", "requirements", "job_dir", "environment", "operator_declaration identity"],
+          "REMEASURED": ["free space (job, temp)", "available memory", "load", "competing processes", "job directory absent"], "RECONFIRMED": ["operator declaration validity (window, withdrawal)"]}
+measured = {"free_job_gb": round(fj, 3), "free_tmp_gb": round(ft, 3), "mem_available_gb": round(mem["MemAvailable"] / 1e6, 3)}
+rec = {"schema_version": SCHEMA_VERSION, "field_classes": fclass, "requirements": {k: DECL[k] for k in REQUIREMENT_KEYS}, "measurements": measured, "operator_declaration": decl_ident, "preflight_mode": a.mode, "launch": "NOT_PERFORMED", "attempt_id_candidate": attempt_id, "timestamp_utc": now.isoformat(timespec="seconds"), "package_sha256": d, "job_dir": a.job_dir, "record_dir": a.record_dir,
        "host": {"hostname": env["hostname"], "kernel": env["kernel"], "boot_id": boot_id}, "environment": env, "reference_environment": ref_env, "load_avg": os.getloadavg(), "uptime_s": float(open("/proc/uptime").read().split()[0]),
        "declaration": {k: v for k, v in DECL.items()}, "local_runtime_baseline_s": DECL["local_runtime_baseline_s"], "items": [{"name": n, "status": s, "detail": x} for n, s, x in results], "verdict": verdict}
 json.dump(rec, open(os.path.join(a.record_dir, "PREFLIGHT_RECORD.json"), "w"), indent=1, default=str)
