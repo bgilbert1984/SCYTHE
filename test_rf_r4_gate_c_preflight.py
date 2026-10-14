@@ -189,6 +189,18 @@ class GateC(unittest.TestCase):
         r = subprocess.run([sys.executable, TOOL, "--mode", "CHECK_ONLY", "--archive", self.arc, "--python", sys.executable, "--job-dir", "/x/y", "--record-dir", os.path.join(self.work, "nohook"), "--now-utc", "2030-01-01T00:00:00+00:00"], capture_output=True, text=True)
         self.assertNotEqual(r.returncode, 0); self.assertFalse(os.path.exists(os.path.join(self.work, "nohook")))
 
+    def test_the_interpreter_probe_cannot_write_bytecode_and_no_parent_directory_is_created(self):
+        log = os.path.join(self.tmp, "fake_interpreter.log"); fake = os.path.join(self.tmp, "fake_python")
+        pathlib.Path(fake).write_text("#!/bin/sh\necho \"ARGS: $@ | PYTHONDONTWRITEBYTECODE=$PYTHONDONTWRITEBYTECODE\" >> " + log + "\nexec " + sys.executable + " \"$@\"\n"); os.chmod(fake, 0o755)
+        r, rec, _ = self.run_tool(python=fake); self.assertEqual(r.returncode, 0, r.stdout)
+        line = pathlib.Path(log).read_text(); self.assertIn("-I -B", line); self.assertIn("PYTHONDONTWRITEBYTECODE=1", line)
+        missing = os.path.join(self.work, "no_such_workspace", "record"); r2, _, _ = self.run_tool(record=missing)
+        self.assertNotEqual(r2.returncode, 0); self.assertFalse(os.path.exists(os.path.dirname(missing)))
+
+    def test_the_attempt_label_is_recorded_in_the_record_and_the_attempt_id(self):
+        r, rec, _ = self.run_tool(extra=["--attempt-label", "312512"]); o = json.loads(pathlib.Path(rec, "PREFLIGHT_RECORD.json").read_text())
+        self.assertEqual(o["attempt_label"], "312512"); self.assertTrue(o["attempt_id_candidate"].endswith("-ATTEMPT312512"))
+
     def test_a_tool_crash_is_not_a_pass(self):
         bad = os.path.join(self.tmp, "bad_ref.json"); pathlib.Path(bad).write_text("{not json")
         r, rec, _ = self.run_tool(extra=["--reference-preflight", bad]); self.assertEqual(r.returncode, 2); self.assertIn("GATE_C_TOOL_FAILURE", r.stdout)

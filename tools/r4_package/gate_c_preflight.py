@@ -9,6 +9,7 @@ of a competing job. RECHECK, run immediately before launch, requires the environ
 Field classes (record schema 2): FROZEN (must be equal at RECHECK: package, runner and harness digests, every requirement/threshold, the job path, the interpreter and numerical environment, the declaration identity);
 REMEASURED (free space, memory, load, competing processes, job-directory absence: measured again and judged against the FROZEN thresholds, never compared for equality); RECONFIRMED (the operator declaration: same identity,
 and independently still valid at RECHECK: inside its window, not withdrawn). A changed measurement is acceptable while the frozen requirement still holds; a changed requirement is refused.
+Run it as `<PYTHON> -I -B gate_c_preflight.py ...`; its own interpreter probe also runs with -B so that importing NumPy cannot write bytecode into the interpreter's site-packages. The parent of --record-dir must already exist (no parent is created).
 It never creates the job directory, never starts a job, never writes outside --record-dir, never deletes, never installs. Exit 0 iff no item FAILED; a crash exits 2 (GATE_C_TOOL_FAILURE).
 """
 import argparse, datetime, hashlib, json, os, platform, re, secrets, shutil, socket, subprocess, sys, tarfile, tempfile, traceback
@@ -24,7 +25,7 @@ DECL = {"package_sha256": "2b2e3251b678a5e83735ee663176f7763482a6948a7d5cb57f244
         "window_hours": 4, "local_runtime_baseline_s": {"total": 1491, "bounded_controls": 162, "fixtures_and_pins": 24, "smoke_and_gate": 203, "full_harness_and_gate": 1101}}
 ap = argparse.ArgumentParser()
 for f in ("--mode", "--archive", "--python", "--job-dir", "--record-dir"): ap.add_argument(f, required=True)
-ap.add_argument("--reference-preflight"); ap.add_argument("--prior-record"); ap.add_argument("--declaration"); ap.add_argument("--operator-declaration"); ap.add_argument("--now-utc")
+ap.add_argument("--reference-preflight"); ap.add_argument("--prior-record"); ap.add_argument("--declaration"); ap.add_argument("--operator-declaration"); ap.add_argument("--now-utc"); ap.add_argument("--attempt-label", default="")
 a = ap.parse_args()
 if a.mode not in ("CHECK_ONLY", "RECHECK"): sys.exit("modes: CHECK_ONLY or RECHECK; launching is not part of this tool")
 override = False
@@ -38,7 +39,8 @@ for p in (a.python, a.job_dir, a.record_dir):
     if not os.path.isabs(p): sys.exit("PYTHON, job dir and record dir must be absolute paths")
 if os.path.exists(a.record_dir): sys.exit("record dir exists; refusing to overwrite a preflight record")
 if a.mode == "RECHECK" and not a.prior_record: sys.exit("RECHECK needs --prior-record")
-os.makedirs(a.record_dir)
+if not os.path.isdir(os.path.dirname(a.record_dir.rstrip('/'))): sys.exit('the parent of --record-dir (the Gate C workspace) must already exist; refusing to create parent directories')
+os.mkdir(a.record_dir)
 sha = lambda b: hashlib.sha256(b).hexdigest()
 def fsha(p):
     h = hashlib.sha256()
@@ -74,7 +76,7 @@ if ok_py:
     code = ("import sys,json,numpy,platform\ntry: cfg=numpy.show_config(mode='dicts')\nexcept Exception as e: cfg={'error':str(e)}\n"
             "print(json.dumps({'version':list(sys.version_info[:3]),'full':sys.version,'numpy':numpy.__version__,'numpy_file':numpy.__file__,'prefix':sys.prefix,'byteorder':sys.byteorder,"
             "'float64_itemsize':numpy.dtype('float64').itemsize,'machine':platform.machine(),'blas':cfg.get('Build Dependencies',{}).get('blas'),'simd':cfg.get('SIMD Extensions'),'compilers':cfg.get('Compilers',{}).get('c')},default=str))")
-    r = sh([py, "-I", "-c", code], "interpreter.txt", env={k: v for k, v in os.environ.items() if k != "PYTHONPATH"})
+    r = sh([py, "-I", "-B", "-c", code], "interpreter.txt", env={**{k: v for k, v in os.environ.items() if k != "PYTHONPATH"}, "PYTHONDONTWRITEBYTECODE": "1"})
     try: info = json.loads(r.stdout.strip().splitlines()[-1]) if r.returncode == 0 else {}
     except (IndexError, ValueError): info = {}            # not a Python interpreter (e.g. an executable that exits 0 silently): reported by item 2a, never a crash
 real = os.path.realpath(py) if ok_py else None
@@ -166,14 +168,14 @@ if a.mode == "RECHECK":
          "; ".join(f"{k}: {req_prior.get(k)!r} -> {req_now[k]!r}" for k in req_now if req_prior.get(k) != req_now[k]) or ("job path differs" if prior.get("job_dir") != a.job_dir else "identical"))
     item("6a the host has not rebooted since the CHECK_ONLY record (informational: a reboot is reported, not failed)", True, "same boot" if prior["host"]["boot_id"] == boot_id else "BOOT ID CHANGED since the CHECK_ONLY record")
 
-attempt_id = f"R4REPLAY-{now.strftime('%Y%m%dT%H%M%SZ')}-{DECL['package_sha256'][:12]}-{env['hostname']}-{secrets.token_hex(4)}"
+attempt_id = f"R4REPLAY-{now.strftime('%Y%m%dT%H%M%SZ')}-{DECL['package_sha256'][:12]}-{env['hostname']}-{secrets.token_hex(4)}" + (f"-ATTEMPT{a.attempt_label}" if a.attempt_label else "")
 fails = [n for n, s, _ in results if s == "FAIL"]; pend = [n for n, s, _ in results if s == "PENDING"]
 verdict = "FAIL" if fails else ("PASS_OPERATOR_CONFIRMATION_PENDING" if pend else "PASS")
 if override: verdict = "INVALID_FOR_GATE_C_DECLARATION_OVERRIDE_" + verdict
 fclass = {"FROZEN": ["package_sha256", "requirements", "job_dir", "environment", "operator_declaration identity"],
           "REMEASURED": ["free space (job, temp)", "available memory", "load", "competing processes", "job directory absent"], "RECONFIRMED": ["operator declaration validity (window, withdrawal)"]}
 measured = {"free_job_gb": round(fj, 3), "free_tmp_gb": round(ft, 3), "mem_available_gb": round(mem["MemAvailable"] / 1e6, 3)}
-rec = {"schema_version": SCHEMA_VERSION, "field_classes": fclass, "requirements": {k: DECL[k] for k in REQUIREMENT_KEYS}, "measurements": measured, "operator_declaration": decl_ident, "preflight_mode": a.mode, "launch": "NOT_PERFORMED", "attempt_id_candidate": attempt_id, "timestamp_utc": now.isoformat(timespec="seconds"), "package_sha256": d, "job_dir": a.job_dir, "record_dir": a.record_dir,
+rec = {"attempt_label": a.attempt_label, "schema_version": SCHEMA_VERSION, "field_classes": fclass, "requirements": {k: DECL[k] for k in REQUIREMENT_KEYS}, "measurements": measured, "operator_declaration": decl_ident, "preflight_mode": a.mode, "launch": "NOT_PERFORMED", "attempt_id_candidate": attempt_id, "timestamp_utc": now.isoformat(timespec="seconds"), "package_sha256": d, "job_dir": a.job_dir, "record_dir": a.record_dir,
        "host": {"hostname": env["hostname"], "kernel": env["kernel"], "boot_id": boot_id}, "environment": env, "reference_environment": ref_env, "load_avg": os.getloadavg(), "uptime_s": float(open("/proc/uptime").read().split()[0]),
        "declaration": {k: v for k, v in DECL.items()}, "local_runtime_baseline_s": DECL["local_runtime_baseline_s"], "items": [{"name": n, "status": s, "detail": x} for n, s, x in results], "verdict": verdict}
 json.dump(rec, open(os.path.join(a.record_dir, "PREFLIGHT_RECORD.json"), "w"), indent=1, default=str)
