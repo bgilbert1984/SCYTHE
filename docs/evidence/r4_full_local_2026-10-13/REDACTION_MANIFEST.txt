@@ -1,7 +1,13 @@
 # Repository copies of local run records. Private absolute paths (the workstation home-directory prefix) were replaced by $HOME; nothing else was changed.
 # Host name, boot id and attempt ids are retained (host identity is part of the evidence). Files with 0 replacements are byte-identical to the originals.
 # 'authored' rows (analysis/*, governance/*) are not copies: original == committed.
+# UNMANIFESTED_PREFIXES: analysis/ governance/ preflight_tools/ job.disposition.txt
+# (these are authored files, tool copies and a sibling report that no original checksum manifest of the run covers; every other committed file must be listed by an original manifest)
+# OMITTED declarations: 'OMITTED | path | expected sha256 | reason' - files referenced by original manifests that are deliberately not committed. The 37-file fixture corpus (job/holdout) is also omitted; it is pinned by job/fixture_hashes.sha256 and job/generated_artifacts.sha256.
 # Columns: committed path (relative to this directory) | ORIGINAL sha256 | COMMITTED sha256 | replacements
+OMITTED | preflight/record_check_only_1/scythe_r4_1_pkg_8d34de9ac0b1.tar.gz | 2b2e3251b678a5e83735ee663176f7763482a6948a7d5cb57f244dac1142874a | package archive copy (not committed; the digest is the declared package digest, rebuilt byte-identically by tools/r4_package/build_package.py)
+OMITTED | preflight/record_check_only_2/scythe_r4_1_pkg_8d34de9ac0b1.tar.gz | 2b2e3251b678a5e83735ee663176f7763482a6948a7d5cb57f244dac1142874a | package archive copy (not committed; the digest is the declared package digest, rebuilt byte-identically by tools/r4_package/build_package.py)
+OMITTED | preflight/record_prelaunch_3/scythe_r4_1_pkg_8d34de9ac0b1.tar.gz | 2b2e3251b678a5e83735ee663176f7763482a6948a7d5cb57f244dac1142874a | package archive copy (not committed; the digest is the declared package digest, rebuilt byte-identically by tools/r4_package/build_package.py)
 analysis/COUNTS.txt | fc43b9ec63bb7ea7db4074411c14e591639a7595df6418b9a7fe5e884e94d092 | fc43b9ec63bb7ea7db4074411c14e591639a7595df6418b9a7fe5e884e94d092 | 0
 analysis/summarize_counts.py | cff9bc16279af0af97f04dffd11ee23e753c9d77877b92fee9ae8d6386a5333c | cff9bc16279af0af97f04dffd11ee23e753c9d77877b92fee9ae8d6386a5333c | 0
 execution/EXECUTION_RECORD.txt | 47c7d09c51e9b4f5c8e9b18fc1e6ad7d7bdc7fd0cd169cf1b13847734d462340 | 47c7d09c51e9b4f5c8e9b18fc1e6ad7d7bdc7fd0cd169cf1b13847734d462340 | 0
@@ -11,7 +17,7 @@ execution/independent_inventory_check.txt | 0e9b958fad8eda694422f8abfe56cf9fb978
 execution/job.disposition.txt | c504533c4d445b45a208f407101fed57e22dc9bfafcd3a8c857650d34c110425 | 4c6c5cabcb522c82dace5883d331354e6a7f6362652151a5e5b1ab19e0272017 | 1
 execution/launch_stdout.txt | f6771665f129e7ff229a3a89c18a0e809ba9ef70e0f514cdd0f31fa948bb42e3 | 17cb426c2baf5cfd386e3aa2414a2402e1dcf08a659c63112350511e76d5b5a4 | 1
 execution/results_summary.json | 3087c38db639200ef653daf0cfe4a8a21544cd47ebc59377f45b46f464586ba7 | 3087c38db639200ef653daf0cfe4a8a21544cd47ebc59377f45b46f464586ba7 | 0
-governance/LAUNCH_AUTHORIZATION_DISCREPANCY.md | fc4589dce02848db1e4237f1e69486dc2e62a0844fab02b48e48bb010ceada1f | fc4589dce02848db1e4237f1e69486dc2e62a0844fab02b48e48bb010ceada1f | 0
+governance/LAUNCH_AUTHORIZATION_DISCREPANCY.md | 51f25ac5d6f6a8897129f5d14438714e1ec0e21c60b1065c76bcef929c224b19 | 51f25ac5d6f6a8897129f5d14438714e1ec0e21c60b1065c76bcef929c224b19 | 0
 job.disposition.txt | c504533c4d445b45a208f407101fed57e22dc9bfafcd3a8c857650d34c110425 | 4c6c5cabcb522c82dace5883d331354e6a7f6362652151a5e5b1ab19e0272017 | 1
 job/JOB_SHA256SUMS | ff5f86a29971a1870d3040fbe03a8a3e4dfc4c63448b6848e853f1aadc2721d2 | ff5f86a29971a1870d3040fbe03a8a3e4dfc4c63448b6848e853f1aadc2721d2 | 0
 job/STATUS.txt | 5efa0281f14684be0d48f94cb6c0aa45743b2ed42b29a2b0bffc9a57682f9b42 | f838cf74b02b856962087dccfd091a4b5ad9024a6d0cf366dbc66ba5a1094298 | 2

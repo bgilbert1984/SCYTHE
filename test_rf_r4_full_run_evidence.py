@@ -91,8 +91,54 @@ class FullRunEvidence(unittest.TestCase):
 
     def test_the_authorization_discrepancy_is_recorded_without_being_resolved(self):
         g = self.read(self.pristine, f"{EV}/governance/LAUNCH_AUTHORIZATION_DISCREPANCY.md").decode()
-        for s in ("LAUNCH_AUTHORIZATION_STATUS: DISPUTED_AWAITING_RECONCILIATION_BY_THE_OWNER", "2026-10-14T02:29:53.439", "NOT_ESTABLISHED", "PRESENT"): self.assertIn(s, g, s)
-        self.assertNotRegex(g, r"LAUNCH_AUTHORIZATION_STATUS: (AUTHORIZED|UNAUTHORIZED)")
+        for s in ("USER_LAUNCH_AUTHORIZATION_REQUEST: PRESENT", "USER_REQUEST_TIMESTAMP: 2026-10-14T02:29:53.439Z", "OPERATOR_POWER_CONFIRMATION: RECORDED",
+                  "ASSISTANT_LAUNCH_AUTHORIZATION: NOT_ESTABLISHED_IN_REVIEWED_RECORD", "GOVERNANCE_DISPOSITION: DISPUTED_AWAITING_RECONCILIATION_BY_THE_OWNER", "not itself an assistant-issued authorization", "dated addendum"):
+            self.assertIn(s, g, s)
+        self.assertNotRegex(g, r"GOVERNANCE_DISPOSITION: (AUTHORIZED|UNAUTHORIZED)")
+
+    # ---- strict parsing of the retained original manifests, and explained omissions
+    def forge_file(self, d, rel, fn):
+        """Change a committed file AND its manifest row (both digests when unredacted) AND the anchor: only the verifier's own cross-checks can object."""
+        full = f"{EV}/{rel}"; self.edit(d, full, fn); new = sha(self.read(d, full))
+        def row(b):
+            lines = b.decode().split("\n")
+            for i, l in enumerate(lines):
+                if l.startswith(rel + " | "): lines[i] = f"{rel} | {new} | {new} | 0"
+            return "\n".join(lines).encode()
+        self.forge_manifest(d, row)
+
+    def test_a_malformed_line_in_a_retained_original_manifest_is_refused(self):
+        self.refused(lambda d: self.forge_file(d, "execution/EXEC_SHA256SUMS", lambda b: b + b"not-a-digest  LAUNCH_RECORD.txt\n"), "malformed checksum line")
+        self.refused(lambda d: self.forge_file(d, "execution/EXEC_SHA256SUMS", lambda b: b.replace(b"  ", b" ", 1)), "malformed checksum line")
+
+    def test_a_duplicate_or_escaping_entry_in_a_retained_original_manifest_is_refused(self):
+        self.refused(lambda d: self.forge_file(d, "execution/EXEC_SHA256SUMS", lambda b: b + b.split(b"\n")[0] + b"\n"), "duplicate checksum entry")
+        self.refused(lambda d: self.forge_file(d, "execution/EXEC_SHA256SUMS", lambda b: b + b"0" * 64 + b"  ../job/STATUS.txt\n"), "malformed checksum line")
+
+    def test_a_reference_that_is_neither_committed_nor_declared_omitted_is_refused(self):
+        self.refused(lambda d: self.forge_file(d, "execution/EXEC_SHA256SUMS", lambda b: b + b"0" * 64 + b"  vanished_artifact.bin\n"), "unexplained reference")
+
+    def test_declared_omissions_must_match_their_references_and_be_referenced(self):
+        man = f"{EV}/REDACTION_MANIFEST.txt"
+        self.refused(lambda d: self.forge_manifest(d, lambda b: b.replace(b"OMITTED | preflight/record_check_only_1/scythe_r4_1_pkg_8d34de9ac0b1.tar.gz | 2b2e", b"OMITTED | preflight/record_check_only_1/scythe_r4_1_pkg_8d34de9ac0b1.tar.gz | 0000", 1)), "records a different digest for the declared-omitted")
+        self.refused(lambda d: self.forge_manifest(d, lambda b: b"\n".join(l for l in b.split(b"\n") if not l.startswith(b"OMITTED | preflight/record_check_only_1")) ), "unexplained reference")
+        self.refused(lambda d: self.forge_manifest(d, lambda b: b.replace(b"OMITTED | ", b"OMITTED | preflight/never_referenced.bin | " + b"1" * 64 + b" | invented\nOMITTED | ", 1)), "is not referenced by any original manifest")
+
+    def test_a_committed_file_that_no_original_manifest_lists_is_refused(self):
+        def forge(d, where):
+            p = pathlib.Path(d, EV, where); p.write_text("x")
+            self.forge_manifest(d, lambda b: b + f"{where} | {sha(b'x')} | {sha(b'x')} | 0\n".encode())
+        self.refused(lambda d: forge(d, "preflight/record_prelaunch_3/unlisted.txt"), "not listed by any original manifest")
+        self.refused(lambda d: forge(d, "execution/unlisted.txt"), "not listed by any original manifest")
+        self.refused(lambda d: forge(d, "operator/unlisted.txt"), "not listed by any original manifest")
+
+    def test_the_declared_omissions_are_reported_and_original_integrity_stays_not_reverified(self):
+        r = self.check(self.fresh()); self.assertIn("declared omissions referenced: 3/3", r.stdout); self.assertIn("pinned fixture corpus (37 files)", r.stdout)
+        self.assertIn("ORIGINAL_JOB_INTEGRITY: NOT_REVERIFIED_FROM_THIS_CHECKOUT", r.stdout)
+        d = self.fresh(); self.refused(lambda d: pathlib.Path(d, EV, "preflight/record_check_only_1/scythe_r4_1_pkg_8d34de9ac0b1.tar.gz").write_bytes(b"x"), "undeclared evidence file added")
+
+    def test_the_pinned_fixture_corpus_must_be_exactly_37_distinct_entries(self):
+        self.refused(lambda d: self.forge_file(d, "job/generated_artifacts.sha256", lambda b: b + b"1" * 64 + b"  extra.npy\n"), "not pinned by exactly 37")
 
     def test_the_fixture_corpus_is_not_committed_and_the_original_artifacts_are_preserved_unchanged(self):
         files = [os.path.join(r, f) for r, _, fs in os.walk(os.path.join(self.pristine, EV)) for f in fs]

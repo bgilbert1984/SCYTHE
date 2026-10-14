@@ -16,13 +16,16 @@ This item is recorded so that the successful execution and the authorization que
 In a later message the reviewer wrote that their last explicit decision before the run was HOLD, that the recorded operator confirmation does not establish that they issued the separate launch authorization, and asked that the PR record
 `FINAL_ASSISTANT_LAUNCH_AUTHORIZATION: NOT_ESTABLISHED_IN_CONVERSATION`.
 
-## How this record handles the conflict
-The two statements are not reconciled here. The transcript line above exists and was recorded before the launch, so recording "not established in conversation" would contradict the transcript, and recording "authorized" would contradict the reviewer. Both are recorded as they are:
+## Distinction clarified at review
+The quoted user-role turn is a user **request** for authorization; it is not itself an assistant-issued authorization. Accordingly it does not contradict a statement that the assistant-side launch authorization is not established. Between that turn (02:29:53.439Z, transcript line 4035) and the launch (02:30:11Z, tool call at line 4043) the transcript contains only assistant reasoning blocks and tool calls (lines 4037-4043), with **no user-visible assistant message granting execution permission**. A later assistant message issued before launch, if one existed in a fuller record, could change this; none is established in the reviewed record.
 
+## Recorded fields
 ```
-LAUNCH_AUTHORIZATION_TURN_IN_SESSION_TRANSCRIPT: PRESENT (user-role, 2026-10-14T02:29:53.439Z, before launch)
-LAUNCH_AUTHORIZATION_REVIEWER_POSITION: NOT_ESTABLISHED (reviewer's later statement)
-LAUNCH_AUTHORIZATION_STATUS: DISPUTED_AWAITING_RECONCILIATION_BY_THE_OWNER
+USER_LAUNCH_AUTHORIZATION_REQUEST: PRESENT
+USER_REQUEST_TIMESTAMP: 2026-10-14T02:29:53.439Z
+OPERATOR_POWER_CONFIRMATION: RECORDED
+ASSISTANT_LAUNCH_AUTHORIZATION: NOT_ESTABLISHED_IN_REVIEWED_RECORD
+GOVERNANCE_DISPOSITION: DISPUTED_AWAITING_RECONCILIATION_BY_THE_OWNER
 ```
-
-The launch is neither retroactively classified as authorized nor as unauthorized by this document. The computational evidence stands on its own custody: sealed job, independent verification, checksums. Whatever the owner concludes should be appended as a dated addendum, not by editing this file.
+This is not a finding of misconduct or an instruction to invalidate the run. The launch is neither retroactively classified as authorized nor as unauthorized here. The computational evidence stands on its own custody: sealed job, independent verification, checksums.
+If the complete transcript or the owner's records show a pre-launch assistant authorization, or the owner decides otherwise, that is resolved by a **dated addendum**, not by editing this file.

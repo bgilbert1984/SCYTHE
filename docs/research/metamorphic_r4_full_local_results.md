@@ -120,8 +120,8 @@ PHASE A (production relations; 36 fixtures)
 - `span_limit_strict` is detected only at the synthetic n = 500,000 geometry (2 cases, Layer B′): function-level evidence, since an input of that length cannot occur on the acquisition path.
 
 ## 5. Redaction and verification
-Repository copies replace the workstation home-directory prefix by `$HOME` (32 of 198 files). `REDACTION_MANIFEST.txt` records every file's original SHA-256, committed SHA-256 and replacement count; its own SHA-256 is anchored here: **`aef49741493258b9bc03bf34f550bb5034fbc78610d3b5ac251fdff18a56692b`**.
-`tools/r4_package/verify_full_run_evidence.py` (sha256 `fd6b701bbe6c83b913999320af578321b6ec2d083874d2839fea3d5d1b9f9141`) run on a pristine `git archive` reports three layers separately:
+Repository copies replace the workstation home-directory prefix by `$HOME` (32 of 198 files). `REDACTION_MANIFEST.txt` records every file's original SHA-256, committed SHA-256 and replacement count; its own SHA-256 is anchored here: **`00f51b61b1fb94a484abf04ed489d3e2a2e2e057c5f7ce6eee99b4c5fabc19a3`**.
+`tools/r4_package/verify_full_run_evidence.py` (sha256 `de039585107bca158d91a405b22527e565604f58061a826d5ea5ff7ade0bf76a`) run on a pristine `git archive` reports three layers separately:
 ```
 COMMITTED_EVIDENCE_INTEGRITY: VERIFIED
 ORIGINAL_MANIFEST_ENTRIES_VS_RECORDED_ORIGINAL_DIGESTS: CONSISTENT
@@ -131,7 +131,7 @@ Unredacted files (all but 32) equal the sealed originals byte for byte, as the o
 No historical manifest was rewritten. The generated fixture corpus (1.2 GB) and the archive copies are not committed.
 
 ## 6. Governance item (separate from the result)
-The launch-authorization record is disputed between the session transcript and the reviewer's later statement; see `governance/LAUNCH_AUTHORIZATION_DISCREPANCY.md`. It is recorded, not resolved, and does not alter the computational evidence.
+The launch-authorization record is disputed. Recorded fields: `USER_LAUNCH_AUTHORIZATION_REQUEST: PRESENT` (2026-10-14T02:29:53.439Z), `OPERATOR_POWER_CONFIRMATION: RECORDED`, `ASSISTANT_LAUNCH_AUTHORIZATION: NOT_ESTABLISHED_IN_REVIEWED_RECORD`, `GOVERNANCE_DISPOSITION: DISPUTED_AWAITING_RECONCILIATION_BY_THE_OWNER`; see `governance/LAUNCH_AUTHORIZATION_DISCREPANCY.md`. A user request is not an assistant-issued authorization; this is not a finding of misconduct. It is recorded, not resolved, and does not alter the computational evidence.
 
 ## 7. Not established
 Cross-host reproducibility (the next experimental gate, not yet authorized to execute), behaviour on real IQ, weak-signal sensitivity, production-path coverage of the boundary sweep, and anything outside the 36 frozen synthetic fixtures.
