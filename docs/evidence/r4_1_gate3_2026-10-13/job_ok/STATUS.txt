@@ -1,0 +1,7 @@
+2026-10-13T13:49:57-07:00 START gate3-r4.1 mode=ok archive_sha256=2b2e3251b678a5e83735ee663176f7763482a6948a7d5cb57f244dac1142874a job=$HOME/r4_gate3_r41/job_ok
+2026-10-13T13:49:57-07:00 OK archive digest verified before extraction; extracted by the driver into a disposable directory
+2026-10-13T13:49:58-07:00 OK package verified (sha256sum -c SHA256SUMS)
+2026-10-13T13:52:11-07:00 OK bounded controls: Ran 88 tests in 133.251s
+2026-10-13T13:52:31-07:00 OK fixtures regenerated, 36/36 hashes verified; index.json pin verified; holdout holds exactly 37 regular files
+2026-10-13T13:52:31-07:00 BEGIN one-fixture boundary-only run (--limit 1 --boundary-only)
+2026-10-13T13:53:25-07:00 DONE COMPUTATION_COMPLETED gate3-r4.1 mode=ok harness_rc=0 gate_rc=0

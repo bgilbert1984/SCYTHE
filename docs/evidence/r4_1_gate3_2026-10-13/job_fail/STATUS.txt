@@ -1,0 +1,5 @@
+2026-10-13T13:49:52-07:00 START gate3-r4.1 mode=fail archive_sha256=2b2e3251b678a5e83735ee663176f7763482a6948a7d5cb57f244dac1142874a job=$HOME/r4_gate3_r41/job_fail
+2026-10-13T13:49:52-07:00 OK archive digest verified before extraction; extracted by the driver into a disposable directory
+2026-10-13T13:49:52-07:00 INJECTED: one byte of tools/r4_job/CUSTODY.md altered in the disposable extraction
+2026-10-13T13:49:52-07:00 FAILED stage: package hash verification
+2026-10-13T13:49:52-07:00 FAILED gate3-r4.1 mode=fail package hash verification

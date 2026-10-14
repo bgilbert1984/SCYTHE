@@ -1,0 +1,18 @@
+COMPUTATION_COMPLETED: NO
+EVIDENCE_SEALED: YES
+JOB_ACCEPTED: NO
+--- sealer
+sealed $HOME/r4_gate3_r41/job_fail
+EVIDENCE_SEALED: YES (manifest written and read back; this is not JOB_ACCEPTED)
+--- independent verifier
+MANIFEST_SYNTAX: 4 entries, bad lines []
+FILES_LISTED_AND_PRESENT: 4/4
+HASH_MISMATCHES: []
+UNLISTED_FILES: []
+SYMLINKS: []
+TERMINAL_RECORD_IS_THE_LAST_LINE: 2026-10-13T13:49:52-07:00 FAILED gate3-r4.1 mode=fail package hash verification
+NOTHING_WRITTEN_AFTER_THE_MANIFEST: []
+FIXTURE_CUSTODY: NOT_APPLICABLE (the job failed before fixtures were generated)
+INDEPENDENT_VERIFICATION: PASS []
+TERMINAL_STATUS: FAILED
+JOB_ACCEPTED: NO (terminal record is FAILED; an intact failure record is not an accepted job)

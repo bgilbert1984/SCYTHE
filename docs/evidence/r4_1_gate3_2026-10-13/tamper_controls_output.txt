@@ -1,0 +1,7 @@
+0 unmodified copy (control; must PASS) | verify_job rc=0 JOB_ACCEPTED: YES | independent rc=0 | NOT-REFUSED (rc-based)
+1 missing index.json | verify_job rc=1 JOB_ACCEPTED: NO (verification | independent rc=1 | REFUSED
+2 modified index.json | verify_job rc=1 JOB_ACCEPTED: NO (verification | independent rc=1 | REFUSED
+3 unexpected file in holdout/ | verify_job rc=1 JOB_ACCEPTED: NO (verification | independent rc=1 | REFUSED
+4 modified .npy fixture | verify_job rc=1 JOB_ACCEPTED: NO (verification | independent rc=1 | REFUSED
+5 STATUS.txt modified after sealing | verify_job rc=1 JOB_ACCEPTED: NO (verification | independent rc=1 | REFUSED
+reference manifest unchanged: 2104894ce26198e66b45fa30b7ac7c528691bfe2d27be83d903ac18621675882

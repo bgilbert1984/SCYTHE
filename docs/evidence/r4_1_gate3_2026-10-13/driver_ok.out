@@ -1,0 +1,23 @@
+COMPUTATION_COMPLETED: YES
+EVIDENCE_SEALED: YES
+JOB_ACCEPTED: YES
+--- sealer
+sealed $HOME/r4_gate3_r41/job_ok
+EVIDENCE_SEALED: YES (manifest written and read back; this is not JOB_ACCEPTED)
+--- independent verifier
+MANIFEST_SYNTAX: 19 entries, bad lines []
+FILES_LISTED_AND_PRESENT: 19/19
+HASH_MISMATCHES: []
+UNLISTED_FILES: []
+SYMLINKS: []
+TERMINAL_RECORD_IS_THE_LAST_LINE: 2026-10-13T13:53:25-07:00 DONE COMPUTATION_COMPLETED gate3-r4.1 mode=ok harness_
+NOTHING_WRITTEN_AFTER_THE_MANIFEST: []
+PINS: 36 fixtures + 1 generated artifacts = 37 expected files
+FIXTURE_BYTES: 37 files; 37/37 match; missing=[] mismatched=[] unexpected=[] non-regular=[]
+INDEX_DESCRIBES_THE_PINNED_FIXTURE_SET: 36 described vs 36 pinned
+INDEPENDENT_VERIFICATION: PASS []
+TERMINAL_STATUS: DONE
+JOB_ACCEPTED: YES
+
+
+FINALIZE rc 0 COMPUTATION YES
