@@ -3,7 +3,7 @@
 They build a real package from the commit under test (HEAD), verify it from an independently extracted clean archive, and check that damaged packages, crashes and
 metadata tricks cannot pass. The historical r4.1 package 2b2e3251... is reproduced from its source commit when that commit is present in the clone.
 """
-import ast, hashlib, json, os, shutil, subprocess, sys, tarfile, tempfile, unittest
+import ast, hashlib, json, os, pathlib, shutil, subprocess, sys, tarfile, tempfile, unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__)); TOOLS = os.path.join(HERE, "tools", "r4_package")
 EVID = os.path.join(HERE, "docs", "evidence"); PROV = os.path.join(EVID, "r4_1_packaging_provenance_2026-10-13"); G3 = os.path.join(EVID, "r4_1_gate3_2026-10-13")
@@ -146,7 +146,7 @@ class ProvenanceRecords(unittest.TestCase):
 
     def test_the_provenance_document_records_the_digest_of_every_repository_tool(self):
         doc = self.read(HERE, "docs", "research", "r4_package_tools_provenance.md").decode()
-        for n in ("build_package.py", "verify_package.py", "neg_controls.py", "make_record.py"):
+        for n in ("build_package.py", "verify_package.py", "neg_controls.py", "make_record.py", "verify_committed_evidence.py"):
             d = sha(self.read(TOOLS, n)); self.assertTrue(d in doc or d[:8] + "…" in doc, n)
 
     def test_the_gate3_record_digests_are_the_ones_reported(self):
@@ -164,6 +164,89 @@ class ProvenanceRecords(unittest.TestCase):
         rec = self.read(G3, "GATE3_R41_RECORD.txt").decode()
         for s in ("88 tests, 0 failures", "exactly 37 regular files", "R4_1_PACKAGED_CUSTODY_VALIDATION_PASS", "2b2e3251b678a5e83735ee663176f7763482a6948a7d5cb57f244dac1142874a"): self.assertIn(s, rec)
         self.assertIn("FAILED_PACKAGED_CUSTODY_INTEGRATION", self.read(HERE, "docs", "research", "metamorphic_r4_1_fixture_custody.md").decode())
+
+
+class CommittedEvidenceVerification(unittest.TestCase):
+    """verify_committed_evidence.py from a pristine `git archive` of HEAD, and the ways it must refuse."""
+    TOOL = os.path.join(TOOLS, "verify_committed_evidence.py"); DOC = "docs/research/r4_package_tools_provenance.md"
+    D = "docs/evidence/r4_1_gate3_2026-10-13"; P = "docs/evidence/r4_1_packaging_provenance_2026-10-13"
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.mkdtemp(prefix="r4evid-"); cls.n = 0
+        a = subprocess.run(["git", "-C", HERE, "archive", "--format=tar", "HEAD", "docs/evidence", cls.DOC], capture_output=True)
+        if a.returncode: raise unittest.SkipTest("not a git checkout")
+        cls.pristine = os.path.join(cls.tmp, "pristine"); os.makedirs(cls.pristine)
+        subprocess.run(["tar", "-x", "-C", cls.pristine], input=a.stdout, check=True)
+
+    @classmethod
+    def tearDownClass(cls): shutil.rmtree(cls.tmp, True)
+
+    def fresh(self):
+        type(self).n += 1; d = os.path.join(self.tmp, f"copy{self.n}"); shutil.copytree(self.pristine, d); return d
+
+    def check(self, d, *extra):
+        return run(sys.executable, self.TOOL, os.path.join(d, "docs/evidence"), os.path.join(d, self.DOC), *extra)
+
+    def edit(self, d, rel, fn):
+        p = os.path.join(d, rel)
+        with open(p, "rb") as fh: b = fh.read()
+        with open(p, "wb") as fh: fh.write(fn(b))
+
+    def test_a_pristine_git_archive_verifies_with_the_three_layers_reported_separately(self):
+        r = self.check(self.fresh()); self.assertEqual(r.returncode, 0, r.stdout)
+        for line in ("COMMITTED_EVIDENCE_INTEGRITY: VERIFIED", "ORIGINAL_MANIFEST_ENTRIES_VS_RECORDED_ORIGINAL_DIGESTS: CONSISTENT", "ORIGINAL_JOB_INTEGRITY: NOT_REVERIFIED_FROM_THIS_CHECKOUT", "EVIDENCE_VERIFICATION: PASS"): self.assertIn(line, r.stdout)
+        self.assertIn("REDACTION_TRANSFORM_REVERSAL: NOT_EVALUATED", r.stdout)
+
+    def refused(self, mutate, expect):
+        d = self.fresh(); mutate(d); r = self.check(d)
+        self.assertEqual(r.returncode, 1, r.stdout); self.assertIn("EVIDENCE_VERIFICATION: FAIL", r.stdout); self.assertIn(expect, r.stdout)
+
+    def test_an_undeclared_change_to_a_committed_file_is_refused(self):
+        self.refused(lambda d: self.edit(d, self.D + "/job_ok/exit_codes.txt", lambda b: b + b"x\n"), "differs from its recorded committed digest")
+
+    def test_an_added_or_missing_evidence_file_is_refused(self):
+        self.refused(lambda d: pathlib.Path(d, self.D, "extra.txt").write_text(""), "undeclared evidence file added")
+        self.refused(lambda d: os.remove(os.path.join(d, self.D, "tamper_controls_output.txt")), "declared evidence file missing")
+
+    def test_an_altered_redaction_declaration_is_refused(self):
+        man = self.P + "/REDACTION_MANIFEST.txt"
+        self.refused(lambda d: self.edit(d, man, lambda b: b.replace(b" | 1\n", b" | 0\n", 1)), "does not match the digest anchored")         # also caught by the anchor
+        def forge(d):                                                     # forge the manifest AND its anchor: the internal consistency and cross-reference rules must still object
+            p = os.path.join(d, man); t = pathlib.Path(p).read_text().replace(" | 1\n", " | 0\n", 1); pathlib.Path(p).write_text(t)
+            self.edit(d, self.DOC, lambda b: b.replace(hashlib.sha256(pathlib.Path(os.path.join(self.pristine, man)).read_bytes()).hexdigest().encode(), hashlib.sha256(t.encode()).hexdigest().encode()))
+        self.refused(forge, "redaction declaration inconsistent")
+
+    def test_an_incorrect_original_digest_is_refused_even_with_a_consistent_anchor(self):
+        man = self.P + "/REDACTION_MANIFEST.txt"
+        def forge(d):
+            p = os.path.join(d, man); lines = pathlib.Path(p).read_text().split("\n")
+            i = next(i for i, l in enumerate(lines) if l.startswith("r4_1_gate3_2026-10-13/job_ok/STATUS.txt"))
+            parts = lines[i].split(" | "); parts[1] = "0" * 64; lines[i] = " | ".join(parts); t = "\n".join(lines); pathlib.Path(p).write_text(t)
+            self.edit(d, self.DOC, lambda b: b.replace(hashlib.sha256(pathlib.Path(os.path.join(self.pristine, man)).read_bytes()).hexdigest().encode(), hashlib.sha256(t.encode()).hexdigest().encode()))
+        self.refused(forge, "differs from the one recorded by")
+
+    def test_a_modified_verbatim_tool_copy_is_refused(self):
+        self.refused(lambda d: self.edit(d, self.P + "/external_tools/build_package.py", lambda b: b + b"#\n"), "verbatim tool copy not matching")
+
+    def test_reversing_the_declared_substitution_needs_the_right_prefix(self):
+        """Synthetic tree: the reversal check is exercised without the real (uncommitted) prefix."""
+        d = self.fresh(); evid = os.path.join(d, "docs/evidence"); pref = "/home/testuser"
+        man = os.path.join(evid, self.P.split("/")[-1], "REDACTION_MANIFEST.txt"); lines = pathlib.Path(man).read_text().split("\n")
+        # rebuild every redacted row so that its recorded original is the committed bytes with $HOME -> pref
+        for i, l in enumerate(lines):
+            if "|" in l and not l.startswith("#"):
+                parts = [x.strip() for x in l.split("|")]
+                if int(parts[3]):
+                    orig = pathlib.Path(os.path.join(evid, parts[0])).read_bytes().replace(b"$HOME", pref.encode()); parts[1] = hashlib.sha256(orig).hexdigest(); lines[i] = " | ".join(parts)
+        t = "\n".join(lines); pathlib.Path(man).write_text(t)
+        self.edit(d, self.DOC, lambda b: b.replace(hashlib.sha256(pathlib.Path(self.pristine, "docs/evidence", self.P.split("/")[-1], "REDACTION_MANIFEST.txt").read_bytes()).hexdigest().encode(), hashlib.sha256(t.encode()).hexdigest().encode()))
+        r = self.check(d, "--original-prefix", pref)
+        self.assertIn("REDACTION_TRANSFORM_REVERSAL: VERIFIED", r.stdout)                                  # the cross-reference to the real original manifests may object; the reversal itself must not
+        r2 = self.check(d, "--original-prefix", "/home/someoneelse"); self.assertIn("REDACTION_TRANSFORM_REVERSAL: FAILED", r2.stdout)
+
+    def test_a_crash_is_a_failure_with_its_own_marker(self):
+        r = run(sys.executable, self.TOOL, os.path.join(self.tmp, "nowhere"), os.path.join(self.tmp, "nodoc.md")); self.assertEqual(r.returncode, 2); self.assertIn("VERIFIER_CRASH", r.stdout)
 
 
 if __name__ == "__main__":

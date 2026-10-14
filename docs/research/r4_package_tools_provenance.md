@@ -30,10 +30,32 @@ source commit → builder → inventory digest → package digest → independen
 
 The builder reads only `git archive`/`git show` of one commit. It is specific to the r4.1 layout (`scythe_r4_1_pkg`, the closure list, the equivalence-package members); a later revision needs its own reviewed builder change.
 
+## 2a. Redaction-aware evidence verification (`verify_committed_evidence.py`)
+
+`python3 tools/r4_package/verify_committed_evidence.py docs/evidence docs/research/r4_package_tools_provenance.md` keeps the two layers apart (as for the r3 evidence):
+
+```
+COMMITTED_EVIDENCE_INTEGRITY: VERIFIED
+ORIGINAL_MANIFEST_ENTRIES_VS_RECORDED_ORIGINAL_DIGESTS: CONSISTENT
+ORIGINAL_JOB_INTEGRITY: NOT_REVERIFIED_FROM_THIS_CHECKOUT
+```
+
+It rejects an undeclared digest mismatch, an added or missing evidence file, an altered redaction declaration, and an incorrect original digest (checked against the retained original manifests). The original job directories and archives are not in a checkout, so original job integrity is never claimed from it.
+Digest anchor: `REDACTION_MANIFEST.txt` sha256 = `eee7b647c8ed4a5a7b4422b158a4223e5d6a5e7de86084f69f4c9a969524d19c` (a manifest that no longer matches this value fails the check). With `--original-prefix`, the declared `$HOME` substitution is reversed and must reproduce each recorded original digest (the prefix is not committed; run locally, see section 3a).
+`verify_committed_evidence.py` is new (no external ancestor); it is a standalone, stdlib-only tool: sha256 `30e75b7a0341c01e85f741abe50a66b3367d6d29532e8b94e0ee3556d74abd8d`.
+
 ## 3. Reproducing the existing package
 
 `tools/r4_package/build_package.py` rebuilt from source commit `8d34de9ac0b1f4758cda3412b364582b4271ffe1` produces an archive whose SHA-256 is **`2b2e3251b678a5e83735ee663176f7763482a6948a7d5cb57f244dac1142874a`**, byte-identical to the frozen package.
-`test_rf_r4_package_tools.py` asserts this when that commit is present in the clone and **skips with an explicit message otherwise** (for example a shallow CI clone); byte identity is claimed only where the test runs.
+`test_rf_r4_package_tools.py` asserts this when that commit is present in the clone and **skips with an explicit message otherwise** (for example a shallow CI clone). Recorded results, kept distinct:
+
+| Environment | Byte-reproduction of `2b2e3251…` |
+|---|---|
+| local full clone, 2026-10-13 | **PASS** |
+| CI shallow checkout | **NOT_EVALUATED** (source commit unavailable; no claim made) |
+
+### 3a. Local redaction-reversal result
+Run on the author's workstation with the (uncommitted) original prefix, 2026-10-13: `REDACTION_TRANSFORM_REVERSAL: VERIFIED for 9 redacted files` (reversing `$HOME` reproduced every recorded original digest). CI reports `REDACTION_TRANSFORM_REVERSAL: NOT_EVALUATED`.
 
 ## 4. Controls (`test_rf_r4_package_tools.py`)
 
