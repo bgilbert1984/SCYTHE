@@ -3,6 +3,8 @@
 > **PROTOCOL DRAFT FOR REVIEW — NO TRANSFER, NO EXECUTION AND NO CONNECTION TO ANY OTHER HOST IS AUTHORIZED BY THIS DOCUMENT.**
 > It adds only this document. It changes no production code, harness, runner, package, tool or evidence. Tolerances below are fixed **before** any second-host result exists and may not be revised after one is observed (§7).
 
+> **Revision 2 (before any Gate C or D activity):** added the tolerance cap and the reclassification of grid constants to class E (§4.2, §4.3) after inspecting the retained local reference for large-magnitude numeric fields, and added the local runtime baseline (§6). No second-host result exists, so no rule was fitted to one.
+
 ## 1. Question and non-question
 
 **Question.** Does a second host (Dedirock) reproduce the complete retained local r4.1 verdict: the same categorical outcomes in every layer, relation, mutant and refusal, and numerical measurements that agree within frozen tolerances, from the same frozen package, fixtures and evaluation order?
@@ -42,7 +44,7 @@ The two result trees must contain **exactly the same set of file names**; a miss
 ### 4.2 Field classes (every leaf of every compared JSON belongs to exactly one)
 | Class | Rule | Examples |
 |---|---|---|
-| **E: exact** | equal as values and as JSON types (`int` vs `float` is a difference) | all verdict and credit strings, statuses and reasons, `production_path`, booleans, integers (bins, candidate counts, case counts, qualifying counts), bin lists, strings including `bin_centre_hz`, the `declared` block, `thread_env`, digests, key sets |
+| **E: exact** | equal as values and as JSON types (`int` vs `float` is a difference) | all verdict and credit strings, statuses and reasons, `production_path`, booleans, integers (bins, candidate counts, case counts, qualifying counts), bin lists, strings including `bin_centre_hz`, the `declared` block, `thread_env`, digests, key sets; **and the floating-point constants that define the grid or the synthetic specification, not measurements**: `layerA.json` `usable_hz` and `geometries/*/bin_spacing_hz`, and `layerBprime.json` `synthetic_spec/*` |
 | **N: numeric** | floating-point leaf; passes if `abs(L − R) <= A + Rr · max(abs(L), abs(R))` | `anchor_excess_db`, `max_*_dev_*`, `ROLL` deviations, excess lists (e.g. Phase B `lost`), `ideal_minus_usable_hz` |
 | **X: environmental, excluded** | recorded, never compared for equality | `run_header.argv` (paths), `run_header.numpy` and interpreter strings (compared as environment, §5), timestamps, durations (`t=…s`), `STATUS.txt`, `env.txt`, host names, `MANIFEST.sha256` and `JOB_SHA256SUMS` (they hash host-specific fields) |
 
@@ -50,10 +52,12 @@ Lists are compared element by element with equal length required. Unknown fields
 
 ### 4.3 Frozen numerical tolerances
 ```
-A  = 1e-9     absolute, in the field's own unit (Hz, dB or bins): the harness's own declared equality tolerance (TOL_HZ = TOL_DB = 1e-9)
-Rr = 1e-12    relative: about 4,500 float64 ulps, an allowance for reassociation inside library FFT and reduction routines
+A    = 1e-9    absolute, in the field's own unit (Hz, dB or bins): the harness's own declared equality tolerance (TOL_HZ = TOL_DB = 1e-9)
+Rr   = 1e-12   relative: about 4,500 float64 ulps, an allowance for reassociation inside library FFT and reduction routines
+Cap  = 1e-8    the effective tolerance A + Rr * max(abs(L), abs(R)) is never larger than 10 * A
 ```
-Both were fixed from the harness's declared constants and float64 arithmetic, **not** from any Dedirock output. They are applied to every N field alike; no field gets a bespoke tolerance.
+All three were fixed from the harness's declared constants and float64 arithmetic, **not** from any Dedirock output. They are applied to every N field alike; no field gets a bespoke tolerance.
+**Why the cap (found by inspecting the retained local reference, before any second-host result exists).** Of the 76 floating-point leaf paths in the reference, 5 carry raw large-magnitude values (frequencies of order 1e5 to 1e6 Hz: the Phase B `lost` frequency lists and a Phase B `max_freq_dev_hz` of a violating mutant; plus two grid constants, now class E). For such values the relative term alone would allow about 1e-6 Hz of slack, 900 times the harness's own 1e-9 Hz equality tolerance, which could swallow a real difference. With the cap, large-magnitude frequencies are held to 1e-8 Hz (about 86 float64 ulps at 1e6), and the relative term only matters for magnitudes above 1e3. Every other path has a maximum magnitude below 1e3 (the largest is a 1000x scale factor), where the relative term adds at most 1e-9.
 Many N fields are deviation residuals of order 1e-10 to 1e-14 sitting beside the 1e-9 and 1e-6 verdict thresholds. Because of this, **class E (the verdicts derived from them) is always compared too**: a residual pair that is numerically close but falls on opposite sides of a verdict threshold is a categorical difference and is reported as such, never absorbed by the tolerance.
 Context, not assumption: the r3 cross-host comparison (62 files, 9,624 leaves) was bit-identical. That does not enter any rule here.
 
@@ -88,6 +92,7 @@ Not permitted to differ: package, fixtures, harness, `declared` block, `thread_e
 - **Transfer scope** (restricted): the package archive (about 120 KB) with its digest sidecar and the preflight tool, into a **new** directory named for the replay attempt. Nothing is written elsewhere; no existing directory (including the r2/r3 evidence directories) is read, modified or removed; no deletion, installation, privilege escalation or service change. The fixture corpus is regenerated remotely, never transferred.
 - **Preflight (remote, read-only except its own directory):** archive digest and safe extraction; `sha256sum -c`; runner and harness digests; explicit absolute interpreter path with exact Python/NumPy versions recorded **as environment, not as a pass condition other than being recorded and then frozen for launch**; thread limits; at least 10 GB free on the job and temporary filesystems, at least 4 GB available memory (measured); job directory nonexistent; no competing r4 job; load recorded; an attempt ID bound to package, host identity, interpreter identity and job path, checksummed before launch.
 - **Availability:** a server host is expected to stay up, but there is no resume. A 4-hour window is declared; an interruption yields an interrupted-attempt record and no inferred result. Exceeding the window is recorded as an overrun and is not by itself a failure or a kill.
+- **Runtime baseline.** The Gate C record states the local reference's actual stage durations so that a slower host is judged against a baseline, not just a window: total 24 min 51 s (2026-10-13 19:30:11 to 19:55:02 PDT; job ID timestamps are UTC), of which bounded controls 162 s, fixture regeneration and pin checks about 24 s, smoke run and gate about 3 min 23 s, full harness run and gate about 18 min 21 s. The replay reports its own stage durations and their ratios to these; a ratio is information, not a verdict.
 - **Execution (Gate D):** the unmodified `run_job.sh`, `PYTHON` explicit, `PYTHONDONTWRITEBYTECODE=1`, started detached; progress observed read-only. One run only.
 - **Return path:** the sealed job without `holdout/`, its disposition file and the preflight record are copied back to the workstation and verified by digest before any comparison; the remote copies are retained. The comparator runs locally on the retained reference and the returned copy.
 
