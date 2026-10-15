@@ -1,0 +1,48 @@
+{
+  "checked_at": "2026-10-15T00:06:34+00:00",
+  "findings": [
+    {
+      "check": "MONITOR_READY observed independently in the monitor's log",
+      "pass": true,
+      "detail": {
+        "ts": "2026-10-15T00:06:34+00:00",
+        "event": "MONITOR_READY",
+        "monitor_pid": 157958
+      }
+    },
+    {
+      "check": "the monitor PID named in MONITOR_READY is independently confirmed to be a live OS process (re-checked via /proc by this driver, not asserted by the monitor)",
+      "pass": true,
+      "detail": {
+        "monitor_pid": 157958
+      }
+    },
+    {
+      "check": "the monitor's claimed bound_pid independently matches the launcher's own launch.pid contents (cross-checked by this driver reading the file itself, not by parsing the monitor's claim alone)",
+      "pass": true,
+      "detail": {
+        "bound_pid": 157961,
+        "launch_pid_file_contents": 157961
+      }
+    },
+    {
+      "check": "this driver independently re-reads matched_exe from disk and recomputes its SHA-256 itself (separate code path from gate_d_monitor.py's own sha256_file), and it matches the expected interpreter digest",
+      "pass": true,
+      "detail": {
+        "matched_exe": "/usr/bin/python3.12",
+        "recomputed_sha256": "8c515a32b1a5d3d807e53359901a4d09ec06819b488736641aabd6a12eefba63",
+        "expected_sha256": "8c515a32b1a5d3d807e53359901a4d09ec06819b488736641aabd6a12eefba63",
+        "exe_still_present": true
+      }
+    },
+    {
+      "check": "the matched_pid named in MONITOR_START_CONFIRMED independently resolves to a real process in /proc at the time of this check (it may have since exited; recorded either way)",
+      "pass": true,
+      "detail": {
+        "matched_pid": 157965,
+        "process_still_present_at_check_time": true
+      }
+    }
+  ],
+  "all_pass": true
+}

@@ -1,0 +1,5 @@
+{"ts": "2026-10-15T00:06:42+00:00", "event": "MONITOR_START", "monitor_pid": 158066, "launch_pid_file": "<REDACTED_WORKTREE_ROOT>/scenarios/startup_failure_wrong_digest/launch.pid", "record_dir": "<REDACTED_WORKTREE_ROOT>/scenarios/startup_failure_wrong_digest/monitor", "interval_seconds": 0.5, "startup_grace_samples": 10, "test_mode": true}
+{"ts": "2026-10-15T00:06:42+00:00", "event": "OOM_OBSERVABILITY", "available": true, "reason": null}
+{"ts": "2026-10-15T00:06:42+00:00", "event": "MONITOR_READY", "monitor_pid": 158066}
+{"ts": "2026-10-15T00:06:47+00:00", "event": "MONITOR_FAILURE", "phase": "STARTUP", "detail": "pid 158069 read from the launch pid file, but no process in its descendant tree matched the expected interpreter digest"}
+{"ts": "2026-10-15T00:06:47+00:00", "event": "MONITOR_STOP", "clean": false, "reason": "STARTUP_FAILURE", "samples_taken": 0}

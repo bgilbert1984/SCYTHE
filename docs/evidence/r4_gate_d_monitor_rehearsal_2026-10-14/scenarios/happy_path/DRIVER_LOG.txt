@@ -1,0 +1,9 @@
+2026-10-15T00:06:28+00:00 SCENARIO happy_path python /usr/bin/python3 sha256 8c515a32b1a5d3d807e53359901a4d09ec06819b488736641aabd6a12eefba63
+2026-10-15T00:06:28+00:00 monitor started, pid 157869
+2026-10-15T00:06:28+00:00 MONITOR_READY observed: {'ts': '2026-10-15T00:06:28+00:00', 'event': 'MONITOR_READY', 'monitor_pid': 157869}
+2026-10-15T00:06:28+00:00 stand-in harness started, pid 157872
+2026-10-15T00:06:29+00:00 MONITOR_START_CONFIRMED observed: {'ts': '2026-10-15T00:06:29+00:00', 'event': 'MONITOR_START_CONFIRMED', 'bound_pid': 157872, 'matched_pid': 157876, 'matched_exe': '/usr/bin/python3.12', 'interpreter_sha256_expected': '8c515a32b1a5d3d807e53359901a4d09ec06819b488736641aabd6a12eefba63', 'root_starttime': 2872054}
+2026-10-15T00:06:29+00:00 independent verification all_pass: True
+2026-10-15T00:06:33+00:00 stand-in harness exited rc 0
+2026-10-15T00:06:34+00:00 clean stop: rc 0 stop_events [{'ts': '2026-10-15T00:06:34+00:00', 'event': 'MONITOR_STOP', 'clean': True, 'reason': 'SIGTERM', 'samples_taken': 9, 'peak_sampled_tree_rss_bytes': 11788288, 'sum_observed_process_hwm_bytes': 36683776, 'peak_job_memory_bytes': None}] sample_count 9 outcome_ok True
+2026-10-15T00:06:34+00:00 SCENARIO happy_path RESULT PASS

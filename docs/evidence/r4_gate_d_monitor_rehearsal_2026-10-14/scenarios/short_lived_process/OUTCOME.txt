@@ -1,0 +1,3 @@
+scenario=short_lived_process
+outcome_ok=True
+checked_at=2026-10-15T00:06:37+00:00
