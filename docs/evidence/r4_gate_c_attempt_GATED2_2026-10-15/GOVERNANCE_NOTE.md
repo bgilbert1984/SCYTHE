@@ -118,3 +118,43 @@ instruction as historical evidence while leaving its procedural sufficiency open
 automatically repeating Gate C merely because its authorization was short would not repair the
 historical authorization record and is not recommended; the original, genuinely-obtained `PASS`
 result is retained, not discarded.
+
+## Merge review qualifications (2026-10-15, recorded verbatim in substance) — added, not a replacement of the above
+
+The owner reviewed the actual PR diff — the committed Gate C request, transfer manifest, command
+trace, preflight records, independent audit, and this governance note — and approved the PR for
+merge with two qualifications that must be preserved going forward, not softened by the merge
+itself.
+
+**Qualification 1 — authorization by reference did not, in fact, meet this document's own stated
+condition.** `GATE_C_REQUEST_AS_AUTHORIZED.md` establishes that a specific, fixed command document
+existed before execution. But that document's own text (its "Revision note (second pass)" and the
+S1 command block) states plainly that the S1 command "is what must be quoted verbatim in any real
+authorization message... never approved 'by reference to this draft' alone." The authorization
+actually given — "Authorize L1 and S1-S5, execute the Gate C sequence exactly as written" — used
+the shorter L1/S1–S5 formulation and did not quote S1 verbatim. **This is a real procedural
+inconsistency between the document's own stated authorization requirement and the authorization
+actually given, not merely an open question of whether the owner reread the file.**
+`GATE_C_BOUNDED_AUTHORIZATION_COMPLIANCE: PENDING_RECONCILIATION` is preserved as the disposition;
+the owner was explicit that there is no reason to withhold the evidence PR while this question
+remains open, and no reason to order a new Gate C run merely to erase the historical ambiguity.
+
+**Qualification 2 — scope of "PASS_VERIFIED."** `INDEPENDENT_AUDIT.md` independently recomputes
+hashes and compares the returned files against their recorded checksum manifest and against
+digests already committed elsewhere in this repository. That strongly supports internal
+consistency and custody continuity across this record. **It does not constitute cryptographic
+proof of the remote host's identity, nor independent attestation of every remote operation that
+occurred.** `PASS_VERIFIED`, wherever it appears in this directory, should be read as scoped to the
+documented preflight verification (the audit described above) — not as a broader claim of external
+attestation of the host or the SSH session itself.
+
+**Merge decision:** `PR_178_APPROVED_FOR_MERGE`, as the faithful evidence record, with both
+qualifications above preserved. The original governance note and the morning follow-up assessment
+remain intact above, including their different historical perspectives — this section is appended
+in addition to, not as a replacement for, either. The next decision is a separate, dated governance
+disposition addressing whether the authorization-by-reference actually given met SCYTHE's bounded-
+authorization requirement; the owner would not order another Gate C run simply to erase the
+historical ambiguity. Gate D RECHECK and replay remain `NOT AUTHORIZED`. The previous four-hour
+operator declaration (window ending 2026-10-15T06:00:00+00:00) has also now expired; any eventual
+launch requires a fresh declaration and a corresponding Gate C validation under the merged
+protocol.

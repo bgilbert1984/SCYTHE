@@ -35,13 +35,22 @@ preparation of a redaction-aware Gate C evidence PR, locally only" instruction (
   in this repository's history (`dedirock-919498765`, `/home/bgilbert1984/...`) were not redacted
   again.
 
-## Gate status (the owner's follow-up assessment, 2026-10-15 morning, supersedes the table below)
+## Gate status (the owner's merge-review disposition, 2026-10-15, supersedes the tables below)
+
+**PR #178 is `APPROVED FOR MERGE`**, with two qualifications recorded in
+`GOVERNANCE_NOTE.md`'s "Merge review qualifications" section and preserved past the merge: (1)
+`GATE_C_REQUEST_AS_AUTHORIZED.md` itself states the S1 command must be quoted verbatim in any real
+authorization, which the authorization actually given did not do — a real procedural
+inconsistency, not just an open question of whether the file was reread; and (2) `PASS_VERIFIED`
+below is scoped strictly to the documented preflight verification (`INDEPENDENT_AUDIT.md`), not to
+any broader claim of cryptographic proof of the remote host's identity or independent attestation
+of every remote operation.
 
 | Item | Disposition |
 |---|---|
-| `GATE_C_TECHNICAL_RESULT` | `PASS_VERIFIED` |
+| `GATE_C_TECHNICAL_RESULT` | `PASS_VERIFIED` (scoped to the documented preflight verification only — see qualification 2 above) |
 | `GATE_C_EXPLICIT_AUTHORIZATION` | `ESTABLISHED` — "Authorize L1 and S1-S5, execute the Gate C sequence exactly as written" was a real, explicit instruction that was acted on |
-| `GATE_C_BOUNDED_AUTHORIZATION_COMPLIANCE` | `PENDING_RECONCILIATION` — whether that instruction, as authorization-by-reference to the then-fixed `GATE_C_REQUEST_AS_AUTHORIZED.md`, satisfies this project's complete-command-review standard is not yet decided |
+| `GATE_C_BOUNDED_AUTHORIZATION_COMPLIANCE` | `PENDING_RECONCILIATION` — the authorization given did not quote S1 verbatim as the frozen request itself requires; this is a real inconsistency, to be adjudicated separately (see qualification 1 above), not a new Gate C run |
 | `GATE_D_AUTHORIZATION` | `NOT_GRANTED` |
 
 ## Gate status at the time this PR was first drafted (the owner's earlier table, superseded above but preserved for the record)
