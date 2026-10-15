@@ -1,0 +1,218 @@
+{
+ "attempt_label": "GATED2-20261015T005128Z-1b0b45",
+ "schema_version": 2,
+ "field_classes": {
+  "FROZEN": [
+   "package_sha256",
+   "requirements",
+   "job_dir",
+   "environment",
+   "operator_declaration identity"
+  ],
+  "REMEASURED": [
+   "free space (job, temp)",
+   "available memory",
+   "load",
+   "competing processes",
+   "job directory absent"
+  ],
+  "RECONFIRMED": [
+   "operator declaration validity (window, withdrawal)"
+  ]
+ },
+ "requirements": {
+  "package_sha256": "2b2e3251b678a5e83735ee663176f7763482a6948a7d5cb57f244dac1142874a",
+  "source_commit": "8d34de9ac0b1f4758cda3412b364582b4271ffe1",
+  "min_free_gb": 10,
+  "min_mem_gb": 4,
+  "run_job_sha256": "02453e0d2b29dd635b0389373f851886293c0c8b37ec431538e01856ffa22d20",
+  "harness_sha256": "1ac4fe34260f6ba63056ed7dbf13f604d9b3f53f8ac77908f4c1ad052eac6687",
+  "window_hours": 4
+ },
+ "measurements": {
+  "free_job_gb": 66.493,
+  "free_tmp_gb": 66.493,
+  "mem_available_gb": 5.241
+ },
+ "operator_declaration": {
+  "sha256": "9c8f893eb6eb666348963c35b14ba3271d5cd1f45a58d68cac94a49af4e1ad33",
+  "operator": "Ben Gilbert",
+  "host": "dedirock-919498765",
+  "package_sha256": "2b2e3251b678a5e83735ee663176f7763482a6948a7d5cb57f244dac1142874a",
+  "window_start_utc": "2026-10-15T02:00:00+00:00",
+  "window_end_utc": "2026-10-15T06:00:00+00:00",
+  "declared_at_utc": "2026-10-15T01:58:17+00:00"
+ },
+ "preflight_mode": "CHECK_ONLY",
+ "launch": "NOT_PERFORMED",
+ "attempt_id_candidate": "R4REPLAY-20261015T021354Z-2b2e3251b678-dedirock-919498765-1a498c65-ATTEMPTGATED2-20261015T005128Z-1b0b45",
+ "timestamp_utc": "2026-10-15T02:13:54+00:00",
+ "package_sha256": "2b2e3251b678a5e83735ee663176f7763482a6948a7d5cb57f244dac1142874a",
+ "job_dir": "/home/bgilbert1984/r4_replay_GATED2-20261015T005128Z-1b0b45/job",
+ "record_dir": "/home/bgilbert1984/r4_replay_GATED2-20261015T005128Z-1b0b45/record_check",
+ "host": {
+  "hostname": "dedirock-919498765",
+  "kernel": "5.14.0-687.48.1.el9_8.x86_64",
+  "boot_id": "cc70d073-ef83-4b64-ba56-72b3d0a82a29"
+ },
+ "environment": {
+  "hostname": "dedirock-919498765",
+  "kernel": "5.14.0-687.48.1.el9_8.x86_64",
+  "os": "Linux-5.14.0-687.48.1.el9_8.x86_64-x86_64-with-glibc2.34",
+  "machine": "x86_64",
+  "cpu_model": "Intel(R) Core(TM) i9-14900K",
+  "logical_cpus": 4,
+  "euid": 1000,
+  "python_full": "3.12.14 (main, Aug 13 2026, 00:00:00) [GCC 11.5.0 20240719 (Red Hat 11.5.0-14)]",
+  "python_version": [
+   3,
+   12,
+   14
+  ],
+  "numpy": "2.5.3",
+  "numpy_file": "/home/bgilbert1984/SCYTHE/.venv/lib64/python3.12/site-packages/numpy/__init__.py",
+  "interpreter_binary_sha256": "1c7d2779938ef3f45cd850119a8655af4c37eaec06b45e3a2e314928a3c3b972",
+  "blas": {
+   "name": "scipy-openblas",
+   "found": true,
+   "version": "0.3.34.106.0",
+   "detection method": "pkgconfig",
+   "include directory": "/opt/_internal/cpython-3.12.13/lib/python3.12/site-packages/scipy_openblas64/include",
+   "lib directory": "/opt/_internal/cpython-3.12.13/lib/python3.12/site-packages/scipy_openblas64/lib",
+   "openblas configuration": "OpenBLAS 0.3.34.106.0  USE64BITINT DYNAMIC_ARCH NO_AFFINITY Haswell MAX_THREADS=64",
+   "pc file directory": "/project/.openblas"
+  },
+  "simd": {
+   "baseline": [
+    "X86_V2"
+   ],
+   "found": [
+    "X86_V3"
+   ],
+   "not found": [
+    "X86_V4",
+    "AVX512_ICL",
+    "AVX512_SPR"
+   ]
+  },
+  "compiler": {
+   "name": "gcc",
+   "linker": "ld.bfd",
+   "version": "14.2.1",
+   "commands": "cc"
+  }
+ },
+ "reference_environment": null,
+ "load_avg": [
+  0.0,
+  0.0,
+  0.0
+ ],
+ "uptime_s": 1113478.86,
+ "declaration": {
+  "package_sha256": "2b2e3251b678a5e83735ee663176f7763482a6948a7d5cb57f244dac1142874a",
+  "source_commit": "8d34de9ac0b1f4758cda3412b364582b4271ffe1",
+  "min_free_gb": 10,
+  "min_mem_gb": 4,
+  "run_job_sha256": "02453e0d2b29dd635b0389373f851886293c0c8b37ec431538e01856ffa22d20",
+  "harness_sha256": "1ac4fe34260f6ba63056ed7dbf13f604d9b3f53f8ac77908f4c1ad052eac6687",
+  "window_hours": 4,
+  "local_runtime_baseline_s": {
+   "total": 1491,
+   "bounded_controls": 162,
+   "fixtures_and_pins": 24,
+   "smoke_and_gate": 203,
+   "full_harness_and_gate": 1101
+  }
+ },
+ "local_runtime_baseline_s": {
+  "total": 1491,
+  "bounded_controls": 162,
+  "fixtures_and_pins": 24,
+  "smoke_and_gate": 203,
+  "full_harness_and_gate": 1101
+ },
+ "items": [
+  {
+   "name": "1 archive SHA-256 equals the declared package digest",
+   "status": "PASS",
+   "detail": "2b2e3251b678a5e83735ee663176f7763482a6948a7d5cb57f244dac1142874a"
+  },
+  {
+   "name": "1a archive sidecar records the declared digest",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "name": "1b safe extraction (no absolute paths, '..', links, devices)",
+   "status": "PASS",
+   "detail": "[]"
+  },
+  {
+   "name": "1c sha256sum -c SHA256SUMS in the extracted package",
+   "status": "PASS",
+   "detail": "28 OK"
+  },
+  {
+   "name": "1d runner and harness digests equal the declared ones",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "name": "2 PYTHON is an absolute executable file",
+   "status": "PASS",
+   "detail": "/home/bgilbert1984/SCYTHE/.venv/bin/python"
+  },
+  {
+   "name": "2a the interpreter imports NumPy and reports its identity",
+   "status": "PASS",
+   "detail": "[3, 12, 14] numpy 2.5.3"
+  },
+  {
+   "name": "2b float64 is 8 bytes and the byte order is little-endian (not permitted to differ from the reference)",
+   "status": "PASS",
+   "detail": "8 little"
+  },
+  {
+   "name": "3 job directory is an absolute path that does not exist",
+   "status": "PASS",
+   "detail": "/home/bgilbert1984/r4_replay_GATED2-20261015T005128Z-1b0b45/job"
+  },
+  {
+   "name": "3b job directory parent exists and is writable",
+   "status": "PASS",
+   "detail": "/home/bgilbert1984/r4_replay_GATED2-20261015T005128Z-1b0b45"
+  },
+  {
+   "name": "3c job directory is not inside the package or the record directory",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "name": "3d at least 10 GB free on the job filesystem (measured)",
+   "status": "PASS",
+   "detail": "66.5 GB at /home/bgilbert1984/r4_replay_GATED2-20261015T005128Z-1b0b45"
+  },
+  {
+   "name": "3e at least 10 GB free on the TMPDIR filesystem (measured)",
+   "status": "PASS",
+   "detail": "66.5 GB at /tmp"
+  },
+  {
+   "name": "3f at least 4 GB available memory",
+   "status": "PASS",
+   "detail": "5.2 GB"
+  },
+  {
+   "name": "4 no competing r4 job process is running",
+   "status": "PASS",
+   "detail": "[]"
+  },
+  {
+   "name": "5 operator declaration: host available for the whole 4 h window, no planned maintenance, reboot or reclaim of the host during the window",
+   "status": "PASS",
+   "detail": "operator 'Ben Gilbert', host dedirock-919498765, window 2026-10-15T02:00:00+00:00 to 2026-10-15T06:00:00+00:00, digest 9c8f893eb6eb6663..."
+  }
+ ],
+ "verdict": "PASS"
+}

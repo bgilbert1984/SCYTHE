@@ -1,0 +1,31 @@
+REDACTION MANIFEST — Gate C attempt GATED2-20261015T005128Z-1b0b45 evidence PR, 2026-10-15
+
+Scope of this manifest: every redaction applied to committed content in this directory. Per
+established project policy, home-directory and host-specific paths are redacted from committed
+evidence; the project's own prior committed evidence (e.g. docs/evidence/3c-run4-16f5e51a/,
+docs/evidence/dedirock-equivalence-2026-10-12/) already discloses the remote host's operational
+identity ("dedirock-919498765", "/home/bgilbert1984/...") in committed files, so those are NOT
+redacted again here — redacting them now would be inconsistent with established precedent and
+would not actually withhold anything already public in this repository's own history. What IS
+redacted, because it has never been committed to this repository before, is the SSH-resolvable
+hostname itself (the literal domain name used to reach Dedirock over SSH), replaced everywhere
+with the placeholder `<REDACTED_SSH_HOST>`. Local-workstation paths under /home/spectrcyde/ are
+also redacted, consistent with the PR #177 rehearsal-evidence precedent, wherever they appear in
+this directory's own narrative documents.
+
+| File | What was redacted | SHA-256 before (original, local-only) | SHA-256 after (this committed copy) |
+|---|---|---|---|
+| operator_declaration.json | Two occurrences of the literal SSH hostname (`ssh_target`, `availability_basis`), replaced with `<REDACTED_SSH_HOST>` | `9c8f893eb6eb666348963c35b14ba3271d5cd1f45a58d68cac94a49af4e1ad33` (2731 bytes — this is the digest that was actually drafted, confirmed by the operator, and checked live by `gate_c_preflight.py`'s operator-declaration check against the host; it remains the authoritative identity of the declaration that was actually used) | `b9544ac4f8fe9f49c2b8be517d0d8c9aded51da2e62a34e754ac5c8f3c2ebc05` (2741 bytes — this committed file, after redaction; a different digest than the original by construction, disclosed here rather than hidden) |
+
+No other file in this directory required redaction:
+- `PREFLIGHT_RECORD.json`, `PREFLIGHT_RECORD.txt`, `PREFLIGHT_SHA256SUMS` are committed byte-for-byte
+  as retrieved from the replay host (digests `9a1cba49...`, `03e90882...`, and the file's own
+  content respectively — see `COMMAND_TRACE.md`). They name `dedirock-919498765` and
+  `/home/bgilbert1984/...` paths, already-disclosed identities per the precedent above, and contain
+  no occurrence of the SSH hostname string.
+- `README.md`, `GOVERNANCE_NOTE.md`, `COMMAND_TRACE.md`, `TRANSFER_MANIFEST.md`,
+  `INDEPENDENT_AUDIT.md`, and `DEDIROCK_ENVIRONMENT_SNAPSHOT.md` were authored directly for this PR
+  and written with the SSH hostname already replaced by `<REDACTED_SSH_HOST>` and local-workstation
+  paths already replaced by `<REDACTED_LOCAL_HOME>` throughout — there was no pre-existing captured
+  file to redact after the fact for these; this is disclosed here for the same transparency this
+  manifest otherwise provides for files that did exist before redaction.
