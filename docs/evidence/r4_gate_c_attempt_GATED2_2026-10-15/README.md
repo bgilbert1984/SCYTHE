@@ -7,6 +7,10 @@ preparation of a redaction-aware Gate C evidence PR, locally only" instruction (
 
 ## Contents
 
+- `GATE_C_REQUEST_AS_AUTHORIZED.md` — the frozen command request as it stood from
+  2026-10-15T02:04:27Z onward (its last edit before the "Authorize L1 and S1-S5" instruction and
+  before S1 ran), redacted. Included so the authorization-reconciliation question in
+  `GOVERNANCE_NOTE.md` can be assessed against the actual document, not a description of it.
 - `COMMAND_TRACE.md` — the exact L1/S1–S5 commands, their outputs, and a disclosed limitation
   (shell exit codes were not explicitly captured).
 - `TRANSFER_MANIFEST.md` — the frozen four-artifact manifest as actually transferred and verified,
@@ -31,7 +35,16 @@ preparation of a redaction-aware Gate C evidence PR, locally only" instruction (
   in this repository's history (`dedirock-919498765`, `/home/bgilbert1984/...`) were not redacted
   again.
 
-## Gate status at the time of this PR (the owner's own table, reproduced verbatim)
+## Gate status (the owner's follow-up assessment, 2026-10-15 morning, supersedes the table below)
+
+| Item | Disposition |
+|---|---|
+| `GATE_C_TECHNICAL_RESULT` | `PASS_VERIFIED` |
+| `GATE_C_EXPLICIT_AUTHORIZATION` | `ESTABLISHED` — "Authorize L1 and S1-S5, execute the Gate C sequence exactly as written" was a real, explicit instruction that was acted on |
+| `GATE_C_BOUNDED_AUTHORIZATION_COMPLIANCE` | `PENDING_RECONCILIATION` — whether that instruction, as authorization-by-reference to the then-fixed `GATE_C_REQUEST_AS_AUTHORIZED.md`, satisfies this project's complete-command-review standard is not yet decided |
+| `GATE_D_AUTHORIZATION` | `NOT_GRANTED` |
+
+## Gate status at the time this PR was first drafted (the owner's earlier table, superseded above but preserved for the record)
 
 | Gate | Disposition |
 |---|---|

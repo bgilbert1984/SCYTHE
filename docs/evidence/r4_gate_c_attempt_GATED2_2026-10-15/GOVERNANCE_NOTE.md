@@ -75,3 +75,46 @@ summarized report of it.
   Gate C authorization discrepancy requires a new preflight attempt or another formal disposition
   before considering Gate D" once this evidence PR has been reviewed — that assessment has not
   happened yet.
+
+## Follow-up assessment (2026-10-15 morning) — added, not a replacement of the above
+
+The owner reviewed this note and sharpened the question it leaves open, without resolving it.
+Recorded here in addition to, not instead of, everything above:
+
+**The three questions, kept separate:**
+
+| Question | Assessment |
+|---|---|
+| Did Gate C `CHECK_ONLY` technically pass? | `PASS`, independently audited as reported (`INDEPENDENT_AUDIT.md`) |
+| Was explicit authorization issued before execution? | **Yes** — "Authorize L1 and S1-S5, execute the Gate C sequence exactly as written" is a real, explicit instruction that was acted on. The earlier framing in this note's main text, which left this as an open question, is corrected by this narrower one. |
+| Did that authorization satisfy the project's complete-command-review requirement? | **Unresolved** |
+
+**The governing principle the owner stated:** "An owner can authorize a previously prepared
+procedure by reference, provided the referenced procedure is uniquely identified, fixed, and
+available for review." Under that principle, the relevant question is not whether the
+authorization message repeated every command, but whether it unambiguously identified a frozen,
+reviewable procedure and whether the required review actually occurred.
+
+**What is now available to assess that**, newly added to this PR: `GATE_C_REQUEST_AS_AUTHORIZED.md`
+is the actual frozen command request, unmodified from `2026-10-15T02:04:27Z` onward — its last
+edit (correcting the stop-condition language after the declaration's digest was confirmed) came
+before the "Authorize L1 and S1-S5" instruction and well before S1 actually ran
+(`2026-10-15T02:13:54Z`, per `COMMAND_TRACE.md`). This establishes that a unique, fixed, available
+document existed at the moment of authorization. **It does not establish that the owner freshly
+re-read that specific document at that moment**, as opposed to authorizing by reference to the
+cumulative review already done across the preceding turns — that distinction is exactly what
+remains open.
+
+**Revised disposition** (supersedes the informal `PENDING` used earlier in this note; reproduced
+in `README.md`):
+```
+GATE_C_TECHNICAL_RESULT: PASS_VERIFIED
+GATE_C_EXPLICIT_AUTHORIZATION: ESTABLISHED
+GATE_C_BOUNDED_AUTHORIZATION_COMPLIANCE: PENDING_RECONCILIATION
+GATE_D_AUTHORIZATION: NOT_GRANTED
+```
+The owner was explicit that this is "not retroactive authorization" — it recognizes the earlier
+instruction as historical evidence while leaving its procedural sufficiency open — and that
+automatically repeating Gate C merely because its authorization was short would not repair the
+historical authorization record and is not recommended; the original, genuinely-obtained `PASS`
+result is retained, not discarded.

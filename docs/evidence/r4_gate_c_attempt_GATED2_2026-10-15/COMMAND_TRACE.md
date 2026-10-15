@@ -1,9 +1,10 @@
 # Command trace — Gate C `CHECK_ONLY`, attempt `GATED2-20261015T005128Z-1b0b45`
 
-Executed 2026-10-15, following `gate_c_request.md`'s L1/S1–S5 sequence from the local preparation
-directory `<REDACTED_LOCAL_HOME>/r4_gate_c_staging_GATED2-20261015T005128Z-1b0b45/` exactly as
-drafted and reviewed. No step deviated from its drafted text. `$SSHO` and `$TARGET` below match
-the connection parameters drafted and reviewed beforehand.
+Executed 2026-10-15, following the L1/S1–S5 sequence in `GATE_C_REQUEST_AS_AUTHORIZED.md` (this
+directory) exactly as drafted and reviewed, from the local preparation directory
+`<REDACTED_LOCAL_HOME>/r4_gate_c_staging_GATED2-20261015T005128Z-1b0b45/`. No step deviated from
+its drafted text. `$SSHO` and `$TARGET` below match the connection parameters drafted and reviewed
+beforehand.
 
 ```
 SSHO="-i <REDACTED_LOCAL_HOME>/.ssh/id_ed25519_dedirock -o BatchMode=yes -o StrictHostKeyChecking=yes -o IdentitiesOnly=yes -o ConnectTimeout=20 -o ForwardAgent=no"
