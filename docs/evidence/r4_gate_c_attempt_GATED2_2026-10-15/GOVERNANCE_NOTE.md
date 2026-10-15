@@ -158,3 +158,14 @@ historical ambiguity. Gate D RECHECK and replay remain `NOT AUTHORIZED`. The pre
 operator declaration (window ending 2026-10-15T06:00:00+00:00) has also now expired; any eventual
 launch requires a fresh declaration and a corresponding Gate C validation under the merged
 protocol.
+
+## Merge record
+
+PR #178 was merged (squash) into `main` as commit `dc6014494e9d6a841072f6d1cf9a5c56d3c930e6`,
+2026-10-15T22:17:54Z. Final CI on the head commit actually merged (`66a5ecb`, which included both
+the original evidence commit and the merge-review-qualifications commit above): all 16 check runs
+(8 jobs × 2 triggered runs — `node-scythe-web`, `python-graphops`, `python-mechanics`,
+`python-platform`, `python-rf`, `rtl-watchdog`, `sdrpp-lock-source-contract`, `secret-scan`)
+reported `pass`, including both `python-rf` runs (5m21s and 5m59s). This record is added after the
+merge, as the owner's own closing instruction directed, and does not reopen or alter anything
+merged above it.
