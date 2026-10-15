@@ -1,0 +1,6 @@
+2026-10-15T00:06:37+00:00 SCENARIO startup_failure_pid_never_appears python /usr/bin/python3 sha256 8c515a32b1a5d3d807e53359901a4d09ec06819b488736641aabd6a12eefba63
+2026-10-15T00:06:37+00:00 monitor started, pid 158020
+2026-10-15T00:06:37+00:00 MONITOR_READY observed: {'ts': '2026-10-15T00:06:37+00:00', 'event': 'MONITOR_READY', 'monitor_pid': 158020}
+2026-10-15T00:06:37+00:00 deliberately never creating <REDACTED_WORKTREE_ROOT>/scenarios/startup_failure_pid_never_appears/launch.pid
+2026-10-15T00:06:42+00:00 expected STARTUP_FAILURE: rc 3 fail_events [{'ts': '2026-10-15T00:06:42+00:00', 'event': 'MONITOR_FAILURE', 'phase': 'STARTUP', 'detail': "launch pid file not yet readable: [Errno 2] No such file or directory: '<REDACTED_WORKTREE_ROOT>/scenarios/startup_failure_pid_never_appears/launch.pid'"}] outcome_ok True
+2026-10-15T00:06:42+00:00 SCENARIO startup_failure_pid_never_appears RESULT PASS

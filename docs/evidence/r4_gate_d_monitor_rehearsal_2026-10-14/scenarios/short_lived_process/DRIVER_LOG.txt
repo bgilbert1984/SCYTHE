@@ -1,0 +1,10 @@
+2026-10-15T00:06:34+00:00 SCENARIO short_lived_process python /usr/bin/python3 sha256 8c515a32b1a5d3d807e53359901a4d09ec06819b488736641aabd6a12eefba63
+2026-10-15T00:06:34+00:00 monitor started, pid 157958
+2026-10-15T00:06:34+00:00 MONITOR_READY observed: {'ts': '2026-10-15T00:06:34+00:00', 'event': 'MONITOR_READY', 'monitor_pid': 157958}
+2026-10-15T00:06:34+00:00 short-lived stand-in harness started, pid 157961
+2026-10-15T00:06:34+00:00 MONITOR_START_CONFIRMED observed: {'ts': '2026-10-15T00:06:34+00:00', 'event': 'MONITOR_START_CONFIRMED', 'bound_pid': 157961, 'matched_pid': 157965, 'matched_exe': '/usr/bin/python3.12', 'interpreter_sha256_expected': '8c515a32b1a5d3d807e53359901a4d09ec06819b488736641aabd6a12eefba63', 'root_starttime': 2872594}
+2026-10-15T00:06:34+00:00 independent verification all_pass: True
+2026-10-15T00:06:35+00:00 stand-in harness exited rc 0
+2026-10-15T00:06:36+00:00 HARNESS_PROCESS_ENDED observed: {'ts': '2026-10-15T00:06:36+00:00', 'event': 'HARNESS_PROCESS_ENDED', 'pid_reused': False}
+2026-10-15T00:06:37+00:00 clean stop: rc 0 stop_events [{'ts': '2026-10-15T00:06:37+00:00', 'event': 'MONITOR_STOP', 'clean': True, 'reason': 'SIGTERM', 'samples_taken': 5, 'peak_sampled_tree_rss_bytes': 12111872, 'sum_observed_process_hwm_bytes': 12111872, 'peak_job_memory_bytes': None}] sample_count 5 outcome_ok True
+2026-10-15T00:06:37+00:00 SCENARIO short_lived_process RESULT PASS

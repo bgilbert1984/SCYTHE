@@ -1,0 +1,3 @@
+scenario=startup_failure_pid_never_appears
+outcome_ok=True
+checked_at=2026-10-15T00:06:42+00:00

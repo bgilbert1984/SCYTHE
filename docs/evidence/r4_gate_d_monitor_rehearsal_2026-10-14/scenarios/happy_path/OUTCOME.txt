@@ -1,0 +1,3 @@
+scenario=happy_path
+outcome_ok=True
+checked_at=2026-10-15T00:06:34+00:00
