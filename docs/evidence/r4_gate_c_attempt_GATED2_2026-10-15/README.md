@@ -29,11 +29,21 @@ preparation of a redaction-aware Gate C evidence PR, locally only" instruction (
 - `GOVERNANCE_NOTE.md` — **read this before treating this attempt as a precedent for anything.**
   It separates the technical result (a genuine, audited `PASS`) from an open question the owner
   raised about whether the authorization that preceded execution met this project's own standard
-  for a bounded authorization. That question is recorded as open, not resolved, here.
+  for a bounded authorization. That question is recorded as open, not resolved, here — see
+  `governance/GATE_C_BOUNDED_AUTHORIZATION_ADDENDUM_2026-10-15.md` for the resolution.
+- `governance/GATE_C_BOUNDED_AUTHORIZATION_ADDENDUM_2026-10-15.md` — the dated addendum that
+  resolves `GATE_C_BOUNDED_AUTHORIZATION_COMPLIANCE` without reopening or editing anything above.
 - `REDACTION_MANIFEST.txt` — the one class of redaction applied (the literal SSH hostname, never
   previously committed to this repository) and why other identifiers already disclosed elsewhere
   in this repository's history (`dedirock-919498765`, `/home/bgilbert1984/...`) were not redacted
   again.
+
+## Gate C bounded-authorization question: resolved by a dated addendum (2026-10-15)
+
+`GATE_C_BOUNDED_AUTHORIZATION_COMPLIANCE`, left `PENDING_RECONCILIATION` in the tables below, is
+resolved in `governance/GATE_C_BOUNDED_AUTHORIZATION_ADDENDUM_2026-10-15.md` — read that file for
+the current, final disposition of that one field. Nothing else on this page or in
+`GOVERNANCE_NOTE.md` is changed by that addendum.
 
 ## Gate status (the owner's merge-review disposition, 2026-10-15, supersedes the tables below)
 
