@@ -230,7 +230,59 @@ change to the declaration schema, the RECHECK mechanism, the retrieval custody t
 other control those documents already define. Building it is explicitly **not required** to adopt
 any of this — the current manual declaration/confirmation flow remains fully valid on its own.
 
-## 12. Current status
+## 12. Threat model — what this does not protect against
+
+Making the receipt mechanism's security boundary explicit, rather than leaving it implied:
+
+- It does **not** attest that the host was actually in the declared maintenance state. It attests
+  only that an authenticated identity approved a declaration that *claims* that state.
+- It does **not** prove execution occurred, or occurred as described. It is an approval artifact,
+  not an execution record.
+- It does **not** replace Gate C validation. Gate C still independently checks the declaration's
+  own fields, host state, and environment; the receipt adds one more check, it does not subsume
+  the others.
+- It does **not** replace Gate D authorization. A valid receipt means a declaration was approved
+  for a specific request — it is not itself the bounded, explicit authorization to execute that
+  this project's standing practice requires (see [`scythe-gate-authorization-strictness`] in
+  project memory, and the GATED3 request's own authorization-by-reference mechanism).
+- It does **not** prevent an operator from approving an incorrect or false declaration. The
+  signature proves *who* approved it, not that what they approved was true. A compromised or
+  careless operator identity can still approve a bad declaration; the receipt makes that act
+  attributable and auditable, not impossible.
+- It does **not** detect or prevent a compromised signing key from issuing a valid-looking receipt
+  for a declaration/request pair the real operator never saw. Key custody (§14) is a prerequisite
+  this document assumes, not something the receipt format itself guarantees.
+
+## 13. Trust assumptions
+
+For the verification algorithm in §6 to mean what it claims to mean, the following must hold —
+documented explicitly so a later security review can check each one rather than inferring them:
+
+- The FusionAuth identity asserted by `approved_by_sub` is itself trustworthy — i.e. FusionAuth's
+  own authentication (including MFA, if configured) has not been bypassed or spoofed.
+- Governance signing keys are protected; a private key's confidentiality is what makes `kid`-based
+  verification meaningful at all.
+- The verifier (Gate C) trusts exactly the public keys listed, at the status (`active`/`retired`),
+  in the trust store it is configured to read — not some other key set.
+- SHA-256 remains collision-resistant for custody purposes, consistent with every other digest in
+  this project's evidence chain.
+- The canonicalization algorithm is fixed to RFC 8785 (JCS); any verifier that canonicalizes
+  differently will compute a different signature input and reject a legitimate receipt, or (worse,
+  if implemented loosely) accept a tampered one.
+- `oidc_jti` is actually checked for uniqueness by the Governance Service at issuance time, to make
+  the stated replay-detection property real rather than aspirational.
+
+## 14. Future evolution — a general artifact-approval pattern, not a Gate D special case
+
+Nothing about §§2–9 is specific to replay execution. The same binding — a signed receipt over two
+(or more) artifact hashes, under a policy version, verifiable offline against a versioned trust
+store — could govern approvals for evidence publication, protocol revisions, dataset freezes,
+benchmark baselines, release candidates, or paper submission packages, with the same
+`governance-receipt/1` schema in each case rather than a proliferation of receipt types per use
+case. This document only specifies the Gate D use case; generalizing it is future work, not implied
+by anything merged here.
+
+## 15. Current status
 
 No code or protocol changes are implied by this document. This design discussion does not
 constitute, and should not be read as, a Gate D execution authorization for any attempt, including
