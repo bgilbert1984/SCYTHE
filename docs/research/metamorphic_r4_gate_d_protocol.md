@@ -31,6 +31,31 @@ blocking this merge. No change to §2, §3, §4, §6 (apart from one clarifying 
 > (§7 step 4, unchanged by this or any revision so far), or any historical evidence. This revision
 > does not authorize anything, retroactively characterize any prior attempt, or itself permit any
 > Dedirock connection.
+>
+> **Revision 5** (this text, PR #183) resolves, by a narrowly scoped protocol clarification rather
+> than by a single request document's own interpretation, a nuance raised during review of the
+> draft GATED3 request: §4's "immediately before `run_job.sh` is invoked, and in the same shell
+> session with no intervening reboot" was read informally as meaning host continuity only, without
+> the protocol itself ever saying so. Adds §4.1, naming and separating three kinds of continuity:
+> **host continuity** (no reboot — already enforced between `CHECK_ONLY` and `RECHECK` via
+> `RECHECK`'s own FROZEN `boot ID` field, but, before this revision, never re-verified between
+> `RECHECK` (§7 step 7) and launch (§7 step 10), across the two intervening, separately-invoked
+> steps 8 and 9); **execution continuity** (the frozen numerical environment and declaration
+> identity — already, and still only, enforced at `RECHECK`'s own moment by its FROZEN-field
+> table, not independently re-verified again closer to launch by this revision); and **session
+> continuity** (separate SSH invocations for steps 6 through 10, which this protocol has always
+> used and explicitly permits, conditioned on host continuity being independently re-established
+> immediately before launch). Closes the real gap host continuity had by requiring a `boot_id`
+> comparison immediately before step 10, added as a new §8 stop condition on mismatch. States
+> explicitly, per the gap this clarification exists to close, that a `boot_id` match proves only
+> the absence of a reboot — it is not represented as proof that no relevant process or
+> configuration changed, which remains execution continuity's, not host continuity's, concern. §4
+> itself gains the new §4.1 subsection described above; its existing table and opening sentence
+> are otherwise unchanged. No change to §2, §3, §5, §6, §9, §10, or §11, apart from one new §8
+> stop condition (the pre-launch `boot_id` mismatch, matching §4.1's requirement); no change to
+> any frozen scientific tolerance, the r4.1 package, the comparison protocol, the Gate C
+> four-input transfer boundary, or any historical evidence. This revision does not authorize
+> anything, retroactively characterize any prior attempt, or itself permit any Dedirock connection.
 
 ## 1. What this is and is not
 
@@ -70,6 +95,47 @@ Immediately before `run_job.sh` is invoked, and in the same shell session with n
 | RECONFIRMED | operator declaration | same identity as §3, and independently still valid (inside its window, not withdrawn) at this moment |
 
 A `RECHECK` refusal stops here. Nothing downstream (monitor, launch) starts.
+
+**4.1 Three distinct kinds of continuity (new in Revision 5), kept named separately on purpose.**
+This protocol's own step sequence (§7) runs `RECHECK` (step 7) immediately before launch (step 10)
+only in the sense that no other step intervenes that is permitted to change host or job state —
+not in the sense of one continuously held terminal session; steps 6 through 10 are, and are meant
+to be, separate SSH invocations (§7's own text has always structured them that way). That
+distinction matters enough to name its three parts explicitly, rather than leave "immediately
+before... in the same shell session" to be read informally each time a request is drafted:
+
+- **Host continuity** — the replay host itself has not rebooted between two points in time.
+  `RECHECK`'s own FROZEN-field table already establishes this between `CHECK_ONLY` (§3) and
+  `RECHECK` (§7 step 7), via the `boot ID` field's exact-equality requirement. It does **not**,
+  by itself, cover the gap between `RECHECK` returning `PASS` and launch (§7 step 10) actually
+  starting — §7 steps 8 and 9 (monitor staging and start) occur in that gap, each a separate SSH
+  invocation. **A request's own command sequence must independently re-confirm host continuity
+  immediately before step 10**, by comparing `/proc/sys/kernel/random/boot_id` (read-only,
+  already within the access §6.1 item 1's record-reading permission already establishes) against
+  the `boot_id` `RECHECK` itself recorded — a mismatch is a stop condition (§8), exactly as a
+  `RECHECK` FROZEN-field mismatch already is. This closes a real gap: nothing before Revision 5
+  re-verified host continuity past the moment `RECHECK` itself ran.
+- **Execution continuity** — the frozen numerical environment (package digest, runner/harness
+  digests, interpreter binary digest and version, BLAS/SIMD/compiler, every requirement and
+  threshold) and the operator declaration's identity have not changed. This is exactly what
+  `RECHECK`'s FROZEN-field table already enforces, *as of the moment `RECHECK` itself runs* — it
+  is not independently re-verified again between `RECHECK` and launch by this revision. Host
+  continuity (above) and execution continuity are deliberately not conflated: **a `boot_id` match
+  proves the host did not reboot; it does not, by itself, prove that every relevant process or
+  configuration remained unchanged** (a service could restart, a file could be modified, a
+  competing process could start, all without a reboot). The narrow, cheap `boot_id` check this
+  revision adds catches the single most disruptive event between `RECHECK` and launch; it is not
+  represented as a substitute for `RECHECK`'s own, more complete FROZEN-field verification, which
+  remains anchored to `RECHECK`'s own moment and is unchanged by this revision.
+- **Session continuity** — whether the commands implementing a Gate D step sequence run within
+  one continuously held shell/SSH session or across several separate ones. This protocol permits,
+  and its own §7 sequence has always used, separate SSH invocations for steps 6 through 10 — that
+  is session continuity's status under this protocol, stated explicitly rather than left to a
+  single request document's own interpretation (a request document may not itself decide this
+  question; it can only comply with what this protocol already permits). That permission is
+  conditioned on host continuity being independently re-established immediately before launch, as
+  the new requirement above now requires — separate SSH invocations are permitted *because*, not
+  instead of, that evidence being preserved.
 
 ## 5. Control 3 — memory and resource observability
 
@@ -159,6 +225,7 @@ Steps run in this order; any deviation or unexpected output stops the gate here 
 
 - `CHECK_ONLY` (step 6) or `RECHECK` (step 7) returns anything other than `PASS` → stop; no launch; no retry without a new attempt.
 - **(New in Revision 3.)** The monitor-staging checksum (step 8, §5.10 item 4) does not match → hard stop; no launch; no replacement, overwrite, or retry of the transfer under this attempt label; no retry at all without a new attempt label and a new §3 Gate C `CHECK_ONLY`.
+- **(New in Revision 5.)** The `boot_id` comparison required immediately before launch (§4.1, host continuity) does not match the `boot_id` `RECHECK` recorded → hard stop; no launch; no retry without a new attempt label and a new §3 Gate C `CHECK_ONLY`, exactly as a `RECHECK` FROZEN-field mismatch already requires.
 - The monitor fails to confirm startup (§5.2) → `MONITOR_FAILURE: STARTUP`, recorded; default posture is an immediate documented manual stop of the harness, since an unmonitored run does not satisfy this gate.
 - The monitor (§5) observes available memory below the frozen 4 GB floor, an OOM-kill event, or records `OOM_OBSERVABILITY_UNAVAILABLE` → recorded; the harness is **not** automatically touched; a human decides whether to let it continue or to issue a documented manual stop (§5.6).
 - **The declared 4-hour window elapses before the job completes.** This is recorded as a `WINDOW_OVERRUN_OBSERVED` event at the moment the window closes (a timestamp comparison, not a judgment call). It does not, by itself, authorize either continuing or stopping — both require a human decision, made and recorded at that point. Continuing requires a **new, separately dated confirmation of continued availability from the same operator identity named in the declaration**, given through the same trusted out-of-band channel as the original declaration (the operator-declaration workflow of `metamorphic_r4_gate_c_preflight.md` §9.2: the operator creates and keeps the artifact; neither the tool nor an assistant creates one on the operator's behalf). This confirmation is its own new, separately timestamped artifact — never an edit to the frozen `CHECK_ONLY`/`RECHECK` records or to the original declaration file, which remain immutable. Absent that confirmation, the default is a documented manual stop once reasonably practicable; the overrun itself still does not trigger an automated kill.
