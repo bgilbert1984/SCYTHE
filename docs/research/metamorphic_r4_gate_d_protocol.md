@@ -14,6 +14,23 @@ replay host (surviving the SSH session, remaining reachable for §5.7's `SIGTERM
 detail to be validated by a local process-lifecycle rehearsal before any real request's step 9
 text is frozen — not asserted correct by this revision, and not itself a further protocol gap
 blocking this merge. No change to §2, §3, §4, §6 (apart from one clarifying cross-reference in §6.1 item 5), §9, or §11; no change to any frozen scientific tolerance, the r4.1 package, the comparison protocol, or any historical evidence. This revision does not authorize anything, retroactively characterize any prior attempt, or itself permit any Dedirock connection.
+>
+> **Revision 4** (this text, PR #182) closes a small retrieval-scope gap §5.10 item 7's own
+> validation (a local-only process-lifecycle rehearsal, run after Revision 3 merged, not yet
+> published as evidence) surfaced: the detachment idiom it validates (`setsid ...
+> </dev/null >>LOG 2>&1 & ... ; disown`) redirects the monitor's and the harness's stdout/stderr to
+> `monitor_stdio.log`/`harness_stdio.log` on the replay host — diagnostic custody for a startup
+> failure that would otherwise be lost, since neither file is covered by §6.1's existing
+> categories. Per the owner's explicit instruction ("amend the protocol before requesting their
+> retrieval" — not named per-request, which would have been the alternative), this revision adds
+> both as a new §6.1 item 6 and updates §6.3's retrieval list to match. No pre-known expected
+> digest exists for either file (they are freshly generated output, not a frozen input); each is
+> digested and the digest recorded as custody immediately on retrieval, the same treatment §6.1
+> items 2, 3 and 5 already receive. No other section changes; no change to any frozen scientific
+> tolerance, the r4.1 package, the comparison protocol, the Gate C four-input transfer boundary
+> (§7 step 4, unchanged by this or any revision so far), or any historical evidence. This revision
+> does not authorize anything, retroactively characterize any prior attempt, or itself permit any
+> Dedirock connection.
 
 ## 1. What this is and is not
 
@@ -106,10 +123,11 @@ A wildcard is acceptable here, in prose, to describe a category of file (as the 
 3. From the sealed job: its disposition file, the top-level job manifest `JOB_SHA256SUMS`, `STATUS.txt`, `env.txt` — **not** `holdout/` (the fixture corpus is regenerated on the replay host and never transferred in either direction, per the cross-host protocol §3).
 4. From `results_full/` and `results_smoke/`: each directory's own `MANIFEST.sha256` (written by the harness itself, listing every durable result file it produced with its digest — class X, per the cross-host protocol §4.2, and not itself compared for equality, only used here to build the inventory), `run_header.json`, `summary.json`, and every other file **that `MANIFEST.sha256` lists** under that results directory (the per-fixture `layerB/`, `phaseA/` and `phaseB/` records the cross-host protocol §4.1 describes by count).
 5. The local SSH/SCP session transcripts (stdout/stderr) kept on the workstation during the session — not an artifact pulled from the replay host, but part of the same custody record. **(Clarified in Revision 3.)** This already covers the monitor-staging transfer and its on-host checksum verification (§5.10, §7 step 8): their SSH/SCP transcript is part of the same session record, not a separate retrieval category.
+6. **(New in Revision 4.)** The redirected-stdio log files the validated detachment idiom of §5.10 item 7 writes on the replay host: the monitor's own (`monitor_stdio.log`, written by §7 step 9's `setsid ... </dev/null >>LOG 2>&1 &`) and the harness's own (`harness_stdio.log`, written the same way by §7 step 10). Both exist specifically to catch anything written to stdout/stderr before the monitor's own structured JSONL log exists (e.g. an argument-validation failure at startup) or by `run_job.sh` outside its own `STATUS.txt`/`logs/` — diagnostic custody for a failure mode category 2 and 3 above do not otherwise cover. Unlike items 1 and 4, neither file has a pre-known expected digest to verify against (they are freshly generated output, not a frozen input); each is digested and the digest recorded as custody immediately on retrieval, the same treatment items 2, 3 and 5 already receive.
 
 **6.2 Building the frozen inventory.** Before any retrieval command is issued: read (read-only `cat`, not a glob) `JOB_SHA256SUMS`, `results_full/MANIFEST.sha256` and `results_smoke/MANIFEST.sha256` from the replay host. Intersect their listed paths with category 4 above (anything a manifest lists that is outside the named categories — there should be none, since the harness's own output is already exactly what §4.1 describes — is excluded, not fetched, and the discrepancy is recorded). Write the resulting concrete list, each entry with its path and the digest the manifest already records for it, to a local file **before** issuing any `scp`. This is the exact inventory the amendment requires: every source path, its destination, and its expected hash, fixed before transfer, not discovered during it.
 
-**6.3 Retrieval and verification.** Copy exactly the files named in §6.1 items 1, 2, 3, 5 (fixed names, no inventory step needed — there is exactly one of each) and exactly the files named in the §6.2 inventory for item 4. Each copied file is verified against its expected digest (the manifest's, for item 4; the preflight tool's own `PREFLIGHT_SHA256SUMS`, for item 1) immediately after transfer, before anything else reads it.
+**6.3 Retrieval and verification.** Copy exactly the files named in §6.1 items 1, 2, 3, 5, 6 (fixed names, no inventory step needed — there is exactly one of each) and exactly the files named in the §6.2 inventory for item 4. Each copied file is verified against its expected digest (the manifest's, for item 4; the preflight tool's own `PREFLIGHT_SHA256SUMS`, for item 1) immediately after transfer, before anything else reads it; item 6's two files have no pre-known expected digest (per item 6's own note) and are instead digested and recorded as custody immediately on retrieval.
 
 If a future need for the archive copy, or any file outside §6.1, is identified, it is added **by a revision of this document**, reviewed before the next Gate D attempt — never improvised during one.
 
