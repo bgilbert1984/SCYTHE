@@ -169,3 +169,10 @@ the original evidence commit and the merge-review-qualifications commit above): 
 reported `pass`, including both `python-rf` runs (5m21s and 5m59s). This record is added after the
 merge, as the owner's own closing instruction directed, and does not reopen or alter anything
 merged above it.
+
+## Pointer to the resolution (added, does not alter anything above)
+
+The `GATE_C_BOUNDED_AUTHORIZATION_COMPLIANCE: PENDING_RECONCILIATION` question raised throughout
+this note is resolved, by a separate dated addendum, in
+`governance/GATE_C_BOUNDED_AUTHORIZATION_ADDENDUM_2026-10-15.md`. Per this project's own convention,
+the resolution is recorded there, not by editing the dispute record above.
