@@ -16,6 +16,11 @@ shape called for in docs/research/scythe_architectural_invariants.md section 13
 Two invariants from that document are *enforced* here, not just represented:
   - section 3: mission_id/session_id are immutable after creation (Mission and Session are
     frozen dataclasses; any attempted mutation raises dataclasses.FrozenInstanceError).
+    This is TOP-LEVEL immutability only. Attribute reassignment is blocked; a dict-typed field
+    (MissionParameters.frequency_plan, Mission.region) is stored as a types.MappingProxyType so
+    `mission.mission_parameters.frequency_plan["start"] = ...` raises too -- but that's still
+    shallow: a mutable value nested one level further down (e.g. a list inside region) is not
+    protected. Deep immutability is a known, deliberately deferred gap, not claimed solved.
   - section 5: an ObservationSet is append-only after sealing (ObservationSet.record_observation()
     raises SealedObservationSetError once sealed() has been called).
 """
@@ -25,6 +30,7 @@ import dataclasses
 import hashlib
 import json
 import re
+import types
 from typing import Any, Dict, List, Optional
 
 __all__ = [
@@ -121,9 +127,23 @@ class MissionParameters:
             raise MissionError("antenna_sha256 must be a 64-character lowercase hex sha256")
         if self.rf_posture is not None and self.rf_posture not in RF_POSTURES:
             raise MissionError(f"rf_posture must be one of {sorted(RF_POSTURES)}")
+        if self.frequency_plan is not None:
+            if not isinstance(self.frequency_plan, dict):
+                raise MissionError("frequency_plan must be an object")
+            # frozen=True only blocks reassigning the *attribute*; it does nothing to stop
+            # frequency_plan["start"] = ... mutating the dict object in place, which would
+            # silently change digest() afterwards -- the same bug class ObservationSet's
+            # preprocessing_history had. Storing an immutable mapping closes it here too.
+            object.__setattr__(self, "frequency_plan", types.MappingProxyType(dict(self.frequency_plan)))
 
     def to_dict(self) -> Dict[str, Any]:
-        return {k: v for k, v in dataclasses.asdict(self).items() if v is not None}
+        d = {}
+        for f in dataclasses.fields(self):
+            v = getattr(self, f.name)
+            if v is None:
+                continue
+            d[f.name] = dict(v) if f.name == "frequency_plan" else v
+        return d
 
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> "MissionParameters":
@@ -162,6 +182,15 @@ class Mission:
                 raise MissionError("gate_d_request_sha256 is only meaningful when mission_type is REPLAY")
             if not _SHA256_RE.match(self.gate_d_request_sha256):
                 raise MissionError("gate_d_request_sha256 must be a 64-character lowercase hex sha256")
+        if self.region is not None:
+            if not isinstance(self.region, dict):
+                raise MissionError("region must be an object")
+            # Shallow immutability only, by the same MappingProxyType mechanism as
+            # MissionParameters.frequency_plan: region["type"] = ... now raises. A nested
+            # mutable value (e.g. region["coordinates"][0].append(...), a list one level
+            # down) is NOT protected -- deep immutability is a known, deliberately deferred
+            # gap, not claimed solved here.
+            object.__setattr__(self, "region", types.MappingProxyType(dict(self.region)))
 
     def to_dict(self) -> Dict[str, Any]:
         d: Dict[str, Any] = {
@@ -176,7 +205,7 @@ class Mission:
                      ("start_after", self.start_after), ("expire_after", self.expire_after),
                      ("gate_d_request_sha256", self.gate_d_request_sha256)):
             if v is not None:
-                d[k] = v
+                d[k] = dict(v) if k == "region" else v
         return d
 
     def to_json(self) -> str:

@@ -178,8 +178,13 @@ physical acquisition artifact itself*, as distinct from the records extracted fr
 `graphops_rf_ingest.py` validates one spectral-summary record at a time with no enclosing "this
 sweep" concept, and `pcap_ingest.py` sessionizes a PCAP file directly into graph sessions with no
 named object for "the file." That's the gap `ObservationSet` fills: one physical acquisition
-artifact (`capture1.sigmf`, `capture2.pcapng`, `flight.csv`, `ais.csv`, `rtl_power.csv`) containing
-many Observations.
+artifact (`capture1.sigmf`, `capture2.pcapng`, `flight.csv`, `ais.csv`, `rtl_power.csv`), recording
+*how many* observations it produced and the lineage of how it was handled. Precision matters here,
+confirmed at implementation (PR #188): `ObservationSet` does not hold Observation objects — there is
+no `Observation` type in this codebase yet, in `scythe_mission.py` or anywhere else. It holds a
+count (`observation_count`) and provenance (`preprocessing_history`), not payloads. The acquisition
+envelope and the extracted-observation data model are two different things; this section specifies
+only the former.
 
 ```jsonc
 {
