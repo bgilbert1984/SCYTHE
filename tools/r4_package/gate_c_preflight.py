@@ -34,6 +34,7 @@ if a.declaration:                       # tests only: a declaration override mak
 if a.now_utc and not override: sys.exit("--now-utc is a test hook and is only honoured together with --declaration (which invalidates the verdict)")
 SCHEMA_VERSION = 2
 SCOPE = "no planned maintenance, reboot or reclaim of the host during the window"
+STANDING_SCOPE = "sole administrator of this temporary sandbox; this declaration applies until explicitly withdrawn (no expiry)"
 REQUIREMENT_KEYS = ("package_sha256", "source_commit", "min_free_gb", "min_mem_gb", "run_job_sha256", "harness_sha256", "window_hours")
 for p in (a.python, a.job_dir, a.record_dir):
     if not os.path.isabs(p): sys.exit("PYTHON, job dir and record dir must be absolute paths")
@@ -113,35 +114,68 @@ item("4 no competing r4 job process is running", not comp, str(comp[:3]))
 # ---- operator declaration (RECONFIRMED): a structured, digest-bound statement made by the operator (the trusted workflow is documented; the tool never creates one)
 def utc(x): return datetime.datetime.fromisoformat(x.replace("Z", "+00:00"))
 def check_declaration(path, mode, prior_identity):
-    """Return (status, detail, identity). CHECK_ONLY: missing -> PENDING. RECHECK: missing, changed, expired, withdrawn or invalid -> FAIL."""
+    """Return (status, detail, identity). CHECK_ONLY: missing -> PENDING. RECHECK: missing, changed, invalid, or no-longer-valid -> FAIL.
+    Two declaration schemas are accepted: gate-c-operator-declaration/1 (a bounded time window, re-checked against wall-clock time at every
+    CHECK_ONLY/RECHECK) and gate-c-operator-declaration/2 (a standing declaration bound to a sandbox_epoch instead of a window; it never
+    expires on its own -- it stays valid until the file is withdrawn via the usual <path>.withdrawn marker). /2 exists for a single-operator,
+    single-purpose sandbox host where a repeating human time-box adds administrative churn without adding confidence; it is not a weaker
+    identity check, only a different validity rule, and the usual digest-bound custody (ident) and RECHECK identity-continuity check below
+    apply identically to both schemas."""
     if not path: return ("PENDING" if mode == "CHECK_ONLY" else "FAIL"), "no operator declaration given", None
     if not os.path.isfile(path): return "FAIL", "operator declaration file missing", None
     raw = open(path, "rb").read(); ident = {"sha256": sha(raw)}
     try:
-        o = json.loads(raw); need = ("schema", "operator", "host", "package_sha256", "window_start_utc", "window_end_utc", "declared_at_utc", "scope")
-        if o.get("schema") != "gate-c-operator-declaration/1" or any(not isinstance(o.get(k), str) or not o[k].strip() for k in need): return "FAIL", "operator declaration is malformed or incomplete", ident
-        start, end, at = utc(o["window_start_utc"]), utc(o["window_end_utc"]), utc(o["declared_at_utc"])
-    except (ValueError, TypeError, AttributeError) as exc: return "FAIL", f"operator declaration unreadable: {exc}", ident
-    ident.update({k: o[k] for k in ("operator", "host", "package_sha256", "window_start_utc", "window_end_utc", "declared_at_utc")})
-    why = []
-    if o["host"] != env["hostname"]: why.append(f"declared host {o['host']!r} is not this host")
-    if o["package_sha256"] != d: why.append("declaration names a different package")
-    if o["scope"] != SCOPE: why.append("declaration scope text differs from the required scope")
-    if end - start != datetime.timedelta(hours=DECL["window_hours"]): why.append(f"window is not exactly {DECL['window_hours']} h")
-    if at > now: why.append("declared in the future")
-    if os.path.exists(path + ".withdrawn"): why.append("declaration WITHDRAWN")
-    if mode == "CHECK_ONLY" and not now < end: why.append("window already expired")
-    if mode == "RECHECK" and not start <= now < end: why.append("launch-time is outside the declared window (expired or not yet open)")
+        o = json.loads(raw); schema = o.get("schema")
+    except (ValueError, TypeError) as exc:
+        return "FAIL", f"operator declaration unreadable: {exc}", ident
+    if schema == "gate-c-operator-declaration/1":
+        need = ("schema", "operator", "host", "package_sha256", "window_start_utc", "window_end_utc", "declared_at_utc", "scope")
+        if any(not isinstance(o.get(k), str) or not o[k].strip() for k in need): return "FAIL", "operator declaration is malformed or incomplete", ident
+        try: start, end, at = utc(o["window_start_utc"]), utc(o["window_end_utc"]), utc(o["declared_at_utc"])
+        except (ValueError, TypeError, AttributeError) as exc: return "FAIL", f"operator declaration unreadable: {exc}", ident
+        ident.update({k: o[k] for k in ("operator", "host", "package_sha256", "window_start_utc", "window_end_utc", "declared_at_utc")}); ident["decl_schema"] = schema
+        why = []
+        if o["host"] != env["hostname"]: why.append(f"declared host {o['host']!r} is not this host")
+        if o["package_sha256"] != d: why.append("declaration names a different package")
+        if o["scope"] != SCOPE: why.append("declaration scope text differs from the required scope")
+        if end - start != datetime.timedelta(hours=DECL["window_hours"]): why.append(f"window is not exactly {DECL['window_hours']} h")
+        if at > now: why.append("declared in the future")
+        if os.path.exists(path + ".withdrawn"): why.append("declaration WITHDRAWN")
+        if mode == "CHECK_ONLY" and not now < end: why.append("window already expired")
+        if mode == "RECHECK" and not start <= now < end: why.append("launch-time is outside the declared window (expired or not yet open)")
+        ok_detail = f"operator {o['operator']!r}, host {o['host']}, window {o['window_start_utc']} to {o['window_end_utc']}, digest {ident['sha256'][:16]}..."
+    elif schema == "gate-c-operator-declaration/2":
+        need = ("schema", "operator", "host", "package_sha256", "status", "declared_at_utc", "scope")
+        if any(not isinstance(o.get(k), str) or not o[k].strip() for k in need): return "FAIL", "operator declaration is malformed or incomplete", ident
+        epoch = o.get("sandbox_epoch")
+        if not isinstance(epoch, int) or isinstance(epoch, bool) or epoch < 1: return "FAIL", "sandbox_epoch must be a positive integer", ident
+        try: at = utc(o["declared_at_utc"])
+        except (ValueError, TypeError, AttributeError) as exc: return "FAIL", f"operator declaration unreadable: {exc}", ident
+        ident.update({k: o[k] for k in ("operator", "host", "package_sha256", "status", "declared_at_utc")}); ident["sandbox_epoch"] = epoch; ident["decl_schema"] = schema
+        why = []
+        if o["host"] != env["hostname"]: why.append(f"declared host {o['host']!r} is not this host")
+        if o["package_sha256"] != d: why.append("declaration names a different package")
+        if o["scope"] != STANDING_SCOPE: why.append("declaration scope text differs from the required standing scope")
+        if o["status"] != "ACTIVE": why.append(f"declaration status is {o['status']!r}, not ACTIVE")
+        if at > now: why.append("declared in the future")
+        if os.path.exists(path + ".withdrawn"): why.append("declaration WITHDRAWN")
+        ok_detail = f"operator {o['operator']!r}, host {o['host']}, sandbox_epoch {epoch}, digest {ident['sha256'][:16]}..."
+    else:
+        return "FAIL", f"unknown declaration schema {schema!r}", ident
     if mode == "RECHECK":
         if not prior_identity: why.append("the CHECK_ONLY record holds no declaration identity")
         elif prior_identity != ident: why.append("declaration identity differs from the one frozen in the CHECK_ONLY record")
-    return ("FAIL" if why else "PASS"), ("; ".join(why) or f"operator {o['operator']!r}, host {o['host']}, window {o['window_start_utc']} to {o['window_end_utc']}, digest {ident['sha256'][:16]}..."), ident
+    return ("FAIL" if why else "PASS"), ("; ".join(why) or ok_detail), ident
 
 prior = None
 if a.mode == "RECHECK":
     pj = os.path.join(a.prior_record, "PREFLIGHT_RECORD.json"); prior = json.load(open(pj))
 st, detail, decl_ident = check_declaration(a.operator_declaration, a.mode, (prior or {}).get("operator_declaration"))
-results.append(("5 operator declaration" + (" (reconfirmed at launch time)" if a.mode == "RECHECK" else "") + f": host available for the whole {DECL['window_hours']} h window, {SCOPE}", st, detail)); print(f"{st:7s} {results[-1][0]}  {detail}")
+if decl_ident and decl_ident.get("decl_schema") == "gate-c-operator-declaration/2":
+    decl_label = f"operator declaration (standing, sandbox_epoch {decl_ident.get('sandbox_epoch')}): {STANDING_SCOPE}"
+else:
+    decl_label = f"operator declaration: host available for the whole {DECL['window_hours']} h window, {SCOPE}"
+results.append(("5 " + decl_label + (" (reconfirmed at launch time)" if a.mode == "RECHECK" else ""), st, detail)); print(f"{st:7s} {results[-1][0]}  {detail}")
 
 # ---- environment table against the reference, and the RECHECK equality
 ref_env = None
@@ -173,7 +207,7 @@ fails = [n for n, s, _ in results if s == "FAIL"]; pend = [n for n, s, _ in resu
 verdict = "FAIL" if fails else ("PASS_OPERATOR_CONFIRMATION_PENDING" if pend else "PASS")
 if override: verdict = "INVALID_FOR_GATE_C_DECLARATION_OVERRIDE_" + verdict
 fclass = {"FROZEN": ["package_sha256", "requirements", "job_dir", "environment", "operator_declaration identity"],
-          "REMEASURED": ["free space (job, temp)", "available memory", "load", "competing processes", "job directory absent"], "RECONFIRMED": ["operator declaration validity (window, withdrawal)"]}
+          "REMEASURED": ["free space (job, temp)", "available memory", "load", "competing processes", "job directory absent"], "RECONFIRMED": ["operator declaration validity (window or sandbox_epoch, status, withdrawal)"]}
 measured = {"free_job_gb": round(fj, 3), "free_tmp_gb": round(ft, 3), "mem_available_gb": round(mem["MemAvailable"] / 1e6, 3)}
 rec = {"attempt_label": a.attempt_label, "schema_version": SCHEMA_VERSION, "field_classes": fclass, "requirements": {k: DECL[k] for k in REQUIREMENT_KEYS}, "measurements": measured, "operator_declaration": decl_ident, "preflight_mode": a.mode, "launch": "NOT_PERFORMED", "attempt_id_candidate": attempt_id, "timestamp_utc": now.isoformat(timespec="seconds"), "package_sha256": d, "job_dir": a.job_dir, "record_dir": a.record_dir,
        "host": {"hostname": env["hostname"], "kernel": env["kernel"], "boot_id": boot_id}, "environment": env, "reference_environment": ref_env, "load_avg": os.getloadavg(), "uptime_s": float(open("/proc/uptime").read().split()[0]),

@@ -46,6 +46,15 @@ class GateC(unittest.TestCase):
     def at(self, minutes):
         return (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=minutes)).isoformat(timespec="seconds")
 
+    STANDING_SCOPE = "sole administrator of this temporary sandbox; this declaration applies until explicitly withdrawn (no expiry)"
+
+    def make_standing_declaration(self, name=None, **over):
+        """A structured gate-c-operator-declaration/2 (standing, sandbox_epoch-bound) made by the test."""
+        t0 = datetime.datetime.now(datetime.timezone.utc)
+        o = {"schema": "gate-c-operator-declaration/2", "operator": "test-operator", "host": socket.gethostname(), "package_sha256": self.decl["package_sha256"], "scope": self.STANDING_SCOPE,
+             "status": "ACTIVE", "sandbox_epoch": 1, "declared_at_utc": (t0 - datetime.timedelta(minutes=10)).isoformat(timespec="seconds")}
+        o.update(over); type(self).n += 1; path = os.path.join(self.tmp, name or f"sdecl{self.n}.json"); pathlib.Path(path).write_text(json.dumps(o)); return path
+
     def items(self, rec): return {i["name"][:3].strip(): i for i in json.loads(pathlib.Path(rec, "PREFLIGHT_RECORD.json").read_text())["items"]}
     def status(self, rec, prefix): return next(i["status"] for i in json.loads(pathlib.Path(rec, "PREFLIGHT_RECORD.json").read_text())["items"] if i["name"].startswith(prefix))
     def verdict(self, rec): return json.loads(pathlib.Path(rec, "PREFLIGHT_RECORD.json").read_text())["verdict"]
@@ -150,6 +159,42 @@ class GateC(unittest.TestCase):
     def test_recheck_refuses_a_pending_check_only_record(self):
         r, prior, job = self.run_tool(); self.assertEqual(self.status(prior, "5 "), "PENDING")
         r, rec, _ = self.recheck(prior, job, self.make_declaration()); self.assertEqual(r.returncode, 1); self.assertEqual(self.status(rec, "6p"), "FAIL")
+
+    # ---- standing declaration (schema /2): no window, bound to sandbox_epoch, valid until withdrawn
+    def checked_standing(self, **kw):
+        df = self.make_standing_declaration(); r, rec, job = self.run_tool(extra=["--operator-declaration", df], **kw); self.assertEqual(r.returncode, 0, r.stdout); return rec, job, df
+
+    def test_a_standing_declaration_passes_check_only_with_no_expiry(self):
+        rec, job, df = self.checked_standing(); self.assertEqual(self.status(rec, "5 "), "PASS")
+        txt = pathlib.Path(rec, "PREFLIGHT_RECORD.txt").read_text(); self.assertIn("standing, sandbox_epoch 1", txt)
+        o = json.loads(pathlib.Path(rec, "PREFLIGHT_RECORD.json").read_text())
+        self.assertEqual(o["operator_declaration"]["decl_schema"], "gate-c-operator-declaration/2"); self.assertEqual(o["operator_declaration"]["sandbox_epoch"], 1)
+
+    def test_recheck_of_a_standing_declaration_passes_arbitrarily_far_in_the_future(self):
+        prior, job, df = self.checked_standing()
+        far = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=400)).isoformat(timespec="seconds")
+        r, rec, _ = self.recheck(prior, job, df, extra=["--now-utc", far]); self.assertEqual(r.returncode, 0, r.stdout); self.assertEqual(self.status(rec, "5 "), "PASS")
+
+    def test_bad_standing_declarations_fail_check_only(self):
+        w = lambda **k: self.make_standing_declaration(**k)
+        cases = {"wrong host": w(host="somewhere-else"), "wrong package": w(package_sha256="0" * 64), "wrong scope": w(scope="anything"),
+                 "status not active": w(status="SUSPENDED"), "declared in the future": w(declared_at_utc=self.at(30)),
+                 "epoch not an integer": w(sandbox_epoch="1"), "epoch zero": w(sandbox_epoch=0), "epoch a bool": w(sandbox_epoch=True)}
+        for name, df in cases.items():
+            r, rec, _ = self.run_tool(extra=["--operator-declaration", df]); self.assertEqual(r.returncode, 1, name); self.assertEqual(self.status(rec, "5 "), "FAIL", name)
+        df = self.make_standing_declaration(); pathlib.Path(df + ".withdrawn").write_text("withdrawn")
+        r, rec, _ = self.run_tool(extra=["--operator-declaration", df]); self.assertEqual(self.status(rec, "5 "), "FAIL"); self.assertIn("WITHDRAWN", pathlib.Path(rec, "PREFLIGHT_RECORD.txt").read_text())
+
+    def test_recheck_refuses_a_changed_or_withdrawn_standing_declaration(self):
+        prior, job, df = self.checked_standing()
+        o = json.loads(pathlib.Path(df).read_text()); o["sandbox_epoch"] = 2; changed = self.make_standing_declaration(**{k: v for k, v in o.items() if k not in ("schema",)})
+        r, rec, _ = self.recheck(prior, job, changed); self.assertEqual(r.returncode, 1); self.assertIn("identity differs", pathlib.Path(rec, "PREFLIGHT_RECORD.txt").read_text())
+        pathlib.Path(df + ".withdrawn").write_text("w"); r, rec, _ = self.recheck(prior, job, df); self.assertEqual(r.returncode, 1); self.assertIn("WITHDRAWN", pathlib.Path(rec, "PREFLIGHT_RECORD.txt").read_text()); os.remove(df + ".withdrawn")
+
+    def test_unknown_declaration_schema_is_refused(self):
+        df = self.make_standing_declaration(schema="gate-c-operator-declaration/3")
+        r, rec, _ = self.run_tool(extra=["--operator-declaration", df]); self.assertEqual(r.returncode, 1); self.assertEqual(self.status(rec, "5 "), "FAIL")
+        self.assertIn("unknown declaration schema", pathlib.Path(rec, "PREFLIGHT_RECORD.txt").read_text())
 
     # ---- frozen requirements vs remeasured quantities
     def test_remeasured_quantities_are_judged_against_the_frozen_thresholds_not_compared_for_equality(self):
