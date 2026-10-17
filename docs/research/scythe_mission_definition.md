@@ -1,49 +1,81 @@
-# SCYTHE Mission Definition — a declared-scope layer over existing collection infrastructure (draft)
+# SCYTHE Mission — the missing coordination object (draft, architectural convergence)
 
-> **DRAFT DESIGN PROPOSAL. No code changes, no schema files, no validator tool, and no Gate C/Gate D
-> change are made by this document.** It does not authorize anything and does not touch the GATED3
-> request or any other in-progress attempt. It is written now, ahead of implementation, because the
-> governance series (Gate C/D, PRs #176–#186) has reached a stable baseline and the next engineering
-> focus is expected to be the RF/mission side rather than another governance refinement.
+> **DRAFT. No code changes, no schema files, no validator tool, and no Gate C/Gate D change are made
+> by this document.** It does not authorize anything and does not touch the GATED3 request or any
+> other in-progress attempt. It is written now, ahead of implementation, because the governance
+> series (Gate C/D, PRs #176–#186) has reached a stable baseline and the next engineering focus is
+> expected to be the RF/mission side rather than another governance refinement.
 
-## 1. Purpose
+This is deliberately framed as a **convergence** document, not a proposal to introduce new
+architecture: SCYTHE already contains several working domain-specific collection pipelines and a
+shared knowledge graph. The claim below is that the one thing missing is a coordination object —
+**Mission** — not another subsystem, another graph, or a replacement for anything that already
+works. Every claim about "what already exists" below was checked against the actual module, not
+assumed.
 
-Gate C and Gate D answer *"may this execution run?"* — package identity, host state, operator
-authorization. They say nothing about *why* a collection happened or how its outputs trace back to
-an objective. This document sketches a **Mission** layer whose job is exactly that: group a bounded,
-declared RF-collection or replay activity together with everything it produces, so a reviewer (or
-Cesium viewer) can always answer "what was this observation part of, and what was that activity
-trying to find out."
+## 1. What already exists
 
-## 2. What already exists — this is not a blank slate
+```
+       RF Ingest   ───────────┐
+       PCAP Ingest ───────────┤
+       ADS-B Pipeline ────────┼──────▶  Hypergraph Engine (HGNode / HGEdge)
+       AIS Pipeline  ─────────┤                    │
+                              │                    ▼
+                              │           Invariant Ledger
+                              │                    │
+                              │                    ▼
+                              └──────▶  Cesium Visualization
+```
 
-Before sketching anything new, it matters what's already in the repository, because most of the
-Evidence/Entity/graph machinery a naive design would invent from scratch is already here in working
-form:
+| Existing module | What it already does |
+|---|---|
+| `graphops_rf_ingest.py` | Validation boundary for live measured-RF spectral summaries; `RFObservationStore` derives SNR and a "stable evidence identity"; `OBSERVATION_ORIGINS` distinguishes `OPERATOR_SYNTHETIC` from `EXTERNAL_SENSOR`. |
+| `pcap_ingest.py` | Deterministic PCAP → sessionization → hypergraph, with its own stated discipline: "PCAPs are not evidence until sessionized; sessions are not knowledge until ledgered." |
+| ADS-B pipeline (`docs/safari_adsb_first_light_blog_post.md`) | A genuinely live, verified pipeline: NESDR capture → numpy preamble matched filter → pyModeS → served tracks, already run against the real sky. |
+| AIS pipeline (`rf_scythe_api_server.py`) | A real vessel-tracking endpoint, CSV-backed today with a mock fallback. |
+| `graphops_rf_antenna.py` | The operator-antenna-declaration pattern: `OPERATOR_DECLARED` fields, digest-identified, recorded with the timestamp it took effect, **never applied backwards** over products already emitted — the same shape as the Gate C operator declaration, already established here for a different purpose. |
+| `capture_policy.py` | A rule-based *authorization* DSL (`AUTHORIZE`/`REQUIRE_APPROVAL`/`DENY`, with constraints like `max_duration`, `allowed_interfaces`) deciding whether a specific capture *command* may run. This is a governance concept, not an intent/parameters concept — named here specifically because §5 must avoid colliding with it. |
+| `hypergraph_engine.py` (`HGNode`, `HGEdge`, `RFHypergraphAdapter`) | The actual entity graph: generic `kind`-discriminated nodes (`id`, `kind`, `position`, `frequency`, `labels`, `metadata`, `created_at`, `updated_at`) and edges (`id`, `kind`, `nodes[]`, `weight`, `labels`, `metadata`, `timestamp`). |
+| `scythe_invariant_ledger.py` | A domain-agnostic transition-invariant checker (`TransitionContract`, `BoundedBalance`, `BoundedCeiling`, `InvariantVerdict`), already wired into CI. |
+| `poi_manager.py`, `cesium-hypergraph-globe.*` | Cesium-facing POI/hypergraph rendering, already working. |
+| `mission_runner.py` | `run_fusion_demo_5km`: a hardcoded simulation of LPI detection → AoA/TDoA tracking — the only literal "mission" in the codebase today, informal and not schema-driven. |
 
-| Existing module | What it already does | Relevance here |
-|---|---|---|
-| `mission_runner.py` | `run_fusion_demo_5km`: a hardcoded simulation of LPI detection → AoA/TDoA tracking over a fixed sensor registry | The only literal "mission" in the codebase today — informal, not schema-driven. This draft's `SIMULATION` mission type would eventually wrap work like this, not replace it. |
-| `graphops_rf_antenna.py` | The operator-antenna-declaration pattern: `OPERATOR_DECLARED` fields, digest-identified, recorded with the timestamp it took effect, **never applied backwards** over products already emitted | The template this draft reuses for sensor declarations (§5) rather than inventing a new declaration idiom — it's the same shape as the Gate C operator declaration, already established in this codebase for a different purpose. |
-| `graphops_rf_ingest.py` | A validation boundary for live measured-RF spectral summaries; `RFObservationStore` already derives SNR and a "stable evidence identity"; `OBSERVATION_ORIGINS` already distinguishes `OPERATOR_SYNTHETIC` from `EXTERNAL_SENSOR` | This *is* the existing Observation/Evidence boundary for spectral data. §8 proposes threading a `mission_sha256`/`session_id` through it, not replacing it. |
-| `pcap_ingest.py` | Deterministic PCAP sessionization into the hypergraph, with its own stated discipline: "PCAPs are not evidence until sessionized; sessions are not knowledge until ledgered" | An existing sibling of the "Session" concept (§6), for a different capture type. |
-| `hypergraph_engine.py` (`HGNode`, `HGEdge`, `RFHypergraphAdapter`) | The actual entity graph: generic `kind`-discriminated nodes (`id`, `kind`, `position`, `frequency`, `labels`, `metadata`, `created_at`, `updated_at`) and edges (`id`, `kind`, `nodes[]`, `weight`, `labels`, `metadata`, `timestamp`) | This already *is* the Entity/Emitter/relationship graph a naive design would propose building. §8–9 map onto it instead of proposing a parallel schema. |
-| `scythe_invariant_ledger.py` | A domain-agnostic transition-invariant checker (`TransitionContract`, `BoundedBalance`, `BoundedCeiling`, `InvariantVerdict`), already wired into CI | A plausible home for mission-level lifecycle invariants (§9), without a mission-specific reimplementation. |
-| `poi_manager.py`, `cesium-hypergraph-globe.*` | Cesium-facing POI/hypergraph rendering, already working | Temporal replay (§10) is a convention for how callers write to the existing graph, not a new rendering system. |
+**What's missing isn't another graph, another ingest path, or another identity scheme.** It's the
+thing that says *these observations belong together because they were collected for one
+operational purpose.* That's Mission.
 
-**What's actually missing, and what this document is for:** none of the above has an explicit, bounded,
-declared top-level envelope — a record saying *this specific collection activity, for this purpose,
-with this gear, between these times, produced these sessions and this evidence*. That envelope — the
-Mission — is the real gap. Everything downstream of it should be the existing machinery above, wearing
-one new foreign key.
+## 2. Hierarchy
+
+```
+Mission
+  ├── Session A  (e.g. Monday morning walk)
+  ├── Session B  (e.g. Tuesday rooftop)
+  ├── Session C  (e.g. stationary replay)
+  └── Session D  (e.g. vehicle route)
+       └── ObservationSet  (one physical acquisition artifact)
+             └── Observation  (one extracted record)
+                   └── Entity reference  (an HGNode this observation contributed to)
+```
+
+A Mission owns **multiple** Sessions — that's how people actually collect data (a multi-day survey
+is several distinct outings, not one continuous session). Everything below Mission is existing
+machinery; Mission is the one new root.
 
 ## 3. Relationship to the governance layer
 
-Orthogonal, not layered underneath. Most mission types here (`PASSIVE_WALK`, `PASSIVE_STATIONARY`,
-`FOX_HUNT`, `LONG_TERM_MONITOR`, `CALIBRATION`) are live capture and never touch Gate C/Gate D at all
-— there's no frozen package, no replay host, nothing for `gate_c_preflight.py` to check. The one
-exception is `REPLAY`: a mission whose evidence comes from a Gate-D-authorized harness run. For that
-type only, the mission record carries the attempt's own frozen request SHA-256 (e.g. GATED3's
+Orthogonal, not layered underneath, and this document adds to it rather than replacing it:
+
+| Layer | Answers |
+|---|---|
+| **Governance** (Gate C/D, declarations, receipts) | Who approved an execution, and under what constraints? |
+| **Mission** (this document) | What were we trying to accomplish, and why? |
+| **Collection** (existing ingest pipelines) | What was actually observed? |
+| **Knowledge** (existing hypergraph) | What relationships exist between what was observed? |
+
+Most mission types are live capture and never touch Gate C/Gate D at all — there's no frozen
+package, no replay host, nothing for `gate_c_preflight.py` to check. The one exception is `REPLAY`
+(§6): a mission whose evidence comes from a Gate-D-authorized harness run. For that type only, the
+mission record carries the attempt's own frozen request SHA-256 (e.g. GATED3's
 `29fee7603ccf1f528089b1a3266862e6c7c94e248c201d3cac042dc85c323d42`) alongside `mission_sha256` —
 the same two-hash-binding pattern already used in `governance_receipt_architecture.md`
 (`declaration_sha256` + `request_sha256`), reused here rather than invented twice.
@@ -54,45 +86,61 @@ the same two-hash-binding pattern already used in `governance_receipt_architectu
 {
   "schema": "mission-definition/1",
   "mission_id": "RFMAP-20261017-001",
-  "mission_type": "PASSIVE_WALK",            // see §7
-  "purpose": "Passive RF survey, downtown corridor",
+  "mission_type": "RF_SURVEY",                // §6 — the evidence-grounded vocabulary
+  "purpose": "Locate intermittent 915 MHz emitter, downtown Seattle corridor",
+  "classification": "unclassified",
   "operator": "Ben Gilbert",
-  "sensor_package": ["<antenna declaration sha256>", "<receiver declaration sha256>"],
+  "mission_parameters": {                     // §5 — renamed from "Capture Policy" to avoid
+    "sdr": "RTL-SDR v5",                       // colliding with the existing capture_policy.py
+    "antenna_sha256": "<graphops_rf_antenna.py declaration digest>",
+    "gain": "AGC",
+    "expected_environment": "urban, multipath-heavy",
+    "frequency_plan": {"center_mhz": 915, "span_mhz": 2},
+    "gps_cadence": "1 Hz",
+    "operator_notes": "intermittent, likely a periodic beacon",
+    "capture_profile": "urban_passive"         // a named preset (§7) resolving to these same fields
+  },
   "region": {"type": "polygon", "coordinates": [...]},   // optional (stationary/calibration may omit)
-  "capture_profile": "urban_passive",         // §6 — a name, not inline settings
   "start_after": "2026-10-20T14:00:00+00:00",
   "expire_after": "2026-10-20T18:00:00+00:00",
   "gate_d_request_sha256": null,              // only set for mission_type REPLAY
   "mission_sha256": "<computed once frozen>"
 }
 ```
-`sensor_package` names existing `graphops_rf_antenna.py`-style declaration digests — it does not
-duplicate antenna/receiver identity, it references it.
+`mission_parameters.antenna_sha256` names an existing `graphops_rf_antenna.py`-style declaration
+digest — it does not duplicate antenna identity, it references it.
 
-## 5. Session schema (`mission-session/1`, sketch)
+## 5. Mission Parameters, not Capture Policy
 
-A mission may contain many sessions (same relationship `pcap_ingest.py` already has between a PCAP
-batch and its sessions, generalized with an explicit parent):
+`capture_policy.py` already exists and already owns the term "Capture Policy" for a different
+concept — authorization rules for whether a specific capture command may run. Mission's intent
+section is deliberately named **Mission Parameters** instead: SDR, antenna, gain, expected
+environment, frequency plan, GPS cadence, operator notes, classification, purpose. Mission says
+*what we intended*; `capture_policy.py` still independently says *whether a given command is
+allowed to execute* — the two are not merged, and nothing about `capture_policy.py` changes here.
 
-```jsonc
-{
-  "schema": "mission-session/1",
-  "session_id": "RFMAP-20261017-001-S01",
-  "mission_sha256": "<parent mission's digest>",
-  "sensor_declarations": ["<antenna sha256>", "<receiver sha256>"],
-  "gps_quality_floor": "3d_fix",
-  "clock_source": "gpsdo",
-  "start_utc": "...", "end_utc": "..."
-}
-```
-Every observation inherits mission/session provenance by carrying `session_id`, the same way
-`graphops_rf_ingest.py` observations would carry it once threaded through (§11 — not done here).
+## 6. Mission types — only categories with existing evidence
 
-## 6. Capture profiles — reusable presets, not per-mission settings
+| Type | Evidence it's grounded in | Touches Gate C/D |
+|---|---|---|
+| `RF_SURVEY` | `graphops_rf_ingest.py`, `graphops_rf_antenna.py`; sub-classified by `mission_parameters.rf_posture` (`WALK`, `STATIONARY`, `FOX_HUNT`, `LONG_TERM_MONITOR`) rather than separate top-level types, so downstream code only ever asks `mission.mission_type` | no |
+| `PCAP_COLLECTION` | `pcap_ingest.py` | no |
+| `ADSB_COLLECTION` | the live ADS-B pipeline (`docs/safari_adsb_first_light_blog_post.md`) | no |
+| `AIS_COLLECTION` | the AIS vessel-tracking endpoint (`rf_scythe_api_server.py`) | no |
+| `REPLAY` | the Gate C/D governance series itself | **yes** |
+| `CALIBRATION` | reference captures against a known source | no |
+| `SIMULATION` | `mission_runner.py`'s existing `run_fusion_demo_5km`; synthetic observations use the existing `OPERATOR_SYNTHETIC` origin from `graphops_rf_ingest.py` | no |
+| `CUSTOM` | escape hatch for anything not yet in this table | depends |
 
-The operator picks a profile name; the rest resolves deterministically. Both the name and the
-resolved parameter snapshot get hashed into the session record, so "which exact settings were in
-effect" is never ambiguous even though the operator only chose a name.
+`WARDRIVE`, `LTE_COLLECTION`, and `OSINT_COLLECTION` were considered and deliberately left out —
+no corresponding module or pipeline was found in this repository. They can be added honestly once
+they exist, rather than speculatively now.
+
+## 7. Capture profiles
+
+A capture profile is a named, reusable preset that resolves to a `mission_parameters` object — the
+operator picks a name, the parameters resolve deterministically, and both the name and the resolved
+snapshot get hashed into the mission record.
 
 | Profile | Sample rate | Gain | FFT size | Averaging | GPS cadence | Upload cadence |
 |---|---|---|---|---|---|---|
@@ -100,72 +148,125 @@ effect" is never ambiguous even though the operator only chose a name.
 | `fox_hunt` | moderate | manual, high dynamic range | small (fast) | none | high | real-time, event-marked |
 | `stationary_observatory` | low, continuous | calibrated | large | heavy | low | periodic, + weather/thermal log |
 
-(Concrete numeric values deliberately omitted here — they belong in the profile's own data file once
-this is implemented, not duplicated into prose that would then drift out of sync with it.)
+(Concrete numeric values deliberately omitted — they belong in the profile's own data file once
+implemented, not duplicated into prose that could drift from it.)
 
-## 7. Mission types
+## 8. Session schema (`mission-session/1`) — purely factual, no intent
 
-| Type | Typical duration | GPS required | Touches Gate C/D | Typical evidence |
-|---|---|---|---|---|
-| `PASSIVE_WALK` | minutes–hours | yes | no | spectral summaries, GPS track |
-| `PASSIVE_STATIONARY` | hours–days | optional (fixed position known) | no | spectral summaries, waterfall |
-| `FOX_HUNT` | minutes–hours | yes, high cadence | no | spectral summaries, GPS track, event markers |
-| `LONG_TERM_MONITOR` | days–months | optional | no | spectral summaries, thermal/weather log |
-| `REPLAY` | minutes–hours | no | **yes** (Gate C/Gate D) | harness evidence, retrieved via the existing custody chain |
-| `CALIBRATION` | minutes | optional | no | reference spectral captures |
-| `SIMULATION` | any | no | no | synthetic observations, explicitly `OPERATOR_SYNTHETIC` per `graphops_rf_ingest.py`'s existing origin field |
+```jsonc
+{
+  "schema": "mission-session/1",
+  "session_id": "RFMAP-20261017-001-S01",
+  "mission_id": "RFMAP-20261017-001",
+  "started_utc": "...", "ended_utc": "...",
+  "operator": "Ben Gilbert",
+  "sensor_declaration_sha256": "<graphops_rf_antenna.py digest actually in use>",
+  "receiver": "RTL-SDR v5",
+  "capture_profile_used": "urban_passive",
+  "location_source": "gps",
+  "session_sha256": "<computed once frozen>"
+}
+```
+A Session records *what happened*; it makes no decisions. If a session deviated from its mission's
+planned `mission_parameters` (different profile, different antenna), that's visible as a factual
+difference between the two records, not a judgment encoded into either one.
 
-## 8. Observations and entities map onto the existing hypergraph, not a new one
+## 9. ObservationSet — the hidden gap
 
-- An **Observation Event** is what `graphops_rf_ingest.py` already validates, with `mission_sha256`
-  and `session_id` added to its allowed fields (a change to that module's `ALLOWED_FIELDS`, not
-  proposed or made here — see §11).
+Neither `graphops_rf_ingest.py` nor `pcap_ingest.py` currently has an explicit object for *the
+physical acquisition artifact itself*, as distinct from the records extracted from it —
+`graphops_rf_ingest.py` validates one spectral-summary record at a time with no enclosing "this
+sweep" concept, and `pcap_ingest.py` sessionizes a PCAP file directly into graph sessions with no
+named object for "the file." That's the gap `ObservationSet` fills: one physical acquisition
+artifact (`capture1.sigmf`, `capture2.pcapng`, `flight.csv`, `ais.csv`, `rtl_power.csv`) containing
+many Observations.
+
+```jsonc
+{
+  "schema": "observation-set/1",
+  "observation_set_id": "RFMAP-20261017-001-S01-OS01",
+  "session_id": "RFMAP-20261017-001-S01",
+  "source_filename": "rtl_power_20261020_1400.csv",
+  "source_sha256": "<digest of the acquired file>",
+  "acquisition_tool_version": "...",
+  "preprocessing_history": [],
+  "observation_count": 0
+}
+```
+This cleanly separates *a capture artifact* from *the scientific observations extracted from it* —
+a distinction a growing repository needs and doesn't currently have anywhere.
+
+## 10. Observations and entities map onto the existing hypergraph, not a new one
+
+- An **Observation** is what `graphops_rf_ingest.py` already validates, with `observation_set_id`
+  (and transitively `session_id`/`mission_id`) added to its allowed fields — a change to that
+  module's `ALLOWED_FIELDS`, not proposed or made here (§13).
 - An **Entity/Emitter** is an `HGNode` with `kind="emitter"`: `position` and `frequency` are already
-  first-class fields; confidence and lifecycle state (§9) live in `metadata`/`labels`, which are
+  first-class fields; confidence and lifecycle state (§11) live in `metadata`/`labels`, which are
   already open dicts — no new node type is needed.
 - A **relationship** ("co-located," "same-device-probable," "handoff-successor") is an `HGEdge` with
   `kind` naming the relation, `weight` as its confidence, and `timestamp` already present.
 
-This section is a *mapping convention* for future code to follow, mirroring what `RFHypergraphAdapter`
-already does for its own inputs — not a proposal to add new fields to `HGNode`/`HGEdge` themselves.
+This is a *mapping convention* mirroring what `RFHypergraphAdapter` already does for its own
+inputs — not a proposal to add new fields to `HGNode`/`HGEdge` themselves.
 
-## 9. Signal lifecycle
+## 11. Signal lifecycle
 
 `Observed → Clustered → Localized → Characterized → Tracked → Attributed → Archived`, with a side
 branch to `Needs Human Review` reachable from `Clustered` or `Characterized` when confidence or
 ambiguity requires it. Stored as `labels["lifecycle_state"]` on the entity's `HGNode` — each
-transition is a new, timestamped edge or metadata update, never an overwrite of the prior state, so
-history stays replayable (§10). Whether illegal transitions (e.g. `Observed` → `Attributed`,
-skipping `Localized`) should be enforced by a `scythe_invariant_ledger.py` `TransitionContract` is an
-open question (§12), not decided here.
+transition is a new, timestamped write, never an overwrite of the prior state, so history stays
+replayable (§12). Whether illegal transitions should be enforced by a `scythe_invariant_ledger.py`
+`TransitionContract` is an open question (§15), not decided here.
 
-## 10. Temporal replay semantics (Cesium)
+## 12. Temporal replay semantics (Cesium)
 
 No new storage model: `HGEdge` already carries `timestamp`, and nodes already carry
-`created_at`/`updated_at`. The only new requirement is a convention — every mission-relevant node/edge
-change is itself a new, timestamped write, never an in-place mutation of a prior state — so
-`cesium-hypergraph-globe.*` (which already renders the hypergraph) can scrub a mission's history by
-replaying its node/edge stream between two timestamps instead of only showing current state. This is
-a discipline for callers, not a change to `hypergraph_engine.py`.
+`created_at`/`updated_at`. The only new requirement is a convention — every mission-relevant
+node/edge change is itself a new, timestamped write, never an in-place mutation — so
+`cesium-hypergraph-globe.*` (which already renders the hypergraph) can scrub a mission's history
+between two timestamps instead of only showing current state. A discipline for callers, not a
+change to `hypergraph_engine.py`.
 
-## 11. What this draft does not do
+## 13. The migration path is one optional foreign key
+
+This is the point of framing this as convergence rather than a new system: adopting Mission does
+not require rewriting anything that already works.
+
+```
+graphops_rf_ingest  ──┐
+pcap_ingest          ──┤
+ADS-B pipeline       ──┼──▶  + one optional field: mission_id
+AIS pipeline         ──┤
+Cesium replay        ──┤
+Invariant ledger     ──┘
+```
+What does **not** change: the hypergraph schema (`HGNode`/`HGEdge`), existing evidence identity,
+RF observation hashes, invariant-ledger semantics. Every existing subsystem gains exactly one new
+reference; none is restructured around a new abstraction.
+
+## 14. What this draft does not do
 
 No JSON Schema files are written. No validator tool (a `mission_preflight.py` analogous to
 `gate_c_preflight.py`) exists. No change is made to `graphops_rf_ingest.py`'s `ALLOWED_FIELDS`,
-`pcap_ingest.py`, `hypergraph_engine.py`, or `scythe_invariant_ledger.py`. No Gate C/Gate D protocol
-is touched. Nothing here authorizes any collection, replay, or execution.
+`pcap_ingest.py`, `hypergraph_engine.py`, `scythe_invariant_ledger.py`, or `capture_policy.py`. No
+Gate C/Gate D protocol is touched. Nothing here authorizes any collection, replay, or execution.
 
-## 12. Open questions
+## 15. Open questions
 
-- How `mission_sha256`/`session_id` actually get threaded into `graphops_rf_ingest.py`'s
-  `ALLOWED_FIELDS` and `pcap_ingest.py`'s session nodes without breaking either module's existing
-  validation boundary.
-- Whether mission-lifecycle invariants (§9) belong in `scythe_invariant_ledger.py` as a generic
+- How `mission_id`/`session_id`/`observation_set_id` actually get threaded into
+  `graphops_rf_ingest.py`'s `ALLOWED_FIELDS` and `pcap_ingest.py`'s session nodes without breaking
+  either module's existing validation boundary.
+- This draft confirms the ADS-B and AIS pipelines exist (§1) but does not examine their ingest code
+  paths in the depth `graphops_rf_ingest.py`/`pcap_ingest.py` received — threading `mission_id`
+  through them needs that examination first.
+- Whether mission-lifecycle invariants (§11) belong in `scythe_invariant_ledger.py` as a generic
   `TransitionContract`, or need a mission-specific checker — not decided.
-- How entity merge/split is decided when new evidence arrives (e.g. two `Clustered` entities turning
-  out to be one `Localized` emitter). No algorithm is specified in this draft.
+- How entity merge/split is decided when new evidence arrives. No algorithm is specified here.
 - Storage/retention policy for `Archived` entities and their evidence — not addressed.
+- Whether a continuous `LONG_TERM_MONITOR` session is chunked into multiple `ObservationSet`s (e.g.
+  one per upload interval) or treated as one open-ended set — not decided.
 - For `REPLAY` missions, whether `mission_sha256` should be computed before or after the Gate D
-  request's own SHA-256 is frozen — an ordering question this draft leaves open.
-- Numeric capture-profile values (§6) need an actual data file once this is implemented; this draft
+  request's own SHA-256 is frozen — an ordering question left open.
+- Numeric capture-profile values (§7) need an actual data file once implemented; this draft
   deliberately does not fix numbers in prose that could drift from that file.
