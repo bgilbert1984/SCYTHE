@@ -474,6 +474,7 @@ def register_mcp_routes(app, engine, use_orchestrator: bool = False, auth_valida
                 node_limit=request.args.get('node_limit', 200),
                 edge_limit=request.args.get('edge_limit', 300),
                 focus_id=request.args.get('focus_id', ''),
+                mission_id=request.args.get('mission_id', ''),
             ))
         except (TypeError, ValueError) as exc:
             return jsonify({'status': 'error', 'message': str(exc), 'nodes': [], 'edges': []}), 400
