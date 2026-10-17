@@ -114,6 +114,7 @@ jobs:
             test_network_measurement_parsing \
             test_network_tool_policy \
             test_ollama_cloud \
+            test_pcap_ingest_mission_id \
             test_pcap_ingest_writebus \
             test_route_epistemics \
             test_sensor_registry_lpi \
