@@ -183,6 +183,31 @@ class TestObservationSet(unittest.TestCase):
             os_.record_observation()
         self.assertEqual(os_.observation_count, 1)  # the rejected call did not increment it
 
+    def test_preprocessing_history_is_a_copy_not_a_live_mutable_reference(self):
+        # Review found: an earlier version exposed preprocessing_history as a plain public
+        # list, so appending to it after seal() silently changed what digest() computed next
+        # -- the seal was shallow. This is the regression test for that fix.
+        os_ = self.make(preprocessing_history=["step1"])
+        before = os_.digest()
+        returned = os_.preprocessing_history
+        returned.append("smuggled")  # mutating the returned list must not touch internal state
+        self.assertEqual(os_.preprocessing_history, ["step1"])
+        self.assertEqual(os_.digest(), before)
+
+    def test_add_preprocessing_step_is_sealing_aware(self):
+        os_ = self.make()
+        os_.add_preprocessing_step("normalized")
+        self.assertEqual(os_.preprocessing_history, ["normalized"])
+        os_.seal()
+        with self.assertRaises(sm.SealedObservationSetError):
+            os_.add_preprocessing_step("too_late")
+        self.assertEqual(os_.preprocessing_history, ["normalized"])  # rejected call had no effect
+
+    def test_preprocessing_history_cannot_be_reassigned(self):
+        os_ = self.make()
+        with self.assertRaises(AttributeError):
+            os_.preprocessing_history = ["replaced"]
+
     def test_sealed_state_round_trips(self):
         os_ = self.make(); os_.record_observation(); os_.seal()
         back = sm.ObservationSet.from_dict(os_.to_dict())

@@ -268,7 +268,7 @@ class ObservationSet:
         self.source_filename = source_filename
         self.source_sha256 = source_sha256
         self.acquisition_tool_version = acquisition_tool_version
-        self.preprocessing_history: List[str] = list(preprocessing_history or [])
+        self._preprocessing_history: List[str] = list(preprocessing_history or [])
         self._observation_count = 0
         self._sealed = False
 
@@ -280,14 +280,32 @@ class ObservationSet:
     def sealed(self) -> bool:
         return self._sealed
 
+    @property
+    def preprocessing_history(self) -> List[str]:
+        """A copy, not a live reference: mutating the returned list does not affect this
+        object's state, sealed or not. The only way to add a step is add_preprocessing_step(),
+        which is sealing-aware. (Found by review: an earlier version exposed this as a plain
+        public list, so appending to it after seal() silently changed what digest() would
+        compute next -- the seal was shallow. This closes that gap.)"""
+        return list(self._preprocessing_history)
+
+    def add_preprocessing_step(self, step: str) -> None:
+        """The only way to extend preprocessing_history. Sealing-aware, same as
+        record_observation() -- see _check_not_sealed()."""
+        self._check_not_sealed("preprocessing_history")
+        self._preprocessing_history.append(step)
+
+    def _check_not_sealed(self, what: str) -> None:
+        if self._sealed:
+            raise SealedObservationSetError(
+                f"ObservationSet {self.observation_set_id!r} is sealed; {what} never "
+                "migrates into a sealed set (scythe_architectural_invariants.md section 5)"
+            )
+
     def record_observation(self) -> int:
         """Increment observation_count by one. The append-only membership invariant: raises
         SealedObservationSetError once sealed, instead of silently accepting it."""
-        if self._sealed:
-            raise SealedObservationSetError(
-                f"ObservationSet {self.observation_set_id!r} is sealed; observations never "
-                "migrate into a sealed set (scythe_architectural_invariants.md section 5)"
-            )
+        self._check_not_sealed("observations")
         self._observation_count += 1
         return self._observation_count
 
