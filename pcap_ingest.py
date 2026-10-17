@@ -27,6 +27,15 @@ equivalent -- "one physical acquisition artifact") produces MANY session nodes
 mismatch is a real open question for a future revision of the mission definition doc, not
 something this additive PR attempts to resolve.
 
+PR D per docs/research/scythe_mission_definition.md: mission_id also goes into pcap_artifact,
+session, and host node LABELS now (not only metadata.provenance), because
+HypergraphEngine.nodes_by_mission()/nodes_with_label() index only from labels. This is the
+backend query primitive for "show Mission X" instead of "show graph" -- it does not wire into
+graphops_graph_resolver.py's /api/graphops/selection/graph endpoint or any Cesium rendering code,
+which is a separate, larger, harder-to-verify-without-a-browser surface left for later. Known
+limitation, not fixed here: host nodes are deduplicated by IP across the whole engine, not scoped
+per mission, so a host observed under two different missions keeps only the first mission_id.
+
 Usage:
     from pcap_ingest import PcapIngestPipeline, IngestConfig
     pipeline = PcapIngestPipeline(hypergraph_engine, config=IngestConfig(
@@ -147,6 +156,17 @@ def _provenance(config: "IngestConfig", source: Optional[str] = None, **extra: A
     if config.mission_id is not None:
         prov["mission_id"] = config.mission_id
     return prov
+
+
+def _mission_label(config: "IngestConfig") -> Dict[str, Any]:
+    """PR D: mission_id also goes into a node's labels (not just metadata.provenance above),
+    because HypergraphEngine's label_index -- and therefore nodes_by_mission()/nodes_with_label()
+    -- is built only from labels at add_node() time (hypergraph_engine.py). provenance.mission_id
+    answers "what mission is this node's custody attributed to"; labels.mission_id is what makes
+    it efficiently queryable. Empty dict (not a None-valued key) when mission_id is unset, so
+    **_mission_label(config) is a no-op and the label dict is byte-for-byte unchanged, same
+    omission discipline as _provenance()."""
+    return {"mission_id": config.mission_id} if config.mission_id is not None else {}
 
 
 def _get_writebus_instance() -> Optional[Any]:
@@ -1028,6 +1048,7 @@ class HypergraphEmitter:
                 "filename": filename,
                 "file_size": file_size,
                 "ingested_at": datetime.now(timezone.utc).isoformat(),
+                **_mission_label(self.config),
             },
             "metadata": {
                 "provenance": _provenance(self.config, evidence_type="packet_capture"),
@@ -1072,6 +1093,7 @@ class HypergraphEmitter:
             "time_bucket": session.time_bucket,
             "start_time": session.start_time,
             "end_time": session.end_time,
+            **_mission_label(self.config),
         }
         if proto_anomaly is not None:
             session_labels["protocol_anomaly_score"] = proto_anomaly.anomaly_score
@@ -1101,11 +1123,17 @@ class HypergraphEmitter:
 
         for ip in (session.src_ip, session.dst_ip):
             host_id = _host_id(ip)
+            # host_id is purely IP-derived and deduplicated across the whole engine, not scoped
+            # per mission -- if the same host IP is observed again under a different mission_id
+            # later, this emitter skips re-emission entirely (pre-existing dedup behavior, not
+            # introduced here) and the host node's labels.mission_id stays whichever mission
+            # first created it. A real, known limitation of attaching mission_id to a
+            # cross-mission-deduplicated node kind -- not fixed here.
             if host_id not in self._emitted_hosts:
                 host_node: Dict[str, Any] = {
                     "id": host_id,
                     "kind": "host",
-                    "labels": {"ip": ip, "bytes": host_bytes.get(ip, 0)},
+                    "labels": {"ip": ip, "bytes": host_bytes.get(ip, 0), **_mission_label(self.config)},
                     "metadata": {
                         "provenance": _provenance(self.config, evidence_type="packet_capture"),
                         "confidence": "SENSOR",
