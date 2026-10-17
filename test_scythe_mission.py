@@ -35,6 +35,36 @@ class TestMissionParameters(unittest.TestCase):
         with self.assertRaises(sm.MissionError):
             sm.MissionParameters.from_dict({"not_a_real_field": 1})
 
+    def test_frequency_plan_is_shallowly_immutable_not_just_the_attribute(self):
+        # Review found: frozen=True blocks mp.frequency_plan = {...} but does nothing to stop
+        # mp.frequency_plan["start"] = ... mutating the dict object in place, which would
+        # silently change digest() afterwards. Regression test for the MappingProxyType fix.
+        mp = sm.MissionParameters(frequency_plan={"center_mhz": 915, "span_mhz": 2})
+        with self.assertRaises(TypeError):
+            mp.frequency_plan["start"] = 900e6
+        self.assertEqual(dict(mp.frequency_plan), {"center_mhz": 915, "span_mhz": 2})
+
+    def test_frequency_plan_is_not_a_dict_instance_an_intentional_api_surprise(self):
+        # Documented in the module docstring, not a bug: MappingProxyType is not a dict
+        # subclass. Pinned here so this doesn't get "fixed" into a plain dict later without
+        # noticing it reintroduces the mutability hole this class exists to close.
+        mp = sm.MissionParameters(frequency_plan={"center_mhz": 915})
+        self.assertFalse(isinstance(mp.frequency_plan, dict))
+        self.assertEqual(mp.frequency_plan.get("center_mhz"), 915)
+        self.assertIn("center_mhz", mp.frequency_plan)
+
+    def test_frequency_plan_must_be_an_object(self):
+        with self.assertRaises(sm.MissionError):
+            sm.MissionParameters(frequency_plan=["not", "an", "object"])
+
+    def test_frequency_plan_round_trips_as_a_plain_dict(self):
+        mp = sm.MissionParameters(frequency_plan={"center_mhz": 915})
+        d = mp.to_dict()
+        self.assertIsInstance(d["frequency_plan"], dict)  # not a mappingproxy leaking out
+        back = sm.MissionParameters.from_dict(d)
+        self.assertEqual(mp, back)
+        self.assertEqual(json.loads(json.dumps(d))["frequency_plan"], {"center_mhz": 915})
+
 
 class TestMission(unittest.TestCase):
     def make(self, **over):
@@ -115,6 +145,25 @@ class TestMission(unittest.TestCase):
         d = self.make().to_dict(); d["not_a_real_field"] = 1
         with self.assertRaises(sm.MissionError):
             sm.Mission.from_dict(d)
+
+    def test_region_is_shallowly_immutable_not_just_the_attribute(self):
+        m = self.make(region={"type": "point", "coordinates": [47.6, -122.3]})
+        with self.assertRaises(TypeError):
+            m.region["type"] = "polygon"
+        self.assertEqual(dict(m.region)["type"], "point")
+
+    def test_region_must_be_an_object(self):
+        with self.assertRaises(sm.MissionError):
+            self.make(region=["not", "an", "object"])
+
+    def test_region_round_trips_as_a_plain_dict_and_through_json(self):
+        m = self.make(region={"type": "point", "coordinates": [47.6, -122.3]})
+        d = m.to_dict()
+        self.assertIsInstance(d["region"], dict)  # not a mappingproxy leaking out
+        self.assertEqual(json.loads(m.to_json())["region"], {"type": "point", "coordinates": [47.6, -122.3]})
+        back = sm.Mission.from_dict(d)
+        self.assertEqual(m, back)
+        self.assertEqual(m.digest(), back.digest())
 
     def test_malformed_mission_id_rejected(self):
         with self.assertRaises(sm.MissionError):
