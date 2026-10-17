@@ -60,7 +60,11 @@ RF_POSTURES = frozenset({"WALK", "STATIONARY", "FOX_HUNT", "LONG_TERM_MONITOR"})
 
 def _canonical_json(obj: Any) -> str:
     """The one serialization used for identity: sorted keys, fixed separators. Never the
-    general-purpose serializer -- see scythe_architectural_invariants.md sections 4 and 13."""
+    general-purpose serializer -- see scythe_architectural_invariants.md sections 4 and 13.
+    Structural determinism only: this solves key order and omitted-field consistency, not
+    numeric canonicalization (-0.0 vs 0.0, NaN, Infinity, float repr edge cases). No field in
+    this module currently carries a float, so that gap is deferred, not solved -- revisit this
+    the moment one does."""
     return json.dumps(obj, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
 
 

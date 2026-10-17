@@ -240,6 +240,25 @@ class TestObservationSet(unittest.TestCase):
             sm.ObservationSet.from_dict(d)
 
 
+class TestVocabularySingleSource(unittest.TestCase):
+    """MISSION_TYPES in scythe_mission.py is a hand-copied constant of the table in
+    docs/research/scythe_mission_definition.md section 6 -- nothing mechanically ties them
+    together, so they can drift silently. This doesn't fix that (a generator would be
+    over-engineering for one frozenset); it turns silent drift into a failing test, per review."""
+
+    def test_mission_types_match_the_mission_definition_doc_section_6(self):
+        import os
+        import re
+        doc_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                 "docs", "research", "scythe_mission_definition.md")
+        with open(doc_path) as f:
+            text = f.read()
+        section = text.split("## 6. Mission types", 1)[1].split("\n## ", 1)[0]
+        documented = set(re.findall(r"^\|\s*`([A-Z_]+)`\s*\|", section, re.MULTILINE))
+        self.assertTrue(documented, "no mission types parsed out of the doc's section 6 table")
+        self.assertEqual(documented, sm.MISSION_TYPES)
+
+
 class TestNoCrossModuleCoupling(unittest.TestCase):
     def test_module_imports_only_stdlib_and_touches_no_other_scythe_module(self):
         import ast
