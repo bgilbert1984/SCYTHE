@@ -44,6 +44,15 @@ class TestMissionParameters(unittest.TestCase):
             mp.frequency_plan["start"] = 900e6
         self.assertEqual(dict(mp.frequency_plan), {"center_mhz": 915, "span_mhz": 2})
 
+    def test_frequency_plan_is_not_a_dict_instance_an_intentional_api_surprise(self):
+        # Documented in the module docstring, not a bug: MappingProxyType is not a dict
+        # subclass. Pinned here so this doesn't get "fixed" into a plain dict later without
+        # noticing it reintroduces the mutability hole this class exists to close.
+        mp = sm.MissionParameters(frequency_plan={"center_mhz": 915})
+        self.assertFalse(isinstance(mp.frequency_plan, dict))
+        self.assertEqual(mp.frequency_plan.get("center_mhz"), 915)
+        self.assertIn("center_mhz", mp.frequency_plan)
+
     def test_frequency_plan_must_be_an_object(self):
         with self.assertRaises(sm.MissionError):
             sm.MissionParameters(frequency_plan=["not", "an", "object"])

@@ -21,6 +21,11 @@ Two invariants from that document are *enforced* here, not just represented:
     `mission.mission_parameters.frequency_plan["start"] = ...` raises too -- but that's still
     shallow: a mutable value nested one level further down (e.g. a list inside region) is not
     protected. Deep immutability is a known, deliberately deferred gap, not claimed solved.
+    API surprise worth knowing, not a bug: isinstance(mission.region, dict) is False --
+    MappingProxyType is not a dict subclass, even though .get()/in/len()/iteration/equality all
+    behave exactly like one. Nothing in this codebase currently does an isinstance(..., dict)
+    check on these fields; if something ever does, it needs to check Mapping (or just use the
+    value directly) instead.
   - section 5: an ObservationSet is append-only after sealing (ObservationSet.record_observation()
     raises SealedObservationSetError once sealed() has been called).
 """
