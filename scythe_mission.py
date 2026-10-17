@@ -1,9 +1,11 @@
 """scythe_mission.py — Mission, Session, and ObservationSet domain types.
 
-PR A per docs/research/scythe_mission_definition.md: types and serialization only. No
-behavioral change anywhere else -- this module imports nothing from, and is not imported by,
-graphops_rf_ingest.py, pcap_ingest.py, hypergraph_engine.py, capture_policy.py, or
-scythe_invariant_ledger.py. Threading mission_id through those is separate, later work (PR B+).
+PR A per docs/research/scythe_mission_definition.md: types and serialization only. As of PR A,
+this module imports nothing from, and is not imported by, graphops_rf_ingest.py, pcap_ingest.py,
+hypergraph_engine.py, capture_policy.py, or scythe_invariant_ledger.py. PR B (graphops_rf_ingest.py
+accepting an optional mission_id) is the first module to import this one -- that is the planned
+direction of coupling (Collection may reference Mission identifiers; Mission never references
+Collection back), not a violation of the PR A boundary.
 
 Domain objects are plain, serializer-independent classes. to_dict()/from_dict() (a general
 projection) and digest() (a canonical, identity-only projection) are two independent views of
@@ -29,6 +31,7 @@ __all__ = [
     "MissionError", "SealedObservationSetError",
     "MISSION_TYPES", "RF_POSTURES",
     "MissionParameters", "Mission", "Session", "ObservationSet",
+    "is_valid_mission_id",
 ]
 
 
@@ -56,6 +59,14 @@ MISSION_TYPES = frozenset({
 # Sub-classification of RF_SURVEY only -- downstream code asks mission.mission_type, never a
 # separate top-level type per posture (section 6).
 RF_POSTURES = frozenset({"WALK", "STATIONARY", "FOX_HUNT", "LONG_TERM_MONITOR"})
+
+
+def is_valid_mission_id(value: Any) -> bool:
+    """Public per PR B (docs/research/scythe_mission_definition.md): lets a collection module
+    (e.g. graphops_rf_ingest.py) validate an optional mission_id against the exact same rule
+    Mission.mission_id itself enforces, instead of duplicating the pattern -- the fix for the
+    "mission vocabulary single source" gap applied to identifiers, not just MISSION_TYPES."""
+    return isinstance(value, str) and bool(_ID_RE.match(value))
 
 
 def _canonical_json(obj: Any) -> str:

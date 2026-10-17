@@ -2,6 +2,17 @@
 
 The GraphOps ingest path accepts no raw IQ and never upgrades client claims.
 RFObservationStore derives SNR and stable evidence identity after validation.
+
+PR B per docs/research/scythe_mission_definition.md: accepts an optional mission_id, with no
+change to any RF logic -- everything behaves exactly as before when mission_id is omitted
+(absent from both the input and the returned frame dict, not present-but-None). This is the
+first module to import scythe_mission.py; that's the intended direction of coupling (Collection
+may reference a Mission identifier; Mission never references Collection back).
+
+What this does not do: mission_id is validated and carried through the returned frame dict, but
+RFObservationStore.ingest_frame() (rf_bridge.py) does not read it, and RFObservation has no
+mission_id field -- it is not yet persisted onto the stored observation. Threading it that far
+is separate, later work, not silently done here under the same PR.
 """
 
 from __future__ import annotations
@@ -9,11 +20,12 @@ from __future__ import annotations
 import math
 from typing import Any, Dict
 
+import scythe_mission
 
 ALLOWED_FIELDS = {
     "sensor_id", "sequence", "timestamp", "center_frequency_hz",
     "peak_frequency_hz", "sample_rate_hz", "peak_dbfs", "noise_floor_dbfs",
-    "observation_origin",
+    "observation_origin", "mission_id",
 }
 
 # Frames arriving over HTTP were not produced by this process's IQ bridge. They
@@ -68,6 +80,15 @@ def validate_measured_rf_frame(payload: Any) -> Dict[str, Any]:
         raise ValueError("sample_rate_hz must be between 0 and 10 GHz")
     if not -300 <= frame["peak_dbfs"] <= 20 or not -300 <= frame["noise_floor_dbfs"] <= 20:
         raise ValueError("dBFS values are outside the accepted range")
+    # Optional, additive, and absent-by-default: a frame with no mission_id produces a frame
+    # dict with no "mission_id" key at all, not a present-but-None one, so nothing downstream
+    # that inspects frame.keys() or does an equality comparison against the pre-PR-B shape sees
+    # any difference when it's omitted.
+    if "mission_id" in payload:
+        mission_id = payload["mission_id"]
+        if not scythe_mission.is_valid_mission_id(mission_id):
+            raise ValueError("mission_id must be a valid Mission identifier")
+        frame["mission_id"] = mission_id
     return frame
 
 
