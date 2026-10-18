@@ -19698,18 +19698,22 @@ if FLASK_AVAILABLE:
     # API ROUTES - DUCKDB / PARQUET EVENT STORE
     # ========================================================================
 
+    # scene_parquet_pipeline.ParquetPipeline is deliberately not initialized
+    # here: Phase 0 verification (see docs/Parquet_Roadmap.md) found zero
+    # Parquet files and zero parquet_index rows across every real instance
+    # database, and zero callers of the routes that exercised it, anywhere
+    # on the host. Parquet export now goes through ScytheDuckStore's own
+    # DuckDB-native export_parquet_block() (see /api/events/export/parquet),
+    # which already writes directly from the live `events` table.
     try:
         from scene_duckdb_store import ScytheDuckStore, TacticalEvent as _TacticalEvent
-        from scene_parquet_pipeline import ParquetPipeline as _ParquetPipeline
         _duck_store = ScytheDuckStore(
             db_path=os.path.join(_data_dir(), 'scythe_events.duckdb'),
             parquet_dir=os.path.join(_data_dir(), 'parquet_blocks'),
         )
-        _parquet_pipe = _ParquetPipeline(store=_duck_store)
         logger.info('DuckDB tactical event store initialized')
     except Exception as _e:
         _duck_store = None
-        _parquet_pipe = None
         logger.warning('DuckDB store unavailable: %s', _e)
 
     @app.route('/api/events/ingest', methods=['POST'])
@@ -19776,7 +19780,7 @@ if FLASK_AVAILABLE:
 
         ?t0=<unix_ms>&t1=<unix_ms>&session_id=<optional>
         """
-        if _duck_store is None or _parquet_pipe is None:
+        if _duck_store is None:
             return jsonify({'status': 'error', 'message': 'DuckDB store not available'}), 503
         from flask import send_file
         try:
@@ -19795,30 +19799,18 @@ if FLASK_AVAILABLE:
 
     @app.route('/api/events/blocks', methods=['GET'])
     def events_list_blocks():
-        """List all Parquet blocks in the cold store."""
+        """List all Parquet blocks in the cold store (via ScytheDuckStore's
+        own DuckDB-native export directory -- see the comment on
+        _duck_store's initialization above for why this no longer goes
+        through scene_parquet_pipeline.ParquetPipeline)."""
         if _duck_store is None:
             return jsonify({'status': 'error', 'message': 'DuckDB store not available'}), 503
-        if _parquet_pipe is None:
-            return jsonify({'status': 'ok', 'blocks': _duck_store.list_parquet_blocks()})
-        return jsonify({'status': 'ok', **_parquet_pipe.inventory()})
+        return jsonify({'status': 'ok', 'blocks': _duck_store.list_parquet_blocks()})
 
-    @app.route('/api/events/flush', methods=['POST'])
-    def events_flush_blocks():
-        """Flush hot DuckDB events to Parquet blocks.
-
-        Body: { "block_seconds": 60, "session_id": "..." }
-        """
-        if _parquet_pipe is None:
-            return jsonify({'status': 'error', 'message': 'Parquet pipeline not available'}), 503
-        data = request.get_json(force=True, silent=True) or {}
-        sid  = data.get('session_id') or None
-        _parquet_pipe._block_sec = int(data.get('block_seconds', 60))
-        blocks = _parquet_pipe.flush_auto_blocks(sid)
-        return jsonify({
-            'status': 'ok',
-            'blocks_written': len(blocks),
-            'blocks': [b.to_dict() for b in blocks],
-        })
+    # /api/events/flush (scene_parquet_pipeline.ParquetPipeline.flush_auto_blocks)
+    # removed: Phase 0 verification found it had never produced a block in any
+    # real instance and had no callers anywhere on the host. Use
+    # /api/events/export/parquet for an on-demand, DuckDB-native export instead.
 
     # ========================================================================
     # API ROUTES - SYSTEM STATUS
@@ -20512,10 +20504,9 @@ def main():
     # The module-level init ran before --data-dir was applied, so it used
     # the default 'metrics_logs' path — which may be locked by the primary
     # instance.  Re-init here with the correct per-instance path.
-    global _duck_store, _parquet_pipe
+    global _duck_store
     try:
         from scene_duckdb_store import ScytheDuckStore as _SDS
-        from scene_parquet_pipeline import ParquetPipeline as _PP
         if _duck_store is not None:
             try:
                 _duck_store._con.close()
@@ -20525,11 +20516,9 @@ def main():
             db_path=os.path.join(data_dir, 'scythe_events.duckdb'),
             parquet_dir=os.path.join(data_dir, 'parquet_blocks'),
         )
-        _parquet_pipe = _PP(store=_duck_store)
         logger.info('DuckDB event store (re-)initialized: %s', data_dir)
     except Exception as _duck_err:
         _duck_store = None
-        _parquet_pipe = None
         logger.warning('DuckDB store unavailable after re-init: %s', _duck_err)
     # Satellite table must be (re-)created in the instance-specific DB
     # because _init_satellite_table() ran at module load against the global DB.
