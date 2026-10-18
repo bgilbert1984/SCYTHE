@@ -662,9 +662,14 @@ class GraphSelectionResolver:
         # entry. Node matching is exact value equality/membership against labels.mission_id (see
         # _label_matches_mission -- no mission-hierarchy expansion, no partial match) -- a node
         # is only "in" a mission because some ingest path (pcap_ingest.py as of PR D) put
-        # mission_id in its labels; RF-ingested observations are not currently labeled at all
-        # (graphops_rf_ingest.py's known gap, see the local invariants crosswalk), so a
-        # mission_id filter will not surface them yet.
+        # mission_id in its labels. RFObservation (rf_bridge.py) now carries mission_id too as
+        # of the PR that closed PR B's storage gap -- but that fix is scoped to
+        # RFObservationStore's own bounded deque, which this resolver never reads: rf_bridge.py
+        # has no HypergraphEngine/RFHypergraphAdapter reference at all, so RF observations never
+        # reach the graph this filter queries, labeled or not. A mission_id filter here still
+        # will not surface them -- not because they're unlabeled anymore, but because they're
+        # not in this graph. Bridging RFObservationStore into HypergraphEngine (e.g. via the
+        # existing RFHypergraphAdapter) would be separate, undone work.
         if mission_id:
             mission_pool_nodes = [node for node in retained["nodes"]
                                   if _label_matches_mission((node.get("labels") or {}).get("mission_id"), mission_id)]

@@ -196,8 +196,12 @@ remains frozen and unauthorized.
 - §4 is resolved (Option B); the remaining questions are about what to build on top of that
   decision, not about the decision itself.
 - §6 is resolved (host attribution is evidentiary, append-only, list-valued for hosts only).
-- Whether RF-ingested observations (still unlabeled at all, per PR B's known gap) should ever be
-  reachable through a mission-filtered browser view, or whether that gap needs closing first.
+- `RFObservation` (`rf_bridge.py`) now carries `mission_id` — PR B's storage gap is closed — but
+  `rf_bridge.py` has no `HypergraphEngine`/`RFHypergraphAdapter` reference at all, so RF
+  observations still never reach the graph this document's `/api/graphops/selection/graph`
+  filter (§4/§6) queries, labeled or not. Whether RF observations should ever be bridged into
+  the shared hypergraph (e.g. via the existing but unused `RFHypergraphAdapter`), and therefore
+  become reachable through a mission-filtered browser view, is still open and undone.
 - Real performance characteristics of a node-label-aware edge scope (§5.3) at the node/edge counts
   this engine actually carries in practice — not measured here.
 - Whether the operational system's multi-operator session concept (join/leave, tasks, watchlist)
