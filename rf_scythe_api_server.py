@@ -5345,9 +5345,27 @@ if FLASK_AVAILABLE:
 
     @app.route('/api/missions', methods=['POST'])
     def create_mission():
+        """Operational Mission (this record: name/owner/status/tasks/watchlist -- a live
+        collaboration session) and domain Mission (scythe_mission.py: typed, immutable,
+        provenance-oriented) are kept as two separate concepts, linked only by sharing one
+        mission_id namespace -- see docs/research/scythe_mission_browser_rendering.md section 4,
+        Option B. Not merged: scythe_mission.Mission is deliberately frozen/immutable (PRs
+        #188, #191), so folding this record's mutable lifecycle into it would mean either
+        breaking that invariant or building a parallel mutable wrapper -- a larger redesign than
+        this link attempts. An explicitly supplied mission_id must be valid for a domain Mission
+        too (scythe_mission.is_valid_mission_id), so a later Mission(mission_id=...) referencing
+        this same operational mission is always constructible; an auto-generated id already
+        satisfies that rule by construction and is not re-validated."""
+        from scythe_mission import is_valid_mission_id
         try:
             data = request.get_json() or {}
-            mission_id = data.get('mission_id') or f"mission_{int(time.time()*1000)}_{random.randint(1,9999)}"
+            mission_id = data.get('mission_id')
+            if mission_id:
+                if not is_valid_mission_id(mission_id):
+                    return jsonify({'status': 'error',
+                                    'message': 'mission_id must be a valid Mission identifier'}), 400
+            else:
+                mission_id = f"mission_{int(time.time()*1000)}_{random.randint(1,9999)}"
             meta = {
                 'mission_id': mission_id,
                 'name': data.get('name',''),
