@@ -5498,10 +5498,17 @@ if FLASK_AVAILABLE:
                     parsed = {}
 
             # build mission predicate wrapper
+            # Accepts both the legacy camelCase "missionId" convention used throughout this
+            # file and the snake_case "mission_id" convention used by scythe_mission.py /
+            # pcap_ingest.py / graphops_rf_ingest.py / hypergraph_engine.py.nodes_by_mission()
+            # (docs/research/scythe_mission_browser_rendering.md section 4, Option A, applied
+            # read-side: accept both rather than break whichever side isn't migrated yet).
             def _mission_filter_node(n):
                 try:
                     labels = n.get('labels') or {}
-                    return labels.get('missionId') == mission_id or n.get('metadata',{}).get('missionId') == mission_id
+                    metadata = n.get('metadata') or {}
+                    return (labels.get('mission_id') == mission_id or labels.get('missionId') == mission_id
+                            or metadata.get('mission_id') == mission_id or metadata.get('missionId') == mission_id)
                 except Exception:
                     return False
 
@@ -5520,8 +5527,11 @@ if FLASK_AVAILABLE:
                         try:
                             if isinstance(node_or_edge, dict):
                                 labels = node_or_edge.get('labels') or {}
+                                metadata = node_or_edge.get('metadata') or {}
+                                if labels.get('mission_id') == mission_id: return True
                                 if labels.get('missionId') == mission_id: return True
-                                if node_or_edge.get('metadata',{}).get('missionId') == mission_id: return True
+                                if metadata.get('mission_id') == mission_id: return True
+                                if metadata.get('missionId') == mission_id: return True
                         except Exception:
                             pass
                         return pred.matches(node_or_edge) if hasattr(pred,'matches') else False
@@ -5537,8 +5547,9 @@ if FLASK_AVAILABLE:
                             for nid,n in (getattr(store,'nodes',{}) or {}).items():
                                 if _mission_filter_node(n): nodes.append(n)
                             for e in (getattr(store,'hyperedges',[]) or []):
-                                # coarse check on metadata
-                                if e.get('metadata',{}).get('missionId') == mission_id:
+                                # coarse check on metadata (both identifier conventions)
+                                e_meta = e.get('metadata') or {}
+                                if e_meta.get('mission_id') == mission_id or e_meta.get('missionId') == mission_id:
                                     edges.append(e)
                         except Exception:
                             pass
@@ -5571,14 +5582,19 @@ if FLASK_AVAILABLE:
         if not client:
             return jsonify({'status': 'error', 'message': 'Invalid session token'}), 401
 
-        # Build a predicate that filters to mission scope
+        # Build a predicate that filters to mission scope. Accepts both the legacy camelCase
+        # "missionId" convention and the snake_case "mission_id" convention (see
+        # docs/research/scythe_mission_browser_rendering.md section 4).
         parsed = {}
         pred = QueryPredicate(parsed)
         def mission_pred(x):
             try:
                 labels = x.get('labels') or {}
+                metadata = x.get('metadata') or {}
+                if labels.get('mission_id') == mission_id: return True
                 if labels.get('missionId') == mission_id: return True
-                if x.get('metadata',{}).get('missionId') == mission_id: return True
+                if metadata.get('mission_id') == mission_id: return True
+                if metadata.get('missionId') == mission_id: return True
             except Exception:
                 pass
             # fall back to parsed predicate
@@ -5586,6 +5602,27 @@ if FLASK_AVAILABLE:
                 return pred.matches(x) if hasattr(pred,'matches') else False
             except Exception:
                 return False
+
+        class _MissionPredicateAdapter:
+            """generate_diff() (subgraph_diff.py) calls predicate.matches_node()/.matches_edge().
+            QueryPredicate only ever consults parsed['where']/['in_room'] inside those methods --
+            a plain {'missionId': mission_id} dict passed as its "parsed" argument supplies
+            neither key, so matches_node()/matches_edge() returned True unconditionally and this
+            stream was not actually scoped to the mission at all. Found while reconciling the
+            mission_id/missionId identifier mismatch; fixed here because that reconciliation
+            would have had no observable effect on this endpoint otherwise. This adapter instead
+            exposes mission_pred (which does check labels/metadata, both identifier conventions)
+            through the interface generate_diff actually calls."""
+            def __init__(self, pred_fn):
+                self._pred_fn = pred_fn
+
+            def matches_node(self, node):
+                return self._pred_fn(node)
+
+            def matches_edge(self, edge):
+                return self._pred_fn(edge)
+
+        mission_predicate = _MissionPredicateAdapter(mission_pred)
 
         engine = globals().get('hypergraph_engine') or globals().get('hypergraph_store')
         redis_conn = globals().get('redis_client')
@@ -5650,7 +5687,7 @@ if FLASK_AVAILABLE:
                                         continue
                                 if maxseq > last_seq:
                                     try:
-                                        diff = gen.generate_diff(f'mission:{mission_id}', QueryPredicate({'missionId': mission_id}), last_seq, maxseq)
+                                        diff = gen.generate_diff(f'mission:{mission_id}', mission_predicate, last_seq, maxseq)
                                         last_seq = maxseq
                                         payload = json.dumps(diff)
                                         yield f"event: DIFF\n"
@@ -5672,7 +5709,7 @@ if FLASK_AVAILABLE:
                         current = last_seq
                     if current > last_seq:
                         try:
-                            diff = gen.generate_diff(f'mission:{mission_id}', QueryPredicate({'missionId': mission_id}), last_seq, current)
+                            diff = gen.generate_diff(f'mission:{mission_id}', mission_predicate, last_seq, current)
                             last_seq = current
                             payload = json.dumps(diff)
                             yield f"event: DIFF\n"
@@ -11279,6 +11316,7 @@ if FLASK_AVAILABLE:
                     "position": [rf_obs.lat or 0.0, rf_obs.lon or 0.0, rf_obs.alt_m or 0.0],
                     "labels": {
                         "missionId": rf_obs.mission_id or ctx.mission_id,
+                        "mission_id": rf_obs.mission_id or ctx.mission_id,
                         "modulation": rf_obs.modulation,
                     },
                     "metadata": {
@@ -11302,6 +11340,7 @@ if FLASK_AVAILABLE:
                     "weight": binding.confidence,
                     "labels": {
                         "missionId": rf_obs.mission_id or net_obs.mission_id or ctx.mission_id,
+                        "mission_id": rf_obs.mission_id or net_obs.mission_id or ctx.mission_id,
                         "evidence": "OBSERVED",
                     },
                     "metadata": {
@@ -11350,6 +11389,7 @@ if FLASK_AVAILABLE:
         labels.update(
             {
                 "missionId": rf_obs.mission_id or ctx.mission_id,
+                "mission_id": rf_obs.mission_id or ctx.mission_id,
                 "modulation": rf_obs.modulation,
                 "evidence": "SYNTHETIC" if metadata.get("synthetic") else "OBSERVED",
             }
@@ -12036,6 +12076,7 @@ if FLASK_AVAILABLE:
                         "weight": confidence,
                         "labels": {
                             "missionId": ctx.mission_id,
+                            "mission_id": ctx.mission_id,
                             "evidence": "FORECAST",
                             "obs_class": "forecast",
                         },
@@ -12053,6 +12094,7 @@ if FLASK_AVAILABLE:
                         "weight": confidence,
                         "labels": {
                             "missionId": ctx.mission_id,
+                            "mission_id": ctx.mission_id,
                             "evidence": "FORECAST",
                             "obs_class": "forecast",
                         },
@@ -12106,6 +12148,7 @@ if FLASK_AVAILABLE:
                                 "weight": intent_probability,
                                 "labels": {
                                     "missionId": ctx.mission_id,
+                                    "mission_id": ctx.mission_id,
                                     "evidence": "INFERRED",
                                     "obs_class": "inferred",
                                 },
@@ -12703,6 +12746,7 @@ if FLASK_AVAILABLE:
                 'tags': data.get('tags') or [],
                 'labels': {
                     'missionId': data.get('mission_id') or data.get('missionId') or (data.get('labels') or {}).get('missionId'),
+                    'mission_id': data.get('mission_id') or data.get('missionId') or (data.get('labels') or {}).get('mission_id') or (data.get('labels') or {}).get('missionId'),
                     'teamId': data.get('team_id') or (data.get('labels') or {}).get('teamId'),
                     'roles': ['rx'] if not (data.get('tx') or {}).get('enabled') else ['rx', 'tx'],
                     'tags': data.get('tags') or []
@@ -15169,7 +15213,8 @@ if FLASK_AVAILABLE:
                     'belief': data.get('belief')
                 },
                 'labels': {
-                    'missionId': data.get('mission_id') or data.get('missionId')
+                    'missionId': data.get('mission_id') or data.get('missionId'),
+                    'mission_id': data.get('mission_id') or data.get('missionId')
                 },
                 'metadata': {
                     'sensor_name': sensor_store.get(from_id, {}).get('name'),
