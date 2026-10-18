@@ -137,6 +137,19 @@ jobs:
       - run: npm ci
       - run: npm test
 
+  node-root-js:
+    runs-on: ubuntu-latest
+    # Root-level JS files (cesium-hypergraph-globe.js, unified-render-scheduler.js, this one)
+    # have no package.json and are not part of the scythe-web app above -- node --test needs
+    # neither. Named, not globbed, for the same reason the Python explicit-test jobs are: a new
+    # *.test.js at the repository root otherwise joins no CI job at all.
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: node --test cesium-mission-filter.test.js
+
   sdrpp-lock-source-contract:
     runs-on: ubuntu-latest
     steps:
