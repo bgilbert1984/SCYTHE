@@ -47,6 +47,45 @@ class _Graph:
         }
 
 
+class _GraphWithSharedHost:
+    """A host node observed under two missions -- the real shape pcap_ingest.py now produces
+    (docs/research/scythe_mission_browser_rendering.md section 6): labels.mission_id is a list,
+    not a scalar, for host nodes specifically."""
+
+    def __init__(self):
+        self.nodes = {
+            "session:a1": {"id": "session:a1", "kind": "session",
+                           "labels": {"mission_id": MISSION_A}, "timestamp": 100},
+            "session:b1": {"id": "session:b1", "kind": "session",
+                           "labels": {"mission_id": MISSION_B}, "timestamp": 101},
+            "host:shared": {"id": "host:shared", "kind": "host",
+                            "labels": {"ip": "10.0.0.1", "mission_id": [MISSION_A, MISSION_B]},
+                            "timestamp": 102},
+        }
+        self.edges = {
+            "edge:a-host": {"id": "edge:a-host", "kind": "SESSION_OBSERVED_HOST",
+                            "nodes": ["session:a1", "host:shared"], "timestamp": 103},
+            "edge:b-host": {"id": "edge:b-host", "kind": "SESSION_OBSERVED_HOST",
+                            "nodes": ["session:b1", "host:shared"], "timestamp": 104},
+        }
+
+
+class ListValuedMissionLabelTests(unittest.TestCase):
+    def test_a_host_with_a_list_valued_mission_id_matches_either_mission(self):
+        resolver_a = GraphSelectionResolver(_GraphWithSharedHost())
+        snap_a = resolver_a.snapshot(node_limit=50, edge_limit=50, mission_id=MISSION_A)
+        self.assertIn("host:shared", {n["id"] for n in snap_a["nodes"]})
+
+        resolver_b = GraphSelectionResolver(_GraphWithSharedHost())
+        snap_b = resolver_b.snapshot(node_limit=50, edge_limit=50, mission_id=MISSION_B)
+        self.assertIn("host:shared", {n["id"] for n in snap_b["nodes"]})
+
+    def test_a_host_with_a_list_valued_mission_id_does_not_match_an_unrelated_mission(self):
+        resolver = GraphSelectionResolver(_GraphWithSharedHost())
+        snap = resolver.snapshot(node_limit=50, edge_limit=50, mission_id="RFMAP-UNRELATED")
+        self.assertNotIn("host:shared", {n["id"] for n in snap["nodes"]})
+
+
 class MissionFilterTests(unittest.TestCase):
     def test_omitted_mission_id_is_byte_for_byte_the_pre_existing_behavior(self):
         resolver = GraphSelectionResolver(_Graph())

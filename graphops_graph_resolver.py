@@ -43,6 +43,17 @@ def _canonical_json(value: Any) -> str:
                       ensure_ascii=False, allow_nan=False, default=str)
 
 
+def _label_matches_mission(value: Any, mission_id: str) -> bool:
+    """A labels.mission_id value matches a requested mission_id if it equals it (the scalar
+    form -- session/pcap_artifact nodes, which belong to exactly one mission) or contains it
+    (the list form -- host nodes, which may legitimately be observed under several missions;
+    docs/research/scythe_mission_browser_rendering.md section 6). Exact equality only, same as
+    before this check existed: no partial match, no mission-hierarchy expansion."""
+    if isinstance(value, (list, tuple, set)):
+        return mission_id in value
+    return value == mission_id
+
+
 @dataclass(frozen=True)
 class PinnedGraphView:
     """One immutable, selection-aware graph projection for one investigation."""
@@ -648,14 +659,15 @@ class GraphSelectionResolver:
         # and the cache it's stored under are never filtered by mission: a revision identifies
         # one total graph state, independent of any one request's mission_id, so two requests
         # with different mission_id values against the same graph state still share one cache
-        # entry. Node matching is exact string equality against labels.mission_id (no
-        # mission-hierarchy expansion, no partial match) -- a node is only "in" a mission because
-        # some ingest path (pcap_ingest.py as of PR D) put mission_id in its labels; RF-ingested
-        # observations are not currently labeled at all (graphops_rf_ingest.py's known gap, see
-        # the local invariants crosswalk), so a mission_id filter will not surface them yet.
+        # entry. Node matching is exact value equality/membership against labels.mission_id (see
+        # _label_matches_mission -- no mission-hierarchy expansion, no partial match) -- a node
+        # is only "in" a mission because some ingest path (pcap_ingest.py as of PR D) put
+        # mission_id in its labels; RF-ingested observations are not currently labeled at all
+        # (graphops_rf_ingest.py's known gap, see the local invariants crosswalk), so a
+        # mission_id filter will not surface them yet.
         if mission_id:
             mission_pool_nodes = [node for node in retained["nodes"]
-                                  if (node.get("labels") or {}).get("mission_id") == mission_id]
+                                  if _label_matches_mission((node.get("labels") or {}).get("mission_id"), mission_id)]
             mission_node_ids = {node["id"] for node in mission_pool_nodes}
             mission_pool_edges = [edge for edge in retained["edges"] if edge.get("nodes") and
                                   all(member in mission_node_ids for member in edge["nodes"])]

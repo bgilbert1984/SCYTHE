@@ -1124,16 +1124,32 @@ class HypergraphEmitter:
         for ip in (session.src_ip, session.dst_ip):
             host_id = _host_id(ip)
             # host_id is purely IP-derived and deduplicated across the whole engine, not scoped
-            # per mission -- if the same host IP is observed again under a different mission_id
-            # later, this emitter skips re-emission entirely (pre-existing dedup behavior, not
-            # introduced here) and the host node's labels.mission_id stays whichever mission
-            # first created it. A real, known limitation of attaching mission_id to a
-            # cross-mission-deduplicated node kind -- not fixed here.
-            if host_id not in self._emitted_hosts:
+            # per mission. Host-attribution semantics (docs/research/scythe_mission_browser_rendering.md
+            # section 6): evidentiary, not authoritative -- a host is shared infrastructure, not
+            # something a mission owns, so mission_id on a host node is a list of every mission
+            # that has ever observed it, append-only (never overwritten, never shrunk). This is a
+            # deliberate type asymmetry from session/pcap_artifact nodes, which belong to exactly
+            # one mission and keep the scalar mission_id label -- not an inconsistency to "fix".
+            #
+            # Existence is checked against the ENGINE (when it supports get_node), not
+            # self._emitted_hosts: a second HypergraphEmitter instance (e.g. a separate pipeline
+            # run ingesting a different mission's PCAPs into the same engine -- the realistic
+            # multi-mission case) starts with an empty _emitted_hosts of its own and would
+            # otherwise treat an already-created host as new, calling add_node()'s full-replace
+            # upsert and silently DISCARDING the first mission's accumulated attribution. Found
+            # writing the test for this fix, not assumed. A lighter-weight engine without
+            # get_node (e.g. a test double) falls back to the original _emitted_hosts-only
+            # behavior -- no accumulation, but also no crash and no regression for callers that
+            # never supported it.
+            existing_host = self.engine.get_node(host_id) if hasattr(self.engine, "get_node") else None
+            if existing_host is None and host_id not in self._emitted_hosts:
+                host_labels: Dict[str, Any] = {"ip": ip, "bytes": host_bytes.get(ip, 0)}
+                if self.config.mission_id is not None:
+                    host_labels["mission_id"] = [self.config.mission_id]
                 host_node: Dict[str, Any] = {
                     "id": host_id,
                     "kind": "host",
-                    "labels": {"ip": ip, "bytes": host_bytes.get(ip, 0), **_mission_label(self.config)},
+                    "labels": host_labels,
                     "metadata": {
                         "provenance": _provenance(self.config, evidence_type="packet_capture"),
                         "confidence": "SENSOR",
@@ -1223,6 +1239,20 @@ class HypergraphEmitter:
                 self.engine.add_node(host_node)
                 self._emitted_hosts.add(host_id)
                 nodes += 1
+            elif self.config.mission_id is not None and existing_host is not None \
+                    and hasattr(self.engine, "update_node"):
+                # Repeat observation of an already-known host (existing_host, fetched above),
+                # under a mission_id that may be new to it: accumulate, never overwrite or skip.
+                # See the comment above this loop and
+                # docs/research/scythe_mission_browser_rendering.md section 6. existing_host is
+                # None (so this branch is skipped entirely) when the engine doesn't support
+                # get_node -- see the comment above; nothing to accumulate into in that case.
+                current = list(existing_host.labels.get("mission_id") or [])
+                if self.config.mission_id not in current:
+                    self.engine.update_node(
+                        host_id,
+                        labels={**existing_host.labels, "mission_id": current + [self.config.mission_id]},
+                    )
 
         # ── SESSION_DERIVED_FROM_PCAP edge ───────────────────────────
         self.engine.add_edge({

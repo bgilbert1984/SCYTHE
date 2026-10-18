@@ -33,10 +33,10 @@ def _emitter(config):
         return engine, HypergraphEmitter(engine, config)
 
 
-def _session(pcap_file="capture.pcapng"):
+def _session(pcap_file="capture.pcapng", session_id="SESSION-test"):
     packet = PacketMeta(timestamp=1000.0, src_ip="10.0.0.1", dst_ip="10.0.0.2",
                         src_port=1234, dst_port=443, proto="TCP", length=100)
-    return SessionData(session_id="SESSION-test", session_key="test-key", packets=[packet],
+    return SessionData(session_id=session_id, session_key=f"test-key-{session_id}", packets=[packet],
                        time_bucket=0, src_ip="10.0.0.1", dst_ip="10.0.0.2", src_port=1234,
                        dst_port=443, proto="TCP", pcap_file=pcap_file)
 
@@ -120,11 +120,15 @@ class MissionLabelTests(unittest.TestCase):
         engine, emitter = _emitter(_minimal_config(mission_id=VALID_MISSION_ID))
         artifact_id = emitter.emit_pcap_artifact("capture.pcapng", 123)
         emitter.emit_session(_session(), artifact_id)
+        # Session nodes belong to exactly one mission: scalar label (unchanged).
         self.assertEqual(engine.nodes["SESSION-test"]["labels"]["mission_id"], VALID_MISSION_ID)
+        # Host nodes may be observed under several missions: list label, even for the first
+        # (docs/research/scythe_mission_browser_rendering.md section 6) -- a deliberate type
+        # asymmetry from session/pcap_artifact nodes, not an inconsistency.
         host_nodes = [n for nid, n in engine.nodes.items() if n["kind"] == "host"]
         self.assertTrue(host_nodes)
         for host in host_nodes:
-            self.assertEqual(host["labels"]["mission_id"], VALID_MISSION_ID)
+            self.assertEqual(host["labels"]["mission_id"], [VALID_MISSION_ID])
 
     def test_omitted_mission_id_leaves_session_and_host_labels_unchanged(self):
         engine, emitter = _emitter(_minimal_config())
@@ -134,6 +138,82 @@ class MissionLabelTests(unittest.TestCase):
         for nid, n in engine.nodes.items():
             if n["kind"] == "host":
                 self.assertNotIn("mission_id", n["labels"])
+
+
+class HostMissionAccumulationTests(unittest.TestCase):
+    """The actual fix: a host observed under a second mission accumulates, rather than losing
+    the first mission's attribution or being skipped entirely.
+    docs/research/scythe_mission_browser_rendering.md section 6."""
+
+    MISSION_B = "RFMAP-20261018-002"
+
+    def test_a_host_observed_under_two_missions_accumulates_both(self):
+        engine = HypergraphEngine()
+        with patch("pcap_ingest._get_writebus_instance", return_value=None):
+            emitter_a = HypergraphEmitter(engine, _minimal_config(mission_id=VALID_MISSION_ID))
+            emitter_b = HypergraphEmitter(engine, _minimal_config(mission_id=self.MISSION_B))
+        artifact_a = emitter_a.emit_pcap_artifact("capture-a.pcapng", 1)
+        emitter_a.emit_session(_session(pcap_file="capture-a.pcapng", session_id="SESSION-a"), artifact_a)
+        host_id = "host:10.0.0.1"
+        self.assertEqual(engine.nodes[host_id].labels["mission_id"], [VALID_MISSION_ID])
+
+        # A second, unrelated mission -- a separate HypergraphEmitter instance, as a separate
+        # pipeline run ingesting a different mission's PCAPs would be -- observes the SAME host IP.
+        artifact_b = emitter_b.emit_pcap_artifact("capture-b.pcapng", 1)
+        emitter_b.emit_session(_session(pcap_file="capture-b.pcapng", session_id="SESSION-b"), artifact_b)
+        self.assertEqual(set(engine.nodes[host_id].labels["mission_id"]), {VALID_MISSION_ID, self.MISSION_B})
+
+    def test_re_observing_under_the_same_mission_does_not_duplicate(self):
+        engine = HypergraphEngine()
+        with patch("pcap_ingest._get_writebus_instance", return_value=None):
+            emitter = HypergraphEmitter(engine, _minimal_config(mission_id=VALID_MISSION_ID))
+        a1 = emitter.emit_pcap_artifact("a.pcapng", 1)
+        emitter.emit_session(_session(pcap_file="a.pcapng", session_id="SESSION-a"), a1)
+        a2 = emitter.emit_pcap_artifact("b.pcapng", 1)
+        emitter.emit_session(_session(pcap_file="b.pcapng", session_id="SESSION-b"), a2)
+        self.assertEqual(engine.nodes["host:10.0.0.1"].labels["mission_id"], [VALID_MISSION_ID])
+
+    def test_nodes_by_mission_finds_a_host_under_either_of_its_missions(self):
+        engine = HypergraphEngine()
+        with patch("pcap_ingest._get_writebus_instance", return_value=None):
+            emitter_a = HypergraphEmitter(engine, _minimal_config(mission_id=VALID_MISSION_ID))
+            emitter_b = HypergraphEmitter(engine, _minimal_config(mission_id=self.MISSION_B))
+        art_a = emitter_a.emit_pcap_artifact("a.pcapng", 1)
+        emitter_a.emit_session(_session(pcap_file="a.pcapng", session_id="SESSION-a"), art_a)
+        art_b = emitter_b.emit_pcap_artifact("b.pcapng", 1)
+        emitter_b.emit_session(_session(pcap_file="b.pcapng", session_id="SESSION-b"), art_b)
+
+        found_under_a = {n.id for n in engine.nodes_by_mission(VALID_MISSION_ID)}
+        found_under_b = {n.id for n in engine.nodes_by_mission(self.MISSION_B)}
+        self.assertIn("host:10.0.0.1", found_under_a)
+        self.assertIn("host:10.0.0.1", found_under_b)
+
+    def test_an_engine_without_get_node_degrades_gracefully_instead_of_crashing(self):
+        # Found while fixing the accumulation bug: HypergraphEmitter's own CollectingEngine
+        # test double (used elsewhere in this file and in test_pcap_ingest_writebus.py) has no
+        # get_node()/update_node(), and the first version of this fix crashed on it with
+        # AttributeError. First emission still works normally; a second observation of the same
+        # host (here, within the same instance, which is the only repeat case such an engine can
+        # even reach) degrades to the pre-fix behavior -- no crash, no accumulation, same as
+        # before this fix existed -- rather than erroring.
+        engine = CollectingEngine()
+        with patch("pcap_ingest._get_writebus_instance", return_value=None):
+            emitter = HypergraphEmitter(engine, _minimal_config(mission_id=VALID_MISSION_ID))
+        art_a = emitter.emit_pcap_artifact("a.pcapng", 1)
+        emitter.emit_session(_session(pcap_file="a.pcapng", session_id="SESSION-a"), art_a)
+        self.assertEqual(engine.nodes["host:10.0.0.1"]["labels"]["mission_id"], [VALID_MISSION_ID])
+
+        art_b = emitter.emit_pcap_artifact("b.pcapng", 1)
+        emitter.emit_session(_session(pcap_file="b.pcapng", session_id="SESSION-b"), art_b)  # no crash
+        self.assertEqual(engine.nodes["host:10.0.0.1"]["labels"]["mission_id"], [VALID_MISSION_ID])
+
+    def test_host_without_mission_id_is_unaffected(self):
+        engine = HypergraphEngine()
+        with patch("pcap_ingest._get_writebus_instance", return_value=None):
+            emitter = HypergraphEmitter(engine, _minimal_config())
+        art = emitter.emit_pcap_artifact("a.pcapng", 1)
+        emitter.emit_session(_session(pcap_file="a.pcapng"), art)
+        self.assertNotIn("mission_id", engine.nodes["host:10.0.0.1"].labels)
 
 
 class NodesByMissionTests(unittest.TestCase):

@@ -412,6 +412,18 @@ pcap_registry_instance = None
 sensor_registry_instance = None
 writebus_instance = None
 
+
+def _label_matches_mission(value, mission_id):
+    """A mission_id/missionId label value matches a requested mission_id if it equals it (the
+    scalar form -- session/pcap_artifact nodes, which belong to exactly one mission) or contains
+    it (the list form -- host nodes, which may legitimately be observed under several missions;
+    docs/research/scythe_mission_browser_rendering.md section 6). Same helper and semantics as
+    graphops_graph_resolver.py's _label_matches_mission."""
+    if isinstance(value, (list, tuple, set)):
+        return mission_id in value
+    return value == mission_id
+
+
 # ============================================================================
 # RF HYPERGRAPH DATA STORAGE
 # ============================================================================
@@ -5525,8 +5537,10 @@ if FLASK_AVAILABLE:
                 try:
                     labels = n.get('labels') or {}
                     metadata = n.get('metadata') or {}
-                    return (labels.get('mission_id') == mission_id or labels.get('missionId') == mission_id
-                            or metadata.get('mission_id') == mission_id or metadata.get('missionId') == mission_id)
+                    return (_label_matches_mission(labels.get('mission_id'), mission_id)
+                            or _label_matches_mission(labels.get('missionId'), mission_id)
+                            or _label_matches_mission(metadata.get('mission_id'), mission_id)
+                            or _label_matches_mission(metadata.get('missionId'), mission_id))
                 except Exception:
                     return False
 
@@ -5546,10 +5560,10 @@ if FLASK_AVAILABLE:
                             if isinstance(node_or_edge, dict):
                                 labels = node_or_edge.get('labels') or {}
                                 metadata = node_or_edge.get('metadata') or {}
-                                if labels.get('mission_id') == mission_id: return True
-                                if labels.get('missionId') == mission_id: return True
-                                if metadata.get('mission_id') == mission_id: return True
-                                if metadata.get('missionId') == mission_id: return True
+                                if _label_matches_mission(labels.get('mission_id'), mission_id): return True
+                                if _label_matches_mission(labels.get('missionId'), mission_id): return True
+                                if _label_matches_mission(metadata.get('mission_id'), mission_id): return True
+                                if _label_matches_mission(metadata.get('missionId'), mission_id): return True
                         except Exception:
                             pass
                         return pred.matches(node_or_edge) if hasattr(pred,'matches') else False
@@ -5567,7 +5581,8 @@ if FLASK_AVAILABLE:
                             for e in (getattr(store,'hyperedges',[]) or []):
                                 # coarse check on metadata (both identifier conventions)
                                 e_meta = e.get('metadata') or {}
-                                if e_meta.get('mission_id') == mission_id or e_meta.get('missionId') == mission_id:
+                                if (_label_matches_mission(e_meta.get('mission_id'), mission_id)
+                                        or _label_matches_mission(e_meta.get('missionId'), mission_id)):
                                     edges.append(e)
                         except Exception:
                             pass
@@ -5609,10 +5624,10 @@ if FLASK_AVAILABLE:
             try:
                 labels = x.get('labels') or {}
                 metadata = x.get('metadata') or {}
-                if labels.get('mission_id') == mission_id: return True
-                if labels.get('missionId') == mission_id: return True
-                if metadata.get('mission_id') == mission_id: return True
-                if metadata.get('missionId') == mission_id: return True
+                if _label_matches_mission(labels.get('mission_id'), mission_id): return True
+                if _label_matches_mission(labels.get('missionId'), mission_id): return True
+                if _label_matches_mission(metadata.get('mission_id'), mission_id): return True
+                if _label_matches_mission(metadata.get('missionId'), mission_id): return True
             except Exception:
                 pass
             # fall back to parsed predicate
