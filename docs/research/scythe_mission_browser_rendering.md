@@ -120,12 +120,13 @@ already exists until someone decides.
 ## 5. What browser rendering could look like (draft; ordered by risk, not by ambition)
 
 **5.1 — Lowest risk: client-side filtering against the existing stream, no server change.**
-The browser already receives unfiltered node/edge events over Socket.IO/SSE
-(`/api/graphops/stream`). A client-side filter — "only render nodes whose `labels.missionId` (or,
-once reconciled, `mission_id`) equals the selected mission" — needs zero server changes, works
-today against the operational system's existing tagging, and can be built and tested independent
-of §4's identifier question. Cost: no bandwidth savings (every node still reaches the browser);
-value: proves the rendering concept cheaply.
+**Revised after verification — see section 7:** the premise that "the browser already receives
+unfiltered node/edge events over Socket.IO" does not hold for the generic hypergraph-node path
+specifically (that listener has no live server-side emitter). The pure matching logic itself
+(`cesium-mission-filter.js`) was still built and genuinely tested — see section 7 — but it is
+**not wired into any rendering pipeline**, because there is no verified-live pipeline to wire it
+into yet. What was originally planned as "step 1, done" is actually "step 1a (the matching
+primitive) done; step 1b (wiring it to something that fires) blocked on section 7's gap."
 
 **5.2 — Medium: a `GET /api/missions/<id>/subgraph`-backed initial view.** The operational
 system's bounded-snapshot endpoint already exists and already works for `missionId`-tagged
@@ -184,18 +185,64 @@ a direct `labels.get("mission_id") == mission_id` equality check against raw nod
 predicates (PR #195) — needed a small fix to also match mission_id as a list member, not just an
 exact scalar equal.
 
-## 7. What this draft does not do
+## 7. The generic hypergraph-node Socket.IO path is not demonstrably live (verified architectural gap)
 
-No Cesium/JS file is edited. No new WebSocket scope type is implemented. No identifier
-reconciliation is performed or chosen. Nothing here was checked against a running browser or dev
-server — stated plainly rather than implied otherwise. No Gate C/Gate D protocol is touched; GATED3
-remains frozen and unauthorized.
+**This is an observation, not an accusation or a TODO.** Found while starting the client-side
+mission filter (section 5.1), independent of Mission work:
 
-## 8. Open questions
+- `cesium-hypergraph-globe.js` listens for Socket.IO events named `entity_update` and
+  `entity_delete`.
+- The only server-side emitter found anywhere in this repository —
+  `operator_session_manager.py`'s `self.websocket.emit('entity_event', event.to_dict())` — emits
+  a **different event name** (`entity_event`, not `entity_update`), with a **different payload
+  shape** (`{event_type, entity_id, entity_type, entity_data, provenance, timestamp}`, with the
+  generic node data nested under `entity_data`, not flattened to top-level `lat`/`lon`/etc. the
+  way `_applyNodeUpdate()` reads it).
+- No emitter for the literal string `entity_update` exists anywhere in this codebase, in any
+  language.
+
+**Conclusion:** the generic hypergraph-node rendering path this document's section 5.1 assumed
+was "the existing stream" is not demonstrably reachable by any live server code today. This is a
+**precondition failure, not a Mission-filter problem** — two separate questions got conflated:
+"does Mission-matching logic work?" (yes, verified — see `cesium-mission-filter.test.js`, 16/16
+passing) and "does the Cesium client currently receive generic node updates?" (not through this
+path, as far as this repository's own code shows).
+
+**What this means for section 5's ordering.** Rewiring the listener to the real event name and
+unwrapping its real payload shape is a materially different, larger, riskier change than "add a
+filter to code that already runs" — it would be changing an apparently-inactive protocol path
+into an active one, which is exactly the kind of change that looks correct in a diff and then
+fails in ways only a running browser would reveal (coordinate extraction, clustering, deletion
+semantics, performance under real event volume). That work is deferred, explicitly, until it can
+be verified end-to-end against a running browser — not attempted here on static reasoning alone.
+Static reasoning is sufficient for the matching primitive; it is not sufficient for a WebSocket
+protocol correction.
+
+**Also not investigated here:** whether the recon-entity, UAV, or RF-classification Socket.IO
+channels (which do appear to have real emitters, per the file's other `_socket.on(...)` handlers)
+could serve as an alternate integration point. Deliberately not pursued as a substitute here —
+filtering one of those channels would demonstrate "Mission filtering works on an unrelated
+stream," not "Mission filtering for the hypergraph renderer," which would be answering a
+different question than the one this document set out to answer.
+
+## 8. What this draft does not do
+
+No `cesium-hypergraph-globe.js`/`.html` file is edited, and `cesium-mission-filter.js` is not
+wired into its rendering pipeline — see section 7 for why. No new WebSocket scope type is
+implemented. No identifier reconciliation is performed or chosen (that was §4/PR #195, already
+done). Nothing here was checked against a running browser or dev server — stated plainly rather
+than implied otherwise. No Gate C/Gate D protocol is touched; GATED3 remains frozen and
+unauthorized.
+
+## 9. Open questions
 
 - §4 is resolved (Option B); the remaining questions are about what to build on top of that
   decision, not about the decision itself.
 - §6 is resolved (host attribution is evidentiary, append-only, list-valued for hosts only).
+- §7's gap (no live emitter for the `entity_update` the client listens for) blocks any further
+  Cesium rendering work until either the client is rewired to the real `entity_event` shape, or
+  a different, genuinely-live integration point is chosen — and verifying either needs a running
+  browser this environment doesn't have.
 - `RFObservation` (`rf_bridge.py`) now carries `mission_id` — PR B's storage gap is closed — but
   `rf_bridge.py` has no `HypergraphEngine`/`RFHypergraphAdapter` reference at all, so RF
   observations still never reach the graph this document's `/api/graphops/selection/graph`
