@@ -147,6 +147,52 @@ class CreateMissionIdentifierLinkTests(unittest.TestCase):
         self.assertTrue(scythe_mission.is_valid_mission_id(result["body"]["mission"]["mission_id"]))
 
 
+# ARR-API-1: mission enumeration. Creates a few missions through the real create_mission()
+# route (so the test exercises the same persistence path production traffic uses), then
+# lists them back.
+LIST_MISSIONS_PROBE = textwrap.dedent("""
+    import json, sys
+    sys.path.insert(0, sys.argv[1])
+    import rf_scythe_api_server as server
+
+    client = server.app.test_client()
+    ids = []
+    for i, status in enumerate(["open", "open", "closed"]):
+        resp = client.post("/api/missions", json={"name": f"probe-{i}"})
+        mission_id = resp.get_json()["mission"]["mission_id"]
+        ids.append(mission_id)
+        if status == "closed":
+            client.post(f"/api/missions/{mission_id}/end")
+
+    resp_all = client.get("/api/missions")
+    resp_open = client.get("/api/missions?status=open")
+    print(json.dumps({
+        "ids": ids,
+        "all": [m["mission_id"] for m in resp_all.get_json()["missions"]],
+        "open": [m["mission_id"] for m in resp_open.get_json()["missions"]],
+        "all_count": resp_all.get_json()["count"],
+    }))
+""")
+
+
+class ListMissionsTests(unittest.TestCase):
+    def test_all_created_missions_are_enumerated(self):
+        proc = _run_probe(LIST_MISSIONS_PROBE)
+        self.assertEqual(proc.returncode, 0, proc.stderr[-4000:])
+        result = json.loads(proc.stdout.strip().splitlines()[-1])
+        self.assertEqual(set(result["all"]), set(result["ids"]))
+        self.assertEqual(result["all_count"], len(result["ids"]))
+
+    def test_status_filter_excludes_ended_missions(self):
+        proc = _run_probe(LIST_MISSIONS_PROBE)
+        self.assertEqual(proc.returncode, 0, proc.stderr[-4000:])
+        result = json.loads(proc.stdout.strip().splitlines()[-1])
+        open_ids, all_ids = set(result["open"]), set(result["ids"])
+        closed_id = result["ids"][2]
+        self.assertNotIn(closed_id, open_ids)
+        self.assertEqual(open_ids, all_ids - {closed_id})
+
+
 class MissionSubgraphIdentifierTests(unittest.TestCase):
     def test_both_identifier_conventions_are_found_in_labels_and_metadata(self):
         proc = _run_probe(SUBGRAPH_PROBE)
