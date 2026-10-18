@@ -1,7 +1,9 @@
 """Reconciling the mission_id/missionId identifier mismatch
 (docs/research/scythe_mission_browser_rendering.md section 4, Option A) between the
 operational Mission system in rf_scythe_api_server.py and the domain Mission system
-(scythe_mission.py + PRs #188-#193).
+(scythe_mission.py + PRs #188-#193). Also covers Option B (the two systems are kept separate,
+linked only by sharing one mission_id namespace): create_mission() now rejects an explicitly
+supplied mission_id that would not be constructible as a domain Mission.
 
 Importing rf_scythe_api_server.py has real side effects (creates assets/, metrics_logs/,
 poi_database.db in the current directory) and installs module-level global state, so -- same
@@ -53,12 +55,56 @@ SUBGRAPH_PROBE = textwrap.dedent("""
 """)
 
 
-def _run_probe(script):
+def _run_probe(script, *extra_argv):
     with tempfile.TemporaryDirectory(prefix="rf-api-mission-") as cwd:
         return subprocess.run(
-            [sys.executable, "-I", "-c", script, REPO],
+            [sys.executable, "-I", "-c", script, REPO, *extra_argv],
             cwd=cwd, capture_output=True, text=True, timeout=180,
             env=dict(os.environ, PYTHONDONTWRITEBYTECODE="1"))
+
+
+# Option B link: an explicitly supplied mission_id must be valid for a domain
+# scythe_mission.Mission too, so a later Mission(mission_id=...) referencing the same
+# operational mission is always constructible.
+CREATE_MISSION_PROBE = textwrap.dedent("""
+    import json, sys
+    sys.path.insert(0, sys.argv[1])
+    import rf_scythe_api_server as server
+
+    client = server.app.test_client()
+    resp = client.post("/api/missions", json={"mission_id": sys.argv[2], "name": "probe"})
+    print(json.dumps({"status_code": resp.status_code, "body": resp.get_json()}))
+""")
+
+
+class CreateMissionIdentifierLinkTests(unittest.TestCase):
+    def test_a_valid_explicit_mission_id_is_accepted_and_constructs_a_domain_mission(self):
+        mission_id = "RFMAP-20261018-003"
+        proc = _run_probe(CREATE_MISSION_PROBE, mission_id)
+        self.assertEqual(proc.returncode, 0, proc.stderr[-4000:])
+        result = json.loads(proc.stdout.strip().splitlines()[-1])
+        self.assertEqual(result["status_code"], 201, result)
+        self.assertEqual(result["body"]["mission"]["mission_id"], mission_id)
+        import scythe_mission
+        self.assertTrue(scythe_mission.is_valid_mission_id(mission_id))
+        m = scythe_mission.Mission(mission_id=mission_id, mission_type="CUSTOM",
+                                    purpose="linked to the operational mission above", operator="test")
+        self.assertEqual(m.mission_id, mission_id)
+
+    def test_a_malformed_explicit_mission_id_is_rejected(self):
+        proc = _run_probe(CREATE_MISSION_PROBE, "has a space")
+        self.assertEqual(proc.returncode, 0, proc.stderr[-4000:])
+        result = json.loads(proc.stdout.strip().splitlines()[-1])
+        self.assertEqual(result["status_code"], 400, result)
+        self.assertIn("mission_id must be a valid Mission identifier", result["body"]["message"])
+
+    def test_the_auto_generated_mission_id_is_already_a_valid_domain_identifier(self):
+        proc = _run_probe(CREATE_MISSION_PROBE, "")
+        self.assertEqual(proc.returncode, 0, proc.stderr[-4000:])
+        result = json.loads(proc.stdout.strip().splitlines()[-1])
+        self.assertEqual(result["status_code"], 201, result)
+        import scythe_mission
+        self.assertTrue(scythe_mission.is_valid_mission_id(result["body"]["mission"]["mission_id"]))
 
 
 class MissionSubgraphIdentifierTests(unittest.TestCase):

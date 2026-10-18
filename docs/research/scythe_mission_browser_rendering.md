@@ -66,7 +66,38 @@ a mission concept. So "browser rendering of Mission" is not a small gap in an ot
 pipeline — it is three unconnected pieces: an operational backend, a domain backend, and a
 frontend that knows about neither.
 
-## 4. Open question this document does not resolve: one Mission concept, or two?
+## 4. Decided: Option B — two concepts, linked by a shared identifier namespace
+
+**Resolved, not left open.** PR #195 reconciled the `mission_id`/`missionId` identifier split
+(§2) by making reads on the operational side accept both conventions and writes dual-write both —
+a prerequisite regardless of which option below was chosen. A follow-up PR then picked **Option
+B** over A: `scythe_mission.Mission` is deliberately frozen/immutable (PRs #188, #191); folding
+the operational system's mutable lifecycle (`join`/`leave`/`status`/`tasks`/`watchlist`) into it
+would mean either breaking that invariant or building a parallel mutable wrapper — a materially
+larger redesign than linking two already-working systems. The two concepts stay separate:
+
+- The operational Mission (`rf_scythe_api_server.py`) is the *collaboration session* — who's
+  online, tasks, watchlist, live diff stream.
+- The domain Mission (`scythe_mission.py`) is the *provenance record* — intent, identity,
+  immutability guarantees.
+- They share one identifier **namespace**, not a merged schema: `POST /api/missions` now rejects
+  an explicitly supplied `mission_id` that would not be constructible as a domain
+  `scythe_mission.Mission` (validated via the same `is_valid_mission_id()` PR B/#189 already
+  introduced for `graphops_rf_ingest.py`). An auto-generated operational `mission_id` already
+  satisfies that rule by construction. This guarantees that if a domain `Mission` object is ever
+  constructed to describe the same real-world mission as an existing operational record, nothing
+  about the identifier shape stops it — without requiring that pairing to actually happen for
+  every mission, or merging either schema into the other.
+
+**What this does not do:** it does not require every operational mission to have a corresponding
+domain `Mission` object, or vice versa — the link is a compatibility guarantee, not an
+enforced 1:1 pairing. `tasks`/`watchlist`/`join`/`leave` remain entirely on the operational side.
+No code reads a domain `Mission` object to populate an operational mission record, or the
+reverse. Whether a future feature ever needs that live cross-reference is left to when a real
+feature actually needs it, consistent with this series' standing discipline of not building
+ahead of demonstrated need.
+
+## 4-prior. Original framing (superseded above, kept for history)
 
 - **Option A — reconcile into one.** Pick one casing (likely `mission_id`, since four of the
   five domain-side modules already use it and it is the newer, actively-developed convention),
@@ -122,14 +153,13 @@ remains frozen and unauthorized.
 
 ## 7. Open questions
 
-- Which of Options A/B/C (§4) is correct — this is a product/architecture decision, not something
-  derivable from the code alone.
-- If A: does the operational system's looser schema (free-form `metadata`, `open`/`closed`
-  status) get absorbed into `MissionParameters`, or stay a separate overlay?
+- §4 is resolved (Option B); the remaining questions are about what to build on top of that
+  decision, not about the decision itself.
 - Whether RF-ingested observations (still unlabeled at all, per PR B's known gap) should ever be
   reachable through a mission-filtered browser view, or whether that gap needs closing first.
 - Real performance characteristics of a node-label-aware edge scope (§5.3) at the node/edge counts
   this engine actually carries in practice — not measured here.
 - Whether the operational system's multi-operator session concept (join/leave, tasks, watchlist)
-  has any place in a provenance-oriented "Mission" at all, or whether it's a UI/collaboration
-  layer that should stay separate regardless of how §4 resolves.
+  should ever gain a live cross-reference to a domain `Mission` object describing the same
+  real-world mission, or whether the identifier-namespace guarantee (§4) is sufficient on its own
+  indefinitely — not decided, and not needed until a concrete feature asks for it.
