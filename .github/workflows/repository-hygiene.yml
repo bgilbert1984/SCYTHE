@@ -125,6 +125,7 @@ jobs:
             test_pcap_ingest_mission_id \
             test_pcap_ingest_writebus \
             test_route_epistemics \
+            test_scene_duckdb_store_mission_id \
             test_sensor_registry_lpi \
             test_subgraph_diff_mission_predicate \
             test_writebus
