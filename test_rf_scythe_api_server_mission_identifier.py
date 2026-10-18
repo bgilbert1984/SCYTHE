@@ -312,6 +312,40 @@ class MissionEventsAndExportTests(unittest.TestCase):
         self.assertIn(".parquet", result["export_filename"])
 
 
+# ARR hardening item 1: /api/events/query accepted arbitrary client-supplied SQL against the
+# DuckDB event store. Zero internal callers were found repo-wide, and the mission-scoped
+# alternative (/api/missions/<id>/events, ARR-API-3) already exists -- removed outright,
+# same disposition as the Parquet pipeline retirement, rather than gated.
+DEPRECATED_EVENTS_QUERY_PROBE = textwrap.dedent("""
+    import json, sys
+    sys.path.insert(0, sys.argv[1])
+    import rf_scythe_api_server as server
+
+    client = server.app.test_client()
+    get_resp = client.get("/api/events/query", query_string={"sql": "SELECT 1"})
+    post_resp = client.post("/api/events/query", json={"sql": "SELECT 1"})
+    print(json.dumps({
+        "get_status": get_resp.status_code, "get_body": get_resp.get_json(),
+        "post_status": post_resp.status_code, "post_body": post_resp.get_json(),
+    }))
+""")
+
+
+class DeprecatedEventsQueryTests(unittest.TestCase):
+    def test_get_is_410_gone_not_executed(self):
+        proc = _run_probe(DEPRECATED_EVENTS_QUERY_PROBE)
+        self.assertEqual(proc.returncode, 0, proc.stderr[-4000:])
+        result = json.loads(proc.stdout.strip().splitlines()[-1])
+        self.assertEqual(result["get_status"], 410, result["get_body"])
+        self.assertIn("/api/missions/<id>/events", result["get_body"]["message"])
+
+    def test_post_is_also_410_gone(self):
+        proc = _run_probe(DEPRECATED_EVENTS_QUERY_PROBE)
+        self.assertEqual(proc.returncode, 0, proc.stderr[-4000:])
+        result = json.loads(proc.stdout.strip().splitlines()[-1])
+        self.assertEqual(result["post_status"], 410, result["post_body"])
+
+
 class MissionSubgraphIdentifierTests(unittest.TestCase):
     def test_both_identifier_conventions_are_found_in_labels_and_metadata(self):
         proc = _run_probe(SUBGRAPH_PROBE)

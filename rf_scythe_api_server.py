@@ -19848,31 +19848,21 @@ if FLASK_AVAILABLE:
 
     @app.route('/api/events/query', methods=['GET', 'POST'])
     def events_query():
-        """Execute arbitrary DuckDB SQL against the events table.
+        """Deprecated (ARR hardening item 1): this route used to accept arbitrary client-
+        supplied SQL against the DuckDB event store -- a SELECT-only prefix check is not a
+        security boundary, and treating an internal endpoint as permanently internal-only is
+        exactly the assumption that doesn't survive proxy changes, added tunnels, or a
+        debugging route surviving past its deployment. Removed outright rather than gated,
+        same disposition as the Parquet pipeline retirement: zero internal callers were found
+        (grepped the full repo, including scythe-web, before removing), and the mission-scoped
+        alternative already exists.
 
-        GET  ?sql=SELECT+...
-        POST { "sql": "SELECT ..." }
-
-        For Mission-scoped reads, prefer GET /api/missions/<id>/events -- this route's
-        unscoped arbitrary SQL is a pending ARR security-review item (see the ARR status
-        memory), not something this comment fixes.
+        Use GET /api/missions/<id>/events instead.
         """
-        if _duck_store is None:
-            return jsonify({'status': 'error', 'message': 'DuckDB store not available'}), 503
-        if request.method == 'POST':
-            sql = (request.get_json(force=True, silent=True) or {}).get('sql', '')
-        else:
-            sql = request.args.get('sql', '')
-        if not sql:
-            return jsonify({'status': 'error', 'message': 'sql parameter required'}), 400
-        # Basic safety: allow SELECT only
-        if not sql.strip().upper().startswith('SELECT'):
-            return jsonify({'status': 'error', 'message': 'only SELECT queries allowed'}), 403
-        try:
-            rows = _duck_store.query_sql(sql)
-            return jsonify({'status': 'ok', 'rows': rows, 'count': len(rows)})
-        except Exception as exc:
-            return jsonify({'status': 'error', 'message': str(exc)}), 400
+        return jsonify({
+            'status': 'error',
+            'message': 'Deprecated. Use GET /api/missions/<id>/events for mission-scoped reads.',
+        }), 410
 
     @app.route('/api/events/stats', methods=['GET'])
     def events_stats():
