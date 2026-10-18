@@ -125,5 +125,67 @@ class ConsistencyInvariantTests(unittest.TestCase):
         store.close()
 
 
+class MissionScopedQueryAndExportTests(unittest.TestCase):
+    """ARR-API-3: mission-scoped reads, built on PR 2's capture_sessions/mission_id contract."""
+
+    def _seeded_store(self, tag):
+        store = ScytheDuckStore(db_path=":memory:", parquet_dir=f"/tmp/scythe_arr_api3_test_{tag}")
+        store.append_batch([
+            _event("sess-A", mission_id="mission-A", entity_id="e1", ts=1_700_000_000_000),
+            _event("sess-A", entity_id="e2", ts=1_700_000_001_000),  # inherits mission-A
+            _event("sess-B", mission_id="mission-B", entity_id="e3", ts=1_700_000_002_000),
+        ])
+        return store
+
+    def test_events_for_mission_returns_only_that_mission_s_events(self):
+        store = self._seeded_store("1")
+        events = store.events_for_mission("mission-A")
+        self.assertEqual({e.entity_id for e in events}, {"e1", "e2"})
+        self.assertTrue(all(e.mission_id == "mission-A" for e in events))
+        store.close()
+
+    def test_events_for_mission_is_stably_ordered_by_seq(self):
+        store = self._seeded_store("2")
+        events = store.events_for_mission("mission-A")
+        self.assertEqual([e.seq for e in events], sorted(e.seq for e in events))
+        store.close()
+
+    def test_events_for_mission_pagination(self):
+        store = self._seeded_store("3")
+        page1 = store.events_for_mission("mission-A", limit=1, offset=0)
+        page2 = store.events_for_mission("mission-A", limit=1, offset=1)
+        self.assertEqual(len(page1), 1)
+        self.assertEqual(len(page2), 1)
+        self.assertNotEqual(page1[0].entity_id, page2[0].entity_id)
+        store.close()
+
+    def test_count_events_for_mission_matches_the_unpaginated_total(self):
+        store = self._seeded_store("4")
+        self.assertEqual(store.count_events_for_mission("mission-A"), 2)
+        self.assertEqual(store.count_events_for_mission("mission-B"), 1)
+        self.assertEqual(store.count_events_for_mission("mission-unknown"), 0)
+        store.close()
+
+    def test_export_parquet_block_filters_to_the_requested_mission(self):
+        store = self._seeded_store("5")
+        fpath = store.export_parquet_block(0, 2_000_000_000_000, mission_id="mission-A")
+        self.assertTrue(fpath.name.startswith("mission-mission-A-events-"))
+        self.assertTrue(fpath.name.endswith(".parquet"))
+        reloaded = ScytheDuckStore(db_path=":memory:", parquet_dir="/tmp/scythe_arr_api3_test_5_reload")
+        ingested = reloaded.ingest_parquet_block(str(fpath))
+        self.assertEqual(ingested, 2)
+        rows = reloaded.query_sql("SELECT DISTINCT mission_id, session_id FROM events")
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["mission_id"], "mission-A")
+        store.close()
+        reloaded.close()
+
+    def test_export_with_no_matching_mission_raises(self):
+        store = self._seeded_store("6")
+        with self.assertRaises(ValueError):
+            store.export_parquet_block(0, 2_000_000_000_000, mission_id="mission-nonexistent")
+        store.close()
+
+
 if __name__ == "__main__":
     unittest.main()
