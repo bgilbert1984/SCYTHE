@@ -187,6 +187,8 @@ exact scalar equal.
 
 ## 7. The generic hypergraph-node Socket.IO path is not demonstrably live (verified architectural gap)
 
+**Tracked as [issue #201](https://github.com/bgilbert1984/SCYTHE/issues/201).**
+
 **This is an observation, not an accusation or a TODO.** Found while starting the client-side
 mission filter (section 5.1), independent of Mission work:
 
