@@ -523,6 +523,9 @@ class NoopPolicyEngine:
 @dataclass
 class Provenance:
     source: str = "manual_ui"        # e.g. "manual_ui", "lpi_detector_v1", "pcap_ingest"
+    mission_id: Optional[str] = None  # preserved from WriteContext.mission_id when present;
+                                       # absent (not a required invariant) for the ambient,
+                                       # pre-Mission telemetry most of the system still produces
     operator_id: Optional[str] = None
     session_id: Optional[str] = None
     request_id: Optional[str] = None
@@ -574,6 +577,7 @@ class WriteContext:
             ses_id = hashlib.sha256(self.session_token.encode("utf-8")).hexdigest()[:16]
         return Provenance(
             source=self.source,
+            mission_id=self.mission_id,
             operator_id=op_id,
             session_id=ses_id,
             request_id=self.request_id,

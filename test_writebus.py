@@ -7,6 +7,7 @@ import unittest
 from writebus import (
     CommitStatus,
     GraphOp,
+    Provenance,
     SQLiteRecordSink,
     WriteBus,
     WriteBusKernelViolation,
@@ -351,6 +352,36 @@ class WriteBusTests(unittest.TestCase):
             )
 
             self.assertEqual([], bus.subscribers)
+
+
+class ProvenanceMissionIdPropagationTests(unittest.TestCase):
+    """ARR hardening item 3: WriteContext.mission_id was threaded through by callers (e.g.
+    registries/pcap_registry.py's _ctx()) but Provenance() -- built by
+    WriteContext.provenance(), called from WriteBus.commit() -- silently dropped it: the field
+    didn't exist on Provenance at all. A real provenance chain break, not a crash: the system
+    kept working, it just lost mission attribution. Fix preserves optionality rather than
+    making mission_id mandatory -- most events in this system are ambient, pre-Mission
+    telemetry with no mission context at all, and that's intentional, not a gap."""
+
+    def test_a_context_with_a_mission_id_preserves_it_in_provenance(self):
+        ctx = WriteContext(mission_id="RFMAP-20261018-080", source="pcap_ingest")
+        prov = ctx.provenance()
+        self.assertEqual(prov.mission_id, "RFMAP-20261018-080")
+
+    def test_a_context_with_no_mission_id_produces_provenance_with_none_not_an_error(self):
+        ctx = WriteContext(source="manual_ui")
+        prov = ctx.provenance()
+        self.assertIsNone(prov.mission_id)
+
+    def test_mission_id_survives_to_dict_serialization(self):
+        ctx = WriteContext(mission_id="RFMAP-20261018-081")
+        self.assertEqual(ctx.provenance().to_dict().get("mission_id"), "RFMAP-20261018-081")
+
+    def test_provenance_can_still_be_constructed_directly_without_mission_id(self):
+        # The field is optional, not mandatory -- this must keep working for every existing
+        # caller that never knew mission_id existed.
+        prov = Provenance(source="lpi_detector_v1")
+        self.assertIsNone(prov.mission_id)
 
 
 if __name__ == "__main__":
