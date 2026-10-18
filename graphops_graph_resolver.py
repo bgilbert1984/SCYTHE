@@ -607,9 +607,10 @@ class GraphSelectionResolver:
         }
 
     def snapshot(self, *, node_limit: int = 200, edge_limit: int = 300,
-                 focus_id: str = "") -> Dict[str, Any]:
+                 focus_id: str = "", mission_id: str = "") -> Dict[str, Any]:
         node_limit = min(max(int(node_limit), 1), 500)
         edge_limit = min(max(int(edge_limit), 1), 1000)
+        mission_id = str(mission_id or "")
         # Detection counts describe the complete deduplicated engine surface;
         # display counts below describe only the bounded payload returned to a client.
         all_nodes = self._nodes()
@@ -641,22 +642,52 @@ class GraphSelectionResolver:
         # Enrichment is a read-time display sidecar. It is deliberately absent
         # from the content-addressed revision and retained evidence snapshot.
         from ip_enrichment import enrich_graph_node
+        # PR D+ (docs/research/scythe_mission_definition.md): "show Mission X" instead of
+        # "show graph" -- a display-time filter, same layer as node_limit/focus_id, applied
+        # AFTER the canonical/cached snapshot above. The retained snapshot, its graphRevision,
+        # and the cache it's stored under are never filtered by mission: a revision identifies
+        # one total graph state, independent of any one request's mission_id, so two requests
+        # with different mission_id values against the same graph state still share one cache
+        # entry. Node matching is exact string equality against labels.mission_id (no
+        # mission-hierarchy expansion, no partial match) -- a node is only "in" a mission because
+        # some ingest path (pcap_ingest.py as of PR D) put mission_id in its labels; RF-ingested
+        # observations are not currently labeled at all (graphops_rf_ingest.py's known gap, see
+        # the local invariants crosswalk), so a mission_id filter will not surface them yet.
+        if mission_id:
+            mission_pool_nodes = [node for node in retained["nodes"]
+                                  if (node.get("labels") or {}).get("mission_id") == mission_id]
+            mission_node_ids = {node["id"] for node in mission_pool_nodes}
+            mission_pool_edges = [edge for edge in retained["edges"] if edge.get("nodes") and
+                                  all(member in mission_node_ids for member in edge["nodes"])]
+            pool_detected_node_count = len(mission_pool_nodes)
+            pool_detected_edge_count = len(mission_pool_edges)
+        else:
+            mission_pool_nodes = retained["nodes"]
+            mission_pool_edges = retained["edges"]
+            pool_detected_node_count = detected_node_count
+            pool_detected_edge_count = detected_edge_count
         ranked_nodes, purpose_counts = _adaptive_rank_nodes(
-            retained["nodes"], retained["edges"], node_limit, str(focus_id or ""))
+            mission_pool_nodes, mission_pool_edges, node_limit, str(focus_id or ""))
         nodes = [enrich_graph_node(node) for node in ranked_nodes]
         allowed = {node["id"] for node in nodes}
-        edges = _adaptive_rank_edges(retained["edges"], allowed, edge_limit, str(focus_id or ""))
-        return {**retained, "nodes": nodes, "edges": edges, "nodeLimit": node_limit,
-                "edgeLimit": edge_limit, "nodeCount": len(nodes), "edgeCount": len(edges),
-                "detectedNodeCount": detected_node_count,
-                "detectedEdgeCount": detected_edge_count,
-                "displayedNodeCount": len(nodes), "displayedEdgeCount": len(edges),
-                "ranking": {"lens": "ADAPTIVE_RELEVANCE", "activityDecaySeconds": 120,
-                            "focusId": str(focus_id or "") or None,
-                            "purposeCounts": purpose_counts,
-                            "suppressedNodes": max(0, detected_node_count - len(nodes)),
-                            "suppressedEdges": max(0, detected_edge_count - len(edges)),
-                            "ordinaryPairCap": 4, "ordinaryHubSoftCap": 30}}
+        edges = _adaptive_rank_edges(mission_pool_edges, allowed, edge_limit, str(focus_id or ""))
+        result = {**retained, "nodes": nodes, "edges": edges, "nodeLimit": node_limit,
+                  "edgeLimit": edge_limit, "nodeCount": len(nodes), "edgeCount": len(edges),
+                  "detectedNodeCount": pool_detected_node_count,
+                  "detectedEdgeCount": pool_detected_edge_count,
+                  "displayedNodeCount": len(nodes), "displayedEdgeCount": len(edges),
+                  "ranking": {"lens": "ADAPTIVE_RELEVANCE", "activityDecaySeconds": 120,
+                              "focusId": str(focus_id or "") or None,
+                              "purposeCounts": purpose_counts,
+                              "suppressedNodes": max(0, pool_detected_node_count - len(nodes)),
+                              "suppressedEdges": max(0, pool_detected_edge_count - len(edges)),
+                              "ordinaryPairCap": 4, "ordinaryHubSoftCap": 30}}
+        # Omitted entirely (not a null-valued key) when unset, same discipline as
+        # pcap_ingest.py's _provenance()/_mission_label(): a caller that never passes mission_id
+        # gets a response byte-for-byte identical to before this change.
+        if mission_id:
+            result["missionFilter"] = mission_id
+        return result
 
     def resolve(self, selection: Dict[str, Any]) -> Dict[str, Any]:
         requested_revision = selection.get("graphRevision")
