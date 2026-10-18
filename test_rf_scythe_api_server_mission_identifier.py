@@ -193,6 +193,58 @@ class ListMissionsTests(unittest.TestCase):
         self.assertEqual(open_ids, all_ids - {closed_id})
 
 
+# ARR-API-2: Mission identity propagation at the HTTP layer. /api/events/ingest validates
+# an optional per-event mission_id against scythe_mission.is_valid_mission_id (same source of
+# truth as create_mission()), then relies on ScytheDuckStore.append_batch's capture_sessions
+# bookkeeping to reject a conflicting re-bind with 409.
+EVENTS_INGEST_PROBE = textwrap.dedent("""
+    import json, sys
+    sys.path.insert(0, sys.argv[1])
+    import rf_scythe_api_server as server
+
+    def ingest(session_id, mission_id=None):
+        event = {"timestamp": 1700000000000, "event_type": "probe", "entity_id": "e1",
+                  "session_id": session_id}
+        if mission_id is not None:
+            event["mission_id"] = mission_id
+        client = server.app.test_client()
+        resp = client.post("/api/events/ingest", json={"events": [event]})
+        return resp.status_code, resp.get_json()
+
+    invalid_code, invalid_body = ingest("sess-http-1", "has a space")
+    ok_code, ok_body = ingest("sess-http-2", "RFMAP-20261018-050")
+    conflict_code, conflict_body = ingest("sess-http-2", "RFMAP-20261018-051")
+
+    print(json.dumps({
+        "invalid_code": invalid_code, "invalid_body": invalid_body,
+        "ok_code": ok_code, "ok_body": ok_body,
+        "conflict_code": conflict_code, "conflict_body": conflict_body,
+    }))
+""")
+
+
+class EventsIngestMissionIdTests(unittest.TestCase):
+    def test_an_invalid_mission_id_is_rejected_with_400(self):
+        proc = _run_probe(EVENTS_INGEST_PROBE)
+        self.assertEqual(proc.returncode, 0, proc.stderr[-4000:])
+        result = json.loads(proc.stdout.strip().splitlines()[-1])
+        self.assertEqual(result["invalid_code"], 400, result["invalid_body"])
+        self.assertIn("mission_id must be a valid Mission identifier", result["invalid_body"]["message"])
+
+    def test_a_valid_mission_id_is_accepted(self):
+        proc = _run_probe(EVENTS_INGEST_PROBE)
+        self.assertEqual(proc.returncode, 0, proc.stderr[-4000:])
+        result = json.loads(proc.stdout.strip().splitlines()[-1])
+        self.assertEqual(result["ok_code"], 200, result["ok_body"])
+        self.assertEqual(result["ok_body"]["ingested"], 1)
+
+    def test_a_conflicting_mission_id_on_an_already_bound_session_is_rejected_with_409(self):
+        proc = _run_probe(EVENTS_INGEST_PROBE)
+        self.assertEqual(proc.returncode, 0, proc.stderr[-4000:])
+        result = json.loads(proc.stdout.strip().splitlines()[-1])
+        self.assertEqual(result["conflict_code"], 409, result["conflict_body"])
+
+
 class MissionSubgraphIdentifierTests(unittest.TestCase):
     def test_both_identifier_conventions_are_found_in_labels_and_metadata(self):
         proc = _run_probe(SUBGRAPH_PROBE)
