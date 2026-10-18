@@ -5355,6 +5355,37 @@ if FLASK_AVAILABLE:
             logger.warning(f"Failed to load mission from DB: {e}")
             return None
 
+    @app.route('/api/missions', methods=['GET'])
+    def list_missions():
+        """Mission enumeration (ARR-API-1). Returns raw mission records only -- no
+        per-mission event/entity counts computed inline, to avoid an N+1 cost trap against
+        the DuckDB event store; a cached-stats view can be added separately if needed."""
+        try:
+            status = request.args.get('status')
+            conn = sqlite3.connect(os.path.join(_data_dir(), 'metrics.db'))
+            conn.row_factory = sqlite3.Row
+            try:
+                if status:
+                    rows = conn.execute(
+                        'SELECT * FROM missions WHERE status = ? ORDER BY created_at DESC', (status,)
+                    ).fetchall()
+                else:
+                    rows = conn.execute('SELECT * FROM missions ORDER BY created_at DESC').fetchall()
+            finally:
+                conn.close()
+            missions = []
+            for r in rows:
+                rec = dict(r)
+                try:
+                    rec['metadata'] = json.loads(rec.get('metadata') or '{}')
+                except Exception:
+                    rec['metadata'] = {}
+                missions.append(rec)
+            return jsonify({'status': 'ok', 'missions': missions, 'count': len(missions)})
+        except Exception as e:
+            logger.error(f"list_missions error: {e}")
+            return jsonify({'status': 'error', 'message': str(e)}), 500
+
     @app.route('/api/missions', methods=['POST'])
     def create_mission():
         """Operational Mission (this record: name/owner/status/tasks/watchlist -- a live
