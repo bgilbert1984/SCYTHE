@@ -63,7 +63,7 @@ def _recon_graph_node(entity: Dict[str, Any], entity_id: str, ctx: WriteContext)
 
     labels = dict(entity.get("labels") or {})
     if ctx.mission_id:
-        labels["missionId"] = str(ctx.mission_id)
+        labels["mission_id"] = str(ctx.mission_id)
 
     # minimal node shape (hypergraph styles by kind)
     return {
