@@ -671,8 +671,14 @@ class GraphSelectionResolver:
         # not in this graph. Bridging RFObservationStore into HypergraphEngine (e.g. via the
         # existing RFHypergraphAdapter) would be separate, undone work.
         if mission_id:
+            # Writers are being normalized to the canonical snake_case mission_id label
+            # (see registries/recon_registry.py, rfuav_inference_service.py,
+            # sensor_registry.py), but already-serialized graph state from before that fix
+            # may still carry the legacy camelCase missionId -- check both, same as
+            # rf_scythe_api_server.py's mission_subgraph route already does.
             mission_pool_nodes = [node for node in retained["nodes"]
-                                  if _label_matches_mission((node.get("labels") or {}).get("mission_id"), mission_id)]
+                                  if _label_matches_mission((node.get("labels") or {}).get("mission_id"), mission_id)
+                                  or _label_matches_mission((node.get("labels") or {}).get("missionId"), mission_id)]
             mission_node_ids = {node["id"] for node in mission_pool_nodes}
             mission_pool_edges = [edge for edge in retained["edges"] if edge.get("nodes") and
                                   all(member in mission_node_ids for member in edge["nodes"])]

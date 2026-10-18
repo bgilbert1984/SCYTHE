@@ -326,7 +326,7 @@ class RFUAVEvidenceEmitter:
             "id": sensor_node_id,
             "kind": "sensor",
             "labels": {
-                "missionId": mission_id,
+                "mission_id": mission_id,
                 "platform": observation.get("platform") or observation.get("source_platform") or "rf_sensor",
             },
             "metadata": {
@@ -340,7 +340,7 @@ class RFUAVEvidenceEmitter:
             "id": rf_node_id,
             "kind": "rf_emitter",
             "labels": {
-                "missionId": mission_id,
+                "mission_id": mission_id,
                 "rf_class": rf.get("class"),
                 "rf_subtype": rf.get("subtype"),
             },
@@ -369,7 +369,7 @@ class RFUAVEvidenceEmitter:
             "nodes": [sensor_node_id, rf_node_id],
             "weight": observation.get("rfuav_confidence", observation.get("confidence", 0.0)),
             "labels": {
-                "missionId": mission_id,
+                "mission_id": mission_id,
                 "evidence": "OBSERVED",
             },
             "metadata": {
@@ -620,7 +620,7 @@ class RFUAVEvidenceEmitter:
                 },
             },
             "labels": {
-                "missionId": mission_id,
+                "mission_id": mission_id,
                 "rf_class": rf_class,
                 "rf_subtype": subtype,
                 "obs_class": "observed",

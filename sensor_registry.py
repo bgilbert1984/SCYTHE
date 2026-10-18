@@ -111,9 +111,10 @@ def _norm_position(sensor: Dict[str, Any]) -> Optional[List[float]]:
 
 def _norm_labels(obj: Dict[str, Any], mission_id: Optional[str] = None) -> Dict[str, Any]:
     labels = dict(obj.get("labels") or {})
-    mid = _coalesce(mission_id, obj.get("mission_id"), obj.get("missionId"), labels.get("missionId"))
+    mid = _coalesce(mission_id, obj.get("mission_id"), obj.get("missionId"),
+                     labels.get("mission_id"), labels.get("missionId"))
     if mid:
-        labels["missionId"] = str(mid)
+        labels["mission_id"] = str(mid)
     tags = obj.get("tags") or obj.get("tag") or labels.get("tags")
     if tags:
         labels["tags"] = tags
@@ -284,7 +285,7 @@ class SensorRegistry:
         r_node = _recon_node_id(str(recon_entity_id))
 
         mid = mission_id
-        labels = {"missionId": str(mid)} if mid else {}
+        labels = {"mission_id": str(mid)} if mid else {}
 
         edge_id = f"edge:sensor_assigned:{s_node}->{r_node}".replace(" ", "_")
         now = time.time()
@@ -371,7 +372,7 @@ class SensorRegistry:
         s_node = _sensor_node_id(str(sensor_id))
 
         mid = _coalesce(mission_id, payload.get("missionId"), payload.get("mission_id"))
-        labels = {"missionId": str(mid)} if mid else {}
+        labels = {"mission_id": str(mid)} if mid else {}
 
         wctx = ctx or _ctx_from_legacy(
             operator=operator,
@@ -539,12 +540,12 @@ class SensorRegistry:
         ops: List[GraphOp] = [stub_op]
 
         # Attach mission label if provided
-        if labels.get("missionId"):
-            mid = labels["missionId"]
+        if labels.get("mission_id"):
+            mid = labels["mission_id"]
             for ent in entities:
                 if isinstance(ent, dict):
                     ent_labels = dict(ent.get("labels") or {})
-                    ent_labels["missionId"] = mid
+                    ent_labels["mission_id"] = mid
                     ent["labels"] = ent_labels
 
         # Convert to GraphOps

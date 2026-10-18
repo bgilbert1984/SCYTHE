@@ -86,6 +86,35 @@ class ListValuedMissionLabelTests(unittest.TestCase):
         self.assertNotIn("host:shared", {n["id"] for n in snap["nodes"]})
 
 
+class _GraphWithLegacyCamelCaseLabel:
+    """A node written before recon_registry.py/rfuav_inference_service.py/sensor_registry.py
+    were normalized to the canonical snake_case mission_id label -- these three writers used
+    labels.missionId (camelCase) exclusively, which this resolver's mission_id filter never
+    read, making their entities invisible under a mission filter despite being present in the
+    graph. Already-serialized graph state from before that fix still has this shape."""
+
+    def __init__(self):
+        self.nodes = {
+            "sensor:legacy": {"id": "sensor:legacy", "kind": "sensor",
+                               "labels": {"missionId": MISSION_A}, "timestamp": 100},
+            "sensor:other-mission": {"id": "sensor:other-mission", "kind": "sensor",
+                                      "labels": {"missionId": MISSION_B}, "timestamp": 101},
+        }
+        self.edges = {}
+
+
+class LegacyCamelCaseLabelCompatibilityTests(unittest.TestCase):
+    def test_a_legacy_camelcase_missionid_label_still_matches_its_mission(self):
+        resolver = GraphSelectionResolver(_GraphWithLegacyCamelCaseLabel())
+        snap = resolver.snapshot(node_limit=50, edge_limit=50, mission_id=MISSION_A)
+        self.assertIn("sensor:legacy", {n["id"] for n in snap["nodes"]})
+
+    def test_a_legacy_camelcase_missionid_label_does_not_match_an_unrelated_mission(self):
+        resolver = GraphSelectionResolver(_GraphWithLegacyCamelCaseLabel())
+        snap = resolver.snapshot(node_limit=50, edge_limit=50, mission_id=MISSION_A)
+        self.assertNotIn("sensor:other-mission", {n["id"] for n in snap["nodes"]})
+
+
 class MissionFilterTests(unittest.TestCase):
     def test_omitted_mission_id_is_byte_for_byte_the_pre_existing_behavior(self):
         resolver = GraphSelectionResolver(_Graph())
