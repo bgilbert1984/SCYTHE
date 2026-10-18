@@ -19752,16 +19752,29 @@ if FLASK_AVAILABLE:
         """Bulk-ingest events from the Android plugin (or any source).
 
         Body: { "events": [ { timestamp, event_type, entity_id, session_id,
-                               lat, lon, alt, payload } ] }
+                               lat, lon, alt, payload, mission_id } ] }
+
+        mission_id is optional (ARR-API-2: Mission identity propagation). When present it is
+        validated against scythe_mission.is_valid_mission_id -- the same single source of truth
+        create_mission() already uses -- then resolved against the event's session_id via
+        ScytheDuckStore.append_batch's capture_sessions bookkeeping. A session's mission binding
+        is immutable once non-null: re-ingesting the same session_id under a conflicting
+        mission_id is rejected with 409, not silently accepted.
         """
         if _duck_store is None:
             return jsonify({'status': 'error', 'message': 'DuckDB store not available'}), 503
+        from scythe_mission import is_valid_mission_id
+        from scene_duckdb_store import SessionMissionConflictError
         data = request.get_json(force=True, silent=True) or {}
         raw  = data.get('events', [])
         if not raw:
             return jsonify({'status': 'error', 'message': 'no events'}), 400
         events = []
         for r in raw:
+            mission_id = r.get('mission_id')
+            if mission_id is not None and not is_valid_mission_id(mission_id):
+                return jsonify({'status': 'error',
+                                'message': 'mission_id must be a valid Mission identifier'}), 400
             events.append(_TacticalEvent(
                 timestamp  = int(r.get('timestamp', 0)),
                 event_type = str(r.get('event_type', 'unknown')),
@@ -19771,8 +19784,12 @@ if FLASK_AVAILABLE:
                 lon        = float(r.get('lon', 0.0)),
                 alt        = float(r.get('alt', 0.0)),
                 payload    = r.get('payload') or {},
+                mission_id = mission_id,
             ))
-        count = _duck_store.append_batch(events)
+        try:
+            count = _duck_store.append_batch(events)
+        except SessionMissionConflictError as exc:
+            return jsonify({'status': 'error', 'message': str(exc)}), 409
         return jsonify({'status': 'ok', 'ingested': count})
 
     @app.route('/api/events/query', methods=['GET', 'POST'])

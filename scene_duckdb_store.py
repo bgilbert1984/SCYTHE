@@ -34,7 +34,14 @@ EVENTS_SCHEMA = pa.schema([
     pa.field("alt",        pa.float64()),
     pa.field("payload",    pa.string()),       # JSON blob for extra fields
     pa.field("seq",        pa.int64()),        # monotonic insert order
+    pa.field("mission_id", pa.string()),       # denormalized from capture_sessions; nullable
 ])
+
+
+class SessionMissionConflictError(Exception):
+    """Raised when a capture_sessions row's mission_id would be rebound to a different,
+    non-null value. A session's mission binding, once non-null, is immutable -- mirrors
+    scythe_mission.Session's frozen invariant without persisting a Python Session object."""
 
 
 @dataclass
@@ -48,6 +55,8 @@ class TacticalEvent:
     alt: float = 0.0
     payload: Optional[Dict[str, Any]] = None
     seq: int = 0
+    mission_id: Optional[str] = None  # resolved via capture_sessions at append time; see
+                                       # ScytheDuckStore._resolve_or_create_session_locked
 
     def to_row(self) -> dict:
         return {
@@ -60,6 +69,7 @@ class TacticalEvent:
             "alt":        self.alt,
             "payload":    json.dumps(self.payload or {}),
             "seq":        self.seq,
+            "mission_id": self.mission_id,
         }
 
     @classmethod
@@ -74,6 +84,7 @@ class TacticalEvent:
             alt=row.get("alt", 0.0),
             payload=json.loads(row.get("payload") or "{}"),
             seq=row.get("seq", 0),
+            mission_id=row.get("mission_id"),
         )
 
 
@@ -112,12 +123,20 @@ class ScytheDuckStore:
                 lat        DOUBLE DEFAULT 0.0,
                 lon        DOUBLE DEFAULT 0.0,
                 alt        DOUBLE DEFAULT 0.0,
-                payload    VARCHAR DEFAULT '{}'
+                payload    VARCHAR DEFAULT '{}',
+                mission_id VARCHAR
             )
         """)
+        # Nullable, additive column for any .duckdb file created before this column existed --
+        # CREATE TABLE IF NOT EXISTS above is a no-op against an existing table, so pre-existing
+        # per-instance stores need this guarded ALTER (same pattern as map_cache.py).
+        cols = {row[1] for row in con.execute("PRAGMA table_info(events)").fetchall()}
+        if 'mission_id' not in cols:
+            con.execute("ALTER TABLE events ADD COLUMN mission_id VARCHAR")
         con.execute("CREATE INDEX IF NOT EXISTS idx_ts  ON events(timestamp)")
         con.execute("CREATE INDEX IF NOT EXISTS idx_eid ON events(entity_id)")
         con.execute("CREATE INDEX IF NOT EXISTS idx_sid ON events(session_id)")
+        con.execute("CREATE INDEX IF NOT EXISTS idx_mid ON events(mission_id)")
         con.execute("""
             CREATE TABLE IF NOT EXISTS snapshots (
                 snap_id     VARCHAR PRIMARY KEY,
@@ -137,46 +156,148 @@ class ScytheDuckStore:
                 session_id VARCHAR NOT NULL
             )
         """)
+        # capture_sessions: the operational persistence projection of scythe_mission.Session
+        # for live ingest. NOT a replacement domain object, and NOT the same concept as
+        # operator_session_manager.py's or scythe_pg.py's "sessions" tables (those are
+        # operator/login state) -- deliberately named differently to avoid that collision.
+        # Exists for exactly one purpose: resolving event ownership (session_id -> mission_id).
+        # Mission (scythe_mission.py)      -- semantic identity
+        #   -> Session (scythe_mission.py) -- semantic ownership (domain, validated only)
+        #     -> capture_sessions          -- operational persistence of that ownership
+        #       -> events.mission_id       -- denormalized query-acceleration column
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS capture_sessions (
+                session_id VARCHAR PRIMARY KEY,
+                mission_id VARCHAR,
+                started_ts BIGINT NOT NULL,
+                operator   VARCHAR,
+                metadata   VARCHAR DEFAULT '{}'
+            )
+        """)
         # Restore sequence counter
         row = con.execute("SELECT COALESCE(MAX(seq), -1) FROM events").fetchone()
         self._seq = (row[0] + 1) if row else 0
+
+    # ------------------------------------------------------------------
+    # Session resolution (capture_sessions)
+    # ------------------------------------------------------------------
+
+    def _resolve_or_create_session_locked(self, session_id: str,
+                                           mission_id: Optional[str] = None,
+                                           operator: Optional[str] = None) -> dict:
+        """Caller must already hold self._lock. Resolves session_id -> mission_id per the
+        lifecycle rule:
+          - no existing row            -> create one with the given mission_id (maybe None)
+          - existing row, mission_id is None/absent  -> inherit the stored value (no-op)
+          - existing row, mission_id matches stored   -> accept (no-op)
+          - existing row, mission_id differs (non-null stored, non-null incoming) -> reject
+
+        Raises SessionMissionConflictError on conflict. Never partially applies: either the
+        row ends up consistent, or this raises before any write."""
+        row = self._con.execute(
+            "SELECT mission_id FROM capture_sessions WHERE session_id = ?", [session_id]
+        ).fetchone()
+        if row is None:
+            self._con.execute(
+                "INSERT INTO capture_sessions VALUES (?,?,?,?,?)",
+                [session_id, mission_id, int(time.time() * 1000), operator, '{}']
+            )
+            return {"session_id": session_id, "mission_id": mission_id}
+
+        existing_mission_id = row[0]
+        if mission_id is None or mission_id == existing_mission_id:
+            return {"session_id": session_id, "mission_id": existing_mission_id}
+        if existing_mission_id is None:
+            self._con.execute(
+                "UPDATE capture_sessions SET mission_id = ? WHERE session_id = ?",
+                [mission_id, session_id]
+            )
+            # Backfill: events already inserted for this session while its mission binding
+            # was still NULL would otherwise disagree with capture_sessions once it's bound --
+            # the whole consistency invariant this denormalization exists for.
+            self._con.execute(
+                "UPDATE events SET mission_id = ? WHERE session_id = ? AND mission_id IS NULL",
+                [mission_id, session_id]
+            )
+            return {"session_id": session_id, "mission_id": mission_id}
+        raise SessionMissionConflictError(
+            f"session {session_id!r} is already bound to mission {existing_mission_id!r}, "
+            f"cannot rebind to {mission_id!r}"
+        )
+
+    def resolve_or_create_session(self, session_id: str, mission_id: Optional[str] = None,
+                                   operator: Optional[str] = None) -> dict:
+        with self._lock:
+            self._con.execute("BEGIN TRANSACTION")
+            try:
+                result = self._resolve_or_create_session_locked(session_id, mission_id, operator)
+                self._con.execute("COMMIT")
+                return result
+            except Exception:
+                self._con.execute("ROLLBACK")
+                raise
 
     # ------------------------------------------------------------------
     # Append
     # ------------------------------------------------------------------
 
     def append(self, event: TacticalEvent) -> int:
-        with self._lock:
-            event.seq = self._seq
-            self._seq += 1
-            r = event.to_row()
-            self._con.execute(
-                "INSERT INTO events VALUES (?,?,?,?,?,?,?,?,?)",
-                [r["seq"], r["timestamp"], r["event_type"], r["entity_id"],
-                 r["session_id"], r["lat"], r["lon"], r["alt"], r["payload"]]
-            )
-            return event.seq
+        self.append_batch([event])
+        return event.seq
 
     def append_batch(self, events: List[TacticalEvent]) -> int:
-        """Bulk insert via PyArrow — orders of magnitude faster than executemany."""
+        """Bulk insert via PyArrow — orders of magnitude faster than executemany.
+
+        Session ownership is resolved and frozen BEFORE any event row is inserted, in the
+        same transaction: no events row may ever exist whose session_id has no corresponding
+        capture_sessions row, and events.mission_id must always agree with capture_sessions
+        (the whole point of denormalizing it onto events for query acceleration). A conflicting
+        mission_id for an already-mission-bound session aborts the entire batch -- nothing is
+        inserted, not even for the other, non-conflicting sessions in the same batch."""
+        if not events:
+            return 0
         with self._lock:
-            rows = []
-            for e in events:
-                e.seq = self._seq
-                self._seq += 1
-                rows.append(e.to_row())
-            if not rows:
-                return 0
-            table = pa.Table.from_pylist(rows, schema=EVENTS_SCHEMA)
-            self._con.register("_batch_tmp", table)
-            self._con.execute("""
-                INSERT INTO events
-                SELECT seq, timestamp, event_type, entity_id,
-                       session_id, lat, lon, alt, payload
-                FROM _batch_tmp
-            """)
-            self._con.unregister("_batch_tmp")
-            return len(rows)
+            self._con.execute("BEGIN TRANSACTION")
+            try:
+                # First pass: reconcile multiple events for the same session_id within this
+                # one batch, so an internal conflict is caught before touching capture_sessions.
+                requested: Dict[str, Optional[str]] = {}
+                for e in events:
+                    prev = requested.get(e.session_id, None)
+                    if prev is not None and e.mission_id is not None and prev != e.mission_id:
+                        raise SessionMissionConflictError(
+                            f"batch contains conflicting mission_id values for session "
+                            f"{e.session_id!r}: {prev!r} vs {e.mission_id!r}"
+                        )
+                    if e.session_id not in requested or e.mission_id is not None:
+                        requested[e.session_id] = e.mission_id if e.mission_id is not None else prev
+
+                resolved: Dict[str, Optional[str]] = {}
+                for session_id, mission_id in requested.items():
+                    result = self._resolve_or_create_session_locked(session_id, mission_id)
+                    resolved[session_id] = result["mission_id"]
+
+                rows = []
+                for e in events:
+                    e.seq = self._seq
+                    self._seq += 1
+                    e.mission_id = resolved[e.session_id]
+                    rows.append(e.to_row())
+
+                table = pa.Table.from_pylist(rows, schema=EVENTS_SCHEMA)
+                self._con.register("_batch_tmp", table)
+                self._con.execute("""
+                    INSERT INTO events
+                    SELECT seq, timestamp, event_type, entity_id,
+                           session_id, lat, lon, alt, payload, mission_id
+                    FROM _batch_tmp
+                """)
+                self._con.unregister("_batch_tmp")
+                self._con.execute("COMMIT")
+                return len(rows)
+            except Exception:
+                self._con.execute("ROLLBACK")
+                raise
 
     # ------------------------------------------------------------------
     # Query
@@ -225,7 +346,7 @@ class ScytheDuckStore:
                     "SELECT * FROM events WHERE timestamp BETWEEN ? AND ? ORDER BY timestamp, seq",
                     [t0, t1]
                 ).fetchall()
-            cols = ["seq","timestamp","event_type","entity_id","session_id","lat","lon","alt","payload"]
+            cols = ["seq","timestamp","event_type","entity_id","session_id","lat","lon","alt","payload","mission_id"]
             return [TacticalEvent.from_row(dict(zip(cols, r))) for r in rows]
 
     def scrub(self, target_ts: int, session_id: str) -> List[TacticalEvent]:
@@ -235,7 +356,7 @@ class ScytheDuckStore:
                 "SELECT * FROM events WHERE session_id=? AND timestamp<=? ORDER BY timestamp, seq",
                 [session_id, target_ts]
             ).fetchall()
-            cols = ["seq","timestamp","event_type","entity_id","session_id","lat","lon","alt","payload"]
+            cols = ["seq","timestamp","event_type","entity_id","session_id","lat","lon","alt","payload","mission_id"]
             return [TacticalEvent.from_row(dict(zip(cols, r))) for r in rows]
 
     def stats(self) -> dict:
