@@ -144,17 +144,58 @@ since it would have to pick a casing convention to key the lookup on.
 code, and would be the first thing in this entire series actually exercised in a browser — which
 nothing before this document has been.
 
-## 6. What this draft does not do
+## 6. Host-dedup mission-attribution semantics (decided)
+
+**The question.** `pcap_ingest.py` deduplicates host nodes by IP across the whole engine
+(`_host_id(ip)` is purely IP-derived). Before this section, a host observed under a second
+mission kept only the first mission's label — a real, previously-recorded limitation (§3 of the
+original review that led to this document). Decided here, before writing the fix, per the
+recommendation that these semantics matter more than the implementation:
+
+- **Can one host participate in multiple missions? Yes.** A host is shared network
+  infrastructure, not something a mission owns. Two unrelated captures observing the same IP
+  address is normal, expected, and already happens in this pre-existing dedup design — the bug
+  was losing that fact, not the fact itself.
+- **Is attribution temporal? Append-only, not latest-wins, not expiring.** Once a mission has
+  observed a host, that fact is never removed. A later mission observing the same host *adds* to
+  the record; it never replaces or ages out an earlier one. This matches the project's established
+  evidence philosophy (`scythe_architectural_invariants.md` §6: "evidence is immutable; derived
+  products reference it, they do not replace it") applied to attribution instead of content.
+- **Evidentiary, not authoritative.** `mission_id` on a host node means "this host was *observed*
+  while collecting evidence under these missions," not "this host *belongs to* or *is controlled
+  by* this mission." A host's mission list is a custody fact, not an ownership claim.
+- **Observations and hosts are allowed to disagree, by design.** A session/`pcap_artifact` node
+  belongs to exactly one mission (the one whose collection produced it) and keeps the existing
+  **scalar** `mission_id` label. A host node can belong to many and uses a **list**. This is a
+  deliberate type asymmetry between node kinds, not an inconsistency — documented explicitly so a
+  future reader doesn't "fix" one into matching the other.
+- **Mission merge/split: out of scope, not answered.** No mission merge/split feature exists
+  anywhere in this codebase (operational or domain). Inventing an answer for a feature that
+  doesn't exist would be exactly the kind of premature design this series has avoided elsewhere;
+  left for whenever such a feature is actually proposed.
+
+**Mechanism.** A host node's `labels.mission_id` is a list that only ever grows:
+`record_observation`-style accumulation (`current + [mission_id]` if not already present), never
+a replacement. `HypergraphEngine.nodes_by_mission()` needed **no change** — `label_index` already
+indexes list-valued labels generically (confirmed directly in `hypergraph_engine.py`'s `add_node`/
+`update_node`, which loop over `isinstance(v, (list, tuple, set))` labels). The two places that did
+a direct `labels.get("mission_id") == mission_id` equality check against raw node dicts —
+`graphops_graph_resolver.py`'s resolver filter (PR #193) and `rf_scythe_api_server.py`'s mission
+predicates (PR #195) — needed a small fix to also match mission_id as a list member, not just an
+exact scalar equal.
+
+## 7. What this draft does not do
 
 No Cesium/JS file is edited. No new WebSocket scope type is implemented. No identifier
 reconciliation is performed or chosen. Nothing here was checked against a running browser or dev
 server — stated plainly rather than implied otherwise. No Gate C/Gate D protocol is touched; GATED3
 remains frozen and unauthorized.
 
-## 7. Open questions
+## 8. Open questions
 
 - §4 is resolved (Option B); the remaining questions are about what to build on top of that
   decision, not about the decision itself.
+- §6 is resolved (host attribution is evidentiary, append-only, list-valued for hosts only).
 - Whether RF-ingested observations (still unlabeled at all, per PR B's known gap) should ever be
   reachable through a mission-filtered browser view, or whether that gap needs closing first.
 - Real performance characteristics of a node-label-aware edge scope (§5.3) at the node/edge counts

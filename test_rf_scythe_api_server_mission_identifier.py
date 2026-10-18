@@ -63,6 +63,46 @@ def _run_probe(script, *extra_argv):
             env=dict(os.environ, PYTHONDONTWRITEBYTECODE="1"))
 
 
+# Host-dedup mission-attribution semantics (docs/research/scythe_mission_browser_rendering.md
+# section 6): a host observed under several missions carries a LIST-valued mission_id label,
+# not a scalar. mission_subgraph's filter must match either member of the list, same as
+# graphops_graph_resolver.py's _label_matches_mission.
+SHARED_HOST_PROBE = textwrap.dedent("""
+    import json, sys
+    sys.path.insert(0, sys.argv[1])
+    import rf_scythe_api_server as server
+
+    MISSION_A = "RFMAP-20261018-010"
+    MISSION_B = "RFMAP-20261018-011"
+
+    server.hypergraph_store.nodes = {
+        "host:shared": {"id": "host:shared", "labels": {"mission_id": [MISSION_A, MISSION_B]},
+                         "metadata": {}},
+    }
+    server.hypergraph_store.hyperedges = []
+
+    client = server.app.test_client()
+    resp_a = client.get(f"/api/missions/{MISSION_A}/subgraph")
+    resp_b = client.get(f"/api/missions/{MISSION_B}/subgraph")
+    resp_other = client.get("/api/missions/RFMAP-UNRELATED/subgraph")
+    print(json.dumps({
+        "a": [n["id"] for n in resp_a.get_json()["subgraph"]["nodes"]],
+        "b": [n["id"] for n in resp_b.get_json()["subgraph"]["nodes"]],
+        "other": [n["id"] for n in resp_other.get_json()["subgraph"]["nodes"]],
+    }))
+""")
+
+
+class SharedHostListValuedMissionTests(unittest.TestCase):
+    def test_a_list_valued_mission_id_matches_every_mission_in_it_and_no_others(self):
+        proc = _run_probe(SHARED_HOST_PROBE)
+        self.assertEqual(proc.returncode, 0, proc.stderr[-4000:])
+        result = json.loads(proc.stdout.strip().splitlines()[-1])
+        self.assertEqual(result["a"], ["host:shared"])
+        self.assertEqual(result["b"], ["host:shared"])
+        self.assertEqual(result["other"], [])
+
+
 # Option B link: an explicitly supplied mission_id must be valid for a domain
 # scythe_mission.Mission too, so a later Mission(mission_id=...) referencing the same
 # operational mission is always constructible.
