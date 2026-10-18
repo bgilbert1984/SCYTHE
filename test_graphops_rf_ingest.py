@@ -58,15 +58,21 @@ class MissionIdTests(unittest.TestCase):
         frame = validate_measured_rf_frame({**_frame(), "mission_id": m.mission_id})
         self.assertEqual(frame["mission_id"], m.mission_id)
 
-    def test_end_to_end_ingestion_is_unaffected_by_a_present_mission_id(self):
+    def test_end_to_end_ingestion_persists_a_present_mission_id(self):
+        # PR B's gap (RFObservationStore did not read mission_id; the stored observation
+        # carried no trace of it) is now closed -- see rf_bridge.py's RFObservation.mission_id
+        # and the local invariants crosswalk.
         store = RFObservationStore(min_snr_db=1.0, cooldown_s=0.0)
         frame = validate_measured_rf_frame({**_frame(), "mission_id": self.VALID_MISSION_ID})
         result = ingest_measured_rf(store, frame)
         self.assertEqual(result["status"], "accepted")
-        # What this does not do (by design, this PR): RFObservationStore does not read
-        # mission_id, and the stored RFObservation has no mission_id field -- the returned
-        # observation carries no trace of it. Threading it that far is separate, later work.
-        self.assertNotIn("mission_id", result["observation"])
+        self.assertEqual(result["observation"]["mission_id"], self.VALID_MISSION_ID)
+
+    def test_end_to_end_ingestion_without_mission_id_leaves_it_null(self):
+        store = RFObservationStore(min_snr_db=1.0, cooldown_s=0.0)
+        result = ingest_measured_rf(store, validate_measured_rf_frame(_frame()))
+        self.assertEqual(result["status"], "accepted")
+        self.assertIsNone(result["observation"]["mission_id"])
 
 
 if __name__ == "__main__":
