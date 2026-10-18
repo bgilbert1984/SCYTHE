@@ -5546,6 +5546,60 @@ if FLASK_AVAILABLE:
             logger.error(f"Fusion Mission Demo Error: {e}")
             return jsonify({'status':'error', 'message': str(e)}), 500
 
+    @app.route('/api/missions/<mission_id>/events', methods=['GET'])
+    def mission_events(mission_id):
+        """Mission-scoped event read (ARR-API-3). Paginated, stable seq ordering. Deliberately
+        narrow: no filtering beyond mission scope (no entity/type/confidence/bbox) -- those can
+        be added later if needed, per the ARR-API-3 review."""
+        if _duck_store is None:
+            return jsonify({'status': 'error', 'message': 'DuckDB store not available'}), 503
+        try:
+            limit = max(1, min(int(request.args.get('limit', 100)), 1000))
+            offset = max(0, int(request.args.get('offset', 0)))
+        except (TypeError, ValueError):
+            return jsonify({'status': 'error', 'message': 'limit/offset must be integers'}), 400
+        try:
+            from dataclasses import asdict
+            events = _duck_store.events_for_mission(mission_id, limit=limit, offset=offset)
+            response = {
+                'status': 'ok',
+                'mission_id': mission_id,
+                'events': [asdict(e) for e in events],
+                'limit': limit,
+                'offset': offset,
+            }
+            if request.args.get('include_total') in ('1', 'true', 'True'):
+                response['total'] = _duck_store.count_events_for_mission(mission_id)
+            return jsonify(response)
+        except Exception as e:
+            logger.error(f"mission_events error: {e}")
+            return jsonify({'status': 'error', 'message': str(e)}), 500
+
+    @app.route('/api/missions/<mission_id>/export', methods=['GET'])
+    def mission_export(mission_id):
+        """Mission-scoped Parquet export (ARR-API-3). This is an export operation (query ->
+        on-demand Parquet artifact), not a storage primitive -- it must not grow into block
+        registries, auto-flush policies, or retention management; that path was explicitly
+        retired in PRs #203/#204 and this route is not its resurrection.
+
+        ?t0=<unix_ms>&t1=<unix_ms> (optional, default: full range to now)
+        """
+        if _duck_store is None:
+            return jsonify({'status': 'error', 'message': 'DuckDB store not available'}), 503
+        from flask import send_file
+        try:
+            t0 = int(request.args.get('t0', 0))
+            t1 = int(request.args.get('t1', int(time.time() * 1000)))
+            fpath = _duck_store.export_parquet_block(t0, t1, mission_id=mission_id)
+            return send_file(str(fpath),
+                             mimetype='application/octet-stream',
+                             as_attachment=True,
+                             download_name=fpath.name)
+        except ValueError as exc:
+            return jsonify({'status': 'error', 'message': str(exc)}), 404
+        except Exception as exc:
+            return jsonify({'status': 'error', 'message': str(exc)}), 500
+
     @app.route('/api/missions/<mission_id>/subgraph', methods=['GET'])
     def mission_subgraph(mission_id):
         try:
@@ -19798,6 +19852,10 @@ if FLASK_AVAILABLE:
 
         GET  ?sql=SELECT+...
         POST { "sql": "SELECT ..." }
+
+        For Mission-scoped reads, prefer GET /api/missions/<id>/events -- this route's
+        unscoped arbitrary SQL is a pending ARR security-review item (see the ARR status
+        memory), not something this comment fixes.
         """
         if _duck_store is None:
             return jsonify({'status': 'error', 'message': 'DuckDB store not available'}), 503

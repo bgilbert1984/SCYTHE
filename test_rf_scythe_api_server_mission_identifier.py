@@ -245,6 +245,73 @@ class EventsIngestMissionIdTests(unittest.TestCase):
         self.assertEqual(result["conflict_code"], 409, result["conflict_body"])
 
 
+# ARR-API-3: mission-scoped events/export, built on PR 2's ingest + capture_sessions.
+MISSION_EVENTS_EXPORT_PROBE = textwrap.dedent("""
+    import json, sys
+    sys.path.insert(0, sys.argv[1])
+    import rf_scythe_api_server as server
+
+    client = server.app.test_client()
+
+    MISSION = "RFMAP-20261018-060"
+    OTHER = "RFMAP-20261018-061"
+
+    def ingest(session_id, mission_id, entity_id):
+        event = {"timestamp": 1700000000000, "event_type": "probe",
+                  "entity_id": entity_id, "session_id": session_id, "mission_id": mission_id}
+        return client.post("/api/events/ingest", json={"events": [event]})
+
+    ingest("sess-x1", MISSION, "e1")
+    ingest("sess-x1", MISSION, "e2")
+    ingest("sess-x2", OTHER, "e3")
+
+    events_resp = client.get(f"/api/missions/{MISSION}/events")
+    paged_resp = client.get(f"/api/missions/{MISSION}/events?limit=1&offset=1")
+    total_resp = client.get(f"/api/missions/{MISSION}/events?include_total=1")
+    other_resp = client.get(f"/api/missions/{OTHER}/events")
+    export_resp = client.get(f"/api/missions/{MISSION}/export")
+
+    print(json.dumps({
+        "events_body": events_resp.get_json(),
+        "paged_body": paged_resp.get_json(),
+        "total_body": total_resp.get_json(),
+        "other_entity_ids": [e["entity_id"] for e in other_resp.get_json()["events"]],
+        "export_status": export_resp.status_code,
+        "export_content_length": len(export_resp.data),
+        "export_filename": export_resp.headers.get("Content-Disposition", ""),
+    }))
+""")
+
+
+class MissionEventsAndExportTests(unittest.TestCase):
+    def test_mission_events_returns_only_that_mission_s_events(self):
+        proc = _run_probe(MISSION_EVENTS_EXPORT_PROBE)
+        self.assertEqual(proc.returncode, 0, proc.stderr[-4000:])
+        result = json.loads(proc.stdout.strip().splitlines()[-1])
+        ids = {e["entity_id"] for e in result["events_body"]["events"]}
+        self.assertEqual(ids, {"e1", "e2"})
+        self.assertEqual(result["other_entity_ids"], ["e3"])
+
+    def test_mission_events_pagination_and_total(self):
+        proc = _run_probe(MISSION_EVENTS_EXPORT_PROBE)
+        self.assertEqual(proc.returncode, 0, proc.stderr[-4000:])
+        result = json.loads(proc.stdout.strip().splitlines()[-1])
+        self.assertEqual(len(result["paged_body"]["events"]), 1)
+        self.assertEqual(result["paged_body"]["limit"], 1)
+        self.assertEqual(result["paged_body"]["offset"], 1)
+        self.assertEqual(result["total_body"]["total"], 2)
+        self.assertNotIn("total", result["events_body"])
+
+    def test_mission_export_returns_a_self_identifying_parquet_file(self):
+        proc = _run_probe(MISSION_EVENTS_EXPORT_PROBE)
+        self.assertEqual(proc.returncode, 0, proc.stderr[-4000:])
+        result = json.loads(proc.stdout.strip().splitlines()[-1])
+        self.assertEqual(result["export_status"], 200, result)
+        self.assertGreater(result["export_content_length"], 0)
+        self.assertIn("mission-RFMAP-20261018-060-events-", result["export_filename"])
+        self.assertIn(".parquet", result["export_filename"])
+
+
 class MissionSubgraphIdentifierTests(unittest.TestCase):
     def test_both_identifier_conventions_are_found_in_labels_and_metadata(self):
         proc = _run_probe(SUBGRAPH_PROBE)

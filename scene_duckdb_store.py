@@ -102,11 +102,21 @@ class ScytheDuckStore:
     def __init__(self, db_path: str = "/home/spectrcyde/NerfEngine/metrics_logs/scythe_events.duckdb",
                  parquet_dir: str = "/home/spectrcyde/NerfEngine/metrics_logs/parquet_blocks"):
         self._lock = threading.Lock()
+        # Resolve to absolute paths once, here, rather than leaving relative Path objects to be
+        # re-resolved against the process's CWD on every later file operation. A relative
+        # parquet_dir (e.g. rf_scythe_api_server.py's default "metrics_logs/parquet_blocks")
+        # was observed resolving inconsistently once the Flask app's eventlet monkey-patching
+        # was active -- export_parquet_block() writes landed at the repo root instead of the
+        # per-instance data dir, a pre-existing bug surfaced while testing mission-scoped
+        # export, not introduced by it.
+        if db_path != ":memory:":
+            db_path = str(Path(db_path).resolve())
         self._db_path = db_path
-        self._parquet_dir = Path(parquet_dir)
+        self._parquet_dir = Path(parquet_dir).resolve()
         self._parquet_dir.mkdir(parents=True, exist_ok=True)
 
-        Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+        if db_path != ":memory:":
+            Path(db_path).parent.mkdir(parents=True, exist_ok=True)
         self._con = duckdb.connect(db_path)
         self._seq = 0
         self._init_schema()
@@ -334,20 +344,39 @@ class ScytheDuckStore:
                 result.append(row)
             return result
 
-    def events_in_range(self, t0: int, t1: int, session_id: Optional[str] = None) -> List[TacticalEvent]:
+    def events_in_range(self, t0: int, t1: int, session_id: Optional[str] = None,
+                         mission_id: Optional[str] = None) -> List[TacticalEvent]:
         with self._lock:
+            clauses = ["timestamp BETWEEN ? AND ?"]
+            params: List[Any] = [t0, t1]
             if session_id:
-                rows = self._con.execute(
-                    "SELECT * FROM events WHERE timestamp BETWEEN ? AND ? AND session_id=? ORDER BY timestamp, seq",
-                    [t0, t1, session_id]
-                ).fetchall()
-            else:
-                rows = self._con.execute(
-                    "SELECT * FROM events WHERE timestamp BETWEEN ? AND ? ORDER BY timestamp, seq",
-                    [t0, t1]
-                ).fetchall()
+                clauses.append("session_id = ?")
+                params.append(session_id)
+            if mission_id:
+                clauses.append("mission_id = ?")
+                params.append(mission_id)
+            sql = f"SELECT * FROM events WHERE {' AND '.join(clauses)} ORDER BY timestamp, seq"
+            rows = self._con.execute(sql, params).fetchall()
             cols = ["seq","timestamp","event_type","entity_id","session_id","lat","lon","alt","payload","mission_id"]
             return [TacticalEvent.from_row(dict(zip(cols, r))) for r in rows]
+
+    def events_for_mission(self, mission_id: str, limit: int = 100, offset: int = 0) -> List[TacticalEvent]:
+        """Mission-scoped, paginated read (ARR-API-3). Stable seq ordering -- no time range
+        required, unlike events_in_range, since a mission's events may span any time window."""
+        with self._lock:
+            rows = self._con.execute(
+                "SELECT * FROM events WHERE mission_id = ? ORDER BY seq LIMIT ? OFFSET ?",
+                [mission_id, limit, offset]
+            ).fetchall()
+            cols = ["seq","timestamp","event_type","entity_id","session_id","lat","lon","alt","payload","mission_id"]
+            return [TacticalEvent.from_row(dict(zip(cols, r))) for r in rows]
+
+    def count_events_for_mission(self, mission_id: str) -> int:
+        with self._lock:
+            row = self._con.execute(
+                "SELECT COUNT(*) FROM events WHERE mission_id = ?", [mission_id]
+            ).fetchone()
+            return row[0] if row else 0
 
     def scrub(self, target_ts: int, session_id: str) -> List[TacticalEvent]:
         """Return all events for a session up to target_ts, time-ordered."""
@@ -403,12 +432,19 @@ class ScytheDuckStore:
     # Parquet cold storage
     # ------------------------------------------------------------------
 
-    def export_parquet_block(self, t0: int, t1: int, session_id: Optional[str] = None) -> Path:
+    def export_parquet_block(self, t0: int, t1: int, session_id: Optional[str] = None,
+                              mission_id: Optional[str] = None) -> Path:
         """
         Export a time-range of events to a Parquet file with ZSTD compression.
         Registers the block in the parquet_index table.
+
+        mission_id (ARR-API-3) filters to that mission's events and names the file
+        self-identifyingly (mission-<id>-events-<UTC timestamp>.parquet) rather than the
+        generic block_* name -- the artifact should remain interpretable on its own if it
+        later becomes evidence material. mission_id, session_id, and timestamp are always
+        present as columns in the exported dataset (EVENTS_SCHEMA), regardless of filename.
         """
-        events = self.events_in_range(t0, t1, session_id)
+        events = self.events_in_range(t0, t1, session_id, mission_id)
         if not events:
             raise ValueError(f"No events in range [{t0}, {t1}]")
 
@@ -416,8 +452,14 @@ class ScytheDuckStore:
         table = pa.Table.from_pylist(rows, schema=EVENTS_SCHEMA)
 
         block_id = str(uuid.uuid4())[:8]
-        sid_tag = (session_id or "all")[:16]
-        fname = f"block_{sid_tag}_{t0}_{t1}_{block_id}.parquet"
+        if mission_id:
+            # mission_id is always filesystem-safe (scythe_mission._ID_RE: [A-Za-z0-9._-],
+            # max 128 chars) by the time it reaches here, so it's used verbatim, not truncated.
+            ts_tag = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+            fname = f"mission-{mission_id}-events-{ts_tag}.parquet"
+        else:
+            sid_tag = (session_id or "all")[:16]
+            fname = f"block_{sid_tag}_{t0}_{t1}_{block_id}.parquet"
         fpath = self._parquet_dir / fname
 
         pq.write_table(
