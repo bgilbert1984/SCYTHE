@@ -61,6 +61,11 @@ def undeclared_effects(tools) -> list[str]:
 
 AUTO_APPROVE = "auto_approve"
 REQUIRES_REVIEW = "requires_review"
+# NOTE: REQUIRES_REVIEW currently means automated policy evaluation only.  No
+# independent (second-principal) approval is required: the proposal is approved
+# by the mutation checks in mcp_safety (caller-supplied confidence, executor
+# trust, graph stability), and the proposer can execute it.  The name is kept
+# for when a second-principal rule is introduced.  See issue #228.
 
 
 def approval_policy(tool) -> str:

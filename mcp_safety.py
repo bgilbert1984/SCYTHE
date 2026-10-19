@@ -199,6 +199,9 @@ class DualAgentOrchestrator:
             self.drift_gate.record_proposal(was_accepted=True)
         else:
             # Mutating, undeclared or unknown tool: check Executor limits
+            # This is automated policy evaluation, not independent review: the
+            # confidence is supplied by the caller and nothing here requires a
+            # principal other than the proposer.  See issue #228.
             approval = self._check_mutation_approval(tool_name, params, confidence)
             proposal["status"] = approval["status"]
             if tool is None:
