@@ -76,6 +76,7 @@ class MCPHandler:
             try:
                 from mcp_orchestrator import AliasMCPOrchestrator
                 self._orchestrator = AliasMCPOrchestrator(engine)
+                self._orchestrator.dual_agent.tool_resolver = self._resolve_tool
                 logger.info("[mcp] Orchestrator initialized (dual agent mode)")
             except Exception as e:
                 logger.warning("[mcp] Orchestrator initialization failed: %s", e)
@@ -213,6 +214,17 @@ class MCPHandler:
 
         remote_stream_manager.connect(endpoint, token)
         return {"connected": True, "endpoint": endpoint, "type": stype}
+
+    def _resolve_tool(self, name: str):
+        """The tool object carrying declared metadata (effect, mutates_state).
+
+        Registry tools are looked up in the registry, because ``self._tools``
+        holds compatibility wrappers for them that do not carry that metadata.
+        """
+        registry = getattr(self, "_registry", None)
+        if registry is not None and name in registry._tools:
+            return registry._tools[name]
+        return self._tools.get(name)
 
     def _handle_tools_call(self, params: Dict[str, Any]):
         name = params.get("name", "")

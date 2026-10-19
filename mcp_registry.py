@@ -9,6 +9,8 @@ Features:
   - Dynamic introspection (tools/schema endpoint)
 """
 from typing import Any, Callable, Dict, Optional
+
+from mcp_effects import READ_ONLY
 import time
 import logging
 import uuid
@@ -684,6 +686,7 @@ def build_registry(engine) -> Dict[str, Any]:
         run=_export_graph_snapshot,
         mutates_state=False,
         rate_limit=None,
+        effect=READ_ONLY,
     ))
 
     reg.register(Tool(
@@ -713,6 +716,7 @@ def build_registry(engine) -> Dict[str, Any]:
         run=_query_hot_entities,
         mutates_state=False,
         rate_limit=None,
+        effect=READ_ONLY,
     ))
 
     reg.register(Tool(
@@ -735,6 +739,7 @@ def build_registry(engine) -> Dict[str, Any]:
         run=_query_recent_edges,
         mutates_state=False,
         rate_limit=None,
+        effect=READ_ONLY,
     ))
 
     reg.register(Tool(
@@ -758,6 +763,7 @@ def build_registry(engine) -> Dict[str, Any]:
         run=_query_scope_stats,
         mutates_state=False,
         rate_limit=None,
+        effect=READ_ONLY,
     ))
 
     reg.register(Tool(
@@ -926,6 +932,7 @@ def build_registry(engine) -> Dict[str, Any]:
         run=_get_engine_metrics,
         mutates_state=False,
         rate_limit=None,
+        effect=READ_ONLY,
     ))
 
     reg.register(Tool(

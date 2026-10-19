@@ -10,7 +10,7 @@ from urllib.error import URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
-from mcp_effects import HARDWARE_CONTROL
+from mcp_effects import HARDWARE_CONTROL, READ_ONLY
 from mcp_registry import Tool
 from rf_bridge import get_rf_bridge, get_rf_observation_store, get_rf_sparse_analyzer
 
@@ -221,7 +221,8 @@ def _read_tools():
         Tool("rf_bridge_status", "Return SDR++ edge bridge and RF evidence-store status.", obj, obj, status),
         Tool("rf_spectrum_snapshot", "Return the latest bounded FFT summary; raw IQ is never exposed.",
              {"type": "object", "properties": {"include_bins": {"type": "boolean"}}, "additionalProperties": False}, obj, snapshot),
-        Tool("rf_observations_query", "Query timestamped RF observations with stable evidence IDs.", query_schema, obj, query),
+        Tool("rf_observations_query", "Query timestamped RF observations with stable evidence IDs.", query_schema, obj, query,
+             effect=READ_ONLY),
         Tool("rf_correlate_graph", "Time-correlate RF observations with graph edges; results are explicitly inferred.", correlate_schema, obj, correlate),
         Tool("rf_insight_context", "Return compact, evidence-labelled RF context suitable for a local model.",
              {"type": "object", "properties": {"window_s": {"type": "number", "minimum": 0, "maximum": 86400},
@@ -230,7 +231,7 @@ def _read_tools():
         Tool("rf_sparse_status", "Return residual-window stats and derived supports. Peak-track plus OMP-assisted periodic amplitude; no range/AoA.",
              obj, obj, sparse_status),
         Tool("rf_sparse_supports_query", "Query derived RF model components. Evidence class is DERIVED_INFERENCE.",
-             sparse_query_schema, obj, sparse_query),
+             sparse_query_schema, obj, sparse_query, effect=READ_ONLY),
         Tool("rf_sparse_insight_context", "Return compact sparse-support context for local Ollama. No IQ, no hardware authority.",
              {"type": "object", "properties": {"limit": {"type": "integer", "minimum": 1, "maximum": 12}},
               "additionalProperties": False}, obj, sparse_context),
