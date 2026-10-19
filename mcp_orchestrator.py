@@ -69,7 +69,13 @@ class AliasMCPOrchestrator:
         self.engine = engine
 
         # Registry (tool definitions + execution)
-        self.registry = build_registry(engine) if isinstance(build_registry(engine), Registry) else Registry()
+        # build_registry returns {tool_name: Tool, '__registry__': Registry}; take the
+        # Registry out of it (MCPHandler does the same for its own registry).
+        built = build_registry(engine)
+        reg = built.get("__registry__") if isinstance(built, dict) else built
+        self.registry = reg if isinstance(reg, Registry) else Registry()
+        if not getattr(self.registry, "_tools", None):
+            logger.error("[orchestrator] registry is empty: no tool can be executed through it")
 
         # Safety layer
         self.dual_agent = DualAgentOrchestrator(default_mutation_budget=3)
