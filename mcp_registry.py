@@ -142,12 +142,16 @@ class Registry:
             raise
 
         # 3. Execute
+        from control_audit import begin_execution, finish_execution
+        audit = begin_execution(tool, params)   # None unless auditing is configured and the tool mutates
         try:
             result = tool.run(engine=engine, params=params or {})
         except Exception as e:
             self._metrics["errors"][name] += 1
             logger.exception("[mcp.registry] tool failed: %s", name)
+            finish_execution(audit, error=e)
             raise
+        finish_execution(audit, result_summary=self._summarize(result))
 
         # record invocation
         self._metrics["invocations"][name] += 1

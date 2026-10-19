@@ -4723,6 +4723,17 @@ if FLASK_AVAILABLE:
         except Exception as e:
             logger.warning(f"[WARN] WriteBus initialization failed: {e}")
 
+        # Control-action audit (append-only SQLite, separate from the graph and WriteBus).
+        # The path is resolved on first write so --data-dir, applied later in main(), is honoured.
+        try:
+            import control_audit
+            control_audit.configure(lambda: os.path.join(_data_dir(), "control_audit.sqlite3"),
+                                    deployment_id=lambda: app.config.get('SCYTHE_INSTANCE_ID'))
+            logger.info("[OK] Control audit configured (retention %s days)",
+                        control_audit.get_store().retention_days)
+        except Exception as e:
+            logger.warning(f"[WARN] Control audit unavailable: {e}")
+
         # SensorRegistry: clean chokepoint (only module allowed to touch BOTH
         # OperatorSessionManager.publish_to_room and HypergraphEngine.add_node/add_edge)
         try:
