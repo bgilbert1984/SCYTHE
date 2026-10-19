@@ -60,6 +60,8 @@ from collections import Counter, defaultdict
 from contextlib import contextmanager
 from typing import Any, Dict, List, Optional
 
+from mcp_effects import LOCAL_STATE
+
 logger = logging.getLogger(__name__)
 
 # ─── constants ────────────────────────────────────────────────────────────────
@@ -3967,6 +3969,12 @@ def register_graphops_tools(engine, mcp_handler, embedding_engine=None,
             },
         },
         fn=_explain_coverage_cell,
+        # Without an evidence_id this admits the caller's sample into the RF solver
+        # evidence store, which notifies subscribers (the autopilot queues a
+        # suggestion).  Admitting evidence changes what later analysis sees, so
+        # it is a state change even though it never touches the graph.
+        mutates_state=True,
+        effect=LOCAL_STATE,
     )
 
     def _directive(params: dict) -> dict:

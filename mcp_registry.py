@@ -30,7 +30,10 @@ class Tool:
         mutates_state: bool = False,
         rate_limit: Optional[float] = None,
         required_mode: str | None = None,
+        effect: Optional[str] = None,
     ):
+        from mcp_effects import resolve_effect
+        self.effect, self.effect_declared = resolve_effect(name, mutates_state, effect)
         self.name = name
         self.description = description
         self.parameters = parameters  # JSON Schema for input validation
@@ -54,6 +57,8 @@ class Tool:
             "parameters": self.parameters,
             "returns": self.returns,
             "mutates_state": self.mutates_state,
+            "effect": self.effect,
+            "effect_declared": self.effect_declared,
             "rate_limit": self.rate_limit,
             "required_mode": self.required_mode,
         }

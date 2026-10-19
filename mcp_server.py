@@ -27,7 +27,9 @@ MCP_SERVER_VERSION = "1.3.0"
 
 
 class ToolDef:
-    def __init__(self, name, description, input_schema, fn, mutates_state=False):
+    def __init__(self, name, description, input_schema, fn, mutates_state=False, effect=None):
+        from mcp_effects import resolve_effect
+        self.effect, self.effect_declared = resolve_effect(name, mutates_state, effect)
         self.name = name
         self.description = description
         self.input_schema = input_schema
