@@ -1,0 +1,26 @@
+R4 FULL-RUN PREFLIGHT RECORD  (mode CHECK_ONLY; run_job.sh NOT started; job directory NOT created)
+ATTEMPT_ID_CANDIDATE: R4FULL-20261014T021655Z-2b2e3251b678-SCYTHE-2b6f4cd2  (bound to package 2b2e3251b678a5e83735ee663176f7763482a6948a7d5cb57f244dac1142874a, host SCYTHE/aaf25e41-e4bf-4c1a-81c9-e978cb25e860, job dir $HOME/r4_full_run_job_20261013)
+TIMESTAMP_UTC: 2026-10-14T02:16:56+00:00
+INTERPRETER: given $HOME/SCYTHE/.venv/bin/python resolved /usr/bin/python3.12 binary sha256 8c515a32b1a5d3d807e53359901a4d09ec06819b488736641aabd6a12eefba63 numpy 2.5.1 at $HOME/SCYTHE/.venv/lib64/python3.12/site-packages/numpy/__init__.py
+
+PASS    1 archive SHA-256 equals the declared package digest  2b2e3251b678a5e83735ee663176f7763482a6948a7d5cb57f244dac1142874a
+PASS    1b safe extraction (no absolute paths, '..', links, devices)  []
+PASS    1c sha256sum -c SHA256SUMS in the extracted package  28 OK
+PASS    1d runner and harness digests equal the declared ones  
+PASS    2 PYTHON is an absolute executable path  $HOME/SCYTHE/.venv/bin/python
+PASS    2b Python is exactly 3.12.13 and NumPy exactly 2.5.1 (otherwise the run is refused)  [3, 12, 13] numpy 2.5.1
+PASS    3 job directory is an absolute path that does not exist  $HOME/r4_full_run_job_20261013
+PASS    3b job directory parent exists and is writable  $HOME
+PASS    3c job directory is not inside the package or the record directory  
+PASS    3d at least 10 GB free on the job filesystem (measured, not inferred)  948.5 GB at $HOME
+PASS    3e at least 10 GB free on the TMPDIR filesystem  948.5 GB at /tmp
+PASS    3f at least 4 GB available memory  7.8 GB
+PASS    4 verification repository checkout is clean  d5ba1f15348f968dadf8864dc87d9fe1b978dac0
+FAIL    4a package verifier: the frozen ARCHIVE against its recorded source commit  rc 2
+PASS    4b evidence verifier: the COMMITTED HISTORICAL EVIDENCE (not the package) from a pristine archive  COMMITTED_EVIDENCE_INTEGRITY: VERIFIED | ORIGINAL_MANIFEST_ENTRIES_VS_RECORDED_ORIGINAL_DIGESTS: CONSISTENT | ORIGINAL_JOB_INTEGRITY: NOT_REVERIFIED_FROM_THIS_CHECKOUT | EVIDENCE_VERIFICATION: PASS
+PASS    5 AC power reported online (where the platform reports it)  online flags ['1']
+PENDING 5b host powered and awake for the whole window; sleep, hibernate and lid-close actions suspended (not detectable from WSL)  OPERATOR CONFIRMATION REQUIRED before any launch
+PASS    6 no competing r4 job process is running  []
+
+PREFLIGHT_VERDICT: FAIL
+LAUNCH: NOT_PERFORMED (a launch needs its own explicit authorization and a fresh LAUNCH-mode record)

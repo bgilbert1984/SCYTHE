@@ -24,6 +24,57 @@ class GraphOpsRFIngestTests(unittest.TestCase):
             validate_measured_rf_frame({**self.frame, "peak_frequency_hz": float("nan")})
 
 
+class MissionIdTests(unittest.TestCase):
+    """PR B: mission_id is optional and additive. No RF logic changes; omitting it must
+    reproduce the exact pre-PR-B frame shape."""
+
+    VALID_MISSION_ID = "RFMAP-20261017-001"
+
+    def test_omitted_mission_id_produces_the_unchanged_pre_pr_b_frame_shape(self):
+        frame = validate_measured_rf_frame(_frame())
+        self.assertNotIn("mission_id", frame)
+        self.assertEqual(set(frame), {"sensor_id", "sequence", "timestamp", "center_frequency_hz",
+                                       "peak_frequency_hz", "sample_rate_hz", "peak_dbfs",
+                                       "noise_floor_dbfs", "observation_origin"})
+
+    def test_valid_mission_id_is_accepted_and_carried_through(self):
+        frame = validate_measured_rf_frame({**_frame(), "mission_id": self.VALID_MISSION_ID})
+        self.assertEqual(frame["mission_id"], self.VALID_MISSION_ID)
+
+    def test_malformed_mission_id_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "mission_id must be a valid Mission identifier"):
+            validate_measured_rf_frame({**_frame(), "mission_id": "has a space"})
+        with self.assertRaisesRegex(ValueError, "mission_id must be a valid Mission identifier"):
+            validate_measured_rf_frame({**_frame(), "mission_id": ""})
+        with self.assertRaisesRegex(ValueError, "mission_id must be a valid Mission identifier"):
+            validate_measured_rf_frame({**_frame(), "mission_id": 12345})
+
+    def test_mission_id_agrees_with_scythe_mission_s_own_rule(self):
+        # Single source of truth, not a duplicated pattern: whatever scythe_mission.Mission
+        # itself would accept as a mission_id, this module accepts too.
+        import scythe_mission
+        m = scythe_mission.Mission(mission_id=self.VALID_MISSION_ID, mission_type="RF_SURVEY",
+                                    purpose="test", operator="test")
+        frame = validate_measured_rf_frame({**_frame(), "mission_id": m.mission_id})
+        self.assertEqual(frame["mission_id"], m.mission_id)
+
+    def test_end_to_end_ingestion_persists_a_present_mission_id(self):
+        # PR B's gap (RFObservationStore did not read mission_id; the stored observation
+        # carried no trace of it) is now closed -- see rf_bridge.py's RFObservation.mission_id
+        # and the local invariants crosswalk.
+        store = RFObservationStore(min_snr_db=1.0, cooldown_s=0.0)
+        frame = validate_measured_rf_frame({**_frame(), "mission_id": self.VALID_MISSION_ID})
+        result = ingest_measured_rf(store, frame)
+        self.assertEqual(result["status"], "accepted")
+        self.assertEqual(result["observation"]["mission_id"], self.VALID_MISSION_ID)
+
+    def test_end_to_end_ingestion_without_mission_id_leaves_it_null(self):
+        store = RFObservationStore(min_snr_db=1.0, cooldown_s=0.0)
+        result = ingest_measured_rf(store, validate_measured_rf_frame(_frame()))
+        self.assertEqual(result["status"], "accepted")
+        self.assertIsNone(result["observation"]["mission_id"])
+
+
 if __name__ == "__main__":
     unittest.main()
 

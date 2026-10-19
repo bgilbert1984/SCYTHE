@@ -1,0 +1,12 @@
+R4 FULL LOCAL RUN (single host) — EXECUTION RECORD
+ATTEMPT_ID: R4FULL-20261014T023003Z-2b2e3251b678-SCYTHE-30d8a2f0   PACKAGE: 2b2e3251b678a5e83735ee663176f7763482a6948a7d5cb57f244dac1142874a   RUNNER: unmodified run_job.sh
+WINDOW (local PDT): 2026-10-13 19:30:11 -> 19:55:02 (about 25 min); controls 88 tests/0 failures; 36/36 fixture hashes; index pin verified; 37 files
+COMPUTATION: COMPLETED (harness rc 0, gate rc 0)     CUSTODY: SEALED     INDEPENDENT VERIFICATION: VERIFIED (verify_job.py PASS; separate inventory check PASS: 150 files outside holdout, 37/37 fixtures)     JOB_ACCEPTED: YES
+PACKAGE AFTER RUN: sha256sum -c clean; no bytecode
+IDENTITY_AND_NAMESPACE: VERIFIED
+PRODUCTION RELATIONS (Phase A, 36 fixtures, 13 detector relations): RELATION_SATISFIED in every cell; 0 violated, 0 ambiguity; persistence relations (5) satisfied on 52 candidates each
+LAYER A: detector not involved; computed-exactly-on-boundary bins: n=524288 none, n=524280 none, n=500000 bin 225000
+LAYER B' (function-level, 12 cases, 0 production violations): removed detected 6/equivalent 6; widened detected 6/equivalent 6; strict detected 2/equivalent 10
+LAYER B (function-level, production length, 36 fixtures): 288 cases evaluated, 0 production violations; 128 PRECONDITION_NOT_MET (all Family B, COLLISION_WITH_OTHER_MAPPED_CANDIDATE; no credit or blame); removed detected 216/equivalent 72; widened detected 144/equivalent 144; strict equivalent 288/detected 0
+PHASE B (6 mutants x first 6 fixtures = 36 records, all COMPLETED, no resource refusals): absolute_floor, first_repeat_only, sign_dropped DETECTED by r3 relations; the three span mutants survive the r3 relations (expected: they are attributed by the boundary relation, not by r3 relations)
+SCIENTIFIC INTERPRETATION: supported only within the evaluated synthetic conditions; not cross-host; not real IQ; Layers A/B/B' are function-level, not production-path coverage

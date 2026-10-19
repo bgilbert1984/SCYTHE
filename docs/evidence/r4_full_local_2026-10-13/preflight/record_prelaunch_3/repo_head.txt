@@ -1,0 +1,6 @@
+$ git -C $HOME/SCYTHE-r4decl rev-parse HEAD
+d5ba1f15348f968dadf8864dc87d9fe1b978dac0
+
+--- stderr
+
+--- rc 0

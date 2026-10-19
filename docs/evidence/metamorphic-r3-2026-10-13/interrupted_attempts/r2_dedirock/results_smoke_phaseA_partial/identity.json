@@ -1,0 +1,24 @@
+{
+ "comparison": "whole CandidateFeature objects + failure parity",
+ "namespace": {
+  "identity_mismatches": [],
+  "names_checked": [
+   "BIN_HZ",
+   "CandidateFeature",
+   "PLAN_PERSISTENCE_MARGIN_DB",
+   "SAMPLE_RATE_HZ",
+   "SequencerRefused",
+   "_parabolic_peak_offset",
+   "math",
+   "np",
+   "usable_half_span_hz"
+  ],
+  "not_module_globals": []
+ },
+ "per_fixture": {
+  "HA_s+f0.05a0.075.npy": true,
+  "HA_s+f0.05a0.15.npy": true
+ },
+ "scope": "fidelity on these fixtures, not a universal guarantee",
+ "verdict": "IDENTITY_AND_NAMESPACE_VERIFIED"
+}

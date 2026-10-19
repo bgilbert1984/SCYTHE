@@ -1,0 +1,39 @@
+........IDENTITY fake: EQUAL
+IDENTITY VERDICT: IDENTITY_AND_NAMESPACE_VERIFIED
+.IDENTITY fake: MISMATCH
+IDENTITY VERDICT: IDENTITY_FAILED
+........................................................$HOME/r4_gate3_r41/pkg_ok/scythe_r4_1_pkg/tools/../test_rf_metamorphic_r4_job.py:337: ResourceWarning: unclosed file <_io.BufferedReader name='/tmp/r4real-xfmbbliq/r4job-xrbwbavb/holdout/index.json'>
+  orig["b"] = open(p(h), "rb").read(); open(p(h), "wb").write(orig["b"].replace(b'"seed": 1000', b'"seed": 1001', 1))
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+$HOME/r4_gate3_r41/pkg_ok/scythe_r4_1_pkg/tools/../test_rf_metamorphic_r4_job.py:337: ResourceWarning: unclosed file <_io.BufferedWriter name='/tmp/r4real-xfmbbliq/r4job-xrbwbavb/holdout/index.json'>
+  orig["b"] = open(p(h), "rb").read(); open(p(h), "wb").write(orig["b"].replace(b'"seed": 1000', b'"seed": 1001', 1))
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+$HOME/r4_gate3_r41/pkg_ok/scythe_r4_1_pkg/tools/../test_rf_metamorphic_r4_job.py:338: ResourceWarning: unclosed file <_io.BufferedWriter name='/tmp/r4real-xfmbbliq/r4job-xrbwbavb/holdout/index.json'>
+  self.refused(mutate, lambda h: open(p(h), "wb").write(orig["b"]), "index.json")
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+$HOME/r4_gate3_r41/pkg_ok/scythe_r4_1_pkg/tools/../test_rf_metamorphic_r4_job.py:337: ResourceWarning: unclosed file <_io.BufferedReader name='/tmp/r4real-xfmbbliq/r4job-fillzuek/holdout/index.json'>
+  orig["b"] = open(p(h), "rb").read(); open(p(h), "wb").write(orig["b"].replace(b'"seed": 1000', b'"seed": 1001', 1))
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+$HOME/r4_gate3_r41/pkg_ok/scythe_r4_1_pkg/tools/../test_rf_metamorphic_r4_job.py:337: ResourceWarning: unclosed file <_io.BufferedWriter name='/tmp/r4real-xfmbbliq/r4job-fillzuek/holdout/index.json'>
+  orig["b"] = open(p(h), "rb").read(); open(p(h), "wb").write(orig["b"].replace(b'"seed": 1000', b'"seed": 1001', 1))
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+$HOME/r4_gate3_r41/pkg_ok/scythe_r4_1_pkg/tools/../test_rf_metamorphic_r4_job.py:338: ResourceWarning: unclosed file <_io.BufferedWriter name='/tmp/r4real-xfmbbliq/r4job-fillzuek/holdout/index.json'>
+  self.refused(mutate, lambda h: open(p(h), "wb").write(orig["b"]), "index.json")
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+.$HOME/r4_gate3_r41/pkg_ok/scythe_r4_1_pkg/tools/../test_rf_metamorphic_r4_job.py:342: ResourceWarning: unclosed file <_io.TextIOWrapper name='/tmp/r4real-xfmbbliq/r4job-76rml8zv/holdout/stray.txt' mode='w' encoding='UTF-8'>
+  self.refused(lambda h: open(p(h), "w").write("x"), lambda h: os.remove(p(h)), "stray.txt")
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+$HOME/r4_gate3_r41/pkg_ok/scythe_r4_1_pkg/tools/../test_rf_metamorphic_r4_job.py:342: ResourceWarning: unclosed file <_io.TextIOWrapper name='/tmp/r4real-xfmbbliq/r4job-gtfj_nks/holdout/stray.txt' mode='w' encoding='UTF-8'>
+  self.refused(lambda h: open(p(h), "w").write("x"), lambda h: os.remove(p(h)), "stray.txt")
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+..$HOME/r4_gate3_r41/pkg_ok/scythe_r4_1_pkg/tools/../test_rf_metamorphic_r4_job.py:351: ResourceWarning: unclosed file <_io.TextIOWrapper name='$HOME/r4_gate3_r41/pkg_ok/scythe_r4_1_pkg/tools/r4_job/run_job.sh' mode='r' encoding='UTF-8'>
+  text = open(os.path.join(JOBDIR, "run_job.sh")).read()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+.$HOME/r4_gate3_r41/pkg_ok/scythe_r4_1_pkg/tools/../test_rf_metamorphic_r4_job.py:455: ResourceWarning: unclosed file <_io.TextIOWrapper name='/tmp/r4pkg-8xt2psbl/job/STATUS.txt' mode='r' encoding='UTF-8'>
+  status = open(os.path.join(job, "STATUS.txt")).read().splitlines()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+...................
+----------------------------------------------------------------------
+Ran 88 tests in 133.251s
+
+OK

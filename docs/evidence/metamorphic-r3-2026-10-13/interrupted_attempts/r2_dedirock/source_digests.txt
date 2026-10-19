@@ -1,0 +1,3 @@
+57a97a092060554d5ed2c1ff8758303b39b0d966115bb70295c9ffabbdf1d626  ~/metamorphic_r2_pkg_20261012/pkg/tools/rf_metamorphic_harness.py
+c3c23487ac0a258a85c80476076bab64b13130799a56c0e74bf24ac229192c17  ~/metamorphic_r2_pkg_20261012/pkg/SHA256SUMS
+908cc2bc67b027cedd36a999e2933dc714906ee3275faf1549e430ad73a6b06a  ~/metamorphic_r2_pkg.tar.gz

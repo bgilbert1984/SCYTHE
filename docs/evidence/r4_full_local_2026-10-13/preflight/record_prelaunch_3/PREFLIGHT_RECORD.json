@@ -1,0 +1,150 @@
+{
+ "interpreter": {
+  "version": [
+   3,
+   12,
+   13
+  ],
+  "full": "3.12.13 (main, Jul 10 2026, 00:00:00) [GCC 14.3.1 20251022 (Red Hat 14.3.1-4)]",
+  "numpy": "2.5.1",
+  "numpy_file": "$HOME/SCYTHE/.venv/lib64/python3.12/site-packages/numpy/__init__.py",
+  "prefix": "$HOME/SCYTHE/.venv",
+  "executable": "$HOME/SCYTHE/.venv/bin/python",
+  "given_path": "$HOME/SCYTHE/.venv/bin/python",
+  "resolved_path": "/usr/bin/python3.12",
+  "binary_sha256": "8c515a32b1a5d3d807e53359901a4d09ec06819b488736641aabd6a12eefba63"
+ },
+ "repo_head": "d5ba1f15348f968dadf8864dc87d9fe1b978dac0",
+ "host": {
+  "hostname": "SCYTHE",
+  "kernel": "6.18.33.2-microsoft-standard-WSL2",
+  "machine": "x86_64",
+  "boot_id": "aaf25e41-e4bf-4c1a-81c9-e978cb25e860"
+ },
+ "load_avg": [
+  0.87109375,
+  1.10009765625,
+  1.3544921875
+ ],
+ "uptime_s": 235170.13,
+ "nproc": 8,
+ "preflight_mode": "CHECK_ONLY",
+ "launch": "NOT_PERFORMED",
+ "attempt_id_candidate": "R4FULL-20261014T023003Z-2b2e3251b678-SCYTHE-30d8a2f0",
+ "timestamp_utc": "2026-10-14T02:30:05+00:00",
+ "declaration": {
+  "package_sha256": "2b2e3251b678a5e83735ee663176f7763482a6948a7d5cb57f244dac1142874a",
+  "source_commit": "8d34de9ac0b1f4758cda3412b364582b4271ffe1",
+  "python": [
+   3,
+   12,
+   13
+  ],
+  "numpy": "2.5.1",
+  "min_free_gb": 10,
+  "min_mem_gb": 4,
+  "run_job_sha256": "02453e0d2b29dd635b0389373f851886293c0c8b37ec431538e01856ffa22d20",
+  "harness_sha256": "1ac4fe34260f6ba63056ed7dbf13f604d9b3f53f8ac77908f4c1ad052eac6687"
+ },
+ "package_sha256": "2b2e3251b678a5e83735ee663176f7763482a6948a7d5cb57f244dac1142874a",
+ "job_dir": "$HOME/r4_full_run_job_20261013_a1",
+ "attempt_dir": "$HOME/r4_full_run_preflight/record_prelaunch_3",
+ "items": [
+  {
+   "name": "1 archive SHA-256 equals the declared package digest",
+   "status": "PASS",
+   "detail": "2b2e3251b678a5e83735ee663176f7763482a6948a7d5cb57f244dac1142874a"
+  },
+  {
+   "name": "1a archive sidecar records the declared digest",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "name": "1b safe extraction (no absolute paths, '..', links, devices)",
+   "status": "PASS",
+   "detail": "[]"
+  },
+  {
+   "name": "1c sha256sum -c SHA256SUMS in the extracted package",
+   "status": "PASS",
+   "detail": "28 OK"
+  },
+  {
+   "name": "1d runner and harness digests equal the declared ones",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "name": "2 PYTHON is an absolute executable path",
+   "status": "PASS",
+   "detail": "$HOME/SCYTHE/.venv/bin/python"
+  },
+  {
+   "name": "2b Python is exactly 3.12.13 and NumPy exactly 2.5.1 (otherwise the run is refused)",
+   "status": "PASS",
+   "detail": "[3, 12, 13] numpy 2.5.1"
+  },
+  {
+   "name": "3 job directory is an absolute path that does not exist",
+   "status": "PASS",
+   "detail": "$HOME/r4_full_run_job_20261013_a1"
+  },
+  {
+   "name": "3b job directory parent exists and is writable",
+   "status": "PASS",
+   "detail": "$HOME"
+  },
+  {
+   "name": "3c job directory is not inside the package or the record directory",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "name": "3d at least 10 GB free on the job filesystem (measured, not inferred)",
+   "status": "PASS",
+   "detail": "948.4 GB at $HOME"
+  },
+  {
+   "name": "3e at least 10 GB free on the TMPDIR filesystem",
+   "status": "PASS",
+   "detail": "948.4 GB at /tmp"
+  },
+  {
+   "name": "3f at least 4 GB available memory",
+   "status": "PASS",
+   "detail": "7.9 GB"
+  },
+  {
+   "name": "4 verification repository checkout is clean",
+   "status": "PASS",
+   "detail": "d5ba1f15348f968dadf8864dc87d9fe1b978dac0"
+  },
+  {
+   "name": "4a package verifier: the frozen ARCHIVE against its recorded source commit",
+   "status": "PASS",
+   "detail": "VERIFICATION PASS (18/18 checks)"
+  },
+  {
+   "name": "4b evidence verifier: the COMMITTED HISTORICAL EVIDENCE (not the package) from a pristine archive",
+   "status": "PASS",
+   "detail": "COMMITTED_EVIDENCE_INTEGRITY: VERIFIED | ORIGINAL_MANIFEST_ENTRIES_VS_RECORDED_ORIGINAL_DIGESTS: CONSISTENT | ORIGINAL_JOB_INTEGRITY: NOT_REVERIFIED_FROM_THIS_CHECKOUT | EVIDENCE_VERIFICATION: PASS"
+  },
+  {
+   "name": "5 AC power reported online (where the platform reports it)",
+   "status": "PASS",
+   "detail": "online flags ['1']"
+  },
+  {
+   "name": "5b host powered and awake for the whole window; sleep, hibernate and lid-close actions suspended (not detectable from WSL)",
+   "status": "PASS",
+   "detail": "operator confirmation given"
+  },
+  {
+   "name": "6 no competing r4 job process is running",
+   "status": "PASS",
+   "detail": "[]"
+  }
+ ],
+ "verdict": "PASS"
+}

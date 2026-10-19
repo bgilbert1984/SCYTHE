@@ -1040,6 +1040,18 @@ class HypergraphEngine:
             if n:
                 yield n
 
+    def nodes_by_mission(self, mission_id: str) -> Iterable[HGNode]:
+        """PR D (docs/research/scythe_mission_definition.md): the backend query primitive for
+        "show Mission X" instead of "show graph" -- a thin wrapper over the existing
+        nodes_with_label() and its already-built label_index, same shape as nodes_by_kind()
+        above. No new index, no graph redesign: a node is findable here only because a producer
+        (pcap_ingest.py, as of this PR) already put mission_id into its labels, not just its
+        metadata.provenance. This does not wire into graphops_graph_resolver.py's
+        /api/graphops/selection/graph endpoint or any Cesium rendering code -- that adaptive
+        ranking/caching/revision-pinning pipeline is its own larger, harder-to-verify-without-a-
+        browser surface, and is explicitly left as separate, later work."""
+        return self.nodes_with_label("mission_id", mission_id)
+
     def nodes_with_label(self, key: str, value: Any) -> Iterable[HGNode]:
         for nid in self.label_index.get(key, {}).get(value, []):
             n = self.nodes.get(nid)

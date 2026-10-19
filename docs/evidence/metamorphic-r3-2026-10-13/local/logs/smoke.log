@@ -1,0 +1,256 @@
+IDENTITY HA_s+f0.05a0.075.npy: EQUAL
+IDENTITY HA_s+f0.05a0.15.npy: EQUAL
+IDENTITY VERDICT: IDENTITY_AND_NAMESPACE_VERIFIED
+(t=2s)
+A HA_s+f0.05a0.075.npy: cands=1 violated=[] t=13s
+A HA_s+f0.05a0.15.npy: cands=1 violated=[] t=25s
+B absolute_floor HA_s+f0.05a0.075.npy: cands=139979 COMPLETED t=57s
+B absolute_floor HA_s+f0.05a0.15.npy: cands=139909 COMPLETED t=78s
+B sign_dropped HA_s+f0.05a0.075.npy: cands=1 COMPLETED t=85s
+B sign_dropped HA_s+f0.05a0.15.npy: cands=1 COMPLETED t=91s
+B first_repeat_only HA_s+f0.05a0.075.npy: cands=436 COMPLETED t=98s
+B first_repeat_only HA_s+f0.05a0.15.npy: cands=424 COMPLETED t=103s
+B span_limit_removed HA_s+f0.05a0.075.npy: cands=1 COMPLETED t=111s
+B span_limit_removed HA_s+f0.05a0.15.npy: cands=1 COMPLETED t=119s
+{
+ "manifest": {
+  "ok": 12,
+  "bad": [],
+  "missing": []
+ },
+ "relation_summary": {
+  "CONJ": {
+   "RELATION_SATISFIED": 2
+  },
+  "NOISE weak": {
+   "RELATION_SATISFIED": 2
+  },
+  "ONE_REPEAT_REPLACED (detector)": {
+   "RELATION_SATISFIED": 2
+  },
+  "PERMUTE reverse": {
+   "RELATION_SATISFIED": 2
+  },
+  "PERMUTE rot3": {
+   "RELATION_SATISFIED": 2
+  },
+  "PHASE 0.449": {
+   "RELATION_SATISFIED": 2
+  },
+  "PHASE 1.571": {
+   "RELATION_SATISFIED": 2
+  },
+  "SCALE x0.001": {
+   "RELATION_SATISFIED": 2
+  },
+  "SCALE x0.37": {
+   "RELATION_SATISFIED": 2
+  },
+  "SCALE x1000": {
+   "RELATION_SATISFIED": 2
+  },
+  "SHIFT +1000 bins": {
+   "RELATION_SATISFIED": 2
+  },
+  "SHIFT +100000 bins": {
+   "RELATION_SATISFIED": 2
+  },
+  "SHIFT -2500 bins": {
+   "RELATION_SATISFIED": 2
+  }
+ },
+ "persistence_summary": {
+  "CONJ": {
+   "RELATION_SATISFIED": 2
+  },
+  "ONE_REPEAT_REPLACED (persistence)": {
+   "RELATION_SATISFIED": 2
+  },
+  "PERMUTE (qualifying count, multiset of excesses)": {
+   "RELATION_SATISFIED": 2
+  },
+  "PHASE 0.449": {
+   "RELATION_SATISFIED": 2
+  },
+  "SCALE x0.37": {
+   "RELATION_SATISFIED": 2
+  }
+ },
+ "mutant_matrix": {
+  "absolute_floor": {
+   "CONJ": {
+    "MUTANT_DETECTED": 1,
+    "MUTANT_SURVIVED": 1
+   },
+   "NOISE weak": {
+    "MUTANT_DETECTED": 2
+   },
+   "ONE_REPEAT_REPLACED (detector)": {
+    "MUTANT_SURVIVED": 2
+   },
+   "PERMUTE reverse": {
+    "MUTANT_SURVIVED": 2
+   },
+   "PERMUTE rot3": {
+    "MUTANT_SURVIVED": 2
+   },
+   "PHASE 0.449": {
+    "MUTANT_SURVIVED": 2
+   },
+   "PHASE 1.571": {
+    "MUTANT_SURVIVED": 2
+   },
+   "SCALE x0.001": {
+    "MUTANT_DETECTED": 2
+   },
+   "SCALE x0.37": {
+    "MUTANT_DETECTED": 2
+   },
+   "SCALE x1000": {
+    "MUTANT_DETECTED": 2
+   },
+   "SHIFT +1000 bins": {
+    "MUTANT_DETECTED": 1,
+    "MUTANT_SURVIVED": 1
+   },
+   "SHIFT +100000 bins": {
+    "MUTANT_DETECTED": 1,
+    "MUTANT_SURVIVED": 1
+   },
+   "SHIFT -2500 bins": {
+    "MUTANT_DETECTED": 1,
+    "MUTANT_SURVIVED": 1
+   }
+  },
+  "first_repeat_only": {
+   "CONJ": {
+    "MUTANT_SURVIVED": 2
+   },
+   "NOISE weak": {
+    "MUTANT_SURVIVED": 2
+   },
+   "ONE_REPEAT_REPLACED (detector)": {
+    "MUTANT_DETECTED": 2
+   },
+   "PERMUTE reverse": {
+    "MUTANT_DETECTED": 2
+   },
+   "PERMUTE rot3": {
+    "MUTANT_DETECTED": 2
+   },
+   "PHASE 0.449": {
+    "MUTANT_SURVIVED": 2
+   },
+   "PHASE 1.571": {
+    "MUTANT_SURVIVED": 2
+   },
+   "SCALE x0.001": {
+    "MUTANT_SURVIVED": 2
+   },
+   "SCALE x0.37": {
+    "MUTANT_SURVIVED": 2
+   },
+   "SCALE x1000": {
+    "MUTANT_SURVIVED": 2
+   },
+   "SHIFT +1000 bins": {
+    "MUTANT_SURVIVED": 2
+   },
+   "SHIFT +100000 bins": {
+    "MUTANT_SURVIVED": 2
+   },
+   "SHIFT -2500 bins": {
+    "MUTANT_SURVIVED": 2
+   }
+  },
+  "sign_dropped": {
+   "CONJ": {
+    "MUTANT_DETECTED": 2
+   },
+   "NOISE weak": {
+    "MUTANT_SURVIVED": 2
+   },
+   "ONE_REPEAT_REPLACED (detector)": {
+    "MUTANT_SURVIVED": 2
+   },
+   "PERMUTE reverse": {
+    "MUTANT_SURVIVED": 2
+   },
+   "PERMUTE rot3": {
+    "MUTANT_SURVIVED": 2
+   },
+   "PHASE 0.449": {
+    "MUTANT_SURVIVED": 2
+   },
+   "PHASE 1.571": {
+    "MUTANT_SURVIVED": 2
+   },
+   "SCALE x0.001": {
+    "MUTANT_SURVIVED": 2
+   },
+   "SCALE x0.37": {
+    "MUTANT_SURVIVED": 2
+   },
+   "SCALE x1000": {
+    "MUTANT_SURVIVED": 2
+   },
+   "SHIFT +1000 bins": {
+    "MUTANT_SURVIVED": 2
+   },
+   "SHIFT +100000 bins": {
+    "MUTANT_SURVIVED": 2
+   },
+   "SHIFT -2500 bins": {
+    "MUTANT_SURVIVED": 2
+   }
+  },
+  "span_limit_removed": {
+   "CONJ": {
+    "MUTANT_SURVIVED": 2
+   },
+   "NOISE weak": {
+    "MUTANT_SURVIVED": 2
+   },
+   "ONE_REPEAT_REPLACED (detector)": {
+    "MUTANT_SURVIVED": 2
+   },
+   "PERMUTE reverse": {
+    "MUTANT_SURVIVED": 2
+   },
+   "PERMUTE rot3": {
+    "MUTANT_SURVIVED": 2
+   },
+   "PHASE 0.449": {
+    "MUTANT_SURVIVED": 2
+   },
+   "PHASE 1.571": {
+    "MUTANT_SURVIVED": 2
+   },
+   "SCALE x0.001": {
+    "MUTANT_SURVIVED": 2
+   },
+   "SCALE x0.37": {
+    "MUTANT_SURVIVED": 2
+   },
+   "SCALE x1000": {
+    "MUTANT_SURVIVED": 2
+   },
+   "SHIFT +1000 bins": {
+    "MUTANT_SURVIVED": 2
+   },
+   "SHIFT +100000 bins": {
+    "MUTANT_SURVIVED": 2
+   },
+   "SHIFT -2500 bins": {
+    "MUTANT_SURVIVED": 2
+   }
+  }
+ },
+ "mutant_verdict": {
+  "absolute_floor": "MUTANT_DETECTED",
+  "first_repeat_only": "MUTANT_DETECTED",
+  "sign_dropped": "MUTANT_DETECTED",
+  "span_limit_removed": "MUTANT_SURVIVED_OR_NOT_COMPARABLE"
+ },
+ "identity_verdict": "IDENTITY_AND_NAMESPACE_VERIFIED"
+}

@@ -1,0 +1,33 @@
+Addendum to README-provenance.txt — termination state reconfirmed.
+
+CONTEXT
+
+The merged provenance record's RETUNE TEST / INPUT STATE sections note that
+load fitting was explicitly confirmed once, at 2026-10-12T02:24:15Z, between
+the three baseline captures and the retune capture, and that no further
+confirmation was logged for or after the retune capture (02:46:00Z). The
+record deliberately says to treat the receiver's state past that point as
+undetermined until a separate check is logged, rather than assume continuity.
+
+This addendum is that separate check.
+
+RECONFIRMATION
+
+50 ohm load fitted, independently confirmed by the operator at:
+
+  2026-10-12T04:09:23Z (host UTC clock at logging time)
+
+This closes the gap the merged record flagged. It does not retroactively
+establish continuous termination across the whole interval between
+02:46:00Z and 04:09:23Z -- only that the load is fitted at this timestamp.
+No RF capture occurred in that interval; the only device activity between
+the retune capture and this check was unrelated `rtl_tcp` service work
+(retargeting `scythe-rtl-tcp.service` from the dead v5 to the XTR, confirmed
+via a TCP probe on :1234, not an RF capture and not a termination-state
+event).
+
+WHAT THIS DOES NOT CHANGE
+
+No RF measurement, hash, classification, or verdict in README-provenance.txt
+is affected. This is a documentation-only follow-up closing a previously
+flagged observability gap, not a correction to any recorded result.

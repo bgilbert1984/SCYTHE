@@ -1,0 +1,27 @@
+{
+  "checked_at": "2026-10-15T00:06:42+00:00",
+  "findings": [
+    {
+      "check": "MONITOR_READY observed independently in the monitor's log",
+      "pass": true,
+      "detail": {
+        "ts": "2026-10-15T00:06:37+00:00",
+        "event": "MONITOR_READY",
+        "monitor_pid": 158020
+      }
+    },
+    {
+      "check": "the monitor PID named in MONITOR_READY is independently confirmed to be a live OS process (re-checked via /proc by this driver, not asserted by the monitor)",
+      "pass": false,
+      "detail": {
+        "monitor_pid": 158020
+      }
+    },
+    {
+      "check": "MONITOR_START_CONFIRMED present",
+      "pass": false,
+      "detail": null
+    }
+  ],
+  "note": "startup failure scenario: absence of MONITOR_START_CONFIRMED is the expected, verified fact"
+}

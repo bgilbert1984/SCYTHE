@@ -294,6 +294,13 @@ class RFObservation:
     classification_window_end: Optional[float] = None
     evidence_class: str = "OBSERVED"
     source: str = "sdrpp_iq_exporter"
+    # PR B's known gap (graphops_rf_ingest.py validated and carried mission_id through the
+    # returned frame dict but never persisted it onto the stored observation -- see the local
+    # invariants crosswalk). Closed here: ingest_frame() below reads it straight from the
+    # already-validated frame. Always present, null when absent -- matching every other
+    # Optional field on this class (e.g. classification_method), not pcap_ingest.py's
+    # omit-the-key-entirely convention; each file keeps its own existing discipline.
+    mission_id: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -380,6 +387,7 @@ class RFObservationStore:
                 # A frame submitted over the ingest API was not produced by this
                 # bridge and must not inherit the IQ exporter's source label.
                 source=str(frame.get("observation_origin") or "sdrpp_iq_exporter").lower(),
+                mission_id=frame.get("mission_id"),
             )
             self._items.append(observation)
             subscribers = list(self._subscribers)

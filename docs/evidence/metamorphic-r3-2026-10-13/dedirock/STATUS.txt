@@ -1,0 +1,11 @@
+2026-10-13T12:49:28+05:30 START job=~/metamorphic_r3_20261013 pkg=~/metamorphic_r3_pkg_20261013/pkg pid=981196
+2026-10-13T12:49:28+05:30 OK package verified
+2026-10-13T12:49:29+05:30 OK 12 bounded controls (Ran 17 tests in 0.964s)
+2026-10-13T12:49:37+05:30 OK fixtures regenerated, 36/36 hashes verified
+2026-10-13T12:50:20+05:30 r2-vs-r3 equivalence exit=0: EQUIVALENCE: EQUIVALENT max |diff| dB = 0.0
+2026-10-13T12:50:52+05:30 smoke harness exit=0
+2026-10-13T12:50:52+05:30 smoke gate exit=0: GATE PASS
+2026-10-13T12:50:52+05:30 BEGIN full run (36 fixtures, mutants on first 6)
+2026-10-13T12:54:31+05:30 full harness exit=0
+2026-10-13T12:54:32+05:30 full gate exit=0: GATE PASS
+2026-10-13T12:54:32+05:30 DONE harness_rc=0 gate_rc=0 (outputs retained on this host until independently verified)

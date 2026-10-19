@@ -13,6 +13,29 @@ Design Principles:
     - Every session ID is deterministic: same PCAP → same sessions.
     - All emitted nodes/edges have source = "pcap_ingest" (sensor-grade).
 
+PR C per docs/research/scythe_mission_definition.md: IngestConfig gains an optional mission_id,
+with no change to any sessionization/emission logic. Omitting it reproduces the exact pre-PR-C
+node metadata (no "mission_id" key in provenance at all, not a present-but-None one). Validated
+via scythe_mission.is_valid_mission_id() -- same single-source-of-truth discipline PR B applied
+to graphops_rf_ingest.py, not a duplicated regex.
+
+Honest architectural note, not fixed here: scythe_mission_definition.md's stated hierarchy is
+Mission -> Session(s) -> ObservationSet -> Observation. This file's actual node relationship is
+the other way for the PCAP-file/session pair: one pcap_artifact node (the ObservationSet
+equivalent -- "one physical acquisition artifact") produces MANY session nodes
+(SESSION_DERIVED_FROM_PCAP), not one session containing many observation sets. Reconciling that
+mismatch is a real open question for a future revision of the mission definition doc, not
+something this additive PR attempts to resolve.
+
+PR D per docs/research/scythe_mission_definition.md: mission_id also goes into pcap_artifact,
+session, and host node LABELS now (not only metadata.provenance), because
+HypergraphEngine.nodes_by_mission()/nodes_with_label() index only from labels. This is the
+backend query primitive for "show Mission X" instead of "show graph" -- it does not wire into
+graphops_graph_resolver.py's /api/graphops/selection/graph endpoint or any Cesium rendering code,
+which is a separate, larger, harder-to-verify-without-a-browser surface left for later. Known
+limitation, not fixed here: host nodes are deduplicated by IP across the whole engine, not scoped
+per mission, so a host observed under two different missions keeps only the first mission_id.
+
 Usage:
     from pcap_ingest import PcapIngestPipeline, IngestConfig
     pipeline = PcapIngestPipeline(hypergraph_engine, config=IngestConfig(
@@ -45,6 +68,8 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
+
+import scythe_mission
 
 logger = logging.getLogger(__name__)
 
@@ -115,6 +140,35 @@ class IngestConfig:
     enable_bsg: bool = True                      # Run BSG detection after sessionization
     # ── Evidence manifest ─────────────────────────────────────────────
     manifest_dir: Optional[str] = None           # If set, write a per-PCAP evidence manifest here
+    # ── Mission provenance (PR C, optional, additive) ─────────────────
+    mission_id: Optional[str] = None             # Attached to every node's provenance when set
+
+    def __post_init__(self) -> None:
+        if self.mission_id is not None and not scythe_mission.is_valid_mission_id(self.mission_id):
+            raise ValueError("mission_id must be a valid Mission identifier")
+
+
+def _provenance(config: "IngestConfig", source: Optional[str] = None, **extra: Any) -> Dict[str, Any]:
+    """Build a provenance dict: config.source_tag (or an explicit source, e.g. the BSG
+    detector's) plus any call-specific extras, plus mission_id when config.mission_id is set.
+    The single place this is assembled, so mission_id threading doesn't require touching each
+    of the ~15 node-emission call sites by hand with a duplicated conditional."""
+    prov: Dict[str, Any] = {"source": source if source is not None else config.source_tag}
+    prov.update(extra)
+    if config.mission_id is not None:
+        prov["mission_id"] = config.mission_id
+    return prov
+
+
+def _mission_label(config: "IngestConfig") -> Dict[str, Any]:
+    """PR D: mission_id also goes into a node's labels (not just metadata.provenance above),
+    because HypergraphEngine's label_index -- and therefore nodes_by_mission()/nodes_with_label()
+    -- is built only from labels at add_node() time (hypergraph_engine.py). provenance.mission_id
+    answers "what mission is this node's custody attributed to"; labels.mission_id is what makes
+    it efficiently queryable. Empty dict (not a None-valued key) when mission_id is unset, so
+    **_mission_label(config) is a no-op and the label dict is byte-for-byte unchanged, same
+    omission discipline as _provenance()."""
+    return {"mission_id": config.mission_id} if config.mission_id is not None else {}
 
 
 def _get_writebus_instance() -> Optional[Any]:
@@ -998,12 +1052,10 @@ class HypergraphEmitter:
                 "filename": filename,
                 "file_size": file_size,
                 "ingested_at": datetime.now(timezone.utc).isoformat(),
+                **_mission_label(self.config),
             },
             "metadata": {
-                "provenance": {
-                    "source": self.config.source_tag,
-                    "evidence_type": "packet_capture",
-                },
+                "provenance": _provenance(self.config, evidence_type="packet_capture"),
             },
         })
         return artifact_id
@@ -1045,6 +1097,7 @@ class HypergraphEmitter:
             "time_bucket": session.time_bucket,
             "start_time": session.start_time,
             "end_time": session.end_time,
+            **_mission_label(self.config),
         }
         if proto_anomaly is not None:
             session_labels["protocol_anomaly_score"] = proto_anomaly.anomaly_score
@@ -1058,12 +1111,8 @@ class HypergraphEmitter:
             "kind": "session",
             "labels": session_labels,
             "metadata": {
-                "provenance": {
-                    "source": self.config.source_tag,
-                    "evidence_type": "packet_capture",
-                    "pcap_file": session.pcap_file,
-                    "session_key": session.session_key,
-                },
+                "provenance": _provenance(self.config, evidence_type="packet_capture",
+                                           pcap_file=session.pcap_file, session_key=session.session_key),
                 "confidence": "SENSOR",
                 "ingested_at": now_iso,
             },
@@ -1078,16 +1127,35 @@ class HypergraphEmitter:
 
         for ip in (session.src_ip, session.dst_ip):
             host_id = _host_id(ip)
-            if host_id not in self._emitted_hosts:
+            # host_id is purely IP-derived and deduplicated across the whole engine, not scoped
+            # per mission. Host-attribution semantics (docs/research/scythe_mission_browser_rendering.md
+            # section 6): evidentiary, not authoritative -- a host is shared infrastructure, not
+            # something a mission owns, so mission_id on a host node is a list of every mission
+            # that has ever observed it, append-only (never overwritten, never shrunk). This is a
+            # deliberate type asymmetry from session/pcap_artifact nodes, which belong to exactly
+            # one mission and keep the scalar mission_id label -- not an inconsistency to "fix".
+            #
+            # Existence is checked against the ENGINE (when it supports get_node), not
+            # self._emitted_hosts: a second HypergraphEmitter instance (e.g. a separate pipeline
+            # run ingesting a different mission's PCAPs into the same engine -- the realistic
+            # multi-mission case) starts with an empty _emitted_hosts of its own and would
+            # otherwise treat an already-created host as new, calling add_node()'s full-replace
+            # upsert and silently DISCARDING the first mission's accumulated attribution. Found
+            # writing the test for this fix, not assumed. A lighter-weight engine without
+            # get_node (e.g. a test double) falls back to the original _emitted_hosts-only
+            # behavior -- no accumulation, but also no crash and no regression for callers that
+            # never supported it.
+            existing_host = self.engine.get_node(host_id) if hasattr(self.engine, "get_node") else None
+            if existing_host is None and host_id not in self._emitted_hosts:
+                host_labels: Dict[str, Any] = {"ip": ip, "bytes": host_bytes.get(ip, 0)}
+                if self.config.mission_id is not None:
+                    host_labels["mission_id"] = [self.config.mission_id]
                 host_node: Dict[str, Any] = {
                     "id": host_id,
                     "kind": "host",
-                    "labels": {"ip": ip, "bytes": host_bytes.get(ip, 0)},
+                    "labels": host_labels,
                     "metadata": {
-                        "provenance": {
-                            "source": self.config.source_tag,
-                            "evidence_type": "packet_capture",
-                        },
+                        "provenance": _provenance(self.config, evidence_type="packet_capture"),
                         "confidence": "SENSOR",
                     },
                 }
@@ -1175,6 +1243,20 @@ class HypergraphEmitter:
                 self.engine.add_node(host_node)
                 self._emitted_hosts.add(host_id)
                 nodes += 1
+            elif self.config.mission_id is not None and existing_host is not None \
+                    and hasattr(self.engine, "update_node"):
+                # Repeat observation of an already-known host (existing_host, fetched above),
+                # under a mission_id that may be new to it: accumulate, never overwrite or skip.
+                # See the comment above this loop and
+                # docs/research/scythe_mission_browser_rendering.md section 6. existing_host is
+                # None (so this branch is skipped entirely) when the engine doesn't support
+                # get_node -- see the comment above; nothing to accumulate into in that case.
+                current = list(existing_host.labels.get("mission_id") or [])
+                if self.config.mission_id not in current:
+                    self.engine.update_node(
+                        host_id,
+                        labels={**existing_host.labels, "mission_id": current + [self.config.mission_id]},
+                    )
 
         # ── SESSION_DERIVED_FROM_PCAP edge ───────────────────────────
         self.engine.add_edge({
@@ -1184,7 +1266,7 @@ class HypergraphEmitter:
             "weight": 1.0,
             "labels": {"pcap_file": session.pcap_file},
             "metadata": {
-                "provenance": {"source": self.config.source_tag},
+                "provenance": _provenance(self.config),
                 "confidence": "SENSOR",
             },
         })
@@ -1200,7 +1282,7 @@ class HypergraphEmitter:
                 self.engine.add_edge({
                     "id": soh_id, "kind": "SESSION_OBSERVED_HOST",
                     "nodes": [session.session_id, hid], "weight": 1.0,
-                    "metadata": {"provenance": {"source": self.config.source_tag}},
+                    "metadata": {"provenance": _provenance(self.config)},
                 })
                 edges += 1
 
@@ -1216,7 +1298,7 @@ class HypergraphEmitter:
                 "total_bytes": session.total_bytes,
             },
             "metadata": {
-                "provenance": {"source": self.config.source_tag},
+                "provenance": _provenance(self.config),
                 "confidence": "SENSOR",
             },
         })
@@ -1230,7 +1312,7 @@ class HypergraphEmitter:
             "weight": 1.0,
             "labels": {"port": session.src_port},
             "metadata": {
-                "provenance": {"source": self.config.source_tag},
+                "provenance": _provenance(self.config),
                 "confidence": "SENSOR",
             },
         })
@@ -1243,7 +1325,7 @@ class HypergraphEmitter:
             "weight": 1.0,
             "labels": {"port": session.dst_port},
             "metadata": {
-                "provenance": {"source": self.config.source_tag},
+                "provenance": _provenance(self.config),
                 "confidence": "SENSOR",
             },
         })
@@ -1290,7 +1372,7 @@ class HypergraphEmitter:
                     "dst_port": dst_port,
                 },
                 "metadata": {
-                    "provenance": {"source": self.config.source_tag},
+                    "provenance": _provenance(self.config),
                     "duration_sec": round(session.duration_sec, 2),
                 },
             })
@@ -1303,7 +1385,7 @@ class HypergraphEmitter:
             self.engine.add_edge({
                 "id": sof_id, "kind": "SESSION_OBSERVED_FLOW",
                 "nodes": [session.session_id, fid], "weight": 1.0,
-                "metadata": {"provenance": {"source": self.config.source_tag}},
+                "metadata": {"provenance": _provenance(self.config)},
             })
             edges += 1
 
@@ -1492,7 +1574,7 @@ class HypergraphEmitter:
                     "session": session.session_id,
                 },
                 "metadata": {
-                    "provenance": {"source": self.config.source_tag},
+                    "provenance": _provenance(self.config),
                     "confidence": "SENSOR",
                 },
             })
@@ -1501,7 +1583,7 @@ class HypergraphEmitter:
                 "kind": "SESSION_CONTAINS_EVENT",
                 "nodes": [session.session_id, event_id],
                 "weight": 1.0,
-                "metadata": {"provenance": {"source": self.config.source_tag}},
+                "metadata": {"provenance": _provenance(self.config)},
             })
             nodes += 1
             edges += 1
@@ -1518,7 +1600,7 @@ class HypergraphEmitter:
                     "session": session.session_id,
                 },
                 "metadata": {
-                    "provenance": {"source": self.config.source_tag},
+                    "provenance": _provenance(self.config),
                     "confidence": "SENSOR",
                 },
             })
@@ -1527,7 +1609,7 @@ class HypergraphEmitter:
                 "kind": "SESSION_CONTAINS_EVENT",
                 "nodes": [session.session_id, event_id],
                 "weight": 1.0,
-                "metadata": {"provenance": {"source": self.config.source_tag}},
+                "metadata": {"provenance": _provenance(self.config)},
             })
             nodes += 1
             edges += 1
@@ -1544,7 +1626,7 @@ class HypergraphEmitter:
                     "session": session.session_id,
                 },
                 "metadata": {
-                    "provenance": {"source": self.config.source_tag},
+                    "provenance": _provenance(self.config),
                     "confidence": "SENSOR",
                 },
             })
@@ -1553,7 +1635,7 @@ class HypergraphEmitter:
                 "kind": "SESSION_CONTAINS_EVENT",
                 "nodes": [session.session_id, event_id],
                 "weight": 1.0,
-                "metadata": {"provenance": {"source": self.config.source_tag}},
+                "metadata": {"provenance": _provenance(self.config)},
             })
             nodes += 1
             edges += 1
@@ -1572,7 +1654,7 @@ class HypergraphEmitter:
                     "session": session.session_id,
                 },
                 "metadata": {
-                    "provenance": {"source": self.config.source_tag},
+                    "provenance": _provenance(self.config),
                     "confidence": "SENSOR",
                 },
             })
@@ -1581,7 +1663,7 @@ class HypergraphEmitter:
                 "kind": "SESSION_CONTAINS_EVENT",
                 "nodes": [session.session_id, event_id],
                 "weight": 1.0,
-                "metadata": {"provenance": {"source": self.config.source_tag}},
+                "metadata": {"provenance": _provenance(self.config)},
             })
             nodes += 1
             edges += 1
@@ -1744,10 +1826,7 @@ class PcapIngestPipeline:
                         "edges_emitted": result.edges_emitted,
                     },
                     "metadata": {
-                        "provenance": {
-                            "source": self.config.source_tag,
-                            "evidence_type": "packet_capture",
-                        },
+                        "provenance": _provenance(self.config, evidence_type="packet_capture"),
                     },
                 },
                 request_id=f"pcap_ingest:{artifact_id}:materialize",
@@ -1776,10 +1855,8 @@ class PcapIngestPipeline:
                                 "sessions_total": bsg_result.sessions_total,
                             },
                             "metadata": {
-                                "provenance": {
-                                    "source": "bsg_detector",
-                                    "evidence_type": "behavioral_inference",
-                                },
+                                "provenance": _provenance(self.config, source="bsg_detector",
+                                                           evidence_type="behavioral_inference"),
                             },
                         },
                         request_id=f"pcap_ingest:{artifact_id}:bsg",
@@ -1914,10 +1991,8 @@ class PcapIngestPipeline:
                             "pcaps_processed": batch.pcaps_processed,
                         },
                         "metadata": {
-                            "provenance": {
-                                "source": "bsg_detector",
-                                "evidence_type": "behavioral_inference",
-                            },
+                            "provenance": _provenance(self.config, source="bsg_detector",
+                                                       evidence_type="behavioral_inference"),
                         },
                     },
                     request_id=f"pcap_ingest:batch:bsg:{evidence_hash}",

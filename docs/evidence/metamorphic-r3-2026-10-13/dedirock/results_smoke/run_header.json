@@ -1,0 +1,83 @@
+{
+ "argv": [
+  "tools/rf_metamorphic_harness.py",
+  "--holdout",
+  "~/metamorphic_r3_20261013/holdout",
+  "--hashes",
+  "~/metamorphic_r3_pkg_20261013/pkg/fixtures/fixture_hashes.sha256",
+  "--results-dir",
+  "~/metamorphic_r3_20261013/results_smoke",
+  "--limit",
+  "2",
+  "--mutant-fixtures",
+  "2"
+ ],
+ "declared": {
+  "ambiguity_upper": 1e-06,
+  "candidate_cap": 1000000,
+  "mutant_runtime_cap_s": 900.0,
+  "mutations": {
+   "absolute_floor": [
+    "floor = float(np.median(median_spec))",
+    "floor = 1.0"
+   ],
+   "first_repeat_only": [
+    "median_spec = np.median(spectra, axis=0)",
+    "median_spec = spectra[0]"
+   ],
+   "sign_dropped": [
+    "freqs = np.fft.fftfreq(n, d=1.0 / SAMPLE_RATE_HZ)",
+    "freqs = np.abs(np.fft.fftfreq(n, d=1.0 / SAMPLE_RATE_HZ))"
+   ],
+   "span_limit_removed": [
+    "in_span = np.abs(freqs[1:-1]) <= usable",
+    "in_span = np.ones(n - 2, dtype=bool)"
+   ]
+  },
+  "noise": [
+   0.1,
+   0.05,
+   0.5
+  ],
+  "one_repeat": [
+   0.05,
+   1.5,
+   3.0
+  ],
+  "phases": [
+   0.4487989505128276,
+   1.5707963267948966
+  ],
+  "scales": [
+   0.001,
+   0.37,
+   1000.0
+  ],
+  "shifts_bins": [
+   1000,
+   -2500,
+   100000
+  ],
+  "strong_db": 15.0,
+  "tol_db": 1e-09,
+  "tol_hz": 1e-09
+ },
+ "fixtures": [
+  "HA_s+f0.05a0.075.npy",
+  "HA_s+f0.05a0.15.npy"
+ ],
+ "harness_sha256": "e1e655f68fa07f08bcf85d05e3ad7148a3c3dfd9360efadd675d7647e44994d4",
+ "numpy": "2.5.3",
+ "production_sha256": {
+  "rf_spur_catalogue_sequencer.py": "e1e82172cc2e56f05709d60b9586b4c675890f5472824eaaa90f6a461b211b82",
+  "rf_spur_retention_estimator.py": "fea25501c2584dbe04e836246a9907c358c371e660458925649741592145e9db"
+ },
+ "revision": "metamorphic-harness.r3",
+ "sequencer_revision": "seq-7.2-1-hann",
+ "thread_env": {
+  "MKL_NUM_THREADS": "1",
+  "NUMEXPR_NUM_THREADS": "1",
+  "OMP_NUM_THREADS": "1",
+  "OPENBLAS_NUM_THREADS": "1"
+ }
+}

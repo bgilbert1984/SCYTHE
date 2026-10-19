@@ -412,6 +412,18 @@ pcap_registry_instance = None
 sensor_registry_instance = None
 writebus_instance = None
 
+
+def _label_matches_mission(value, mission_id):
+    """A mission_id/missionId label value matches a requested mission_id if it equals it (the
+    scalar form -- session/pcap_artifact nodes, which belong to exactly one mission) or contains
+    it (the list form -- host nodes, which may legitimately be observed under several missions;
+    docs/research/scythe_mission_browser_rendering.md section 6). Same helper and semantics as
+    graphops_graph_resolver.py's _label_matches_mission."""
+    if isinstance(value, (list, tuple, set)):
+        return mission_id in value
+    return value == mission_id
+
+
 # ============================================================================
 # RF HYPERGRAPH DATA STORAGE
 # ============================================================================
@@ -5343,11 +5355,60 @@ if FLASK_AVAILABLE:
             logger.warning(f"Failed to load mission from DB: {e}")
             return None
 
+    @app.route('/api/missions', methods=['GET'])
+    def list_missions():
+        """Mission enumeration (ARR-API-1). Returns raw mission records only -- no
+        per-mission event/entity counts computed inline, to avoid an N+1 cost trap against
+        the DuckDB event store; a cached-stats view can be added separately if needed."""
+        try:
+            status = request.args.get('status')
+            conn = sqlite3.connect(os.path.join(_data_dir(), 'metrics.db'))
+            conn.row_factory = sqlite3.Row
+            try:
+                if status:
+                    rows = conn.execute(
+                        'SELECT * FROM missions WHERE status = ? ORDER BY created_at DESC', (status,)
+                    ).fetchall()
+                else:
+                    rows = conn.execute('SELECT * FROM missions ORDER BY created_at DESC').fetchall()
+            finally:
+                conn.close()
+            missions = []
+            for r in rows:
+                rec = dict(r)
+                try:
+                    rec['metadata'] = json.loads(rec.get('metadata') or '{}')
+                except Exception:
+                    rec['metadata'] = {}
+                missions.append(rec)
+            return jsonify({'status': 'ok', 'missions': missions, 'count': len(missions)})
+        except Exception as e:
+            logger.error(f"list_missions error: {e}")
+            return jsonify({'status': 'error', 'message': str(e)}), 500
+
     @app.route('/api/missions', methods=['POST'])
     def create_mission():
+        """Operational Mission (this record: name/owner/status/tasks/watchlist -- a live
+        collaboration session) and domain Mission (scythe_mission.py: typed, immutable,
+        provenance-oriented) are kept as two separate concepts, linked only by sharing one
+        mission_id namespace -- see docs/research/scythe_mission_browser_rendering.md section 4,
+        Option B. Not merged: scythe_mission.Mission is deliberately frozen/immutable (PRs
+        #188, #191), so folding this record's mutable lifecycle into it would mean either
+        breaking that invariant or building a parallel mutable wrapper -- a larger redesign than
+        this link attempts. An explicitly supplied mission_id must be valid for a domain Mission
+        too (scythe_mission.is_valid_mission_id), so a later Mission(mission_id=...) referencing
+        this same operational mission is always constructible; an auto-generated id already
+        satisfies that rule by construction and is not re-validated."""
+        from scythe_mission import is_valid_mission_id
         try:
             data = request.get_json() or {}
-            mission_id = data.get('mission_id') or f"mission_{int(time.time()*1000)}_{random.randint(1,9999)}"
+            mission_id = data.get('mission_id')
+            if mission_id:
+                if not is_valid_mission_id(mission_id):
+                    return jsonify({'status': 'error',
+                                    'message': 'mission_id must be a valid Mission identifier'}), 400
+            else:
+                mission_id = f"mission_{int(time.time()*1000)}_{random.randint(1,9999)}"
             meta = {
                 'mission_id': mission_id,
                 'name': data.get('name',''),
@@ -5485,6 +5546,60 @@ if FLASK_AVAILABLE:
             logger.error(f"Fusion Mission Demo Error: {e}")
             return jsonify({'status':'error', 'message': str(e)}), 500
 
+    @app.route('/api/missions/<mission_id>/events', methods=['GET'])
+    def mission_events(mission_id):
+        """Mission-scoped event read (ARR-API-3). Paginated, stable seq ordering. Deliberately
+        narrow: no filtering beyond mission scope (no entity/type/confidence/bbox) -- those can
+        be added later if needed, per the ARR-API-3 review."""
+        if _duck_store is None:
+            return jsonify({'status': 'error', 'message': 'DuckDB store not available'}), 503
+        try:
+            limit = max(1, min(int(request.args.get('limit', 100)), 1000))
+            offset = max(0, int(request.args.get('offset', 0)))
+        except (TypeError, ValueError):
+            return jsonify({'status': 'error', 'message': 'limit/offset must be integers'}), 400
+        try:
+            from dataclasses import asdict
+            events = _duck_store.events_for_mission(mission_id, limit=limit, offset=offset)
+            response = {
+                'status': 'ok',
+                'mission_id': mission_id,
+                'events': [asdict(e) for e in events],
+                'limit': limit,
+                'offset': offset,
+            }
+            if request.args.get('include_total') in ('1', 'true', 'True'):
+                response['total'] = _duck_store.count_events_for_mission(mission_id)
+            return jsonify(response)
+        except Exception as e:
+            logger.error(f"mission_events error: {e}")
+            return jsonify({'status': 'error', 'message': str(e)}), 500
+
+    @app.route('/api/missions/<mission_id>/export', methods=['GET'])
+    def mission_export(mission_id):
+        """Mission-scoped Parquet export (ARR-API-3). This is an export operation (query ->
+        on-demand Parquet artifact), not a storage primitive -- it must not grow into block
+        registries, auto-flush policies, or retention management; that path was explicitly
+        retired in PRs #203/#204 and this route is not its resurrection.
+
+        ?t0=<unix_ms>&t1=<unix_ms> (optional, default: full range to now)
+        """
+        if _duck_store is None:
+            return jsonify({'status': 'error', 'message': 'DuckDB store not available'}), 503
+        from flask import send_file
+        try:
+            t0 = int(request.args.get('t0', 0))
+            t1 = int(request.args.get('t1', int(time.time() * 1000)))
+            fpath = _duck_store.export_parquet_block(t0, t1, mission_id=mission_id)
+            return send_file(str(fpath),
+                             mimetype='application/octet-stream',
+                             as_attachment=True,
+                             download_name=fpath.name)
+        except ValueError as exc:
+            return jsonify({'status': 'error', 'message': str(exc)}), 404
+        except Exception as exc:
+            return jsonify({'status': 'error', 'message': str(exc)}), 500
+
     @app.route('/api/missions/<mission_id>/subgraph', methods=['GET'])
     def mission_subgraph(mission_id):
         try:
@@ -5498,10 +5613,19 @@ if FLASK_AVAILABLE:
                     parsed = {}
 
             # build mission predicate wrapper
+            # Accepts both the legacy camelCase "missionId" convention used throughout this
+            # file and the snake_case "mission_id" convention used by scythe_mission.py /
+            # pcap_ingest.py / graphops_rf_ingest.py / hypergraph_engine.py.nodes_by_mission()
+            # (docs/research/scythe_mission_browser_rendering.md section 4, Option A, applied
+            # read-side: accept both rather than break whichever side isn't migrated yet).
             def _mission_filter_node(n):
                 try:
                     labels = n.get('labels') or {}
-                    return labels.get('missionId') == mission_id or n.get('metadata',{}).get('missionId') == mission_id
+                    metadata = n.get('metadata') or {}
+                    return (_label_matches_mission(labels.get('mission_id'), mission_id)
+                            or _label_matches_mission(labels.get('missionId'), mission_id)
+                            or _label_matches_mission(metadata.get('mission_id'), mission_id)
+                            or _label_matches_mission(metadata.get('missionId'), mission_id))
                 except Exception:
                     return False
 
@@ -5520,8 +5644,11 @@ if FLASK_AVAILABLE:
                         try:
                             if isinstance(node_or_edge, dict):
                                 labels = node_or_edge.get('labels') or {}
-                                if labels.get('missionId') == mission_id: return True
-                                if node_or_edge.get('metadata',{}).get('missionId') == mission_id: return True
+                                metadata = node_or_edge.get('metadata') or {}
+                                if _label_matches_mission(labels.get('mission_id'), mission_id): return True
+                                if _label_matches_mission(labels.get('missionId'), mission_id): return True
+                                if _label_matches_mission(metadata.get('mission_id'), mission_id): return True
+                                if _label_matches_mission(metadata.get('missionId'), mission_id): return True
                         except Exception:
                             pass
                         return pred.matches(node_or_edge) if hasattr(pred,'matches') else False
@@ -5537,8 +5664,10 @@ if FLASK_AVAILABLE:
                             for nid,n in (getattr(store,'nodes',{}) or {}).items():
                                 if _mission_filter_node(n): nodes.append(n)
                             for e in (getattr(store,'hyperedges',[]) or []):
-                                # coarse check on metadata
-                                if e.get('metadata',{}).get('missionId') == mission_id:
+                                # coarse check on metadata (both identifier conventions)
+                                e_meta = e.get('metadata') or {}
+                                if (_label_matches_mission(e_meta.get('mission_id'), mission_id)
+                                        or _label_matches_mission(e_meta.get('missionId'), mission_id)):
                                     edges.append(e)
                         except Exception:
                             pass
@@ -5571,14 +5700,19 @@ if FLASK_AVAILABLE:
         if not client:
             return jsonify({'status': 'error', 'message': 'Invalid session token'}), 401
 
-        # Build a predicate that filters to mission scope
+        # Build a predicate that filters to mission scope. Accepts both the legacy camelCase
+        # "missionId" convention and the snake_case "mission_id" convention (see
+        # docs/research/scythe_mission_browser_rendering.md section 4).
         parsed = {}
         pred = QueryPredicate(parsed)
         def mission_pred(x):
             try:
                 labels = x.get('labels') or {}
-                if labels.get('missionId') == mission_id: return True
-                if x.get('metadata',{}).get('missionId') == mission_id: return True
+                metadata = x.get('metadata') or {}
+                if _label_matches_mission(labels.get('mission_id'), mission_id): return True
+                if _label_matches_mission(labels.get('missionId'), mission_id): return True
+                if _label_matches_mission(metadata.get('mission_id'), mission_id): return True
+                if _label_matches_mission(metadata.get('missionId'), mission_id): return True
             except Exception:
                 pass
             # fall back to parsed predicate
@@ -5586,6 +5720,27 @@ if FLASK_AVAILABLE:
                 return pred.matches(x) if hasattr(pred,'matches') else False
             except Exception:
                 return False
+
+        class _MissionPredicateAdapter:
+            """generate_diff() (subgraph_diff.py) calls predicate.matches_node()/.matches_edge().
+            QueryPredicate only ever consults parsed['where']/['in_room'] inside those methods --
+            a plain {'missionId': mission_id} dict passed as its "parsed" argument supplies
+            neither key, so matches_node()/matches_edge() returned True unconditionally and this
+            stream was not actually scoped to the mission at all. Found while reconciling the
+            mission_id/missionId identifier mismatch; fixed here because that reconciliation
+            would have had no observable effect on this endpoint otherwise. This adapter instead
+            exposes mission_pred (which does check labels/metadata, both identifier conventions)
+            through the interface generate_diff actually calls."""
+            def __init__(self, pred_fn):
+                self._pred_fn = pred_fn
+
+            def matches_node(self, node):
+                return self._pred_fn(node)
+
+            def matches_edge(self, edge):
+                return self._pred_fn(edge)
+
+        mission_predicate = _MissionPredicateAdapter(mission_pred)
 
         engine = globals().get('hypergraph_engine') or globals().get('hypergraph_store')
         redis_conn = globals().get('redis_client')
@@ -5650,7 +5805,7 @@ if FLASK_AVAILABLE:
                                         continue
                                 if maxseq > last_seq:
                                     try:
-                                        diff = gen.generate_diff(f'mission:{mission_id}', QueryPredicate({'missionId': mission_id}), last_seq, maxseq)
+                                        diff = gen.generate_diff(f'mission:{mission_id}', mission_predicate, last_seq, maxseq)
                                         last_seq = maxseq
                                         payload = json.dumps(diff)
                                         yield f"event: DIFF\n"
@@ -5672,7 +5827,7 @@ if FLASK_AVAILABLE:
                         current = last_seq
                     if current > last_seq:
                         try:
-                            diff = gen.generate_diff(f'mission:{mission_id}', QueryPredicate({'missionId': mission_id}), last_seq, current)
+                            diff = gen.generate_diff(f'mission:{mission_id}', mission_predicate, last_seq, current)
                             last_seq = current
                             payload = json.dumps(diff)
                             yield f"event: DIFF\n"
@@ -11279,6 +11434,7 @@ if FLASK_AVAILABLE:
                     "position": [rf_obs.lat or 0.0, rf_obs.lon or 0.0, rf_obs.alt_m or 0.0],
                     "labels": {
                         "missionId": rf_obs.mission_id or ctx.mission_id,
+                        "mission_id": rf_obs.mission_id or ctx.mission_id,
                         "modulation": rf_obs.modulation,
                     },
                     "metadata": {
@@ -11302,6 +11458,7 @@ if FLASK_AVAILABLE:
                     "weight": binding.confidence,
                     "labels": {
                         "missionId": rf_obs.mission_id or net_obs.mission_id or ctx.mission_id,
+                        "mission_id": rf_obs.mission_id or net_obs.mission_id or ctx.mission_id,
                         "evidence": "OBSERVED",
                     },
                     "metadata": {
@@ -11350,6 +11507,7 @@ if FLASK_AVAILABLE:
         labels.update(
             {
                 "missionId": rf_obs.mission_id or ctx.mission_id,
+                "mission_id": rf_obs.mission_id or ctx.mission_id,
                 "modulation": rf_obs.modulation,
                 "evidence": "SYNTHETIC" if metadata.get("synthetic") else "OBSERVED",
             }
@@ -12036,6 +12194,7 @@ if FLASK_AVAILABLE:
                         "weight": confidence,
                         "labels": {
                             "missionId": ctx.mission_id,
+                            "mission_id": ctx.mission_id,
                             "evidence": "FORECAST",
                             "obs_class": "forecast",
                         },
@@ -12053,6 +12212,7 @@ if FLASK_AVAILABLE:
                         "weight": confidence,
                         "labels": {
                             "missionId": ctx.mission_id,
+                            "mission_id": ctx.mission_id,
                             "evidence": "FORECAST",
                             "obs_class": "forecast",
                         },
@@ -12106,6 +12266,7 @@ if FLASK_AVAILABLE:
                                 "weight": intent_probability,
                                 "labels": {
                                     "missionId": ctx.mission_id,
+                                    "mission_id": ctx.mission_id,
                                     "evidence": "INFERRED",
                                     "obs_class": "inferred",
                                 },
@@ -12703,6 +12864,7 @@ if FLASK_AVAILABLE:
                 'tags': data.get('tags') or [],
                 'labels': {
                     'missionId': data.get('mission_id') or data.get('missionId') or (data.get('labels') or {}).get('missionId'),
+                    'mission_id': data.get('mission_id') or data.get('missionId') or (data.get('labels') or {}).get('mission_id') or (data.get('labels') or {}).get('missionId'),
                     'teamId': data.get('team_id') or (data.get('labels') or {}).get('teamId'),
                     'roles': ['rx'] if not (data.get('tx') or {}).get('enabled') else ['rx', 'tx'],
                     'tags': data.get('tags') or []
@@ -15169,7 +15331,8 @@ if FLASK_AVAILABLE:
                     'belief': data.get('belief')
                 },
                 'labels': {
-                    'missionId': data.get('mission_id') or data.get('missionId')
+                    'missionId': data.get('mission_id') or data.get('missionId'),
+                    'mission_id': data.get('mission_id') or data.get('missionId')
                 },
                 'metadata': {
                     'sensor_name': sensor_store.get(from_id, {}).get('name'),
@@ -19620,18 +19783,22 @@ if FLASK_AVAILABLE:
     # API ROUTES - DUCKDB / PARQUET EVENT STORE
     # ========================================================================
 
+    # scene_parquet_pipeline.ParquetPipeline is deliberately not initialized
+    # here: Phase 0 verification (see docs/Parquet_Roadmap.md) found zero
+    # Parquet files and zero parquet_index rows across every real instance
+    # database, and zero callers of the routes that exercised it, anywhere
+    # on the host. Parquet export now goes through ScytheDuckStore's own
+    # DuckDB-native export_parquet_block() (see /api/events/export/parquet),
+    # which already writes directly from the live `events` table.
     try:
         from scene_duckdb_store import ScytheDuckStore, TacticalEvent as _TacticalEvent
-        from scene_parquet_pipeline import ParquetPipeline as _ParquetPipeline
         _duck_store = ScytheDuckStore(
             db_path=os.path.join(_data_dir(), 'scythe_events.duckdb'),
             parquet_dir=os.path.join(_data_dir(), 'parquet_blocks'),
         )
-        _parquet_pipe = _ParquetPipeline(store=_duck_store)
         logger.info('DuckDB tactical event store initialized')
     except Exception as _e:
         _duck_store = None
-        _parquet_pipe = None
         logger.warning('DuckDB store unavailable: %s', _e)
 
     @app.route('/api/events/ingest', methods=['POST'])
@@ -19639,16 +19806,29 @@ if FLASK_AVAILABLE:
         """Bulk-ingest events from the Android plugin (or any source).
 
         Body: { "events": [ { timestamp, event_type, entity_id, session_id,
-                               lat, lon, alt, payload } ] }
+                               lat, lon, alt, payload, mission_id } ] }
+
+        mission_id is optional (ARR-API-2: Mission identity propagation). When present it is
+        validated against scythe_mission.is_valid_mission_id -- the same single source of truth
+        create_mission() already uses -- then resolved against the event's session_id via
+        ScytheDuckStore.append_batch's capture_sessions bookkeeping. A session's mission binding
+        is immutable once non-null: re-ingesting the same session_id under a conflicting
+        mission_id is rejected with 409, not silently accepted.
         """
         if _duck_store is None:
             return jsonify({'status': 'error', 'message': 'DuckDB store not available'}), 503
+        from scythe_mission import is_valid_mission_id
+        from scene_duckdb_store import SessionMissionConflictError
         data = request.get_json(force=True, silent=True) or {}
         raw  = data.get('events', [])
         if not raw:
             return jsonify({'status': 'error', 'message': 'no events'}), 400
         events = []
         for r in raw:
+            mission_id = r.get('mission_id')
+            if mission_id is not None and not is_valid_mission_id(mission_id):
+                return jsonify({'status': 'error',
+                                'message': 'mission_id must be a valid Mission identifier'}), 400
             events.append(_TacticalEvent(
                 timestamp  = int(r.get('timestamp', 0)),
                 event_type = str(r.get('event_type', 'unknown')),
@@ -19658,8 +19838,12 @@ if FLASK_AVAILABLE:
                 lon        = float(r.get('lon', 0.0)),
                 alt        = float(r.get('alt', 0.0)),
                 payload    = r.get('payload') or {},
+                mission_id = mission_id,
             ))
-        count = _duck_store.append_batch(events)
+        try:
+            count = _duck_store.append_batch(events)
+        except SessionMissionConflictError as exc:
+            return jsonify({'status': 'error', 'message': str(exc)}), 409
         return jsonify({'status': 'ok', 'ingested': count})
 
     @app.route('/api/events/query', methods=['GET', 'POST'])
@@ -19668,6 +19852,10 @@ if FLASK_AVAILABLE:
 
         GET  ?sql=SELECT+...
         POST { "sql": "SELECT ..." }
+
+        For Mission-scoped reads, prefer GET /api/missions/<id>/events -- this route's
+        unscoped arbitrary SQL is a pending ARR security-review item (see the ARR status
+        memory), not something this comment fixes.
         """
         if _duck_store is None:
             return jsonify({'status': 'error', 'message': 'DuckDB store not available'}), 503
@@ -19698,7 +19886,7 @@ if FLASK_AVAILABLE:
 
         ?t0=<unix_ms>&t1=<unix_ms>&session_id=<optional>
         """
-        if _duck_store is None or _parquet_pipe is None:
+        if _duck_store is None:
             return jsonify({'status': 'error', 'message': 'DuckDB store not available'}), 503
         from flask import send_file
         try:
@@ -19717,30 +19905,18 @@ if FLASK_AVAILABLE:
 
     @app.route('/api/events/blocks', methods=['GET'])
     def events_list_blocks():
-        """List all Parquet blocks in the cold store."""
+        """List all Parquet blocks in the cold store (via ScytheDuckStore's
+        own DuckDB-native export directory -- see the comment on
+        _duck_store's initialization above for why this no longer goes
+        through scene_parquet_pipeline.ParquetPipeline)."""
         if _duck_store is None:
             return jsonify({'status': 'error', 'message': 'DuckDB store not available'}), 503
-        if _parquet_pipe is None:
-            return jsonify({'status': 'ok', 'blocks': _duck_store.list_parquet_blocks()})
-        return jsonify({'status': 'ok', **_parquet_pipe.inventory()})
+        return jsonify({'status': 'ok', 'blocks': _duck_store.list_parquet_blocks()})
 
-    @app.route('/api/events/flush', methods=['POST'])
-    def events_flush_blocks():
-        """Flush hot DuckDB events to Parquet blocks.
-
-        Body: { "block_seconds": 60, "session_id": "..." }
-        """
-        if _parquet_pipe is None:
-            return jsonify({'status': 'error', 'message': 'Parquet pipeline not available'}), 503
-        data = request.get_json(force=True, silent=True) or {}
-        sid  = data.get('session_id') or None
-        _parquet_pipe._block_sec = int(data.get('block_seconds', 60))
-        blocks = _parquet_pipe.flush_auto_blocks(sid)
-        return jsonify({
-            'status': 'ok',
-            'blocks_written': len(blocks),
-            'blocks': [b.to_dict() for b in blocks],
-        })
+    # /api/events/flush (scene_parquet_pipeline.ParquetPipeline.flush_auto_blocks)
+    # removed: Phase 0 verification found it had never produced a block in any
+    # real instance and had no callers anywhere on the host. Use
+    # /api/events/export/parquet for an on-demand, DuckDB-native export instead.
 
     # ========================================================================
     # API ROUTES - SYSTEM STATUS
@@ -20434,10 +20610,9 @@ def main():
     # The module-level init ran before --data-dir was applied, so it used
     # the default 'metrics_logs' path — which may be locked by the primary
     # instance.  Re-init here with the correct per-instance path.
-    global _duck_store, _parquet_pipe
+    global _duck_store
     try:
         from scene_duckdb_store import ScytheDuckStore as _SDS
-        from scene_parquet_pipeline import ParquetPipeline as _PP
         if _duck_store is not None:
             try:
                 _duck_store._con.close()
@@ -20447,11 +20622,9 @@ def main():
             db_path=os.path.join(data_dir, 'scythe_events.duckdb'),
             parquet_dir=os.path.join(data_dir, 'parquet_blocks'),
         )
-        _parquet_pipe = _PP(store=_duck_store)
         logger.info('DuckDB event store (re-)initialized: %s', data_dir)
     except Exception as _duck_err:
         _duck_store = None
-        _parquet_pipe = None
         logger.warning('DuckDB store unavailable after re-init: %s', _duck_err)
     # Satellite table must be (re-)created in the instance-specific DB
     # because _init_satellite_table() ran at module load against the global DB.

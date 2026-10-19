@@ -1,0 +1,33 @@
+$ sha256sum -c SHA256SUMS
+PACKAGE_IDENTITY.txt: OK
+PACKAGE_INVENTORY.json: OK
+docs/research/metamorphic_r4_1_fixture_custody.md: OK
+docs/research/metamorphic_r4_implementation_notes.md: OK
+docs/research/metamorphic_r4_span_boundary_design.md: OK
+fixtures/fixture_hashes.sha256: OK
+fixtures/generate_holdout.py: OK
+fixtures/synth521_holdout_index.json: OK
+fixtures/synth_521_holdout_frozen.json: OK
+rf_corpus_vocabulary.py: OK
+rf_promotion_envelope.py: OK
+rf_promotion_geometry.py: OK
+rf_signal_chain_identity.py: OK
+rf_spur_catalogue_sequencer.py: OK
+rf_spur_retention_estimator.py: OK
+test_rf_metamorphic_controls.py: OK
+test_rf_metamorphic_r4_controls.py: OK
+test_rf_metamorphic_r4_job.py: OK
+test_rf_metamorphic_r4_production_path.py: OK
+test_rf_spur_catalogue_sequencer.py: OK
+tools/r4_job/CUSTODY.md: OK
+tools/r4_job/PACKAGE_FILES.txt: OK
+tools/r4_job/gate_results.py: OK
+tools/r4_job/generated_artifacts.sha256: OK
+tools/r4_job/run_job.sh: OK
+tools/r4_job/seal_job.py: OK
+tools/r4_job/verify_job.py: OK
+tools/rf_metamorphic_harness.py: OK
+
+--- stderr
+
+--- rc 0

@@ -2160,8 +2160,10 @@ def orchestrator_graphops_selection_graph():
                         'nodes': [], 'edges': [], 'bounded': True}), 400
     from urllib.parse import urlencode
     focus_id = str(request.args.get('focus_id', ''))[:256]
+    mission_id = str(request.args.get('mission_id', ''))[:256]
     query = "?" + urlencode({'node_limit': node_limit, 'edge_limit': edge_limit,
-                              **({'focus_id': focus_id} if focus_id else {})})
+                              **({'focus_id': focus_id} if focus_id else {}),
+                              **({'mission_id': mission_id} if mission_id else {})})
     data = _proxy_get(port, '/api/graphops/selection/graph' + query, timeout=15)
     if data is None:
         return jsonify({'status': 'unavailable', 'message': 'Graph instance unreachable',

@@ -1,0 +1,44 @@
+fixtures 36 | candidates per fixture: {1: 20, 2: 16} | total candidates 52
+
+relation                           verdicts                          max_freq_dev  max_excess_dev_dB  n_base n/a entrants strong near-margin
+CONJ                               {'RELATION_SATISFIED': 36}            1.16e-10          7.11e-15     52   0        0      0      0
+NOISE weak                         {'RELATION_SATISFIED': 36}            8.23e-03          1.21e-01      0   0        0     52      0
+ONE_REPEAT_REPLACED (detector)     {'RELATION_SATISFIED': 36}            3.22e-02          9.60e-01      0   0        0     52      0
+PERMUTE reverse                    {'RELATION_SATISFIED': 36}            0.00e+00          0.00e+00     52   0        0      0      0
+PERMUTE rot3                       {'RELATION_SATISFIED': 36}            0.00e+00          0.00e+00     52   0        0      0      0
+PHASE 0.449                        {'RELATION_SATISFIED': 36}            0.00e+00          7.11e-15     52   0        0      0      0
+PHASE 1.571                        {'RELATION_SATISFIED': 36}            0.00e+00          7.11e-15     52   0        0      0      0
+SCALE x0.001                       {'RELATION_SATISFIED': 36}            0.00e+00          7.11e-15     52   0        0      0      0
+SCALE x0.37                        {'RELATION_SATISFIED': 36}            0.00e+00          7.11e-15     52   0        0      0      0
+SCALE x1000                        {'RELATION_SATISFIED': 36}            0.00e+00          1.07e-14     52   0        0      0      0
+SHIFT +1000 bins                   {'RELATION_SATISFIED': 36}            1.16e-10          7.11e-15     52   0        0      0      0
+SHIFT +100000 bins                 {'RELATION_SATISFIED': 36}            1.75e-10          7.11e-15     52   0        0      0      0
+SHIFT -2500 bins                   {'RELATION_SATISFIED': 36}            1.16e-10          7.11e-15     52   0        0      0      0
+
+persistence relations (per candidate):
+  CONJ                                                 {'RELATION_SATISFIED': 52}
+  ONE_REPEAT_REPLACED (persistence)                    {'RELATION_SATISFIED': 52}
+  PERMUTE (qualifying count, multiset of excesses)     {'RELATION_SATISFIED': 52}
+  PHASE 0.449                                          {'RELATION_SATISFIED': 52}
+  SCALE x0.37                                          {'RELATION_SATISFIED': 52}
+
+ROLL (informational only): max freq deviation in bins min 0.0000 max 0.0016; candidate-count changes: 0
+
+phase B: 24 records; statuses {'COMPLETED': 24}
+mutant candidates per fixture (min..max): {'absolute_floor': (139905, 140081), 'first_repeat_only': (404, 436), 'sign_dropped': (1, 1), 'span_limit_removed': (1, 1)}
+
+mutant x relation  (D=MUTANT_DETECTED  S=MUTANT_SURVIVED  -=NOT_COMPARABLE; counts over the mutant fixtures)
+relation                                absolute_floor   first_repeat_only        sign_dropped  span_limit_removed
+CONJ                                          D4 S2 -0            D0 S6 -0            D6 S0 -0            D0 S6 -0
+NOISE weak                                    D6 S0 -0            D0 S6 -0            D0 S6 -0            D0 S6 -0
+ONE_REPEAT_REPLACED (detector)                D0 S6 -0            D6 S0 -0            D0 S6 -0            D0 S6 -0
+PERMUTE reverse                               D0 S6 -0            D6 S0 -0            D0 S6 -0            D0 S6 -0
+PERMUTE rot3                                  D0 S6 -0            D6 S0 -0            D0 S6 -0            D0 S6 -0
+PHASE 0.449                                   D0 S6 -0            D0 S6 -0            D0 S6 -0            D0 S6 -0
+PHASE 1.571                                   D0 S6 -0            D0 S6 -0            D0 S6 -0            D0 S6 -0
+SCALE x0.001                                  D6 S0 -0            D0 S6 -0            D0 S6 -0            D0 S6 -0
+SCALE x0.37                                   D6 S0 -0            D0 S6 -0            D0 S6 -0            D0 S6 -0
+SCALE x1000                                   D6 S0 -0            D0 S6 -0            D0 S6 -0            D0 S6 -0
+SHIFT +1000 bins                              D3 S3 -0            D0 S6 -0            D0 S6 -0            D0 S6 -0
+SHIFT +100000 bins                            D4 S2 -0            D0 S6 -0            D0 S6 -0            D0 S6 -0
+SHIFT -2500 bins                              D3 S3 -0            D0 S6 -0            D0 S6 -0            D0 S6 -0

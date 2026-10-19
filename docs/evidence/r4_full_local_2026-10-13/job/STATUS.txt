@@ -1,0 +1,8 @@
+2026-10-13T19:30:11-07:00 START job=$HOME/r4_full_run_job_20261013_a1 pkg=$HOME/r4_full_run_preflight/record_prelaunch_3/extracted_package/scythe_r4_1_pkg pid=1017973
+2026-10-13T19:30:11-07:00 OK package verified
+2026-10-13T19:32:54-07:00 OK bounded controls (Ran 88 tests in 162.222s)
+2026-10-13T19:33:18-07:00 OK fixtures regenerated, 36/36 hashes verified
+2026-10-13T19:33:18-07:00 OK generated artifacts: 1/1 pinned digests verified
+2026-10-13T19:36:41-07:00 OK smoke gate: GATE PASS
+2026-10-13T19:36:41-07:00 BEGIN full run (36 fixtures, mutants on first 6)
+2026-10-13T19:55:02-07:00 DONE COMPUTATION_COMPLETED harness_rc=0 gate_rc=0 (this is not JOB_ACCEPTED; outputs retained until sealed and independently verified)

@@ -1,0 +1,36 @@
+GATE C PREFLIGHT RECORD (mode CHECK_ONLY; no job started; job directory not created)
+ATTEMPT_ID_CANDIDATE: R4REPLAY-20261015T021354Z-2b2e3251b678-dedirock-919498765-1a498c65-ATTEMPTGATED2-20261015T005128Z-1b0b45  (bound to package 2b2e3251b678a5e83735ee663176f7763482a6948a7d5cb57f244dac1142874a, host dedirock-919498765/cc70d073-ef83-4b64-ba56-72b3d0a82a29, interpreter 1c7d2779938ef3f45cd850119a8655af4c37eaec06b45e3a2e314928a3c3b972, job dir /home/bgilbert1984/r4_replay_GATED2-20261015T005128Z-1b0b45/job)
+TIMESTAMP_UTC: 2026-10-15T02:13:54+00:00
+
+PASS    1 archive SHA-256 equals the declared package digest  2b2e3251b678a5e83735ee663176f7763482a6948a7d5cb57f244dac1142874a
+PASS    1a archive sidecar records the declared digest  
+PASS    1b safe extraction (no absolute paths, '..', links, devices)  []
+PASS    1c sha256sum -c SHA256SUMS in the extracted package  28 OK
+PASS    1d runner and harness digests equal the declared ones  
+PASS    2 PYTHON is an absolute executable file  /home/bgilbert1984/SCYTHE/.venv/bin/python
+PASS    2a the interpreter imports NumPy and reports its identity  [3, 12, 14] numpy 2.5.3
+PASS    2b float64 is 8 bytes and the byte order is little-endian (not permitted to differ from the reference)  8 little
+PASS    3 job directory is an absolute path that does not exist  /home/bgilbert1984/r4_replay_GATED2-20261015T005128Z-1b0b45/job
+PASS    3b job directory parent exists and is writable  /home/bgilbert1984/r4_replay_GATED2-20261015T005128Z-1b0b45
+PASS    3c job directory is not inside the package or the record directory  
+PASS    3d at least 10 GB free on the job filesystem (measured)  66.5 GB at /home/bgilbert1984/r4_replay_GATED2-20261015T005128Z-1b0b45
+PASS    3e at least 10 GB free on the TMPDIR filesystem (measured)  66.5 GB at /tmp
+PASS    3f at least 4 GB available memory  5.2 GB
+PASS    4 no competing r4 job process is running  []
+PASS    5 operator declaration: host available for the whole 4 h window, no planned maintenance, reboot or reclaim of the host during the window  operator 'Ben Gilbert', host dedirock-919498765, window 2026-10-15T02:00:00+00:00 to 2026-10-15T06:00:00+00:00, digest 9c8f893eb6eb6663...
+
+ENVIRONMENT TABLE (reference = the retained local run; replay = this host). Differences are recorded, not judged (protocol section 5.3).
+field                        reference                                    replay
+hostname                     (no reference given)                         dedirock-919498765
+kernel                       (no reference given)                         5.14.0-687.48.1.el9_8.x86_64
+logical_cpus                 (no reference given)                         4
+python_version               (no reference given)                         [3, 12, 14]
+numpy                        (no reference given)                         2.5.3
+interpreter_binary_sha256    (no reference given)                         1c7d2779938ef3f45cd850119a8655af4c37eaec06b45e3a2e314928a3c3b972
+numpy_file                   (no reference given)                         /home/bgilbert1984/SCYTHE/.venv/lib64/python3.12/site-packages/numpy/_
+cpu_model                    (not in the reference record)                Intel(R) Core(TM) i9-14900K
+simd (numpy)                                                              {"baseline": ["X86_V2"], "found": ["X86_V3"], "not found": ["X86_V4", "AVX512_ICL", "AVX512_SPR"]}
+blas (numpy)                                                              {"name": "scipy-openblas", "found": true, "version": "0.3.34.106.0", "detection method": "pkgconfig", "include directory
+
+PREFLIGHT_VERDICT: PASS
+LAUNCH: NOT_PERFORMED (Gate D needs its own explicit authorization)

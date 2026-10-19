@@ -1,0 +1,7 @@
+2026-10-15T00:06:42+00:00 SCENARIO startup_failure_wrong_digest python /usr/bin/python3 sha256 8c515a32b1a5d3d807e53359901a4d09ec06819b488736641aabd6a12eefba63
+2026-10-15T00:06:42+00:00 monitor started, pid 158066
+2026-10-15T00:06:42+00:00 MONITOR_READY observed: {'ts': '2026-10-15T00:06:42+00:00', 'event': 'MONITOR_READY', 'monitor_pid': 158066}
+2026-10-15T00:06:42+00:00 stand-in harness started (deliberately long-lived), pid 158069
+2026-10-15T00:06:47+00:00 expected STARTUP_FAILURE: rc 3 fail_events [{'ts': '2026-10-15T00:06:47+00:00', 'event': 'MONITOR_FAILURE', 'phase': 'STARTUP', 'detail': 'pid 158069 read from the launch pid file, but no process in its descendant tree matched the expected interpreter digest'}] outcome_ok True
+2026-10-15T00:06:47+00:00 harness left untouched by monitor (never signalled): True
+2026-10-15T00:06:47+00:00 SCENARIO startup_failure_wrong_digest RESULT PASS

@@ -1,0 +1,22 @@
+{
+ "schema": "gate-c-operator-declaration/1",
+ "operator": "Ben Gilbert",
+ "host": "dedirock-919498765",
+ "package_sha256": "2b2e3251b678a5e83735ee663176f7763482a6948a7d5cb57f244dac1142874a",
+ "window_start_utc": "2026-10-15T02:00:00+00:00",
+ "window_end_utc": "2026-10-15T06:00:00+00:00",
+ "declared_at_utc": "2026-10-15T01:58:17+00:00",
+ "scope": "no planned maintenance, reboot or reclaim of the host during the window",
+ "ssh_target": "bgilbert1984@<REDACTED_SSH_HOST>",
+ "operator_workstation": "scythe-1 (a mobile workstation; it is not the replay host and its availability is not what is declared)",
+ "availability_basis": "The operator states that <REDACTED_SSH_HOST> is the Dedirock virtual machine and that it operates continuously (24/7). This declaration does not assert continuous availability as a fact needing re-confirmation each attempt; it asserts the narrower, bounded commitment below for this specific window.",
+ "assurance_elaboration": [
+  "No maintenance window, package or kernel update, service restart or scheduled job that the operator controls is planned on the host during the window.",
+  "No reboot, shutdown, suspend, snapshot-restore, resize, migration or provider-side reclaim of the virtual machine is planned or requested by the operator during the window.",
+  "The operator will not start any other r4 job, and will not start load on the host that is intended to compete for its CPU, memory or disk, during the window.",
+  "If any of the above stops being true, the operator will withdraw this declaration by creating the marker file <declaration path>.withdrawn before anything further is done with it.",
+  "The window covers the Gate C preflight steps; it does not authorize a replay job (Gate D has its own authorization and its own RECHECK against this same declaration identity).",
+  "This declaration reflects the operator's own stated standing commitment ('Dedirock is continuously available, and \"Fire when ready\" is your standing operator commitment') and direct confirmation of operator identity ('operator declaration is me Ben Gilbert'), both given directly in this session. It was drafted by the assistant at the operator's explicit instruction ('finalize the declaration locally using the protocol's required timestamps, freeze its SHA-256'), from facts the operator stated, not inferred from any prior attempt. It takes effect only when the operator confirms the exact SHA-256 of this file.",
+  "This declaration does not authorize any SSH connection, CHECK_ONLY, RECHECK, or Gate D action by its own existence. It is a maintenance/reboot/reclaim assurance for the stated window; separate, explicit authorization of the exact command sequence is required before any remote action."
+ ]
+}

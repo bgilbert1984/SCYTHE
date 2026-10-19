@@ -1,0 +1,35 @@
+ATTEMPT: R2_DEDIROCK
+DISPOSITION: INTERRUPTED_HARNESS_DEFECT
+
+ROOT_CAUSE:
+  REPEATED_WHOLE_SPECTRUM_MEDIAN
+
+OBSERVED:
+  MUTANT: absolute_floor
+  CANDIDATES: 139958
+  FLOOR_COST_PER_CALL_S: 0.095   (measured on the local laptop; Dedirock is about 2.5x faster on this workload)
+  FLOOR_RECOMPUTED_PER_CANDIDATE: TRUE
+  LOCAL_ESTIMATE_PER_MUTANT_FIXTURE_CALL: about 3.9 hours
+  OBSERVED_ON_DEDIROCK: first mutant at 100% CPU for 18m37s, no Phase B record written
+
+SCYTHE_PRODUCTION_DEFECT: NOT_ESTABLISHED
+
+PHASE_A_SMOKE:
+  PRESERVED   (results_smoke_phaseA_partial/, 2 fixtures, identity verified)
+  SCIENTIFIC_DISPOSITION: NON_EVIDENTIARY_SMOKE
+
+FULL_36_FIXTURE_RUN:
+  NOT_STARTED
+
+PROCESS:
+  job pid/pgid: 978988; terminated by SIGTERM to the own process group of the job only (no name-based kill)
+  harness r2 sha256: 57a97a092060554d5ed2c1ff8758303b39b0d966115bb70295c9ffabbdf1d626
+  package tarball sha256: 908cc2bc67b027cedd36a999e2933dc714906ee3275faf1549e430ad73a6b06a
+  thread limits: see thread_env.txt (all 1)
+  stop requested/stopped: see stop_log.txt
+  STATUS.txt was not appended at termination (killed mid-stage); its last line is the fixture-verification step.
+
+REDACTION NOTE: absolute home-directory paths in this directory were replaced by "~" (text/JSON copies only). The unredacted
+originals remain on the Dedirock host and in the operator's local preservation directory (tarball sha256
+8f38e67f252d28b6a050a26a24973d038eb4fd55cc96f6513569dc27005f5b93). results_smoke_phaseA_partial/ is the interrupted smoke
+Phase A (non-evidentiary); it was not regenerated.

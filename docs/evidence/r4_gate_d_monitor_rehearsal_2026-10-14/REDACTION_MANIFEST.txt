@@ -1,0 +1,25 @@
+REDACTION MANIFEST — r4 Gate D monitor/launcher rehearsal, 2026-10-14
+
+The rehearsal ran in a local git worktree whose absolute path is operator- and machine-specific and
+carries no evidentiary value (it is where this particular run happened to be checked out, not a fact
+about the monitor's behavior). Five captured files recorded that path verbatim, written there by the
+monitor and the rehearsal driver themselves (e.g. MONITOR_START's own `launch_pid_file`/`record_dir`
+fields, and one DRIVER_LOG.txt line). Each occurrence of the literal substring
+
+    /home/spectrcyde/SCYTHE-r4drehearse/docs/evidence/r4_gate_d_monitor_rehearsal_2026-10-14
+
+was replaced with the placeholder `<REDACTED_WORKTREE_ROOT>` (all other content, including every PID,
+timestamp, digest, and log event, is unchanged). No other redaction was performed; nothing else in
+this evidence directory named a private path, credential, or operator identity.
+
+| File | SHA-256 before redaction | SHA-256 after redaction |
+|---|---|---|
+| scenarios/happy_path/monitor/MONITOR_LOG.jsonl | 3d0310fe32a0755fa42d9176041eabbaac822fdb50cb2ea38634883ce35e867b | 154b823d502fbe0fe2f069149e8243bcec2cd9882459902e5306846ffe12b3a4 |
+| scenarios/short_lived_process/monitor/MONITOR_LOG.jsonl | c89c0ac52fc7070d5a54ec09aab220cb7047a6f8201fdebcdd3d790cce23d93a | de2fa6c3edf3a2c8c96d9dd9c48ddcbbf0c866cfb8227111e6629f5f8d91b406 |
+| scenarios/startup_failure_pid_never_appears/DRIVER_LOG.txt | 27b6f11eeb277c736f017caf82f01cdb2f5964e589487d6b3597398bb48529da | f7980e36a6c7913d84beea180afa897ce99a95f196576fae4cb88a75a6ccf39e |
+| scenarios/startup_failure_pid_never_appears/monitor/MONITOR_LOG.jsonl | 739d7eb602417c62a426f24b37f7dce1d6838a375d781ad5d1edb901ebf849da | 989645d3c27afe2e2f934dc2453a467169aad1ca995276c0da456fb725d24481 |
+| scenarios/startup_failure_wrong_digest/monitor/MONITOR_LOG.jsonl | 074dca2c105e5e2623b38fb47e438f33c4fd647a6b902f78a8e7a60929937834 | b4a6c6f393418733bcca904c1b8ab88049dbaf90bd52153f207ebcb65fe418f3 |
+
+All other files in this evidence directory (OUTCOME.txt, INDEPENDENT_VERIFICATION.json, job/STATUS.txt,
+launch.pid, and the non-redacted DRIVER_LOG.txt files) are committed exactly as produced by the
+rehearsal run, byte for byte.

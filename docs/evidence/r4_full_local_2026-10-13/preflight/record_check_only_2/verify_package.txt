@@ -1,0 +1,26 @@
+$ $HOME/SCYTHE/.venv/bin/python $HOME/SCYTHE-r4decl/tools/r4_package/verify_package.py $HOME/SCYTHE-r4decl 8d34de9ac0b1f4758cda3412b364582b4271ffe1 $HOME/r4_full_run_preflight/record_check_only_2/scythe_r4_1_pkg_8d34de9ac0b1.tar.gz $HOME/r4_full_run_preflight/record_check_only_2/verify_extract --python $HOME/SCYTHE/.venv/bin/python
+PASS 1 archive SHA-256 equals its recorded digest  [2b2e3251b678a5e83735ee663176f7763482a6948a7d5cb57f244dac1142874a]
+PASS 2 extraction safe (no absolute paths, '..', links or devices)  [[]]
+PASS 3 extracted file set == inventory (+ the two manifests)  [29 files; extra=[] missing=[]]
+PASS 3b inventory names the complete commit  [8d34de9ac0b1f4758cda3412b364582b4271ffe1]
+PASS 4 sha256sum -c SHA256SUMS  [28 OK]
+PASS 4b SHA256SUMS lists every file except itself
+PASS 5 inventory content digests match the files  [[]]
+PASS 6 CLEAN ARCHIVE COMPARISON: byte-identical to git show AND an independent git archive  [26 files compared; mismatches=[]]
+PASS 7 source closure: every import resolves inside the package (isolated interpreter)  [11 local modules; third-party=['_distutils_hack', 'numpy']; outside=[]]
+PASS 7b every locally imported module is in the packaged closure list or is a tool/test the package carries
+PASS 7c the closure list is fully present in the package  [[]]
+PASS 10 r4.1 custody files present  [[]]
+PASS 10b generated-artifact pin == digest of the frozen index, naming index.json only
+PASS 10c 36 fixture hashes, none naming index.json, digest equals the identity record
+PASS 10d identity records the pin digest and revision r4.1
+PASS 10e runner finalizes through the separate verifier
+PASS 8 every .py compiles and every .sh passes bash -n  [[]]
+PASS 9 no caches, links, oversize files, absolute local paths, credential patterns or operator identities  [0 hit(s)]
+
+NOTES: ["third-party imports: ['_distutils_hack', 'numpy']"]
+VERIFICATION PASS (18/18 checks)
+
+--- stderr
+
+--- rc 0
