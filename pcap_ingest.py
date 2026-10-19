@@ -138,6 +138,8 @@ class IngestConfig:
     max_flow_entities: int = 2000                # Cap flow nodes per PCAP
     # ── Behavioral Session Groups ─────────────────────────────────────
     enable_bsg: bool = True                      # Run BSG detection after sessionization
+    # ── Evidence manifest ─────────────────────────────────────────────
+    manifest_dir: Optional[str] = None           # If set, write a per-PCAP evidence manifest here
     # ── Mission provenance (PR C, optional, additive) ─────────────────
     mission_id: Optional[str] = None             # Attached to every node's provenance when set
 
@@ -501,6 +503,8 @@ class IngestResult:
     geo_points: List[Dict[str, Any]] = field(default_factory=list)  # GeoIP resolved hosts
     dpi_stats: Dict[str, int] = field(default_factory=lambda: {"dns_names": 0, "tls_snis": 0, "http_hosts": 0})
     bsg_summary: Optional[Dict[str, Any]] = None  # BSG detection results
+    stage_timings: Dict[str, float] = field(default_factory=dict)  # seconds per pipeline stage
+    manifest_path: Optional[str] = None          # Evidence manifest, when config.manifest_dir is set
 
     @property
     def ok(self) -> bool:
@@ -1768,7 +1772,9 @@ class PcapIngestPipeline:
 
         try:
             # ── 1. Decode (with DPI) ─────────────────────────────────
+            t_stage = time.monotonic()
             packets = decode_pcap(filepath, enable_dpi=self.config.enable_dpi)
+            result.stage_timings["decode"] = time.monotonic() - t_stage
             result.packets_decoded = len(packets)
 
             if not packets:
@@ -1782,15 +1788,18 @@ class PcapIngestPipeline:
             result.nodes_emitted += 1
 
             # ── 3. Sessionize ────────────────────────────────────────
+            t_stage = time.monotonic()
             sessions = sessionize(
                 packets,
                 filename,
                 window_sec=self.config.session_window_sec,
                 min_packets=self.config.min_session_packets,
             )
+            result.stage_timings["sessionize"] = time.monotonic() - t_stage
             result.sessions_created = len(sessions)
 
             # ── 4. Emit session hypergraphs ──────────────────────────
+            t_stage = time.monotonic()
             for session in sessions:
                 nodes, edges = self.emitter.emit_session(session, artifact_id)
                 result.nodes_emitted += nodes
@@ -1800,6 +1809,8 @@ class PcapIngestPipeline:
                 # ── 5. Ledger registration ───────────────────────────
                 if self.registrar:
                     self.registrar.register_session(session, artifact_id)
+
+            result.stage_timings["emit"] = time.monotonic() - t_stage
 
             self.emitter.flush(
                 entity_id=artifact_id,
@@ -1876,6 +1887,14 @@ class PcapIngestPipeline:
         result.geo_points = self.emitter.geo_points[geo_before:]
         result.dpi_stats = dict(self.emitter.dpi_stats)
         result.duration_sec = time.monotonic() - t0
+
+        if self.config.manifest_dir and filepath.exists():
+            try:
+                from ingest_manifest import build_manifest, write_manifest
+                manifest = build_manifest(filepath, result, self.config, result.stage_timings)
+                result.manifest_path = str(write_manifest(manifest, Path(self.config.manifest_dir)))
+            except Exception as man_err:
+                logger.warning("[pcap_ingest] manifest failed for %s: %s", filename, man_err)
 
         logger.info(
             "[pcap_ingest] %s: %d sessions, %d geo_points, DPI: %s",
