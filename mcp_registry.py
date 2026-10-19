@@ -192,12 +192,17 @@ class Registry:
 
     def _audit_log(self, tool: Tool, params: Dict[str, Any], result: Any):
         """Log tool execution for audit trail."""
+        from mcp_principal import current_proposal_id, principal_dict
+
         record = {
             "uuid": str(uuid.uuid4()),
             "timestamp": time.time(),
             "tool": tool.name,
             "mutates_state": tool.mutates_state,
+            "effect": getattr(tool, "effect", None),
             "params": params or {},
+            "proposal_id": current_proposal_id(),
+            "principal": principal_dict(),
             "result_summary": self._summarize(result),
         }
         logger.info(f"[MCP_AUDIT] {json.dumps(record, default=str)}")

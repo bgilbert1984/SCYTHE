@@ -204,6 +204,9 @@ class AliasMCPOrchestrator:
             proposal["error"] = "Phase 0 is observe-only; mutation execution is disabled"
             return {"ok": False, "error": proposal["error"], "phase": self.phase.value}
 
+        from mcp_principal import principal_dict
+        proposal["executed_by"] = principal_dict()   # shadow runs are executions too
+
         # Get adaptive budget for this phase
         if self.phase in (Phase.PHASE_2_LIMITED_MUTATION, Phase.PHASE_3_ADAPTIVE_BUDGET):
             mutation_budget = self.dual_agent.executor_trust.adaptive_budget(
@@ -234,13 +237,15 @@ class AliasMCPOrchestrator:
                 proposal["execution_result"] = result
             else:
                 # Normal execution
-                result = self.registry.execute(
-                    self.engine,
-                    tool_name,
-                    params,
-                    agent_mode="mutate" if tool_name in self._mutation_tools() else "observe",
-                    mutation_budget=mutation_budget,
-                )
+                from mcp_principal import proposal_scope
+                with proposal_scope(proposal_id):
+                    result = self.registry.execute(
+                        self.engine,
+                        tool_name,
+                        params,
+                        agent_mode="mutate" if tool_name in self._mutation_tools() else "observe",
+                        mutation_budget=mutation_budget,
+                    )
                 proposal["status"] = "executed"
                 proposal["execution_result"] = result
                 self.dual_agent.stability.add_mutation()
