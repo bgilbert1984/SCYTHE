@@ -24,6 +24,7 @@ tamper-evident policy, not protection from a privileged host user.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import datetime as _dt
 import json
 import logging
@@ -47,6 +48,7 @@ CREATE TABLE IF NOT EXISTS control_audit_events (
     timestamp        TEXT NOT NULL,
     ts_epoch         REAL NOT NULL,
     execution_id     TEXT NOT NULL,
+    source           TEXT,
     principal_kind   TEXT NOT NULL,
     principal_id     TEXT,
     session_id       TEXT,
@@ -130,6 +132,8 @@ class ControlAuditStore:
             db = sqlite3.connect(path, check_same_thread=False, isolation_level=None)
             db.execute("PRAGMA journal_mode=WAL")
             db.executescript(SCHEMA)
+            if "source" not in {r[1] for r in db.execute("PRAGMA table_info(control_audit_events)")}:
+                db.execute("ALTER TABLE control_audit_events ADD COLUMN source TEXT")   # stores created before #227
             if self.retention_days is not None:
                 db.execute("INSERT OR REPLACE INTO control_audit_meta (key, value) VALUES ('retention_days', ?)",
                            (str(self.retention_days),))
@@ -142,7 +146,7 @@ class ControlAuditStore:
     def record(self, *, execution_id: str, action: str, effect: str, result: str,
                principal: Optional[Dict[str, Any]] = None, proposal_id: Optional[str] = None,
                parameters: Optional[Dict[str, Any]] = None, result_summary: Optional[str] = None,
-               timestamp: Optional[float] = None) -> str:
+               timestamp: Optional[float] = None, source: Optional[str] = None) -> str:
         """Append one event and return its id.  Raises on failure; see ``safe_record``."""
         ts = time.time() if timestamp is None else float(timestamp)
         principal = principal or {}
@@ -150,7 +154,7 @@ class ControlAuditStore:
         row = (
             event_id,
             _dt.datetime.fromtimestamp(ts, _dt.timezone.utc).isoformat(),
-            ts, execution_id,
+            ts, execution_id, source,
             principal.get("kind") or "none", principal.get("operator_id"), principal.get("session_id"),
             action, effect, proposal_id,
             json.dumps(redact(parameters or {}), sort_keys=True, default=str),
@@ -158,9 +162,9 @@ class ControlAuditStore:
         )
         with self._lock:
             self._conn().execute(
-                "INSERT INTO control_audit_events (event_id, timestamp, ts_epoch, execution_id, principal_kind,"
-                " principal_id, session_id, action, effect, proposal_id, parameters_json, result,"
-                " result_summary, software_version, deployment_id, host_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", row)
+                "INSERT INTO control_audit_events (event_id, timestamp, ts_epoch, execution_id, source,"
+                " principal_kind, principal_id, session_id, action, effect, proposal_id, parameters_json, result,"
+                " result_summary, software_version, deployment_id, host_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", row)
         return event_id
 
     def safe_record(self, **fields) -> Optional[str]:
@@ -230,19 +234,54 @@ def reset() -> None:
     _store = None
 
 
-def begin_execution(tool, params: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
-    """Record that a state-changing tool is about to run.  None when auditing does not apply."""
+def begin_action(*, action: str, effect: str, params: Optional[Dict[str, Any]], principal: Optional[Dict[str, Any]],
+                 source: str, proposal_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """Write the ``started`` row for an action and return the context ``finish_execution`` closes.
+
+    ``source`` says which entry point asked: ``mcp`` or an HTTP route such as
+    ``api.sdr.tune``, so the same underlying effect reached two ways stays distinguishable.
+    """
     store = _store
-    if store is None or not getattr(tool, "mutates_state", False):
+    if store is None:
         return None
-    from mcp_principal import current_proposal_id, principal_dict
     ctx = {
-        "store": store, "execution_id": str(uuid.uuid4()), "action": tool.name,
-        "effect": getattr(tool, "effect", None) or "UNDECLARED", "params": params or {},
-        "principal": principal_dict(), "proposal_id": current_proposal_id(),
+        "store": store, "execution_id": str(uuid.uuid4()), "action": action, "effect": effect or "UNDECLARED",
+        "params": params or {}, "principal": principal, "proposal_id": proposal_id, "source": source,
     }
     _write(ctx, "started")
     return ctx
+
+
+def begin_execution(tool, params: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """MCP entry: record that a state-changing tool is about to run.  None when auditing does not apply."""
+    if _store is None or not getattr(tool, "mutates_state", False):
+        return None
+    from mcp_principal import current_proposal_id, principal_dict
+    return begin_action(action=tool.name, effect=getattr(tool, "effect", None), params=params,
+                        principal=principal_dict(), source="mcp", proposal_id=current_proposal_id())
+
+
+class _Outcome:
+    """Lets the audited block say what happened, for the closing row."""
+    summary: Optional[str] = None
+
+
+@contextlib.contextmanager
+def audited(*, action: str, effect: str, params: Optional[Dict[str, Any]], principal: Optional[Dict[str, Any]],
+            source: str):
+    """Audit the block: ``started`` on entry, then ``success`` or ``error`` on exit.
+
+    An exception is recorded and re-raised unchanged, so a caller's own error
+    handling and responses are unaffected.  With no store configured this is a no-op.
+    """
+    ctx = begin_action(action=action, effect=effect, params=params, principal=principal, source=source)
+    outcome = _Outcome()
+    try:
+        yield outcome
+    except BaseException as exc:
+        finish_execution(ctx, error=exc)
+        raise
+    finish_execution(ctx, result_summary=outcome.summary)
 
 
 def finish_execution(ctx: Optional[Dict[str, Any]], *, result_summary: Optional[str] = None,
@@ -259,7 +298,7 @@ def _write(ctx: Dict[str, Any], result: str, summary: Optional[str] = None) -> N
     ctx["store"].safe_record(
         execution_id=ctx["execution_id"], action=ctx["action"], effect=ctx["effect"], result=result,
         principal=ctx["principal"], proposal_id=ctx["proposal_id"], parameters=ctx["params"],
-        result_summary=summary)
+        result_summary=summary, source=ctx["source"])
 
 
 def main(argv=None) -> int:

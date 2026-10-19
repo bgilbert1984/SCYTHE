@@ -3810,29 +3810,43 @@ if FLASK_AVAILABLE:
         include_control = request.args.get('control', '').lower() in ('1', 'true', 'yes')
         return jsonify(bridge.status(include_control=include_control))
 
+    def _sdr_audit(action, params, source, principal):
+        """Audit one hardware-control request (control_audit; no-op when unconfigured)."""
+        import control_audit
+        from mcp_effects import HARDWARE_CONTROL
+        return control_audit.audited(action=action, effect=HARDWARE_CONTROL, params=params,
+                                     principal=principal.to_dict(), source=source)
+
     @app.route('/api/sdr/start', methods=['POST'])
     def sdr_bridge_start():
-        if not _rf_bridge_authorized():
+        principal = _rf_bridge_principal()
+        if principal is None:
             return jsonify({'status': 'error', 'message': 'Authentication required'}), 401
         bridge, error = _rf_bridge_or_error()
         if error:
             return error
-        started = bridge.start()
+        with _sdr_audit('rf_capture_control', {'action': 'start'}, 'api.sdr.start', principal) as outcome:
+            started = bridge.start()
+            outcome.summary = f'changed={started}'
         return jsonify({'status': 'ok', 'started': started, 'bridge': bridge.status()})
 
     @app.route('/api/sdr/stop', methods=['POST'])
     def sdr_bridge_stop():
-        if not _rf_bridge_authorized():
+        principal = _rf_bridge_principal()
+        if principal is None:
             return jsonify({'status': 'error', 'message': 'Authentication required'}), 401
         bridge, error = _rf_bridge_or_error()
         if error:
             return error
-        stopped = bridge.stop()
+        with _sdr_audit('rf_capture_control', {'action': 'stop'}, 'api.sdr.stop', principal) as outcome:
+            stopped = bridge.stop()
+            outcome.summary = f'changed={stopped}'
         return jsonify({'status': 'ok', 'stopped': stopped, 'bridge': bridge.status()})
 
     @app.route('/api/sdr/tune', methods=['POST'])
     def sdr_bridge_tune():
-        if not _rf_bridge_authorized():
+        principal = _rf_bridge_principal()
+        if principal is None:
             return jsonify({'status': 'error', 'message': 'Authentication required'}), 401
         bridge, error = _rf_bridge_or_error()
         if error:
@@ -3842,7 +3856,11 @@ if FLASK_AVAILABLE:
             frequency_hz = float(body['frequency_hz'])
             mode = body.get('mode')
             bandwidth_hz = int(body.get('bandwidth_hz', 0))
-            control = bridge.tune(frequency_hz, mode=mode, bandwidth_hz=bandwidth_hz)
+            # Audited from here: a request rejected above for bad input never reached the bridge.
+            params = {'frequency_hz': frequency_hz, 'mode': mode, 'bandwidth_hz': bandwidth_hz}
+            with _sdr_audit('rf_tune', params, 'api.sdr.tune', principal) as outcome:
+                control = bridge.tune(frequency_hz, mode=mode, bandwidth_hz=bandwidth_hz)
+                outcome.summary = 'tuned'
             return jsonify({'status': 'ok', 'control': control, 'bridge': bridge.status()})
         except KeyError:
             return jsonify({'status': 'error', 'message': 'frequency_hz is required'}), 400
@@ -3854,14 +3872,17 @@ if FLASK_AVAILABLE:
 
     @app.route('/api/sdr/config', methods=['POST'])
     def sdr_bridge_configure():
-        if not _rf_bridge_authorized():
+        principal = _rf_bridge_principal()
+        if principal is None:
             return jsonify({'status': 'error', 'message': 'Authentication required'}), 401
         bridge, error = _rf_bridge_or_error()
         if error:
             return error
         body = request.get_json(silent=True) or {}
         try:
-            status = bridge.configure_stream(**body)
+            with _sdr_audit('rf_stream_configure', body, 'api.sdr.config', principal) as outcome:
+                status = bridge.configure_stream(**body)
+                outcome.summary = 'configured'
             return jsonify({'status': 'ok', 'bridge': status})
         except (TypeError, ValueError) as exc:
             return jsonify({'status': 'error', 'message': str(exc)}), 400
