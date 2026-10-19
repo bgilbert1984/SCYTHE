@@ -10,7 +10,7 @@ Features:
 """
 from typing import Any, Callable, Dict, Optional
 
-from mcp_effects import READ_ONLY
+from mcp_effects import LOCAL_STATE, READ_ONLY
 import time
 import logging
 import uuid
@@ -549,6 +549,7 @@ def build_registry(engine) -> Dict[str, Any]:
         },
         run=_decay_now,
         mutates_state=True,
+        effect=LOCAL_STATE,
         rate_limit=1.0,
     ))
 
@@ -571,6 +572,7 @@ def build_registry(engine) -> Dict[str, Any]:
         },
         run=_ingest_pcap,
         mutates_state=True,
+        effect=LOCAL_STATE,
         rate_limit=10.0,
     ))
 
@@ -593,6 +595,7 @@ def build_registry(engine) -> Dict[str, Any]:
         },
         run=_ingest_live_event,
         mutates_state=True,
+        effect=LOCAL_STATE,
         rate_limit=1.0,  # at most once per second
     ))
 
@@ -615,6 +618,7 @@ def build_registry(engine) -> Dict[str, Any]:
         },
         run=_run_tak_ml,
         mutates_state=True,
+        effect=LOCAL_STATE,
         rate_limit=2.0,
     ))
 
@@ -641,6 +645,7 @@ def build_registry(engine) -> Dict[str, Any]:
         },
         run=_reinforce_edge,
         mutates_state=True,
+        effect=LOCAL_STATE,
         rate_limit=None,
     ))
 
@@ -662,6 +667,7 @@ def build_registry(engine) -> Dict[str, Any]:
         },
         run=_prune_below_weight,
         mutates_state=True,
+        effect=LOCAL_STATE,
         rate_limit=None,
     ))
 
@@ -672,6 +678,7 @@ def build_registry(engine) -> Dict[str, Any]:
         returns={"type": "object", "properties": {"ok": {"type": "boolean"}}},
         run=_clear_scope_cache,
         mutates_state=True,
+        effect=LOCAL_STATE,
         rate_limit=None,
     ))
 
@@ -836,6 +843,7 @@ def build_registry(engine) -> Dict[str, Any]:
         },
         run=_subscribe_scope,
         mutates_state=True,
+        effect=LOCAL_STATE,
         rate_limit=None,
     ))
 
@@ -858,6 +866,7 @@ def build_registry(engine) -> Dict[str, Any]:
         },
         run=_unsubscribe_scope,
         mutates_state=True,
+        effect=LOCAL_STATE,
         rate_limit=None,
     ))
 
@@ -882,6 +891,7 @@ def build_registry(engine) -> Dict[str, Any]:
         },
         run=_scrub_scope_time,
         mutates_state=True,
+        effect=LOCAL_STATE,
         rate_limit=None,
     ))
 
@@ -978,6 +988,7 @@ def build_registry(engine) -> Dict[str, Any]:
         },
         run=_set_decay_lambda,
         mutates_state=True,
+        effect=LOCAL_STATE,
         rate_limit=1.0,
     ))
 
@@ -1027,6 +1038,7 @@ def build_registry(engine) -> Dict[str, Any]:
         },
         run=_reload_rules,
         mutates_state=True,
+        effect=LOCAL_STATE,
         rate_limit=5.0,
     ))
 
