@@ -10,6 +10,7 @@ from urllib.error import URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
+from mcp_effects import HARDWARE_CONTROL
 from mcp_registry import Tool
 from rf_bridge import get_rf_bridge, get_rf_observation_store, get_rf_sparse_analyzer
 
@@ -253,10 +254,10 @@ def _mutation_tools():
              {"type": "object", "required": ["frequency_hz"], "properties": {
                  "frequency_hz": {"type": "number", "exclusiveMinimum": 0},
                  "mode": {"type": "string"}, "bandwidth_hz": {"type": "integer", "minimum": 0}},
-              "additionalProperties": False}, obj, tune, mutates_state=True, required_mode="mutate"),
+              "additionalProperties": False}, obj, tune, mutates_state=True, required_mode="mutate", effect=HARDWARE_CONTROL),
         Tool("rf_capture_control", "Start or stop the native IQ bridge. Requires an approved orchestrator proposal.",
              {"type": "object", "required": ["action"], "properties": {"action": {"enum": ["start", "stop"]}},
-              "additionalProperties": False}, obj, capture, mutates_state=True, required_mode="mutate"),
+              "additionalProperties": False}, obj, capture, mutates_state=True, required_mode="mutate", effect=HARDWARE_CONTROL),
     ]
 
 

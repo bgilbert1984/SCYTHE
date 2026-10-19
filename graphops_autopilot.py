@@ -33,6 +33,8 @@ from collections import deque
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
+from mcp_effects import TRAINING_DATA
+
 logger = logging.getLogger(__name__)
 
 # ── Tier thresholds (Gemma_Llama_MCP.md §4) ──────────────────────────────────
@@ -889,6 +891,10 @@ def register_autopilot_tools(engine, mcp_handler,
             },
         },
         fn = _submit_feedback,
+        # Sends a training-feedback record to the TAK-ML server and sets
+        # card.analyst_verdict: a state transition outside this process.
+        mutates_state = True,
+        effect        = TRAINING_DATA,
     )
 
     logger.info("[mcp] GraphOps Autopilot tools registered (5 tools)")
