@@ -915,7 +915,8 @@ def build_registry(engine) -> Dict[str, Any]:
             },
         },
         run=_set_scope_filter,
-        mutates_state=False,
+        mutates_state=True,
+        effect=LOCAL_STATE,
         rate_limit=None,
     ))
 

@@ -34,6 +34,12 @@ class OrchestratorRegistryTest(unittest.TestCase):
         )
         self.assertEqual(undeclared, [])
 
+    def test_set_scope_filter_is_a_declared_local_state_mutation(self):
+        tool = self.orch.registry._tools["set_scope_filter"]
+        self.assertTrue(tool.mutates_state)
+        self.assertEqual((tool.effect, tool.effect_declared), ("LOCAL_STATE", True))
+        self.assertIn("set_scope_filter", self.orch._mutation_tools())
+
     def test_phase_0_blocks_a_registry_mutation_tool(self):
         p = self.orch.propose_action("decay_now", {"lambda": 0.001}, confidence=0.9)
         self.assertEqual(p["status"], "approved")
