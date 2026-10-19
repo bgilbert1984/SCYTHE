@@ -57,3 +57,21 @@ def undeclared_effects(tools) -> list[str]:
         name for name, tool in dict(tools).items()
         if hasattr(tool, "effect_declared") and not tool.effect_declared
     )
+
+
+AUTO_APPROVE = "auto_approve"
+REQUIRES_REVIEW = "requires_review"
+
+
+def approval_policy(tool) -> str:
+    """Whether a proposal for ``tool`` may be approved without the mutation checks.
+
+    Decided from the tool's declared effect only, never from its name.  Anything
+    that is not positively known to be non-mutating needs review: an unknown tool,
+    a tool that never declared an effect, and a declared effect that is mutating.
+    """
+    if tool is None or not getattr(tool, "effect_declared", False):
+        return REQUIRES_REVIEW
+    if getattr(tool, "effect", None) in NON_MUTATING and not getattr(tool, "mutates_state", True):
+        return AUTO_APPROVE
+    return REQUIRES_REVIEW

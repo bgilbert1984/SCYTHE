@@ -142,7 +142,10 @@ class DualAgentOrchestrator:
       Executor → executes if approved
     """
 
-    def __init__(self, default_mutation_budget: int = 3):
+    def __init__(self, default_mutation_budget: int = 3, tool_resolver=None):
+        # name -> tool object (with .effect / .effect_declared / .mutates_state).
+        # Approval is decided from the tool's declared effect, never its name.
+        self.tool_resolver = tool_resolver
         self.analyst_mode = "observe"  # readonly
         self.analyst_trust = TrustScore(agent_id="analyst")
 
@@ -178,16 +181,27 @@ class DualAgentOrchestrator:
             "approval_reason": "",
         }
 
-        # Analyst is always read-only, so analyst proposals are always safe
-        if "query" in tool_name or tool_name in ("export_graph_snapshot", "get_engine_metrics"):
+        from mcp_effects import AUTO_APPROVE, approval_policy
+
+        tool = self.tool_resolver(tool_name) if self.tool_resolver else None
+        proposal["effect"] = getattr(tool, "effect", None)
+        proposal["effect_declared"] = bool(getattr(tool, "effect_declared", False))
+
+        if approval_policy(tool) == AUTO_APPROVE:
             proposal["status"] = "approved"
-            proposal["approval_reason"] = "query tool (read-only)"
+            proposal["approval_reason"] = f"declared {tool.effect} (non-mutating)"
             self.drift_gate.record_proposal(was_accepted=True)
         else:
-            # Mutation tool: check Executor limits
+            # Mutating, undeclared or unknown tool: check Executor limits
             approval = self._check_mutation_approval(tool_name, params, confidence)
             proposal["status"] = approval["status"]
-            proposal["approval_reason"] = approval["reason"]
+            if tool is None:
+                why = "tool not found"
+            elif not proposal["effect_declared"]:
+                why = "effect not declared"
+            else:
+                why = f"effect {tool.effect}"
+            proposal["approval_reason"] = f"{why}: {approval['reason']}"
             self.drift_gate.record_proposal(was_accepted=(proposal["status"] != "rejected"))
 
         self.decision_log.append(proposal)
