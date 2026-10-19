@@ -3735,35 +3735,58 @@ if FLASK_AVAILABLE:
         RF_BRIDGE_AVAILABLE = False
         logger.warning("SDR++ bridge unavailable: %s", _rf_bridge_import_error)
 
-    def _rf_bridge_authorized(require_identity=False):
-        """Validate operator or internal credentials for SDR control routes."""
+    def _rf_bridge_principal(require_identity=False):
+        """Validate operator or internal credentials for SDR control routes.
+
+        Returns the caller's mcp_principal.Principal, or None when the request is
+        not allowed.  The decisions are exactly those _rf_bridge_authorized always
+        made; the difference is that who the caller is no longer gets discarded.
+        """
         import hmac
+        from mcp_principal import ANONYMOUS, INTERNAL_TOKEN, LOOPBACK, OPERATOR_SESSION, Principal
 
         configured_internal = app.config.get('INTERNAL_TOKEN', '')
         supplied_internal = request.headers.get('X-Internal-Token', '')
         if configured_internal and supplied_internal and hmac.compare_digest(
             str(configured_internal), str(supplied_internal)
         ):
-            return True
+            return Principal(kind=INTERNAL_TOKEN)
 
         manager = globals().get('operator_manager')
         # Browser SDR routes preserve anonymous development mode. MCP requires
         # an identity unless the caller is loopback on a development instance.
         if not manager:
-            return (not require_identity) or request.remote_addr in ('127.0.0.1', '::1')
+            if request.remote_addr in ('127.0.0.1', '::1'):
+                return Principal(kind=LOOPBACK)
+            return None if require_identity else Principal(kind=ANONYMOUS)
 
         token = (
             request.headers.get('X-Session-Token')
             or request.headers.get('Authorization', '').replace('Bearer ', '').strip()
         )
         if not token:
-            return False
+            return None
         try:
             if hasattr(manager, 'validate_session'):
-                return bool(manager.validate_session(token))
-            return bool(manager.get_operator_for_session(token))
+                session = manager.validate_session(token)
+                operator_id = getattr(session, 'operator_id', None)
+                session_id = getattr(session, 'session_id', None)
+            else:
+                operator = manager.get_operator_for_session(token)
+                session, session_id = operator, None
+                operator_id = getattr(operator, 'operator_id', None)
+            if not session:
+                return None
+            operator = getattr(manager, 'operators', {}).get(operator_id) if operator_id else None
+            role = getattr(getattr(operator, 'role', None), 'value', None)
+            return Principal(kind=OPERATOR_SESSION, operator_id=operator_id, session_id=session_id,
+                             role=role, callsign=getattr(operator, 'callsign', None))
         except Exception:
-            return False
+            return None
+
+    def _rf_bridge_authorized(require_identity=False):
+        """Validate operator or internal credentials for SDR control routes."""
+        return _rf_bridge_principal(require_identity) is not None
 
     def _rf_bridge_or_error():
         if not RF_BRIDGE_AVAILABLE or get_rf_bridge is None:
@@ -21096,7 +21119,7 @@ def main():
                 app,
                 eng,
                 use_orchestrator=True,
-                auth_validator=lambda: _rf_bridge_authorized(require_identity=True),
+                auth_validator=lambda: _rf_bridge_principal(require_identity=True),
                 selection_engine=globals().get('hypergraph_store'),
             )
             logger.info('MCP server registered at /mcp (%d tools, %d resources)',

@@ -436,18 +436,24 @@ def register_mcp_routes(app, engine, use_orchestrator: bool = False, auth_valida
 
     from flask import request, jsonify
 
-    def _authorized():
+    def _authenticate():
+        """Return the caller's Principal, or None when the request is not allowed."""
+        from mcp_principal import INTERNAL_TOKEN, LOOPBACK, Principal, coerce
         if auth_validator is not None:
             try:
-                return bool(auth_validator())
+                return coerce(auth_validator())
             except Exception:
                 logger.exception("[mcp] auth validator failed")
-                return False
+                return None
         configured = os.getenv("MCP_INTERNAL_TOKEN", "")
         supplied = request.headers.get("X-Internal-Token", "")
         if configured:
-            return bool(supplied) and hmac.compare_digest(configured, supplied)
-        return request.remote_addr in {"127.0.0.1", "::1"}
+            ok = bool(supplied) and hmac.compare_digest(configured, supplied)
+            return Principal(kind=INTERNAL_TOKEN) if ok else None
+        return Principal(kind=LOOPBACK) if request.remote_addr in {"127.0.0.1", "::1"} else None
+
+    def _authorized():
+        return _authenticate() is not None
 
     def _unauthorized():
         return jsonify({"jsonrpc": "2.0", "id": None,
@@ -455,15 +461,18 @@ def register_mcp_routes(app, engine, use_orchestrator: bool = False, auth_valida
 
     @app.route('/mcp', methods=['POST'])
     def mcp_jsonrpc():
-        if not _authorized():
+        from mcp_principal import principal_scope
+        principal = _authenticate()
+        if principal is None:
             return _unauthorized()
         body = request.get_json(silent=True)
         if not body:
             return jsonify({"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "Parse error"}}), 400
-        if isinstance(body, list):
-            responses = [handler.handle(req) for req in body]
-            return jsonify(responses)
-        return jsonify(handler.handle(body))
+        with principal_scope(principal):
+            if isinstance(body, list):
+                responses = [handler.handle(req) for req in body]
+                return jsonify(responses)
+            return jsonify(handler.handle(body))
 
     @app.route('/mcp', methods=['GET'])
     def mcp_info():

@@ -182,6 +182,12 @@ class DualAgentOrchestrator:
         }
 
         from mcp_effects import AUTO_APPROVE, approval_policy
+        from mcp_principal import principal_dict
+
+        # Who asked.  There is no separate human approver in this flow: approval
+        # is computed below from the safety checks, so the identities worth
+        # recording are the proposer here and the executor in execute_proposal.
+        proposal["proposed_by"] = principal_dict()
 
         tool = self.tool_resolver(tool_name) if self.tool_resolver else None
         proposal["effect"] = getattr(tool, "effect", None)
