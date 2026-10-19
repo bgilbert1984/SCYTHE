@@ -27,6 +27,13 @@ class OrchestratorRegistryTest(unittest.TestCase):
     def test_mutation_tools_are_seen_as_mutations(self):
         self.assertIn("decay_now", self.orch._mutation_tools())
 
+    def test_every_mutating_registry_tool_declares_its_effect(self):
+        undeclared = sorted(
+            name for name, tool in self.orch.registry._tools.items()
+            if tool.mutates_state and not tool.effect_declared
+        )
+        self.assertEqual(undeclared, [])
+
     def test_phase_0_blocks_a_registry_mutation_tool(self):
         p = self.orch.propose_action("decay_now", {"lambda": 0.001}, confidence=0.9)
         self.assertEqual(p["status"], "approved")
