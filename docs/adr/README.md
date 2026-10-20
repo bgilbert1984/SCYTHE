@@ -11,6 +11,7 @@ implemented — the repository states elsewhere what actually ships.
 | [0003](0003-rf-emission-tracking-hierarchy.md) | Detection, track, transmitter and location are four layers | Proposed |
 | [0004](0004-mcp-control-plane.md) | MCP tools declare their effect, and policy follows the declaration | Accepted and implemented; Registry/ToolDef split undecided |
 | [0005](0005-registry-tooldef-execution-model.md) | Registry and ToolDef tools: one lifecycle, or an explicit boundary | Proposed; not decided |
+| [0006](0006-mcp-approval-policy.md) | Approval is a policy tier per effect, and independent approval is expressible | Proposed; not decided |
 
 ## Relationship to `docs/SparseSCYTHE.md`
 
