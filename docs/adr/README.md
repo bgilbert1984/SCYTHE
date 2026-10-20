@@ -16,6 +16,24 @@ implemented — the repository states elsewhere what actually ships.
 | [0008](0008-mutation-replayability.md) | Every mutation owes a declared level of explainability | Proposed; not decided |
 | [0009](0009-partial-failure.md) | A partially applied mutation is represented, never silently discarded | Proposed; not decided |
 
+## How ADRs 0004–0009 relate
+
+The MCP control-plane ADRs build on one another. Arrows read "builds on" and follow each
+ADR's own *Builds on* line.
+
+```text
+0004  Control-plane invariants (effects, audit, principal)
+  ├── 0005  Execution model (Registry vs ToolDef)
+  │     └── 0006  Approval semantics (modes per effect)
+  └── 0007  Mutation boundary (builds on 0004, 0005, 0006)
+        ├── 0008  Replayability (also builds on 0006)
+        └── 0009  Partial-failure semantics (also builds on 0008)
+```
+
+0004 is accepted and implemented. 0005–0009 are proposals: each frames a decision and
+none is chosen. Policy that the ADRs deliberately leave open (the `HARDWARE_CONTROL`
+approval default, the boundary for a given tool) is tracked in #228, #236 and #218.
+
 ## Relationship to `docs/SparseSCYTHE.md`
 
 These three ADRs are condensed **from** `docs/SparseSCYTHE.md`, which braids three
