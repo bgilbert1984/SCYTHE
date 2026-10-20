@@ -22,13 +22,11 @@ mutation boundary, and today the repository has more than one answer.
   persistence/broadcast AND the hypergraph" (`writebus.py`). The live server constructs it
   with `strict_no_bypass=True` (`rf_scythe_api_server.py`).
 - `strict_no_bypass` is narrower than its name. It wraps a **fixed list of methods on two
-  objects** so they raise `WriteBusKernelViolation` outside `WriteBus.commit()`: on the
-  hypergraph engine, `apply_graph_event`, `add_node`, `update_node`, `remove_node`,
-  `add_edge`, `remove_edge`, the three `add_geo_*` methods, `add_node_from_rf` and
-  `add_edge_from_rf`; on the operator manager, `publish_to_room`, `delete_from_room`,
-  `broadcast_entity_event`. It also removes the graph-event bus subscriber that applies
-  events to the engine. It guarantees nothing about any other store, other engine methods,
-  or state outside those two objects.
+  objects** (the hypergraph engine's node, edge and event-apply methods, and the operator
+  manager's publish, delete and broadcast methods) so they raise `WriteBusKernelViolation`
+  outside `WriteBus.commit()`. It also removes the graph-event bus subscriber that applies
+  events to the engine. It guarantees nothing about any other store, other methods, or
+  state outside those two objects.
 - The MCP mutation tools were never classified against this boundary (#218).
 - Other control actions (RF retune, `/api/sdr/*`) change state that is not the graph at
   all and have their own durable audit (`control_audit.py`), deliberately separate from
@@ -45,20 +43,23 @@ method. The live server passes the same global engine to WriteBus and to `/mcp`
 | Tool | Without the guard | With `strict_no_bypass=True` |
 |---|---|---|
 | `ingest_live_event` (1 queued event) | `{committed: 1, requested: 5}`, node created | `{committed: 0, requested: 5}`, **no node**, event already dequeued |
-| `decay_now` (one stale edge) | `{edges_pruned: 1}` | raises `WriteBusKernelViolation` from `remove_edge` |
+| `decay_now` (one stale edge) | `{edges_pruned: 1}` | raises `WriteBusKernelViolation` |
 
-So under the production setting, these two approved, audited, "successful" tool calls
-either do nothing or fail. `ingest_live_event` is the sharper case: its per-event
-`except Exception: continue` swallows the violation, the response looks like a normal
-partial commit, and the events have already been removed from the queue. Nobody is told
-the boundary rejected them.
+Under the tested configuration (`strict_no_bypass=True`), the observed execution path
+prevented these operations from completing, although each had been authorized, approved
+and would be audited:
 
-Two further observations from the same read, recorded because they bear on what "the
-boundary" covers, not as part of this decision: `reinforce_edge` and `prune_below_weight`
-handlers probe for engine methods that `HypergraphEngine` does not define (so they report
-failure or zero, #220), and `decay_now`'s `lambda` argument is accepted by
-`decay_edges` but not used in the persistence computation, which reads the engine's own
-`decay_lambda`.
+    authorize -> approve -> audit -> mutation denied by the boundary
+
+This ADR records that the control plane and the boundary do not currently agree. It does
+not decide which is expected. Other deployments are not claimed to be affected.
+
+A second, separate observation: `ingest_live_event` catches every per-event exception, so
+the violation was swallowed, the response resembled an ordinary partial commit, and the
+events had already been removed from the queue. That is a failure-representation question,
+not a boundary question, and belongs to the partial-failure decision below. Smaller
+implementation gaps seen in the same read (handlers probing for engine methods that do not
+exist, an ignored argument) are ordinary technical debt and are recorded on #218, not here.
 
 None of this is evidence of an exploit. It is evidence that the boundary and the
 control plane were built separately and have not been reconciled.
@@ -143,9 +144,9 @@ Deliberately not decided here. Each can be its own ADR if it grows.
 - **Relax `strict_no_bypass`.** Rejected here as the answer to a tool's classification.
   Loosening a guard to make an unclassified tool pass removes the signal that found the
   problem.
-- **Do nothing until a tool is reported broken.** The finding above is the cost of
-  that: two tools were approved, audited and reported as working while the configuration
-  the server ships with prevents them.
+- **Do nothing until a tool is reported broken.** The observation above is the cost of
+  that: the control plane approves and audits operations that the boundary, as
+  configured, rejects.
 
 ## Consequences if accepted
 
