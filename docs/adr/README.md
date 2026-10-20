@@ -16,6 +16,36 @@ implemented — the repository states elsewhere what actually ships.
 | [0008](0008-mutation-replayability.md) | Every mutation owes a declared level of explainability | Proposed; not decided |
 | [0009](0009-partial-failure.md) | A partially applied mutation is represented, never silently discarded | Proposed; not decided |
 
+## Where to look
+
+The MCP control-plane ADRs each own one concern. Status is in the table above and can
+differ per ADR; a proposal records a direction, not a settled rule.
+
+| Concern | ADR |
+|---|---|
+| Effects: what a tool may do, and how it is audited | [0004](0004-mcp-control-plane.md) |
+| Execution model: how every tool runs | [0005](0005-registry-tooldef-execution-model.md) |
+| Approval: who must approve before it runs | [0006](0006-mcp-approval-policy.md) |
+| Mutation boundary: where state may change | [0007](0007-mutation-boundary.md) |
+| Replayability: what must be reconstructible | [0008](0008-mutation-replayability.md) |
+| Failure semantics: how partial work is represented | [0009](0009-partial-failure.md) |
+
+Questions that come up when working on a tool, and where the answer comes from:
+
+| Question | Source of truth |
+|---|---|
+| Can this tool mutate? | its declared effect, checked by `validate_tool_contract` (0004) |
+| How is it executed? | 0005 |
+| Who must approve it? | the minimum mode for its effect, 0006 |
+| Where may it change state? | its classification under 0007 |
+| What must be replayable? | its declared level, 0008 |
+| How are failures represented? | 0009 |
+| Where is the state it touches kept? | [`docs/State_Inventory.md`](../State_Inventory.md) |
+| What does the system do today? | the code and tests, then [`docs/MCP_Tools.md`](../MCP_Tools.md) |
+
+An ADR in the table above states a decision or a proposal. For current behavior, the
+code governs.
+
 ## How ADRs 0004–0009 relate
 
 The MCP control-plane ADRs build on one another. Arrows read "builds on" and follow each
