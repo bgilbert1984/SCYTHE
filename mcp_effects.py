@@ -80,3 +80,36 @@ def approval_policy(tool) -> str:
     if getattr(tool, "effect", None) in NON_MUTATING and not getattr(tool, "mutates_state", True):
         return AUTO_APPROVE
     return REQUIRES_REVIEW
+
+
+def validate_tool_contract(tools) -> list[str]:
+    """Return one message per violation of the declarative tool contract.
+
+    Checks metadata only, never whether the tool's implementation exists (that is
+    the runtime capability question in #220).  ``tools`` maps registered name to
+    Tool.  Every tool must have: an object schema for parameters and returns, an
+    explicitly declared effect, ``mutates_state`` that agrees with that effect, and
+    an approval policy that matches it (non-mutating effects are auto-approved,
+    every other effect requires review).
+    """
+    problems = []
+    for name, tool in sorted(dict(tools).items()):
+        if getattr(tool, "name", name) != name:
+            problems.append(f"{name}: registered under a different name than tool.name={tool.name!r}")
+        for field in ("parameters", "returns"):
+            schema = getattr(tool, field, None)
+            if not isinstance(schema, dict) or schema.get("type") != "object":
+                problems.append(f"{name}: {field} must be an object schema")
+        if not getattr(tool, "effect_declared", False):
+            problems.append(f"{name}: effect is not explicitly declared")
+        effect = getattr(tool, "effect", None)
+        if effect not in EFFECT_CATEGORIES:
+            problems.append(f"{name}: unknown effect {effect!r}")
+            continue
+        mutating = effect not in NON_MUTATING
+        if bool(tool.mutates_state) != mutating:
+            problems.append(f"{name}: mutates_state={bool(tool.mutates_state)} contradicts effect {effect}")
+        expected = REQUIRES_REVIEW if mutating else AUTO_APPROVE
+        if getattr(tool, "effect_declared", False) and approval_policy(tool) != expected:
+            problems.append(f"{name}: approval policy {approval_policy(tool)} does not match effect {effect}")
+    return problems

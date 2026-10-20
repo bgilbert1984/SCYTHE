@@ -119,6 +119,7 @@ jobs:
             test_graphops_infrastructure \
             test_ip_enrichment \
             test_lunar_evidence_resolver \
+            test_mcp_tool_contract \
             test_network_measurement_parsing \
             test_network_tool_policy \
             test_ollama_cloud \

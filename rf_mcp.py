@@ -218,23 +218,23 @@ def _read_tools():
         return compact_model_context(analyzer.latest_window(), analyzer.query_supports(limit=limit), limit)
 
     return [
-        Tool("rf_bridge_status", "Return SDR++ edge bridge and RF evidence-store status.", obj, obj, status),
+        Tool("rf_bridge_status", "Return SDR++ edge bridge and RF evidence-store status.", obj, obj, status, effect=READ_ONLY),
         Tool("rf_spectrum_snapshot", "Return the latest bounded FFT summary; raw IQ is never exposed.",
-             {"type": "object", "properties": {"include_bins": {"type": "boolean"}}, "additionalProperties": False}, obj, snapshot),
+             {"type": "object", "properties": {"include_bins": {"type": "boolean"}}, "additionalProperties": False}, obj, snapshot, effect=READ_ONLY),
         Tool("rf_observations_query", "Query timestamped RF observations with stable evidence IDs.", query_schema, obj, query,
              effect=READ_ONLY),
-        Tool("rf_correlate_graph", "Time-correlate RF observations with graph edges; results are explicitly inferred.", correlate_schema, obj, correlate),
+        Tool("rf_correlate_graph", "Time-correlate RF observations with graph edges; results are explicitly inferred.", correlate_schema, obj, correlate, effect=READ_ONLY),
         Tool("rf_insight_context", "Return compact, evidence-labelled RF context suitable for a local model.",
              {"type": "object", "properties": {"window_s": {"type": "number", "minimum": 0, "maximum": 86400},
               "min_snr_db": {"type": "number"}, "limit": {"type": "integer", "minimum": 1, "maximum": 100}},
-              "additionalProperties": False}, obj, context),
+              "additionalProperties": False}, obj, context, effect=READ_ONLY),
         Tool("rf_sparse_status", "Return residual-window stats and derived supports. Peak-track plus OMP-assisted periodic amplitude; no range/AoA.",
-             obj, obj, sparse_status),
+             obj, obj, sparse_status, effect=READ_ONLY),
         Tool("rf_sparse_supports_query", "Query derived RF model components. Evidence class is DERIVED_INFERENCE.",
              sparse_query_schema, obj, sparse_query, effect=READ_ONLY),
         Tool("rf_sparse_insight_context", "Return compact sparse-support context for local Ollama. No IQ, no hardware authority.",
              {"type": "object", "properties": {"limit": {"type": "integer", "minimum": 1, "maximum": 12}},
-              "additionalProperties": False}, obj, sparse_context),
+              "additionalProperties": False}, obj, sparse_context, effect=READ_ONLY),
     ]
 
 
