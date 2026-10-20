@@ -107,8 +107,8 @@ not mean any tool has been migrated.
    the canonical record is the HTTP route inventory on #236
    (https://github.com/bgilbert1984/SCYTHE/issues/236#issuecomment-6292702102).
 4. **The mutation invariant.** Every externally initiated state mutation SHALL execute
-   through the lifecycle pipeline (`Registry.execute`, or an equivalent that replaces
-   it). Transports (MCP, HTTP, UI, CLI, or future interfaces) are adapters that invoke
+   through the lifecycle pipeline, which is currently realized by `Registry.execute`.
+   Transports (MCP, HTTP, UI, CLI, or future interfaces) are adapters that invoke
    the lifecycle; they are not independent mutation mechanisms and MUST NOT bypass
    proposal, approval, audit or lifecycle enforcement. The review question for new code
    is "can this mutate state?", not "which transport is it?".
