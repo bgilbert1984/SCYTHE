@@ -120,6 +120,7 @@ jobs:
             test_graphops_infrastructure \
             test_ip_enrichment \
             test_lunar_evidence_resolver \
+            test_mcp_lifecycle_invariant \
             test_mcp_orchestrator_registry \
             test_mcp_tooldef_parity \
             test_mcp_tool_contract \
