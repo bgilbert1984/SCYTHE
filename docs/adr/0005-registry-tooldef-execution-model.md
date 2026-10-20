@@ -1,8 +1,10 @@
 # ADR 0005 — Registry and ToolDef tools: one lifecycle, or an explicit boundary
 
 - **Status:** Accepted (architecture), 2026-10-20: the principle and Option B as the
-  long-term direction. **Not implemented.** No `ToolDef` tool has been adapted, the
-  interim step C is not decided, and the HTTP routes are not decided.
+  long-term direction. Amended 2026-10-21 with the mutation invariant (Decision 4).
+  **Partially compliant.** Option B is implemented for every MCP tool (#249, #250, #251);
+  interim step C was not taken. The invariant is the rule and the listed HTTP exceptions
+  are known non-compliance, not accepted alternatives.
 - **Date:** 2026-10-20
 - **Resolves:** decision 6 of [ADR 0004](0004-mcp-control-plane.md), tracked in #236.
 - **Related:** #218 (mutation boundary), #220 (capability), #227 (`/api/sdr/*` parity),
@@ -20,7 +22,8 @@ Two classes of MCP tool exist and they are not equivalent.
 | Execution | `Registry.execute`: validation, rate limit, mode check, `[MCP_AUDIT]`, control audit | `ToolDef.fn(params)` |
 | Orchestrator | proposed, approved, executed | not known |
 
-Consequences observed on `main` (see #236 for the evidence):
+Consequences observed on `main` when this ADR was accepted (see #236 for the evidence;
+items 1 and 2 are resolved by #249–#251, item 3 is not):
 
 1. A mutating `ToolDef` tool cannot be called directly (refused) and cannot be run by
    proposal: the proposal is **approved** with the declared effect, then
@@ -78,16 +81,17 @@ not orchestratable") instead of approved and then failed.
 
 These options are about MCP execution. They do not decide the HTTP routes (below).
 
-## Separate decision: the direct HTTP routes
+## The direct HTTP routes
 
-Whichever option is chosen, promoting, adapting or rejecting `ToolDef` tools leaves
-`/api/sensor/eve/ground`, the chat auto-grounding and `/api/graphops/directives/explain-coverage-cell`
-where they are. The precedent is `/api/sdr/*` (#227): the routes stayed and now write the
-same control-audit record as MCP. That is a smaller, independent decision with three
-possible outcomes: route through the shared lifecycle, record to the control audit only,
-or document each as an accepted exception. Which mutations may bypass the canonical
-boundary is classified in #218, not here. This ADR only requires that the question is
-answered for these routes before #236 or #218 is closed.
+The first version of this ADR left the HTTP routes undecided and listed three possible
+outcomes: route through the shared lifecycle, record to the control audit only, or
+document each as an accepted exception. The precedent was `/api/sdr/*` (#227): the routes
+stayed and now write the same control-audit record as MCP.
+
+With the lifecycle implemented, tested and exercised, that latitude is withdrawn.
+"Control-audit only" and "accepted exception" are no longer architecturally sanctioned
+steady states, because they preserve two mutation paths with different guarantees. The
+rule is Decision 4. The routes below are known exceptions to it.
 
 ## Decision
 
@@ -97,38 +101,58 @@ not mean any tool has been migrated.
 1. **B is the target:** one execution contract, two classes, adapter-based. Treat it
    as a stepping stone toward **A**, tool by tool, where a tool's semantics fit the
    Registry.
-2. **C** may land first as an interim step. It is optional and not decided here: it is independent of B,
-   cheap, and removes the approve-then-fail behavior now. It must be described as interim
-   so it is not mistaken for the decision. C on its own leaves two execution models
-   permanently.
-3. The HTTP routes are handled as their own change and are not decided here, following the `/api/sdr/*` precedent,
-   tracked in #218.
+2. **C** was an optional interim step and was not taken: B removed the approve-then-fail
+   behavior directly.
+3. Which HTTP routes mutate state, and in what order they migrate, is tracked per route;
+   the canonical record is the HTTP route inventory on #236
+   (https://github.com/bgilbert1984/SCYTHE/issues/236#issuecomment-6292702102).
+4. **The mutation invariant.** Every externally initiated state mutation SHALL execute
+   through the lifecycle pipeline, which is currently realized by `Registry.execute`.
+   Transports (MCP, HTTP, UI, CLI, or future interfaces) are adapters that invoke
+   the lifecycle; they are not independent mutation mechanisms and MUST NOT bypass
+   proposal, approval, audit or lifecycle enforcement. The review question for new code
+   is "can this mutate state?", not "which transport is it?".
+
+### Implementation status against the invariant
+
+Architecture and migration are separate: the invariant is decided; compliance is partial.
+
+| | Status |
+|---|---|
+| MCP `Registry` tools | compliant |
+| MCP `ToolDef` tools, mutating and non-mutating | compliant (`adapt_tooldef`, #249, #250) |
+| `/api/sdr/*` (`status`, `start`, `stop`, `tune`, `config`) | **known exception**: writes a control-audit record directly, no proposal or lifecycle (#227) |
+| `POST /api/embedding/entity` | **known exception**: performs the `embed_entity` mutation with no proposal, approval or audit record |
+| `POST /api/sensor/eve/ground`, chat auto-grounding, `POST /api/graphops/directives/explain-coverage-cell` | **known exceptions** (Context, item 3) |
+| other non-GET `/api/...` routes | **not yet classified**; the inventory on #236 is a static first pass |
+
+Exceptions are temporary compatibility interfaces. Each should migrate to the lifecycle or
+be retired. Migrating a UI-facing route changes what the caller sees: under the lifecycle
+a mutation can be blocked by the current phase, held for approval, or return a proposal
+instead of an effect, and that must be stated in the migrating change.
 
 Rationale for B over A as the first move: A rewrites twelve tools to change where they
 live; B changes how they are executed, which is the thing that is wrong. A can follow
 without redoing B.
 
-## What B would require
+## What B required, and where it is implemented
 
-Stated so the cost is visible, not as a design:
+| Requirement | Implementation |
+|---|---|
+| A single execution entry point used by `MCPHandler.tools/call` and `execute_proposal` | `Registry.execute` |
+| An adapter from `ToolDef` to what that entry point needs (schema, `effect`, `mutates_state`) | `adapt_tooldef` in `mcp_registry.py` (#249, #250) |
+| Non-mutating `ToolDef` tools stay directly callable but gain the audit record and rate limit | `MCPHandler._handle_tools_call` (#250) |
+| A test over both classes that the lifecycle steps run identically | `test_mcp_tooldef_parity`, and `test_mcp_lifecycle_invariant` (#251), which enumerates every tool: non-mutating tools are executed by the Registry exactly once, direct calls to mutating tools are refused, and mutating tools execute exactly once via propose then execute |
+| `validate_tool_contract` keeps covering both classes | unchanged |
 
-- A single execution entry point used by both `MCPHandler.tools/call` and
-  `execute_proposal`.
-- An adapter from `ToolDef` to what that entry point needs (schema for validation,
-  `effect`, `mutates_state`).
-- Non-mutating `ToolDef` tools stay directly callable but gain the audit record and rate
-  limit, or an explicit, documented exemption per tool.
-- A test asserting that for every tool in both classes, the lifecycle steps run
-  identically (a mutating tool is refused directly, approved by proposal, executed once,
-  audited once).
-- `validate_tool_contract` keeps covering both classes; no change expected.
+The invariant test covers MCP only. No test yet asserts Decision 4 for HTTP routes.
 
 ## Consequences if accepted
 
 - The `Unknown tool` failure disappears: a mutating `GraphOps` tool is either executable
   through the lifecycle or refused with a truthful reason.
 - Audit coverage of the `graphops_*` tools becomes uniform with Registry tools.
-- The HTTP routes remain a known gap until their own decision lands.
+- The HTTP routes remain a known gap, recorded above, until each exception migrates or is retired.
 - If mutating `ToolDef` tools become executable through the orchestrator, the approval
   semantics defined by #228 determine whether execution needs only automated policy
   evaluation or an independent approving principal. Implementations of B should define how
@@ -139,7 +163,7 @@ Stated so the cost is visible, not as a design:
 
 | Decision | Issue |
 |---|---|
-| Disposition of the direct HTTP routes | #218 |
+| Order and mechanism of migrating each HTTP exception | #236 (inventory), #218 (classification of what mutates) |
 | Whether a second principal is required for any effect | #228 |
 | Capability probes in place of `hasattr` | #220 |
 | Data-egress classification | #220 (observation) |
