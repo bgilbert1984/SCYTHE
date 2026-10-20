@@ -87,7 +87,7 @@ def validate_tool_contract(tools) -> list[str]:
 
     Checks metadata only, never whether the tool's implementation exists (that is
     the runtime capability question in #220).  ``tools`` maps registered name to
-    Tool.  Every tool must have: an object schema for parameters and returns, an
+    Tool or ToolDef.  Every tool must have: an object schema for parameters and returns, an
     explicitly declared effect, ``mutates_state`` that agrees with that effect, and
     an approval policy that matches it (non-mutating effects are auto-approved,
     every other effect requires review).
@@ -96,8 +96,11 @@ def validate_tool_contract(tools) -> list[str]:
     for name, tool in sorted(dict(tools).items()):
         if getattr(tool, "name", name) != name:
             problems.append(f"{name}: registered under a different name than tool.name={tool.name!r}")
-        for field in ("parameters", "returns"):
-            schema = getattr(tool, field, None)
+        # Registry tools carry parameters/returns; ToolDef (GraphOps) carries input_schema only.
+        fields = {"parameters": getattr(tool, "parameters", getattr(tool, "input_schema", None))}
+        if hasattr(tool, "returns"):
+            fields["returns"] = tool.returns
+        for field, schema in fields.items():
             if not isinstance(schema, dict) or schema.get("type") != "object":
                 problems.append(f"{name}: {field} must be an object schema")
         if not getattr(tool, "effect_declared", False):

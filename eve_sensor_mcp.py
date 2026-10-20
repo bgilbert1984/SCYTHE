@@ -43,6 +43,8 @@ import urllib.error
 import urllib.request
 import uuid
 from typing import Any, Dict, List, Optional, Tuple
+
+from mcp_effects import LOCAL_STATE
 from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
@@ -561,6 +563,7 @@ def register_sensor_stream_tool(engine: Any, mcp_handler: Any) -> None:
         },
         fn=lambda p: sensor_stream_tool(p, engine),
         mutates_state=True,
+        effect=LOCAL_STATE,
     )
 
     logger.info("[eve_sensor_mcp] registered graphops_sensor_stream tool")
