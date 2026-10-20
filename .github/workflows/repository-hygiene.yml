@@ -121,6 +121,7 @@ jobs:
             test_ip_enrichment \
             test_lunar_evidence_resolver \
             test_mcp_orchestrator_registry \
+            test_mcp_tooldef_parity \
             test_mcp_tool_contract \
             test_network_measurement_parsing \
             test_network_tool_policy \
