@@ -70,8 +70,10 @@ effect, `mutates_state` consistent with the effect, an approval policy that matc
 effect, and unique names. It covers Registry tools as served and the `ToolDef` tools. It
 does **not** check that a backing implementation exists. Whether a tool is supported at
 runtime is tracked in #220, so a metadata failure and a capability failure stay
-distinguishable. `ToolDef` tools whose effect is not yet audited are named in one list in
-`test_mcp_tool_contract.py`; the list can only shrink.
+distinguishable. Every `graphops_*` `ToolDef` tool declares an effect (#239). The four
+read-only analysis tools were audited from the code, and `test_graphops_tool_effects.py`
+pins what the audit relied on. `graphops_directive` is `READ_ONLY` as wired, because its
+director is built without an engine; it is not `READ_ONLY` unconditionally.
 
 ### 6. Registry tools and ToolDef tools: not decided
 
@@ -94,6 +96,11 @@ question in #236. This ADR takes no position.
 - Some tools still write to the engine directly rather than through WriteBus, and
   whether that is acceptable per tool is open (#218).
 - The audit store is tamper-evident policy, not protection from a privileged host user.
+- `READ_ONLY` means no state transition. It does not mean no external communication:
+  `graphops_investigate` and the DSL embedding verbs send graph-derived text to a remote
+  model endpoint. The effect taxonomy answers "can this tool change state?" and not "can
+  it disclose information to another system?". A data-flow classification may be needed
+  to tell computational reads from outbound transfer. That is not part of this ADR.
 
 ## Open decisions
 
@@ -103,4 +110,4 @@ question in #236. This ADR takes no position.
 | Which mutations may bypass WriteBus; behavior under `strict_no_bypass`; replayability | #218 |
 | Whether `ToolDef` tools join the proposal lifecycle, are promoted, or stay direct | #236 |
 | Explicit supported/unsupported capability declarations in place of `hasattr` probes | #220 |
-| Effects for `graphops_investigate`, `graphops_dsl_exec`, `graphops_directive`, `graphops_suggest` | #218 |
+| Whether outbound data flows (prompts or embedding requests to a remote model) need their own classification | not yet raised; relevant to #220 |
