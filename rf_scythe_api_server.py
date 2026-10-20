@@ -11288,22 +11288,38 @@ if FLASK_AVAILABLE:
 
     @app.route('/api/embedding/entity', methods=['POST'])
     def embed_recon_entity():
-        """Embed a single entity into semantic memory (called from Recon panel 🧠 button)."""
+        """Embed a single entity into semantic memory (called from Recon panel 🧠 button).
+
+        An adapter into the MCP lifecycle (ADR 0005, Decision 4): it identifies the
+        caller, proposes and executes ``embed_entity``, and reports what the lifecycle
+        decided.  A decision not to execute (phase, budget, approval) is a valid
+        response, not a transport failure, so it is returned with status 200.
+        """
+        principal = _rf_bridge_principal(require_identity=True)
+        if principal is None:
+            return jsonify({'status': 'error', 'message': 'Authentication required'}), 401
         try:
             data    = request.get_json() or {}
             eid     = data.get('entity_id', '')
             event   = data.get('event', data)
             if not eid:
                 return jsonify({'status': 'error', 'message': 'entity_id required'}), 400
-            embed_eng = globals().get('embedding_engine')
-            if embed_eng is None:
-                return jsonify({'status': 'error', 'message': 'embedding_engine not initialized'}), 503
-            from embedding_engine import EmbeddingEngine
-            desc    = EmbeddingEngine.build_entity_description({**event, 'entity_id': eid})
-            vec_idx = embed_eng.add_entity(eid, desc)
-            embed_eng.save_index()
-            return jsonify({'status': 'ok', 'entity_id': eid, 'vec_idx': vec_idx,
-                            'total_vectors': embed_eng.stats()['total_vectors']})
+            handler = globals().get('mcp_handler')
+            orchestrator = getattr(handler, '_orchestrator', None)
+            if orchestrator is None or 'embed_entity' not in getattr(handler, '_tools', {}):
+                return jsonify({'status': 'error', 'message': 'embedding lifecycle not initialized'}), 503
+            from mcp_principal import principal_scope
+            with principal_scope(principal):
+                proposal = orchestrator.propose_action(
+                    'embed_entity',
+                    {'entity_id': eid, 'event': {**(event if isinstance(event, dict) else {}), 'entity_id': eid}},
+                    justification='recon panel embed',
+                    agent_id=principal.operator_id or principal.kind,
+                )
+                executed = (orchestrator.execute_proposal(proposal['proposal_id'])
+                            if proposal.get('status') == 'approved' else None)
+            body = _embedding_lifecycle_response(eid, proposal, executed)
+            return jsonify(body), (503 if body['outcome'] == 'error' else 200)
         except Exception as e:
             logger.error(f'[embedding/entity] {e}')
             return jsonify({'status': 'error', 'message': str(e)}), 500
@@ -20558,6 +20574,41 @@ if FLASK_AVAILABLE:
 # MAIN
 # ============================================================================
 
+def _embedding_lifecycle_response(entity_id, proposal, executed):
+    """Translate an ``embed_entity`` proposal and execution into the route's response body.
+
+    ``outcome`` is one of: executed, rejected, blocked_by_phase, budget_exhausted, shadow,
+    error.  ``status`` stays ``ok`` only for ``executed``, as the route's earlier callers expect.
+    """
+    body = {'entity_id': entity_id, 'proposal_id': proposal.get('proposal_id')}
+    if executed is None:
+        outcome, reason = 'rejected', proposal.get('approval_reason') or f"proposal {proposal.get('status')}"
+    elif not executed.get('ok'):
+        reason = str(executed.get('error', ''))
+        if 'observe-only' in reason:
+            outcome = 'blocked_by_phase'
+        elif 'MUTATION_BUDGET_EXCEEDED' in reason:
+            outcome = 'budget_exhausted'
+        else:
+            outcome = 'error'
+        if 'phase' in executed:
+            body['phase'] = executed['phase']
+    else:
+        result = executed.get('result') or {}
+        if result.get('_shadow_mode'):
+            outcome, reason = 'shadow', 'shadow phase: estimated only, nothing was embedded'
+        elif result.get('error'):
+            outcome, reason = 'error', str(result['error'])
+        else:
+            outcome, reason = 'executed', ''
+            body.update({k: result.get(k) for k in ('vec_idx', 'total_vectors')})
+    body['outcome'] = outcome
+    body['status'] = 'ok' if outcome == 'executed' else 'error' if outcome == 'error' else 'not_executed'
+    if reason:
+        body['reason'] = reason
+    return body
+
+
 def main():
     # ── InstanceDB health and diagnostics endpoints (MCP tools) ──
     @app.route('/api/instance/db/health', methods=['GET'])
@@ -21154,6 +21205,7 @@ def main():
                 auth_validator=lambda: _rf_bridge_principal(require_identity=True),
                 selection_engine=globals().get('hypergraph_store'),
             )
+            globals()['mcp_handler'] = mcp_handler  # read by the /api/embedding/entity adapter
             logger.info('MCP server registered at /mcp (%d tools, %d resources)',
                         len(mcp_handler._tools), len(mcp_handler._resources))
 

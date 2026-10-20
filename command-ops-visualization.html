@@ -33497,20 +33497,33 @@ const RPM = {
       }
       embedBtn.disabled = true;
       embedBtn.textContent = `⏳ Embedding ${toEmbed.length}…`;
-      let done = 0;
+      // The route reports what the control plane decided (ADR 0005): embedded, or why not.
+      const outcomes = {};
+      let firstReason = '';
       for (const e of toEmbed) {
+        let outcome = 'error';
         try {
-          await fetch('/api/embedding/entity', {
+          const r = await fetch('/api/embedding/entity', {
             method: 'POST',
             headers: {'Content-Type':'application/json'},
             body: JSON.stringify({ entity_id: e.entity_id, event: e }),
           });
-          done++;
+          const body = await r.json().catch(() => ({}));
+          outcome = r.status === 401 ? 'unauthorized' : (body.outcome || 'error');
+          if (outcome !== 'executed' && !firstReason) firstReason = body.reason || body.message || '';
         } catch(err) {}
+        outcomes[outcome] = (outcomes[outcome] || 0) + 1;
+        if (outcome === 'blocked_by_phase' || outcome === 'unauthorized' || outcome === 'budget_exhausted') break;
       }
-      embedBtn.textContent = `✅ Embedded ${done}`;
+      const done = outcomes.executed || 0;
+      const labels = { blocked_by_phase: 'blocked by phase', budget_exhausted: 'budget exhausted',
+                       unauthorized: 'sign-in required', rejected: 'not approved', shadow: 'shadow only', error: 'failed' };
+      const notDone = Object.entries(outcomes).filter(([k]) => k !== 'executed')
+        .map(([k, n]) => `${n} ${labels[k] || k}`).join(', ');
+      embedBtn.textContent = notDone ? `⚠ Embedded ${done}; ${notDone}` : `✅ Embedded ${done}`;
+      embedBtn.title = firstReason;
       embedBtn.disabled = false;
-      setTimeout(() => { embedBtn.textContent = '🧠 Embed'; }, 3000);
+      setTimeout(() => { embedBtn.textContent = '🧠 Embed'; embedBtn.title = ''; }, notDone ? 8000 : 3000);
     };
   },
 };
