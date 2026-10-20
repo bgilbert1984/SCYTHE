@@ -37,6 +37,12 @@ Consequences observed on `main` (see #236 for the evidence):
 Since #235 every `ToolDef` tool declares an effect and passes `validate_tool_contract`,
 so the metadata is no longer the problem. The open question is the execution model.
 
+The principle this ADR proposes: **execution semantics are a property of the control
+plane, not of the tool implementation class.** Effect classification, approval, audit and
+principal propagation should not depend on whether a tool is a Registry `Tool` or a
+`ToolDef`. Only registration and discovery may differ. This is the direction of #220,
+#221, #225, #226, #227 and #232–#235.
+
 Registry tools are control-plane actions (decay, retune, ingest). GraphOps tools are
 application services (investigation, explanation, feedback). They may not want identical
 semantics, and that is a reason to decide deliberately rather than by drift.
@@ -92,7 +98,8 @@ Proposed, not decided.
    Registry.
 2. Land **C** first as an interim step, if the owner wants it: it is independent of B,
    cheap, and removes the approve-then-fail behavior now. It must be described as interim
-   so it is not mistaken for the decision.
+   so it is not mistaken for the decision. C on its own leaves two execution models
+   permanently.
 3. Handle the HTTP routes as their own change, following the `/api/sdr/*` precedent,
    tracked in #218.
 
@@ -121,10 +128,11 @@ Stated so the cost is visible, not as a design:
   through the lifecycle or refused with a truthful reason.
 - Audit coverage of the `graphops_*` tools becomes uniform with Registry tools.
 - The HTTP routes remain a known gap until their own decision lands.
-- Executing `graphops_submit_feedback` (`TRAINING_DATA`, POSTs to the TAK-ML server) would
-  become possible through an approval that is still automated and self-approvable
-  (#228). Making these tools executable widens what that approval permits, so #228 should
-  be considered before B ships, not after.
+- If mutating `ToolDef` tools become executable through the orchestrator, the approval
+  semantics defined by #228 determine whether execution needs only automated policy
+  evaluation or an independent approving principal. Implementations of B should define how
+  mutating `ToolDef` tools participate in that policy, so the execution model should not be
+  finalized without considering #228.
 
 ## Not decided here
 
