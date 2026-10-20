@@ -110,4 +110,4 @@ question in #236. This ADR takes no position.
 | Which mutations may bypass WriteBus; behavior under `strict_no_bypass`; replayability | #218 |
 | Whether `ToolDef` tools join the proposal lifecycle, are promoted, or stay direct | #236 |
 | Explicit supported/unsupported capability declarations in place of `hasattr` probes | #220 |
-| Whether outbound data flows (prompts or embedding requests to a remote model) need their own classification | not yet raised; relevant to #220 |
+| Whether outbound data flows (prompts or embedding requests to a remote model) need their own classification | #220 (recorded as an observation) |
