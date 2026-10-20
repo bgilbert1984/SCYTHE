@@ -81,6 +81,8 @@ class Registry:
         }
 
     def register(self, tool: Tool):
+        if tool.name in self._tools:
+            raise ValueError(f"tool {tool.name!r} is already registered")
         self._tools[tool.name] = tool
         for key in self._metrics:
             self._metrics[key].setdefault(tool.name, 0)
@@ -802,6 +804,7 @@ def build_registry(engine) -> Dict[str, Any]:
         },
         run=_get_entity_neighbors,
         mutates_state=False,
+        effect=READ_ONLY,
         rate_limit=None,
     ))
 
@@ -821,6 +824,7 @@ def build_registry(engine) -> Dict[str, Any]:
         },
         run=_get_edge_by_id,
         mutates_state=False,
+        effect=READ_ONLY,
         rate_limit=None,
     ))
 
@@ -932,6 +936,7 @@ def build_registry(engine) -> Dict[str, Any]:
         },
         run=_list_active_scopes,
         mutates_state=False,
+        effect=READ_ONLY,
         rate_limit=None,
     ))
 
@@ -968,6 +973,7 @@ def build_registry(engine) -> Dict[str, Any]:
         },
         run=_get_decay_config,
         mutates_state=False,
+        effect=READ_ONLY,
         rate_limit=None,
     ))
 
@@ -1007,6 +1013,7 @@ def build_registry(engine) -> Dict[str, Any]:
         },
         run=_get_tak_ml_status,
         mutates_state=False,
+        effect=READ_ONLY,
         rate_limit=None,
     ))
 
@@ -1024,6 +1031,7 @@ def build_registry(engine) -> Dict[str, Any]:
         },
         run=_get_socket_metrics,
         mutates_state=False,
+        effect=READ_ONLY,
         rate_limit=None,
     ))
 
