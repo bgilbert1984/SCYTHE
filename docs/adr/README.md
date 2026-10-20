@@ -9,6 +9,7 @@ implemented — the repository states elsewhere what actually ships.
 | [0001](0001-sparse-recovery-validation.md) | Sparse recovery is validated before it is believed | Proposed; §5 pattern Accepted, one application implemented |
 | [0002](0002-polarimetric-channel-diversity.md) | Channel diversity is physical, never synthetic | Proposed |
 | [0003](0003-rf-emission-tracking-hierarchy.md) | Detection, track, transmitter and location are four layers | Proposed |
+| [0004](0004-mcp-control-plane.md) | MCP tools declare their effect, and policy follows the declaration | Accepted and implemented; Registry/ToolDef split undecided |
 
 ## Relationship to `docs/SparseSCYTHE.md`
 
@@ -43,4 +44,5 @@ One thing: the `{outcome, reason_code}` shape of ADR 0001 §5, and only in
 own `NULL_OUTCOMES` has not migrated. See
 `docs/RF_Signal_Family_Classifier_Scope.md` for what Phase 0 actually shipped.
 
-Nothing else in these ADRs exists in code.
+Nothing else in ADRs 0001–0003 exists in code. ADR 0004 is the exception: decisions 1–5
+are implemented and tested, and `docs/MCP_Tools.md` describes the current behavior.
