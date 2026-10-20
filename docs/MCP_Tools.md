@@ -1,135 +1,117 @@
-1. Make effect declarations mandatory (highest value)
-Right now you've added explicit effects for reachable mutating tools and a regression test.
-I'd eventually strengthen that into a startup invariant:
-Every registered tool must explicitly declare an effect.
+# MCP tools
 
-Not just mutating ones.
-For example:
-READ_ONLY
-LOCAL_STATE
-EXTERNAL_STATE
-TRAINING_DATA
-HARDWARE_CONTROL
-AUDIT_ONLY
+Reference for how a tool is defined, authorized, approved, executed and audited in
+SCYTHE's MCP layer. It describes current behavior. Open questions are listed under
+[Current limitations](#current-limitations) and are not decided here.
 
-Inference was a great migration aid, but I'd aim to eliminate it over time.
-2. Replace mutates_state with derived semantics
-Today you have two pieces of metadata:
-mutates_state
-effect
+## Purpose
 
-Those can drift.
-Eventually I'd rather have something like
-effect = Effect.LOCAL_STATE
+An MCP tool is a named operation a caller can invoke over `/mcp` (`tools/call`) or,
+for state-changing tools, through the orchestrator proposal flow.
 
+There are two classes of tool, held in different places:
 
-and derive
-mutates_state = effect != READ_ONLY
+| Class | Defined by | Held in | Lifecycle |
+|---|---|---|---|
+| Registry tool | `mcp_registry.Tool` | `MCPHandler._registry` and the orchestrator's registry | validation, rate limit, durable audit, proposal flow |
+| ToolDef tool | `mcp_server.ToolDef` | `MCPHandler._tools` only (the `graphops_*` tools) | runs through `ToolDef.fn`; see [limitations](#current-limitations) |
 
+RF tools (`rf_mcp.py`) are Registry tools registered after `build_registry`.
 
-or
-effect.is_mutating()
+## Terminology
 
+The four steps are kept separate on purpose.
 
-One source of truth is easier to maintain.
-3. Capability advertisement
-This ties into #217.
-Instead of just exposing tool schemas, expose something like:
-{
-  "tool": "decay_now",
-  "effect": "LOCAL_STATE",
-  "approval": "required",
-  "implemented": true,
-  "writebus": false
-}
+- **Authorize**: authenticate the caller and decide whether they may invoke the API at
+  all. The result is a `Principal` (`mcp_principal.py`).
+- **Approve**: policy evaluation of a proposal before execution. Currently automated for
+  every effect that needs it; no second principal is involved.
+- **Execute**: perform the operation.
+- **Audit**: durably record what happened.
 
-An autonomous agent could plan correctly without probing behavior.
-4. Tool versioning
-Schemas evolve.
-Eventually it may be useful to attach
-tool_version
+## Lifecycle
 
-or
-api_revision
+1. **Registration.** A tool is registered with its schema, `mutates_state` and `effect`.
+   `Registry.register` refuses a duplicate name.
+2. **Authorization.** The auth step establishes a `Principal`, carried for the duration
+   of the request. Its `kind` states how strong the identification is
+   (`operator_session`, `internal_token`, `loopback`, `anonymous`, `unspecified`). Only
+   `operator_session` identifies an individual.
+3. **Proposal and approval (state-changing tools).** A direct `tools/call` of a tool with
+   `mutates_state` is refused. The caller uses `orchestrate/propose`,
+   `orchestrate/decide` and `orchestrate/execute`. Approval is decided from the tool's
+   declared effect (see below), never from its name.
+4. **Execution.** `Registry.execute` validates parameters, enforces the rate limit and
+   runs the tool. The orchestrator also applies the autonomy phase: in phase 0 a
+   mutating tool is blocked as observe-only, phase 1 returns a shadow estimate, and
+   phases 2 and 3 execute within a mutation budget.
+5. **Audit.** Every `Registry.execute` writes an `[MCP_AUDIT]` log line carrying the
+   tool, effect, proposal ID and principal. When `control_audit` is configured, state-changing
+   executions are also written to a durable, append-only SQLite store as a `started` row
+   and a `success` or `error` row sharing an `execution_id`. That store is separate from
+   the graph and does not go through WriteBus.
 
-to each registered tool.
-That makes audit replay much easier.
-5. Approval reason codes
-Instead of free-form strings like
-approved because...
+## Effect taxonomy
 
-I'd eventually standardize them.
-Example:
-APPROVED_EFFECT_POLICY
+A tool declares one effect (`mcp_effects.py`). A tool mutates state when it causes an
+externally observable state transition, including state outside the local graph. "Does
+not call an engine mutation method" is not the test.
 
-DENIED_PHASE
+| Effect | Meaning | Approval |
+|---|---|---|
+| `READ_ONLY` | no state transition | not needed |
+| `AUDIT_ONLY` | writes only records about its own call | not needed |
+| `LOCAL_STATE` | this process's graph, stores, queues, caches | proposal flow |
+| `EXTERNAL_STATE` | a remote service or database | proposal flow |
+| `HARDWARE_CONTROL` | tuner, capture bridge, other devices | proposal flow |
+| `TRAINING_DATA` | feedback that changes a model's training set | proposal flow |
 
-DENIED_CAPABILITY
+Anything not positively known to be non-mutating needs review: an unknown tool, a tool
+with no declared effect, and any mutating effect.
 
-DENIED_APPROVAL
+## Current invariants
 
-DENIED_BUDGET
+Enforced by tests, not by convention.
 
-Machines can consume those much more reliably.
-6. Idempotence metadata
-This one is surprisingly useful.
-Some tools can safely run twice.
-Some absolutely cannot.
-Example metadata:
-idempotent=True
+- Every Registry tool declares its effect explicitly. `mutates_state` must agree with the
+  effect, and the approval policy must match it.
+- `validate_tool_contract` (`mcp_effects.py`) checks schema, explicit effect, flag
+  consistency, approval consistency and name uniqueness. It runs in CI over the Registry
+  tools as served and over the `ToolDef` tools.
+- Approval is derived from the declared effect.
+- Principal, proposal ID and effect are carried into the audit record.
+- `/api/sdr/*` hardware routes write the same control-audit record as MCP.
+- `ToolDef` tools whose effect has not been audited are named in
+  `UNCLASSIFIED_TOOLDEFS` in `test_mcp_tool_contract.py`. A new undeclared tool fails the
+  test; so does a listed tool that becomes declared.
 
-or
+The validator checks metadata only. It does not check that a backing implementation
+exists.
 
-idempotent=False
+## Current limitations
 
-An orchestrator can safely retry the first category after transient failures.
-7. Preconditions
-Closely related.
-Instead of discovering failures by execution:
-requires:
-    scope_exists
-    hardware_connected
-    proposal_present
+- **Registry and ToolDef split.** The orchestrator knows only Registry tools. A mutating
+  `ToolDef` tool is approved by a proposal and then fails with `Unknown tool`, and a
+  direct call is refused. Non-mutating `ToolDef` tools run directly, without the
+  Registry's rate limit, mode check or audit record. Tracked in #236.
+- **Capability versus implementation.** Handlers probe their engine with `hasattr` and
+  can return success when the backing method is missing. Tracked in #220.
+- **Approval semantics.** `REQUIRES_REVIEW` is automated policy evaluation over a
+  caller-supplied confidence, executor trust and graph stability. No independent approver
+  is required, and the proposer can execute. Tracked in #228.
+- **State boundary.** Some tools write to the engine directly rather than through
+  WriteBus, and whether that is acceptable per tool is undecided. Replayability of
+  mutations is also open. Tracked in #218.
+- **Unclassified GraphOps tools.** `graphops_investigate`, `graphops_dsl_exec`,
+  `graphops_directive` and `graphops_suggest` have no declared effect. Tracked in #218.
 
-That gives planners much better information.
-8. Transaction grouping
-Eventually you may want
-proposal
-    ↓
-tool A
-tool B
-tool C
+## Related issues
 
-to produce one audit transaction rather than unrelated rows.
-Not urgent, but worth keeping in mind.
-9. Mutation budget visibility
-You discovered the Phase-2 mutation budget almost by accident.
-I'd expose it.
-For example
-remaining_mutation_budget
-
-or
-mutation_budget_remaining
-
-Agents can then avoid proposing work that cannot execute.
-10. Stable tool IDs
-Today names appear to be the identifiers.
-If names ever change, historical audit interpretation becomes harder.
-An immutable identifier alongside the display name would future-proof things.
-What I would not change
-I would resist adding:
-- more approval tiers,
-- more effect categories,
-- more policy knobs,
-until there's a concrete use case.
-The current taxonomy is compact and understandable.
-Overall assessment
-The MCP layer has evolved considerably. It started as a collection of callable functions with relatively loose contracts. After this series of changes, it's beginning to resemble a governed control plane:
-- explicit effect taxonomy,
-- policy-driven authorization,
-- principal propagation,
-- durable audit,
-- proposal linkage,
-- registry consistency,
-- regression tests enforcing architectural invariants.
-The remaining work is mostly refinement rather than foundational repair. The biggest architectural item still unresolved, in my view, is the mutation boundary: deciding which operations are intended to be local engine mutations, which must go through WriteBus, and which should never bypass it under strict_no_bypass. Once that boundary is explicit, the control plane will have a much clearer contract for both human operators and autonomous GraphOps agents.
+| Topic | Issue |
+|---|---|
+| Mutation boundary, replayability, unclassified GraphOps tools | #218 |
+| RF control audit chain | #219 |
+| Capability metadata integrity and runtime capability | #220 |
+| Approval policy hardening | #221 |
+| Approval policy decisions (second principal) | #228 |
+| Orchestrator and `ToolDef` tools | #236 |
