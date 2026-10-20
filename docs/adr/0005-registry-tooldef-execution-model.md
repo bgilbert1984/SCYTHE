@@ -122,7 +122,7 @@ Architecture and migration are separate: the invariant is decided; compliance is
 | MCP `Registry` tools | compliant |
 | MCP `ToolDef` tools, mutating and non-mutating | compliant (`adapt_tooldef`, #249, #250) |
 | `/api/sdr/*` (`status`, `start`, `stop`, `tune`, `config`) | **known exception**: writes a control-audit record directly, no proposal or lifecycle (#227) |
-| `POST /api/embedding/entity` | **known exception**: performs the `embed_entity` mutation with no proposal, approval or audit record |
+| `POST /api/embedding/entity` | compliant: an adapter that proposes and executes `embed_entity` under the caller's principal and reports the lifecycle outcome (`test_rf_embedding_route_lifecycle`) |
 | `POST /api/sensor/eve/ground`, chat auto-grounding, `POST /api/graphops/directives/explain-coverage-cell` | **known exceptions** (Context, item 3) |
 | other non-GET `/api/...` routes | **not yet classified**; the inventory on #236 is a static first pass |
 
