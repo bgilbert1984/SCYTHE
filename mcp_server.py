@@ -254,7 +254,15 @@ class MCPHandler:
             raise RuntimeError(
                 f"Direct execution of mutating tool {name} is disabled; use the orchestrator proposal flow"
             )
-        if hasattr(tool, 'fn'):
+        if hasattr(tool, 'fn') and hasattr(self, '_registry'):
+            # A non-mutating ToolDef takes the same lifecycle as a Registry tool:
+            # parameter validation, rate limit, mode check, [MCP_AUDIT] (ADR 0005, #236).
+            # Only the response envelope below stays the ToolDef one.
+            if name not in self._registry._tools:
+                from mcp_registry import adapt_tooldef
+                self._registry.register(adapt_tooldef(tool))
+            result = self._registry.execute(self.engine, name, arguments, agent_mode="observe")
+        elif hasattr(tool, 'fn'):
             result = tool.fn(arguments)
         elif callable(tool):
             result = tool(arguments)

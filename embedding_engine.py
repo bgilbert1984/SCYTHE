@@ -540,7 +540,15 @@ class EmbeddingEngine:
 # ─── MCP tool registration ────────────────────────────────────────────────────
 
 def register_embedding_tools(engine, mcp_handler, embedding_engine: EmbeddingEngine) -> None:
-    """Register 5 semantic memory MCP tools into an MCPHandler instance."""
+    """Register 5 semantic memory MCP tools into an MCPHandler instance.
+
+    Effects (#236): ``embed_entity`` adds a vector to the FAISS index, saves the index
+    to disk and mirrors the entity to the instance database (``add_entity``,
+    ``save_index``), so it is ``LOCAL_STATE``.  The other four only read the index.
+    All five send text to the configured embedding endpoint, which the effect
+    taxonomy does not model (observation on #220).
+    """
+    from mcp_effects import LOCAL_STATE, READ_ONLY
     from mcp_server import ToolDef
 
     # ── embed_entity ──────────────────────────────────────────────────────────
@@ -658,6 +666,8 @@ def register_embedding_tools(engine, mcp_handler, embedding_engine: EmbeddingEng
             "required": ["entity_id"],
         },
         fn=_embed_entity,
+        effect=LOCAL_STATE,
+        mutates_state=True,
     )
 
     mcp_handler._tools["search_similar_entities"] = ToolDef(
@@ -675,6 +685,7 @@ def register_embedding_tools(engine, mcp_handler, embedding_engine: EmbeddingEng
             "required": ["query"],
         },
         fn=_search_similar,
+        effect=READ_ONLY,
     )
 
     mcp_handler._tools["detect_anomaly_pattern"] = ToolDef(
@@ -693,6 +704,7 @@ def register_embedding_tools(engine, mcp_handler, embedding_engine: EmbeddingEng
             "required": ["description"],
         },
         fn=_detect_anomaly,
+        effect=READ_ONLY,
     )
 
     mcp_handler._tools["stitch_identities"] = ToolDef(
@@ -711,6 +723,7 @@ def register_embedding_tools(engine, mcp_handler, embedding_engine: EmbeddingEng
             "required": ["description"],
         },
         fn=_stitch_identities,
+        effect=READ_ONLY,
     )
 
     mcp_handler._tools["get_semantic_clusters"] = ToolDef(
@@ -727,6 +740,7 @@ def register_embedding_tools(engine, mcp_handler, embedding_engine: EmbeddingEng
             },
         },
         fn=_get_clusters,
+        effect=READ_ONLY,
     )
 
     logger.info("[embedding_engine] registered 5 MCP tools: "
