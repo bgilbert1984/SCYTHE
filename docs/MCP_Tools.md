@@ -107,8 +107,8 @@ exists.
 - **Data egress is not an effect.** `graphops_investigate` sends prompts built from graph
   data to the configured Ollama endpoint, which can be Ollama Cloud. The DSL embedding
   verbs call an Ollama embedding endpoint. Neither changes state on the remote, so they
-  are `READ_ONLY`, but the taxonomy has no way to say a tool sends data out. Not yet
-  tracked; relevant to the capability model in #220.
+  are `READ_ONLY`, but the taxonomy has no way to say a tool sends data out. Recorded as
+  an observation on #220; no change is proposed.
 
 ## Related issues
 
