@@ -39,7 +39,7 @@ import time
 from typing import Any, Dict, Optional
 from enum import Enum
 
-from mcp_registry import Registry, build_registry
+from mcp_registry import Registry, adapt_tooldef, build_registry
 from mcp_safety import (
     DualAgentOrchestrator,
     ShadowMutationMode,
@@ -148,6 +148,7 @@ class AliasMCPOrchestrator:
 
         Returns proposal dict with approval status.
         """
+        self._adopt_tooldef(tool_name)
         proposal = self.dual_agent.propose_action(
             tool_name=tool_name,
             params=params,
@@ -203,6 +204,7 @@ class AliasMCPOrchestrator:
 
         tool_name = proposal["tool_name"]
         params = proposal["params"]
+        self._adopt_tooldef(tool_name)
 
         if (self.phase == Phase.PHASE_0_OBSERVE_ONLY
                 and tool_name in self._mutation_tools()):
@@ -314,6 +316,20 @@ class AliasMCPOrchestrator:
         ]
 
         return status
+
+    def _adopt_tooldef(self, tool_name: str) -> None:
+        """Make a ToolDef known to the registry so it takes the Registry lifecycle.
+
+        ToolDef tools (the graphops_* tools) are held only by the MCP handler.  Without
+        this a proposal for a mutating one was approved and then failed with
+        ``Unknown tool`` (#236).  Tools the registry already has are left alone.
+        """
+        if tool_name in self.registry._tools:
+            return
+        resolver = self.dual_agent.tool_resolver
+        tool = resolver(tool_name) if resolver else None
+        if tool is not None and hasattr(tool, "fn") and not hasattr(tool, "run"):
+            self.registry.register(adapt_tooldef(tool))
 
     def _mutation_tools(self) -> set:
         """Get list of mutation tools from registry."""
