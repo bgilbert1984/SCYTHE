@@ -3882,6 +3882,14 @@ def register_graphops_tools(engine, mcp_handler, embedding_engine=None,
         primary  = extractor.primary_entity(entities)
         return {"entities": entities, "primary_entity": primary}
 
+    # Effect READ_ONLY, audited from the code (test_graphops_tool_effects.py pins the
+    # assumptions): the agent loop reads the graph through the DSL executor (read
+    # accessors only), calls an Ollama /api/chat endpoint and queries the vector store.
+    # Its one mutating path, reflexive grounding via sensor_stream_tool, is off because
+    # the agent above is built with allow_sensor_mutation=False and nothing sets it.
+    # It does send prompts built from graph data to the configured Ollama endpoint,
+    # which can be Ollama Cloud (https://ollama.com); that is egress, not a state
+    # change on the remote, and the taxonomy has no category for it (#220).
     mcp_handler._tools["graphops_investigate"] = ToolDef(
         name="graphops_investigate",
         description=(
@@ -3899,8 +3907,17 @@ def register_graphops_tools(engine, mcp_handler, embedding_engine=None,
             "required": ["question"],
         },
         fn=_investigate,
+        effect=READ_ONLY,
     )
 
+    # Effect READ_ONLY, audited verb by verb: the executor dispatches 18 verbs, all of
+    # which read the graph through nodes/edges/edges_for_node/get_node/degree/
+    # nodes_with_label/view and keep their working state on the executor, which
+    # _dsl_exec resets each call.  STITCH_IDENTITIES only reports groups; nothing merges.
+    # SENSOR_STREAM is not a verb here (it would return "unknown verb"), so the prefix
+    # check above is defence in depth.  VECTOR_SEARCH, CLUSTER_SIMILAR and
+    # STITCH_IDENTITIES field=embedding call a stateless Ollama embedding endpoint and
+    # read the vector store; RF_CORRELATE queries the RF observation store.
     mcp_handler._tools["graphops_dsl_exec"] = ToolDef(
         name="graphops_dsl_exec",
         description=(
@@ -3921,6 +3938,7 @@ def register_graphops_tools(engine, mcp_handler, embedding_engine=None,
             "required": ["plan"],
         },
         fn=_dsl_exec,
+        effect=READ_ONLY,
     )
 
     mcp_handler._tools["graphops_entity_parse"] = ToolDef(
@@ -3991,6 +4009,13 @@ def register_graphops_tools(engine, mcp_handler, embedding_engine=None,
         ),
         input_schema={"type": "object", "additionalProperties": True},
         fn=_directive,
+        # Effect READ_ONLY, as wired: GraphOpsDirector() is built without an engine, so
+        # every graph directive raises "graph engine is unavailable" before reaching
+        # GraphSelectionResolver (which keeps a process-local snapshot cache).  The
+        # remaining directives read dataset and lunar evidence files and return an
+        # EffectPlan with mutations=[].  Giving the director an engine here would
+        # need this re-audited.
+        effect=READ_ONLY,
     )
 
     def _suggest(params: dict) -> dict:
@@ -4025,6 +4050,10 @@ def register_graphops_tools(engine, mcp_handler, embedding_engine=None,
             "required": [],
         },
         fn=_suggest,
+        # Effect READ_ONLY: signal extraction runs read-only DSL probes and reads the
+        # vector store and RF observation stats.  auto_execute runs at most two plans
+        # through the same read-only executor and restores its focus state.
+        effect=READ_ONLY,
     )
 
     try:

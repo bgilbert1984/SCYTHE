@@ -41,18 +41,6 @@ class RegisteredToolContractTest(unittest.TestCase):
             self.assertEqual(validate_tool_contract(registry._tools), [])
 
 
-# GraphOps tools whose effect has not been audited yet (#218: the investigate agent loop,
-# the graphops_dsl_exec verb set, directive and suggest).  They are held outside either
-# Registry, as ToolDef objects.  Declaring one removes it from this set; a new tool cannot
-# join it without this file changing.
-UNCLASSIFIED_TOOLDEFS = {
-    "graphops_investigate",
-    "graphops_dsl_exec",
-    "graphops_directive",
-    "graphops_suggest",
-}
-
-
 class ToolDefContractTest(unittest.TestCase):
     """The GraphOps tools are ToolDef objects in handler._tools, outside both Registry
     instances, so the registry checks above never saw them."""
@@ -81,17 +69,8 @@ class ToolDefContractTest(unittest.TestCase):
         self.assertIn("graphops_submit_feedback", self.tooldefs)
         self.assertGreaterEqual(len(self.tooldefs), 12)
 
-    def test_every_graphops_tool_meets_the_contract_except_the_unaudited_ones(self):
-        problems = [
-            p for p in validate_tool_contract(self.tooldefs)
-            if p.split(":")[0] not in UNCLASSIFIED_TOOLDEFS
-        ]
-        self.assertEqual(problems, [])
-
-    def test_the_unaudited_list_only_names_tools_that_are_still_undeclared(self):
-        for name in UNCLASSIFIED_TOOLDEFS:
-            self.assertIn(name, self.tooldefs)
-            self.assertFalse(self.tooldefs[name].effect_declared, f"{name} is declared: remove it from the list")
+    def test_every_graphops_tool_meets_the_contract(self):
+        self.assertEqual(validate_tool_contract(self.tooldefs), [])
 
 
 class ValidatorTest(unittest.TestCase):
