@@ -75,13 +75,14 @@ read-only analysis tools were audited from the code, and `test_graphops_tool_eff
 pins what the audit relied on. `graphops_directive` is `READ_ONLY` as wired, because its
 director is built without an engine; it is not `READ_ONLY` unconditionally.
 
-### 6. Registry tools and ToolDef tools: not decided
+### 6. Registry tools and ToolDef tools: decided in ADR 0005
 
 Two classes of tool exist. Registry tools have proposal, approval, rate limit and audit.
 `ToolDef` tools (the `graphops_*` tools) run through `ToolDef.fn`; a mutating one is
 refused when called directly and, when proposed, is approved and then fails with
 `Unknown tool`. Whether they are meant to share one lifecycle, and if so how, is the
-question in #236. This ADR takes no position.
+question in #236. [ADR 0005](0005-registry-tooldef-execution-model.md) takes the
+architectural position (one execution contract, two classes); it is not yet implemented.
 
 ## Consequences
 

@@ -1,8 +1,8 @@
 # ADR 0005 — Registry and ToolDef tools: one lifecycle, or an explicit boundary
 
-- **Status:** Proposed. Nothing here is decided or implemented. The direction in
-  [Recommendation](#recommendation) is a proposal for the owner to accept, change or
-  reject.
+- **Status:** Accepted (architecture), 2026-10-20: the principle and Option B as the
+  long-term direction. **Not implemented.** No `ToolDef` tool has been adapted, the
+  interim step C is not decided, and the HTTP routes are not decided.
 - **Date:** 2026-10-20
 - **Resolves:** decision 6 of [ADR 0004](0004-mcp-control-plane.md), tracked in #236.
 - **Related:** #218 (mutation boundary), #220 (capability), #227 (`/api/sdr/*` parity),
@@ -89,18 +89,19 @@ or document each as an accepted exception. Which mutations may bypass the canoni
 boundary is classified in #218, not here. This ADR only requires that the question is
 answered for these routes before #236 or #218 is closed.
 
-## Recommendation
+## Decision
 
-Proposed, not decided.
+Accepted as architecture. Accepting it means future work is evaluated against it; it does
+not mean any tool has been migrated.
 
-1. Adopt **B** as the target: one execution contract, two classes, adapter-based. Treat it
+1. **B is the target:** one execution contract, two classes, adapter-based. Treat it
    as a stepping stone toward **A**, tool by tool, where a tool's semantics fit the
    Registry.
-2. Land **C** first as an interim step, if the owner wants it: it is independent of B,
+2. **C** may land first as an interim step. It is optional and not decided here: it is independent of B,
    cheap, and removes the approve-then-fail behavior now. It must be described as interim
    so it is not mistaken for the decision. C on its own leaves two execution models
    permanently.
-3. Handle the HTTP routes as their own change, following the `/api/sdr/*` precedent,
+3. The HTTP routes are handled as their own change and are not decided here, following the `/api/sdr/*` precedent,
    tracked in #218.
 
 Rationale for B over A as the first move: A rewrites twelve tools to change where they

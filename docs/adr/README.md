@@ -10,8 +10,8 @@ implemented — the repository states elsewhere what actually ships.
 | [0002](0002-polarimetric-channel-diversity.md) | Channel diversity is physical, never synthetic | Proposed |
 | [0003](0003-rf-emission-tracking-hierarchy.md) | Detection, track, transmitter and location are four layers | Proposed |
 | [0004](0004-mcp-control-plane.md) | MCP tools declare their effect, and policy follows the declaration | Accepted and implemented; Registry/ToolDef split undecided |
-| [0005](0005-registry-tooldef-execution-model.md) | Registry and ToolDef tools: one lifecycle, or an explicit boundary | Proposed; not decided |
-| [0006](0006-mcp-approval-policy.md) | Approval is a policy tier per effect, and independent approval is expressible | Proposed; not decided |
+| [0005](0005-registry-tooldef-execution-model.md) | Registry and ToolDef tools: one lifecycle, or an explicit boundary | Accepted (architecture); not implemented |
+| [0006](0006-mcp-approval-policy.md) | Approval is a policy tier per effect, and independent approval is expressible | Proposed; mechanism mature, default mapping pending #228 |
 | [0007](0007-mutation-boundary.md) | Every authoritative mutation has exactly one documented boundary | Proposed; not decided |
 | [0008](0008-mutation-replayability.md) | Every mutation owes a declared level of explainability | Proposed; not decided |
 | [0009](0009-partial-failure.md) | A partially applied mutation is represented, never silently discarded | Proposed; not decided |
@@ -30,8 +30,8 @@ ADR's own *Builds on* line.
         └── 0009  Partial-failure semantics (also builds on 0008)
 ```
 
-0004 is accepted and implemented. 0005–0009 are proposals: each frames a decision and
-none is chosen. Policy that the ADRs deliberately leave open (the `HARDWARE_CONTROL`
+0004 is accepted and implemented. 0005 is accepted as architecture and not yet
+implemented. 0006–0009 are proposals: each frames a decision and none is chosen. Policy that the ADRs deliberately leave open (the `HARDWARE_CONTROL`
 approval default, the boundary for a given tool) is tracked in #228, #236 and #218.
 
 ## Relationship to `docs/SparseSCYTHE.md`
