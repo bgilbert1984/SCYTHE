@@ -33,7 +33,7 @@ from collections import deque
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
-from mcp_effects import TRAINING_DATA
+from mcp_effects import READ_ONLY, TRAINING_DATA
 
 logger = logging.getLogger(__name__)
 
@@ -824,6 +824,7 @@ def register_autopilot_tools(engine, mcp_handler,
         ),
         input_schema = {"type": "object", "properties": {}},
         fn           = _status,
+        effect       = READ_ONLY,
     )
     mcp_handler._tools["graphops_suggestion_queue"] = ToolDef(
         name        = "graphops_suggestion_queue",
@@ -833,6 +834,7 @@ def register_autopilot_tools(engine, mcp_handler,
         ),
         input_schema = {"type": "object", "properties": {}},
         fn           = _suggestion_queue,
+        effect       = READ_ONLY,
     )
     mcp_handler._tools["graphops_observation_log"] = ToolDef(
         name        = "graphops_observation_log",
@@ -842,6 +844,7 @@ def register_autopilot_tools(engine, mcp_handler,
         ),
         input_schema = {"type": "object", "properties": {}},
         fn           = _observation_log,
+        effect       = READ_ONLY,
     )
     mcp_handler._tools["graphops_format_card"] = ToolDef(
         name        = "graphops_format_card",
@@ -851,6 +854,7 @@ def register_autopilot_tools(engine, mcp_handler,
         ),
         input_schema = {"type": "object", "properties": {}},
         fn           = _format_card,
+        effect       = READ_ONLY,
     )
 
     def _submit_feedback(params: dict) -> dict:

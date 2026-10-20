@@ -60,7 +60,7 @@ from collections import Counter, defaultdict
 from contextlib import contextmanager
 from typing import Any, Dict, List, Optional
 
-from mcp_effects import LOCAL_STATE
+from mcp_effects import LOCAL_STATE, READ_ONLY
 
 logger = logging.getLogger(__name__)
 
@@ -3937,6 +3937,7 @@ def register_graphops_tools(engine, mcp_handler, embedding_engine=None,
             "required": ["text"],
         },
         fn=_entity_parse,
+        effect=READ_ONLY,
     )
 
     def _explain_coverage_cell(params: dict) -> dict:
