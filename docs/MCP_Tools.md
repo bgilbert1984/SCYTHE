@@ -81,9 +81,11 @@ Enforced by tests, not by convention.
 - Approval is derived from the declared effect.
 - Principal, proposal ID and effect are carried into the audit record.
 - `/api/sdr/*` hardware routes write the same control-audit record as MCP.
-- `ToolDef` tools whose effect has not been audited are named in
-  `UNCLASSIFIED_TOOLDEFS` in `test_mcp_tool_contract.py`. A new undeclared tool fails the
-  test; so does a listed tool that becomes declared.
+- Every `graphops_*` `ToolDef` tool declares an effect. The four read-only analysis tools
+  (`graphops_dsl_exec`, `graphops_investigate`, `graphops_directive`, `graphops_suggest`)
+  were audited from the code, and `test_graphops_tool_effects.py` pins what that audit
+  relied on: the DSL verb set, the engine accessors the verbs may touch, the agent's
+  disabled sensor-stream path, and the engine-less director.
 
 The validator checks metadata only. It does not check that a backing implementation
 exists.
@@ -102,14 +104,17 @@ exists.
 - **State boundary.** Some tools write to the engine directly rather than through
   WriteBus, and whether that is acceptable per tool is undecided. Replayability of
   mutations is also open. Tracked in #218.
-- **Unclassified GraphOps tools.** `graphops_investigate`, `graphops_dsl_exec`,
-  `graphops_directive` and `graphops_suggest` have no declared effect. Tracked in #218.
+- **Data egress is not an effect.** `graphops_investigate` sends prompts built from graph
+  data to the configured Ollama endpoint, which can be Ollama Cloud. The DSL embedding
+  verbs call an Ollama embedding endpoint. Neither changes state on the remote, so they
+  are `READ_ONLY`, but the taxonomy has no way to say a tool sends data out. Not yet
+  tracked; relevant to the capability model in #220.
 
 ## Related issues
 
 | Topic | Issue |
 |---|---|
-| Mutation boundary, replayability, unclassified GraphOps tools | #218 |
+| Mutation boundary, replayability | #218 |
 | RF control audit chain | #219 |
 | Capability metadata integrity and runtime capability | #220 |
 | Approval policy hardening | #221 |

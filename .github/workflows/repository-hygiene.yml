@@ -114,6 +114,7 @@ jobs:
             test_graphops_external_infrastructure \
             test_graphops_flow_direction \
             test_graphops_flow_evidence \
+            test_graphops_tool_effects \
             test_graphops_graph_resolver_mission_filter \
             test_graphops_host_trace \
             test_graphops_infrastructure \
