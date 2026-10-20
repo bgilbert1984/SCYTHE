@@ -66,6 +66,28 @@ class Tool:
         }
 
 
+def adapt_tooldef(tooldef) -> Tool:
+    """A Registry ``Tool`` that runs ``tooldef.fn``, so a ToolDef executes through
+    ``Registry.execute`` and gets validation, rate limiting, the mode check and the
+    control audit (ADR 0005, #236).  Metadata is carried over unchanged: an effect
+    that was inferred stays inferred, so the adapter never makes a tool look declared.
+    """
+    fn = tooldef.fn
+
+    def run(engine, params):
+        return fn(params)
+
+    return Tool(
+        name=tooldef.name,
+        description=tooldef.description,
+        parameters=tooldef.input_schema,
+        returns={"type": "object"},
+        run=run,
+        mutates_state=tooldef.mutates_state,
+        effect=tooldef.effect if tooldef.effect_declared else None,
+    )
+
+
 class Registry:
     """Production registry with validation, audit, and rate limiting."""
 
