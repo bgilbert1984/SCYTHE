@@ -1,7 +1,9 @@
 # ADR 0006 — Approval is a policy tier per effect, and independent approval is expressible
 
-- **Status:** Proposed. Nothing here is decided or implemented. The default is a
-  proposal for the owner to accept, change or reject.
+- **Status:** Proposed. Nothing here is decided or implemented. The mechanism (modes,
+  separation of authorization and approval, the approval action) is mature; the default
+  mapping per effect, and whether `HARDWARE_CONTROL` or `EXTERNAL_STATE` default to
+  `SECOND_PRINCIPAL`, remain policy choices to be made with #228.
 - **Date:** 2026-10-20
 - **Resolves:** the policy question in #228. Builds on [ADR 0004](0004-mcp-control-plane.md)
   (approval derives from the declared effect) and [ADR 0005](0005-registry-tooldef-execution-model.md)
@@ -69,6 +71,10 @@ amending this ADR.
   authorize an irreversible action.** Confidence is the case #228 found. The same rule
   covers any similar field a caller can set, such as risk, urgency, severity or
   certainty.
+- **A deployment may require a stricter approval mode than the architectural minimum
+  for an effect, never a weaker one.** The declared effect sets the floor. A deployment
+  may raise it (for example to `SECOND_PRINCIPAL`) and may not lower it, so no
+  configuration can undo a guarantee that the declared effect establishes.
 
 ### 3. The current default mapping preserves current behavior
 
