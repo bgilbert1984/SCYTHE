@@ -11,7 +11,7 @@ implemented — the repository states elsewhere what actually ships.
 | [0003](0003-rf-emission-tracking-hierarchy.md) | Detection, track, transmitter and location are four layers | Proposed |
 | [0004](0004-mcp-control-plane.md) | MCP tools declare their effect, and policy follows the declaration | Accepted and implemented; Registry/ToolDef split undecided |
 | [0005](0005-registry-tooldef-execution-model.md) | Registry and ToolDef tools: one lifecycle, or an explicit boundary | Accepted (architecture); mutation invariant stated; MCP compliant, HTTP exceptions listed |
-| [0006](0006-mcp-approval-policy.md) | Approval is a policy tier per effect, and independent approval is expressible | Proposed; mechanism mature, default mapping pending #228 |
+| [0006](0006-mcp-approval-policy.md) | Approval is a policy tier per effect, and independent approval is expressible | Proposed; mode table implemented, approval state and action pending (#228) |
 | [0007](0007-mutation-boundary.md) | Every authoritative mutation has exactly one documented boundary | Proposed; not decided |
 | [0008](0008-mutation-replayability.md) | Every mutation owes a declared level of explainability | Proposed; not decided |
 | [0009](0009-partial-failure.md) | A partially applied mutation is represented, never silently discarded | Proposed; not decided |

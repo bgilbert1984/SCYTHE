@@ -1,9 +1,13 @@
 # ADR 0006 — Approval is a policy tier per effect, and independent approval is expressible
 
-- **Status:** Proposed. Nothing here is decided or implemented. The mechanism (modes,
-  separation of authorization and approval, the approval action) is mature; the default
-  mapping per effect, and whether `HARDWARE_CONTROL` or `EXTERNAL_STATE` default to
-  `SECOND_PRINCIPAL`, remain policy choices to be made with #228.
+- **Status:** Proposed; partly implemented. The mode table and the "a deployment may
+  raise, never lower" rule exist in `mcp_effects.py` (`MINIMUM_APPROVAL_MODE`,
+  `required_approval_mode`, checked by `validate_tool_contract`), with today's mapping and
+  no change in behavior. Not implemented: the `pending_approval` state, the approval
+  action, any deployment setting that feeds `required_approval_mode`, and enforcement of
+  `SECOND_PRINCIPAL`. Whether `HARDWARE_CONTROL` or `EXTERNAL_STATE` default to
+  `SECOND_PRINCIPAL` remains a policy choice to be made with #228, and is sequenced after
+  those mechanisms and after the `/api/sdr/*` routes join the lifecycle.
 - **Date:** 2026-10-20
 - **Resolves:** the policy question in #228. Builds on [ADR 0004](0004-mcp-control-plane.md)
   (approval derives from the declared effect) and [ADR 0005](0005-registry-tooldef-execution-model.md)

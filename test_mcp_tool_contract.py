@@ -1,8 +1,11 @@
 import unittest
 from unittest import mock
 
+import mcp_effects
 from mcp_effects import (
-    AUTO_APPROVE, HARDWARE_CONTROL, REQUIRES_REVIEW, LOCAL_STATE, READ_ONLY, validate_tool_contract,
+    APPROVAL_MODES, AUTO_APPROVE, AUTOMATED, DIRECT, EFFECT_CATEGORIES, HARDWARE_CONTROL, LOCAL_STATE,
+    MINIMUM_APPROVAL_MODE, NON_MUTATING, READ_ONLY, REQUIRES_REVIEW, SECOND_PRINCIPAL,
+    approval_policy, required_approval_mode, validate_approval_table, validate_tool_contract,
 )
 from mcp_registry import Registry, Tool, build_registry
 
@@ -109,6 +112,60 @@ class ValidatorTest(unittest.TestCase):
         reg.register(_tool("dup"))
         with self.assertRaises(ValueError):
             reg.register(_tool("dup"))
+
+
+class ApprovalModeTableTest(unittest.TestCase):
+    """ADR 0006 / #228: the per-effect approval floor lives in one table, and a deployment
+    may raise it, never lower it.  Nothing here changes what a caller can do."""
+
+    def test_the_table_is_consistent_with_the_effect_taxonomy(self):
+        self.assertEqual(validate_approval_table(), [])
+        self.assertEqual(set(MINIMUM_APPROVAL_MODE), set(EFFECT_CATEGORIES))
+
+    def test_today_s_mapping_is_unchanged(self):
+        self.assertEqual({e: m for e, m in MINIMUM_APPROVAL_MODE.items() if m == DIRECT}, {e: DIRECT for e in NON_MUTATING})
+        self.assertEqual({m for e, m in MINIMUM_APPROVAL_MODE.items() if e not in NON_MUTATING}, {AUTOMATED})
+
+    def test_the_policy_is_derived_from_the_table(self):
+        for effect in EFFECT_CATEGORIES:
+            tool = _tool(mutates_state=effect not in NON_MUTATING, effect=effect)
+            expected = AUTO_APPROVE if MINIMUM_APPROVAL_MODE[effect] == DIRECT else REQUIRES_REVIEW
+            self.assertEqual(approval_policy(tool), expected, effect)
+
+    def test_a_table_entry_that_breaks_the_taxonomy_is_reported(self):
+        with mock.patch.dict(mcp_effects.MINIMUM_APPROVAL_MODE, {LOCAL_STATE: DIRECT}):
+            self.assertTrue(any("LOCAL_STATE" in p for p in validate_approval_table()))
+            self.assertTrue(any("LOCAL_STATE" in p for p in validate_tool_contract({})))
+        with mock.patch.dict(mcp_effects.MINIMUM_APPROVAL_MODE, {READ_ONLY: AUTOMATED}):
+            self.assertTrue(any("READ_ONLY" in p for p in validate_approval_table()))
+        with mock.patch.dict(mcp_effects.MINIMUM_APPROVAL_MODE, {LOCAL_STATE: "BOGUS"}):
+            self.assertTrue(any("unknown mode" in p for p in validate_approval_table()))
+        table = {k: v for k, v in MINIMUM_APPROVAL_MODE.items() if k != HARDWARE_CONTROL}
+        with mock.patch.object(mcp_effects, "MINIMUM_APPROVAL_MODE", table):
+            self.assertTrue(any("no minimum mode" in p for p in validate_approval_table()))
+
+    def test_with_no_deployment_setting_the_floor_applies(self):
+        for effect in EFFECT_CATEGORIES:
+            self.assertEqual(required_approval_mode(effect), MINIMUM_APPROVAL_MODE[effect])
+            self.assertEqual(required_approval_mode(effect, {}), MINIMUM_APPROVAL_MODE[effect])
+
+    def test_a_deployment_may_raise_the_mode(self):
+        self.assertEqual(required_approval_mode(HARDWARE_CONTROL, {HARDWARE_CONTROL: SECOND_PRINCIPAL}), SECOND_PRINCIPAL)
+        self.assertEqual(required_approval_mode(READ_ONLY, {READ_ONLY: AUTOMATED}), AUTOMATED)
+        self.assertEqual(required_approval_mode(LOCAL_STATE, {HARDWARE_CONTROL: SECOND_PRINCIPAL}), AUTOMATED)
+
+    def test_a_deployment_may_not_lower_the_mode(self):
+        for effect in EFFECT_CATEGORIES:
+            floor = APPROVAL_MODES.index(MINIMUM_APPROVAL_MODE[effect])
+            for lower in APPROVAL_MODES[:floor]:
+                with self.assertRaises(ValueError, msg=f"{effect} -> {lower}"):
+                    required_approval_mode(effect, {effect: lower})
+
+    def test_unknown_effects_and_modes_are_refused(self):
+        with self.assertRaises(ValueError):
+            required_approval_mode("NOT_AN_EFFECT")
+        with self.assertRaises(ValueError):
+            required_approval_mode(LOCAL_STATE, {LOCAL_STATE: "ALWAYS"})
 
 
 if __name__ == "__main__":
