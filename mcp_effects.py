@@ -59,6 +59,61 @@ def undeclared_effects(tools) -> list[str]:
     )
 
 
+# Approval modes (ADR 0006): the stages between authorization and execution, weakest
+# first.  They describe which stages exist, not how trusted a tool is.
+DIRECT = "DIRECT"                      # no approval stage
+AUTOMATED = "AUTOMATED"                # policy evaluation (mcp_safety._check_mutation_approval)
+SECOND_PRINCIPAL = "SECOND_PRINCIPAL"  # policy evaluation plus another identified principal
+APPROVAL_MODES = (DIRECT, AUTOMATED, SECOND_PRINCIPAL)
+
+# The architectural floor: the weakest approval mode each effect may have.  This is the
+# one place the mapping lives.  It records today's behavior; only AUTOMATED is enforced
+# (SECOND_PRINCIPAL has no pending state or approval action yet, #228).
+MINIMUM_APPROVAL_MODE = {
+    READ_ONLY: DIRECT,
+    AUDIT_ONLY: DIRECT,
+    LOCAL_STATE: AUTOMATED,
+    TRAINING_DATA: AUTOMATED,
+    EXTERNAL_STATE: AUTOMATED,
+    HARDWARE_CONTROL: AUTOMATED,
+}
+
+
+def required_approval_mode(effect: str, deployment: Optional[dict] = None) -> str:
+    """The approval mode an effect requires: the floor, or a stricter deployment setting.
+
+    ``deployment`` maps effect to a requested mode.  A deployment may raise the mode and
+    may never lower it, so no configuration undoes a guarantee the declared effect
+    establishes; a request below the floor raises ``ValueError`` instead of being ignored.
+    """
+    if effect not in MINIMUM_APPROVAL_MODE:
+        raise ValueError(f"unknown effect {effect!r}; expected one of {sorted(MINIMUM_APPROVAL_MODE)}")
+    floor = MINIMUM_APPROVAL_MODE[effect]
+    requested = (deployment or {}).get(effect)
+    if requested is None:
+        return floor
+    if requested not in APPROVAL_MODES:
+        raise ValueError(f"effect {effect}: unknown approval mode {requested!r}; expected one of {list(APPROVAL_MODES)}")
+    if APPROVAL_MODES.index(requested) < APPROVAL_MODES.index(floor):
+        raise ValueError(f"effect {effect}: a deployment may not lower the approval mode below {floor} (asked for {requested})")
+    return requested
+
+
+def validate_approval_table() -> list[str]:
+    """One message per way ``MINIMUM_APPROVAL_MODE`` disagrees with the effect taxonomy."""
+    problems = []
+    for effect in sorted(EFFECT_CATEGORIES - set(MINIMUM_APPROVAL_MODE)):
+        problems.append(f"approval table: effect {effect} has no minimum mode")
+    for effect in sorted(set(MINIMUM_APPROVAL_MODE) - EFFECT_CATEGORIES):
+        problems.append(f"approval table: {effect!r} is not an effect category")
+    for effect, mode in sorted(MINIMUM_APPROVAL_MODE.items()):
+        if mode not in APPROVAL_MODES:
+            problems.append(f"approval table: effect {effect} has unknown mode {mode!r}")
+        elif (effect in NON_MUTATING) != (mode == DIRECT):
+            problems.append(f"approval table: effect {effect} mapped to {mode}; only non-mutating effects may be DIRECT, and they must be")
+    return problems
+
+
 AUTO_APPROVE = "auto_approve"
 REQUIRES_REVIEW = "requires_review"
 # NOTE: REQUIRES_REVIEW currently means automated policy evaluation only.  No
@@ -74,10 +129,12 @@ def approval_policy(tool) -> str:
     Decided from the tool's declared effect only, never from its name.  Anything
     that is not positively known to be non-mutating needs review: an unknown tool,
     a tool that never declared an effect, and a declared effect that is mutating.
+    A tool is auto-approved exactly when its effect's minimum mode is ``DIRECT``.
     """
     if tool is None or not getattr(tool, "effect_declared", False):
         return REQUIRES_REVIEW
-    if getattr(tool, "effect", None) in NON_MUTATING and not getattr(tool, "mutates_state", True):
+    mode = MINIMUM_APPROVAL_MODE.get(getattr(tool, "effect", None))
+    if mode == DIRECT and not getattr(tool, "mutates_state", True):
         return AUTO_APPROVE
     return REQUIRES_REVIEW
 
@@ -92,7 +149,7 @@ def validate_tool_contract(tools) -> list[str]:
     an approval policy that matches it (non-mutating effects are auto-approved,
     every other effect requires review).
     """
-    problems = []
+    problems = validate_approval_table()
     for name, tool in sorted(dict(tools).items()):
         if getattr(tool, "name", name) != name:
             problems.append(f"{name}: registered under a different name than tool.name={tool.name!r}")
