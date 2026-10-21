@@ -149,7 +149,8 @@ class DualAgentOrchestrator:
       Executor → executes if approved
     """
 
-    def __init__(self, default_mutation_budget: int = 3, tool_resolver=None, approval_modes=None):
+    def __init__(self, default_mutation_budget: int = 3, tool_resolver=None, approval_modes=None,
+                 pending_ttl_seconds=None):
         # name -> tool object (with .effect / .effect_declared / .mutates_state).
         # Approval is decided from the tool's declared effect, never its name.
         self.tool_resolver = tool_resolver
@@ -168,13 +169,50 @@ class DualAgentOrchestrator:
 
         # Deployment approval settings (ADR 0006): they may raise an effect's mode, never
         # lower it.  None reads MCP_APPROVAL_MODES.
-        from mcp_effects import SECOND_PRINCIPAL, deployment_approval_modes
+        from mcp_effects import SECOND_PRINCIPAL, deployment_approval_modes, deployment_approval_ttl
         self.approval_modes = dict(approval_modes) if approval_modes is not None else deployment_approval_modes()
+        # How long a pending_approval proposal stays approvable (MCP_APPROVAL_TTL_SECONDS).
+        self.pending_ttl = float(pending_ttl_seconds) if pending_ttl_seconds is not None else deployment_approval_ttl()
         if SECOND_PRINCIPAL in self.approval_modes.values():
             logging.getLogger(__name__).warning(
                 "[approval] %s requires %s: matching proposals wait as pending_approval until a different "
                 "identified operator approves them (orchestrate/approve); without identified operators they cannot run",
                 sorted(e for e, m in self.approval_modes.items() if m == SECOND_PRINCIPAL), SECOND_PRINCIPAL)
+
+    def _audit_transition(self, action: str, proposal: Dict[str, Any], principal, result: str,
+                          summary: Optional[str] = None, parameters: Optional[Dict[str, Any]] = None) -> None:
+        """Append a proposal-lifecycle row to the control audit.  Evidence only: nothing reads it back
+        to decide anything, and a failed write cannot change a decision."""
+        try:
+            import control_audit
+            control_audit.record_transition(
+                action=action, effect=proposal.get("effect"), principal=principal,
+                proposal_id=proposal["proposal_id"], result=result, summary=summary, parameters=parameters)
+        except Exception:
+            logger.exception("[approval] could not audit %s for %s", action, proposal.get("proposal_id"))
+
+    def _expire(self, proposal: Dict[str, Any], now: float) -> None:
+        proposal.update(status="expired", expired_at=now)
+        self._audit_transition(
+            "proposal.expired", proposal, None, "expired",
+            summary=f"not approved within {self.pending_ttl:g}s", parameters={"tool": proposal["tool_name"]})
+
+    def expire_pending(self) -> int:
+        """Expire ``pending_approval`` proposals older than the TTL and drop long-expired entries.
+
+        Returns how many were expired.  Run opportunistically, so the in-memory log does not
+        grow with proposals nobody will approve; ``decide_proposal`` checks the TTL itself and
+        does not depend on this having run.
+        """
+        now = time.time()
+        expired = 0
+        for p in self.decision_log:
+            if p["status"] == "pending_approval" and now - p["timestamp"] > self.pending_ttl:
+                self._expire(p, now)
+                expired += 1
+        self.decision_log[:] = [p for p in self.decision_log
+                                if not (p["status"] == "expired" and now - p.get("expired_at", now) > self.pending_ttl)]
+        return expired
 
     def decide_proposal(self, proposal_id: str, decision: str, approver, note: str = "") -> Dict[str, Any]:
         """Approve or deny a ``pending_approval`` proposal (ADR 0006, Decision 6).
@@ -191,6 +229,10 @@ class DualAgentOrchestrator:
             return {"ok": False, "error": "proposal not found"}
         if decision not in ("approve", "deny"):
             return {"ok": False, "error": f"decision must be 'approve' or 'deny', not {decision!r}"}
+        now = time.time()
+        if proposal["status"] == "pending_approval" and now - proposal["timestamp"] > self.pending_ttl:
+            self._expire(proposal, now)
+            return {"ok": False, "error": f"proposal expired: not approved within {self.pending_ttl:g}s"}
         if proposal["status"] != "pending_approval":
             return {"ok": False, "error": f"proposal status is {proposal['status']}, not pending_approval"}
         if approver is None or not getattr(approver, "identified", False):
@@ -203,10 +245,14 @@ class DualAgentOrchestrator:
 
         who = approver.to_dict()
         if decision == "deny":
-            proposal.update(status="denied", denied_by=who, denied_at=time.time(), approval_note=note)
+            proposal.update(status="denied", denied_by=who, denied_at=now, approval_note=note)
+            self._audit_transition("proposal.denied", proposal, who, "denied", summary=note or None,
+                                   parameters={"tool": proposal["tool_name"], "params_digest": proposal["params_digest"]})
             return {"ok": True, "proposal_id": proposal_id, "status": "denied"}
-        proposal.update(status="approved", approved_by=who, approved_at=time.time(), approval_note=note,
+        proposal.update(status="approved", approved_by=who, approved_at=now, approval_note=note,
                         approved_params_digest=proposal["params_digest"])
+        self._audit_transition("proposal.approved", proposal, who, "approved", summary=note or None,
+                               parameters={"tool": proposal["tool_name"], "params_digest": proposal["params_digest"]})
         return {"ok": True, "proposal_id": proposal_id, "status": "approved"}
 
     def verify_approval(self, proposal: Dict[str, Any]) -> Optional[str]:
@@ -255,6 +301,7 @@ class DualAgentOrchestrator:
         """Analyst proposes an action. Returns decision."""
         import uuid
 
+        self.expire_pending()
         proposal_id = str(uuid.uuid4())
         proposal = {
             "proposal_id": proposal_id,
@@ -310,6 +357,13 @@ class DualAgentOrchestrator:
             self.drift_gate.record_proposal(was_accepted=(proposal["status"] != "rejected"))
 
         self.decision_log.append(proposal)
+        if mode != DIRECT:
+            # The proposer is only in this in-memory proposal; the row keeps it past a restart.
+            self._audit_transition(
+                "proposal.created", proposal, proposal.get("proposed_by"), proposal["status"],
+                summary=proposal["approval_reason"],
+                parameters={"tool": tool_name, "params": params, "params_digest": proposal["params_digest"],
+                            "approval_mode": mode, "confidence": confidence, "justification": justification})
         return proposal
 
     def _check_mutation_approval(

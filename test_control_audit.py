@@ -218,7 +218,10 @@ class McpFlowTest(unittest.TestCase):
         proposal = self.call("orchestrate/propose", {"tool_name": "probe_control", "params": {"x": 1}, "confidence": 0.95})
         self.current = Principal(OPERATOR_SESSION, operator_id="op-bob", session_id="s-b")
         self.assertTrue(self.call("orchestrate/execute", {"proposal_id": proposal["proposal_id"]})["ok"])
-        started, done = self.store.events(proposal_id=proposal["proposal_id"])
+        rows = self.store.events(proposal_id=proposal["proposal_id"])
+        self.assertEqual([r["action"] for r in rows][0], "proposal.created")     # the lifecycle row, from the proposer
+        self.assertEqual(rows[0]["principal_id"], "op-alice")
+        started, done = [r for r in rows if not r["action"].startswith("proposal.")]
         self.assertEqual([started["result"], done["result"]], ["started", "success"])
         self.assertEqual({started["principal_id"], done["principal_id"]}, {"op-bob"})
         self.assertEqual(done["effect"], LOCAL_STATE)

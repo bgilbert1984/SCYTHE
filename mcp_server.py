@@ -75,8 +75,9 @@ class MCPHandler:
         if use_orchestrator:
             # Validated outside the try below: a bad MCP_APPROVAL_MODES must stop startup,
             # not leave the orchestrator quietly disabled or half configured.
-            from mcp_effects import deployment_approval_modes
+            from mcp_effects import deployment_approval_modes, deployment_approval_ttl
             deployment_approval_modes()
+            deployment_approval_ttl()
             try:
                 from mcp_orchestrator import AliasMCPOrchestrator
                 self._orchestrator = AliasMCPOrchestrator(engine)

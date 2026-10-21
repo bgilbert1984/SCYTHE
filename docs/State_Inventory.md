@@ -34,7 +34,7 @@ Terms used in the classification:
 | RF hypergraph store | `RFHypergraphStore` in `rf_scythe_api_server.py`; `nodes`, `hyperedges`; in memory | no ("In-memory storage") | server routes; not examined further |
 | WriteBus state | `writebus_state.sqlite3`, or the operator DB path when the operator manager has one: idempotency, commit status and history, temporal context, dead-letter and repair records | yes | `WriteBus.commit` |
 | Operator database | `operator_sessions.db`: operators, sessions, teams, rooms, room membership, `room_entities`, `entity_audit_log` | yes | operator manager; `room_entities` is the target of `WriteBus` room publishing |
-| Control audit | `control_audit.sqlite3` under the data directory: `control_audit_events`, `control_audit_meta`; append-only, retention enforced by triggers | yes | `control_audit` via `Registry.execute` and `/api/sdr/*` |
+| Control audit | `control_audit.sqlite3` under the data directory: `control_audit_events`, `control_audit_meta`; append-only, retention enforced by triggers | yes | `control_audit` via `Registry.execute`, `/api/sdr/*` and the proposal lifecycle rows |
 | Proposal log | `DualAgentOrchestrator.decision_log`, a list; in memory | no | `propose_action`, `execute_proposal` |
 | Recon system entities | `recon_system.entities` (and `.tasks`); in memory | no; rebuilt at startup by `rehydrate_recon_from_operator_db` from `room_entities` for `RECON_ENTITY`, `PCAP_HOST`, `NMAP_TARGET` | several routes; the live-ingest worker writes `RECON_ENTITY` records into it directly |
 | Live-ingest queue | `live_ingest` deque, capped at 10,000; in memory | no | stream manager and `ws_ingest` enqueue; the server's live-ingest worker and `ingest_live_event` dequeue |

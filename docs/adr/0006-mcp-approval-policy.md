@@ -4,22 +4,24 @@
   - **Implemented:** the approval-mode table and the deployment floor ("a deployment may
     raise, never lower") in `mcp_effects.py` (`MINIMUM_APPROVAL_MODE`,
     `required_approval_mode`, checked by `validate_tool_contract`); the deployment setting
-    `MCP_APPROVAL_MODES` (`parse_approval_modes`, validated at startup, so a bad value stops
-    the handler); the mode recorded on every proposal as `approval_mode`; the
-    `pending_approval` state; the approval action `orchestrate/approve` (approve or deny,
-    by an identified operator who differs from the proposer, with a note); and the
-    execution-time check that a `SECOND_PRINCIPAL` proposal has a recorded approval by a
-    different identified operator and unchanged parameters (a digest taken at proposal
-    time). With the setting unset, the mapping is today's and behavior is unchanged. The
-    approval lives in the in-memory proposal.
+    `MCP_APPROVAL_MODES` (validated at startup, so a bad value stops the handler); the mode
+    recorded on every proposal as `approval_mode`; the `pending_approval` state; the
+    approval action `orchestrate/approve` (approve or deny, by an identified operator who
+    differs from the proposer, with a note); the execution-time check, which recomputes the
+    required mode from the tool's effect and the current setting and verifies the recorded
+    approval and an unchanged parameter digest; the transition audit rows
+    (`proposal.created`, `.approved`, `.denied`, `.expired`, keyed by `proposal_id`, with
+    `control_audit.reconstruct_proposal` to read a history back); and the pending TTL
+    (`MCP_APPROVAL_TTL_SECONDS`, default 900) with pruning. With the settings unset, the
+    mapping is today's, and the only visible change is the additional lifecycle rows.
+    The audit rows are evidence only: no decision reads them.
   - **Accepted architecture (reviewed and agreed 2026-10-21):** the independent
     proposal, approval and execution transitions (Decision 3) and the `SECOND_PRINCIPAL`
-    lifecycle (Decision 6): approval transitions, execution-time validation, transition
-    audit rows, and the proposal durability model.
-  - **Not yet implemented:** the transition audit rows (so the proposer and approver are
-    recoverable after a restart), the pending TTL (a pending proposal does not expire, so
-    a stale one can still be approved), and any exposure of the approval action beyond
-    `/mcp` (REST, UI). Decision 6 is otherwise live for a deployment that sets it.
+    lifecycle (Decision 6).
+  - **Not yet implemented:** durable pending proposals (a restart drops them, which fails
+    closed; the audit keeps the record, #219), exposure of the approval action beyond
+    `/mcp` (REST, UI), role checks on who may approve, and any change of default.
+    `/api/sdr/*` still bypasses the whole flow.
 
   Whether `HARDWARE_CONTROL` or `EXTERNAL_STATE` default to `SECOND_PRINCIPAL` remains a
   policy choice to be made with #228, sequenced after those mechanisms and after the

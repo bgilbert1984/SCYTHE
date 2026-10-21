@@ -121,6 +121,7 @@ jobs:
             test_ip_enrichment \
             test_lunar_evidence_resolver \
             test_mcp_approval_action \
+            test_mcp_approval_audit \
             test_mcp_approval_policy \
             test_mcp_lifecycle_invariant \
             test_mcp_orchestrator_registry \

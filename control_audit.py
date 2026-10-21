@@ -261,6 +261,57 @@ def begin_execution(tool, params: Optional[Dict[str, Any]]) -> Optional[Dict[str
                         principal=principal_dict(), source="mcp", proposal_id=current_proposal_id())
 
 
+PROPOSAL_CREATED = "proposal.created"
+PROPOSAL_APPROVED = "proposal.approved"
+PROPOSAL_DENIED = "proposal.denied"
+PROPOSAL_EXPIRED = "proposal.expired"
+PROPOSAL_ACTIONS = (PROPOSAL_CREATED, PROPOSAL_APPROVED, PROPOSAL_DENIED, PROPOSAL_EXPIRED)
+
+
+def record_transition(*, action: str, effect: Optional[str], principal: Optional[Dict[str, Any]], proposal_id: str,
+                      result: str, parameters: Optional[Dict[str, Any]] = None,
+                      summary: Optional[str] = None, source: str = "mcp") -> Optional[str]:
+    """Append one proposal-lifecycle row (ADR 0006).  Evidence only.
+
+    ``proposal_id`` is the join key that ties a proposal's rows to its execution rows.
+    Best effort and a no-op without a store: nothing in the approval or execution
+    decision reads these rows or depends on this write succeeding.
+    """
+    store = _store
+    if store is None:
+        return None
+    return store.safe_record(execution_id=str(uuid.uuid4()), action=action, effect=effect or "UNDECLARED",
+                             result=result, principal=principal, proposal_id=proposal_id, parameters=parameters,
+                             result_summary=summary, source=source)
+
+
+def reconstruct_proposal(store: "ControlAuditStore", proposal_id: str) -> Dict[str, Any]:
+    """The recorded history of one proposal, from its audit rows alone.
+
+    Who proposed, approved, denied and executed it, and in what order.  This is a read
+    of history for people and tools; it is never an input to an approval or execution
+    decision, and a proposal that is gone from memory is not made executable by it.
+    """
+    rows = store.events(proposal_id=proposal_id, limit=1000)
+    out: Dict[str, Any] = {"proposal_id": proposal_id, "events": [(r["action"], r["result"]) for r in rows],
+                           "proposed_by": None, "approved_by": None, "denied_by": None, "executed_by": None,
+                           "expired": False, "executed": False}
+    for r in rows:
+        who = r["principal_id"] or r["principal_kind"]
+        if r["action"] == PROPOSAL_CREATED:
+            out["proposed_by"] = who
+            out.setdefault("tool", json.loads(r["parameters_json"]).get("tool"))
+        elif r["action"] == PROPOSAL_APPROVED:
+            out["approved_by"] = who
+        elif r["action"] == PROPOSAL_DENIED:
+            out["denied_by"] = who
+        elif r["action"] == PROPOSAL_EXPIRED:
+            out["expired"] = True
+        elif r["result"] == "success":
+            out["executed_by"], out["executed"] = who, True
+    return out
+
+
 class _Outcome:
     """Lets the audited block say what happened, for the closing row."""
     summary: Optional[str] = None
