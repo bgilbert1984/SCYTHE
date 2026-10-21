@@ -102,10 +102,10 @@ class ProposalModeTest(unittest.TestCase):
             o = DualAgentOrchestrator(tool_resolver={"h": _tool("h", HARDWARE_CONTROL)}.get)
         self.assertEqual(o.propose_action("h", {}, confidence=0.9)["status"], "pending_approval")
 
-    def test_a_raised_mode_logs_that_nothing_can_approve_yet(self):
+    def test_a_raised_mode_logs_that_an_identified_operator_must_approve(self):
         with self.assertLogs("mcp_safety", level="WARNING") as cap:
             DualAgentOrchestrator(approval_modes={HARDWARE_CONTROL: SECOND_PRINCIPAL})
-        self.assertIn("cannot be approved or executed yet", cap.output[0])
+        self.assertIn("identified operator approves", cap.output[0])
 
 
 class FullOrchestratorTest(unittest.TestCase):
