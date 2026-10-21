@@ -1,15 +1,21 @@
 # ADR 0006 — Approval is a policy tier per effect, and independent approval is expressible
 
-- **Status:** Proposed; partly implemented. The `SECOND_PRINCIPAL` mechanism (Decision 6)
-  and the transition principle (Decision 3) were reviewed and agreed on 2026-10-21; they
-  are not implemented. Implemented: the mode table and the "a deployment may raise, never
-  lower" rule in `mcp_effects.py` (`MINIMUM_APPROVAL_MODE`, `required_approval_mode`,
-  checked by `validate_tool_contract`), with today's mapping and no change in behavior.
-  Not implemented: the `pending_approval` state, the approval action, any deployment
-  setting that feeds `required_approval_mode`, and enforcement of `SECOND_PRINCIPAL`.
+- **Status:** Proposed; partly implemented. Read the three groups separately:
+  - **Implemented:** the approval-mode table and the deployment floor ("a deployment may
+    raise, never lower") in `mcp_effects.py` (`MINIMUM_APPROVAL_MODE`,
+    `required_approval_mode`, checked by `validate_tool_contract`). Today's mapping, no
+    change in behavior. Nothing reads the mode at runtime yet.
+  - **Accepted architecture (reviewed and agreed 2026-10-21):** the independent
+    proposal, approval and execution transitions (Decision 3) and the `SECOND_PRINCIPAL`
+    lifecycle (Decision 6): approval transitions, execution-time validation, transition
+    audit rows, and the proposal durability model.
+  - **Not yet implemented:** the `pending_approval` state, the approval action, the
+    transition audit rows, the TTL, the deployment setting that feeds
+    `required_approval_mode`, and enforcement of `SECOND_PRINCIPAL`. Decision 6 is not live.
+
   Whether `HARDWARE_CONTROL` or `EXTERNAL_STATE` default to `SECOND_PRINCIPAL` remains a
-  policy choice to be made with #228, and is sequenced after those mechanisms and after
-  the `/api/sdr/*` routes join the lifecycle.
+  policy choice to be made with #228, sequenced after those mechanisms and after the
+  `/api/sdr/*` routes join the lifecycle.
 - **Date:** 2026-10-20
 - **Resolves:** the policy question in #228. Builds on [ADR 0004](0004-mcp-control-plane.md)
   (approval derives from the declared effect) and [ADR 0005](0005-registry-tooldef-execution-model.md)
