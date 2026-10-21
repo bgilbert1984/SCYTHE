@@ -158,6 +158,54 @@ class ApprovalActionTest(unittest.TestCase):
         self.assertFalse(r["ok"])
         self.assertIn("approver is the proposer", r["error"])
 
+    def approved(self):
+        p = self.propose()
+        self.assertTrue(self.decide(p, BOB)["ok"])
+        return p
+
+    def test_tampering_with_the_approval_metadata_stops_execution(self):
+        """The execution-time check must not trust anything stored on the proposal."""
+        cases = {
+            "approved_by removed": lambda p: p.pop("approved_by"),
+            "approved_by emptied": lambda p: p.update(approved_by={}),
+            "approver replaced by an unidentified principal":
+                lambda p: p.update(approved_by=Principal(kind=LOOPBACK).to_dict()),
+            "approver replaced by the internal token":
+                lambda p: p.update(approved_by=INTERNAL.to_dict()),
+            "an unidentified approver claiming identified=True":
+                lambda p: p.update(approved_by={"kind": LOOPBACK, "operator_id": "bob", "identified": True}),
+            "approver operator_id changed to the proposer":
+                lambda p: p["approved_by"].update(operator_id="alice"),
+            "approved digest removed": lambda p: p.pop("approved_params_digest"),
+            "approved digest replaced": lambda p: p.update(approved_params_digest="0" * 64),
+            "approval_mode lowered to AUTOMATED": lambda p: (p.pop("approved_by"), p.update(approval_mode=AUTOMATED)),
+            "approval_mode removed": lambda p: (p.pop("approved_by"), p.pop("approval_mode")),
+        }
+        for label, tamper in cases.items():
+            with self.subTest(label):
+                p = self.approved()
+                tamper(p)
+                r = self.execute(p)
+                self.assertFalse(r["ok"], label)
+        self.assertEqual(self.ran, [])
+
+    def test_a_forged_approved_status_cannot_hide_behind_a_lowered_mode(self):
+        p = self.propose()
+        p.update(status="approved", approval_mode=AUTOMATED)   # no approval was ever given
+        self.assertFalse(self.execute(p)["ok"])
+        self.assertEqual(self.ran, [])
+
+    def test_a_proposal_approved_in_a_weaker_mode_is_refused_once_the_setting_is_raised(self):
+        h = MCPHandler(HypergraphEngine(), use_orchestrator=True)   # no raised mode when proposing
+        h._tools["probe_write"] = self.h._tools["probe_write"]
+        h._orchestrator.set_phase(2, dry_run=False)
+        p = h._orchestrator.propose_action("probe_write", {"n": 1}, confidence=0.9)
+        self.assertEqual(p["status"], "approved")
+        h._orchestrator.dual_agent.approval_modes = {LOCAL_STATE: SECOND_PRINCIPAL}   # raised afterwards
+        r = h._orchestrator.execute_proposal(p["proposal_id"])
+        self.assertFalse(r["ok"])
+        self.assertEqual(self.ran, [])
+
     def test_the_rpc_uses_the_callers_principal_as_the_approver(self):
         p = self.propose()
         req = {"jsonrpc": "2.0", "id": 1, "method": "orchestrate/approve",

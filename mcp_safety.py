@@ -213,14 +213,19 @@ class DualAgentOrchestrator:
         """Why an ``approved`` proposal may not execute, or ``None`` if it may.
 
         Repeats the approval-time checks at execution, so a defect that sets
-        ``approved`` directly still cannot run a ``SECOND_PRINCIPAL`` proposal.  Proposals
-        in any other mode are not affected.
+        ``approved`` directly still cannot run a ``SECOND_PRINCIPAL`` proposal.  Nothing
+        stored on the proposal is trusted to say whether approval was needed: the mode is
+        recomputed from the tool's declared effect and the current deployment setting, and
+        the stricter of that and the recorded mode applies.  The approver is judged from
+        the fields that identify an individual, not from the stored ``identified`` flag.
         """
         from mcp_effects import SECOND_PRINCIPAL
-        if proposal.get("approval_mode") != SECOND_PRINCIPAL:
+        tool = self.tool_resolver(proposal["tool_name"]) if self.tool_resolver else None
+        if SECOND_PRINCIPAL not in (proposal.get("approval_mode"), self.approval_mode_for(tool)):
             return None
+        from mcp_principal import OPERATOR_SESSION
         approver = proposal.get("approved_by") or {}
-        if not approver.get("identified"):
+        if approver.get("kind") != OPERATOR_SESSION or not approver.get("operator_id"):
             return "a second-principal proposal has no recorded approval by an identified operator"
         proposer_id = (proposal.get("proposed_by") or {}).get("operator_id")
         if proposer_id and proposer_id == approver.get("operator_id"):
