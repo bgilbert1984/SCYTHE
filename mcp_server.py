@@ -145,6 +145,8 @@ class MCPHandler:
                 return self._rpc_ok(req_id, self._handle_propose(params))
             elif method == "orchestrate/decide":
                 return self._rpc_ok(req_id, self._handle_decide(params))
+            elif method == "orchestrate/approve":
+                return self._rpc_ok(req_id, self._handle_approve(params))
             elif method == "orchestrate/execute":
                 return self._rpc_ok(req_id, self._handle_execute(params))
             elif method == "orchestrate/status":
@@ -327,6 +329,13 @@ class MCPHandler:
 
         proposal_id = params.get("proposal_id", "")
         return self._orchestrator.check_proposal(proposal_id)
+
+    def _handle_approve(self, params: Dict[str, Any]):
+        """Approve or deny a pending_approval proposal. The caller's authenticated principal is the approver."""
+        if not self._orchestrator:
+            raise RuntimeError("Orchestrator not initialized")
+        return self._orchestrator.approve_proposal(
+            params.get("proposal_id", ""), params.get("decision", ""), params.get("note", "") or "")
 
     def _handle_execute(self, params: Dict[str, Any]):
         """Executor executes an approved proposal."""

@@ -40,7 +40,12 @@ The four steps are kept separate on purpose.
 3. **Proposal and approval (state-changing tools).** A direct `tools/call` of a tool with
    `mutates_state` is refused. The caller uses `orchestrate/propose`,
    `orchestrate/decide` and `orchestrate/execute`. Approval is decided from the tool's
-   declared effect (see below), never from its name.
+   declared effect (see below), never from its name. When a deployment requires
+   `SECOND_PRINCIPAL` for an effect (`MCP_APPROVAL_MODES`), a proposal that passes the
+   automated checks waits as `pending_approval` until a different identified operator
+   calls `orchestrate/approve` (`proposal_id`, `decision` of `approve` or `deny`, an optional
+   `note`); execution then re-checks the approval and that the parameters are unchanged.
+   `orchestrate/decide` only reports status.
 4. **Execution.** `Registry.execute` validates parameters, enforces the rate limit and
    runs the tool. The orchestrator also applies the autonomy phase: in phase 0 a
    mutating tool is blocked as observe-only, phase 1 returns a shadow estimate, and

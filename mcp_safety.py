@@ -19,6 +19,13 @@ from dataclasses import dataclass, field
 logger = logging.getLogger(__name__)
 
 
+def proposal_digest(tool_name: str, params: Any) -> str:
+    """Stable digest of what a proposal would run, so approval can be bound to it."""
+    import hashlib
+    import json
+    return hashlib.sha256(json.dumps({"tool": tool_name, "params": params}, sort_keys=True, default=str).encode()).hexdigest()
+
+
 @dataclass
 class TrustScore:
     """Tracks agent safety profile over time."""
@@ -165,9 +172,67 @@ class DualAgentOrchestrator:
         self.approval_modes = dict(approval_modes) if approval_modes is not None else deployment_approval_modes()
         if SECOND_PRINCIPAL in self.approval_modes.values():
             logging.getLogger(__name__).warning(
-                "[approval] %s requires %s: matching proposals stop at pending_approval and cannot be "
-                "approved or executed yet (the approval action is not implemented)",
+                "[approval] %s requires %s: matching proposals wait as pending_approval until a different "
+                "identified operator approves them (orchestrate/approve); without identified operators they cannot run",
                 sorted(e for e, m in self.approval_modes.items() if m == SECOND_PRINCIPAL), SECOND_PRINCIPAL)
+
+    def decide_proposal(self, proposal_id: str, decision: str, approver, note: str = "") -> Dict[str, Any]:
+        """Approve or deny a ``pending_approval`` proposal (ADR 0006, Decision 6).
+
+        ``approver`` is the authenticated ``Principal`` making the call.  It must be an
+        identified operator session whose ``operator_id`` differs from the proposer's, so
+        two sessions of one operator are one principal.  A proposer that is not an
+        identified operator (an internal automation) can be approved by any identified
+        operator.  Approval authorizes execution; it does not run anything, and execution
+        still checks phase, budget and the recorded approval.
+        """
+        proposal = next((p for p in self.decision_log if p["proposal_id"] == proposal_id), None)
+        if not proposal:
+            return {"ok": False, "error": "proposal not found"}
+        if decision not in ("approve", "deny"):
+            return {"ok": False, "error": f"decision must be 'approve' or 'deny', not {decision!r}"}
+        if proposal["status"] != "pending_approval":
+            return {"ok": False, "error": f"proposal status is {proposal['status']}, not pending_approval"}
+        if approver is None or not getattr(approver, "identified", False):
+            return {"ok": False, "error": "approval requires an identified operator session"}
+        proposer_id = (proposal.get("proposed_by") or {}).get("operator_id")
+        if proposer_id and proposer_id == approver.operator_id:
+            return {"ok": False, "error": "the approver must differ from the proposer"}
+        if proposal_digest(proposal["tool_name"], proposal["params"]) != proposal.get("params_digest"):
+            return {"ok": False, "error": "proposal parameters changed after the proposal was created"}
+
+        who = approver.to_dict()
+        if decision == "deny":
+            proposal.update(status="denied", denied_by=who, denied_at=time.time(), approval_note=note)
+            return {"ok": True, "proposal_id": proposal_id, "status": "denied"}
+        proposal.update(status="approved", approved_by=who, approved_at=time.time(), approval_note=note,
+                        approved_params_digest=proposal["params_digest"])
+        return {"ok": True, "proposal_id": proposal_id, "status": "approved"}
+
+    def verify_approval(self, proposal: Dict[str, Any]) -> Optional[str]:
+        """Why an ``approved`` proposal may not execute, or ``None`` if it may.
+
+        Repeats the approval-time checks at execution, so a defect that sets
+        ``approved`` directly still cannot run a ``SECOND_PRINCIPAL`` proposal.  Nothing
+        stored on the proposal is trusted to say whether approval was needed: the mode is
+        recomputed from the tool's declared effect and the current deployment setting, and
+        the stricter of that and the recorded mode applies.  The approver is judged from
+        the fields that identify an individual, not from the stored ``identified`` flag.
+        """
+        from mcp_effects import SECOND_PRINCIPAL
+        tool = self.tool_resolver(proposal["tool_name"]) if self.tool_resolver else None
+        if SECOND_PRINCIPAL not in (proposal.get("approval_mode"), self.approval_mode_for(tool)):
+            return None
+        from mcp_principal import OPERATOR_SESSION
+        approver = proposal.get("approved_by") or {}
+        if approver.get("kind") != OPERATOR_SESSION or not approver.get("operator_id"):
+            return "a second-principal proposal has no recorded approval by an identified operator"
+        proposer_id = (proposal.get("proposed_by") or {}).get("operator_id")
+        if proposer_id and proposer_id == approver.get("operator_id"):
+            return "the recorded approver is the proposer"
+        if proposal_digest(proposal["tool_name"], proposal["params"]) != proposal.get("approved_params_digest"):
+            return "proposal parameters changed after approval"
+        return None
 
     def approval_mode_for(self, tool) -> str:
         """The approval mode a proposal for ``tool`` needs: its effect's floor, or a stricter deployment setting.
@@ -217,6 +282,7 @@ class DualAgentOrchestrator:
         from mcp_effects import DIRECT, SECOND_PRINCIPAL
         mode = self.approval_mode_for(tool)
         proposal["approval_mode"] = mode
+        proposal["params_digest"] = proposal_digest(tool_name, params)
 
         if mode == DIRECT and approval_policy(tool) == AUTO_APPROVE:
             proposal["status"] = "approved"
@@ -237,8 +303,8 @@ class DualAgentOrchestrator:
                 why = f"effect {tool.effect}"
             proposal["approval_reason"] = f"{why}: {approval['reason']}"
             if mode == SECOND_PRINCIPAL and proposal["status"] == "approved":
-                # The automated checks passed; an independent principal must still approve.
-                # Nothing can approve it yet, so it cannot execute (fail closed).
+                # The automated checks passed; an independent principal must still approve
+                # (decide_proposal).  Until then it cannot execute.
                 proposal["status"] = "pending_approval"
                 proposal["approval_reason"] += " | awaiting independent approval"
             self.drift_gate.record_proposal(was_accepted=(proposal["status"] != "rejected"))
@@ -298,6 +364,9 @@ class DualAgentOrchestrator:
 
         if proposal["status"] != "approved":
             return {"ok": False, "error": f"proposal status is {proposal['status']}, not approved"}
+        problem = self.verify_approval(proposal)
+        if problem:
+            return {"ok": False, "error": problem}
 
         # Get adaptive budget based on trust
         budget = self.executor_trust.adaptive_budget(self.base_mutation_budget)

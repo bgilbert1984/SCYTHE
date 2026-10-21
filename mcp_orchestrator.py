@@ -188,6 +188,11 @@ class AliasMCPOrchestrator:
             "confidence": proposal.get("confidence", 0.0),
         }
 
+    def approve_proposal(self, proposal_id: str, decision: str, note: str = "") -> Dict[str, Any]:
+        """Approve or deny a ``pending_approval`` proposal as the current principal (ADR 0006)."""
+        from mcp_principal import current_principal
+        return self.dual_agent.decide_proposal(proposal_id, decision, current_principal(), note)
+
     def execute_proposal(
         self,
         proposal_id: str,
@@ -202,6 +207,10 @@ class AliasMCPOrchestrator:
 
         if proposal["status"] != "approved":
             return {"ok": False, "error": f"proposal status is {proposal['status']}, not approved"}
+
+        problem = self.dual_agent.verify_approval(proposal)
+        if problem:
+            return {"ok": False, "error": problem}
 
         tool_name = proposal["tool_name"]
         params = proposal["params"]
