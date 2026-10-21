@@ -142,7 +142,7 @@ class DualAgentOrchestrator:
       Executor → executes if approved
     """
 
-    def __init__(self, default_mutation_budget: int = 3, tool_resolver=None):
+    def __init__(self, default_mutation_budget: int = 3, tool_resolver=None, approval_modes=None):
         # name -> tool object (with .effect / .effect_declared / .mutates_state).
         # Approval is decided from the tool's declared effect, never its name.
         self.tool_resolver = tool_resolver
@@ -158,6 +158,27 @@ class DualAgentOrchestrator:
 
         # Decision log: separate from tool audit log
         self.decision_log: list[Dict[str, Any]] = []
+
+        # Deployment approval settings (ADR 0006): they may raise an effect's mode, never
+        # lower it.  None reads MCP_APPROVAL_MODES.
+        from mcp_effects import SECOND_PRINCIPAL, deployment_approval_modes
+        self.approval_modes = dict(approval_modes) if approval_modes is not None else deployment_approval_modes()
+        if SECOND_PRINCIPAL in self.approval_modes.values():
+            logging.getLogger(__name__).warning(
+                "[approval] %s requires %s: matching proposals stop at pending_approval and cannot be "
+                "approved or executed yet (the approval action is not implemented)",
+                sorted(e for e, m in self.approval_modes.items() if m == SECOND_PRINCIPAL), SECOND_PRINCIPAL)
+
+    def approval_mode_for(self, tool) -> str:
+        """The approval mode a proposal for ``tool`` needs: its effect's floor, or a stricter deployment setting.
+
+        A tool that never declared an effect, or that cannot be found, is ``AUTOMATED``
+        (today's treatment); no deployment setting applies to it because it has no effect.
+        """
+        from mcp_effects import AUTOMATED, required_approval_mode
+        if tool is None or not getattr(tool, "effect_declared", False):
+            return AUTOMATED
+        return required_approval_mode(tool.effect, self.approval_modes)
 
     def propose_action(
         self,
@@ -177,7 +198,7 @@ class DualAgentOrchestrator:
             "confidence": confidence,
             "justification": justification,
             "timestamp": time.time(),
-            "status": "proposed",  # proposed | approved | rejected | executed
+            "status": "proposed",  # proposed | approved | pending_approval | rejected | executed
             "approval_reason": "",
         }
 
@@ -193,7 +214,11 @@ class DualAgentOrchestrator:
         proposal["effect"] = getattr(tool, "effect", None)
         proposal["effect_declared"] = bool(getattr(tool, "effect_declared", False))
 
-        if approval_policy(tool) == AUTO_APPROVE:
+        from mcp_effects import DIRECT, SECOND_PRINCIPAL
+        mode = self.approval_mode_for(tool)
+        proposal["approval_mode"] = mode
+
+        if mode == DIRECT and approval_policy(tool) == AUTO_APPROVE:
             proposal["status"] = "approved"
             proposal["approval_reason"] = f"declared {tool.effect} (non-mutating)"
             self.drift_gate.record_proposal(was_accepted=True)
@@ -211,6 +236,11 @@ class DualAgentOrchestrator:
             else:
                 why = f"effect {tool.effect}"
             proposal["approval_reason"] = f"{why}: {approval['reason']}"
+            if mode == SECOND_PRINCIPAL and proposal["status"] == "approved":
+                # The automated checks passed; an independent principal must still approve.
+                # Nothing can approve it yet, so it cannot execute (fail closed).
+                proposal["status"] = "pending_approval"
+                proposal["approval_reason"] += " | awaiting independent approval"
             self.drift_gate.record_proposal(was_accepted=(proposal["status"] != "rejected"))
 
         self.decision_log.append(proposal)

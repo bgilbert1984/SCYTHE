@@ -121,6 +121,16 @@ class EmbeddingRouteLifecycleTest(unittest.TestCase):
         self.assertEqual((r.status_code, r.get_json()["outcome"]), (503, "error"))
         self.assertIn("Ollama", r.get_json()["reason"])
 
+    def test_a_raised_approval_mode_is_reported_as_pending_approval(self):
+        from mcp_effects import SECOND_PRINCIPAL
+        self.orch.set_phase(2, dry_run=False)
+        self.orch.dual_agent.approval_modes = {LOCAL_STATE: SECOND_PRINCIPAL}
+        r = self.post({"entity_id": "e1", "event": {}})
+        body = r.get_json()
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual((body["outcome"], body["status"]), ("pending_approval", "not_executed"))
+        self.assertEqual(self.embedded, [])
+
     def test_it_is_unavailable_when_the_lifecycle_is_not_initialized(self):
         with mock.patch.dict(self.rf.__dict__, {"mcp_handler": None}):
             self.assertEqual(self.post({"entity_id": "e1"}).status_code, 503)

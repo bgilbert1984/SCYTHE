@@ -3,15 +3,21 @@
 - **Status:** Proposed; partly implemented. Read the three groups separately:
   - **Implemented:** the approval-mode table and the deployment floor ("a deployment may
     raise, never lower") in `mcp_effects.py` (`MINIMUM_APPROVAL_MODE`,
-    `required_approval_mode`, checked by `validate_tool_contract`). Today's mapping, no
-    change in behavior. Nothing reads the mode at runtime yet.
+    `required_approval_mode`, checked by `validate_tool_contract`); the deployment setting
+    `MCP_APPROVAL_MODES` (`parse_approval_modes`, validated at startup, so a bad value stops
+    the handler); the mode recorded on every proposal as `approval_mode`; and the
+    `pending_approval` state for a `SECOND_PRINCIPAL` proposal that passes the automated
+    checks. With the setting unset, the mapping is today's and behavior is unchanged. A
+    proposal in `pending_approval` cannot be approved or executed: nothing leaves that
+    state yet, which is deliberate (fail closed).
   - **Accepted architecture (reviewed and agreed 2026-10-21):** the independent
     proposal, approval and execution transitions (Decision 3) and the `SECOND_PRINCIPAL`
     lifecycle (Decision 6): approval transitions, execution-time validation, transition
     audit rows, and the proposal durability model.
-  - **Not yet implemented:** the `pending_approval` state, the approval action, the
-    transition audit rows, the TTL, the deployment setting that feeds
-    `required_approval_mode`, and enforcement of `SECOND_PRINCIPAL`. Decision 6 is not live.
+  - **Not yet implemented:** the approval action, the execution-time approval and
+    parameter-digest check, the transition audit rows, the TTL, and enforcement of
+    `SECOND_PRINCIPAL` beyond holding proposals pending. Decision 6 is therefore only
+    partly live: a deployment that sets it stops executing the affected effect.
 
   Whether `HARDWARE_CONTROL` or `EXTERNAL_STATE` default to `SECOND_PRINCIPAL` remains a
   policy choice to be made with #228, sequenced after those mechanisms and after the

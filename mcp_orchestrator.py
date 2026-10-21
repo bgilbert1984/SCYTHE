@@ -183,6 +183,7 @@ class AliasMCPOrchestrator:
             "tool_name": proposal["tool_name"],
             "approved": proposal["status"] in ("approved", "executed"),
             "status": proposal["status"],
+            "approval_mode": proposal.get("approval_mode"),
             "approval_reason": proposal.get("approval_reason", ""),
             "confidence": proposal.get("confidence", 0.0),
         }
