@@ -104,6 +104,10 @@ class AllToolDefsTest(unittest.TestCase):
         cls.handler = MCPHandler(engine, use_orchestrator=True)
         register_graphops_tools(engine, cls.handler)
         register_autopilot_tools(engine, cls.handler, autopilot=mock.Mock())
+        # Import duckdb (embedding_engine's own dependency) before the sys.modules patch: patch.dict
+        # removes every module first imported inside the block on exit, which leaves a half-removed
+        # duckdb that cannot be imported again by whichever test module runs next.
+        import duckdb  # noqa: F401
         # embedding_engine imports faiss at module level; the tools only need the module to import.
         with mock.patch.dict(sys.modules, {"faiss": mock.MagicMock()}):
             from embedding_engine import register_embedding_tools
