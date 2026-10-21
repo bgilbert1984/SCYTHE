@@ -35,6 +35,10 @@ class LifecycleInvariantTest(unittest.TestCase):
         # register_mcp_routes registers these too; leaving them out left both HARDWARE_CONTROL tools untested.
         from rf_mcp import register_rf_tools
         register_rf_tools(engine, cls.handler)
+        # Import duckdb (embedding_engine's own dependency) before the sys.modules patch: patch.dict
+        # removes every module first imported inside the block on exit, which leaves a half-removed
+        # duckdb that cannot be imported again by whichever test module runs next.
+        import duckdb  # noqa: F401
         # embedding_engine imports faiss at module level; the tools only need the module to import.
         with mock.patch.dict(sys.modules, {"faiss": mock.MagicMock()}):
             from embedding_engine import register_embedding_tools
