@@ -1,7 +1,8 @@
 # ADR 0005 — Registry and ToolDef tools: one lifecycle, or an explicit boundary
 
 - **Status:** Accepted (architecture), 2026-10-20: the principle and Option B as the
-  long-term direction. Amended 2026-10-21 with the mutation invariant (Decision 4).
+  long-term direction. Amended 2026-10-21 with the mutation invariant (Decision 4) and the
+  initiator class (Decision 5).
   **Partially compliant.** Option B is implemented for every MCP tool (#249, #250, #251);
   interim step C was not taken. The invariant is the rule and the listed HTTP exceptions
   are known non-compliance, not accepted alternatives.
@@ -113,6 +114,44 @@ not mean any tool has been migrated.
    proposal, approval, audit or lifecycle enforcement. The review question for new code
    is "can this mutate state?", not "which transport is it?".
 
+5. **Initiator class.** Every execution through the lifecycle has an initiator class,
+   recorded on the proposal and in the audit rows. There are two:
+   - `autonomous`: the default, and the class of every caller that does not declare
+     otherwise, including all `/mcp` traffic.
+   - `operator_command`: an interactive operator command through a first-party operator
+     interface.
+
+   The class is assigned by trusted server code (the adapter for that interface). It is
+   never read from request data or any caller-supplied field. The autonomy phase
+   constrains `autonomous` execution. An `operator_command` is not subject to the phase,
+   and is subject to everything else: authorization, the approval mode its effect
+   requires, parameter integrity, the execution-time checks and the audit. This is a
+   classification with distinct lifecycle semantics, not a bypass of the lifecycle.
+
+   The class is defined by interactive operator intent, not by transport. Any first-party
+   interface (HTTP, WebSocket, CLI, a desktop client) may be assigned it by its own
+   adapter; a script or a new interface that has not been classified is `autonomous`.
+   Which interfaces are `operator_command` is decided per interface by the change that
+   migrates it. This ADR assigns it to the `/api/sdr/*` equipment-control routes only.
+   `POST /api/embedding/entity` stays `autonomous` and respects the phase: it is a
+   reversible, reproducible `LOCAL_STATE` change, not equipment control.
+
+   **Why it exists.** The phase answers "may agents mutate unattended?". Driving live
+   equipment from an operator interface is a different question, and tying it to the
+   phase would make using the radio mean enabling autonomous mutation system-wide. The
+   initiator class is a compatibility mechanism for that mismatch in what the phase
+   means. It does not redefine the phase, and a separate interactive-operator gate may
+   replace it later.
+
+   **What it does not prove.** The class is asserted by the adapter and is not verified.
+   A person at the first-party interface and a script holding the same operator session
+   token send the same request, and operator sessions can be created by any client. So
+   `operator_command` means "an authenticated caller of a first-party operator route",
+   which is what these routes already allow today (they do not consult the phase). Making
+   it mean a person would need a signal a script cannot reuse, such as an operator
+   session kind (interactive or service) set at login. That does not exist and is not
+   decided here.
+
 ### Implementation status against the invariant
 
 Architecture and migration are separate: the invariant is decided; compliance is partial.
@@ -121,12 +160,15 @@ Architecture and migration are separate: the invariant is decided; compliance is
 |---|---|
 | MCP `Registry` tools | compliant |
 | MCP `ToolDef` tools, mutating and non-mutating | compliant (`adapt_tooldef`, #249, #250) |
-| `/api/sdr/*` (`status`, `start`, `stop`, `tune`, `config`) | **known exception**: writes a control-audit record directly, no proposal or lifecycle (#227) |
+| `/api/sdr/*` (`start`, `stop`, `tune`, `config`) | **known exception**: writes a control-audit record directly, no proposal or lifecycle (#227). Migration decided: the routes join the lifecycle as `operator_command` (Decision 5); `/api/sdr/config` gets an MCP tool, `rf_stream_configure` (`HARDWARE_CONTROL`, strict schema), so there is something to propose; the route-level audit is removed in favor of the lifecycle's rows. Not yet implemented |
+| `/api/sdr/status`, `/api/sdr/spectrum/*` | reads; unchanged |
 | `POST /api/embedding/entity` | compliant: an adapter that proposes and executes `embed_entity` under the caller's principal and reports the lifecycle outcome (`test_rf_embedding_route_lifecycle`) |
 | `POST /api/sensor/eve/ground`, chat auto-grounding, `POST /api/graphops/directives/explain-coverage-cell` | **known exceptions** (Context, item 3) |
 | other non-GET `/api/...` routes | **not yet classified**; the inventory on #236 is a static first pass |
 
-Exceptions are temporary compatibility interfaces. Each should migrate to the lifecycle or
+Exceptions are temporary compatibility interfaces. A route classified `operator_command`
+is not an exception once it runs through the lifecycle, even though the phase does not
+apply to it. Each should migrate to the lifecycle or
 be retired. Migrating a UI-facing route changes what the caller sees: under the lifecycle
 a mutation can be blocked by the current phase, held for approval, or return a proposal
 instead of an effect, and that must be stated in the migrating change.
@@ -165,5 +207,7 @@ The invariant test covers MCP only. No test yet asserts Decision 4 for HTTP rout
 |---|---|
 | Order and mechanism of migrating each HTTP exception | #236 (inventory), #218 (classification of what mutates) |
 | Whether a second principal is required for any effect | #228 |
+| Verifying that an `operator_command` is a person (an interactive operator session kind) | not tracked |
+| A separate interactive-operator gate in place of the initiator class | not tracked |
 | Capability probes in place of `hasattr` | #220 |
 | Data-egress classification | #220 (observation) |
