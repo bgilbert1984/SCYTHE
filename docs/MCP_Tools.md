@@ -45,7 +45,9 @@ The four steps are kept separate on purpose.
    automated checks waits as `pending_approval` until a different identified operator
    calls `orchestrate/approve` (`proposal_id`, `decision` of `approve` or `deny`, an optional
    `note`); execution then re-checks the approval and that the parameters are unchanged.
-   `orchestrate/decide` only reports status. A tool its author declares `halts` (only
+   `orchestrate/decide` only reports status. The same action is available over REST for first-party
+   interfaces: `GET /api/mcp/proposals/pending` lists what is waiting and
+   `POST /api/mcp/proposals/<id>/decision` (`decision`, optional `note`) approves and runs it, or denies it. A tool its author declares `halts` (only
    `rf_capture_stop`: it takes no parameters and only ceases activity) is capped at `AUTOMATED` and is never
    held for a second principal; it is still proposed, authorized and audited (ADR 0006 Decision 7).
 4. **Execution.** `Registry.execute` validates parameters, enforces the rate limit and

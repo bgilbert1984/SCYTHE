@@ -3892,6 +3892,39 @@ if FLASK_AVAILABLE:
         return jsonify({'status': 'ok', 'outcome': 'executed', 'proposal_id': proposal_id,
                         'bridge': result.get('bridge', bridge.status())})
 
+    @app.route('/api/mcp/proposals/pending', methods=['GET'])
+    def mcp_pending_proposals():
+        """Proposals waiting for an independent approver (ADR 0006).  An adapter over the lifecycle."""
+        principal = _rf_bridge_principal(require_identity=True)
+        if principal is None:
+            return jsonify({'status': 'error', 'message': 'Authentication required'}), 401
+        orchestrator = getattr(globals().get('mcp_handler'), '_orchestrator', None)
+        if orchestrator is None:
+            return jsonify({'status': 'error', 'message': 'approval lifecycle is not initialized'}), 503
+        orchestrator.dual_agent.expire_pending()
+        ttl = orchestrator.dual_agent.pending_ttl
+        pending = [_proposal_view(p, principal, ttl) for p in orchestrator.dual_agent.decision_log
+                   if p.get('status') == 'pending_approval']
+        return jsonify({'status': 'ok', 'proposals': pending, 'caller': principal.to_dict()})
+
+    @app.route('/api/mcp/proposals/<proposal_id>/decision', methods=['POST'])
+    def mcp_decide_proposal(proposal_id):
+        """Approve (and run) or deny a pending proposal as the calling operator.  An adapter: the
+        lifecycle decides who may approve (an identified operator other than the proposer)."""
+        principal = _rf_bridge_principal(require_identity=True)
+        if principal is None:
+            return jsonify({'status': 'error', 'message': 'Authentication required'}), 401
+        body = request.get_json(silent=True) or {}
+        decision = str(body.get('decision', ''))
+        if decision not in ('approve', 'deny'):
+            return jsonify({'status': 'error', 'message': "decision must be 'approve' or 'deny'"}), 400
+        note = str(body.get('note', ''))[:500]
+        ran = _decide_pending(proposal_id, decision, note, principal)
+        if ran is None:
+            return jsonify({'status': 'error', 'message': 'approval lifecycle is not initialized'}), 503
+        response, code = ran
+        return jsonify(response), code
+
     @app.route('/api/sdr/spectrum/latest', methods=['GET'])
     def sdr_bridge_latest_spectrum():
         if not _rf_bridge_authorized():
@@ -20666,6 +20699,64 @@ def _sdr_lifecycle_refusal_response(proposal, executed):
     code = 400 if outcome == 'invalid' else 503 if outcome == 'error' else 409
     return jsonify({'status': status, 'outcome': outcome, 'message': reason, 'reason': reason,
                     'proposal_id': proposal.get('proposal_id'), **extras}), code
+
+
+def _proposal_view(proposal, caller, ttl):
+    """A pending proposal as shown to a prospective approver.  Secret-named parameters are redacted."""
+    import control_audit
+    proposer = proposal.get('proposed_by') or {}
+    return {
+        'proposal_id': proposal['proposal_id'],
+        'tool': proposal['tool_name'],
+        'params': control_audit.redact(proposal.get('params') or {}),
+        'approval_mode': proposal.get('approval_mode'),
+        'initiator': proposal.get('initiator'),
+        'proposed_by': {k: proposer.get(k) for k in ('kind', 'operator_id', 'callsign') if proposer.get(k)},
+        'own': bool(proposer.get('operator_id')) and proposer.get('operator_id') == caller.operator_id,
+        'created_at': proposal['timestamp'],
+        'expires_at': proposal['timestamp'] + ttl,
+    }
+
+
+def _decision_error_status(message):
+    """HTTP status for a refused approval decision (``decide_proposal`` error text)."""
+    if 'not found' in message:
+        return 404
+    if 'identified operator' in message or 'differ from the proposer' in message:
+        return 403
+    return 409
+
+
+def _decide_pending(proposal_id, decision, note, principal):
+    """Approve or deny a pending proposal as ``principal``, and run it on approval.
+
+    The approver may execute (ADR 0006, D6): approval and execution stay separate transitions, each
+    checked on its own, but the interactive caller does not have to come back for a second call.
+    Returns ``(body, status)``, or ``None`` when the lifecycle is not initialized.
+    """
+    handler = globals().get('mcp_handler')
+    orchestrator = getattr(handler, '_orchestrator', None)
+    if orchestrator is None:
+        return None
+    from mcp_principal import principal_scope, source_scope
+    with principal_scope(principal), source_scope('api.mcp.approve'):
+        decided = orchestrator.approve_proposal(proposal_id, decision, note)
+        if not decided.get('ok'):
+            message = str(decided.get('error', ''))
+            return {'status': 'error', 'outcome': 'refused', 'message': message, 'reason': message,
+                    'proposal_id': proposal_id}, _decision_error_status(message)
+        if decision == 'deny':
+            return {'status': 'ok', 'outcome': 'denied', 'proposal_id': proposal_id}, 200
+        proposal = next(p for p in orchestrator.dual_agent.decision_log if p['proposal_id'] == proposal_id)
+        executed = orchestrator.execute_proposal(proposal_id)
+    refusal = _lifecycle_refusal(proposal, executed)
+    if refusal is not None:
+        outcome, reason, extras = refusal
+        code = 400 if outcome == 'invalid' else 503 if outcome == 'error' else 409
+        return {'status': 'error' if code != 409 else 'not_executed', 'outcome': outcome, 'message': reason,
+                'reason': reason, 'proposal_id': proposal_id, 'approved': True, **extras}, code
+    return {'status': 'ok', 'outcome': 'executed', 'proposal_id': proposal_id, 'tool': proposal['tool_name'],
+            'result': executed.get('result')}, 200
 
 
 def main():

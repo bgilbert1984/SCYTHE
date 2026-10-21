@@ -39,6 +39,84 @@
         }
     }
 
+    // A control response is judged by what the lifecycle decided, not by the transport status alone.
+    async function readOutcome(response) {
+        let data = null;
+        try { data = await response.json(); } catch (error) { data = null; }
+        return { ...window.SDRPPOutcome.describeResponse(response.status, data), data };
+    }
+
+    // Commands waiting for a second operator (ADR 0006), and the controls to approve or deny them.
+    const approvals = { timer: null, items: [] };
+
+    function approvalsPanel() { return document.getElementById('sdrpp-approvals'); }
+
+    function renderApprovals() {
+        const panel = approvalsPanel();
+        if (!panel) return;
+        const button = document.getElementById('sdrpp-approvals-btn');
+        const count = approvals.items.length;
+        if (button) button.textContent = count ? `Approvals (${count})` : 'Approvals';
+        panel.textContent = '';
+        if (!count) {
+            const empty = document.createElement('div');
+            empty.textContent = 'No commands are waiting for approval.';
+            panel.appendChild(empty);
+            return;
+        }
+        const now = Date.now() / 1000;
+        approvals.items.forEach(item => {
+            const row = document.createElement('div');
+            row.className = 'sdrpp-approval-row';
+            const text = document.createElement('span');
+            text.textContent = window.SDRPPOutcome.describeProposal(item, now);
+            row.appendChild(text);
+            if (item.own) {
+                const note = document.createElement('em');
+                note.textContent = ' (yours: another operator must approve)';
+                row.appendChild(note);
+            } else {
+                [['approve', 'Approve'], ['deny', 'Deny']].forEach(([decision, label]) => {
+                    const choice = document.createElement('button');
+                    choice.className = 'spec-control';
+                    choice.textContent = label;
+                    choice.addEventListener('click', () => decide(item.proposal_id, decision));
+                    row.appendChild(choice);
+                });
+            }
+            panel.appendChild(row);
+        });
+    }
+
+    async function refreshApprovals() {
+        if (!approvalsPanel()) return;
+        try {
+            const response = await apiFetch('/api/mcp/proposals/pending');
+            if (!response.ok) return;   // not signed in as an operator, or approvals unavailable: show nothing
+            const data = await response.json();
+            approvals.items = Array.isArray(data.proposals) ? data.proposals : [];
+            renderApprovals();
+        } catch (error) { /* keep the last list */ }
+    }
+
+    async function decide(proposalId, decision) {
+        try {
+            const response = await apiFetch(`/api/mcp/proposals/${encodeURIComponent(proposalId)}/decision`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ decision }),
+            });
+            const outcome = await readOutcome(response);
+            if (outcome.ok) {
+                notify('SDR++ approval', decision === 'approve' ? 'Approved and executed.' : 'Denied.', 'info');
+            } else {
+                notify('SDR++ approval', outcome.message, 'error');
+            }
+        } finally {
+            refreshApprovals();
+        }
+    }
+
     function resizeCanvas() {
         const canvas = state.canvas || document.getElementById('spectrogramCanvas');
         if (!canvas) return null;
@@ -173,7 +251,14 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: '{}',
                 });
-                if (!startResponse.ok) throw new Error(`SDR start HTTP ${startResponse.status}`);
+                const outcome = await readOutcome(startResponse);
+                if (outcome.kind === 'pending_approval') {
+                    setStatus('waiting', 'AWAITING SECOND-OPERATOR APPROVAL');
+                    notify('SDR++ bridge', outcome.message, 'warning');
+                    refreshApprovals();
+                    return true;   // handled: nothing was started, so do not open the stream
+                }
+                if (!outcome.ok) throw new Error(outcome.message || `SDR start HTTP ${startResponse.status}`);
             }
             if (!state.streaming) {
                 openStream().catch(error => {
@@ -196,7 +281,9 @@
         state.abortController = null;
         state.streaming = false;
         try {
-            await apiFetch('/api/sdr/stop', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+            const response = await apiFetch('/api/sdr/stop', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+            const outcome = await readOutcome(response);
+            if (!outcome.ok) notify('SDR++ stop', outcome.message, 'error');
         } finally {
             setStatus('off', 'STOPPED');
         }
@@ -212,10 +299,11 @@
                 bandwidth_hz: Number(bandwidthHz) || 0,
             }),
         });
-        const data = await response.json();
-        if (!response.ok) throw new Error(data.message || `Tune HTTP ${response.status}`);
+        const outcome = await readOutcome(response);
+        if (outcome.kind === 'pending_approval') refreshApprovals();
+        if (!outcome.ok) throw new Error(outcome.message || `Tune HTTP ${response.status}`);
         notify('SDR++ tuned', formatFrequency(frequencyHz), 'info');
-        return data;
+        return outcome.data;
     }
 
     function parseFrequency(text) {
@@ -244,6 +332,16 @@
                 }
             });
         }
+        const approvalsButton = document.getElementById('sdrpp-approvals-btn');
+        if (approvalsButton) {
+            approvalsButton.addEventListener('click', () => {
+                const panel = approvalsPanel();
+                if (panel) panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+                refreshApprovals();
+            });
+            if (!approvals.timer) approvals.timer = setInterval(() => { if (!document.hidden) refreshApprovals(); }, 20000);
+            refreshApprovals();
+        }
         window.addEventListener('resize', resizeCanvas);
     }
 
@@ -252,6 +350,7 @@
         stopSpectrum,
         tune,
         parseFrequency,
+        refreshApprovals,
         drawFrame,
         state,
     };
