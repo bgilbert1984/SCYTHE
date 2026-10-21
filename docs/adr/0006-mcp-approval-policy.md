@@ -22,11 +22,12 @@
     `validate_tool_contract`, caps the mode at `AUTOMATED`; `rf_capture_control` is split into
     `rf_capture_start` and `rf_capture_stop`, and only the stop tool halts.
   - **Not yet implemented:** durable pending proposals (a restart drops them, which fails
-    closed; the audit keeps the record, #219), exposure of the approval action beyond
-    `/mcp` (REST, UI), role checks on who may approve, and any change of default.
+    closed; the audit keeps the record, #219), role checks on who may approve, and any change
+    of default. The approval action is exposed beyond `/mcp` as `GET /api/mcp/proposals/pending`
+    and `POST /api/mcp/proposals/<id>/decision`, with a list and buttons in the SDR++ panel.
     The `/api/sdr/*` control routes now enter the lifecycle as `operator_command`
     (ADR 0005 Decision 5); with a raised `HARDWARE_CONTROL` mode their start, tune and config
-    requests answer 409 `pending_approval`, and the UI cannot yet approve them.
+    requests answer 409 `pending_approval`, and a second operator approves them from the SDR++ panel.
 
   Whether `HARDWARE_CONTROL` or `EXTERNAL_STATE` default to `SECOND_PRINCIPAL` remains a
   policy choice to be made with #228, sequenced after those mechanisms and after the

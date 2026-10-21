@@ -8898,6 +8898,8 @@
             <input id="sdrpp-frequency-input" class="spec-control" value="145.350M" aria-label="SDR++ tune frequency" style="width:92px;" />
             <button class="spec-control" id="sdrpp-tune-btn" title="Tune SDR++ through Rigctl">Tune</button>
             <button class="spec-control" id="sdrpp-disconnect-btn" title="Disconnect the RF bridge">Disconnect</button>
+            <button class="spec-control" id="sdrpp-approvals-btn" title="Radio commands waiting for a second operator">Approvals</button>
+            <div id="sdrpp-approvals" role="region" aria-label="Radio commands awaiting approval" style="display:none;position:absolute;right:8px;top:100%;z-index:50;min-width:320px;max-width:520px;padding:8px;background:#0b1220;border:1px solid #2a3550;border-radius:4px;font-size:12px;"></div>
             <div id="zoomControls">
                 <button class="spec-control" id="zoomInBtn">+</button>
                 <button class="spec-control" id="zoomOutBtn">-</button>
@@ -8955,6 +8957,7 @@
     <script src="ionosphere-data-enhancer.js"></script>
 	    <!-- Essential RF SCYTHE components only (loaded once) -->
 	    <script src="mock-api.js"></script>
+	    <script src="sdrpp-outcome.js"></script>
 	    <script src="sdrpp-bridge.js"></script>
     <script src="network-infrastructure.js"></script>
     <!-- Cognition stack: simulation authority before visualization sampling -->

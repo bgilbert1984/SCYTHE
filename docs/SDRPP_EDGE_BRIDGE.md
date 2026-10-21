@@ -84,6 +84,10 @@ may use the configured `X-Internal-Token`.
 - `POST /api/sdr/stop`
 - `POST /api/sdr/tune` with `frequency_hz`, optional `mode`, and `bandwidth_hz`
 - `POST /api/sdr/config` for FFT/sample interpretation settings
+- `GET /api/mcp/proposals/pending` and `POST /api/mcp/proposals/<id>/decision`: when a deployment
+  requires a second operator for radio control (`MCP_APPROVAL_MODES`), start, tune and config answer
+  `409` with `outcome: pending_approval`; another signed-in operator approves them here or from the
+  **Approvals** button in the spectrum panel
 - `GET /api/sdr/spectrum/latest`
 - `GET /api/sdr/spectrum/stream` for authenticated NDJSON frames
 
