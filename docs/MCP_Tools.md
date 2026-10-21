@@ -54,7 +54,14 @@ The four steps are kept separate on purpose.
    tool, effect, proposal ID and principal. When `control_audit` is configured, state-changing
    executions are also written to a durable, append-only SQLite store as a `started` row
    and a `success` or `error` row sharing an `execution_id`. That store is separate from
-   the graph and does not go through WriteBus.
+   the graph and does not go through WriteBus. The same store records a proposal's
+   lifecycle as `proposal.created`, `proposal.approved`, `proposal.denied` and
+   `proposal.expired` rows (written for proposals whose approval mode is above `DIRECT`),
+   each carrying the `proposal_id` that also appears on the execution rows, so the
+   proposer, approver and executor can be read back after a restart
+   (`control_audit.reconstruct_proposal`). These rows are evidence only: no approval or
+   execution decision reads them. A `pending_approval` proposal expires after
+   `MCP_APPROVAL_TTL_SECONDS` (default 900) and can no longer be approved.
 
 ## Effect taxonomy
 

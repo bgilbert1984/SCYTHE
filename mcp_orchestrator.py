@@ -170,6 +170,7 @@ class AliasMCPOrchestrator:
 
     def check_proposal(self, proposal_id: str) -> Dict[str, Any]:
         """Check approval status of a proposal."""
+        self.dual_agent.expire_pending()
         proposal = next(
             (p for p in self.dual_agent.decision_log if p["proposal_id"] == proposal_id),
             None,
@@ -198,6 +199,7 @@ class AliasMCPOrchestrator:
         proposal_id: str,
     ) -> Dict[str, Any]:
         """Execute an approved proposal via the executor agent."""
+        self.dual_agent.expire_pending()
         proposal = next(
             (p for p in self.dual_agent.decision_log if p["proposal_id"] == proposal_id),
             None,

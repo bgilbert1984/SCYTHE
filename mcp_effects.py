@@ -130,6 +130,29 @@ def deployment_approval_modes(environ=None) -> dict:
     return parse_approval_modes((os.environ if environ is None else environ).get(APPROVAL_MODES_ENV))
 
 
+APPROVAL_TTL_ENV = "MCP_APPROVAL_TTL_SECONDS"
+DEFAULT_APPROVAL_TTL_SECONDS = 900.0
+
+
+def deployment_approval_ttl(environ=None) -> float:
+    """Seconds a ``pending_approval`` proposal stays approvable (``MCP_APPROVAL_TTL_SECONDS``, default 900).
+
+    Anything that is not a positive number raises ``ValueError``, so a bad value stops startup.
+    """
+    import math
+    import os
+    raw = (os.environ if environ is None else environ).get(APPROVAL_TTL_ENV)
+    if raw is None or not str(raw).strip():
+        return DEFAULT_APPROVAL_TTL_SECONDS
+    try:
+        ttl = float(raw)
+    except ValueError:
+        raise ValueError(f"{APPROVAL_TTL_ENV}: expected a number of seconds, got {raw!r}") from None
+    if not math.isfinite(ttl) or ttl <= 0:
+        raise ValueError(f"{APPROVAL_TTL_ENV}: must be a positive number of seconds, got {raw!r}")
+    return ttl
+
+
 def validate_approval_table() -> list[str]:
     """One message per way ``MINIMUM_APPROVAL_MODE`` disagrees with the effect taxonomy."""
     problems = []

@@ -151,7 +151,8 @@ class FullOrchestratorTest(unittest.TestCase):
         checked = h._orchestrator.check_proposal(p["proposal_id"])
         self.assertEqual((checked["approved"], checked["status"], checked["approval_mode"]),
                          (False, "pending_approval", SECOND_PRINCIPAL))
-        self.assertEqual(control_audit.get_store().events(), [])  # nothing executed, so nothing audited as executed
+        # nothing executed, so only the lifecycle row exists and no execution row does
+        self.assertEqual([e["action"] for e in control_audit.get_store().events()], ["proposal.created"])
 
     def test_a_bad_setting_stops_the_handler_instead_of_disabling_the_orchestrator(self):
         with mock.patch.dict(os.environ, {APPROVAL_MODES_ENV: "LOCAL_STATE=DIRECT"}):

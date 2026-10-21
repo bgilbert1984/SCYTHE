@@ -95,7 +95,10 @@ class EmbeddingRouteLifecycleTest(unittest.TestCase):
     def test_the_execution_is_in_the_control_audit_under_the_caller_and_the_proposal(self):
         self.orch.set_phase(2, dry_run=False)
         pid = self.post({"entity_id": "e1", "event": {}}).get_json()["proposal_id"]
-        rows = self.audit_rows()
+        all_rows = self.audit_rows()
+        created = [r for r in all_rows if r[0] == "proposal.created"]
+        self.assertEqual([(r[3], r[4]) for r in created], [("op-1", pid)])
+        rows = [r for r in all_rows if not r[0].startswith("proposal.")]
         self.assertEqual([r[2] for r in rows], ["started", "success"])
         for action, effect, _, principal_id, proposal_id in rows:
             self.assertEqual((action, effect, principal_id, proposal_id), ("embed_entity", LOCAL_STATE, "op-1", pid))

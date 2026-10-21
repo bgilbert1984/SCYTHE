@@ -97,7 +97,8 @@ class ToolDefThroughOrchestratorTest(unittest.TestCase):
     def audit_rows(self):
         with sqlite3.connect(self.audit_path) as conn:
             return conn.execute(
-                "SELECT action, effect, result, proposal_id FROM control_audit_events ORDER BY ts_epoch, rowid"
+                "SELECT action, effect, result, proposal_id FROM control_audit_events"
+                " WHERE action NOT LIKE 'proposal.%' ORDER BY ts_epoch, rowid"   # execution rows; proposal.* are the lifecycle rows
             ).fetchall()
 
     def test_proposal_is_approved_with_the_declared_effect(self):
