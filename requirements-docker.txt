@@ -21,7 +21,7 @@ websockets>=12.0
 aiohttp>=3.9.0
 
 # ── Data storage ──────────────────────────────────────────────────────────────
-duckdb>=0.10.0
+duckdb>=0.10.0,<2   # 2.0 breaks scene_duckdb_store.append_batch (see repository-hygiene.yml)
 pyarrow>=14.0.0
 
 # ── Network & packet intelligence ─────────────────────────────────────────────
