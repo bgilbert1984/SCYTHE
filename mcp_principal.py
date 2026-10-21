@@ -52,6 +52,12 @@ _principal: contextvars.ContextVar[Optional[Principal]] = contextvars.ContextVar
 _proposal_id: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar("mcp_proposal_id", default=None)
 
 
+# Initiator class (ADR 0005 Decision 5).  Assigned by server code, never read from request data.
+AUTONOMOUS = "autonomous"
+OPERATOR_COMMAND = "operator_command"
+INITIATOR_CLASSES = (AUTONOMOUS, OPERATOR_COMMAND)
+
+_initiator: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar("mcp_initiator", default=None)
 _source: contextvars.ContextVar[str] = contextvars.ContextVar("mcp_source", default="mcp")
 
 
@@ -61,6 +67,11 @@ def current_principal() -> Optional[Principal]:
 
 def current_proposal_id() -> Optional[str]:
     return _proposal_id.get()
+
+
+def current_initiator() -> Optional[str]:
+    """The initiator class of the proposal now executing, or None outside a proposal."""
+    return _initiator.get()
 
 
 def current_source() -> str:
@@ -89,6 +100,15 @@ def proposal_scope(proposal_id: Optional[str]) -> Iterator[None]:
         yield
     finally:
         _proposal_id.reset(token)
+
+
+@contextlib.contextmanager
+def initiator_scope(initiator: Optional[str]) -> Iterator[None]:
+    token = _initiator.set(initiator)
+    try:
+        yield
+    finally:
+        _initiator.reset(token)
 
 
 @contextlib.contextmanager

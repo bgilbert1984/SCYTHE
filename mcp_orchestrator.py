@@ -142,11 +142,13 @@ class AliasMCPOrchestrator:
         confidence: float = 0.75,
         justification: str = "",
         agent_id: str = "analyst",
+        initiator: str = "autonomous",
     ) -> Dict[str, Any]:
         """
         Analyst proposes an action.
 
-        Returns proposal dict with approval status.
+        Returns proposal dict with approval status.  ``initiator`` is assigned by server
+        code (an adapter); the ``/mcp`` handlers never pass it (ADR 0005 Decision 5).
         """
         self._adopt_tooldef(tool_name)
         proposal = self.dual_agent.propose_action(
@@ -154,6 +156,7 @@ class AliasMCPOrchestrator:
             params=params,
             confidence=confidence,
             justification=justification,
+            initiator=initiator,
         )
 
         proposal["agent_id"] = agent_id
@@ -218,7 +221,16 @@ class AliasMCPOrchestrator:
         params = proposal["params"]
         self._adopt_tooldef(tool_name)
 
-        if (self.phase == Phase.PHASE_0_OBSERVE_ONLY
+        # The phase limits what an agent may do unattended.  An operator command is not
+        # an agent acting unattended, so it skips the phase rules (observe-only, shadow,
+        # budget); approval, the digest check and the audit above and below still apply.
+        from mcp_principal import AUTONOMOUS, OPERATOR_COMMAND, initiator_scope
+        initiator = proposal.get("initiator", AUTONOMOUS)
+        if initiator != OPERATOR_COMMAND:
+            initiator = AUTONOMOUS    # anything unrecognised gets the stricter class
+        phase_applies = initiator == AUTONOMOUS
+
+        if (phase_applies and self.phase == Phase.PHASE_0_OBSERVE_ONLY
                 and tool_name in self._mutation_tools()):
             proposal["status"] = "blocked"
             proposal["error"] = "Phase 0 is observe-only; mutation execution is disabled"
@@ -228,7 +240,7 @@ class AliasMCPOrchestrator:
         proposal["executed_by"] = principal_dict()   # shadow runs are executions too
 
         # Get adaptive budget for this phase
-        if self.phase in (Phase.PHASE_2_LIMITED_MUTATION, Phase.PHASE_3_ADAPTIVE_BUDGET):
+        if phase_applies and self.phase in (Phase.PHASE_2_LIMITED_MUTATION, Phase.PHASE_3_ADAPTIVE_BUDGET):
             mutation_budget = self.dual_agent.executor_trust.adaptive_budget(
                 self.dual_agent.base_mutation_budget
             )
@@ -237,7 +249,7 @@ class AliasMCPOrchestrator:
 
         # Execute via registry
         try:
-            if self.phase == Phase.PHASE_1_SHADOW_MUTATION:
+            if phase_applies and self.phase == Phase.PHASE_1_SHADOW_MUTATION:
                 # Phase 1: shadow mutation
                 current_metrics = {
                     "edge_count": len(getattr(self.engine, "edges", [])),
@@ -258,7 +270,7 @@ class AliasMCPOrchestrator:
             else:
                 # Normal execution
                 from mcp_principal import proposal_scope
-                with proposal_scope(proposal_id):
+                with proposal_scope(proposal_id), initiator_scope(initiator):
                     result = self.registry.execute(
                         self.engine,
                         tool_name,
