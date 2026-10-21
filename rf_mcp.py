@@ -250,6 +250,9 @@ def _mutation_tools():
         changed = bridge.start() if action == "start" else bridge.stop()
         return {"action": action, "changed": changed, "bridge": bridge.status(False)}
 
+    def configure(*, engine, params):
+        return {"bridge": get_rf_bridge().configure_stream(**params)}
+
     return [
         Tool("rf_tune", "Tune SDR++ through localhost Rigctl. Requires an approved orchestrator proposal.",
              {"type": "object", "required": ["frequency_hz"], "properties": {
@@ -259,6 +262,16 @@ def _mutation_tools():
         Tool("rf_capture_control", "Start or stop the native IQ bridge. Requires an approved orchestrator proposal.",
              {"type": "object", "required": ["action"], "properties": {"action": {"enum": ["start", "stop"]}},
               "additionalProperties": False}, obj, capture, mutates_state=True, required_mode="mutate", effect=HARDWARE_CONTROL),
+        Tool("rf_stream_configure", "Change the expected IQ stream format (rate, FFT size, centre frequency) and restart ingestion. "
+             "Requires an approved orchestrator proposal.",
+             {"type": "object", "minProperties": 1, "properties": {
+                 "sample_rate_hz": {"type": "number", "exclusiveMinimum": 0},
+                 "center_frequency_hz": {"type": "number", "exclusiveMinimum": 0},
+                 "sample_type": {"type": "string"},
+                 "fft_size": {"type": "integer", "minimum": 1},
+                 "max_bins": {"type": "integer", "minimum": 1},
+                 "frames_per_second": {"type": "number", "exclusiveMinimum": 0}},
+              "additionalProperties": False}, obj, configure, mutates_state=True, required_mode="mutate", effect=HARDWARE_CONTROL),
     ]
 
 

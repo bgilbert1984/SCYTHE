@@ -84,7 +84,8 @@ class RegisteredToolsTest(unittest.TestCase):
         from rf_mcp import _mutation_tools
         tools = {t.name: t for t in _mutation_tools()}
         self.assertEqual({n: t.effect for n, t in tools.items()},
-                         {"rf_tune": HARDWARE_CONTROL, "rf_capture_control": HARDWARE_CONTROL})
+                         {"rf_tune": HARDWARE_CONTROL, "rf_capture_control": HARDWARE_CONTROL,
+                          "rf_stream_configure": HARDWARE_CONTROL})
 
 
 if __name__ == "__main__":

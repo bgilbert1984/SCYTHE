@@ -256,9 +256,9 @@ def begin_execution(tool, params: Optional[Dict[str, Any]]) -> Optional[Dict[str
     """MCP entry: record that a state-changing tool is about to run.  None when auditing does not apply."""
     if _store is None or not getattr(tool, "mutates_state", False):
         return None
-    from mcp_principal import current_proposal_id, principal_dict
+    from mcp_principal import current_proposal_id, current_source, principal_dict
     return begin_action(action=tool.name, effect=getattr(tool, "effect", None), params=params,
-                        principal=principal_dict(), source="mcp", proposal_id=current_proposal_id())
+                        principal=principal_dict(), source=current_source(), proposal_id=current_proposal_id())
 
 
 PROPOSAL_CREATED = "proposal.created"
