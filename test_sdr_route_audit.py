@@ -89,9 +89,8 @@ class SdrRouteAuditTest(_SdrFixture):
     def test_start_and_stop_use_the_same_action_as_the_mcp_tool(self):
         self.assertEqual(self.post("/api/sdr/start").status_code, 200)
         self.assertEqual(self.post("/api/sdr/stop").status_code, 200)
-        by_source = {(e["source"], json.loads(e["parameters_json"])["action"]) for e in self.rows()}
-        self.assertEqual(by_source, {("api.sdr.start", "start"), ("api.sdr.stop", "stop")})
-        self.assertEqual({e["action"] for e in self.rows()}, {"rf_capture_control"})
+        by_source = {(e["source"], e["action"]) for e in self.rows()}
+        self.assertEqual(by_source, {("api.sdr.start", "rf_capture_start"), ("api.sdr.stop", "rf_capture_stop")})
 
     def test_config_is_audited(self):
         r = self.post("/api/sdr/config", {"fft_size": 2048})

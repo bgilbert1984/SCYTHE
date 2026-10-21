@@ -244,11 +244,15 @@ def _mutation_tools():
     def tune(*, engine, params):
         return get_rf_bridge().tune(params["frequency_hz"], params.get("mode"), params.get("bandwidth_hz", 0))
 
-    def capture(*, engine, params):
+    def capture_start(*, engine, params):
         bridge = get_rf_bridge()
-        action = params["action"]
-        changed = bridge.start() if action == "start" else bridge.stop()
-        return {"action": action, "changed": changed, "bridge": bridge.status(False)}
+        return {"action": "start", "changed": bridge.start(), "bridge": bridge.status(False)}
+
+    def capture_stop(*, engine, params):
+        bridge = get_rf_bridge()
+        return {"action": "stop", "changed": bridge.stop(), "bridge": bridge.status(False)}
+
+    no_params = {"type": "object", "properties": {}, "additionalProperties": False}
 
     def configure(*, engine, params):
         return {"bridge": get_rf_bridge().configure_stream(**params)}
@@ -259,9 +263,12 @@ def _mutation_tools():
                  "frequency_hz": {"type": "number", "exclusiveMinimum": 0},
                  "mode": {"type": "string"}, "bandwidth_hz": {"type": "integer", "minimum": 0}},
               "additionalProperties": False}, obj, tune, mutates_state=True, required_mode="mutate", effect=HARDWARE_CONTROL),
-        Tool("rf_capture_control", "Start or stop the native IQ bridge. Requires an approved orchestrator proposal.",
-             {"type": "object", "required": ["action"], "properties": {"action": {"enum": ["start", "stop"]}},
-              "additionalProperties": False}, obj, capture, mutates_state=True, required_mode="mutate", effect=HARDWARE_CONTROL),
+        Tool("rf_capture_start", "Start the native IQ bridge. Requires an approved orchestrator proposal.",
+             no_params, obj, capture_start, mutates_state=True, required_mode="mutate", effect=HARDWARE_CONTROL),
+        Tool("rf_capture_stop", "Stop the native IQ bridge. Only ceases activity, so it is never held for a second "
+             "principal (ADR 0006 Decision 7). Requires an approved orchestrator proposal.",
+             no_params, obj, capture_stop, mutates_state=True, required_mode="mutate", effect=HARDWARE_CONTROL,
+             halts=True),
         Tool("rf_stream_configure", "Change the expected IQ stream format (rate, FFT size, centre frequency) and restart ingestion. "
              "Requires an approved orchestrator proposal.",
              {"type": "object", "minProperties": 1, "properties": {

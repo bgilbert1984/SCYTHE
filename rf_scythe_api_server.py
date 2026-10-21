@@ -3825,7 +3825,7 @@ if FLASK_AVAILABLE:
         bridge, error = _rf_bridge_or_error()
         if error:
             return error
-        with _sdr_audit('rf_capture_control', {'action': 'start'}, 'api.sdr.start', principal) as outcome:
+        with _sdr_audit('rf_capture_start', {}, 'api.sdr.start', principal) as outcome:
             started = bridge.start()
             outcome.summary = f'changed={started}'
         return jsonify({'status': 'ok', 'started': started, 'bridge': bridge.status()})
@@ -3838,7 +3838,7 @@ if FLASK_AVAILABLE:
         bridge, error = _rf_bridge_or_error()
         if error:
             return error
-        with _sdr_audit('rf_capture_control', {'action': 'stop'}, 'api.sdr.stop', principal) as outcome:
+        with _sdr_audit('rf_capture_stop', {}, 'api.sdr.stop', principal) as outcome:
             stopped = bridge.stop()
             outcome.summary = f'changed={stopped}'
         return jsonify({'status': 'ok', 'stopped': stopped, 'bridge': bridge.status()})

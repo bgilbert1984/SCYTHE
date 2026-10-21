@@ -45,7 +45,9 @@ The four steps are kept separate on purpose.
    automated checks waits as `pending_approval` until a different identified operator
    calls `orchestrate/approve` (`proposal_id`, `decision` of `approve` or `deny`, an optional
    `note`); execution then re-checks the approval and that the parameters are unchanged.
-   `orchestrate/decide` only reports status.
+   `orchestrate/decide` only reports status. A tool its author declares `halts` (only
+   `rf_capture_stop`: it takes no parameters and only ceases activity) is capped at `AUTOMATED` and is never
+   held for a second principal; it is still proposed, authorized and audited (ADR 0006 Decision 7).
 4. **Execution.** `Registry.execute` validates parameters, enforces the rate limit and
    runs the tool. The orchestrator also applies the autonomy phase to `autonomous` proposals (every
    `/mcp` proposal; an `operator_command` proposal, assigned only by server code, skips the phase

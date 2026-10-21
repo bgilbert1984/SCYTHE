@@ -79,12 +79,17 @@ MINIMUM_APPROVAL_MODE = {
 }
 
 
-def required_approval_mode(effect: str, deployment: Optional[dict] = None) -> str:
+def required_approval_mode(effect: str, deployment: Optional[dict] = None, halts: bool = False) -> str:
     """The approval mode an effect requires: the floor, or a stricter deployment setting.
 
     ``deployment`` maps effect to a requested mode.  A deployment may raise the mode and
     may never lower it, so no configuration undoes a guarantee the declared effect
     establishes; a request below the floor raises ``ValueError`` instead of being ignored.
+
+    ``halts`` is the one exception (ADR 0006 Decision 7): a tool whose author declared in code
+    that it only stops activity is capped at ``AUTOMATED``, so a deployment that raises the
+    effect to ``SECOND_PRINCIPAL`` does not make a stop wait for another operator.  It comes
+    from the tool, never from ``deployment``.
     """
     if effect not in MINIMUM_APPROVAL_MODE:
         raise ValueError(f"unknown effect {effect!r}; expected one of {sorted(MINIMUM_APPROVAL_MODE)}")
@@ -96,6 +101,8 @@ def required_approval_mode(effect: str, deployment: Optional[dict] = None) -> st
         raise ValueError(f"effect {effect}: unknown approval mode {requested!r}; expected one of {list(APPROVAL_MODES)}")
     if APPROVAL_MODES.index(requested) < APPROVAL_MODES.index(floor):
         raise ValueError(f"effect {effect}: a deployment may not lower the approval mode below {floor} (asked for {requested})")
+    if halts and APPROVAL_MODES.index(requested) > APPROVAL_MODES.index(AUTOMATED):
+        return AUTOMATED
     return requested
 
 
@@ -193,6 +200,24 @@ def approval_policy(tool) -> str:
     return REQUIRES_REVIEW
 
 
+def _halting_problems(name, tool, effect, mutating) -> list[str]:
+    """A ``halts`` tool is exempt from independent approval, so the declaration is narrow.
+
+    It must mutate state (a stop is still a mutation, audited and authorized), must not be
+    ``TRAINING_DATA``, and must take no parameters: a tool that can be told where, how or what
+    to do can start, configure or retarget, and is not a halting action.
+    """
+    out = []
+    if not mutating:
+        out.append(f"{name}: halts is declared on a tool that does not mutate state")
+    if effect == TRAINING_DATA:
+        out.append(f"{name}: a {TRAINING_DATA} tool can never be a halting action")
+    params = getattr(tool, "parameters", None) or {}
+    if params.get("properties") or params.get("additionalProperties") is not False:
+        out.append(f"{name}: a halting tool must take no parameters (empty properties, additionalProperties false)")
+    return out
+
+
 def validate_tool_contract(tools) -> list[str]:
     """Return one message per violation of the declarative tool contract.
 
@@ -223,6 +248,8 @@ def validate_tool_contract(tools) -> list[str]:
         mutating = effect not in NON_MUTATING
         if bool(tool.mutates_state) != mutating:
             problems.append(f"{name}: mutates_state={bool(tool.mutates_state)} contradicts effect {effect}")
+        if getattr(tool, "halts", False):
+            problems.extend(_halting_problems(name, tool, effect, mutating))
         expected = REQUIRES_REVIEW if mutating else AUTO_APPROVE
         if getattr(tool, "effect_declared", False) and approval_policy(tool) != expected:
             problems.append(f"{name}: approval policy {approval_policy(tool)} does not match effect {effect}")

@@ -2410,7 +2410,8 @@ def orchestrator_graphops_workbench():
         'semantic': [{'tool': 'embed_entity', 'boundary': 'EXPLICIT CORPUS ADMISSION REQUIRED'}],
         'spectrum': [
             {'tool': 'rf_tune', 'boundary': 'ORCHESTRATOR APPROVAL REQUIRED'},
-            {'tool': 'rf_capture_control', 'boundary': 'ORCHESTRATOR APPROVAL REQUIRED'},
+            {'tool': 'rf_capture_start', 'boundary': 'ORCHESTRATOR APPROVAL REQUIRED'},
+            {'tool': 'rf_capture_stop', 'boundary': 'ORCHESTRATOR APPROVAL REQUIRED'},
         ],
         'events': [
             {'tool': 'ingest_live_event', 'boundary': 'ORCHESTRATOR APPROVAL REQUIRED'},

@@ -18,7 +18,9 @@
   - **Accepted architecture (reviewed and agreed 2026-10-21):** the independent
     proposal, approval and execution transitions (Decision 3), the `SECOND_PRINCIPAL`
     lifecycle (Decision 6), and that a halting action is exempt from independent approval
-    (Decision 7; the mechanism is proposed, not decided).
+    (Decision 7). **Implemented for halting actions:** `Tool(halts=True)`, checked by
+    `validate_tool_contract`, caps the mode at `AUTOMATED`; `rf_capture_control` is split into
+    `rf_capture_start` and `rf_capture_stop`, and only the stop tool halts.
   - **Not yet implemented:** durable pending proposals (a restart drops them, which fails
     closed; the audit keeps the record, #219), exposure of the approval action beyond
     `/mcp` (REST, UI), role checks on who may approve, and any change of default.
@@ -220,12 +222,17 @@ capped at `AUTOMATED` whatever a deployment sets.
   withdraw activity, it mutates state, and it cannot start, configure or retarget
   anything. Tools that start, tune, configure, transmit or change training data are never
   halting.
-- **Proposed mechanism, not decided:** `rf_capture_control` takes `action: start | stop`
-  and the mode is per tool, so the capture tool is split into `rf_capture_start` and
-  `rf_capture_stop`, with `halts` on the stop tool. `rf_capture_control` would then be
-  retired or kept as a deprecated alias that only starts. The alternative is to keep one
-  tool and add an action-level rule to the approval step, which spreads the exemption into
-  policy code and is harder to validate.
+- **Mechanism (implemented):** `rf_capture_control` took `action: start | stop` and the mode
+  is per tool, so it was split into `rf_capture_start` and `rf_capture_stop`, with `halts=True`
+  on the stop tool. `rf_capture_control` is retired with no alias: an alias that accepts
+  `stop` would carry the exemption back into a tool that can also start. The alternative,
+  one tool with an action-level rule in the approval step, would have spread the exemption
+  into policy code. `validate_tool_contract` requires a halting tool to mutate state, not
+  to be `TRAINING_DATA`, and to take no parameters (so it cannot be told where or how to
+  act); `test_mcp_halting_action` pins the set of halting tools, so adding one is a
+  deliberate change. The exemption removes only the second-principal requirement: an
+  `autonomous` stop is still refused in Phase 0, and the proposal, authorization, digest
+  check and audit still apply.
 
 ### 8. Out of scope, deliberately
 

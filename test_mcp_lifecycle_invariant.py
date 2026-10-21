@@ -73,7 +73,7 @@ class LifecycleInvariantTest(unittest.TestCase):
         return tool
 
     def test_the_hardware_control_tools_are_in_the_set(self):
-        self.assertTrue({"rf_tune", "rf_capture_control"} <= set(self.names))
+        self.assertTrue({"rf_tune", "rf_capture_start", "rf_capture_stop"} <= set(self.names))
 
     def test_the_tool_set_is_not_empty_and_spans_both_classes(self):
         classes = {n in self.handler._registry._tools for n in self.names}
