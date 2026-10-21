@@ -1,3 +1,4 @@
+import importlib.util
 import logging
 import os
 import sqlite3
@@ -51,6 +52,9 @@ class StreamConfigureToolTest(unittest.TestCase):
                                  "params": {"name": "rf_stream_configure", "arguments": {"fft_size": 1024}}})
         self.assertIn("orchestrate/propose", r["error"]["message"])
 
+    # Registry.execute skips parameter validation when jsonschema is missing (the python-rf job
+    # does not install it); the python-platform job does and runs this file.
+    @unittest.skipUnless(importlib.util.find_spec("jsonschema"), "jsonschema not installed")
     def test_the_schema_is_strict_and_a_bad_request_changes_nothing(self):
         self.orch.set_phase(2, dry_run=False)
         before = get_rf_bridge().config
