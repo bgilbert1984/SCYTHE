@@ -73,7 +73,7 @@ class RFMCPTests(unittest.TestCase):
         self.assertIn("orchestrate/propose", rejected["error"]["message"])
 
         proposal = handler._orchestrator.propose_action(
-            "rf_capture_control", {"action": "start"}, confidence=0.99,
+            "rf_capture_start", {}, confidence=0.99,
             justification="test safety boundary",
         )
         blocked = handler._orchestrator.execute_proposal(proposal["proposal_id"])
@@ -82,7 +82,7 @@ class RFMCPTests(unittest.TestCase):
 
         handler._orchestrator.set_phase(1, dry_run=False)
         shadow_proposal = handler._orchestrator.propose_action(
-            "rf_capture_control", {"action": "start"}, confidence=0.99,
+            "rf_capture_start", {}, confidence=0.99,
             justification="test shadow boundary",
         )
         shadow = handler._orchestrator.execute_proposal(shadow_proposal["proposal_id"])

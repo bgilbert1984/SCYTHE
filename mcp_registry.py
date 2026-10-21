@@ -33,10 +33,14 @@ class Tool:
         rate_limit: Optional[float] = None,
         required_mode: str | None = None,
         effect: Optional[str] = None,
+        halts: bool = False,
     ):
         from mcp_effects import resolve_effect
         self.effect, self.effect_declared = resolve_effect(name, mutates_state, effect)
         self.name = name
+        # ADR 0006 Decision 7: declared in code by the tool's author, checked by validate_tool_contract,
+        # and never settable from deployment configuration.
+        self.halts = bool(halts)
         self.description = description
         self.parameters = parameters  # JSON Schema for input validation
         self.returns = returns  # JSON Schema for return validation

@@ -52,7 +52,7 @@ class GraphOpsWorkbenchTests(unittest.TestCase):
             'rf_sparse_status', 'rf_sparse_supports_query',
         ])
         proposed = [item['tool'] for item in response.get_json()['proposals']]
-        self.assertEqual(proposed, ['rf_tune', 'rf_capture_control'])
+        self.assertEqual(proposed, ['rf_tune', 'rf_capture_start', 'rf_capture_stop'])
 
 
 if __name__ == '__main__':

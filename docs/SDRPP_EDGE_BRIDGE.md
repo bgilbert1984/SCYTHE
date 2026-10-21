@@ -163,7 +163,7 @@ IQ, unbounded waterfall history, receiver credentials, or hardware-control
 authority in a Cloud capsule. Measured RF stays `OBSERVED`; correlations and
 model explanations stay `INFERRED`.
 
-`rf_tune`, `rf_capture_control`, and sensor ingestion cannot be called through
+`rf_tune`, `rf_capture_start`, `rf_capture_stop`, `rf_stream_configure`, and sensor ingestion cannot be called through
 direct `tools/call`. They require the orchestrator proposal path. The default
 Phase 0 blocks mutation execution, Phase 1 simulates it, and remote phase
 changes remain disabled unless an operator explicitly sets

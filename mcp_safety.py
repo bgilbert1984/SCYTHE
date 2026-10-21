@@ -290,7 +290,7 @@ class DualAgentOrchestrator:
         from mcp_effects import AUTOMATED, required_approval_mode
         if tool is None or not getattr(tool, "effect_declared", False):
             return AUTOMATED
-        return required_approval_mode(tool.effect, self.approval_modes)
+        return required_approval_mode(tool.effect, self.approval_modes, halts=getattr(tool, "halts", False))
 
     def propose_action(
         self,
