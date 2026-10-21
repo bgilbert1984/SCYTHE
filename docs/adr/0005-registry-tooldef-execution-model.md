@@ -136,6 +136,13 @@ not mean any tool has been migrated.
    `POST /api/embedding/entity` stays `autonomous` and respects the phase: it is a
    reversible, reproducible `LOCAL_STATE` change, not equipment control.
 
+   An `operator_command` is also not judged by the agent-health gates in the automated
+   approval step (executor trust, mutation oscillation, graph entropy), and its executions are
+   not counted toward them. Those gates judge an agent's unattended behaviour and the
+   graph's health; applied to an operator driving equipment, three tunes inside a minute would
+   make the fourth a "graph oscillation". The proposal's declared effect and approval mode
+   still apply.
+
    **Why it exists.** The phase answers "may agents mutate unattended?". Driving live
    equipment from an operator interface is a different question, and tying it to the
    phase would make using the radio mean enabling autonomous mutation system-wide. The
@@ -160,7 +167,7 @@ Architecture and migration are separate: the invariant is decided; compliance is
 |---|---|
 | MCP `Registry` tools | compliant |
 | MCP `ToolDef` tools, mutating and non-mutating | compliant (`adapt_tooldef`, #249, #250) |
-| `/api/sdr/*` (`start`, `stop`, `tune`, `config`) | **known exception**: writes a control-audit record directly, no proposal or lifecycle (#227). Migration decided: the routes join the lifecycle as `operator_command` (Decision 5); `/api/sdr/config` gets an MCP tool, `rf_stream_configure` (`HARDWARE_CONTROL`, strict schema), so there is something to propose; the route-level audit is removed in favor of the lifecycle's rows. Not yet implemented |
+| `/api/sdr/*` (`start`, `stop`, `tune`, `config`) | **compliant**: adapters that propose and execute `rf_capture_start`, `rf_capture_stop`, `rf_tune` and `rf_stream_configure` as `operator_command` under the caller's principal; the route-level audit is gone and the lifecycle writes the rows with `source` `api.sdr.*` (`test_sdr_route_lifecycle`, `test_sdr_route_audit`). A request the lifecycle does not run is never a 2xx response, because the radio UI treats 2xx as success. The UI does not yet show `pending_approval`, and approval is exposed only over `/mcp` |
 | `/api/sdr/status`, `/api/sdr/spectrum/*` | reads; unchanged |
 | `POST /api/embedding/entity` | compliant: an adapter that proposes and executes `embed_entity` under the caller's principal and reports the lifecycle outcome (`test_rf_embedding_route_lifecycle`) |
 | `POST /api/sensor/eve/ground`, chat auto-grounding, `POST /api/graphops/directives/explain-coverage-cell` | **known exceptions** (Context, item 3) |

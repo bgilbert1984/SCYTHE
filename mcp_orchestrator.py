@@ -280,8 +280,9 @@ class AliasMCPOrchestrator:
                     )
                 proposal["status"] = "executed"
                 proposal["execution_result"] = result
-                self.dual_agent.stability.add_mutation()
-                self.dual_agent.executor_trust.update(success=True)
+                if phase_applies:    # these track an agent's behaviour and the graph, not an operator's command
+                    self.dual_agent.stability.add_mutation()
+                    self.dual_agent.executor_trust.update(success=True)
 
             logger.info(
                 "[orchestrator] Proposal %s executed: %s",
@@ -293,9 +294,10 @@ class AliasMCPOrchestrator:
         except Exception as e:
             proposal["status"] = "failed"
             proposal["error"] = str(e)
-            self.dual_agent.executor_trust.update(success=False)
+            if phase_applies:
+                self.dual_agent.executor_trust.update(success=False)
             logger.error("[orchestrator] Proposal %s failed: %s", proposal_id[:8], e)
-            return {"ok": False, "error": str(e)}
+            return {"ok": False, "error": str(e), "error_type": type(e).__name__}
 
     def get_organism_status(self) -> Dict[str, Any]:
         """Return full orchestrator status (the "organism status")."""
