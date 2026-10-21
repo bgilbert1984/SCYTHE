@@ -123,6 +123,7 @@ jobs:
             test_mcp_approval_policy \
             test_mcp_lifecycle_invariant \
             test_mcp_orchestrator_registry \
+            test_mcp_pending_approval \
             test_mcp_tooldef_parity \
             test_mcp_tool_contract \
             test_network_measurement_parsing \

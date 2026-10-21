@@ -33513,11 +33513,11 @@ const RPM = {
           if (outcome !== 'executed' && !firstReason) firstReason = body.reason || body.message || '';
         } catch(err) {}
         outcomes[outcome] = (outcomes[outcome] || 0) + 1;
-        if (outcome === 'blocked_by_phase' || outcome === 'unauthorized' || outcome === 'budget_exhausted') break;
+        if (['blocked_by_phase', 'unauthorized', 'budget_exhausted', 'pending_approval'].includes(outcome)) break;
       }
       const done = outcomes.executed || 0;
       const labels = { blocked_by_phase: 'blocked by phase', budget_exhausted: 'budget exhausted',
-                       unauthorized: 'sign-in required', rejected: 'not approved', shadow: 'shadow only', error: 'failed' };
+                       unauthorized: 'sign-in required', rejected: 'not approved', pending_approval: 'awaiting approval', shadow: 'shadow only', error: 'failed' };
       const notDone = Object.entries(outcomes).filter(([k]) => k !== 'executed')
         .map(([k, n]) => `${n} ${labels[k] || k}`).join(', ');
       embedBtn.textContent = notDone ? `⚠ Embedded ${done}; ${notDone}` : `✅ Embedded ${done}`;

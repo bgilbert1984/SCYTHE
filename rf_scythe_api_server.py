@@ -20577,12 +20577,13 @@ if FLASK_AVAILABLE:
 def _embedding_lifecycle_response(entity_id, proposal, executed):
     """Translate an ``embed_entity`` proposal and execution into the route's response body.
 
-    ``outcome`` is one of: executed, rejected, blocked_by_phase, budget_exhausted, shadow,
+    ``outcome`` is one of: executed, rejected, pending_approval, blocked_by_phase, budget_exhausted, shadow,
     error.  ``status`` stays ``ok`` only for ``executed``, as the route's earlier callers expect.
     """
     body = {'entity_id': entity_id, 'proposal_id': proposal.get('proposal_id')}
     if executed is None:
-        outcome, reason = 'rejected', proposal.get('approval_reason') or f"proposal {proposal.get('status')}"
+        outcome = 'pending_approval' if proposal.get('status') == 'pending_approval' else 'rejected'
+        reason = proposal.get('approval_reason') or f"proposal {proposal.get('status')}"
     elif not executed.get('ok'):
         reason = str(executed.get('error', ''))
         if 'observe-only' in reason:

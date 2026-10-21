@@ -99,6 +99,37 @@ def required_approval_mode(effect: str, deployment: Optional[dict] = None) -> st
     return requested
 
 
+APPROVAL_MODES_ENV = "MCP_APPROVAL_MODES"
+
+
+def parse_approval_modes(text: Optional[str]) -> dict:
+    """Parse a deployment approval setting such as ``HARDWARE_CONTROL=SECOND_PRINCIPAL,LOCAL_STATE=AUTOMATED``.
+
+    Empty or ``None`` is no setting.  Anything malformed, an unknown effect or mode, a
+    repeated effect, or a mode below the floor raises ``ValueError``, so a bad setting
+    stops startup instead of being half applied.
+    """
+    modes: dict = {}
+    for item in (text or "").split(","):
+        item = item.strip()
+        if not item:
+            continue
+        effect, sep, mode = (part.strip() for part in item.partition("="))
+        if not sep or not effect or not mode:
+            raise ValueError(f"{APPROVAL_MODES_ENV}: expected EFFECT=MODE, got {item!r}")
+        if effect in modes:
+            raise ValueError(f"{APPROVAL_MODES_ENV}: effect {effect} is set more than once")
+        required_approval_mode(effect, {effect: mode})  # validates effect, mode and the floor
+        modes[effect] = mode
+    return modes
+
+
+def deployment_approval_modes(environ=None) -> dict:
+    """The deployment's approval settings, read from ``MCP_APPROVAL_MODES`` (see ``parse_approval_modes``)."""
+    import os
+    return parse_approval_modes((os.environ if environ is None else environ).get(APPROVAL_MODES_ENV))
+
+
 def validate_approval_table() -> list[str]:
     """One message per way ``MINIMUM_APPROVAL_MODE`` disagrees with the effect taxonomy."""
     problems = []
