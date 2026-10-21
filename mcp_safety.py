@@ -351,7 +351,7 @@ class DualAgentOrchestrator:
             # This is automated policy evaluation, not independent review: the
             # confidence is supplied by the caller and nothing here requires a
             # principal other than the proposer.  See issue #228.
-            approval = self._check_mutation_approval(tool_name, params, confidence)
+            approval = self._check_mutation_approval(tool_name, params, confidence, initiator)
             proposal["status"] = approval["status"]
             if tool is None:
                 why = "tool not found"
@@ -382,14 +382,25 @@ class DualAgentOrchestrator:
         tool_name: str,
         params: Dict[str, Any],
         confidence: float,
+        initiator: str = "autonomous",
     ) -> Dict[str, Any]:
-        """Check if Executor can approve a mutation proposal."""
+        """Check if Executor can approve a mutation proposal.
+
+        The trust, oscillation and entropy gates judge an agent's unattended behaviour and
+        the graph's health.  An ``operator_command`` (ADR 0005 Decision 5) is an operator
+        driving equipment, so they do not apply: without this, three tunes inside a minute
+        would make the fourth "graph oscillation".
+        """
+        from mcp_principal import OPERATOR_COMMAND
         reasons = []
 
         # Confidence threshold
         if confidence < 0.70:
             reasons.append(f"confidence {confidence:.2f} < 0.70")
             return {"status": "rejected", "reason": " | ".join(reasons)}
+
+        if initiator == OPERATOR_COMMAND:
+            return {"status": "approved", "reason": "operator command: agent stability gates do not apply"}
 
         # Check trust score
         if self.executor_trust.should_demote_to_observe():

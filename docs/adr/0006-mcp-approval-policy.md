@@ -24,7 +24,9 @@
   - **Not yet implemented:** durable pending proposals (a restart drops them, which fails
     closed; the audit keeps the record, #219), exposure of the approval action beyond
     `/mcp` (REST, UI), role checks on who may approve, and any change of default.
-    `/api/sdr/*` still bypasses the whole flow.
+    The `/api/sdr/*` control routes now enter the lifecycle as `operator_command`
+    (ADR 0005 Decision 5); with a raised `HARDWARE_CONTROL` mode their start, tune and config
+    requests answer 409 `pending_approval`, and the UI cannot yet approve them.
 
   Whether `HARDWARE_CONTROL` or `EXTERNAL_STATE` default to `SECOND_PRINCIPAL` remains a
   policy choice to be made with #228, sequenced after those mechanisms and after the
@@ -72,7 +74,7 @@ the code as it stands:
   pending approvals and does not require volatile proposals.
 - The direct `/api/sdr/*` hardware routes reach the same hardware without a proposal at
   all. They write the same audit record (#227) but are not gated by anything in this
-  ADR.
+  ADR. (Written when that was true; they now enter the lifecycle as `operator_command`.)
 
 Nothing here is an authentication bypass: the caller was authenticated. The gap is that
 authentication answers "who is asking", and the approval step does not answer "may they".
@@ -282,7 +284,7 @@ capped at `AUTOMATED` whatever a deployment sets.
 | Decision | Issue |
 |---|---|
 | Whether to enable `SECOND_PRINCIPAL` for `HARDWARE_CONTROL` in a given deployment | #228 follow-up |
-| The mechanism for exempting halting actions (a split `rf_capture_stop` with `halts`, or an action-level rule) | #228 |
-| Whether the direct `/api/sdr/*` routes join the proposal flow | decided in ADR 0005 Decision 5; not implemented (#236, #218) |
+| The mechanism for exempting halting actions | decided and implemented: `halts`, split `rf_capture_stop` (Decision 7) |
+| Whether the direct `/api/sdr/*` routes join the proposal flow | decided in ADR 0005 Decision 5 and implemented (#236, #218) |
 | Durable proposals; fail-closed audit; loopback/anonymous hardware control | #219 |
 | Who is entitled to approve (roles) | not tracked |

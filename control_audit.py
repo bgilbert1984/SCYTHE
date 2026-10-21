@@ -277,7 +277,7 @@ PROPOSAL_ACTIONS = (PROPOSAL_CREATED, PROPOSAL_APPROVED, PROPOSAL_DENIED, PROPOS
 
 def record_transition(*, action: str, effect: Optional[str], principal: Optional[Dict[str, Any]], proposal_id: str,
                       result: str, parameters: Optional[Dict[str, Any]] = None,
-                      summary: Optional[str] = None, source: str = "mcp",
+                      summary: Optional[str] = None, source: Optional[str] = None,
                       initiator: Optional[str] = None) -> Optional[str]:
     """Append one proposal-lifecycle row (ADR 0006).  Evidence only.
 
@@ -288,9 +288,10 @@ def record_transition(*, action: str, effect: Optional[str], principal: Optional
     store = _store
     if store is None:
         return None
+    from mcp_principal import current_source
     return store.safe_record(execution_id=str(uuid.uuid4()), action=action, effect=effect or "UNDECLARED",
                              result=result, principal=principal, proposal_id=proposal_id, parameters=parameters,
-                             result_summary=summary, source=source, initiator=initiator)
+                             result_summary=summary, source=source or current_source(), initiator=initiator)
 
 
 def reconstruct_proposal(store: "ControlAuditStore", proposal_id: str) -> Dict[str, Any]:

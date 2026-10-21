@@ -117,6 +117,17 @@ class OperatorCommandTest(_Fixture):
         self.assertEqual(low["status"], "rejected")
         self.assertFalse(self.execute(low)["ok"])
 
+    def test_agent_stability_gates_do_not_apply_to_it_and_do_to_an_agent(self):
+        self.o.set_phase(2, dry_run=False)
+        for _ in range(5):
+            self.o.dual_agent.stability.add_mutation()      # an agent burst: 5 mutations in a minute
+        self.assertEqual(self.propose()["status"], "rejected")
+        op = self.propose(OPERATOR_COMMAND)
+        self.assertEqual(op["status"], "approved")
+        before = len(self.o.dual_agent.stability.mutation_timestamps)
+        self.assertTrue(self.execute(op)["ok"])
+        self.assertEqual(len(self.o.dual_agent.stability.mutation_timestamps), before)   # and it is not counted
+
     def test_it_runs_an_unknown_tool_nowhere(self):
         p = self.o.propose_action("no_such_tool", {}, confidence=0.9, initiator=OPERATOR_COMMAND)
         self.assertFalse(self.execute(p)["ok"])

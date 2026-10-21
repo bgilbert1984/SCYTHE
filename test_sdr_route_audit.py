@@ -52,7 +52,14 @@ class _SdrFixture(unittest.TestCase):
         sess = SimpleNamespace(operator_id="op-1", session_id="sess-9")
         self.manager = SimpleNamespace(operators={"op-1": op},
                                        validate_session=lambda t: sess if t == "good" else None)
+        from hypergraph_engine import HypergraphEngine
+        from mcp_server import MCPHandler
+        self.handler = MCPHandler(HypergraphEngine(), use_orchestrator=True)
+        from rf_mcp import register_rf_tools
+        register_rf_tools(self.handler.engine, self.handler)
         patches = [mock.patch.object(rf, "_rf_bridge_or_error", lambda: (self.bridge, None)),
+                   mock.patch("rf_mcp.get_rf_bridge", lambda: self.bridge),
+                   mock.patch.dict(rf.__dict__, {"mcp_handler": self.handler}),
                    mock.patch.object(rf, "operator_manager", self.manager),
                    mock.patch.dict(rf.app.config, {"INTERNAL_TOKEN": "s3cret"})]
         for p in patches:
@@ -69,6 +76,10 @@ class _SdrFixture(unittest.TestCase):
         return self.client.post(path, json=body, headers=h, environ_base={"REMOTE_ADDR": remote})
 
     def rows(self):
+        """Execution rows only; the proposal.* rows are asserted where they matter."""
+        return [e for e in self.store.events() if not e["action"].startswith("proposal.")]
+
+    def all_rows(self):
         return self.store.events()
 
 
@@ -85,6 +96,11 @@ class SdrRouteAuditTest(_SdrFixture):
             self.assertEqual(e["deployment_id"], "test-deploy")
         self.assertEqual(json.loads(done["parameters_json"]),
                          {"bandwidth_hz": 12500, "frequency_hz": 433.92e6, "mode": "NFM"})
+        # The lifecycle wrote these (ADR 0005 Decision 4): one proposal, an operator command, same id on every row.
+        self.assertEqual({e["initiator"] for e in self.all_rows()}, {"operator_command"})
+        self.assertEqual(len({e["proposal_id"] for e in self.all_rows()}), 1)
+        self.assertEqual([e["action"] for e in self.all_rows()], ["proposal.created", "rf_tune", "rf_tune"])
+        self.assertEqual({e["source"] for e in self.all_rows()}, {"api.sdr.tune"})
 
     def test_start_and_stop_use_the_same_action_as_the_mcp_tool(self):
         self.assertEqual(self.post("/api/sdr/start").status_code, 200)
@@ -166,24 +182,25 @@ class ParityTest(_SdrFixture):
         mcp = [e for e in self.rows() if e["source"] == "mcp"]
         http = [e for e in self.rows() if e["source"] == "api.sdr.tune"]
         self.assertEqual([self.comparable(e) for e in mcp], [self.comparable(e) for e in http])
-        self.assertEqual({e["source"] for e in self.rows()}, {"mcp", "api.sdr.tune"})
+        self.assertEqual({e["source"] for e in self.all_rows()}, {"mcp", "api.sdr.tune"})
 
     def test_secret_redaction_is_the_same_on_both_paths(self):
         from mcp_principal import Principal
         self.mcp_rows(Principal(OPERATOR_SESSION, operator_id="op-1"), {"frequency_hz": 1.0, "api_key": "k-123"})
         self.post("/api/sdr/config", {"fft_size": 512, "api_key": "k-123"})
-        for e in self.rows():
+        for e in self.all_rows():
             self.assertNotIn("k-123", e["parameters_json"])
             self.assertIn("<redacted>", e["parameters_json"])
 
-    def test_the_anonymous_asymmetry_is_visible_in_the_record(self):
-        """Anonymous development mode drives hardware directly over HTTP, while the MCP path
-        always goes through a proposal.  Not changed here; the audit row must make it plain."""
+    def test_an_anonymous_development_caller_is_recorded_as_anonymous_and_has_a_proposal(self):
+        """Anonymous development mode still reaches hardware, but now through a proposal: the row says who
+        it was (nobody identified) and which proposal carried it."""
         with mock.patch.object(self.rf, "operator_manager", None):
             self.post("/api/sdr/tune", {"frequency_hz": 1e6}, token=None, remote="10.1.2.3")
         row = [e for e in self.rows() if e["result"] == "success"][0]
-        self.assertEqual((row["source"], row["principal_kind"], row["principal_id"], row["proposal_id"]),
-                         ("api.sdr.tune", ANONYMOUS, None, None))
+        self.assertEqual((row["source"], row["principal_kind"], row["principal_id"], row["initiator"]),
+                         ("api.sdr.tune", ANONYMOUS, None, "operator_command"))
+        self.assertTrue(row["proposal_id"])
 
 
 class McpSourceTest(unittest.TestCase):

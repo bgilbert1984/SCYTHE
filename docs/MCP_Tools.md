@@ -97,7 +97,8 @@ Enforced by tests, not by convention.
   tools as served and over the `ToolDef` tools.
 - Approval is derived from the declared effect.
 - Principal, proposal ID and effect are carried into the audit record.
-- `/api/sdr/*` hardware routes write the same control-audit record as MCP.
+- `/api/sdr/*` hardware routes are adapters into the lifecycle (`operator_command`), so they leave the same
+  proposal and execution rows as MCP, with `source` `api.sdr.*`.
 - Every `graphops_*` `ToolDef` tool declares an effect. The four read-only analysis tools
   (`graphops_dsl_exec`, `graphops_investigate`, `graphops_directive`, `graphops_suggest`)
   were audited from the code, and `test_graphops_tool_effects.py` pins what that audit

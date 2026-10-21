@@ -3810,82 +3810,87 @@ if FLASK_AVAILABLE:
         include_control = request.args.get('control', '').lower() in ('1', 'true', 'yes')
         return jsonify(bridge.status(include_control=include_control))
 
-    def _sdr_audit(action, params, source, principal):
-        """Audit one hardware-control request (control_audit; no-op when unconfigured)."""
-        import control_audit
-        from mcp_effects import HARDWARE_CONTROL
-        return control_audit.audited(action=action, effect=HARDWARE_CONTROL, params=params,
-                                     principal=principal.to_dict(), source=source)
+    def _sdr_control(tool_name, params, principal, source):
+        """Propose and execute one SDR control action.  Returns ``(result, response)``: the tool result
+        when it ran, otherwise the error response to return."""
+        ran = _sdr_lifecycle(tool_name, params, principal, source)
+        if ran is None:
+            return None, (jsonify({'status': 'error', 'message': 'SDR control lifecycle is not initialized'}), 503)
+        proposal, executed = ran
+        refusal = _sdr_lifecycle_refusal_response(proposal, executed)
+        if refusal is not None:
+            return None, refusal
+        result = executed.get('result') or {}
+        if result.get('_shadow_mode'):    # cannot happen for an operator command; never report it as done
+            return None, (jsonify({'status': 'error', 'message': 'unexpected shadow execution'}), 503)
+        return (result, proposal['proposal_id']), None
+
+    def _sdr_prelude():
+        principal = _rf_bridge_principal()
+        if principal is None:
+            return None, None, (jsonify({'status': 'error', 'message': 'Authentication required'}), 401)
+        bridge, error = _rf_bridge_or_error()
+        if error:
+            return None, None, error
+        return principal, bridge, None
 
     @app.route('/api/sdr/start', methods=['POST'])
     def sdr_bridge_start():
-        principal = _rf_bridge_principal()
-        if principal is None:
-            return jsonify({'status': 'error', 'message': 'Authentication required'}), 401
-        bridge, error = _rf_bridge_or_error()
+        principal, bridge, error = _sdr_prelude()
         if error:
             return error
-        with _sdr_audit('rf_capture_start', {}, 'api.sdr.start', principal) as outcome:
-            started = bridge.start()
-            outcome.summary = f'changed={started}'
-        return jsonify({'status': 'ok', 'started': started, 'bridge': bridge.status()})
+        ran, error = _sdr_control('rf_capture_start', {}, principal, 'api.sdr.start')
+        if error:
+            return error
+        result, proposal_id = ran
+        return jsonify({'status': 'ok', 'outcome': 'executed', 'proposal_id': proposal_id,
+                        'started': result.get('changed'), 'bridge': bridge.status()})
 
     @app.route('/api/sdr/stop', methods=['POST'])
     def sdr_bridge_stop():
-        principal = _rf_bridge_principal()
-        if principal is None:
-            return jsonify({'status': 'error', 'message': 'Authentication required'}), 401
-        bridge, error = _rf_bridge_or_error()
+        principal, bridge, error = _sdr_prelude()
         if error:
             return error
-        with _sdr_audit('rf_capture_stop', {}, 'api.sdr.stop', principal) as outcome:
-            stopped = bridge.stop()
-            outcome.summary = f'changed={stopped}'
-        return jsonify({'status': 'ok', 'stopped': stopped, 'bridge': bridge.status()})
+        ran, error = _sdr_control('rf_capture_stop', {}, principal, 'api.sdr.stop')
+        if error:
+            return error
+        result, proposal_id = ran
+        return jsonify({'status': 'ok', 'outcome': 'executed', 'proposal_id': proposal_id,
+                        'stopped': result.get('changed'), 'bridge': bridge.status()})
 
     @app.route('/api/sdr/tune', methods=['POST'])
     def sdr_bridge_tune():
-        principal = _rf_bridge_principal()
-        if principal is None:
-            return jsonify({'status': 'error', 'message': 'Authentication required'}), 401
-        bridge, error = _rf_bridge_or_error()
+        principal, bridge, error = _sdr_prelude()
         if error:
             return error
         body = request.get_json(silent=True) or {}
         try:
-            frequency_hz = float(body['frequency_hz'])
-            mode = body.get('mode')
-            bandwidth_hz = int(body.get('bandwidth_hz', 0))
-            # Audited from here: a request rejected above for bad input never reached the bridge.
-            params = {'frequency_hz': frequency_hz, 'mode': mode, 'bandwidth_hz': bandwidth_hz}
-            with _sdr_audit('rf_tune', params, 'api.sdr.tune', principal) as outcome:
-                control = bridge.tune(frequency_hz, mode=mode, bandwidth_hz=bandwidth_hz)
-                outcome.summary = 'tuned'
-            return jsonify({'status': 'ok', 'control': control, 'bridge': bridge.status()})
+            params = {'frequency_hz': float(body['frequency_hz']), 'bandwidth_hz': int(body.get('bandwidth_hz', 0))}
         except KeyError:
             return jsonify({'status': 'error', 'message': 'frequency_hz is required'}), 400
-        except ValueError as exc:
+        except (TypeError, ValueError) as exc:
             return jsonify({'status': 'error', 'message': str(exc)}), 400
-        except Exception as exc:
-            logger.warning("SDR++ tune failed: %s", exc)
-            return jsonify({'status': 'error', 'message': str(exc)}), 503
+        if body.get('mode') is not None:
+            params['mode'] = body['mode']
+        ran, error = _sdr_control('rf_tune', params, principal, 'api.sdr.tune')
+        if error:
+            return error
+        result, proposal_id = ran
+        return jsonify({'status': 'ok', 'outcome': 'executed', 'proposal_id': proposal_id,
+                        'control': result, 'bridge': bridge.status()})
 
     @app.route('/api/sdr/config', methods=['POST'])
     def sdr_bridge_configure():
-        principal = _rf_bridge_principal()
-        if principal is None:
-            return jsonify({'status': 'error', 'message': 'Authentication required'}), 401
-        bridge, error = _rf_bridge_or_error()
+        principal, bridge, error = _sdr_prelude()
         if error:
             return error
         body = request.get_json(silent=True) or {}
-        try:
-            with _sdr_audit('rf_stream_configure', body, 'api.sdr.config', principal) as outcome:
-                status = bridge.configure_stream(**body)
-                outcome.summary = 'configured'
-            return jsonify({'status': 'ok', 'bridge': status})
-        except (TypeError, ValueError) as exc:
-            return jsonify({'status': 'error', 'message': str(exc)}), 400
+        ran, error = _sdr_control('rf_stream_configure', body, principal, 'api.sdr.config')
+        if error:
+            return error
+        result, proposal_id = ran
+        return jsonify({'status': 'ok', 'outcome': 'executed', 'proposal_id': proposal_id,
+                        'bridge': result.get('bridge', bridge.status())})
 
     @app.route('/api/sdr/spectrum/latest', methods=['GET'])
     def sdr_bridge_latest_spectrum():
@@ -20574,6 +20579,29 @@ if FLASK_AVAILABLE:
 # MAIN
 # ============================================================================
 
+def _lifecycle_refusal(proposal, executed):
+    """Why the lifecycle did not run a proposal, as ``(outcome, reason, extras)``; ``None`` if it ran.
+
+    ``outcome`` is one of: rejected, pending_approval, blocked_by_phase, budget_exhausted, invalid, error.
+    Shared by the adapters that report the lifecycle's decision to a client.
+    """
+    if executed is None:
+        outcome = 'pending_approval' if proposal.get('status') == 'pending_approval' else 'rejected'
+        return outcome, proposal.get('approval_reason') or f"proposal {proposal.get('status')}", {}
+    if executed.get('ok'):
+        return None
+    reason = str(executed.get('error', ''))
+    if 'observe-only' in reason:
+        outcome = 'blocked_by_phase'
+    elif 'MUTATION_BUDGET_EXCEEDED' in reason:
+        outcome = 'budget_exhausted'
+    elif executed.get('error_type') in ('ValueError', 'TypeError', 'KeyError'):
+        outcome = 'invalid'
+    else:
+        outcome = 'error'
+    return outcome, reason, ({'phase': executed['phase']} if 'phase' in executed else {})
+
+
 def _embedding_lifecycle_response(entity_id, proposal, executed):
     """Translate an ``embed_entity`` proposal and execution into the route's response body.
 
@@ -20581,19 +20609,12 @@ def _embedding_lifecycle_response(entity_id, proposal, executed):
     error.  ``status`` stays ``ok`` only for ``executed``, as the route's earlier callers expect.
     """
     body = {'entity_id': entity_id, 'proposal_id': proposal.get('proposal_id')}
-    if executed is None:
-        outcome = 'pending_approval' if proposal.get('status') == 'pending_approval' else 'rejected'
-        reason = proposal.get('approval_reason') or f"proposal {proposal.get('status')}"
-    elif not executed.get('ok'):
-        reason = str(executed.get('error', ''))
-        if 'observe-only' in reason:
-            outcome = 'blocked_by_phase'
-        elif 'MUTATION_BUDGET_EXCEEDED' in reason:
-            outcome = 'budget_exhausted'
-        else:
+    refusal = _lifecycle_refusal(proposal, executed)
+    if refusal is not None:
+        outcome, reason, extras = refusal
+        if outcome == 'invalid':
             outcome = 'error'
-        if 'phase' in executed:
-            body['phase'] = executed['phase']
+        body.update(extras)
     else:
         result = executed.get('result') or {}
         if result.get('_shadow_mode'):
@@ -20608,6 +20629,43 @@ def _embedding_lifecycle_response(entity_id, proposal, executed):
     if reason:
         body['reason'] = reason
     return body
+
+
+def _sdr_lifecycle(tool_name, params, principal, source):
+    """Run one SDR control request through the lifecycle as an ``operator_command``.
+
+    The route identifies the caller and the action; the lifecycle decides (ADR 0005 Decisions 4 and 5).
+    Returns ``(proposal, executed)`` or ``None`` when the lifecycle is not initialized.  ``executed`` is
+    ``None`` when the proposal was not approved.
+    """
+    handler = globals().get('mcp_handler')
+    orchestrator = getattr(handler, '_orchestrator', None)
+    if orchestrator is None or tool_name not in getattr(handler, '_tools', {}):
+        return None
+    from mcp_principal import OPERATOR_COMMAND, principal_scope, source_scope
+    with principal_scope(principal), source_scope(source):
+        proposal = orchestrator.propose_action(
+            tool_name, params, confidence=1.0, justification=source,
+            agent_id=principal.operator_id or principal.kind, initiator=OPERATOR_COMMAND)
+        executed = (orchestrator.execute_proposal(proposal['proposal_id'])
+                    if proposal.get('status') == 'approved' else None)
+    return proposal, executed
+
+
+def _sdr_lifecycle_refusal_response(proposal, executed):
+    """The HTTP response for an SDR request the lifecycle did not run, or ``None`` if it ran.
+
+    The radio UI treats any 2xx as success, so a refusal is never 2xx: 409 for a governance
+    decision (rejected, awaiting a second operator), 400 for bad input, 503 for a failure.
+    """
+    refusal = _lifecycle_refusal(proposal, executed)
+    if refusal is None:
+        return None
+    outcome, reason, extras = refusal
+    status = 'error' if outcome in ('invalid', 'error') else 'not_executed'
+    code = 400 if outcome == 'invalid' else 503 if outcome == 'error' else 409
+    return jsonify({'status': status, 'outcome': outcome, 'message': reason, 'reason': reason,
+                    'proposal_id': proposal.get('proposal_id'), **extras}), code
 
 
 def main():
