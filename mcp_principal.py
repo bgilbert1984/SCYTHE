@@ -52,12 +52,20 @@ _principal: contextvars.ContextVar[Optional[Principal]] = contextvars.ContextVar
 _proposal_id: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar("mcp_proposal_id", default=None)
 
 
+_source: contextvars.ContextVar[str] = contextvars.ContextVar("mcp_source", default="mcp")
+
+
 def current_principal() -> Optional[Principal]:
     return _principal.get()
 
 
 def current_proposal_id() -> Optional[str]:
     return _proposal_id.get()
+
+
+def current_source() -> str:
+    """The entry point that asked for the running action: ``mcp`` unless an adapter says otherwise."""
+    return _source.get()
 
 
 def principal_dict() -> Optional[Dict[str, Any]]:
@@ -81,6 +89,16 @@ def proposal_scope(proposal_id: Optional[str]) -> Iterator[None]:
         yield
     finally:
         _proposal_id.reset(token)
+
+
+@contextlib.contextmanager
+def source_scope(source: str) -> Iterator[None]:
+    """Name the entry point (for example ``api.sdr.tune``) so execution rows can tell it from ``mcp``."""
+    token = _source.set(source)
+    try:
+        yield
+    finally:
+        _source.reset(token)
 
 
 def coerce(result: Any) -> Optional[Principal]:

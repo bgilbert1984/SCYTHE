@@ -53,7 +53,8 @@ The four steps are kept separate on purpose.
 5. **Audit.** Every `Registry.execute` writes an `[MCP_AUDIT]` log line carrying the
    tool, effect, proposal ID and principal. When `control_audit` is configured, state-changing
    executions are also written to a durable, append-only SQLite store as a `started` row
-   and a `success` or `error` row sharing an `execution_id`. That store is separate from
+   and a `success` or `error` row sharing an `execution_id`. Each row carries a `source`: `mcp` by default, or the name an adapter sets with
+   `source_scope` (for example `api.sdr.tune`), so one effect reached two ways stays distinguishable. That store is separate from
    the graph and does not go through WriteBus. The same store records a proposal's
    lifecycle as `proposal.created`, `proposal.approved`, `proposal.denied` and
    `proposal.expired` rows (written for proposals whose approval mode is above `DIRECT`),
