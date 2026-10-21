@@ -47,7 +47,9 @@ The four steps are kept separate on purpose.
    `note`); execution then re-checks the approval and that the parameters are unchanged.
    `orchestrate/decide` only reports status.
 4. **Execution.** `Registry.execute` validates parameters, enforces the rate limit and
-   runs the tool. The orchestrator also applies the autonomy phase: in phase 0 a
+   runs the tool. The orchestrator also applies the autonomy phase to `autonomous` proposals (every
+   `/mcp` proposal; an `operator_command` proposal, assigned only by server code, skips the phase
+   rules and keeps approval, the digest check and the audit; ADR 0005 Decision 5): in phase 0 a
    mutating tool is blocked as observe-only, phase 1 returns a shadow estimate, and
    phases 2 and 3 execute within a mutation budget.
 5. **Audit.** Every `Registry.execute` writes an `[MCP_AUDIT]` log line carrying the
@@ -58,7 +60,7 @@ The four steps are kept separate on purpose.
    the graph and does not go through WriteBus. The same store records a proposal's
    lifecycle as `proposal.created`, `proposal.approved`, `proposal.denied` and
    `proposal.expired` rows (written for proposals whose approval mode is above `DIRECT`),
-   each carrying the `proposal_id` that also appears on the execution rows, so the
+   each carrying the `initiator` class and the `proposal_id` that also appears on the execution rows, so the
    proposer, approver and executor can be read back after a restart
    (`control_audit.reconstruct_proposal`). These rows are evidence only: no approval or
    execution decision reads them. A `pending_approval` proposal expires after

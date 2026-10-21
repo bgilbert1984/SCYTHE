@@ -49,6 +49,7 @@ CREATE TABLE IF NOT EXISTS control_audit_events (
     ts_epoch         REAL NOT NULL,
     execution_id     TEXT NOT NULL,
     source           TEXT,
+    initiator        TEXT,
     principal_kind   TEXT NOT NULL,
     principal_id     TEXT,
     session_id       TEXT,
@@ -134,6 +135,8 @@ class ControlAuditStore:
             db.executescript(SCHEMA)
             if "source" not in {r[1] for r in db.execute("PRAGMA table_info(control_audit_events)")}:
                 db.execute("ALTER TABLE control_audit_events ADD COLUMN source TEXT")   # stores created before #227
+            if "initiator" not in {r[1] for r in db.execute("PRAGMA table_info(control_audit_events)")}:
+                db.execute("ALTER TABLE control_audit_events ADD COLUMN initiator TEXT")   # stores created before ADR 0005 D5
             if self.retention_days is not None:
                 db.execute("INSERT OR REPLACE INTO control_audit_meta (key, value) VALUES ('retention_days', ?)",
                            (str(self.retention_days),))
@@ -146,7 +149,8 @@ class ControlAuditStore:
     def record(self, *, execution_id: str, action: str, effect: str, result: str,
                principal: Optional[Dict[str, Any]] = None, proposal_id: Optional[str] = None,
                parameters: Optional[Dict[str, Any]] = None, result_summary: Optional[str] = None,
-               timestamp: Optional[float] = None, source: Optional[str] = None) -> str:
+               timestamp: Optional[float] = None, source: Optional[str] = None,
+               initiator: Optional[str] = None) -> str:
         """Append one event and return its id.  Raises on failure; see ``safe_record``."""
         ts = time.time() if timestamp is None else float(timestamp)
         principal = principal or {}
@@ -154,7 +158,7 @@ class ControlAuditStore:
         row = (
             event_id,
             _dt.datetime.fromtimestamp(ts, _dt.timezone.utc).isoformat(),
-            ts, execution_id, source,
+            ts, execution_id, source, initiator,
             principal.get("kind") or "none", principal.get("operator_id"), principal.get("session_id"),
             action, effect, proposal_id,
             json.dumps(redact(parameters or {}), sort_keys=True, default=str),
@@ -163,8 +167,8 @@ class ControlAuditStore:
         with self._lock:
             self._conn().execute(
                 "INSERT INTO control_audit_events (event_id, timestamp, ts_epoch, execution_id, source,"
-                " principal_kind, principal_id, session_id, action, effect, proposal_id, parameters_json, result,"
-                " result_summary, software_version, deployment_id, host_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", row)
+                " initiator, principal_kind, principal_id, session_id, action, effect, proposal_id, parameters_json, result,"
+                " result_summary, software_version, deployment_id, host_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", row)
         return event_id
 
     def safe_record(self, **fields) -> Optional[str]:
@@ -235,7 +239,8 @@ def reset() -> None:
 
 
 def begin_action(*, action: str, effect: str, params: Optional[Dict[str, Any]], principal: Optional[Dict[str, Any]],
-                 source: str, proposal_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
+                 source: str, proposal_id: Optional[str] = None,
+                 initiator: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """Write the ``started`` row for an action and return the context ``finish_execution`` closes.
 
     ``source`` says which entry point asked: ``mcp`` or an HTTP route such as
@@ -247,6 +252,7 @@ def begin_action(*, action: str, effect: str, params: Optional[Dict[str, Any]], 
     ctx = {
         "store": store, "execution_id": str(uuid.uuid4()), "action": action, "effect": effect or "UNDECLARED",
         "params": params or {}, "principal": principal, "proposal_id": proposal_id, "source": source,
+        "initiator": initiator,
     }
     _write(ctx, "started")
     return ctx
@@ -256,9 +262,10 @@ def begin_execution(tool, params: Optional[Dict[str, Any]]) -> Optional[Dict[str
     """MCP entry: record that a state-changing tool is about to run.  None when auditing does not apply."""
     if _store is None or not getattr(tool, "mutates_state", False):
         return None
-    from mcp_principal import current_proposal_id, current_source, principal_dict
+    from mcp_principal import current_initiator, current_proposal_id, current_source, principal_dict
     return begin_action(action=tool.name, effect=getattr(tool, "effect", None), params=params,
-                        principal=principal_dict(), source=current_source(), proposal_id=current_proposal_id())
+                        principal=principal_dict(), source=current_source(), proposal_id=current_proposal_id(),
+                        initiator=current_initiator())
 
 
 PROPOSAL_CREATED = "proposal.created"
@@ -270,7 +277,8 @@ PROPOSAL_ACTIONS = (PROPOSAL_CREATED, PROPOSAL_APPROVED, PROPOSAL_DENIED, PROPOS
 
 def record_transition(*, action: str, effect: Optional[str], principal: Optional[Dict[str, Any]], proposal_id: str,
                       result: str, parameters: Optional[Dict[str, Any]] = None,
-                      summary: Optional[str] = None, source: str = "mcp") -> Optional[str]:
+                      summary: Optional[str] = None, source: str = "mcp",
+                      initiator: Optional[str] = None) -> Optional[str]:
     """Append one proposal-lifecycle row (ADR 0006).  Evidence only.
 
     ``proposal_id`` is the join key that ties a proposal's rows to its execution rows.
@@ -282,7 +290,7 @@ def record_transition(*, action: str, effect: Optional[str], principal: Optional
         return None
     return store.safe_record(execution_id=str(uuid.uuid4()), action=action, effect=effect or "UNDECLARED",
                              result=result, principal=principal, proposal_id=proposal_id, parameters=parameters,
-                             result_summary=summary, source=source)
+                             result_summary=summary, source=source, initiator=initiator)
 
 
 def reconstruct_proposal(store: "ControlAuditStore", proposal_id: str) -> Dict[str, Any]:
@@ -349,7 +357,7 @@ def _write(ctx: Dict[str, Any], result: str, summary: Optional[str] = None) -> N
     ctx["store"].safe_record(
         execution_id=ctx["execution_id"], action=ctx["action"], effect=ctx["effect"], result=result,
         principal=ctx["principal"], proposal_id=ctx["proposal_id"], parameters=ctx["params"],
-        result_summary=summary, source=ctx["source"])
+        result_summary=summary, source=ctx["source"], initiator=ctx.get("initiator"))
 
 
 def main(argv=None) -> int:

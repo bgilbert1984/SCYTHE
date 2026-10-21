@@ -187,7 +187,8 @@ class DualAgentOrchestrator:
             import control_audit
             control_audit.record_transition(
                 action=action, effect=proposal.get("effect"), principal=principal,
-                proposal_id=proposal["proposal_id"], result=result, summary=summary, parameters=parameters)
+                proposal_id=proposal["proposal_id"], result=result, summary=summary, parameters=parameters,
+                initiator=proposal.get("initiator"))
         except Exception:
             logger.exception("[approval] could not audit %s for %s", action, proposal.get("proposal_id"))
 
@@ -297,9 +298,18 @@ class DualAgentOrchestrator:
         params: Dict[str, Any],
         confidence: float,
         justification: str = "",
+        initiator: str = "autonomous",
     ) -> Dict[str, Any]:
-        """Analyst proposes an action. Returns decision."""
+        """Analyst proposes an action. Returns decision.
+
+        ``initiator`` is the ADR 0005 Decision 5 class.  It is a server-side argument: no
+        transport handler passes request data into it.  It is recorded once, here, and
+        execution reads it back from the proposal.
+        """
         import uuid
+        from mcp_principal import INITIATOR_CLASSES
+        if initiator not in INITIATOR_CLASSES:
+            raise ValueError(f"unknown initiator class {initiator!r}")
 
         self.expire_pending()
         proposal_id = str(uuid.uuid4())
@@ -310,6 +320,7 @@ class DualAgentOrchestrator:
             "confidence": confidence,
             "justification": justification,
             "timestamp": time.time(),
+            "initiator": initiator,
             "status": "proposed",  # proposed | approved | pending_approval | rejected | executed
             "approval_reason": "",
         }
