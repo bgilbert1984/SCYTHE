@@ -32,6 +32,9 @@ class LifecycleInvariantTest(unittest.TestCase):
         cls.handler = MCPHandler(engine, use_orchestrator=True)
         register_graphops_tools(engine, cls.handler)
         register_autopilot_tools(engine, cls.handler, autopilot=mock.Mock())
+        # register_mcp_routes registers these too; leaving them out left both HARDWARE_CONTROL tools untested.
+        from rf_mcp import register_rf_tools
+        register_rf_tools(engine, cls.handler)
         # embedding_engine imports faiss at module level; the tools only need the module to import.
         with mock.patch.dict(sys.modules, {"faiss": mock.MagicMock()}):
             from embedding_engine import register_embedding_tools
@@ -64,6 +67,9 @@ class LifecycleInvariantTest(unittest.TestCase):
             if t is not None and hasattr(t, stub_name):
                 setattr(t, stub_name, stub)
         return tool
+
+    def test_the_hardware_control_tools_are_in_the_set(self):
+        self.assertTrue({"rf_tune", "rf_capture_control"} <= set(self.names))
 
     def test_the_tool_set_is_not_empty_and_spans_both_classes(self):
         classes = {n in self.handler._registry._tools for n in self.names}
