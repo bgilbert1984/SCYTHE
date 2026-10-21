@@ -1,13 +1,21 @@
 # ADR 0006 — Approval is a policy tier per effect, and independent approval is expressible
 
-- **Status:** Proposed; partly implemented. The mode table and the "a deployment may
-  raise, never lower" rule exist in `mcp_effects.py` (`MINIMUM_APPROVAL_MODE`,
-  `required_approval_mode`, checked by `validate_tool_contract`), with today's mapping and
-  no change in behavior. Not implemented: the `pending_approval` state, the approval
-  action, any deployment setting that feeds `required_approval_mode`, and enforcement of
-  `SECOND_PRINCIPAL`. Whether `HARDWARE_CONTROL` or `EXTERNAL_STATE` default to
-  `SECOND_PRINCIPAL` remains a policy choice to be made with #228, and is sequenced after
-  those mechanisms and after the `/api/sdr/*` routes join the lifecycle.
+- **Status:** Proposed; partly implemented. Read the three groups separately:
+  - **Implemented:** the approval-mode table and the deployment floor ("a deployment may
+    raise, never lower") in `mcp_effects.py` (`MINIMUM_APPROVAL_MODE`,
+    `required_approval_mode`, checked by `validate_tool_contract`). Today's mapping, no
+    change in behavior. Nothing reads the mode at runtime yet.
+  - **Accepted architecture (reviewed and agreed 2026-10-21):** the independent
+    proposal, approval and execution transitions (Decision 3) and the `SECOND_PRINCIPAL`
+    lifecycle (Decision 6): approval transitions, execution-time validation, transition
+    audit rows, and the proposal durability model.
+  - **Not yet implemented:** the `pending_approval` state, the approval action, the
+    transition audit rows, the TTL, the deployment setting that feeds
+    `required_approval_mode`, and enforcement of `SECOND_PRINCIPAL`. Decision 6 is not live.
+
+  Whether `HARDWARE_CONTROL` or `EXTERNAL_STATE` default to `SECOND_PRINCIPAL` remains a
+  policy choice to be made with #228, sequenced after those mechanisms and after the
+  `/api/sdr/*` routes join the lifecycle.
 - **Date:** 2026-10-20
 - **Resolves:** the policy question in #228. Builds on [ADR 0004](0004-mcp-control-plane.md)
   (approval derives from the declared effect) and [ADR 0005](0005-registry-tooldef-execution-model.md)
@@ -33,8 +41,19 @@ the code as it stands:
   (`rf_tune` at confidence 0.9, two calls, one operator session).
 - The name `REQUIRES_REVIEW` overstates this. #229 documented the real meaning (automated
   policy evaluation); the name was kept.
-- The control audit already records the proposer and the executor separately, so a
-  second-principal rule needs no schema change.
+- The control audit does **not** record the proposer. A row holds one principal (the
+  actor of that row, the executor for an execution) and a `proposal_id`; the proposer
+  exists only in the in-memory proposal (`proposed_by`) and is lost on restart. An
+  approver would have nowhere to be recorded. (An earlier version of this ADR said the
+  audit already held both; that was wrong.)
+- Authorization is authentication only. Any authenticated principal can call
+  `orchestrate/propose` and `orchestrate/execute`; nothing checks that they may command
+  the tool.
+- `agent_id` on `orchestrate/propose` is supplied by the caller. It is recorded, and it is
+  not an identity: only the `Principal` established by authentication is.
+- Mutations execute only above Phase 0, and the phase can be changed remotely only when
+  `MCP_ALLOW_REMOTE_PHASE_CONTROL` is set. A default deployment therefore stays in Phase 0
+  and executes no mutation through the orchestrator.
 - Proposals are stored in memory in the current implementation, which limits restart
   behavior. That is an implementation constraint: the approval model permits durable
   pending approvals and does not require volatile proposals.
@@ -80,7 +99,14 @@ amending this ADR.
   may raise it (for example to `SECOND_PRINCIPAL`) and may not lower it, so no
   configuration can undo a guarantee that the declared effect establishes.
 
-### 3. The current default mapping preserves current behavior
+### 3. Proposal, approval and execution are independent transitions
+
+Proposal, approval and execution are independent lifecycle transitions. Approval
+authorizes execution but is not execution. Execution remains subject to all runtime
+policy: phase, mutation budget, parameter integrity and authorization. Approval is a
+necessary condition for execution, never a substitute for execution-time policy.
+
+### 4. The current default mapping preserves current behavior
 
 | Effect | Mode today and by default |
 |---|---|
@@ -95,42 +121,89 @@ optionally `EXTERNAL_STATE`) require `SECOND_PRINCIPAL`. Whether to turn that on
 policy decision recorded separately. Deciding the capability and deciding the setting
 are different decisions, and only the first is proposed here.
 
-### 4. Caller-supplied confidence is recorded, not trusted for hardware
+### 5. Caller-supplied confidence is recorded, not trusted for hardware
 
 Applying the invariant above: confidence stays stored, audited and shown to a reviewer.
 For `HARDWARE_CONTROL` it should not by itself decide whether hardware may be actuated. Changing that alters behavior for
 current callers, so it is its own change after this ADR is accepted.
 
-### 5. What `SECOND_PRINCIPAL` must mean, if enabled
+### 6. What `SECOND_PRINCIPAL` must mean, if enabled
 
 A second-principal rule is only as strong as the identity behind it, so it carries
-conditions:
+conditions. The mechanism below was reviewed and agreed on 2026-10-21; it is not
+implemented.
 
-- The approver must be an **identified** principal (`operator_session`, per
-  `mcp_principal.py`). `loopback`, `internal_token`, `anonymous` and `unspecified` cannot
-  approve, because they do not identify an individual.
-- The approver's `operator_id` must differ from the proposer's. Two sessions of one
-  operator are one principal.
-- A new proposal state, `pending_approval`, sits between `proposed` and `approved`, and
-  a distinct approval action exists. Today's `orchestrate/decide` only reports status;
-  its meaning should not be reinterpreted for existing clients. How the approval action
-  is exposed (RPC, REST, CLI or UI) is implementation and is not decided here.
-- The approver's identity, time and optional note are recorded on the proposal and carried
-  into the control-audit row (the schema already holds proposer and executor; an approver
-  field is the one addition, and should be confirmed against the schema before
-  implementation).
-- Execution requires the recorded approval, and the executor check still applies.
+**States.** `proposed` leads to `rejected`, `approved`, or `pending_approval`. A pending
+proposal becomes `approved`, `denied` or `expired`. An approved proposal executes as
+today. `pending_approval`, `denied` and `expired` are new, and `orchestrate/decide` keeps
+meaning "report status".
 
-### 6. Out of scope, deliberately
+**Choosing the mode.** When a proposal is created, the mode is
+`required_approval_mode(effect, deployment_settings)`. For `SECOND_PRINCIPAL` the automated
+checks run first (a failure is `rejected` and the approver is not asked); a pass leaves
+the proposal `pending_approval`. The proposal records its `approval_mode`. The deployment
+setting comes from one source read at startup, an environment variable
+(for example `MCP_APPROVAL_MODES=HARDWARE_CONTROL=SECOND_PRINCIPAL`, parsed like
+`MCP_ALLOW_REMOTE_PHASE_CONTROL`). A value below the floor, an unknown effect or an
+unknown mode stops startup. Unset means the floor, so there is no behavior change by
+default.
+
+**Who may approve.** The approver must be an identified principal (`operator_session`, per
+`mcp_principal.py`); `loopback`, `internal_token`, `anonymous` and `unspecified` cannot
+approve, because they do not identify an individual. The approver's `operator_id` must
+differ from the proposer's, so two sessions of one operator are one principal. A proposer
+that is not an identified operator (an internal automation) may create the proposal, and
+any identified operator may approve it. `agent_id` is never used as an identity. The
+approver may also execute: the control is independent approval, not separation of
+execution.
+
+**The approval action.** A distinct action (`orchestrate/approve`: `proposal_id`, a
+decision of approve or deny, an optional note) is the only way out of `pending_approval`.
+One function in the orchestrator enforces the preconditions for every transport; how it
+is exposed (RPC, REST, CLI or UI) is not decided here. On approval the proposal records
+the approver, the time, the note and a digest of the parameters approved.
+
+**Execution.** `execute_proposal` requires, for a `SECOND_PRINCIPAL` proposal, a recorded
+approver who differs from the proposer, and parameters that still match the approved
+digest. This repeats the approval-time checks, so a defect that sets `approved` directly
+still cannot execute. Phase, budget and the executor check apply as for any proposal.
+
+**Audit.** Transitions are written as rows of the existing control-audit table, with no
+schema change: a proposal-created row (principal: the proposer), and an approved or denied
+row (principal: the approver, the note in the summary). Execution rows already carry
+`proposal_id`. **`proposal_id` is the documented stable join key** for reconstructing a
+proposal's history (proposer, approver, executor) from the audit, and it must not be
+reused or re-derived.
+
+**Durability.** Proposals stay in memory in the first implementation. A restart drops
+pending proposals, which fails closed: the proposer proposes again, and the audit rows keep
+the record. A pending proposal expires after a TTL (proposed default: 15 minutes,
+configurable) so a stale proposal cannot be approved after its context has changed.
+Durable pending proposals need a store that keeps parameters unredacted, which the audit
+store deliberately does not; that is tracked with #219.
+
+**Unsatisfiable configurations.** A deployment with a raised mode and no identified
+operators cannot approve anything, so the effect cannot execute through MCP. That is the
+intended fail-closed outcome; a warning is logged at startup.
+
+**Order of work.** First, the mode on the proposal, the deployment setting and
+`pending_approval` with no way out (a deployment that opts in stops executing and
+nothing bypasses it). Then the approval action, the execution check, the audit rows and
+the TTL. Changing a default is a separate policy decision after both, and the
+`/api/sdr/*` routes joining the lifecycle is a separate design, because it changes the
+workflow for live hardware (a click becomes a proposal that another operator approves).
+
+### 7. Out of scope, deliberately
 
 - **Role-based access.** "Operator may approve" is an identity rule, not a role system.
-  Who is entitled to approve is not designed here.
+  Who is entitled to approve is not designed here. Likewise, who may *propose* or
+  *execute* is still authentication only.
 - **`/api/sdr/*` and other direct routes.** Second-principal approval on MCP does not
   constrain a route that never enters the proposal flow, which contradicts the invariant
   above until reconciled. How they are reconciled (join the flow, or a documented
   exception) is tracked with the HTTP-path question in #236 and #218. Enabling `SECOND_PRINCIPAL` for
   hardware without addressing them would gate one door of two.
-- **Fail-closed audit, durable proposal lifecycle events, anonymous/loopback hardware
+- **Fail-closed audit, durable proposals, anonymous/loopback hardware
   control outside development** — the other questions in #219.
 - **A data-flow or communication attribute.** Separate (#220 observation).
 
