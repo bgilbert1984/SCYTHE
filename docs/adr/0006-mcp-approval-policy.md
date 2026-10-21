@@ -16,8 +16,9 @@
     mapping is today's, and the only visible change is the additional lifecycle rows.
     The audit rows are evidence only: no decision reads them.
   - **Accepted architecture (reviewed and agreed 2026-10-21):** the independent
-    proposal, approval and execution transitions (Decision 3) and the `SECOND_PRINCIPAL`
-    lifecycle (Decision 6).
+    proposal, approval and execution transitions (Decision 3), the `SECOND_PRINCIPAL`
+    lifecycle (Decision 6), and that a halting action is exempt from independent approval
+    (Decision 7; the mechanism is proposed, not decided).
   - **Not yet implemented:** durable pending proposals (a restart drops them, which fails
     closed; the audit keeps the record, #219), exposure of the approval action beyond
     `/mcp` (REST, UI), role checks on who may approve, and any change of default.
@@ -107,7 +108,9 @@ amending this ADR.
 - **A deployment may require a stricter approval mode than the architectural minimum
   for an effect, never a weaker one.** The declared effect sets the floor. A deployment
   may raise it (for example to `SECOND_PRINCIPAL`) and may not lower it, so no
-  configuration can undo a guarantee that the declared effect establishes.
+  configuration can undo a guarantee that the declared effect establishes. The one
+  exception is a halting tool (Decision 7), which the tool's author declares in code and
+  which a deployment cannot grant.
 
 ### 3. Proposal, approval and execution are independent transitions
 
@@ -203,16 +206,40 @@ the TTL. Changing a default is a separate policy decision after both, and the
 `/api/sdr/*` routes joining the lifecycle is a separate design, because it changes the
 workflow for live hardware (a click becomes a proposal that another operator approves).
 
-### 7. Out of scope, deliberately
+### 7. A halting action is not held for a second principal
+
+Stopping equipment must remain available. A tool that only ceases activity, such as
+stopping a capture, stays inside the lifecycle: it is proposed, authorized and audited
+like any other mutation. It is exempt only from independent approval: its required mode is
+capped at `AUTOMATED` whatever a deployment sets.
+
+- The exemption is a declaration in the tool's own code (proposed name: `halts`), checked
+  by `validate_tool_contract`, and never a deployment setting. A deployment can therefore
+  not use it to weaken policy, which keeps the "raise, never lower" invariant intact.
+- It is narrow. A tool may declare `halts` only if its sole purpose is to stop or
+  withdraw activity, it mutates state, and it cannot start, configure or retarget
+  anything. Tools that start, tune, configure, transmit or change training data are never
+  halting.
+- **Proposed mechanism, not decided:** `rf_capture_control` takes `action: start | stop`
+  and the mode is per tool, so the capture tool is split into `rf_capture_start` and
+  `rf_capture_stop`, with `halts` on the stop tool. `rf_capture_control` would then be
+  retired or kept as a deprecated alias that only starts. The alternative is to keep one
+  tool and add an action-level rule to the approval step, which spreads the exemption into
+  policy code and is harder to validate.
+
+### 8. Out of scope, deliberately
 
 - **Role-based access.** "Operator may approve" is an identity rule, not a role system.
   Who is entitled to approve is not designed here. Likewise, who may *propose* or
   *execute* is still authentication only.
 - **`/api/sdr/*` and other direct routes.** Second-principal approval on MCP does not
   constrain a route that never enters the proposal flow, which contradicts the invariant
-  above until reconciled. How they are reconciled (join the flow, or a documented
-  exception) is tracked with the HTTP-path question in #236 and #218. Enabling `SECOND_PRINCIPAL` for
-  hardware without addressing them would gate one door of two.
+  above until reconciled. The `/api/sdr/*` routes will join the lifecycle as
+  `operator_command` ([ADR 0005](0005-registry-tooldef-execution-model.md), Decision 5);
+  until that lands, enabling `SECOND_PRINCIPAL` for hardware would gate one door of two.
+  Even then, a deployment that raises `HARDWARE_CONTROL` also needs a way for a second
+  operator to approve (REST or UI): approval is exposed only over `/mcp`, so a raised mode
+  would otherwise stop the first-party radio interface.
 - **Fail-closed audit, durable proposals, anonymous/loopback hardware
   control outside development** — the other questions in #219.
 - **A data-flow or communication attribute.** Separate (#220 observation).
@@ -248,6 +275,7 @@ workflow for live hardware (a click becomes a proposal that another operator app
 | Decision | Issue |
 |---|---|
 | Whether to enable `SECOND_PRINCIPAL` for `HARDWARE_CONTROL` in a given deployment | #228 follow-up |
-| Whether the direct `/api/sdr/*` routes join the proposal flow | #236, #218 |
+| The mechanism for exempting halting actions (a split `rf_capture_stop` with `halts`, or an action-level rule) | #228 |
+| Whether the direct `/api/sdr/*` routes join the proposal flow | decided in ADR 0005 Decision 5; not implemented (#236, #218) |
 | Durable proposals; fail-closed audit; loopback/anonymous hardware control | #219 |
 | Who is entitled to approve (roles) | not tracked |
