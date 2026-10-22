@@ -1,0 +1,3 @@
+# Browser driver for run.py. The server runs under the project's own interpreter, which needs jsonschema
+# (declared in the repository's requirements.txt). After installing: playwright install chromium
+playwright>=1.40
