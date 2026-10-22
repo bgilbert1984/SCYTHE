@@ -29,3 +29,13 @@ scripts did not load).
 - The page's selection handler flies the camera to the selected node; the harness disables `flyToNode` so that each click
   lands where it was computed.
 - It does not check how nodes look (rings, glow), only what a click selects.
+
+## Why the harness waits for the camera to settle
+
+The picker projects through camera matrices copied from Cesium once per rendered frame, while the harness asks Cesium's *current* camera
+where a node is on screen. Right after the camera is moved the two differ until a frame renders. Under CPU load the page can go well
+over the old fixed 700 ms wait without rendering one, and a click aimed with Cesium's answer then lands where the picker's older pose
+puts a neighbouring node: "a hidden node cannot be selected" failed intermittently this way (about 1 run in 10 under load, none in 80
+on a quiet machine), on the base commit too. `Check.settle()` waits until at least two frames have rendered, the camera matrix is
+unchanged across them, and the picker's camera equals Cesium's; if that does not happen in 30 s the harness exits 2 (infrastructure)
+instead of reporting a false pick.

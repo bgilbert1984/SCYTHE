@@ -15,6 +15,7 @@ import json
 import os
 import sys
 import threading
+import time
 import urllib.parse
 from pathlib import Path
 
@@ -75,9 +76,32 @@ class Check:
         self.results.append((name, ok))
         print(f"{'PASS' if ok else 'FAIL'}  {name}{('  ' + detail) if detail else ''}")
 
-    def view(self, height):
-        self.page.evaluate(f"globe._viewer.camera.setView({{destination: Cesium.Cartesian3.fromDegrees({VIEW_LON}, {VIEW_LAT}, {height})}})")
-        self.page.wait_for_timeout(700)
+    def view(self, height, lon=VIEW_LON, lat=VIEW_LAT):
+        self.page.evaluate(f"globe._viewer.camera.setView({{destination: Cesium.Cartesian3.fromDegrees({lon}, {lat}, {height})}})")
+        self.settle()
+
+    # What the camera is doing, and whether the camera the picker reads is the one Cesium has.
+    CAMERA_STATE = """() => { const vm = Array.from(globe._viewer.camera.viewMatrix), tm = globe._camera.matrixWorldInverse.elements;
+      return {frame: globe._viewer.scene.frameState.frameNumber, vm, synced: Math.max(...vm.map((v, i) => Math.abs(v - tm[i]))) < 1e-6}; }"""
+
+    def settle(self, timeout_s=30):
+        """Wait until the camera has stopped and the picker has caught up with it.
+
+        The picker projects through the camera matrices copied from Cesium once per rendered frame, while where a node is on
+        screen is asked of Cesium's current camera. Right after the camera is moved those differ until a frame renders; under
+        load the page can go well over a fixed 700 ms without one, and a click aimed with Cesium's answer then lands where the
+        picker's older pose puts a neighbouring node. So: two or more frames rendered, the matrix unchanged across them, and
+        the two cameras equal.
+        """
+        deadline = time.monotonic() + timeout_s
+        last = None
+        while time.monotonic() < deadline:
+            now = self.page.evaluate(self.CAMERA_STATE)
+            if last and now["frame"] >= last["frame"] + 2 and now["synced"] and now["vm"] == last["vm"]:
+                return
+            last = now
+            self.page.wait_for_timeout(100)
+        raise InfrastructureError(f"the camera did not settle within {timeout_s} s (frames are not rendering, or it keeps moving)")
 
     def screen(self, node_id):
         """Where Cesium itself puts the node, in page pixels, or None when it is off the canvas."""
@@ -147,8 +171,7 @@ class Check:
         self.page.wait_for_timeout(100)
         self.record("the same node is selectable again once shown", self.selected() == "n5")
 
-        self.page.evaluate("globe._viewer.camera.setView({destination: Cesium.Cartesian3.fromDegrees(80, -38, 6e6)})")
-        self.page.wait_for_timeout(700)
+        self.view(6e6, lon=80, lat=-38)
         self.page.evaluate("globe.selectNode(null)")
         self.page.mouse.click(700, 425)
         self.page.wait_for_timeout(100)
@@ -187,6 +210,9 @@ def main():
             page.evaluate("globe.flyToNode = () => {}")
             ok = Check(page, args.out).run()
             browser.close()
+    except InfrastructureError as error:
+        print(f"INFRASTRUCTURE: {error}")
+        return 2
     except PlaywrightError as error:
         print(f"INFRASTRUCTURE: {str(error)[:200]}")
         return 2
