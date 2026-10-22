@@ -720,11 +720,34 @@
 
       .mobile-menu-toggle { display: block !important; margin-left: auto; }
     }
+    .mvp-tint { position:fixed; inset:0; z-index:12; pointer-events:none; box-shadow:inset 0 0 90px 10px transparent;
+      transition:box-shadow .8s ease; }
+    .mvp-tint[data-tone="gray"] { box-shadow:inset 0 0 90px 10px rgba(140,150,160,.28); }
+    .mvp-tint[data-tone="green"] { box-shadow:inset 0 0 90px 10px rgba(60,220,130,.28); }
+    .mvp-tint[data-tone="yellow"] { box-shadow:inset 0 0 90px 10px rgba(247,209,84,.38); }
+    .mvp-tint[data-tone="purple"] { box-shadow:inset 0 0 90px 10px rgba(170,110,255,.32); }
+    .mvp { position:fixed; top:8px; left:50%; transform:translateX(-50%); z-index:41; width:min(760px,calc(100vw - 24px));
+      box-sizing:border-box; border:1px solid rgba(0,212,255,.45); background:rgba(0,12,28,.9); color:#ccefff;
+      font:10px/1.35 ui-monospace,monospace; }
+    .mvp__header { display:flex; flex-wrap:wrap; gap:4px 12px; align-items:center; padding:5px 8px; }
+    .mvp__lifecycle { padding:1px 6px; border:1px solid currentColor; letter-spacing:.06em; }
+    .mvp__lifecycle[data-tone="gray"] { color:#a9b4bd; } .mvp__lifecycle[data-tone="green"] { color:#3cdc82; }
+    .mvp__lifecycle[data-tone="yellow"] { color:#f7d154; } .mvp__lifecycle[data-tone="purple"] { color:#b98cff; }
+    .mvp__counts { display:flex; flex-wrap:wrap; gap:4px 10px; color:#9fc7d8; }
+    .mvp__ribbon { display:flex; flex-wrap:wrap; gap:2px 12px; padding:3px 8px; border-top:1px dashed rgba(0,212,255,.3); }
+    .mvp__event[data-kind="observation"] { color:#63ffd1; } .mvp__event[data-kind="correlation"] { color:#ff8cc8; }
+    .mvp__event[data-kind="inference"] { color:#f7d154; } .mvp__event[data-kind="graph"], .mvp__event[data-kind="unclassified"] { color:#9fc7d8; }
+    .mvp__empty, .mvp__line { color:#7fa6b8; }
+    .mvp__inspector { max-height:40vh; overflow:auto; padding:4px 8px 8px; border-top:1px dashed rgba(0,212,255,.3); }
+    .mvp__heading { margin:2px 0 4px; font-size:10px; color:#66ddff; letter-spacing:.06em; }
+    .mvp__trace { padding:3px 0; border-bottom:1px solid rgba(0,212,255,.12); }
   </style>
 </head>
 <body>
 
 <div id="globe-root">
+<div id="mission-viewport-tint" class="mvp-tint" aria-hidden="true"></div>
+<aside id="mission-viewport" class="mvp" aria-label="Mission viewport"></aside>
   <div id="cesiumContainer"></div>
 
   <!-- HUD elements -->
@@ -4351,5 +4374,15 @@ document.addEventListener('DOMContentLoaded', () => {
   window.SCYTHEWeb and creates no data or overlays.
 -->
 <script type="module" src="scythe-web/browser-entry.js"></script>
+<script type="module">
+  import { MissionViewportPanel } from "./scythe-web/missionViewportPanel.js";
+  const missionId = new URLSearchParams(window.location.search).get("mission");
+  const viewport = new MissionViewportPanel({
+    root: document.getElementById("mission-viewport"), tint: document.getElementById("mission-viewport-tint"),
+    apiBase: window.SCYTHE_API_BASE || "", missionId, storages: [window.sessionStorage, window.localStorage] });
+  window.scytheMissionViewport = viewport;
+  window.addEventListener("globe:node_selected", ({detail}) => viewport.select(detail?.node ? detail.entityId : null));
+</script>
+
 </body>
 </html>
