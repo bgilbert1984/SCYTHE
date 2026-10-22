@@ -576,6 +576,8 @@
     import { formatAddressContextPrompt, prepareAddressContext } from "./addressContextWorkflow.js";
     import { graphTransportNotice } from "./graphOpsTransportStatus.js";
     import { graphEntityPromptContext } from "./graphEntityTooltip.js";
+    import { parseDeepLink } from "./deepLink.js";
+    import { mountDeepLinkNav } from "./deepLinkNav.js";
     import { askGraphOps, askGraphOpsCloudFullFidelity, formatCloudFullFidelityConversation,
       formatGraphOpsConversation, operatorQuestionOnly } from "./graphOpsConversation.js";
     import { GraphExplorerView } from "./graphExplorerView.js";
@@ -658,14 +660,19 @@
     });
     const liveGraphController = new LiveGraphController();
     const evidenceTicker = new SystemEvidenceTicker({root:document.getElementById("system-evidence-ticker")}).start();
+    const deepLinkContext = parseDeepLink(window.location.search);
     const missionGovernance = new MissionGovernancePanel({
       root: document.getElementById("mission-governance"),
       storages: [window.sessionStorage, window.localStorage],
-      missionId: new URLSearchParams(window.location.search).get("mission")});
+      missionId: deepLinkContext.mission});
+    const deepLinkNavigation = mountDeepLinkNav({root: document.getElementById("mission-governance"), from: "regional",
+      targets: ["globe", "ops"], mission: deepLinkContext.mission, select: deepLinkContext.select, rejected: deepLinkContext.rejected});
     window.scytheEvidenceTicker = evidenceTicker;
     const tickerRoot = document.getElementById("globe-root");
-    tickerRoot.addEventListener("scythe-web:graph-selection", ({detail}) => evidenceTicker.note("selection",
-      `${String(detail?.kind ?? "GRAPH ENTITY").toUpperCase()} · ${detail?.entityId ?? "UNAVAILABLE"}`));
+    tickerRoot.addEventListener("scythe-web:graph-selection", ({detail}) => {
+      evidenceTicker.note("selection", `${String(detail?.kind ?? "GRAPH ENTITY").toUpperCase()} · ${detail?.entityId ?? "UNAVAILABLE"}`);
+      deepLinkNavigation.update({select: detail?.entityId ?? null});   // the links follow the selection
+    });
     tickerRoot.addEventListener("scythe-web:coverage-cell-selected", ({detail}) => evidenceTicker.note("rf-cell",
       `RF CELL PINNED // ${detail?.tile_id ?? "UNKNOWN TILE"} · ${detail?.coverage ? "THRESHOLD PASS" : "THRESHOLD FAIL"} · ${detail?.value ?? "—"} ${detail?.units ?? ""}`));
     tickerRoot.addEventListener("scythe-web:rf-sensor-selection", ({detail}) => evidenceTicker.note("rf-sensor",
