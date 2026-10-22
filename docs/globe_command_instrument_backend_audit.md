@@ -166,9 +166,9 @@ or any invalid id, stays unbound.
 with `getattr`, but `WriteBus.publish_bus` publishes a plain dict (`ENTITY_UPSERT`), so each
 WriteBus event was stored and pushed to clients blank (`event_type=''`, `entity_id=''`, `{}`).
 The drain now reads objects and dicts alike. A WriteBus commit whose context sets `mission_id` is
-now stored under that mission. Still open: no production pcap path sets `mission_id` (the MCP
-handler, the CLI and `tak_ml_gemma_runner` build `IngestConfig` without it, and the pcap flush
-context has none), and the other `GraphEventBus` subscribers (map-cache node and edge, line
+now stored under that mission. The pcap flush context now carries `IngestConfig.mission_id`, so a
+missioned ingest binds. Still open: no production caller sets `IngestConfig.mission_id` (the MCP
+handler, the CLI and `tak_ml_gemma_runner` build it without one), and the other `GraphEventBus` subscribers (map-cache node and edge, line
 ~4158 onward) have the same `getattr`-only reading. A dict event also never receives the bus's
 `sequence_id`, so it reads 0.
 

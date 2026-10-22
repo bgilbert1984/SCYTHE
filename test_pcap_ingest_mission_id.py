@@ -261,5 +261,56 @@ class NodesByMissionTests(unittest.TestCase):
         self.assertEqual(kinds, {artifact_id})
 
 
+class LiveEventBindingTests(unittest.TestCase):
+    """The flush context's mission reaches the live feed: a real WriteBus, then the drain's reader
+    and binder (graph_event_fields, live_mission_binding)."""
+
+    def _live_events(self, config):
+        import os
+        import tempfile
+        from graph_event_bus import GraphEventBus
+        from pcap_ingest import _pcap_artifact_id
+        from writebus import WriteBus
+
+        engine = HypergraphEngine()
+        bus = GraphEventBus(redis_client=None)
+        received = []
+        bus.subscribe(received.append)
+        writebus = WriteBus(operator_manager=None, hypergraph_engine=engine, graph_event_bus=bus,
+                            writebus_db_path=os.path.join(tempfile.mkdtemp(), "wb.sqlite3"))
+        artifact_id = _pcap_artifact_id("capture.pcapng")
+        with patch("pcap_ingest._get_writebus_instance", return_value=writebus):
+            emitter = HypergraphEmitter(engine, config)
+            emitter.emit_pcap_artifact("capture.pcapng", 123)
+            emitter.flush(
+                entity_id=artifact_id,
+                entity_type="PCAP_INGEST_MATERIALIZATION",
+                entity_data={"id": artifact_id, "kind": "pcap_artifact"},
+                request_id=f"pcap_ingest:{artifact_id}:materialize",
+                evidence_refs=[artifact_id],
+                idempotency_key=emitter.idempotency_key(artifact_id, "materialize"),
+            )
+        return received
+
+    def test_a_missioned_ingest_publishes_events_the_binder_binds(self):
+        from graph_event_fields import graph_event_fields
+        from live_mission_binding import live_session
+
+        events = self._live_events(_minimal_config(mission_id=VALID_MISSION_ID))
+        self.assertTrue(events)
+        for ev in events:
+            data = graph_event_fields(ev)["data"]
+            self.assertEqual(live_session(data), ("live:" + VALID_MISSION_ID, VALID_MISSION_ID))
+
+    def test_an_ingest_without_a_mission_publishes_events_that_stay_unbound(self):
+        from graph_event_fields import graph_event_fields
+        from live_mission_binding import live_session
+
+        events = self._live_events(_minimal_config())
+        self.assertTrue(events)
+        for ev in events:
+            self.assertEqual(live_session(graph_event_fields(ev)["data"]), ("global", None))
+
+
 if __name__ == "__main__":
     unittest.main()
