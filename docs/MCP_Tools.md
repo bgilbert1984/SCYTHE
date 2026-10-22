@@ -47,7 +47,13 @@ The four steps are kept separate on purpose.
    `note`); execution then re-checks the approval and that the parameters are unchanged.
    `orchestrate/decide` only reports status. The same action is available over REST for first-party
    interfaces: `GET /api/mcp/proposals/pending` lists what is waiting and
-   `POST /api/mcp/proposals/<id>/decision` (`decision`, optional `note`) approves and runs it, or denies it. A tool its author declares `halts` (only
+   `POST /api/mcp/proposals/<id>/decision` (`decision`, optional `note`) approves and runs it, or denies it.
+   Two read-only routes describe the lifecycle for display and decide nothing: `GET /api/mcp/governance`
+   (whether the lifecycle is enabled, the phase, the effective approval mode of each effect and the deployment's
+   overrides, the pending TTL, whether remote phase changes are enabled) and `GET /api/mcp/proposals/recent`
+   (the lifecycle state of recent proposals, newest first, with who proposed, approved, denied or executed them and
+   why one did not run). Both need an identified operator session (the governance route also accepts the internal token).
+   A tool its author declares `halts` (only
    `rf_capture_stop`: it takes no parameters and only ceases activity) is capped at `AUTOMATED` and is never
    held for a second principal; it is still proposed, authorized and audited (ADR 0006 Decision 7).
 4. **Execution.** `Registry.execute` validates parameters, enforces the rate limit and

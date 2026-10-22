@@ -375,6 +375,35 @@
     .directive__context { margin-top:5px; padding:4px 5px; border-left:2px solid rgba(99,255,209,.55); background:rgba(7,20,34,.62); }
     .directive__context-signature { color:#63ffd1; }.directive__context-missing { color:#7f9bad; margin-top:2px; }
     @media (max-width:800px) { .live-hypergraph { height:220px; width:320px; } }
+    .mgov { position:absolute; top:36px; left:50%; transform:translateX(-50%); z-index:59; width:min(700px,calc(100vw - 24px));
+      box-sizing:border-box; border:1px solid rgba(0,212,255,.55); background:rgba(0,12,28,.94); color:#ccefff;
+      font:10px/1.35 ui-monospace,monospace; }
+    .mgov__bar { display:flex; flex-wrap:wrap; align-items:center; gap:6px 10px; padding:5px 8px; }
+    .mgov__title { color:#66ddff; letter-spacing:.08em; }
+    .mgov__mission { color:#ccefff; }
+    .mgov__badges { display:flex; flex-wrap:wrap; gap:4px; flex:1 1 300px; }
+    .mgov__badge { padding:1px 6px; border:1px solid rgba(0,212,255,.4); }
+    .mgov__badge[data-tone="ok"] { border-color:rgba(99,255,209,.55); color:#63ffd1; }
+    .mgov__badge[data-tone="warn"] { border-color:rgba(247,209,84,.65); color:#f7d154; }
+    .mgov__badge[data-tone="lock"] { border-color:rgba(255,140,200,.65); color:#ff8cc8; }
+    .mgov__badge[data-tone="off"] { border-color:rgba(255,110,110,.6); color:#ff6e6e; }
+    .mgov__toggle, .mgov__action { font:10px ui-monospace,monospace; color:#ccefff; background:#0b1a2e; border:1px solid rgba(0,212,255,.55);
+      padding:2px 8px; cursor:pointer; }
+    .mgov__toggle:hover, .mgov__action:hover, .mgov__toggle:focus-visible, .mgov__action:focus-visible { color:#fff; outline:1px solid #00d4ff; }
+    .mgov__body { max-height:min(60vh,520px); overflow:auto; padding:0 8px 8px; border-top:1px dashed rgba(0,212,255,.3); }
+    .mgov__note { padding:5px 0; color:#f7d154; }
+    .mgov__heading { margin:8px 0 4px; font-size:10px; color:#66ddff; letter-spacing:.06em; }
+    .mgov__empty { color:#7fa6b8; padding:2px 0; }
+    .mgov__row { display:flex; flex-wrap:wrap; align-items:center; gap:4px 8px; padding:4px 0; border-bottom:1px solid rgba(0,212,255,.12); }
+    .mgov__what { flex:1 1 200px; }
+    .mgov__outcome { flex:1 1 100%; color:#9fc7d8; }
+    .mgov__own { color:#9fc7d8; }
+    .mgov__strip { display:inline-flex; gap:2px; }
+    .mgov__step { padding:0 4px; border:1px solid rgba(0,212,255,.2); color:#4f7284; font-size:9px; }
+    .mgov__step[data-reached="true"] { color:#63ffd1; border-color:rgba(99,255,209,.55); }
+    .mgov__step[data-current="true"] { background:rgba(0,212,255,.16); }
+    .mgov__step[data-terminal] { color:#ff6e6e; border-color:rgba(255,110,110,.7); background:rgba(255,110,110,.12); }
+    @media (max-width:1500px) { .mgov { left:12px; transform:none; } }
   </style>
   <script type="importmap">
   {"imports":{"three":"./node_modules/three/build/three.module.js","three/addons/":"./node_modules/three/examples/jsm/"}}
@@ -389,6 +418,7 @@
         aria-pressed="false" title="Pause evidence ticker motion">Ⅱ</button>
       <span class="notice__summary" data-system-ticker-summary aria-live="polite"></span>
     </div>
+    <aside id="mission-governance" class="mgov" aria-label="Mission operations: governance and approvals"></aside>
     <aside id="live-hypergraph" class="live-hypergraph" aria-label="Live network hypergraph">
       <button class="live-hypergraph__resize" type="button" data-live-graph-resize aria-label="Resize live hypergraph">↗</button>
       <button id="live-hypergraph-bundle" class="live-hypergraph__bundle" type="button"
@@ -558,6 +588,7 @@
     import { ContextualWorkbench } from "./contextualWorkbench.js";
     import { SystemEvidenceTicker } from "./systemEvidenceTicker.js";
     import { NesdrSpectrumView } from "./nesdrSpectrumView.js";
+    import { MissionGovernancePanel } from "./missionGovernancePanel.js";
 
     const viewerOptions = {
       animation: false,
@@ -627,6 +658,10 @@
     });
     const liveGraphController = new LiveGraphController();
     const evidenceTicker = new SystemEvidenceTicker({root:document.getElementById("system-evidence-ticker")}).start();
+    const missionGovernance = new MissionGovernancePanel({
+      root: document.getElementById("mission-governance"),
+      storages: [window.sessionStorage, window.localStorage],
+      missionId: new URLSearchParams(window.location.search).get("mission")});
     window.scytheEvidenceTicker = evidenceTicker;
     const tickerRoot = document.getElementById("globe-root");
     tickerRoot.addEventListener("scythe-web:graph-selection", ({detail}) => evidenceTicker.note("selection",
