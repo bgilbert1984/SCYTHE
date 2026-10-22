@@ -8898,8 +8898,10 @@
             <input id="sdrpp-frequency-input" class="spec-control" value="145.350M" aria-label="SDR++ tune frequency" style="width:92px;" />
             <button class="spec-control" id="sdrpp-tune-btn" title="Tune SDR++ through Rigctl">Tune</button>
             <button class="spec-control" id="sdrpp-disconnect-btn" title="Disconnect the RF bridge">Disconnect</button>
-            <button class="spec-control" id="sdrpp-approvals-btn" title="Radio commands waiting for a second operator">Approvals</button>
-            <div id="sdrpp-approvals" role="region" aria-label="Radio commands awaiting approval" style="display:none;position:absolute;right:8px;top:100%;z-index:50;min-width:320px;max-width:520px;padding:8px;background:#0b1220;border:1px solid #2a3550;border-radius:4px;font-size:12px;"></div>
+            <span style="position:relative;display:inline-block;">
+                <button class="spec-control" id="sdrpp-approvals-btn" title="Radio commands waiting for a second operator">Approvals</button>
+                <div id="sdrpp-approvals" role="region" aria-label="Radio commands awaiting approval" style="display:none;position:absolute;right:0;bottom:100%;margin-bottom:6px;z-index:50;min-width:320px;max-width:min(520px,60vw);max-height:40vh;overflow-y:auto;padding:8px;background:#0b1220;border:1px solid #2a3550;border-radius:4px;font-size:12px;"></div>
+            </span>
             <div id="zoomControls">
                 <button class="spec-control" id="zoomInBtn">+</button>
                 <button class="spec-control" id="zoomOutBtn">-</button>
