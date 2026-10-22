@@ -153,6 +153,29 @@ export function nodesNotYetCreated(events, at) {
   return hidden;
 }
 
+/**
+ * Nodes the server had deleted at `at`: those whose newest node event up to `at` is a NODE_DELETE. A later create or
+ * update brings a node back, as it does on the live page. Only deletes in the loaded window can hide a node.
+ */
+export function nodesDeletedBy(events, at) {
+  const hidden = new Set();
+  if (at == null) return hidden;
+  const history = new Map();
+  for (const event of events || []) {
+    const id = event?.entity_id;
+    if (!id || !/^NODE_(CREATE|UPDATE|DELETE)$/.test(event.event_type || "")) continue;
+    const time = Number(event.timestamp);
+    if (!Number.isFinite(time) || time > at) continue;
+    if (!history.has(id)) history.set(id, []);
+    history.get(id).push({type: event.event_type, time, seq: Number(event.seq) || 0});
+  }
+  for (const [id, entries] of history) {
+    entries.sort((a, b) => a.time - b.time || a.seq - b.seq);
+    if (entries[entries.length - 1].type === "NODE_DELETE") hidden.add(id);
+  }
+  return hidden;
+}
+
 /** The scrubber's clock label: UTC time of day, with the date when the span crosses midnight. */
 export function scrubLabel(at, bounds) {
   const iso = new Date(Number(at)).toISOString();

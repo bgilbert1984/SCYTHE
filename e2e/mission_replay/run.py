@@ -36,6 +36,7 @@ EVENTS = [
     event(7, 9, "probe", "n0"),
     event(8, 3, "EDGE_CREATE", "edge-del", src="n8", dst="n9"),              # a drawn edge the server later deletes
     event(9, 8, "EDGE_DELETE", "edge-del", id="edge-del"),
+    event(10, 0, "NODE_CREATE", "n10"), event(11, 4, "NODE_DELETE", "n10"),   # a node the server deletes (live and in the replay)
 ]
 # Drawn edges: id -> (src, dst). "edge-C" has no event at all.
 DRAWN = {"edge-by-id": ("n0", "n1"), "drawn-B": ("n2", "n3"), "edge-C": ("n4", "n5"), "dup-1": ("n6", "n7"), "dup-2": ("n6", "n7"),
@@ -46,6 +47,10 @@ SCRUBS = [   # seconds after T0 -> edges that must be hidden (among the drawn on
     (6.5, set()),                                 # all exist
     (8.5, {"edge-del"}),                          # edge-del was deleted at +8s; unmatched events hide nothing
                                                   # (+9s is the newest event, where the slider means Live, so it is not probed)
+]
+NODE_SCRUBS = [   # seconds after T0 -> is n10 shown while the timeline decides (it is live-deleted by then)
+    (2, True),      # before the delete at +4s
+    (5.5, False),   # after it
 ]
 EXPECTED_IDENTITY = {"byId": 3, "byEndpoints": 1, "unmatched": 2}
 
@@ -71,6 +76,7 @@ class Check:
             print("      state:", self.page.evaluate("""() => JSON.stringify({
               identity: scytheMissionViewport.state.edgeIdentity, scrubMs: scytheMissionViewport.state.scrubMs,
               events: scytheMissionViewport.state.events.length, deleted: [...globe._deletedEdges], hidden: [...globe._hiddenEdges],
+              deletedNodes: [...globe._deletedNodes],
               drawn: [...globe._graph.edges.entries()].filter(([id]) => !id.startsWith('prox:')).map(([id, e]) => [id, e.src, e.dst]),
               queue: globe._updateQueue.length})"""))
             print("      matches:", self.page.evaluate("""async () => {
@@ -92,10 +98,10 @@ class Check:
     def visible_ids(self):
         return {e["id"] for e in self.page.evaluate("globe._getVisibleEdges().map(e => ({id: e.id}))")}
 
-    def graph_event(self, event_type, entity_id, **data):
+    def graph_event(self, event_type, entity_id, kind="edge", **data):
         """Deliver an event through the page's own graph_event socket handler, as the server would."""
-        self.page.evaluate("""([type, id, data]) => globe._socket.listeners('graph_event')[0](
-            {event_type: type, entity_id: id, entity_kind: 'edge', data}) """, [event_type, entity_id, data])
+        self.page.evaluate("""([type, id, kind, data]) => globe._socket.listeners('graph_event')[0](
+            {event_type: type, entity_id: id, entity_kind: kind, data}) """, [event_type, entity_id, kind, data])
         # The globe applies queued updates on a timer, which software rendering can delay: wait for the queue to drain.
         self.page.wait_for_function("globe._updateQueue.length === 0", timeout=15000)
         self.page.wait_for_timeout(150)
@@ -114,6 +120,52 @@ class Check:
         self.record("an edge the server creates again is drawn again", "edge-del" in self.visible_ids())
         self.graph_event("EDGE_DELETE", "edge-del", id="edge-del")
         self.record("and a second delete hides it again", "edge-del" not in self.visible_ids())
+
+    def node_shown(self, node_id):
+        """The shader's own visibility flag for a node: what the picker and the renderer both read."""
+        return self.page.evaluate("""(id) => { const n = globe._graph.nodes.get(id);
+            return n ? globe._nodeMesh.geometry.attributes.instanceVisible.array[n.idx] === 1 : null; }""", node_id)
+
+    def hyperedge_vertices(self):
+        return self.page.evaluate("globe._heMesh.geometry.drawRange.count")
+
+    def settle(self):
+        self.page.wait_for_function("globe._updateQueue.length === 0", timeout=15000)
+        self.page.wait_for_timeout(150)
+
+    def node_delete_cases(self):
+        page = self.page
+        page.evaluate("""() => {
+            globe._queueUpdate({type: 'edge_update', id: 'edge-nd', src: 'n10', dst: 'n11', confidence: 0.9, entropy: 0.5});
+            globe._queueUpdate({type: 'hyperedge_update', id: 'he-nd', members: ['n10', 'n11', 'n0'], confidence: 0.8}); }""")
+        self.settle()
+        base = self.hyperedge_vertices()
+        self.record("before a delete, the node, its edge and its hyperedge are drawn",
+                    self.node_shown("n10") and "edge-nd" in self.visible_ids() and base > 0, f"hyperedge vertices {base}")
+        self.graph_event("NODE_DELETE", "n10", kind="host")
+        self.record("a live NODE_DELETE hides the node", self.node_shown("n10") is False)
+        self.record("  and keeps it, so a scrub can still show it", page.evaluate("globe._graph.nodes.has('n10')"))
+        self.record("  and the edge that ends on it goes with it", "edge-nd" not in self.visible_ids())
+        self.record("  and so does a hyperedge it belongs to", self.hyperedge_vertices() < base, f"{self.hyperedge_vertices()} < {base}")
+        page.evaluate("globe.selectNode('n10')")
+        self.record("  and it cannot be selected", page.evaluate("globe._selectedEntityId") is None)
+        nodes, edges = page.evaluate("globe._graph.nodes.size"), self.visible_ids()
+        self.graph_event("NODE_DELETE", "never-drawn-node", kind="host")
+        self.record("deleting a node that was never drawn changes nothing",
+                    page.evaluate("globe._graph.nodes.size") == nodes and self.visible_ids() == edges and self.node_shown("n10") is False)
+        for seconds, shown in NODE_SCRUBS:
+            self.scrub_to(seconds)
+            self.record(f"scrubbed to +{seconds}s the timeline decides: n10 is {'shown' if shown else 'hidden'}",
+                        self.node_shown("n10") is shown)
+            self.record(f"  and the edge that ends on it agrees at +{seconds}s", ("edge-nd" in self.visible_ids()) is shown)
+        page.evaluate("document.querySelector('.mvp__live').click()")
+        page.wait_for_timeout(400)
+        self.record("back on Live, the deleted node is hidden again", self.node_shown("n10") is False)
+        self.graph_event("NODE_CREATE", "n10", kind="host", lat=10.0, lon=20.0, confidence=0.9)
+        self.record("a node the server creates again is drawn again", self.node_shown("n10") is True)
+        self.record("  with its edge and hyperedge", "edge-nd" in self.visible_ids() and self.hyperedge_vertices() == base)
+        self.graph_event("NODE_DELETE", "n10", kind="host")
+        self.record("and a second delete hides it again", self.node_shown("n10") is False)
 
     def run(self):
         page = self.page
@@ -141,6 +193,7 @@ class Check:
         self.record("Live restores every edge the timeline hid", self.hidden() == set())
         self.record("back on Live, the deleted edge stays hidden", "edge-del" not in self.visible_ids())
         self.live_recreate_cases()
+        self.node_delete_cases()
         page.evaluate("scytheMissionViewport.refresh()")     # recompute now rather than race the poll
         page.wait_for_timeout(300)
         tooltip = page.evaluate("document.querySelector('.mvp__clock').title")
