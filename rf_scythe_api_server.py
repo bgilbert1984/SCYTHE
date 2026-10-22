@@ -4265,6 +4265,7 @@ if FLASK_AVAILABLE:
                 import queue as _queue_mod
                 from scene_duckdb_store import TacticalEvent as _TEv
                 from live_mission_binding import live_session as _live_session
+                from graph_event_fields import graph_event_fields as _graph_event_fields
                 _graph_event_q: _queue_mod.Queue = _queue_mod.Queue(maxsize=2000)
                 globals()['_graph_event_q'] = _graph_event_q  # T4-2: expose for /api/health/queues
 
@@ -4280,10 +4281,12 @@ if FLASK_AVAILABLE:
                         except _queue_mod.Empty:
                             continue
                         try:
-                            et = getattr(ev, 'event_type', '') or getattr(ev, 'type', '')
-                            eid = getattr(ev, 'entity_id', '') or getattr(ev, 'id', '') or ''
-                            seq = int(getattr(ev, 'sequence_id', 0) or 0)
-                            data = getattr(ev, 'entity_data', None) or getattr(ev, 'payload', {}) or {}
+                            # An event is an object (engine) or a dict (WriteBus ENTITY_UPSERT).
+                            fields = _graph_event_fields(ev)
+                            et = fields['event_type']
+                            eid = fields['entity_id']
+                            seq = fields['sequence_id']
+                            data = fields['data']
                             loc = data.get('location') or {}
                             lat = float(loc.get('lat') or data.get('lat') or 0.0)
                             lon = float(loc.get('lon') or data.get('lon') or 0.0)
@@ -4315,7 +4318,7 @@ if FLASK_AVAILABLE:
                                     _sio.emit('graph_event', {
                                         'event_type': et,
                                         'entity_id': eid,
-                                        'entity_kind': getattr(ev, 'entity_kind', '') or getattr(ev, 'entity_type', ''),
+                                        'entity_kind': fields['entity_kind'],
                                         'sequence_id': seq,
                                         'data': data,
                                     }, namespace='/')
@@ -4323,7 +4326,7 @@ if FLASK_AVAILABLE:
                                     pass
 
                             # T4-4: rf_field_update push for rf_node events
-                            ekind = (getattr(ev, 'entity_kind', '') or getattr(ev, 'entity_type', '') or '').lower()
+                            ekind = (fields['entity_kind'] or '').lower()
                             if 'rf' in ekind and _sio is not None:
                                 try:
                                     from rf_field_generator import get_field_snapshot as _rff
