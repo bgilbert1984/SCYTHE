@@ -94,12 +94,13 @@ class Check:
         the two cameras equal.
         """
         deadline = time.monotonic() + timeout_s
-        last = None
+        anchor = None
         while time.monotonic() < deadline:
             now = self.page.evaluate(self.CAMERA_STATE)
-            if last and now["frame"] >= last["frame"] + 2 and now["synced"] and now["vm"] == last["vm"]:
-                return
-            last = now
+            if anchor is None or now["vm"] != anchor["vm"]:
+                anchor = now        # the first sample, or the camera moved: count frames from here
+            elif now["frame"] >= anchor["frame"] + 2 and now["synced"]:
+                return              # (counted from the anchor, not between polls: under load a poll may see one frame or none)
             self.page.wait_for_timeout(100)
         raise InfrastructureError(f"the camera did not settle within {timeout_s} s (frames are not rendering, or it keeps moving)")
 
