@@ -77,3 +77,46 @@ export function evidenceCounts(events) {
 export function tailOffset(total, count) {
   return Math.max(0, (Number(total) || 0) - count);
 }
+
+/** Shader codes for the globe's per-node semantic attribute; 0 draws as it always did. */
+export const NODE_SEMANTIC_CODE = {unclassified: 0, observation: 1, inference: 2, correlation: 3};
+
+/**
+ * What kind of thing a node is, from what the server recorded about it: its entity kind, how its position was
+ * resolved (node_geo_index.method) and the mission events that touch it. Nothing is guessed: a node with no such
+ * evidence is unclassified. `basis` says which fact decided it.
+ */
+export function classifyNode({kind, method, events = []} = {}) {
+  const observed = events.filter(event => classifyEvent(event?.event_type).key === "observation").length;
+  const resolution = String(method || "").toLowerCase();
+  let key = "unclassified";
+  let basis = "no evidence or position method recorded";
+  if (/hyperedge/i.test(String(kind || ""))) {
+    key = "correlation"; basis = "hyperedge entity";
+  } else if (observed) {
+    key = "observation"; basis = `${observed} observation event${observed === 1 ? "" : "s"}`;
+  } else if (resolution === "observed") {
+    key = "observation"; basis = "position observed";
+  } else if (resolution) {
+    key = "inference"; basis = `position inferred (${resolution})`;
+  }
+  return {key, basis, code: NODE_SEMANTIC_CODE[key], ...KINDS[key]};
+}
+
+/** Count nodes by class, for the header. */
+export function nodeClassCounts(classes) {
+  const counts = {observation: 0, inference: 0, correlation: 0, unclassified: 0};
+  for (const item of classes) counts[item.key] += 1;
+  return counts;
+}
+
+/** Group events by entity once, so classifying every node is not a scan of all events per node. */
+export function eventsByEntity(events) {
+  const grouped = new Map();
+  for (const event of events || []) {
+    if (!event?.entity_id) continue;
+    if (!grouped.has(event.entity_id)) grouped.set(event.entity_id, []);
+    grouped.get(event.entity_id).push(event);
+  }
+  return grouped;
+}

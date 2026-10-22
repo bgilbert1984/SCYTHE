@@ -740,6 +740,8 @@
     .mvp__empty, .mvp__line { color:#7fa6b8; }
     .mvp__inspector { max-height:40vh; overflow:auto; padding:4px 8px 8px; border-top:1px dashed rgba(0,212,255,.3); }
     .mvp__heading { margin:2px 0 4px; font-size:10px; color:#66ddff; letter-spacing:.06em; }
+    .mvp__class { color:#ccefff; padding:1px 0 3px; }
+    .mvp__class[data-kind="inference"] { color:#f7d154; } .mvp__class[data-kind="correlation"] { color:#ff8cc8; } .mvp__class[data-kind="observation"] { color:#63ffd1; }
     .mvp__trace { padding:3px 0; border-bottom:1px solid rgba(0,212,255,.12); }
   </style>
 </head>
@@ -1976,7 +1978,7 @@ async function loadInitialState() {
       if (nodes.length > 0) {
         nodes.forEach(n => {
           if (n.lat != null && n.lon != null)
-            globe.upsertNode(n.node_id, n.lat, n.lon, n.confidence, { kind: 'cached' });
+            globe.upsertNode(n.node_id, n.lat, n.lon, n.confidence, { kind: 'cached', method: n.method });
         });
         addFeedItem(`📍 ${nodes.length} node positions seeded from geo index`, 'info');
       }
@@ -4379,7 +4381,8 @@ document.addEventListener('DOMContentLoaded', () => {
   const missionId = new URLSearchParams(window.location.search).get("mission");
   const viewport = new MissionViewportPanel({
     root: document.getElementById("mission-viewport"), tint: document.getElementById("mission-viewport-tint"),
-    apiBase: window.SCYTHE_API_BASE || "", missionId, storages: [window.sessionStorage, window.localStorage] });
+    apiBase: window.SCYTHE_API_BASE || "", missionId,
+    globe: () => (typeof globe !== "undefined" ? globe : null), storages: [window.sessionStorage, window.localStorage] });
   window.scytheMissionViewport = viewport;
   window.addEventListener("globe:node_selected", ({detail}) => viewport.select(detail?.node ? detail.entityId : null));
 </script>

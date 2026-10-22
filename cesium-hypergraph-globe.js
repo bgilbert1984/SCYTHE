@@ -278,6 +278,7 @@ const NODE_VERT = /* glsl */`
   attribute vec3  instanceColor;
   attribute float instanceViolations; // packed: dns|c2|rst|port in nibbles
   attribute float instanceLifecycle;  // 0=ghost → 1=active
+  attribute float instanceSemantic;   // 0=unclassified 1=observation 2=inference 3=correlation
 
   uniform float uTime;
   uniform float uSelectedId;          // -1 = none
@@ -289,6 +290,7 @@ const NODE_VERT = /* glsl */`
   varying vec3  vColor;
   varying float vViolations;
   varying float vLifecycle;
+  varying float vSemantic;
   varying vec2  vUv;
   varying vec3  vNormal;
   varying float vFarFade;
@@ -307,6 +309,7 @@ const NODE_VERT = /* glsl */`
     vColor     = instanceColor;
     vViolations= instanceViolations;
     vLifecycle = instanceLifecycle;
+    vSemantic  = instanceSemantic;
 
     float emerge = smoothstep(0.0, 0.85, instanceLifecycle);
 
@@ -353,6 +356,7 @@ const NODE_FRAG = /* glsl */`
   varying vec3  vColor;
   varying float vViolations;
   varying float vLifecycle;
+  varying float vSemantic;
   varying vec2  vUv;
   varying vec3  vNormal;
   varying float vFarFade;
@@ -396,6 +400,12 @@ const NODE_FRAG = /* glsl */`
     float alpha = smoothstep(0.0, 0.35, vLifecycle) * max(0.1, vConf);
     alpha = min(alpha, 0.75);   // cap opacity so labels remain visible through nodes
     alpha *= smoothstep(1.0, 0.8, d);  // soft anti-aliased circle edge
+    // Semantic class: observations stay solid; an inference is a hollow ring; a correlation is a ring with a core.
+    if (vSemantic > 1.5) {
+      float ring = smoothstep(0.5, 0.62, d);
+      float core = vSemantic > 2.5 ? 1.0 - smoothstep(0.2, 0.3, d) : 0.0;
+      alpha *= max(ring, core);
+    }
     alpha *= vFarFade;                 // fade at horizon / far clip plane
     gl_FragColor = vec4(clamp(color, 0.0, 2.0), alpha);
   }
@@ -2133,6 +2143,7 @@ class CesiumHypergraphGlobe {
     const colArr  = new Float32Array(MAX_NODES * 3).fill(0.3);
     const violArr = new Float32Array(MAX_NODES);
     const lcArr   = new Float32Array(MAX_NODES);   // lifecycle
+    const semArr  = new Float32Array(MAX_NODES);   // semantic class code
 
     geo.setAttribute('instancePosition',   new THREE.InstancedBufferAttribute(posArr,  3));
     geo.setAttribute('instanceId',         new THREE.InstancedBufferAttribute(idArr,   1));
@@ -2142,6 +2153,7 @@ class CesiumHypergraphGlobe {
     geo.setAttribute('instanceColor',      new THREE.InstancedBufferAttribute(colArr,  3));
     geo.setAttribute('instanceViolations', new THREE.InstancedBufferAttribute(violArr, 1));
     geo.setAttribute('instanceLifecycle',  new THREE.InstancedBufferAttribute(lcArr,   1));
+    geo.setAttribute('instanceSemantic',   new THREE.InstancedBufferAttribute(semArr,  1));
 
     const mat = new THREE.ShaderMaterial({
       uniforms: {
@@ -3359,7 +3371,10 @@ class CesiumHypergraphGlobe {
     for (const k of Object.keys(geo.attributes)) geo.attributes[k].needsUpdate = true;
 
     // Store in graph state
-    this._graph.nodes.set(id, { lat, lon, conf, idx, shadow: ev.shadow ?? false });
+    // kind and geo_method are what the server said about the node; the viewport classifies from them.
+    this._graph.nodes.set(id, { lat, lon, conf, idx, shadow: ev.shadow ?? false,
+      kind: ev.entity_kind || ev.kind || null, method: ev.geo_method ?? null,
+      semantic: this._graph.nodes.get(id)?.semantic ?? 0 });
     return isNew;
   }
 
@@ -3755,8 +3770,19 @@ class CesiumHypergraphGlobe {
       entity_kind: options.kind || 'host',
       violations: options.violations || {},
       cluster_size: options.clusterSize || 1,
-      shadow: options.shadow || false
+      shadow: options.shadow || false,
+      geo_method: options.method || null
     });
+  }
+
+  /** Set a node's semantic class code (0 unclassified, 1 observation, 2 inference, 3 correlation). */
+  setNodeSemantic(id, code) {
+    const node = this._graph.nodes.get(id);
+    if (!node || node.semantic === code) return;
+    node.semantic = code;
+    const attr = this._nodeMesh.geometry.attributes.instanceSemantic;
+    attr.array[node.idx] = code;
+    attr.needsUpdate = true;
   }
 
   upsertEdge(id, srcId, dstId, conf, options = {}) {

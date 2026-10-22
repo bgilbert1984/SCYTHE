@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import {classifyEvent, describeEvent, entityProvenance, evidenceCounts, missionLifecycle, tailOffset} from "./missionViewport.js";
+import {NODE_SEMANTIC_CODE, classifyEvent, classifyNode, describeEvent, entityProvenance, eventsByEntity, evidenceCounts,
+  missionLifecycle, nodeClassCounts, tailOffset} from "./missionViewport.js";
 
 test("the lifecycle only reports states the server records", () => {
   assert.equal(missionLifecycle({}).key, "none");
@@ -52,4 +53,29 @@ test("provenance is the entity's own events and counts cover every class", () =>
   assert.equal(tailOffset(250, 100), 150);
   assert.equal(tailOffset(20, 100), 0);
   assert.equal(tailOffset(undefined, 100), 0);
+});
+
+test("a node is classified only from what the server recorded about it", () => {
+  assert.equal(classifyNode({kind: "hyperedge"}).key, "correlation");
+  assert.equal(classifyNode({events: [{event_type: "probe"}, {event_type: "flow"}]}).basis, "2 observation events");
+  assert.equal(classifyNode({method: "observed"}).basis, "position observed");
+  assert.equal(classifyNode({method: "neighbor_inferred"}).key, "inference");
+  assert.equal(classifyNode({method: "recon_fallback"}).basis, "position inferred (recon_fallback)");
+  assert.equal(classifyNode({kind: "host"}).key, "unclassified");
+  assert.equal(classifyNode().code, 0);
+});
+
+test("evidence outranks how a position was resolved, and graph writes alone say nothing", () => {
+  assert.equal(classifyNode({method: "neighbor_inferred", events: [{event_type: "probe"}]}).key, "observation");
+  assert.equal(classifyNode({events: [{event_type: "NODE_CREATE"}, {event_type: "CONFIDENCE_MUTATION"}]}).key, "unclassified");
+  assert.equal(classifyNode({kind: "hyperedge", method: "observed"}).key, "correlation");
+  assert.deepEqual(Object.values(NODE_SEMANTIC_CODE), [0, 1, 2, 3]);
+});
+
+test("nodes are counted by class and events grouped per entity", () => {
+  const classes = [classifyNode({method: "observed"}), classifyNode({method: "x"}), classifyNode({})];
+  assert.deepEqual(nodeClassCounts(classes), {observation: 1, inference: 1, correlation: 0, unclassified: 1});
+  const grouped = eventsByEntity([{entity_id: "a", event_type: "probe"}, {entity_id: "a"}, {event_type: "x"}]);
+  assert.equal(grouped.get("a").length, 2);
+  assert.equal(grouped.size, 1);
 });

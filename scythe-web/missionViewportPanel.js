@@ -1,5 +1,6 @@
 import {sessionToken} from "./missionGovernance.js";
-import {describeEvent, entityProvenance, evidenceCounts, missionLifecycle, tailOffset} from "./missionViewport.js";
+import {classifyNode, describeEvent, entityProvenance, eventsByEntity, evidenceCounts, missionLifecycle, nodeClassCounts,
+  tailOffset} from "./missionViewport.js";
 
 const WINDOW = 200;     // how many of the mission's newest events the viewport reads
 const RIBBON = 8;       // how many of those the ribbon shows
@@ -10,10 +11,10 @@ const RIBBON = 8;       // how many of those the ribbon shows
  * and the pending approvals. Where the server records nothing (a hash, a WriteBus entry) it says "not recorded".
  */
 export class MissionViewportPanel {
-  constructor({root, tint, apiBase = "", missionId = null, fetchImpl = globalThis.fetch?.bind(globalThis), storages = [],
+  constructor({root, tint, globe = () => null, apiBase = "", missionId = null, fetchImpl = globalThis.fetch?.bind(globalThis), storages = [],
                pollMs = 5000, setTimer = globalThis.setInterval?.bind(globalThis)} = {}) {
-    Object.assign(this, {root, tint, apiBase, missionId, fetch: fetchImpl, storages});
-    this.state = {mission: null, reachable: true, pending: [], events: [], total: null, selected: null};
+    Object.assign(this, {root, tint, globe, apiBase, missionId, fetch: fetchImpl, storages});
+    this.state = {mission: null, reachable: true, pending: [], events: [], total: null, selected: null, nodeClasses: []};
     this.build();
     this.render();
     this.refresh();
@@ -33,7 +34,8 @@ export class MissionViewportPanel {
     this.lifecycle = this.el("span", "mvp__lifecycle");
     this.mission = this.el("span", "mvp__mission");
     this.counts = this.el("span", "mvp__counts");
-    this.header.append(this.lifecycle, this.mission, this.counts);
+    this.nodeCounts = this.el("span", "mvp__counts");
+    this.header.append(this.lifecycle, this.mission, this.counts, this.nodeCounts);
     this.ribbon = this.el("div", "mvp__ribbon");
     this.ribbon.setAttribute("aria-label", "Mission event stream");
     this.inspector = this.el("section", "mvp__inspector");
@@ -52,8 +54,28 @@ export class MissionViewportPanel {
     }
   }
 
+  /** The classification of one of the globe's nodes, from what the globe and the mission's events record about it. */
+  classify(id, node, grouped = eventsByEntity(this.state.events)) {
+    return classifyNode({kind: node?.kind, method: node?.method, events: grouped.get(id) || []});
+  }
+
+  /** Classify every node on the globe and tell the globe the class codes, only where one changed. */
+  syncNodes() {
+    const globe = this.globe();
+    const nodes = globe?._graph?.nodes;
+    if (!nodes) return;
+    const grouped = eventsByEntity(this.state.events);
+    const classes = [];
+    for (const [id, node] of nodes) {
+      const result = this.classify(id, node, grouped);
+      globe.setNodeSemantic?.(id, result.code);
+      classes.push(result);
+    }
+    this.state.nodeClasses = classes;
+  }
+
   async refresh() {
-    if (!this.missionId) return this.render();
+    if (!this.missionId) { this.syncNodes(); return this.render(); }
     const id = encodeURIComponent(this.missionId);
     const token = sessionToken(...this.storages);
     const [mission, first, pending] = await Promise.all([
@@ -94,6 +116,16 @@ export class MissionViewportPanel {
       badge.title = info.note;
       this.counts.append(badge);
     }
+    this.syncNodes();
+    const nodes = nodeClassCounts(this.state.nodeClasses);
+    this.nodeCounts.textContent = "";
+    for (const [key, label] of [["observation", "observed"], ["inference", "inferred"], ["correlation", "correlated"], ["unclassified", "unclassified"]]) {
+      if (!nodes[key]) continue;
+      const info = classifyNode({kind: key === "correlation" ? "hyperedge" : "", method: {observation: "observed", inference: "inferred"}[key]});
+      const badge = this.el("span", "mvp__count", `${info.glyph} ${nodes[key]} node${nodes[key] === 1 ? "" : "s"} ${label}`);
+      badge.title = info.note;
+      this.nodeCounts.append(badge);
+    }
     this.renderRibbon();
     this.renderInspector();
   }
@@ -123,6 +155,12 @@ export class MissionViewportPanel {
     this.inspector.textContent = "";
     if (!selected) return;
     this.inspector.append(this.el("h3", "mvp__heading", `PROVENANCE · ${selected}`));
+    const node = this.globe()?._graph?.nodes?.get(selected);
+    const own = this.classify(selected, node);
+    const cls = this.el("div", "mvp__class", `${own.glyph} ${own.label} · ${own.basis}`);
+    cls.dataset.kind = own.key;
+    cls.title = own.note;
+    this.inspector.append(cls);
     this.inspector.append(this.el("div", "mvp__line", `Mission: ${this.missionId || "none selected"}`));
     const rows = this.missionId ? entityProvenance(events, selected) : [];
     if (!rows.length) {
