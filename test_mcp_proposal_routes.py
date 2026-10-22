@@ -165,5 +165,85 @@ class DecisionTest(ProposalRoutesTest):
             self.assertEqual(self.decide("x").status_code, 503)
 
 
+class GovernanceTest(ProposalRoutesTest):
+    """The state the Mission Governance page shows: read-only, descriptive, for identified operators."""
+
+    def test_it_needs_an_authenticated_caller(self):
+        self.assertEqual(self.call("get", "/api/mcp/governance", token=None).status_code, 401)
+        self.assertEqual(self.call("get", "/api/mcp/governance", token="bad").status_code, 401)
+        self.assertEqual(self.call("get", "/api/mcp/governance", token=None,
+                                   headers={"X-Internal-Token": "s3cret"}).status_code, 200)   # a service may read it
+
+    def test_it_reports_the_phase_the_effective_modes_and_the_deployment_overrides(self):
+        j = self.call("get", "/api/mcp/governance").get_json()
+        self.assertEqual((j["lifecycle_enabled"], j["phase"], j["remote_phase_control_enabled"]),
+                         (True, {"value": 0, "name": "PHASE_0_OBSERVE_ONLY"}, False))
+        self.assertEqual(j["approval_modes"]["HARDWARE_CONTROL"], "SECOND_PRINCIPAL")
+        self.assertEqual(j["approval_modes"]["LOCAL_STATE"], "AUTOMATED")
+        self.assertEqual(j["approval_modes"]["READ_ONLY"], "DIRECT")
+        self.assertEqual(j["approval_mode_overrides"], {"HARDWARE_CONTROL": "SECOND_PRINCIPAL"})
+        self.assertGreater(j["pending_ttl_seconds"], 0)
+        self.assertEqual(j["caller"]["operator_id"], "op-1")
+
+    def test_remote_phase_control_follows_the_deployment_setting(self):
+        with mock.patch.dict(os.environ, {"MCP_ALLOW_REMOTE_PHASE_CONTROL": "true"}):
+            self.assertTrue(self.call("get", "/api/mcp/governance").get_json()["remote_phase_control_enabled"])
+
+    def test_it_changes_nothing(self):
+        before = (self.orch.phase, list(self.orch.dual_agent.decision_log), list(self.bridge.calls))
+        self.call("get", "/api/mcp/governance")
+        self.assertEqual((self.orch.phase, list(self.orch.dual_agent.decision_log), list(self.bridge.calls)), before)
+
+    def test_without_the_lifecycle_it_says_so_instead_of_failing(self):
+        with mock.patch.dict(self.rf.__dict__, {"mcp_handler": None}):
+            r = self.call("get", "/api/mcp/governance")
+        self.assertEqual((r.status_code, r.get_json()["lifecycle_enabled"]), (200, False))
+        self.assertNotIn("phase", r.get_json())
+
+
+class RecentTest(ProposalRoutesTest):
+    """The lifecycle state of every recent proposal, so the page can say why something did or did not run."""
+
+    def recent(self, token="t1", query=""):
+        return self.call("get", "/api/mcp/proposals/recent" + query, token)
+
+    def test_it_needs_an_authenticated_caller_and_the_lifecycle(self):
+        self.assertEqual(self.recent(token=None).status_code, 401)
+        with mock.patch.dict(self.rf.__dict__, {"mcp_handler": None}):
+            self.assertEqual(self.recent().status_code, 503)
+
+    def test_it_shows_each_state_who_acted_and_why(self):
+        waiting = self.tune(hz=1e6, api_key="k-123")
+        approved = self.tune(hz=2e6)
+        self.decide(approved)
+        denied = self.tune(hz=3e6)
+        self.decide(denied, "deny", note="not now")
+        j = self.recent("t2").get_json()
+        by_id = {p["proposal_id"]: p for p in j["proposals"]}
+        self.assertEqual([by_id[waiting]["status"], by_id[approved]["status"], by_id[denied]["status"]],
+                         ["pending_approval", "executed", "denied"])
+        self.assertEqual(by_id[approved]["approved_by"]["callsign"], "CALL2")
+        self.assertEqual(by_id[approved]["proposed_by"]["operator_id"], "op-1")
+        self.assertEqual(by_id[denied]["denied_by"]["operator_id"], "op-2")
+        self.assertIn("expires_at", by_id[waiting])
+        self.assertNotIn("expires_at", by_id[approved])                     # only a waiting proposal has a deadline
+        self.assertIn("awaiting independent approval", by_id[waiting]["reason"])
+        self.assertNotIn("k-123", str(j))                                   # secret-named params are redacted
+        self.assertEqual([p["proposal_id"] for p in j["proposals"]], [denied, approved, waiting])   # newest first
+
+    def test_a_proposal_held_by_the_phase_says_why(self):
+        proposal = self.orch.propose_action("rf_tune", {"frequency_hz": 5e6}, confidence=1.0, agent_id="agent")
+        self.decide(proposal["proposal_id"])
+        item = next(p for p in self.recent().get_json()["proposals"] if p["proposal_id"] == proposal["proposal_id"])
+        self.assertEqual(item["initiator"], "autonomous")
+        self.assertIn("Phase 0", item["reason"])
+
+    def test_limit_is_bounded_and_validated(self):
+        for hz in (1e6, 2e6, 3e6):
+            self.tune(hz=hz)
+        self.assertEqual(len(self.recent(query="?limit=2").get_json()["proposals"]), 2)
+        self.assertEqual(self.recent(query="?limit=abc").status_code, 400)
+
+
 if __name__ == "__main__":
     unittest.main()

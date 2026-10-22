@@ -3907,6 +3907,45 @@ if FLASK_AVAILABLE:
                    if p.get('status') == 'pending_approval']
         return jsonify({'status': 'ok', 'proposals': pending, 'caller': principal.to_dict()})
 
+    @app.route('/api/mcp/governance', methods=['GET'])
+    def mcp_governance():
+        """The lifecycle's current governance state, for display.  Descriptive only: it decides nothing."""
+        principal = _rf_bridge_principal(require_identity=True)
+        if principal is None:
+            return jsonify({'status': 'error', 'message': 'Authentication required'}), 401
+        from mcp_effects import MINIMUM_APPROVAL_MODE, required_approval_mode
+        orchestrator = getattr(globals().get('mcp_handler'), '_orchestrator', None)
+        remote_phase = os.getenv('MCP_ALLOW_REMOTE_PHASE_CONTROL', '').lower() in {'1', 'true', 'yes'}
+        body = {'status': 'ok', 'lifecycle_enabled': orchestrator is not None,
+                'remote_phase_control_enabled': remote_phase, 'caller': principal.to_dict()}
+        if orchestrator is not None:
+            deployment = dict(orchestrator.dual_agent.approval_modes)
+            body.update(
+                phase={'value': orchestrator.phase.value, 'name': orchestrator.phase.name},
+                approval_modes={effect: required_approval_mode(effect, deployment) for effect in sorted(MINIMUM_APPROVAL_MODE)},
+                approval_mode_overrides=deployment,
+                pending_ttl_seconds=orchestrator.dual_agent.pending_ttl)
+        return jsonify(body)
+
+    @app.route('/api/mcp/proposals/recent', methods=['GET'])
+    def mcp_recent_proposals():
+        """The lifecycle state of recent proposals, newest first (read-only; the pending list stays the approval surface)."""
+        principal = _rf_bridge_principal(require_identity=True)
+        if principal is None:
+            return jsonify({'status': 'error', 'message': 'Authentication required'}), 401
+        orchestrator = getattr(globals().get('mcp_handler'), '_orchestrator', None)
+        if orchestrator is None:
+            return jsonify({'status': 'error', 'message': 'approval lifecycle is not initialized'}), 503
+        try:
+            limit = min(200, max(1, int(request.args.get('limit', '50'))))
+        except ValueError:
+            return jsonify({'status': 'error', 'message': 'limit must be an integer'}), 400
+        orchestrator.dual_agent.expire_pending()
+        ttl = orchestrator.dual_agent.pending_ttl
+        log = sorted(orchestrator.dual_agent.decision_log, key=lambda p: p.get('timestamp', 0), reverse=True)[:limit]
+        return jsonify({'status': 'ok', 'proposals': [_proposal_history_view(p, principal, ttl) for p in log],
+                        'caller': principal.to_dict()})
+
     @app.route('/api/mcp/proposals/<proposal_id>/decision', methods=['POST'])
     def mcp_decide_proposal(proposal_id):
         """Approve (and run) or deny a pending proposal as the calling operator.  An adapter: the
@@ -20722,6 +20761,18 @@ def _proposal_view(proposal, caller, ttl):
         'created_at': proposal['timestamp'],
         'expires_at': proposal['timestamp'] + ttl,
     }
+
+
+def _proposal_history_view(proposal, caller, ttl):
+    """A proposal in any lifecycle state, for display: who did what, and why it did not run."""
+    view = _proposal_view(proposal, caller, ttl)
+    if proposal.get('status') != 'pending_approval':
+        view.pop('expires_at')
+    who = lambda key: {k: (proposal.get(key) or {}).get(k) for k in ('operator_id', 'callsign') if (proposal.get(key) or {}).get(k)}
+    view.update(status=proposal.get('status'), reason=proposal.get('error') or proposal.get('approval_reason') or '',
+                approved_by=who('approved_by'), denied_by=who('denied_by'), executed_by=who('executed_by'),
+                approved_at=proposal.get('approved_at'), denied_at=proposal.get('denied_at'))
+    return view
 
 
 def _decision_error_status(message):
