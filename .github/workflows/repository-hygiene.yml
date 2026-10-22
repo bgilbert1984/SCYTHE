@@ -122,6 +122,7 @@ jobs:
             test_graphops_host_trace \
             test_graphops_infrastructure \
             test_ip_enrichment \
+            test_live_mission_binding \
             test_lunar_evidence_resolver \
             test_mcp_approval_action \
             test_mcp_approval_audit \

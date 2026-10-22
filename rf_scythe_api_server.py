@@ -4264,6 +4264,7 @@ if FLASK_AVAILABLE:
             try:
                 import queue as _queue_mod
                 from scene_duckdb_store import TacticalEvent as _TEv
+                from live_mission_binding import live_session as _live_session
                 _graph_event_q: _queue_mod.Queue = _queue_mod.Queue(maxsize=2000)
                 globals()['_graph_event_q'] = _graph_event_q  # T4-2: expose for /api/health/queues
 
@@ -4292,14 +4293,18 @@ if FLASK_AVAILABLE:
                             ds = globals().get('_duck_store')
                             if ds is not None:
                                 try:
+                                    # An event that declares exactly one mission is stored under
+                                    # that mission's live session; anything else stays 'global'.
+                                    live_sid, live_mid = _live_session(data)
                                     ds.append(_TEv(
                                         timestamp=int(time.time() * 1000),
                                         event_type=et,
                                         entity_id=eid,
-                                        session_id='global',
+                                        session_id=live_sid,
                                         lat=lat, lon=lon, alt=alt,
                                         payload=data,
                                         seq=seq,
+                                        mission_id=live_mid,
                                     ))
                                 except Exception:
                                     pass

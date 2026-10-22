@@ -155,6 +155,14 @@ Consequences, from reading the code (not exercised against a running server):
 This is the most important thing to decide before building anything that mixes live and
 replayed evidence in one view.
 
+**Update (`live_mission_binding.py`):** a live event that declares exactly one valid mission
+(in `labels`, `metadata`, `meta`, or WriteBus `provenance_write`) is now stored under
+`live:<mission_id>` with that `mission_id`, so it appears in the mission's events. Everything
+else stays in `'global'` unbound. The shared `'global'` session is deliberately not bound,
+because a session's binding backfills every event already in it. An event naming two missions,
+or any invalid id, stays unbound. Still open: whether production live events actually carry a
+mission in those fields, which was not measured.
+
 ## 5. Revisions
 
 Three different "revision" notions exist or are implied. They are not the same thing.
@@ -302,7 +310,7 @@ In rough dependency order. Each is a backend decision; none is a browser task.
 
 | # | Work | Unblocks |
 |---|---|---|
-| 1 | Decide whether live graph events belong to a mission, and bind them (set `mission_id` on the live append, or bind the `'global'` session) | live and replay agreeing; items 4, 10, 11 |
+| 1 | ~~Decide whether live graph events belong to a mission, and bind them~~ Done for events that declare their mission; see the update in section 4 | live and replay agreeing; items 4, 10, 11 |
 | 2 | Define mission revision (what increments it) and serve it; expose `sequence_id` on stored events | items 2, 3, 10, 13 |
 | 3 | Expose WriteBus commit status read-only, mission-filtered | item 10 |
 | 4 | Add an explicit evidence class (observation, interpretation, annotation, hypothesis) set by the writer | items 3, 12, 13, 15 |
