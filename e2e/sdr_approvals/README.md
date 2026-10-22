@@ -10,6 +10,29 @@ python e2e/sdr_approvals/run.py            # screenshots go to e2e/sdr_approvals
 
 Expected result: **19/19 passed**, exit status 0. That is the reference lifecycle behaviour.
 
+## Coverage
+
+Validated:
+
+- Proposal creation and ownership (who proposed, who may decide)
+- Approval and denial, by real pointer click, on both the console and the governance page
+- Second-principal enforcement, including the same operator's second session and self-approval (403)
+- Halting actions exempt from approval
+- Validation failures (400) before a proposal exists
+- Lifecycle unavailable (503 on the console, "Disabled" on the governance header)
+- Governance header reflecting the server's reported mission, lifecycle, phase, approval mode and remote-phase setting
+- Signed-out governance page: no lifecycle state shown
+- The audit chain behind each console case (proposer, approver, executor)
+
+Not validated (intentionally):
+
+- Login and session establishment (sessions are seeded)
+- Polling refresh behaviour (cases reload the page; a UI test suite is the place for timers)
+- Graph backend, evidence panels, hypergraph synchronisation (the `HTTP 404` banners on the governance page are expected here)
+- A real radio or `rf_bridge`
+- Browser matrix and CI integration (Chromium only, run by hand)
+- Performance characteristics
+
 ## What it verifies
 
 | # | Guarantee |
@@ -52,6 +75,7 @@ They are evidence for reviews and release notes, not an assertion: the run does 
 - `HARDWARE_CONTROL=SECOND_PRINCIPAL` (the recommended setting for deployments that control hardware). The server sets it.
 - Three operator sessions: ALPHA (`tok-alpha`), ALPHA's second session (`tok-alpha2`), BRAVO (`tok-bravo`).
 - Phase 0 (observe-only): operator commands are exempt from the phase; that is part of what is being checked.
+- The governance phase closes the earlier console pages first, to reduce browser resource consumption. This also removed intermittent Approve-click timeouts seen while several Cesium pages stayed open; the cause was not investigated.
 - Port 5099 on loopback; the harness server runs from the repository root and writes a temporary control-audit database.
 - The page loads some scripts from public CDNs (Cesium, MapLibre); the run needs outbound network access.
 - Test-only endpoints exist in the harness server process only: `/__bridge_calls`, `/__audit`, `/__lifecycle/<on|off>`.
