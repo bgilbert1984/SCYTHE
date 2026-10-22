@@ -1,14 +1,14 @@
-# SDR approvals: two-operator browser walkthrough
+# SDR approvals and Mission Governance: two-operator browser walkthrough
 
 An end-to-end check of the radio approval flow (ADR 0005 Decisions 4 and 5, ADR 0006 Decisions 6 and 7) as an operator
 experiences it: two signed-in operators in headless Chromium, the real Flask app and MCP lifecycle behind them, and a
-fake radio.
+fake radio. A second phase drives the Mission Governance page (`scythe-web/regional-rf-demo.html`) against the same lifecycle.
 
 ```
 python e2e/sdr_approvals/run.py            # screenshots go to e2e/sdr_approvals/out/ (git-ignored)
 ```
 
-Expected result: **11/11 passed**, exit status 0. That is the reference lifecycle behaviour.
+Expected result: **19/19 passed**, exit status 0. That is the reference lifecycle behaviour.
 
 ## What it verifies
 
@@ -25,18 +25,27 @@ Expected result: **11/11 passed**, exit status 0. That is the reference lifecycl
 | 9 | With the lifecycle unavailable a control request is a 503 and the UI says so. |
 | 10 | A Tune with no frequency is a 400 and the UI shows a plain message, with no Python exception text. |
 | 11 | Malformed stream settings are a 400 and never become a proposal: validation precedes approval. |
+| 12 | Mission Governance page, signed out: it says to sign in and shows no lifecycle state. |
+| 13 | The governance header shows the mission, lifecycle, phase, approval mode and remote-phase setting the server reports. |
+| 14 | A held Tune counts in the page's Approvals badge; the proposer sees it as their own, with no buttons. |
+| 15 | The approver sees what, who and the lifecycle stage, with Approve/Deny; the recent list says why it waits. |
+| 16 | Approve from the page (real pointer click) runs the Tune, and the page reports who approved it. |
+| 17 | Deny from the page runs nothing and shows it denied by the approver. |
+| 18 | The proposer cannot approve their own command through the decision route (403). |
+| 19 | With the lifecycle unavailable the header says Disabled instead of failing. |
 
-Reference screenshots (pending, approved, denied, lifecycle unavailable, validation error) are in `reference/`.
+Reference screenshots (pending, approved, denied, lifecycle unavailable, validation error, governance header, approver view and approved) are in `reference/`.
 They are evidence for reviews and release notes, not an assertion: the run does not compare pixels.
 
 ## What it does not verify
 
-- The login page. Operator sessions are seeded (`sessionStorage`) and the session check is answered by the test.
+- The login page (on both pages). Operator sessions are seeded (`sessionStorage`) and the session check is answered by the test.
 - A real radio, SDR++, or the real `rf_bridge` (including its own validation). The bridge is a fake that records calls.
 - The default deployment (no approval modes). That is covered by `test_sdr_route_lifecycle.py` and the MCP tests.
 - Expiry of pending proposals, the 20-second badge refresh, roles (ADR 0006 Decision 8), autonomous or agent proposals.
 - The 3D globe. Cesium is not usable in headless Chromium; the harness dismisses its render-error dialog.
-- Pixel layout beyond the reachability checks in case 2.
+- Pixel layout beyond the reachability checks in case 2 and the real clicks in cases 16 and 17. The governance page's graph, evidence and ticker panels are not exercised (their `HTTP 404` banners are expected here: the harness has no graph backend).
+- The governance page's 10-second poll: cases reload the page to read the lifecycle's current state.
 
 ## Execution assumptions
 
@@ -69,7 +78,7 @@ A case that cannot complete (for example a button no click can reach) is reporte
 infrastructure: that is how the Approvals panel placement defect showed up. After a failure, later cases may fail
 too, because the cases share state; fix the first failure first.
 
-`10/11 passed` therefore means: the harness ran, and one lifecycle guarantee no longer holds or was deliberately changed.
+`18/19 passed` therefore means: the harness ran, and one lifecycle guarantee no longer holds or was deliberately changed.
 It does not mean the harness is broken (that is exit 2).
 
 ## Updating

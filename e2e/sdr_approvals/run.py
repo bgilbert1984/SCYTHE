@@ -239,6 +239,116 @@ class Walkthrough:
             c["detail"] = f"responses={got} new_proposals={len(self.get('/__audit')) - before}"
 
         print("page errors:", json.dumps({k: p.errors for k, p in (("alpha", a), ("bravo", b), ("alpha2", a2)) if p})[:600])
+        for page in (a, b, a2):      # the console pages (Cesium) are done; closing them keeps the next phase's clicks responsive
+            if page:
+                page.context.close()
+        self.run_governance(browser)
+
+    # --- the Mission Governance page ----------------------------------------------------------------------------------
+    GOVERNANCE_URL = "/scythe-web/regional-rf-demo.html?mission=MISSION-14"
+
+    def open_governance(self, browser, token):
+        """The regional RF demo page.  It reads the same seeded session as the main console and polls every 10 s, so a
+        reload is how a case sees the lifecycle's current state without waiting."""
+        context = browser.new_context(viewport={"width": 1500, "height": 900})
+        if token:
+            context.add_init_script(f"sessionStorage.setItem('scythe:orchestrator:brokerSession', JSON.stringify({{sessionToken: '{token}'}}));")
+        page = context.new_page()
+        page.errors = []
+        page.on("pageerror", lambda e: page.errors.append(str(e)[:160]))
+        self.load_governance(page)
+        return page
+
+    def load_governance(self, page, expand=False):
+        from playwright.sync_api import Error as PlaywrightError
+        try:
+            page.goto(self.base + self.GOVERNANCE_URL, wait_until="domcontentloaded", timeout=60000)
+            page.wait_for_selector("#mission-governance .mgov__bar", timeout=60000)
+            page.wait_for_timeout(2500)      # the panel's first refresh
+        except PlaywrightError as exc:
+            raise InfrastructureError(f"the governance page did not become ready: {str(exc).splitlines()[0]}")
+        if expand:
+            page.click("#mission-governance-toggle")
+
+    def gov_text(self, page, part=".mgov__body"):
+        return page.inner_text(f"#mission-governance {part}".strip()).replace("\n", " | ")
+
+    def api(self, page, method, path, token, body=None):
+        return page.evaluate("""async ([m, path, t, body]) => { const r = await fetch(path, {method: m,
+            headers: {'X-Session-Token': t, 'Content-Type': 'application/json'}, body: body ? JSON.stringify(body) : undefined});
+            return [r.status, await r.json()]; }""", [method, path, token, body])
+
+    def run_governance(self, browser):
+        anon = self.open_governance(browser, None)
+        with self.case(12, "Governance page, signed out: it says to sign in and shows no lifecycle state") as c:
+            anon.click("#mission-governance-toggle")
+            text = self.gov_text(anon, "")
+            c["ok"] = "Sign in on the main console" in text and "Lifecycle:" not in text
+            c["detail"] = text[:160]
+
+        a = self.open_governance(browser, "tok-alpha")
+        b = self.open_governance(browser, "tok-bravo")
+        with self.case(13, "Governance header shows the mission, lifecycle, phase, approval mode and remote-phase setting") as c:
+            head = self.gov_text(a, ".mgov__bar")
+            self.shot(a, "10-governance-header")
+            c["ok"] = all(x in head for x in ("MISSION MISSION-14", "Lifecycle: Active", "Phase: 0 · observe-only",
+                                                "Approval: SECOND_PRINCIPAL", "Remote phase: Disabled"))
+            c["detail"] = head
+
+        with self.case(14, "A held Tune counts in the badge; the proposer sees it as their own with no buttons") as c:
+            code, body = self.api(a, "POST", "/api/sdr/tune", "tok-alpha", {"frequency_hz": 145.35e6, "mode": "NFM"})
+            for page in (a, b):
+                self.load_governance(page, expand=True)
+            mine = self.gov_text(a)
+            c["ok"] = (code == 409 and body["outcome"] == "pending_approval" and "Approvals (1)" in a.inner_text("#mission-governance-toggle")
+                       and "Yours: another operator must approve" in mine and a.locator("#mission-governance .mgov__action").count() == 0)
+            c["detail"] = f"http={code} {mine[:200]}"
+
+        with self.case(15, "The approver sees what, who and the stage, with Approve/Deny, and the recent list says why it waits") as c:
+            theirs = self.gov_text(b)
+            self.shot(b, "11-governance-approver")
+            c["ok"] = ("Tune SDR to 145.350 MHz NFM" in theirs and "ALPHA" in theirs and "Awaiting a second operator" in theirs
+                       and b.locator("#mission-governance .mgov__action").count() == 2)
+            c["detail"] = theirs[:240]
+
+        with self.case(16, "Approve from the page (real pointer click) runs the Tune and the page reports who approved it") as c:
+            b.locator("#mission-governance .mgov__action[data-decision=approve]").click(timeout=8000)
+            b.wait_for_timeout(1800)
+            after = self.gov_text(b)
+            self.shot(b, "12-governance-approved")
+            c["ok"] = "tune 145350000.0" in self.calls() and "Approved and executed." in after and "Executed; approved by BRAVO" in after
+            c["detail"] = f"calls={self.calls()} {after[:240]}"
+
+        with self.case(17, "Deny from the page: nothing runs and the page shows it denied by BRAVO") as c:
+            self.api(a, "POST", "/api/sdr/tune", "tok-alpha", {"frequency_hz": 100e6})
+            self.load_governance(b, expand=True)
+            b.locator("#mission-governance .mgov__action[data-decision=deny]").click(timeout=8000)
+            b.wait_for_timeout(1800)
+            after = self.gov_text(b)
+            self.shot(b, "13-governance-denied")
+            c["ok"] = "tune 100000000.0" not in self.calls() and "Denied by BRAVO" in after
+            c["detail"] = after[:240]
+
+        with self.case(18, "The proposer cannot approve their own command through the governance route (403)") as c:
+            self.api(a, "POST", "/api/sdr/tune", "tok-alpha", {"frequency_hz": 99e6})
+            pid = self.api(a, "GET", "/api/mcp/proposals/pending", "tok-alpha")[1]["proposals"][0]["proposal_id"]
+            code, _ = self.api(a, "POST", f"/api/mcp/proposals/{pid}/decision", "tok-alpha", {"decision": "approve"})
+            c["ok"] = code == 403 and "tune 99000000.0" not in self.calls()
+            c["detail"] = f"status={code}"
+            self.api(b, "POST", f"/api/mcp/proposals/{pid}/decision", "tok-bravo", {"decision": "deny"})
+
+        with self.case(19, "With the lifecycle unavailable the header says Disabled instead of failing") as c:
+            self.set_lifecycle("off")
+            try:
+                self.load_governance(a)
+                head = self.gov_text(a, ".mgov__bar")
+                self.shot(a, "14-governance-lifecycle-off")
+                c["ok"] = "Lifecycle: Disabled" in head
+                c["detail"] = head
+            finally:
+                self.set_lifecycle("on")
+
+        print("governance page errors:", json.dumps({k: p.errors for k, p in (("anon", anon), ("alpha", a), ("bravo", b))})[:400])
 
 
 def start_server(python, port, log_path):
