@@ -279,6 +279,7 @@ const NODE_VERT = /* glsl */`
   attribute float instanceViolations; // packed: dns|c2|rst|port in nibbles
   attribute float instanceLifecycle;  // 0=ghost → 1=active
   attribute float instanceSemantic;   // 0=unclassified 1=observation 2=inference 3=correlation
+  attribute float instanceVisible;    // 0 = hidden (the mission timeline is before this node existed)
 
   uniform float uTime;
   uniform float uSelectedId;          // -1 = none
@@ -332,7 +333,7 @@ const NODE_VERT = /* glsl */`
     vec4 centerClip = projectionMatrix * modelViewMatrix * vec4(worldPos, 1.0);
 
     // Clip nodes behind camera before perspective divide
-    if (centerClip.w < 0.001) {
+    if (centerClip.w < 0.001 || instanceVisible < 0.5) {
       gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
       vFarFade = 0.0;
       return;
@@ -2144,6 +2145,7 @@ class CesiumHypergraphGlobe {
     const violArr = new Float32Array(MAX_NODES);
     const lcArr   = new Float32Array(MAX_NODES);   // lifecycle
     const semArr  = new Float32Array(MAX_NODES);   // semantic class code
+    const visArr  = new Float32Array(MAX_NODES).fill(1);   // 0 hides a node
 
     geo.setAttribute('instancePosition',   new THREE.InstancedBufferAttribute(posArr,  3));
     geo.setAttribute('instanceId',         new THREE.InstancedBufferAttribute(idArr,   1));
@@ -2154,6 +2156,7 @@ class CesiumHypergraphGlobe {
     geo.setAttribute('instanceViolations', new THREE.InstancedBufferAttribute(violArr, 1));
     geo.setAttribute('instanceLifecycle',  new THREE.InstancedBufferAttribute(lcArr,   1));
     geo.setAttribute('instanceSemantic',   new THREE.InstancedBufferAttribute(semArr,  1));
+    geo.setAttribute('instanceVisible',    new THREE.InstancedBufferAttribute(visArr,  1));
 
     const mat = new THREE.ShaderMaterial({
       uniforms: {
@@ -3374,7 +3377,7 @@ class CesiumHypergraphGlobe {
     // kind and geo_method are what the server said about the node; the viewport classifies from them.
     this._graph.nodes.set(id, { lat, lon, conf, idx, shadow: ev.shadow ?? false,
       kind: ev.entity_kind || ev.kind || null, method: ev.geo_method ?? null,
-      semantic: this._graph.nodes.get(id)?.semantic ?? 0 });
+      semantic: this._graph.nodes.get(id)?.semantic ?? 0, visible: this._graph.nodes.get(id)?.visible ?? true });
     return isNew;
   }
 
@@ -3782,6 +3785,16 @@ class CesiumHypergraphGlobe {
     node.semantic = code;
     const attr = this._nodeMesh.geometry.attributes.instanceSemantic;
     attr.array[node.idx] = code;
+    attr.needsUpdate = true;
+  }
+
+  /** Hide or show a node (the mission timeline hides nodes that did not exist yet). */
+  setNodeVisible(id, visible) {
+    const node = this._graph.nodes.get(id);
+    if (!node || node.visible === visible) return;
+    node.visible = visible;
+    const attr = this._nodeMesh.geometry.attributes.instanceVisible;
+    attr.array[node.idx] = visible ? 1 : 0;
     attr.needsUpdate = true;
   }
 

@@ -1,6 +1,6 @@
 import {sessionToken} from "./missionGovernance.js";
 import {classifyNode, describeEvent, entityProvenance, eventsByEntity, evidenceCounts, missionLifecycle, nodeClassCounts,
-  tailOffset} from "./missionViewport.js";
+  eventsUpTo, nodesNotYetCreated, scrubLabel, tailOffset, timelineBounds} from "./missionViewport.js";
 
 const WINDOW = 200;     // how many of the mission's newest events the viewport reads
 const RIBBON = 8;       // how many of those the ribbon shows
@@ -14,7 +14,7 @@ export class MissionViewportPanel {
   constructor({root, tint, globe = () => null, apiBase = "", missionId = null, fetchImpl = globalThis.fetch?.bind(globalThis), storages = [],
                pollMs = 5000, setTimer = globalThis.setInterval?.bind(globalThis)} = {}) {
     Object.assign(this, {root, tint, globe, apiBase, missionId, fetch: fetchImpl, storages});
-    this.state = {mission: null, reachable: true, pending: [], events: [], total: null, selected: null, nodeClasses: []};
+    this.state = {mission: null, reachable: true, pending: [], events: [], total: null, selected: null, nodeClasses: [], scrubMs: null};
     this.build();
     this.render();
     this.refresh();
@@ -38,9 +38,20 @@ export class MissionViewportPanel {
     this.header.append(this.lifecycle, this.mission, this.counts, this.nodeCounts);
     this.ribbon = this.el("div", "mvp__ribbon");
     this.ribbon.setAttribute("aria-label", "Mission event stream");
+    this.scrub = this.el("div", "mvp__scrub");
+    this.slider = this.el("input", "mvp__slider");
+    this.slider.type = "range";
+    this.slider.step = "1";
+    this.slider.setAttribute("aria-label", "Mission timeline");
+    this.slider.addEventListener("input", () => this.scrubTo(Number(this.slider.value)));
+    this.clock = this.el("span", "mvp__clock");
+    this.live = this.el("button", "mvp__live", "Live");
+    this.live.type = "button";
+    this.live.addEventListener("click", () => this.scrubTo(null));
+    this.scrub.append(this.slider, this.clock, this.live);
     this.inspector = this.el("section", "mvp__inspector");
     this.inspector.hidden = true;
-    this.root.append(this.header, this.ribbon, this.inspector);
+    this.root.append(this.header, this.ribbon, this.scrub, this.inspector);
   }
 
   async get(path, headers = {}) {
@@ -55,7 +66,7 @@ export class MissionViewportPanel {
   }
 
   /** The classification of one of the globe's nodes, from what the globe and the mission's events record about it. */
-  classify(id, node, grouped = eventsByEntity(this.state.events)) {
+  classify(id, node, grouped = eventsByEntity(this.viewEvents())) {
     return classifyNode({kind: node?.kind, method: node?.method, events: grouped.get(id) || []});
   }
 
@@ -64,11 +75,13 @@ export class MissionViewportPanel {
     const globe = this.globe();
     const nodes = globe?._graph?.nodes;
     if (!nodes) return;
-    const grouped = eventsByEntity(this.state.events);
+    const grouped = eventsByEntity(this.viewEvents());
+    const hidden = nodesNotYetCreated(this.state.events, this.state.scrubMs);
     const classes = [];
     for (const [id, node] of nodes) {
       const result = this.classify(id, node, grouped);
       globe.setNodeSemantic?.(id, result.code);
+      globe.setNodeVisible?.(id, !hidden.has(id));
       classes.push(result);
     }
     this.state.nodeClasses = classes;
@@ -94,6 +107,37 @@ export class MissionViewportPanel {
     this.render();
   }
 
+  /** The events as of the scrubbed moment (all of them when live). */
+  viewEvents() {
+    return eventsUpTo(this.state.events, this.state.scrubMs);
+  }
+
+  /** Move the timeline to `ms` (unix ms), or back to live with null. */
+  scrubTo(ms) {
+    const bounds = timelineBounds(this.state.events);
+    this.state.scrubMs = ms == null || !bounds || ms >= bounds.end ? null : Math.max(bounds.start, ms);
+    this.render();
+  }
+
+  renderScrub() {
+    const bounds = timelineBounds(this.state.events);
+    this.scrub.hidden = !this.missionId;
+    this.slider.hidden = this.live.hidden = !bounds;
+    if (!bounds) {
+      this.state.scrubMs = null;
+      this.clock.textContent = this.state.events.length ? "Events share one moment: nothing to scrub" : "";
+      return;
+    }
+    this.slider.min = String(bounds.start);
+    this.slider.max = String(bounds.end);
+    this.slider.value = String(this.state.scrubMs ?? bounds.end);
+    this.live.disabled = this.state.scrubMs == null;
+    this.clock.textContent = this.state.scrubMs == null
+      ? `LIVE · ${scrubLabel(bounds.end, bounds)}`
+      : `AS OF ${scrubLabel(this.state.scrubMs, bounds)} · ${this.viewEvents().length} of ${this.state.events.length} events`;
+    this.clock.dataset.mode = this.state.scrubMs == null ? "live" : "past";
+  }
+
   select(entityId) {
     this.state.selected = entityId || null;
     this.renderInspector();
@@ -108,7 +152,7 @@ export class MissionViewportPanel {
     this.lifecycle.dataset.tone = life.tone;
     this.lifecycle.title = life.detail;
     this.mission.textContent = this.missionId ? `MISSION ${s.mission?.name || this.missionId}` : "";
-    const counts = evidenceCounts(s.events);
+    const counts = evidenceCounts(this.viewEvents());
     this.counts.textContent = "";
     for (const key of ["observation", "correlation", "inference"]) {
       const info = describeEvent({event_type: {observation: "probe", correlation: "HYPEREDGE_CREATE", inference: "CONFIDENCE_MUTATION"}[key]}).kind;
@@ -127,6 +171,7 @@ export class MissionViewportPanel {
       this.nodeCounts.append(badge);
     }
     this.renderRibbon();
+    this.renderScrub();
     this.renderInspector();
   }
 
@@ -140,7 +185,7 @@ export class MissionViewportPanel {
 
   renderRibbon() {
     this.ribbon.textContent = "";
-    const rows = this.state.events.slice(-RIBBON).map(describeEvent);
+    const rows = this.viewEvents().slice(-RIBBON).map(describeEvent);
     this.ribbon.hidden = !this.missionId;
     if (!rows.length) {
       this.ribbon.append(this.el("span", "mvp__empty", this.missionId ? "No events recorded for this mission." : ""));
@@ -150,7 +195,8 @@ export class MissionViewportPanel {
   }
 
   renderInspector() {
-    const {selected, events, total} = this.state;
+    const {selected, total} = this.state;
+    const events = this.viewEvents();
     this.inspector.hidden = !selected;
     this.inspector.textContent = "";
     if (!selected) return;
@@ -168,8 +214,9 @@ export class MissionViewportPanel {
         this.missionId ? "No events for this entity in the mission's recent events." : "Open with ?mission=<id> to trace events."));
       return;
     }
-    if (total > events.length) {
-      this.inspector.append(this.el("div", "mvp__line", `Showing the newest ${events.length} of ${total} mission events.`));
+    const loaded = this.state.events.length;
+    if (total > loaded) {
+      this.inspector.append(this.el("div", "mvp__line", `Showing the newest ${loaded} of ${total} mission events.`));
     }
     for (const row of rows) {
       const item = this.el("div", "mvp__trace");

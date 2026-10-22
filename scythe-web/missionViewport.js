@@ -120,3 +120,42 @@ export function eventsByEntity(events) {
   }
   return grouped;
 }
+
+/** The time span of the loaded events (unix ms), or null when there is nothing to scrub between. */
+export function timelineBounds(events) {
+  const times = (events || []).map(event => Number(event?.timestamp)).filter(Number.isFinite);
+  if (!times.length) return null;
+  const start = Math.min(...times);
+  const end = Math.max(...times);
+  return end > start ? {start, end} : null;
+}
+
+/** The events recorded at or before `at` (unix ms); null means live: all of them. */
+export function eventsUpTo(events, at) {
+  if (at == null) return events || [];
+  return (events || []).filter(event => Number(event?.timestamp) <= at);
+}
+
+/**
+ * Nodes that did not exist yet at `at`: those whose creation event is later. Only a creation event in the loaded
+ * window can hide a node, because a node first seen mid-window may simply have older events that were not loaded.
+ */
+export function nodesNotYetCreated(events, at) {
+  const hidden = new Set();
+  if (at == null) return hidden;
+  const created = new Map();
+  for (const event of events || []) {
+    if (event?.event_type !== "NODE_CREATE" || !event.entity_id) continue;
+    const time = Number(event.timestamp);
+    if (Number.isFinite(time) && !(created.get(event.entity_id) <= time)) created.set(event.entity_id, time);
+  }
+  for (const [id, time] of created) if (time > at) hidden.add(id);
+  return hidden;
+}
+
+/** The scrubber's clock label: UTC time of day, with the date when the span crosses midnight. */
+export function scrubLabel(at, bounds) {
+  const iso = new Date(Number(at)).toISOString();
+  const crosses = bounds && new Date(bounds.start).toISOString().slice(0, 10) !== new Date(bounds.end).toISOString().slice(0, 10);
+  return crosses ? `${iso.slice(0, 10)} ${iso.slice(11, 19)}Z` : `${iso.slice(11, 19)}Z`;
+}
