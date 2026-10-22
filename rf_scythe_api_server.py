@@ -3868,8 +3868,8 @@ if FLASK_AVAILABLE:
             params = {'frequency_hz': float(body['frequency_hz']), 'bandwidth_hz': int(body.get('bandwidth_hz', 0))}
         except KeyError:
             return jsonify({'status': 'error', 'message': 'frequency_hz is required'}), 400
-        except (TypeError, ValueError) as exc:
-            return jsonify({'status': 'error', 'message': str(exc)}), 400
+        except (TypeError, ValueError):
+            return jsonify({'status': 'error', 'message': 'frequency_hz must be a number and bandwidth_hz an integer'}), 400
         if body.get('mode') is not None:
             params['mode'] = body['mode']
         ran, error = _sdr_control('rf_tune', params, principal, 'api.sdr.tune')
@@ -20618,6 +20618,8 @@ def _lifecycle_refusal(proposal, executed):
     ``outcome`` is one of: rejected, pending_approval, blocked_by_phase, budget_exhausted, invalid, error.
     Shared by the adapters that report the lifecycle's decision to a client.
     """
+    if proposal.get('status') == 'invalid':      # refused before a proposal existed (nothing to approve)
+        return 'invalid', proposal.get('error', 'invalid parameters'), {}
     if executed is None:
         outcome = 'pending_approval' if proposal.get('status') == 'pending_approval' else 'rejected'
         return outcome, proposal.get('approval_reason') or f"proposal {proposal.get('status')}", {}
@@ -20676,6 +20678,10 @@ def _sdr_lifecycle(tool_name, params, principal, source):
     if orchestrator is None or tool_name not in getattr(handler, '_tools', {}):
         return None
     from mcp_principal import OPERATOR_COMMAND, principal_scope, source_scope
+    # Only a valid command may become a proposal: an approver is asked "may we do this?", never "is this coherent?".
+    problem = orchestrator.registry.check_params(tool_name, params)
+    if problem:
+        return {'proposal_id': None, 'tool_name': tool_name, 'status': 'invalid', 'error': problem}, None
     with principal_scope(principal), source_scope(source):
         proposal = orchestrator.propose_action(
             tool_name, params, confidence=1.0, justification=source,

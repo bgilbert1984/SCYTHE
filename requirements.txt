@@ -81,6 +81,7 @@ axios            # Note: This is a JS dependency, not Python
 questdb>=1.1.0    # Time series database client
 psycopg2-binary>=2.9.5  # PostgreSQL adapter
 duckdb>=1.0.0,<2   # Embedded analytics store; 2.0 breaks scene_duckdb_store.append_batch (see repository-hygiene.yml)
+jsonschema>=4.0.0   # MCP tool parameters are validated against their schemas; without it validation is skipped
 faiss-cpu==1.15.0 # CPU vector index used by GraphOps semantic memory
 
 # Signal Processing & Tracking
