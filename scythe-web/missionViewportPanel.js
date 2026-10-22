@@ -14,7 +14,7 @@ export class MissionViewportPanel {
   constructor({root, tint, globe = () => null, apiBase = "", missionId = null, fetchImpl = globalThis.fetch?.bind(globalThis), storages = [],
                pollMs = 5000, setTimer = globalThis.setInterval?.bind(globalThis)} = {}) {
     Object.assign(this, {root, tint, globe, apiBase, missionId, fetch: fetchImpl, storages});
-    this.state = {mission: null, reachable: true, pending: [], events: [], total: null, selected: null, nodeClasses: [], scrubMs: null};
+    this.state = {mission: null, reachable: true, pending: [], events: [], total: null, selected: null, nodeClasses: [], scrubMs: null, edgeIdentity: null};
     this.build();
     this.render();
     this.refresh();
@@ -85,8 +85,10 @@ export class MissionViewportPanel {
       classes.push(result);
     }
     this.state.nodeClasses = classes;
-    globe.setHiddenLinks?.(linksNotPresent({events: this.state.events, at: this.state.scrubMs, hiddenNodes: hidden,
-      edges: globe._graph.edges, hyperedges: globe._graph.hyperedges}));
+    const links = linksNotPresent({events: this.state.events, at: this.state.scrubMs, hiddenNodes: hidden,
+      edges: globe._graph.edges, hyperedges: globe._graph.hyperedges});
+    this.state.edgeIdentity = links.identity;
+    globe.setHiddenLinks?.(links);
   }
 
   async refresh() {
@@ -138,6 +140,10 @@ export class MissionViewportPanel {
       ? `LIVE · ${scrubLabel(bounds.end, bounds)}`
       : `AS OF ${scrubLabel(this.state.scrubMs, bounds)} · ${this.viewEvents().length} of ${this.state.events.length} events`;
     this.clock.dataset.mode = this.state.scrubMs == null ? "live" : "past";
+    const id = this.state.edgeIdentity;
+    this.clock.title = id && (id.byId + id.byEndpoints + id.unmatched)
+      ? `Edge events matched to drawn edges: ${id.byId} by id, ${id.byEndpoints} by their ends, ${id.unmatched} not matched (these cannot rewind their edge)`
+      : "";
   }
 
   select(entityId) {

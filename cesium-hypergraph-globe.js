@@ -3400,8 +3400,14 @@ class CesiumHypergraphGlobe {
   /* ───────────────────────────────────────────────────────────────────────
    * Edge update — batch into _arcEdges, mark dirty
    * ----------------------------------------------------------------------- */
+  /** The edge's identity: the id the server gave it (edge_id, id, or a graph event's entity_id), else src::dst, the same
+   *  fallback the server's edge cache uses. Mission events carry the server's entity_id, so this is what they match. */
+  _edgeId(ev) {
+    return ev.edge_id || ev.id || ev.entity_id || `${ev.src}::${ev.dst}`;
+  }
+
   _applyEdgeUpdate(ev) {
-    const eid   = ev.edge_id || ev.id || `${ev.src}::${ev.dst}`;
+    const eid   = this._edgeId(ev);
     const conf  = parseFloat(ev.confidence ?? ev.conf ?? 0.3);
     if (conf < CONF_CULL_THRESHOLD && !ev.shadow) return;
 
@@ -3454,7 +3460,7 @@ class CesiumHypergraphGlobe {
   }
 
   _applyEdgeRemove(ev) {
-    const eid = ev.edge_id || ev.id;
+    const eid = ev.edge_id || ev.id || ev.entity_id;
     this._arcEdges = this._arcEdges.filter(e => e.id !== eid);
     this._graph.edges.delete(eid);
     this._arcDirty = true;
