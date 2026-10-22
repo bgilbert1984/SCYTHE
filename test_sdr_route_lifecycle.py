@@ -148,6 +148,39 @@ class InvalidInputTest(_Fixture):
         self.assertEqual(self.bridge.calls, [])
 
 
+class InvalidInputUnderApprovalTest(_Fixture):
+    """Only a valid command may become a proposal: malformed input is a 400 in every approval mode, never a queue entry."""
+    SETTING = "HARDWARE_CONTROL=SECOND_PRINCIPAL"
+    BAD = (("/api/sdr/tune", {"mode": "NFM"}, "frequency_hz is required"),
+           ("/api/sdr/tune", {"frequency_hz": "abc"}, "frequency_hz must be a number"),
+           ("/api/sdr/tune", {"frequency_hz": None}, "frequency_hz must be a number"),
+           ("/api/sdr/tune", {"frequency_hz": -5}, "frequency_hz must be greater than 0"),
+           ("/api/sdr/tune", {"frequency_hz": 1e6, "bandwidth_hz": -1}, "bandwidth_hz must be at least 0"),
+           ("/api/sdr/config", {}, "at least one setting is required"),
+           ("/api/sdr/config", {"nonsense": 1}, "unsupported setting(s): nonsense"),
+           ("/api/sdr/config", {"fft_size": 0}, "fft_size must be at least 1"),
+           ("/api/sdr/config", {"fft_size": "big"}, "fft_size must be an integer"))
+
+    def test_bad_input_is_a_400_with_a_plain_message_and_creates_no_proposal(self):
+        for path, body, message in self.BAD:
+            with self.subTest(path=path, body=body):
+                r = self.post(path, body)
+                j = r.get_json()
+                self.assertEqual((r.status_code, j["status"]), (400, "error"), j)
+                self.assertIn(message, j["message"])
+                self.assertNotIn("Invalid parameters", j["message"])   # no validator internals
+                self.assertNotIn("float()", j["message"])               # no Python exception text
+        self.assertEqual(self.bridge.calls, [])
+        self.assertEqual([p for p in self.orch.dual_agent.decision_log if p.get("status") == "pending_approval"], [])
+        self.assertEqual(self.orch.dual_agent.decision_log, [])
+        self.assertEqual(self.store.events(), [])
+
+    def test_a_valid_command_still_waits_for_a_second_operator(self):
+        j = self.post("/api/sdr/tune", {"frequency_hz": 1e6}).get_json()
+        self.assertEqual(j["outcome"], "pending_approval")
+        self.assertEqual(self.bridge.calls, [])
+
+
 class RaisedHardwareModeTest(_Fixture):
     SETTING = "HARDWARE_CONTROL=SECOND_PRINCIPAL"
 

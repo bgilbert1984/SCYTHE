@@ -92,6 +92,35 @@ def adapt_tooldef(tooldef) -> Tool:
     )
 
 
+def describe_schema_error(error) -> str:
+    """One operator-readable sentence for a ``jsonschema.ValidationError``.
+
+    The full validator text names Python types and echoes whole objects; an operator needs the
+    field and what is wrong with it.  Unfamiliar validators fall back to the validator's message.
+    """
+    field = ".".join(str(part) for part in error.absolute_path)
+    limit = error.validator_value
+    kind = error.validator
+    if kind == "required":
+        missing = [name for name in limit if name not in (error.instance or {})]
+        return f"{', '.join(missing) or field} is required"
+    if kind == "additionalProperties":
+        extra = sorted(set(error.instance) - set(error.schema.get("properties", {})))
+        return f"unsupported setting(s): {', '.join(extra)}" if extra else "unsupported setting"
+    if kind == "minProperties":
+        return "at least one setting is required"
+    if kind == "type":
+        wanted = limit if isinstance(limit, str) else " or ".join(limit)
+        return f"{field or 'value'} must be {'an' if wanted[0] in 'aeiou' else 'a'} {wanted}"
+    if kind == "exclusiveMinimum":
+        return f"{field} must be greater than {limit}"
+    if kind == "minimum":
+        return f"{field} must be at least {limit}"
+    if kind == "maximum":
+        return f"{field} must be at most {limit}"
+    return f"{field}: {error.message}" if field else error.message
+
+
 class Registry:
     """Production registry with validation, audit, and rate limiting."""
 
@@ -115,6 +144,25 @@ class Registry:
 
     def list_tools(self):
         return list(self._tools.values())
+
+    def check_params(self, name: str, params: Optional[Dict[str, Any]]) -> Optional[str]:
+        """Why ``params`` can never be valid for tool ``name``, or ``None`` if they conform.
+
+        Used before a proposal exists (ADR 0006): a request the server already knows is malformed is
+        refused outright, so an approver is only ever asked "may we?", never "is this even coherent?".
+        A tool this registry does not hold is not judged here.
+        """
+        tool = self._tools.get(name)
+        if tool is None:
+            return None
+        try:
+            from jsonschema import Draft202012Validator
+        except ImportError:
+            logger.warning("[mcp] jsonschema not installed; skipping parameter validation")
+            return None
+        errors = sorted(Draft202012Validator(tool.parameters).iter_errors(params if params is not None else {}),
+                        key=lambda e: [str(part) for part in e.absolute_path])
+        return describe_schema_error(errors[0]) if errors else None
 
     def get_schema(self):
         """Return schema for all tools (for introspection endpoint)."""
