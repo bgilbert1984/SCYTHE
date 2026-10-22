@@ -1,6 +1,27 @@
 # Hub summary
 
-The instrument panel on `rf_scythe_home.html`: what each SCYTHE instance reports about itself, before anything is visualized.
+`rf_scythe_home.html` is the Mission Hub: an operator console, not a product page. It answers what state each SCYTHE instance is in
+and where to go next, and nothing else. It shows what each instance reports about itself before anything is visualized.
+
+## The page
+
+- **State bar:** the operator (from the session), instances running of total, whether the orchestrator is reachable, and a UTC clock.
+  The instance and orchestrator figures come from the same poll as the cards, so they cannot disagree with them.
+- **Left navigation:** Dashboard, New instance, Connect to an instance, Documentation, Account (dialog) and the account page, Logout.
+- **Dashboard:** the fleet line, then one card per instance.
+- **Kept from before, unchanged:** the auth gate, the account dialog (profile edit, TOTP), the new-instance and join dialogs, and
+  terminating an instance from the join list.
+
+## Removed, and why
+
+The hero banner and slogans; the nine demo cards (RF Visualization, the Cesium client card, LHC, Remora fleet, X-37B, JWST, missile
+demo, tactical demo, multi-plane infographic); the Mastodon, X, WordPress and About links; the animated background and its credit; the
+loading screen (a timer, not a loading state); the copyright footer; and the old **System Status** panel, which was static HTML with
+invented values ("SDR Interface: Melted Down", "NeRF Engine: Online"). Per-instance health below replaces it. No file was deleted: the
+demo pages are still in the repository and only the page's references to them are gone. They belong in documentation, not on a console.
+
+The fleet line adds up only what instances reported and says how many did not, so a total is never shown as complete when it is not.
+
 Logic in `scythe-web/hubSummary.js` (pure), the panel in `scythe-web/hubSummaryView.js`, checked on the real page by
 `e2e/hub_summary/run.py`.
 

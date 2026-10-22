@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import {ageSeconds, countsLine, instanceCounts, instanceHealth, summarizeMissions} from "./hubSummary.js";
+import {ageSeconds, countsLine, fleetLine, fleetSummary, instanceCounts, instanceHealth, summarizeMissions, uptimeLabel} from "./hubSummary.js";
 import {mountHub} from "./hubSummaryView.js";
 import {instanceDeepLink} from "./deepLink.js";
 
@@ -148,4 +148,46 @@ test("when a later poll fails the last report is kept and the failure said", asy
   await hub.refresh();
   assert.match(root.textContent, /Showing the last report; the orchestrator did not answer \(503\)/);
   assert.equal(root.find((n) => n.tag === "article").length, 1);
+});
+
+test("the fleet totals count only what instances reported, and say how many did not", () => {
+  const fleet = fleetSummary([RUNNING, {id: "s", status: "running"}, {id: "d", status: "dead", authority: {authoritative_state: {nodes: 5, edges: 1, sessions: 0, bsgs: 0}}},
+    {id: "p", status: "starting"}, null, "x"]);
+  assert.deepEqual([fleet.total, fleet.running, fleet.dead, fleet.other], [4, 2, 1, 1]);
+  assert.deepEqual(fleet.nodes, {sum: 2188, silent: 2});
+  assert.deepEqual(fleet.edges, {sum: 8418, silent: 2});
+  assert.equal(fleet.writesLocked, 1);   // only an instance that reported a locked gate counts
+  assert.equal(fleetLine(fleet, 3700), "2 running of 4 · 2188 nodes (2 not reporting) · 8418 edges (2 not reporting) · 2 sessions (2 not reporting) · 1 dead · writes locked on 1 · orchestrator up 1h");
+});
+
+test("a fleet that reports nothing says so instead of showing zero", () => {
+  assert.equal(fleetLine(fleetSummary([{id: "a", status: "running"}, {id: "b", status: "running"}])),
+    "2 running of 2 · nodes: not reported · edges: not reported · sessions: not reported");
+  assert.equal(fleetLine(fleetSummary([])), "No instances");
+  assert.equal(fleetLine(fleetSummary(undefined)), "No instances");
+});
+
+test("uptime is a coarse label, or nothing", () => {
+  assert.equal(uptimeLabel(30), "up 1m");
+  assert.equal(uptimeLabel(600), "up 10m");
+  assert.equal(uptimeLabel(7300), "up 2h");
+  assert.equal(uptimeLabel(200000), "up 2d");
+  for (const bad of [null, undefined, -1, NaN, "5"]) assert.equal(uptimeLabel(bad), null);
+});
+
+test("the hub tells the page what it shows, so the header and the cards agree", async () => {
+  const updates = [];
+  const root = new Element("div");
+  mountHub({root, fetchImpl: fakeFetch({"/api/scythe/instances": response({instances: [RUNNING], orchestrator_uptime: 90})}), now: () => NOW, setTimer: null,
+    document: doc, onUpdate: (update) => updates.push(update)});
+  await settle();
+  const last = updates[updates.length - 1];
+  assert.deepEqual([last.fleet.running, last.fleet.total, last.uptime, last.error], [1, 1, 90, null]);
+  assert.match(root.find((n) => n.id === "hub-fleet")[0].textContent, /1 running of 1 · 2183 nodes · 8417 edges · 2 sessions · writes locked on 1 · orchestrator up 1m/);
+  assert.equal(updates[0].fleet, null, "before the first answer there is no fleet");
+
+  const failing = [];
+  mountHub({root: new Element("div"), fetchImpl: fakeFetch({"/api/scythe/instances": new Error("down")}), setTimer: null, document: doc, onUpdate: (u) => failing.push(u)});
+  await settle();
+  assert.equal(failing[failing.length - 1].error, "down");
 });
