@@ -39,3 +39,8 @@ puts a neighbouring node: "a hidden node cannot be selected" failed intermittent
 on a quiet machine), on the base commit too. `Check.settle()` waits until at least two frames have rendered, the camera matrix is
 unchanged across them, and the picker's camera equals Cesium's; if that does not happen in 30 s the harness exits 2 (infrastructure)
 instead of reporting a false pick.
+
+The harness also proves the wait is needed, on every run: it freezes the picker's camera sync, moves the camera, and shows that a click
+aimed at a hidden node with Cesium's answer selects its neighbour and that `settle()` refuses to continue; then it restores the sync and
+shows the same click selects nothing. It also stops the mission panel's 5 s poll from re-showing a node the hidden-node case just hid
+(the panel re-asserts every node's visibility), which is a second way that case could be undone mid-test.

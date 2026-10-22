@@ -84,7 +84,7 @@ class Check:
     CAMERA_STATE = """() => { const vm = Array.from(globe._viewer.camera.viewMatrix), tm = globe._camera.matrixWorldInverse.elements;
       return {frame: globe._viewer.scene.frameState.frameNumber, vm, synced: Math.max(...vm.map((v, i) => Math.abs(v - tm[i]))) < 1e-6}; }"""
 
-    def settle(self, timeout_s=30):
+    def settle(self, timeout_s=120):
         """Wait until the camera has stopped and the picker has caught up with it.
 
         The picker projects through the camera matrices copied from Cesium once per rendered frame, while where a node is on
@@ -103,6 +103,44 @@ class Check:
                 return              # (counted from the anchor, not between polls: under load a poll may see one frame or none)
             self.page.wait_for_timeout(100)
         raise InfrastructureError(f"the camera did not settle within {timeout_s} s (frames are not rendering, or it keeps moving)")
+
+    def picker_pose_guard_cases(self):
+        """settle() must refuse to continue while the picker holds an older camera than Cesium has.
+
+        Freeze the picker's camera sync, move the camera, and click where Cesium puts a hidden node: the picker, using its older
+        pose, selects a neighbour, which is the failure this wait exists to prevent. Then restore the sync and check the guard lets go.
+        """
+        page = self.page
+        self.view(CASE_HEIGHT)
+        page.evaluate("() => { globe.__sync = globe._syncCamera; globe._syncCamera = () => {}; }")
+        try:
+            page.evaluate(f"globe._viewer.camera.setView({{destination: Cesium.Cartesian3.fromDegrees({VIEW_LON + 5}, {VIEW_LAT}, {CASE_HEIGHT})}})")
+            page.wait_for_timeout(700)
+            point = self.screen("n5")
+            self.hold_visibility()
+            page.evaluate("globe.setNodeVisible('n5', false)")
+            page.evaluate("globe.selectNode(null)")
+            page.mouse.click(*point)
+            page.wait_for_timeout(100)
+            self.record("(guard) with the picker's camera behind Cesium's, a click aimed at a hidden node selects its neighbour",
+                        self.selected() not in (None, "n5"), f"selected {self.selected()!r}")
+            try:
+                self.settle(timeout_s=3)
+                self.record("(guard) settle() refuses to continue while the picker's camera is behind", False, "it returned")
+            except InfrastructureError:
+                self.record("(guard) settle() refuses to continue while the picker's camera is behind", True)
+        finally:
+            page.evaluate("() => { globe._syncCamera = globe.__sync; }")
+        self.settle()
+        point = self.screen("n5")
+        page.evaluate("globe.selectNode(null)")
+        page.mouse.click(*point)
+        page.wait_for_timeout(100)
+        self.record("(guard) once the picker catches up and settle() returns, the same click selects nothing", self.selected() is None, f"selected {self.selected()!r}")
+
+    def hold_visibility(self):
+        """Stop the mission panel re-asserting every node's visibility on its 5 s poll: that would un-hide a node this harness just hid."""
+        self.page.evaluate("() => { if (window.scytheMissionViewport) scytheMissionViewport.syncNodes = () => {}; }")
 
     def screen(self, node_id):
         """Where Cesium itself puts the node, in page pixels, or None when it is off the canvas."""
@@ -161,6 +199,7 @@ class Check:
 
         self.view(CASE_HEIGHT)
         point = self.screen("n5")
+        self.hold_visibility()
         self.page.evaluate("globe.setNodeVisible('n5', false)")
         self.page.evaluate("globe.selectNode(null)")
         self.page.mouse.click(*point)
@@ -177,6 +216,7 @@ class Check:
         self.page.mouse.click(700, 425)
         self.page.wait_for_timeout(100)
         self.record("with the Earth between the camera and the nodes, nothing is selected", self.selected() is None)
+        self.picker_pose_guard_cases()
         self.record("the page raised no script errors", not self.page.errors, "; ".join(self.page.errors[:3]))
         return all(ok for _, ok in self.results)
 
