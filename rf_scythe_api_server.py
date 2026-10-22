@@ -13344,9 +13344,16 @@ if FLASK_AVAILABLE:
             session_window_sec: int — time bucket (default: 30)
             files: list[str] — specific PCAPs (default: all)
             skip_existing: bool — skip already-ingested (default: true)
+            mission_id: str — mission these captures belong to (optional; must be a valid
+                Mission identifier, same rule as POST /api/missions)
         """
         try:
             from pcap_ingest import handle_mcp_pcap_ingest
+            from scythe_mission import is_valid_mission_id
+            params = request.get_json(silent=True) or {}
+            if params.get('mission_id') is not None and not is_valid_mission_id(params['mission_id']):
+                return jsonify({'status': 'error',
+                                'message': 'mission_id must be a valid Mission identifier'}), 400
             engine = _get_engine()
             ledger = None
             try:
@@ -13355,7 +13362,6 @@ if FLASK_AVAILABLE:
             except Exception:
                 pass
 
-            params = request.get_json(silent=True) or {}
             # Ensure staging directory is instance-local
             if 'staging_dir' not in params:
                 staging = os.path.join(_data_dir(), 'pcaps')

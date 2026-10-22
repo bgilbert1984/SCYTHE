@@ -2089,6 +2089,13 @@ MCP_PCAP_INGEST_TOOL = {
                 "description": "Skip PCAPs that have already been ingested.",
                 "default": True,
             },
+            "mission_id": {
+                "type": "string",
+                "description": (
+                    "Mission these captures belong to. Optional; must be a valid Mission "
+                    "identifier. When set, the emitted nodes and their live events carry it."
+                ),
+            },
         },
         "required": [],
     },
@@ -2144,6 +2151,7 @@ def handle_mcp_pcap_ingest(
         enable_geoip=params.get("enable_geoip", True),
         enable_dpi=params.get("enable_dpi", True),
         emit_flow_nodes=params.get("emit_flow_nodes", True),
+        mission_id=params.get("mission_id"),   # optional; an invalid id raises ValueError
     )
     pipeline = PcapIngestPipeline(engine, ledger, config)
 

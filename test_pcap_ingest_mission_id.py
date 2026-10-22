@@ -312,5 +312,57 @@ class LiveEventBindingTests(unittest.TestCase):
             self.assertEqual(live_session(graph_event_fields(ev)["data"]), ("global", None))
 
 
+class McpHandlerMissionIdTests(unittest.TestCase):
+    """handle_mcp_pcap_ingest builds its IngestConfig from the tool/route parameters."""
+
+    def _config_for(self, params):
+        import pcap_ingest
+
+        captured = {}
+
+        class StubPipeline:
+            def __init__(self, engine, ledger, config):
+                captured["config"] = config
+                self.emitter = type("E", (), {"graph_epoch": "g", "dpi_stats": {}})()
+
+            def ingest_all(self):
+                class Result:
+                    ok = True
+                    geo_points = []
+                    dpi_stats = {}
+
+                    def to_dict(self):
+                        return {}
+
+                    def summary(self):
+                        return "stub"
+
+                return Result()
+
+        with patch.object(pcap_ingest, "PcapIngestPipeline", StubPipeline):
+            pcap_ingest.handle_mcp_pcap_ingest(None, None, params)
+        return captured["config"]
+
+    def test_a_valid_mission_id_reaches_the_ingest_config(self):
+        config = self._config_for({"mission_id": VALID_MISSION_ID})
+        self.assertEqual(config.mission_id, VALID_MISSION_ID)
+
+    def test_omitting_it_leaves_the_config_unmissioned(self):
+        self.assertIsNone(self._config_for({}).mission_id)
+        self.assertIsNone(self._config_for({"mission_id": None}).mission_id)
+
+    def test_an_invalid_mission_id_is_refused_not_ignored(self):
+        for bad in ("has a space", "", 7):
+            with self.assertRaisesRegex(ValueError, "mission_id must be a valid Mission identifier"):
+                self._config_for({"mission_id": bad})
+
+    def test_the_tool_schema_declares_the_parameter(self):
+        from pcap_ingest import MCP_PCAP_INGEST_TOOL
+
+        prop = MCP_PCAP_INGEST_TOOL["inputSchema"]["properties"]["mission_id"]
+        self.assertEqual(prop["type"], "string")
+        self.assertNotIn("mission_id", MCP_PCAP_INGEST_TOOL["inputSchema"]["required"])
+
+
 if __name__ == "__main__":
     unittest.main()

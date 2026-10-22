@@ -193,6 +193,47 @@ class ListMissionsTests(unittest.TestCase):
         self.assertEqual(open_ids, all_ids - {closed_id})
 
 
+# POST /api/pcap/batch_ingest accepts an optional mission_id, validated against the same rule as
+# create_mission() before any ingest work starts. The handler is replaced so no PCAP is read.
+BATCH_INGEST_PROBE = textwrap.dedent("""
+    import json, sys
+    sys.path.insert(0, sys.argv[1])
+    import pcap_ingest
+    import rf_scythe_api_server as server
+
+    seen = []
+    def fake_handler(engine, ledger, params):
+        seen.append(params.get("mission_id"))
+        return {"status": "ok", "total_sessions": 0}
+    pcap_ingest.handle_mcp_pcap_ingest = fake_handler
+
+    def post(body):
+        resp = server.app.test_client().post("/api/pcap/batch_ingest", json=body)
+        return resp.status_code, resp.get_json()
+
+    bad_code, bad_body = post({"mission_id": "has a space"})
+    empty_code, _ = post({"mission_id": ""})
+    ok_code, _ = post({"mission_id": "RFMAP-20261018-060"})
+    none_code, _ = post({})
+    print(json.dumps({"bad_code": bad_code, "bad_body": bad_body, "empty_code": empty_code,
+                      "ok_code": ok_code, "none_code": none_code, "seen": seen}))
+""")
+
+
+class BatchIngestMissionIdTests(unittest.TestCase):
+    def test_a_valid_mission_id_is_passed_on_and_an_invalid_one_is_refused_before_ingest(self):
+        proc = _run_probe(BATCH_INGEST_PROBE)
+        self.assertEqual(proc.returncode, 0, proc.stderr[-4000:])
+        result = json.loads(proc.stdout.strip().splitlines()[-1])
+        self.assertEqual(result["bad_code"], 400, result["bad_body"])
+        self.assertIn("mission_id must be a valid Mission identifier", result["bad_body"]["message"])
+        self.assertEqual(result["empty_code"], 400)
+        self.assertEqual(result["ok_code"], 200)
+        self.assertEqual(result["none_code"], 200)
+        # Only the two accepted requests reached the handler; the refused ones never ran.
+        self.assertEqual(result["seen"], ["RFMAP-20261018-060", None])
+
+
 # ARR-API-2: Mission identity propagation at the HTTP layer. /api/events/ingest validates
 # an optional per-event mission_id against scythe_mission.is_valid_mission_id (same source of
 # truth as create_mission()), then relies on ScytheDuckStore.append_batch's capture_sessions
