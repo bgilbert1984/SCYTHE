@@ -1750,6 +1750,8 @@ class CesiumHypergraphGlobe {
     /* ── Hyperedge layer ── */
     this._heMesh        = null;     // THREE.Points
     this._hiddenEdges      = new Set();   // edge ids the mission timeline hides
+    this._deletedEdges     = new Set();   // edge ids the server deleted; hidden live, kept so a scrub can show them before the delete
+    this._missionScrubbing = false;       // while true the mission timeline decides what a delete hid, not these marks
     this._hiddenHyperedges = new Set();   // hyperedge ids the mission timeline hides
     this._heList        = [];       // [{centroid, conf, color, height, width, memberCount}]
     this._heDirty       = false;
@@ -2989,6 +2991,8 @@ class CesiumHypergraphGlobe {
     }
 
     this._socket = io(connectUrl, ioOpts);
+    // The page binds its live graph_event handler to each new socket (this runs after the auth round-trip).
+    window.dispatchEvent(new CustomEvent('globe:socket_ready', { detail: { socket: this._socket } }));
 
     this._socket.on('connect', () => {
       console.log('[Globe] ✅ SocketIO connected via', this._socket.io.engine.transport.name,
@@ -3162,8 +3166,8 @@ class CesiumHypergraphGlobe {
   /** Filter arc entries to those within the current time window.
    *  In live mode returns the live _arcEdges array directly (zero overhead). */
   _getVisibleEdges() {
-    const shown = e => !this._hiddenEdges.has(e.id);
-    if (this._isLive) return this._hiddenEdges.size ? this._arcEdges.filter(shown) : this._arcEdges;
+    const shown = e => !this._hiddenEdges.has(e.id) && (this._missionScrubbing || !this._deletedEdges.has(e.id));
+    if (this._isLive) return (this._hiddenEdges.size || this._deletedEdges.size) ? this._arcEdges.filter(shown) : this._arcEdges;
     const cursor   = this._timeCursor;
     const winStart = cursor - this._timeWindow;
     const result   = [];
@@ -3290,6 +3294,7 @@ class CesiumHypergraphGlobe {
         case 'node_remove':     topoChanged |= this._applyNodeRemove(ev); break;
         case 'edge_update':     this._applyEdgeUpdate(ev);                 break;
         case 'edge_remove':     this._applyEdgeRemove(ev);                 break;
+        case 'edge_delete':     this._applyEdgeDelete(ev);                 break;
         case 'hyperedge_update':this._applyHyperedgeUpdate(ev);            break;
       }
     }
@@ -3408,6 +3413,7 @@ class CesiumHypergraphGlobe {
 
   _applyEdgeUpdate(ev) {
     const eid   = this._edgeId(ev);
+    this._deletedEdges.delete(eid);          // an edge the server creates or updates again exists again
     const conf  = parseFloat(ev.confidence ?? ev.conf ?? 0.3);
     if (conf < CONF_CULL_THRESHOLD && !ev.shadow) return;
 
@@ -3456,6 +3462,14 @@ class CesiumHypergraphGlobe {
       for (let i = 0; i < 5000; i++) this._edgeStore.delete(sorted[i][0]);
     }
 
+    this._arcDirty = true;
+  }
+
+  /** The server deleted an edge: hide it, but keep it so the mission timeline can still show it before the delete. */
+  _applyEdgeDelete(ev) {
+    const eid = ev.edge_id || ev.id || ev.entity_id;
+    if (!eid || this._deletedEdges.has(eid)) return;
+    this._deletedEdges.add(eid);
     this._arcDirty = true;
   }
 
@@ -3812,7 +3826,8 @@ class CesiumHypergraphGlobe {
   }
 
   /** Hide the given edges and hyperedges (the mission timeline hides links that did not exist yet). */
-  setHiddenLinks({edges = [], hyperedges = []} = {}) {
+  setHiddenLinks({edges = [], hyperedges = [], scrubbing = false} = {}) {
+    if (this._missionScrubbing !== scrubbing) { this._missionScrubbing = scrubbing; this._arcDirty = true; }
     const same = (a, b) => a.size === b.size && [...b].every(id => a.has(id));
     const nextEdges = new Set(edges), nextHyper = new Set(hyperedges);
     if (!same(this._hiddenEdges, nextEdges)) { this._hiddenEdges = nextEdges; this._arcDirty = true; }
@@ -3828,6 +3843,11 @@ class CesiumHypergraphGlobe {
     attr.array[node.idx] = visible ? 1 : 0;
     attr.needsUpdate = true;
     if (!visible && this._selectedEntityId === id) this.selectNode(null);   // never leave a hidden node selected
+  }
+
+  /** The server deleted this edge (a graph EDGE_DELETE event). */
+  deleteEdge(id) {
+    this._queueUpdate({ type: 'edge_delete', edge_id: id });
   }
 
   upsertEdge(id, srcId, dstId, conf, options = {}) {

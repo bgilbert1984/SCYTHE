@@ -2567,31 +2567,42 @@ const _pcap = {
         globe.upsertNode(ev.entity_id, lat, lon, conf, { kind: 'host', ...ev, shadow: conf < 0.35 });
         this.injectedNodes.add(ev.entity_id);
       });
-
-      // T3-B: live graph_event push from server GraphEventBus
-      globe._socket.on('graph_event', ev => {
-        if (!ev?.event_type) return;
-        const et = ev.event_type.toUpperCase();
-        const d  = ev.data || {};
-        const loc = d.location || {};
-        const lat = loc.lat ?? d.lat ?? d.latitude;
-        const lon = loc.lon ?? d.lon ?? d.longitude;
-        const conf = d.confidence ?? d.weight ?? 0.5;
-
-        if (et === 'NODE_DELETE') {
-          globe.removeNode?.(ev.entity_id);
-        } else if (et.startsWith('NODE') && lat != null && lon != null) {
-          globe.upsertNode(ev.entity_id, lat, lon, conf, {
-            kind: ev.entity_kind || d.kind || 'host',
-            shadow: conf < 0.35,
-            ...d,
-          });
-        } else if (et.startsWith('EDGE') && et !== 'EDGE_DELETE') {
-          // Route edge events through the existing queue mechanism
-          globe._queueUpdate?.({ type: 'edge_update', ...d, edge_id: ev.entity_id });
-        }
-      });
     }
+
+    // T3-B: live graph_event push from server GraphEventBus. globe._socket does not exist yet when this runs (it is created
+    // after the auth round-trip), so bind when the globe announces a socket, and now if one is already there.
+    const onGraphEvent = ev => {
+      if (!ev?.event_type) return;
+      const et = ev.event_type.toUpperCase();
+      const d  = ev.data || {};
+      const loc = d.location || {};
+      const lat = loc.lat ?? d.lat ?? d.latitude;
+      const lon = loc.lon ?? d.lon ?? d.longitude;
+      const conf = d.confidence ?? d.weight ?? 0.5;
+
+      if (et === 'NODE_DELETE') {
+        globe.removeNode?.(ev.entity_id);
+      } else if (et.startsWith('NODE') && lat != null && lon != null) {
+        globe.upsertNode(ev.entity_id, lat, lon, conf, {
+          kind: ev.entity_kind || d.kind || 'host',
+          shadow: conf < 0.35,
+          ...d,
+        });
+      } else if (et === 'EDGE_DELETE') {
+        globe.deleteEdge?.(ev.entity_id);
+      } else if (et.startsWith('EDGE')) {
+        // Route edge events through the existing queue mechanism
+        globe._queueUpdate?.({ type: 'edge_update', ...d, edge_id: ev.entity_id });
+      }
+    };
+    const boundSockets = new WeakSet();
+    const bindGraphEvents = (socket) => {
+      if (!socket || boundSockets.has(socket)) return;
+      boundSockets.add(socket);
+      socket.on('graph_event', onGraphEvent);
+    };
+    bindGraphEvents(globe._socket);
+    window.addEventListener('globe:socket_ready', (e) => bindGraphEvents(e.detail?.socket));
 
     // Pre-load session list
     this._loadSessions();

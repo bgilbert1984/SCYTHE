@@ -11,6 +11,10 @@ python e2e/mission_replay/run.py
 It reuses the canned-API server of `e2e/globe_picking/run.py`, so it needs the same dependencies (Playwright and its
 Chromium) and network access for the Cesium, three.js and Socket.IO CDNs.
 
+The page draws synthetic proximity arcs (`prox:<a>→<b>`) between nearby nodes from about 8 s after load. One of them can share
+its ends with a real edge, which the matcher treats as ambiguous and leaves unmatched, so the harness turns that generator off
+and removes what it drew, and tests only the edges it draws itself.
+
 ## What it asserts
 
 | Drawn edge | Event | Expected |
