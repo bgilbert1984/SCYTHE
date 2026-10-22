@@ -1,6 +1,6 @@
 import {sessionToken} from "./missionGovernance.js";
 import {classifyNode, describeEvent, entityProvenance, eventsByEntity, evidenceCounts, missionLifecycle, nodeClassCounts,
-  eventsUpTo, nodesNotYetCreated, scrubLabel, tailOffset, timelineBounds} from "./missionViewport.js";
+  eventsUpTo, linksNotPresent, nodesNotYetCreated, scrubLabel, tailOffset, timelineBounds} from "./missionViewport.js";
 
 const WINDOW = 200;     // how many of the mission's newest events the viewport reads
 const RIBBON = 8;       // how many of those the ribbon shows
@@ -85,6 +85,8 @@ export class MissionViewportPanel {
       classes.push(result);
     }
     this.state.nodeClasses = classes;
+    globe.setHiddenLinks?.(linksNotPresent({events: this.state.events, at: this.state.scrubMs, hiddenNodes: hidden,
+      edges: globe._graph.edges, hyperedges: globe._graph.hyperedges}));
   }
 
   async refresh() {

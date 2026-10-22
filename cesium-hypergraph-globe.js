@@ -1749,6 +1749,8 @@ class CesiumHypergraphGlobe {
 
     /* ── Hyperedge layer ── */
     this._heMesh        = null;     // THREE.Points
+    this._hiddenEdges      = new Set();   // edge ids the mission timeline hides
+    this._hiddenHyperedges = new Set();   // hyperedge ids the mission timeline hides
     this._heList        = [];       // [{centroid, conf, color, height, width, memberCount}]
     this._heDirty       = false;
     this._clusterFlareVisible = true;
@@ -3160,13 +3162,14 @@ class CesiumHypergraphGlobe {
   /** Filter arc entries to those within the current time window.
    *  In live mode returns the live _arcEdges array directly (zero overhead). */
   _getVisibleEdges() {
-    if (this._isLive) return this._arcEdges;
+    const shown = e => !this._hiddenEdges.has(e.id);
+    if (this._isLive) return this._hiddenEdges.size ? this._arcEdges.filter(shown) : this._arcEdges;
     const cursor   = this._timeCursor;
     const winStart = cursor - this._timeWindow;
     const result   = [];
     for (const e of this._edgeStore.values()) {
       const ts = e.serverTs || 0;
-      if (ts >= winStart && ts <= cursor) result.push(e);
+      if (ts >= winStart && ts <= cursor && shown(e)) result.push(e);
     }
     return result;
   }
@@ -3596,10 +3599,12 @@ class CesiumHypergraphGlobe {
     const HWID = geo.attributes.aHEWidth.array;
 
     let vi = 0;
-    const count = Math.min(this._heList.length, MAX_HYPEREDGES);
+    const heVisible = this._hiddenHyperedges.size
+      ? this._heList.filter(h => !this._hiddenHyperedges.has(h.id)) : this._heList;
+    const count = Math.min(heVisible.length, MAX_HYPEREDGES);
 
     for (let hi = 0; hi < count; hi++) {
-      const h = this._heList[hi];
+      const h = heVisible[hi];
       for (let pi = 0; pi < MAX_HE_PARTICLES; pi++) {
         const i = hi * MAX_HE_PARTICLES + pi;
         POS[i*3]   = h.centroid.x;
@@ -3786,6 +3791,14 @@ class CesiumHypergraphGlobe {
     const attr = this._nodeMesh.geometry.attributes.instanceSemantic;
     attr.array[node.idx] = code;
     attr.needsUpdate = true;
+  }
+
+  /** Hide the given edges and hyperedges (the mission timeline hides links that did not exist yet). */
+  setHiddenLinks({edges = [], hyperedges = []} = {}) {
+    const same = (a, b) => a.size === b.size && [...b].every(id => a.has(id));
+    const nextEdges = new Set(edges), nextHyper = new Set(hyperedges);
+    if (!same(this._hiddenEdges, nextEdges)) { this._hiddenEdges = nextEdges; this._arcDirty = true; }
+    if (!same(this._hiddenHyperedges, nextHyper)) { this._hiddenHyperedges = nextHyper; this._heDirty = true; }
   }
 
   /** Hide or show a node (the mission timeline hides nodes that did not exist yet). */
