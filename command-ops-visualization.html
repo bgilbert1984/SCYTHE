@@ -3923,7 +3923,11 @@
         <div id="operational-status">
             <div class="status-indicator status-active">
                 <div class="status-dot"></div>
-                <span><a href="./cesium-hypergraph-globe.html" style="color:inherit;text-decoration:none;">GLOBE INTEL</a></span>
+                <span><a id="deeplink-globe" href="./cesium-hypergraph-globe.html" style="color:inherit;text-decoration:none;">GLOBE INTEL</a></span>
+            </div>
+            <div class="status-indicator status-active">
+                <div class="status-dot"></div>
+                <span><a id="deeplink-regional" href="./scythe-web/regional-rf-demo.html" style="color:inherit;text-decoration:none;">REGIONAL RF</a></span>
             </div>
             <div class="status-indicator status-active">
                 <div class="status-dot"></div>
@@ -44019,5 +44023,15 @@ ${unconfirmedBanner}
         }
     })();
     </script>
+<script type="module">
+    // Deep-link contract (scythe-web/deepLink.js): carry the mission and selection this page was opened with to the
+    // other views. This page does not load a mission from the server, so it only forwards the context.
+    import { deepLink, parseDeepLink } from "./scythe-web/deepLink.js";
+    const context = parseDeepLink(window.location.search);
+    for (const [id, target] of [["deeplink-globe", "globe"], ["deeplink-regional", "regional"]]) {
+        const anchor = document.getElementById(id);
+        if (anchor) anchor.href = deepLink(target, context, "ops");
+    }
+</script>
 </body>
 </html>

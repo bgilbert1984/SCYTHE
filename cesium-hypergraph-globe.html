@@ -4395,13 +4395,27 @@ document.addEventListener('DOMContentLoaded', () => {
 <script type="module" src="scythe-web/browser-entry.js"></script>
 <script type="module">
   import { MissionViewportPanel } from "./scythe-web/missionViewportPanel.js";
-  const missionId = new URLSearchParams(window.location.search).get("mission");
+  import { parseDeepLink, selectWhenPresent } from "./scythe-web/deepLink.js";
+  import { mountDeepLinkNav } from "./scythe-web/deepLinkNav.js";
+  const link = parseDeepLink(window.location.search);
+  const missionId = link.mission;
   const viewport = new MissionViewportPanel({
     root: document.getElementById("mission-viewport"), tint: document.getElementById("mission-viewport-tint"),
     apiBase: window.SCYTHE_API_BASE || "", missionId,
     globe: () => (typeof globe !== "undefined" ? globe : null), storages: [window.sessionStorage, window.localStorage] });
   window.scytheMissionViewport = viewport;
-  window.addEventListener("globe:node_selected", ({detail}) => viewport.select(detail?.node ? detail.entityId : null));
+  const nav = mountDeepLinkNav({root: viewport.header, from: "globe", targets: ["regional", "ops"], mission: link.mission,
+    select: link.select, rejected: link.rejected});
+  window.addEventListener("globe:node_selected", ({detail}) => {
+    const entityId = detail?.node ? detail.entityId : null;
+    viewport.select(entityId);
+    nav.update({select: entityId});
+  });
+  // ?select=<entity>: select it once the graph has loaded it (it arrives after the page does).
+  if (link.select) selectWhenPresent(window.globe, link.select).then((outcome) => {
+    window.scytheDeepLinkSelect = outcome;
+    if (outcome !== "selected") console.info(`[deep link] ${link.select}: ${outcome}`);
+  });
 </script>
 
 </body>
