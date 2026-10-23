@@ -740,6 +740,11 @@
     .mvp__empty, .mvp__line { color:#7fa6b8; }
     .mvp__inspector { max-height:40vh; overflow:auto; padding:4px 8px 8px; border-top:1px dashed rgba(0,212,255,.3); }
     .mvp__heading { margin:2px 0 4px; font-size:10px; color:#66ddff; letter-spacing:.06em; }
+    .mvp__scrub { display:flex; align-items:center; gap:8px; padding:4px 8px; border-top:1px dashed rgba(0,212,255,.3); }
+    .mvp__slider { flex:1 1 auto; min-width:0; accent-color:#00d4ff; }
+    .mvp__clock { color:#9fc7d8; white-space:nowrap; } .mvp__clock[data-mode="past"] { color:#f7d154; }
+    .mvp__live { font:10px ui-monospace,monospace; color:#ccefff; background:#0b1a2e; border:1px solid rgba(0,212,255,.55); padding:1px 8px; cursor:pointer; }
+    .mvp__live:disabled { opacity:.45; cursor:default; }
     .mvp__class { color:#ccefff; padding:1px 0 3px; }
     .mvp__class[data-kind="inference"] { color:#f7d154; } .mvp__class[data-kind="correlation"] { color:#ff8cc8; } .mvp__class[data-kind="observation"] { color:#63ffd1; }
     .mvp__trace { padding:3px 0; border-bottom:1px solid rgba(0,212,255,.12); }

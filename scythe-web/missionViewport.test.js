@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {NODE_SEMANTIC_CODE, classifyEvent, classifyNode, describeEvent, entityProvenance, eventsByEntity, evidenceCounts,
-  missionLifecycle, nodeClassCounts, tailOffset} from "./missionViewport.js";
+  missionLifecycle, nodeClassCounts, nodesNotYetCreated, eventsUpTo, scrubLabel, tailOffset, timelineBounds} from "./missionViewport.js";
 
 test("the lifecycle only reports states the server records", () => {
   assert.equal(missionLifecycle({}).key, "none");
@@ -78,4 +78,34 @@ test("nodes are counted by class and events grouped per entity", () => {
   const grouped = eventsByEntity([{entity_id: "a", event_type: "probe"}, {entity_id: "a"}, {event_type: "x"}]);
   assert.equal(grouped.get("a").length, 2);
   assert.equal(grouped.size, 1);
+});
+
+test("the timeline spans the loaded events and needs two distinct moments to scrub", () => {
+  assert.deepEqual(timelineBounds([{timestamp: 5000}, {timestamp: 1000}, {timestamp: "x"}]), {start: 1000, end: 5000});
+  assert.equal(timelineBounds([{timestamp: 1000}, {timestamp: 1000}]), null);
+  assert.equal(timelineBounds([]), null);
+  assert.equal(timelineBounds(undefined), null);
+});
+
+test("scrubbing shows the events up to the chosen moment, and live shows all", () => {
+  const events = [{timestamp: 1000}, {timestamp: 2000}, {timestamp: 3000}];
+  assert.equal(eventsUpTo(events, 2000).length, 2);
+  assert.equal(eventsUpTo(events, 500).length, 0);
+  assert.equal(eventsUpTo(events, null).length, 3);
+});
+
+test("only a creation event in the loaded window can hide a node", () => {
+  const events = [{timestamp: 3000, event_type: "NODE_CREATE", entity_id: "late"},
+    {timestamp: 1000, event_type: "NODE_CREATE", entity_id: "early"},
+    {timestamp: 4000, event_type: "NODE_CREATE", entity_id: "early"},
+    {timestamp: 3500, event_type: "probe", entity_id: "older-than-window"}];
+  assert.deepEqual([...nodesNotYetCreated(events, 2000)], ["late"]);
+  assert.deepEqual([...nodesNotYetCreated(events, 5000)], []);
+  assert.equal(nodesNotYetCreated(events, null).size, 0);
+});
+
+test("the scrub clock shows the date only when the span crosses midnight", () => {
+  const day = Date.UTC(2026, 9, 22, 9, 41, 22);
+  assert.equal(scrubLabel(day, {start: day, end: day + 1000}), "09:41:22Z");
+  assert.equal(scrubLabel(day, {start: day, end: day + 86400000}), "2026-10-22 09:41:22Z");
 });
