@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {NODE_SEMANTIC_CODE, classifyEvent, classifyNode, describeEvent, entityProvenance, eventsByEntity, evidenceCounts,
-  missionLifecycle, nodeClassCounts, nodesNotYetCreated, eventsUpTo, scrubLabel, tailOffset, timelineBounds} from "./missionViewport.js";
+  linksNotPresent, missionLifecycle, nodeClassCounts, nodesNotYetCreated, eventsUpTo, scrubLabel, tailOffset, timelineBounds} from "./missionViewport.js";
 
 test("the lifecycle only reports states the server records", () => {
   assert.equal(missionLifecycle({}).key, "none");
@@ -108,4 +108,32 @@ test("the scrub clock shows the date only when the span crosses midnight", () =>
   const day = Date.UTC(2026, 9, 22, 9, 41, 22);
   assert.equal(scrubLabel(day, {start: day, end: day + 1000}), "09:41:22Z");
   assert.equal(scrubLabel(day, {start: day, end: day + 86400000}), "2026-10-22 09:41:22Z");
+});
+
+test("an edge or hyperedge never outlives a missing endpoint, and live hides nothing", () => {
+  const edges = new Map([["e1", {src: "a", dst: "late"}], ["e2", {src: "a", dst: "b"}]]);
+  const hyperedges = new Map([["h1", {members: ["a", "late"]}], ["h2", {members: ["a", "b"]}]]);
+  const hidden = linksNotPresent({events: [], at: 1000, edges, hyperedges, hiddenNodes: new Set(["late"])});
+  assert.deepEqual([...hidden.edges], ["e1"]);
+  assert.deepEqual([...hidden.hyperedges], ["h1"]);
+  const live = linksNotPresent({events: [], at: null, edges, hyperedges, hiddenNodes: new Set(["late"])});
+  assert.equal(live.edges.size + live.hyperedges.size, 0);
+});
+
+test("an edge is hidden before its creation event or after its newest delete, and only then", () => {
+  const events = [
+    {entity_id: "e1", event_type: "EDGE_CREATE", timestamp: 3000},
+    {entity_id: "e2", event_type: "EDGE_CREATE", timestamp: 1000},
+    {entity_id: "e2", event_type: "EDGE_DELETE", timestamp: 2000},
+    {entity_id: "e3", event_type: "EDGE_CREATE", timestamp: 1000},
+    {entity_id: "e3", event_type: "EDGE_DELETE", timestamp: 2000},
+    {entity_id: "e3", event_type: "EDGE_UPDATE", timestamp: 2500},
+    {entity_id: "e4", event_type: "EDGE_UPDATE", timestamp: 4000},
+    {entity_id: "n", event_type: "NODE_CREATE", timestamp: 9000}];
+  const at = (time) => [...linksNotPresent({events, at: time}).edges].sort();
+  assert.deepEqual(at(500), ["e1", "e2", "e3"]);
+  assert.deepEqual(at(1500), ["e1"]);
+  assert.deepEqual(at(2200), ["e1", "e2", "e3"]);
+  assert.deepEqual(at(2600), ["e1", "e2"]);
+  assert.deepEqual(at(5000), ["e2"]);
 });

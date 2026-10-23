@@ -159,3 +159,40 @@ export function scrubLabel(at, bounds) {
   const crosses = bounds && new Date(bounds.start).toISOString().slice(0, 10) !== new Date(bounds.end).toISOString().slice(0, 10);
   return crosses ? `${iso.slice(0, 10)} ${iso.slice(11, 19)}Z` : `${iso.slice(11, 19)}Z`;
 }
+
+const EDGE_EVENTS = new Set(["EDGE_CREATE", "EDGE_UPDATE", "EDGE_UPSERT", "EDGE_DELETE"]);
+
+/**
+ * Links that did not exist at `at`, so the graph is never drawn with an edge to a node that is hidden.
+ * - an edge or hyperedge touching a node that is not yet created is hidden (it could not exist without it);
+ * - an edge whose creation event in the loaded window is later is hidden;
+ * - an edge whose newest event up to `at` is a delete is hidden.
+ * Anything the events do not speak to stays visible: absence of evidence removes nothing.
+ * `edges` maps edge id to {src, dst}; `hyperedges` maps hyperedge id to {members}.
+ */
+export function linksNotPresent({events, at, edges = new Map(), hyperedges = new Map(), hiddenNodes = new Set()} = {}) {
+  const result = {edges: new Set(), hyperedges: new Set()};
+  if (at == null) return result;
+  const history = new Map();
+  for (const event of events || []) {
+    if (!EDGE_EVENTS.has(event?.event_type) || !event.entity_id) continue;
+    const time = Number(event.timestamp);
+    if (!Number.isFinite(time)) continue;
+    if (!history.has(event.entity_id)) history.set(event.entity_id, []);
+    history.get(event.entity_id).push({type: event.event_type, time, seq: Number(event.seq) || 0});
+  }
+  for (const [id, entries] of history) {
+    entries.sort((a, b) => a.time - b.time || a.seq - b.seq);
+    const created = entries.find(entry => entry.type === "EDGE_CREATE");
+    const latest = entries.filter(entry => entry.time <= at).pop();
+    if (created && created.time > at) result.edges.add(id);
+    else if (latest?.type === "EDGE_DELETE") result.edges.add(id);
+  }
+  for (const [id, edge] of edges) {
+    if (hiddenNodes.has(edge?.src) || hiddenNodes.has(edge?.dst)) result.edges.add(id);
+  }
+  for (const [id, hyperedge] of hyperedges) {
+    if ((hyperedge?.members || []).some(member => hiddenNodes.has(member))) result.hyperedges.add(id);
+  }
+  return result;
+}
