@@ -76,6 +76,32 @@ class PcapIngestWriteBusTests(unittest.TestCase):
         self.assertEqual("NODE_UPDATE", call["graph_ops"][0].event_type)
         self.assertEqual(artifact_id, call["graph_ops"][0].entity_id)
 
+    def _flushed_context(self, config):
+        bus = FakeWriteBus()
+        artifact_id = _pcap_artifact_id("capture.pcapng")
+        with patch("pcap_ingest._get_writebus_instance", return_value=bus):
+            emitter = HypergraphEmitter(DirectMutationForbiddenEngine(), config)
+            emitter.emit_pcap_artifact("capture.pcapng", 123)
+            emitter.flush(
+                entity_id=artifact_id,
+                entity_type="PCAP_INGEST_MATERIALIZATION",
+                entity_data={"id": artifact_id, "kind": "pcap_artifact"},
+                request_id=f"pcap_ingest:{artifact_id}:materialize",
+                evidence_refs=[artifact_id],
+                idempotency_key=emitter.idempotency_key(artifact_id, "materialize"),
+            )
+        return bus.calls[0]["ctx"]
+
+    def test_the_flush_context_carries_the_configured_mission(self):
+        ctx = self._flushed_context(IngestConfig(mission_id="RFMAP-20261017-001"))
+        self.assertEqual("RFMAP-20261017-001", ctx.mission_id)
+        self.assertEqual("RFMAP-20261017-001", ctx.provenance().mission_id)
+
+    def test_the_flush_context_has_no_mission_when_none_is_configured(self):
+        ctx = self._flushed_context(IngestConfig())
+        self.assertIsNone(ctx.mission_id)
+        self.assertIsNone(ctx.provenance().mission_id)
+
     def test_discard_pending_prevents_stale_ops_from_flushing(self):
         bus = FakeWriteBus()
         config = IngestConfig()

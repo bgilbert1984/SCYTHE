@@ -299,6 +299,7 @@ class _WriteBusGraphWriter:
             operator_id="SYSTEM:PCAP_INGEST",
             request_id=request_id,
             source=self._config.source_tag,
+            mission_id=self._config.mission_id,
             evidence_refs=list(evidence_refs or []),
             correlation_id=correlation_id or request_id,
         )
