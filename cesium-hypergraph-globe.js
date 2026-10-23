@@ -2027,7 +2027,7 @@ class CesiumHypergraphGlobe {
     window.addEventListener('resize', () => this._onResize());
 
     // ── Cesium canvas click → node pick ─────────────────────────────────
-    cesiumCanvas.addEventListener('click', (e) => this._onCanvasClick(e));
+    this._wireCanvasPicking(cesiumCanvas);
 
     // ── Geo labels (countries + dynamic cities) ─────────────────────────
     this._initGeoLabels();
@@ -2117,7 +2117,7 @@ class CesiumHypergraphGlobe {
     window.addEventListener('resize', () => this._onResize());
 
     // ── Cesium canvas click → node pick ─────────────────────────────────
-    cesiumCanvas.addEventListener('click', (e) => this._onCanvasClick(e));
+    this._wireCanvasPicking(cesiumCanvas);
 
     // ── Geo labels ──────────────────────────────────────────────────────
     this._initGeoLabels();
@@ -3703,24 +3703,34 @@ class CesiumHypergraphGlobe {
   }
 
   /* ───────────────────────────────────────────────────────────────────────
-   * Canvas click → GPU picking (raycasting fallback)
+   * Canvas click → node pick (screen-space; see node-picking.js)
    * ----------------------------------------------------------------------- */
+  _wireCanvasPicking(canvas) {
+    // A drag rotates the globe and still ends in a click: only a press-and-release in place picks.
+    let down = null;
+    canvas.addEventListener('pointerdown', (e) => { down = { x: e.clientX, y: e.clientY }; });
+    canvas.addEventListener('click', (e) => {
+      const moved = down ? Math.hypot(e.clientX - down.x, e.clientY - down.y) : 0;
+      down = null;
+      if (moved <= 5) this._onCanvasClick(e);
+    });
+  }
+
   _onCanvasClick(e) {
     const rect = e.target.getBoundingClientRect();
-    const x    = ((e.clientX - rect.left) / rect.width)  * 2 - 1;
-    const y   = -((e.clientY - rect.top)  / rect.height) * 2 + 1;
-
-    const raycaster = new THREE.Raycaster();
-    raycaster.setFromCamera({ x, y }, this._camera);
-    const hits = raycaster.intersectObject(this._nodeMesh);
-
-    if (hits.length > 0) {
-      const instanceIdx = hits[0].instanceId;
-      // Reverse-lookup entityId from instance index
-      const entityId = [...this._nodeIdxMap.entries()]
-        .find(([, idx]) => idx === instanceIdx)?.[0];
-      if (entityId) this.selectNode(entityId);
-    }
+    const geo  = this._nodeMesh.geometry.attributes;
+    const viewProj = new THREE.Matrix4()
+      .multiplyMatrices(this._camera.projectionMatrix, this._camera.matrixWorldInverse).elements;
+    const idx = ScytheNodePicking.pickNode({
+      px: e.clientX - rect.left, py: e.clientY - rect.top, width: rect.width, height: rect.height,
+      viewProj, count: this._nodeCount, heightScale: RECON_HEIGHT_SCALE,
+      cameraPosition: [this._camera.matrixWorld.elements[12], this._camera.matrixWorld.elements[13], this._camera.matrixWorld.elements[14]],
+      nodes: { position: geo.instancePosition.array, conf: geo.instanceConf.array, lifecycle: geo.instanceLifecycle.array,
+               cluster: geo.instanceCluster.array, visible: geo.instanceVisible.array }
+    });
+    if (idx < 0) return;
+    const entityId = [...this._nodeIdxMap.entries()].find(([, i]) => i === idx)?.[0];
+    if (entityId) this.selectNode(entityId);
   }
 
   /* ───────────────────────────────────────────────────────────────────────
