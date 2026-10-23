@@ -4,15 +4,16 @@
                 K27 ADDED, K25 AMENDED below. Every anchor audits clean at
                 66a544bf; the inventory gate refuses K24 if it reappears.
 3b controls     27  (J1..J27) in controls_journal.py
-5.21 controls   21  (S1..S21) in docs/evidence/s-series/controls_521.py, with
+5.21 controls   33  (S1..S35, S33 and S34 RETIRED after run 3) in
+                docs/evidence/s-series/controls_521.py, with
                 its own runner and verifier beside it; not part of this bundle's
                 selftest, covered by the launch gates and verify_s_series.py.
 
 EXPECTED COUNT IS A PROPERTY OF A CHECKPOINT, NOT OF THIS PROJECT. Both gates
-now assert 2421, which is what
+now assert 2423, which is what
 
-    the entry-17 commit  (main after 007f8e5d, plus the reference-comb match
-                          and the twenty-two witness tests it needed)
+    the S22 commit       (main after 39da055e, plus the twelve entry-17
+                          controls and the two witnesses they needed)
 
 collects exactly, with 2 pre-existing skips on a host without the pinned
 observation tree (the count gate reads `Ran N`, which includes them). Update them in the same commit as
@@ -28,7 +29,8 @@ is not self-correcting.
   2370    66a544bf + 3d                             #116's gates
   2392    4091d22e + §5.21 catalogue analysis        #119's gates
   2399    007f8e5d + S-series witnesses              #120's gates
-  2421    + entry 17 reference-comb match            these gates
+  2421    39da055e + entry 17 reference-comb match   #121's gates
+  2423    + S22..S35 witnesses                        these gates
 
 The two certifications remain valid at THEIR counts. 2245 and 2254 were true of
 the trees they were measured on; neither is wrong, and neither is this one's.
