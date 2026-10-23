@@ -160,6 +160,58 @@ export function scrubLabel(at, bounds) {
   return crosses ? `${iso.slice(0, 10)} ${iso.slice(11, 19)}Z` : `${iso.slice(11, 19)}Z`;
 }
 
+/** The two ends of an edge event, from its payload, as the server's edge cache reads them; null when it names none. */
+export function edgeEndpoints(event) {
+  const payload = event?.payload && typeof event.payload === "object" ? event.payload : {};
+  const nodes = Array.isArray(payload.nodes) ? payload.nodes : [];
+  const src = payload.src || payload.source || nodes[0];
+  const dst = payload.dst || payload.target || (nodes.length > 1 ? nodes[nodes.length - 1] : undefined);
+  return src && dst ? {src: String(src), dst: String(dst)} : null;
+}
+
+/** How an edge event was tied to a drawn edge. */
+export const MATCH_MODE = Object.freeze({ID: "ID", ENDPOINTS: "ENDPOINTS", UNMATCHED: "UNMATCHED"});
+
+/**
+ * Which rendered edge each edge event is about, and how that was decided:
+ *   ID         the event's entity_id is the id of a drawn edge;
+ *   ENDPOINTS  it is not, but the payload names the same two ends as exactly one drawn edge;
+ *   UNMATCHED  neither. Two drawn edges with the same ends are ambiguous and are never matched by their ends.
+ * `matches` lists every edge event with its mode, `resolved` groups the matched events by drawn edge id, and `identity`
+ * counts the modes, so a mismatch is visible rather than silent.
+ */
+export function resolveEdgeEvents(events, edges = new Map()) {
+  const byEnds = new Map();
+  for (const [id, edge] of edges) {
+    if (!edge?.src || !edge?.dst) continue;
+    const key = `${edge.src}\u0000${edge.dst}`;
+    byEnds.set(key, byEnds.has(key) ? null : id);
+  }
+  const matches = [];
+  const resolved = new Map();
+  const identity = {byId: 0, byEndpoints: 0, unmatched: 0};
+  for (const event of events || []) {
+    if (!EDGE_EVENTS.has(event?.event_type) || !event.entity_id) continue;
+    let edgeId = event.entity_id;
+    let mode = MATCH_MODE.ID;
+    if (!edges.has(edgeId)) {
+      const ends = edgeEndpoints(event);
+      const match = ends && byEnds.get(`${ends.src}\u0000${ends.dst}`);
+      if (match) { edgeId = match; mode = MATCH_MODE.ENDPOINTS; } else mode = MATCH_MODE.UNMATCHED;
+    }
+    matches.push({event, edgeId: mode === MATCH_MODE.UNMATCHED ? null : edgeId, mode});
+    if (mode === MATCH_MODE.ID) identity.byId += 1;
+    else if (mode === MATCH_MODE.ENDPOINTS) identity.byEndpoints += 1;
+    else identity.unmatched += 1;
+    // An event with no matching drawn edge is still kept under its own id: with no drawn edge list at all, that is
+    // the only identity there is, and an unmatched id hides nothing because no drawn edge carries it.
+    const key = mode === MATCH_MODE.UNMATCHED ? event.entity_id : edgeId;
+    if (!resolved.has(key)) resolved.set(key, []);
+    resolved.get(key).push(event);
+  }
+  return {matches, resolved, identity};
+}
+
 const EDGE_EVENTS = new Set(["EDGE_CREATE", "EDGE_UPDATE", "EDGE_UPSERT", "EDGE_DELETE"]);
 
 /**
@@ -171,17 +223,20 @@ const EDGE_EVENTS = new Set(["EDGE_CREATE", "EDGE_UPDATE", "EDGE_UPSERT", "EDGE_
  * `edges` maps edge id to {src, dst}; `hyperedges` maps hyperedge id to {members}.
  */
 export function linksNotPresent({events, at, edges = new Map(), hyperedges = new Map(), hiddenNodes = new Set()} = {}) {
-  const result = {edges: new Set(), hyperedges: new Set()};
+  const {resolved, identity} = resolveEdgeEvents(events, edges);
+  const result = {edges: new Set(), hyperedges: new Set(), identity};
   if (at == null) return result;
   const history = new Map();
-  for (const event of events || []) {
-    if (!EDGE_EVENTS.has(event?.event_type) || !event.entity_id) continue;
-    const time = Number(event.timestamp);
-    if (!Number.isFinite(time)) continue;
-    if (!history.has(event.entity_id)) history.set(event.entity_id, []);
-    history.get(event.entity_id).push({type: event.event_type, time, seq: Number(event.seq) || 0});
+  for (const [id, group] of resolved) {
+    for (const event of group) {
+      const time = Number(event.timestamp);
+      if (!Number.isFinite(time)) continue;
+      if (!history.has(id)) history.set(id, []);
+      history.get(id).push({type: event.event_type, time, seq: Number(event.seq) || 0});
+    }
   }
   for (const [id, entries] of history) {
+    if (edges.size && !edges.has(id)) continue;     // an unmatched event names no drawn edge: it hides nothing
     entries.sort((a, b) => a.time - b.time || a.seq - b.seq);
     const created = entries.find(entry => entry.type === "EDGE_CREATE");
     const latest = entries.filter(entry => entry.time <= at).pop();

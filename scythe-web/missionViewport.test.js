@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {NODE_SEMANTIC_CODE, classifyEvent, classifyNode, describeEvent, entityProvenance, eventsByEntity, evidenceCounts,
-  linksNotPresent, missionLifecycle, nodeClassCounts, nodesNotYetCreated, eventsUpTo, scrubLabel, tailOffset, timelineBounds} from "./missionViewport.js";
+  edgeEndpoints, linksNotPresent, missionLifecycle, nodeClassCounts, nodesNotYetCreated, resolveEdgeEvents, MATCH_MODE, eventsUpTo, scrubLabel, tailOffset, timelineBounds} from "./missionViewport.js";
 
 test("the lifecycle only reports states the server records", () => {
   assert.equal(missionLifecycle({}).key, "none");
@@ -136,4 +136,48 @@ test("an edge is hidden before its creation event or after its newest delete, an
   assert.deepEqual(at(2200), ["e1", "e2", "e3"]);
   assert.deepEqual(at(2600), ["e1", "e2"]);
   assert.deepEqual(at(5000), ["e2"]);
+});
+
+test("an edge event's ends are read from its payload the way the server's cache reads them", () => {
+  assert.deepEqual(edgeEndpoints({payload: {src: "a", dst: "b"}}), {src: "a", dst: "b"});
+  assert.deepEqual(edgeEndpoints({payload: {source: "a", target: "b"}}), {src: "a", dst: "b"});
+  assert.deepEqual(edgeEndpoints({payload: {nodes: ["a", "x", "b"]}}), {src: "a", dst: "b"});
+  assert.equal(edgeEndpoints({payload: {nodes: ["a"]}}), null);
+  assert.equal(edgeEndpoints({}), null);
+  assert.equal(edgeEndpoints(null), null);
+});
+
+test("edge events resolve by id first, then by their ends, and a mismatch is counted rather than silent", () => {
+  const edges = new Map([["edge-1", {src: "a", dst: "b"}], ["edge-2", {src: "c", dst: "d"}]]);
+  const events = [
+    {event_type: "EDGE_CREATE", entity_id: "edge-1", timestamp: 1},
+    {event_type: "EDGE_CREATE", entity_id: "other-id", timestamp: 2, payload: {src: "c", dst: "d"}},
+    {event_type: "EDGE_CREATE", entity_id: "nowhere", timestamp: 3, payload: {src: "x", dst: "y"}},
+    {event_type: "EDGE_CREATE", entity_id: "no-payload", timestamp: 4},
+    {event_type: "NODE_CREATE", entity_id: "a", timestamp: 5}];
+  const {matches, resolved, identity} = resolveEdgeEvents(events, edges);
+  assert.deepEqual(identity, {byId: 1, byEndpoints: 1, unmatched: 2});
+  assert.equal(resolved.get("edge-2").length, 1);        // the "other-id" event is about edge-2
+  assert.equal(resolved.has("other-id"), false);
+  assert.deepEqual(matches.map(m => [m.event.entity_id, m.mode, m.edgeId]), [
+    ["edge-1", MATCH_MODE.ID, "edge-1"], ["other-id", MATCH_MODE.ENDPOINTS, "edge-2"],
+    ["nowhere", MATCH_MODE.UNMATCHED, null], ["no-payload", MATCH_MODE.UNMATCHED, null]]);
+});
+
+test("two rendered edges with the same ends are ambiguous and never matched by their ends", () => {
+  const edges = new Map([["e1", {src: "a", dst: "b"}], ["e2", {src: "a", dst: "b"}]]);
+  const {identity, matches} = resolveEdgeEvents([{event_type: "EDGE_CREATE", entity_id: "zzz", timestamp: 1, payload: {src: "a", dst: "b"}}], edges);
+  assert.deepEqual(identity, {byId: 0, byEndpoints: 0, unmatched: 1});
+  assert.equal(matches[0].mode, MATCH_MODE.UNMATCHED);
+  assert.equal(linksNotPresent({events: [{event_type: "EDGE_CREATE", entity_id: "zzz", timestamp: 9000, payload: {src: "a", dst: "b"}}], at: 1000, edges}).edges.size, 0);
+});
+
+test("an edge whose event carries a different id is still hidden before its creation, through its ends", () => {
+  const edges = new Map([["edge-2", {src: "c", dst: "d"}]]);
+  const events = [{event_type: "EDGE_CREATE", entity_id: "other-id", timestamp: 3000, payload: {src: "c", dst: "d"}}];
+  const hidden = linksNotPresent({events, at: 1000, edges});
+  assert.deepEqual([...hidden.edges], ["edge-2"]);
+  assert.equal(hidden.identity.byEndpoints, 1);
+  assert.equal(linksNotPresent({events, at: null, edges}).identity.byEndpoints, 1);   // reported live too
+  assert.equal(linksNotPresent({events, at: 5000, edges}).edges.size, 0);
 });
