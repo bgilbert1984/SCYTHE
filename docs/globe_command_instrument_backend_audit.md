@@ -160,8 +160,17 @@ replayed evidence in one view.
 `live:<mission_id>` with that `mission_id`, so it appears in the mission's events. Everything
 else stays in `'global'` unbound. The shared `'global'` session is deliberately not bound,
 because a session's binding backfills every event already in it. An event naming two missions,
-or any invalid id, stays unbound. Still open: whether production live events actually carry a
-mission in those fields, which was not measured.
+or any invalid id, stays unbound.
+
+**Update (`graph_event_fields.py`):** measuring the real pipeline showed the drain read every event
+with `getattr`, but `WriteBus.publish_bus` publishes a plain dict (`ENTITY_UPSERT`), so each
+WriteBus event was stored and pushed to clients blank (`event_type=''`, `entity_id=''`, `{}`).
+The drain now reads objects and dicts alike. A WriteBus commit whose context sets `mission_id` is
+now stored under that mission. Still open: no production pcap path sets `mission_id` (the MCP
+handler, the CLI and `tak_ml_gemma_runner` build `IngestConfig` without it, and the pcap flush
+context has none), and the other `GraphEventBus` subscribers (map-cache node and edge, line
+~4158 onward) have the same `getattr`-only reading. A dict event also never receives the bus's
+`sequence_id`, so it reads 0.
 
 ## 5. Revisions
 

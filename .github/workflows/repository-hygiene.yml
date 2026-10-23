@@ -108,6 +108,7 @@ jobs:
           python tools/ci_run_explicit_tests.py \
             test_eve_graph_ingest \
             test_eve_grpc_retry \
+            test_graph_event_fields \
             test_graphfusion \
             test_graphops_address_context \
             test_graphops_authority \
