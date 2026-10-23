@@ -50,3 +50,17 @@ an expanded card re-reads them once a minute.
 
 Evidence totals, "second operator waiting", pending approvals and Gate D. None is reported without a per-instance login (approvals
 need an instance session) or at all (see `docs/globe_command_instrument_backend_audit.md`).
+
+## Go to… (Ctrl+K)
+
+`scythe-web/commandPalette.js` (pure) and `commandPaletteView.js` (the dialog) give the hub a jump list, opened with Ctrl+K / Cmd+K or the nav's "Go to…" button.
+
+It offers only what exists:
+
+- the hub's own actions (New instance, Connect, Account, Documentation, Logout);
+- Globe, Regional and Mission Ops for every instance that is **running**;
+- a mission's views only when the hub has **already loaded** that instance's mission list (by expanding its card). The palette never fetches, because `GET /api/missions` has no limit.
+
+An instance that is not running offers nothing, and the palette says how many were left out. Mission links are the deep links of `deep_link_contract.md`; an unusable mission id yields a link without it.
+
+Matching: every word of the query must appear in the label; labels that start with, then have a word starting with, the first word rank first. It does not search entities, alerts or evidence, because the hub has no source for them.

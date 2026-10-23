@@ -178,8 +178,57 @@ class Check:
         self.record("the page raised no script errors", not page.errors, "; ".join(page.errors[:3]))
         page.close()
 
+    def entries(self, page):
+        return page.evaluate("[...document.querySelectorAll('.palette__row')].map(r => r.dataset.entry)")
+
+    def palette_cases(self):
+        page = self.home()
+        page.wait_for_selector("#hub-summary-list .hub__card", timeout=60000)
+        page.focus("#btn-new-instance")
+        asked = sum(p.endswith("/api/missions") for p in Handler.requests)
+        page.keyboard.press("Control+k")
+        page.wait_for_selector(".palette:not([hidden]) .palette__row", timeout=5000)
+        self.record("Ctrl+K opens the palette with the input focused", page.evaluate("document.activeElement.className") == "palette__input")
+        ids = self.entries(page)
+        self.record("it lists the hub's actions and the views of running instances only",
+                    "action:new" in ids and "view:scythe-ab12:globe" in ids and "view:scythe-new:ops" in ids and not any("scythe-dead" in i for i in ids), str(ids))
+        self.record("it offers no mission before the hub has loaded one", not any(i.startswith("mission:") for i in ids))
+        self.record("it says how many instances were left out", "1 instance is not running and not listed." in page.evaluate("document.querySelector('.palette__note').textContent"))
+        self.record("opening it fetched nothing", sum(p.endswith("/api/missions") for p in Handler.requests) == asked)
+        page.keyboard.type("ops-1 reg")
+        self.record("typing narrows the list", self.entries(page) == ["view:scythe-ab12:regional"], str(self.entries(page)))
+        page.keyboard.press("Escape")
+        self.record("Escape closes it and returns focus to where it was",
+                    page.evaluate("[document.querySelector('.palette').hidden, document.activeElement.id]") == [True, "btn-new-instance"])
+        page.keyboard.press("Control+k")
+        page.keyboard.type("zzzz")
+        self.record("a query that matches nothing says so", page.evaluate("document.querySelector('.palette__note').textContent") == "Nothing matches.")
+        page.keyboard.press("Escape")
+        page.click("[data-instance=scythe-ab12] .hub__toggle")
+        page.wait_for_selector("[data-instance=scythe-ab12] .hub__mission", timeout=30000)
+        page.keyboard.press("Control+k")
+        page.keyboard.type("Mission E")
+        ids = self.entries(page)
+        self.record("once the hub has loaded a mission list, its missions are offered", "mission:scythe-ab12:m-e:globe" in ids and not any(":m-g:" in i for i in ids), str(ids))
+        page.keyboard.press("Control+k")
+        self.record("Ctrl+K again closes it", page.evaluate("document.querySelector('.palette').hidden") is True)
+        page.keyboard.press("Control+k")
+        page.keyboard.type("Connect")
+        page.keyboard.press("Enter")
+        page.wait_for_selector("#modal-join-instance.active", timeout=15000)
+        self.record("Enter on an action runs it", True)
+        page.keyboard.press("Escape")
+        page.keyboard.press("Control+k")
+        page.keyboard.type("Mission E Globe")
+        page.keyboard.press("Enter")
+        page.wait_for_function("typeof scytheMissionViewport !== 'undefined'", timeout=60000)
+        landed = page.evaluate("location.pathname + location.search")
+        self.record("Enter on a mission opens that instance's globe on it",
+                    landed == "/scythe/i/scythe-ab12/cesium-hypergraph-globe.html?mission=m-e" and page.evaluate("scytheMissionViewport.missionId") == "m-e", landed)
+        page.close()
+
     def run(self):
-        for cases in (self.shell_cases, self.panel_cases, self.missions_cases, self.unreachable_cases):
+        for cases in (self.shell_cases, self.panel_cases, self.missions_cases, self.palette_cases, self.unreachable_cases):
             cases()
         return all(self.results)
 

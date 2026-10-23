@@ -144,6 +144,16 @@
 
         /* ── Hub summary: what each instance reports about itself ──────────── */
         .hub { max-width: 1100px; margin: 0 auto; padding: 8px 24px 32px; position: relative; z-index: 10; }
+        .palette { position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 10000; display: flex; justify-content: center; align-items: flex-start; padding-top: 12vh; }
+        .palette[hidden] { display: none; }
+        .palette__box { width: min(560px, calc(100vw - 32px)); background: #141821; border: 1px solid #3a4560; border-radius: 8px; font-family: 'Roboto Mono', monospace; font-size: 0.8rem; color: #b8c0cc; }
+        .palette__input { width: 100%; box-sizing: border-box; background: transparent; border: 0; border-bottom: 1px solid #2a3040; color: #e0e0e0; padding: 12px 14px; font: inherit; outline: none; }
+        .palette__list { list-style: none; margin: 0; padding: 4px 0; max-height: 50vh; overflow-y: auto; }
+        .palette__row { display: flex; justify-content: space-between; gap: 12px; padding: 7px 14px; cursor: pointer; }
+        .palette__row[aria-selected="true"] { background: #232b3d; color: #fff; }
+        .palette__hint { color: #6b7488; white-space: nowrap; }
+        .palette__note { padding: 6px 14px 10px; color: #6b7488; font-size: 0.7rem; }
+        .palette__note:empty { display: none; }
         .hub__title { font-family: 'Titillium Web', sans-serif; color: #e0e0e0; font-size: 1.05rem; letter-spacing: 2px; text-transform: uppercase; margin: 0 0 4px; text-align: center; }
         .hub__sub { color: #666; font-size: 0.75rem; font-family: 'Roboto Mono', monospace; text-align: center; margin: 0 0 16px; }
         .hub__list { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; }
@@ -450,6 +460,7 @@
             <a href="#dashboard" class="active">Dashboard</a>
             <button type="button" onclick="ScytheInstances.openNewModal()">New instance</button>
             <button type="button" onclick="ScytheInstances.openJoinModal()">Connect to an instance</button>
+            <button type="button" onclick="scythePalette.open()">Go to… <kbd>Ctrl K</kbd></button>
             <hr>
             <a href="docs/documentation.html" target="_blank" rel="noopener">Documentation</a>
             <button type="button" onclick="openAccountModal()">Account</button>
@@ -1022,7 +1033,19 @@
     </script>
 <script type="module">
     import { mountHub } from "./scythe-web/hubSummaryView.js";
+    import { mountPalette } from "./scythe-web/commandPaletteView.js";
     window.scytheHub = mountHub({ root: document.getElementById("hub-summary-list"), onUpdate: (update) => window.scytheShell.update(update) });
+    // Ctrl+K: go to a hub action, a running instance's view, or a mission the hub has loaded. The hub's own state is the only source.
+    window.scythePalette = mountPalette({
+        getState: () => ({ instances: window.scytheHub.state.instances ?? [], missions: window.scytheHub.state.missions }),
+        actions: [
+            { id: "new", label: "New instance", run: () => ScytheInstances.openNewModal() },
+            { id: "join", label: "Connect to an instance", run: () => ScytheInstances.openJoinModal() },
+            { id: "account", label: "Account", run: () => openAccountModal() },
+            { id: "docs", label: "Documentation", run: () => window.open("docs/documentation.html", "_blank", "noopener") },
+            { id: "logout", label: "Logout", run: () => handleLogout() },
+        ],
+    });
 </script>
 </body>
 </html>
