@@ -52,7 +52,7 @@ export function mountPalette({getState, actions = [], document: doc = globalThis
     });
     input.setAttribute("aria-activedescendant", shown.length ? `palette-row-${active}` : "");
     note.textContent = !shown.length ? "Nothing matches."
-      : skipped ? `${skipped} instance${skipped === 1 ? " is" : "s are"} not running and not listed.` : "";
+      : skipped ? `${skipped} instance${skipped === 1 ? " is" : "s are"} not listed (not running, or no usable id).` : "";
   }
 
   function choose(entry) {

@@ -44,3 +44,9 @@ test("bad input yields no entries instead of throwing", () => {
   assert.deepEqual(paletteEntries({instances: null}).entries, []);
   assert.deepEqual(filterEntries([], undefined), []);
 });
+
+test("an instance whose id cannot go in a URL offers nothing and does not break the rest", () => {
+  const {entries, skipped} = paletteEntries({instances: [{id: "../x", name: "bad", status: "running"}, {id: "scythe-ab12", name: "ops-1", status: "running"}]});
+  assert.deepEqual(entries.map((e) => e.label), ["ops-1 — Globe", "ops-1 — Regional", "ops-1 — Mission Ops"]);
+  assert.equal(skipped, 1);
+});

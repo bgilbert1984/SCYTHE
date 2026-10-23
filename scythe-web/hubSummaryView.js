@@ -54,7 +54,7 @@ export function mountHub({root, base = "", fetchImpl = globalThis.fetch?.bind(gl
     const nav = el("span", className);
     for (const [target, label] of TARGETS) {
       const anchor = el("a", "hub__link", label);
-      anchor.href = instanceDeepLink(instanceId, target, context);
+      try { anchor.href = instanceDeepLink(instanceId, target, context); } catch { return el("span", `${className} hub__note--bad`, "No links: this instance's id is not usable in a URL."); }
       nav.append(anchor);
     }
     return nav;
