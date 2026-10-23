@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {NODE_SEMANTIC_CODE, classifyEvent, classifyNode, describeEvent, entityProvenance, eventsByEntity, evidenceCounts,
-  edgeEndpoints, linksNotPresent, missionLifecycle, nodeClassCounts, nodesNotYetCreated, resolveEdgeEvents, MATCH_MODE, eventsUpTo, scrubLabel, tailOffset, timelineBounds} from "./missionViewport.js";
+  edgeEndpoints, linksNotPresent, missionLifecycle, nodeClassCounts, nodesDeletedBy, nodesNotYetCreated, resolveEdgeEvents, MATCH_MODE, eventsUpTo, scrubLabel, tailOffset, timelineBounds} from "./missionViewport.js";
 
 test("the lifecycle only reports states the server records", () => {
   assert.equal(missionLifecycle({}).key, "none");
@@ -92,6 +92,35 @@ test("scrubbing shows the events up to the chosen moment, and live shows all", (
   assert.equal(eventsUpTo(events, 2000).length, 2);
   assert.equal(eventsUpTo(events, 500).length, 0);
   assert.equal(eventsUpTo(events, null).length, 3);
+});
+
+test("a node whose newest event up to the scrub time is a delete is hidden, and a later event brings it back", () => {
+  const events = [
+    {timestamp: 1000, event_type: "NODE_CREATE", entity_id: "gone", seq: 1},
+    {timestamp: 3000, event_type: "NODE_DELETE", entity_id: "gone", seq: 2},
+    {timestamp: 1000, event_type: "NODE_CREATE", entity_id: "back", seq: 3},
+    {timestamp: 2000, event_type: "NODE_DELETE", entity_id: "back", seq: 4},
+    {timestamp: 4000, event_type: "NODE_UPDATE", entity_id: "back", seq: 5},
+    {timestamp: 1000, event_type: "NODE_CREATE", entity_id: "kept", seq: 6}];
+  assert.deepEqual([...nodesDeletedBy(events, 2500)], ["back"]);
+  assert.deepEqual([...nodesDeletedBy(events, 3500)].sort(), ["back", "gone"]);
+  assert.deepEqual([...nodesDeletedBy(events, 5000)], ["gone"]);
+  assert.deepEqual([...nodesDeletedBy(events, 1500)], []);
+});
+
+test("node deletes are ordered by time then sequence, and Live hides nothing", () => {
+  const sameTime = [{timestamp: 1000, event_type: "NODE_DELETE", entity_id: "n", seq: 1},
+    {timestamp: 1000, event_type: "NODE_CREATE", entity_id: "n", seq: 2}];
+  assert.equal(nodesDeletedBy(sameTime, 1000).size, 0);
+  assert.equal(nodesDeletedBy([{timestamp: 1, event_type: "NODE_DELETE", entity_id: "n"}], null).size, 0);
+  assert.equal(nodesDeletedBy([{timestamp: 1, event_type: "EDGE_DELETE", entity_id: "e"}, {timestamp: "x", event_type: "NODE_DELETE", entity_id: "n"}, null], 9).size, 0);
+});
+
+test("a deleted node takes the edges that end on it out of the picture", () => {
+  const edges = new Map([["e1", {src: "a", dst: "b"}], ["e2", {src: "c", dst: "d"}]]);
+  const events = [{timestamp: 1000, event_type: "NODE_DELETE", entity_id: "a"}];
+  const links = linksNotPresent({events: [], at: 2000, edges, hyperedges: new Map(), hiddenNodes: nodesDeletedBy(events, 2000)});
+  assert.deepEqual([...links.edges], ["e1"]);
 });
 
 test("only a creation event in the loaded window can hide a node", () => {

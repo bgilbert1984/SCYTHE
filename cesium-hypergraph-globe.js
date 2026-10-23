@@ -1751,6 +1751,7 @@ class CesiumHypergraphGlobe {
     this._heMesh        = null;     // THREE.Points
     this._hiddenEdges      = new Set();   // edge ids the mission timeline hides
     this._deletedEdges     = new Set();   // edge ids the server deleted; hidden live, kept so a scrub can show them before the delete
+    this._deletedNodes     = new Set();   // node ids the server deleted; hidden live, kept so a scrub can show them before the delete
     this._missionScrubbing = false;       // while true the mission timeline decides what a delete hid, not these marks
     this._hiddenHyperedges = new Set();   // hyperedge ids the mission timeline hides
     this._heList        = [];       // [{centroid, conf, color, height, width, memberCount}]
@@ -3166,8 +3167,10 @@ class CesiumHypergraphGlobe {
   /** Filter arc entries to those within the current time window.
    *  In live mode returns the live _arcEdges array directly (zero overhead). */
   _getVisibleEdges() {
-    const shown = e => !this._hiddenEdges.has(e.id) && (this._missionScrubbing || !this._deletedEdges.has(e.id));
-    if (this._isLive) return (this._hiddenEdges.size || this._deletedEdges.size) ? this._arcEdges.filter(shown) : this._arcEdges;
+    // An arc entry holds positions, not ids: the ends of an edge are on its graph record.
+    const endDeleted = e => { const g = this._graph.edges.get(e.id); return !!g && (this._deletedNodes.has(g.src) || this._deletedNodes.has(g.dst)); };
+    const shown = e => !this._hiddenEdges.has(e.id) && (this._missionScrubbing || (!this._deletedEdges.has(e.id) && !endDeleted(e)));
+    if (this._isLive) return (this._hiddenEdges.size || this._deletedEdges.size || this._deletedNodes.size) ? this._arcEdges.filter(shown) : this._arcEdges;
     const cursor   = this._timeCursor;
     const winStart = cursor - this._timeWindow;
     const result   = [];
@@ -3292,6 +3295,7 @@ class CesiumHypergraphGlobe {
         case 'node_update':     topoChanged |= this._applyNodeUpdate(ev);
                                 this._reconEntityPipeline(ev);            break;
         case 'node_remove':     topoChanged |= this._applyNodeRemove(ev); break;
+        case 'node_delete':     this._applyNodeDelete(ev);                 break;
         case 'edge_update':     this._applyEdgeUpdate(ev);                 break;
         case 'edge_remove':     this._applyEdgeRemove(ev);                 break;
         case 'edge_delete':     this._applyEdgeDelete(ev);                 break;
@@ -3386,7 +3390,38 @@ class CesiumHypergraphGlobe {
     this._graph.nodes.set(id, { lat, lon, conf, idx, shadow: ev.shadow ?? false,
       kind: ev.entity_kind || ev.kind || null, method: ev.geo_method ?? null,
       semantic: this._graph.nodes.get(id)?.semantic ?? 0, visible: this._graph.nodes.get(id)?.visible ?? true });
+    if (this._deletedNodes.delete(id)) {    // a node the server creates or updates again exists again
+      this._writeNodeVisible(id);
+      this._arcDirty = this._heDirty = true;
+    }
     return isNew;
+  }
+
+  /** The server deleted a node: hide it, but keep it so the mission timeline can still show it before the delete.
+   *  A node this page never drew changes nothing. */
+  _applyNodeDelete(ev) {
+    const id = ev.entity_id || ev.id;
+    if (!id || !this._graph.nodes.has(id) || this._deletedNodes.has(id)) return;
+    this._deletedNodes.add(id);
+    this._writeNodeVisible(id);
+    this._arcDirty = this._heDirty = true;   // the links to it go with it
+  }
+
+  /** True when the node is hidden: by the mission timeline, or deleted by the server while the timeline is not deciding. */
+  _nodeHidden(id) {
+    const node = this._graph.nodes.get(id);
+    return !!node && (node.visible === false || (!this._missionScrubbing && this._deletedNodes.has(id)));
+  }
+
+  /** Write a node's shader visibility: shown by the timeline, and not deleted unless the timeline is deciding. */
+  _writeNodeVisible(id) {
+    const node = this._graph.nodes.get(id);
+    if (!node) return;
+    const shown = !this._nodeHidden(id);
+    const attr = this._nodeMesh.geometry.attributes.instanceVisible;
+    const value = shown ? 1 : 0;
+    if (attr.array[node.idx] !== value) { attr.array[node.idx] = value; attr.needsUpdate = true; }
+    if (!shown && this._selectedEntityId === id) this.selectNode(null);   // never leave a hidden node selected
   }
 
   _applyNodeRemove(ev) {
@@ -3619,8 +3654,10 @@ class CesiumHypergraphGlobe {
     const HWID = geo.attributes.aHEWidth.array;
 
     let vi = 0;
-    const heVisible = this._hiddenHyperedges.size
-      ? this._heList.filter(h => !this._hiddenHyperedges.has(h.id)) : this._heList;
+    const memberDeleted = h => !this._missionScrubbing && this._deletedNodes.size
+      && (this._graph.hyperedges.get(h.id)?.members || []).some(m => this._deletedNodes.has(m));
+    const heVisible = (this._hiddenHyperedges.size || this._deletedNodes.size)
+      ? this._heList.filter(h => !this._hiddenHyperedges.has(h.id) && !memberDeleted(h)) : this._heList;
     const count = Math.min(heVisible.length, MAX_HYPEREDGES);
 
     for (let hi = 0; hi < count; hi++) {
@@ -3714,7 +3751,7 @@ class CesiumHypergraphGlobe {
    * ----------------------------------------------------------------------- */
   selectNode(entityId) {
     // A node the mission timeline has hidden takes no part in interaction: render and interaction share one rule.
-    if (entityId && this._graph.nodes.get(entityId)?.visible === false) return;
+    if (entityId && this._nodeHidden(entityId)) return;
     this._selectedEntityId = entityId;
     const idx = entityId ? this._nodeIdxMap.get(entityId) : -1;
     this._uSelectedId.value = (idx !== undefined) ? idx : -1;
@@ -3827,7 +3864,10 @@ class CesiumHypergraphGlobe {
 
   /** Hide the given edges and hyperedges (the mission timeline hides links that did not exist yet). */
   setHiddenLinks({edges = [], hyperedges = [], scrubbing = false} = {}) {
-    if (this._missionScrubbing !== scrubbing) { this._missionScrubbing = scrubbing; this._arcDirty = true; }
+    if (this._missionScrubbing !== scrubbing) {
+      this._missionScrubbing = scrubbing; this._arcDirty = true;
+      if (this._deletedNodes.size) { this._heDirty = true; for (const id of this._deletedNodes) this._writeNodeVisible(id); }
+    }
     const same = (a, b) => a.size === b.size && [...b].every(id => a.has(id));
     const nextEdges = new Set(edges), nextHyper = new Set(hyperedges);
     if (!same(this._hiddenEdges, nextEdges)) { this._hiddenEdges = nextEdges; this._arcDirty = true; }
@@ -3839,10 +3879,12 @@ class CesiumHypergraphGlobe {
     const node = this._graph.nodes.get(id);
     if (!node || node.visible === visible) return;
     node.visible = visible;
-    const attr = this._nodeMesh.geometry.attributes.instanceVisible;
-    attr.array[node.idx] = visible ? 1 : 0;
-    attr.needsUpdate = true;
-    if (!visible && this._selectedEntityId === id) this.selectNode(null);   // never leave a hidden node selected
+    this._writeNodeVisible(id);
+  }
+
+  /** The server deleted this node (a graph NODE_DELETE event). */
+  removeNode(id) {
+    this._queueUpdate({ type: 'node_delete', entity_id: id });
   }
 
   /** The server deleted this edge (a graph EDGE_DELETE event). */

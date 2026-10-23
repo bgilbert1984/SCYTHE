@@ -25,6 +25,12 @@ and removes what it drew, and tests only the edges it draws itself.
 | `dup-1`, `dup-2` | one event whose ends match both | **unmatched** (ambiguous), neither hidden |
 | none | an event naming no ends | **unmatched** |
 
+Live deletes are covered too. For an edge: a live `EDGE_DELETE` hides it and keeps it, a delete of an edge never drawn
+changes nothing, and a later create or a second delete behaves. For a node (`NODE_DELETE` through the page's own handler):
+the node's shader visibility flag goes to 0, the node stays in the graph, an edge ending on it and a hyperedge it belongs
+to go with it, it cannot be selected, deleting a node never drawn changes nothing, scrubbing before the delete shows it and
+after hides it (the timeline decides while scrubbing), Live hides it again, and a create brings it and its links back.
+
 Also: live hides nothing, every scrub position hides exactly the expected set and the drawn arcs agree, Live restores
 everything, the tooltip reports `1 by id, 1 by their ends, 2 not matched`, and the page raises no script errors.
 

@@ -1,6 +1,6 @@
 import {sessionToken} from "./missionGovernance.js";
 import {classifyNode, describeEvent, entityProvenance, eventsByEntity, evidenceCounts, missionLifecycle, nodeClassCounts,
-  eventsUpTo, linksNotPresent, nodesNotYetCreated, scrubLabel, tailOffset, timelineBounds} from "./missionViewport.js";
+  eventsUpTo, linksNotPresent, nodesDeletedBy, nodesNotYetCreated, scrubLabel, tailOffset, timelineBounds} from "./missionViewport.js";
 
 const WINDOW = 200;     // how many of the mission's newest events the viewport reads
 const RIBBON = 8;       // how many of those the ribbon shows
@@ -76,7 +76,8 @@ export class MissionViewportPanel {
     const nodes = globe?._graph?.nodes;
     if (!nodes) return;
     const grouped = eventsByEntity(this.viewEvents());
-    const hidden = nodesNotYetCreated(this.state.events, this.state.scrubMs);
+    const hidden = new Set([...nodesNotYetCreated(this.state.events, this.state.scrubMs),
+      ...nodesDeletedBy(this.state.events, this.state.scrubMs)]);
     const classes = [];
     for (const [id, node] of nodes) {
       const result = this.classify(id, node, grouped);
