@@ -38,7 +38,18 @@ INSTANCE_PATH = re.compile(r"^/scythe/i/([A-Za-z0-9._-]+)(/.*)?$")
 class Handler(globe_page.Handler):
     requests = []          # every path asked for, to prove what was and was not fetched
     fail_instances = False
+    spawn = False          # answer the new-instance request with markup and a javascript: link
     hostile = False        # serve an operator and an instance whose fields are markup, to prove they are shown as text
+
+    def do_POST(self):
+        path = urllib.parse.urlparse(self.path).path
+        self.rfile.read(int(self.headers.get("content-length") or 0))
+        if path == "/api/scythe/instances/new":
+            return self.reply_json({"instance_id": "spawned-1", "name": "<img src=x onerror=window.__pwned=1>", "port": "<b>7</b>",
+                                    "visualization_url": "javascript:window.__pwned=1"})
+        if path == "/api/operator/issue-bootstrap":
+            return self.reply_json({"status": "ok", "bootstrap_token": "t"})
+        return self.reply_json({"status": "ok"})
 
     def do_GET(self):
         path = urllib.parse.urlparse(self.path).path
@@ -49,6 +60,8 @@ class Handler(globe_page.Handler):
             if Handler.hostile:
                 bad = {**RUNNING, "id": "x'),window.__pwned=1,('", "name": "<img src=x onerror=window.__pwned=1>", "port": "<b>9</b>", "status": 'running" onmouseover="window.__pwned=1'}
                 return self.reply_json({"instances": [bad], "count": 1})
+            if Handler.spawn:
+                return self.reply_json({"instances": [RUNNING, {"id": "spawned-1", "name": "new", "port": 51009, "status": "running", "socket_io_ready": True}], "count": 2})
             return self.reply_json({"instances": [RUNNING, SPARSE, DEAD], "count": 3, "orchestrator_uptime": 3700})
         if path == "/api/operator/session":
             if Handler.hostile:
@@ -261,8 +274,29 @@ class Check:
         finally:
             Handler.hostile = False
 
+    def spawn_cases(self):
+        Handler.spawn = True
+        try:
+            page = self.home()
+            popups = []
+            page.context.on("page", lambda p: popups.append(p.url))
+            page.wait_for_selector("#hub-summary-list .hub__card", timeout=60000)
+            page.click("#btn-new-instance")
+            page.wait_for_selector("#modal-new-instance.active", timeout=15000)
+            page.click("#modal-new-instance >> text=Launch Instance")
+            page.wait_for_function("document.getElementById('spawn-status').textContent.includes('Instance launched')", timeout=60000)
+            result = page.evaluate("""() => { const s = document.getElementById('spawn-status');
+              return {text: s.textContent, markup: !!s.querySelector('img, b'), links: [...s.querySelectorAll('a')].map(a => a.getAttribute('href')), pwned: !!window.__pwned} }""")
+            self.record("a launched instance's name and port are shown as text", "<img src=x" in result["text"] and "<b>7</b>" in result["text"] and not result["markup"] and not result["pwned"], str(result)[:200])
+            self.record("a javascript: link from the server is not offered", result["links"] == [] and "no link that can be opened" in result["text"], str(result["links"]))
+            page.wait_for_timeout(2600)   # the page opens the link on its own after 2 s
+            self.record("  and nothing was opened or run", popups == [] and not page.evaluate("!!window.__pwned"), str(popups))
+            page.close()
+        finally:
+            Handler.spawn = False
+
     def run(self):
-        for cases in (self.escaping_cases, self.shell_cases, self.panel_cases, self.missions_cases, self.palette_cases, self.unreachable_cases):
+        for cases in (self.spawn_cases, self.escaping_cases, self.shell_cases, self.panel_cases, self.missions_cases, self.palette_cases, self.unreachable_cases):
             cases()
         return all(self.results)
 

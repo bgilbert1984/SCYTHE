@@ -7,7 +7,7 @@ import vm from "node:vm";
 const context = {URL, window: undefined};
 vm.createContext(context);
 vm.runInContext(readFileSync(new URL("../assets/js/safe_next.js", import.meta.url), "utf8"), context);
-const {safeNext} = context.SCYTHE_SAFE_NEXT;
+const {safeNext, isInstanceId} = context.SCYTHE_SAFE_NEXT;
 const ORIGIN = "https://scythe.example";
 const HOME = "/rf_scythe_home.html";
 const go = (raw) => safeNext(raw, ORIGIN, HOME);
@@ -43,4 +43,9 @@ test("a path that would read as a host once normalized is refused", () => {
 
 test("nothing, or not text, gives the fallback", () => {
   for (const raw of [null, undefined, "", 7, {}, []]) assert.equal(go(raw), HOME);
+});
+
+test("an instance id is a short token that cannot leave a path", () => {
+  for (const id of ["scythe-ab12", "a", "A.b_c-1", "x".repeat(64)]) assert.equal(isInstanceId(id), true, id);
+  for (const id of ["", "..", ".", "../x", "a/b", "a\\b", "a?b", "a#b", "a b", "-a", ".a", "x".repeat(65), "a%2fb", null, undefined, 5]) assert.equal(isInstanceId(id), false, String(id));
 });

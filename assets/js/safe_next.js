@@ -19,6 +19,10 @@
         return path;
     }
 
-    if (typeof module !== 'undefined' && module.exports) module.exports = { safeNext };
-    root.SCYTHE_SAFE_NEXT = { safeNext };
+    // The instance-id rule (the same as scythe-web/deepLink.js): it is placed in a path, so it must not be able to leave it.
+    const INSTANCE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+    function isInstanceId(value) { return typeof value === 'string' && INSTANCE_ID.test(value); }
+
+    if (typeof module !== 'undefined' && module.exports) module.exports = { safeNext, isInstanceId };
+    root.SCYTHE_SAFE_NEXT = { safeNext, isInstanceId };
 })(typeof window !== 'undefined' ? window : globalThis);

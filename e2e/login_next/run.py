@@ -29,6 +29,18 @@ CASES = [  # (name, next, expected landing path+query, must stay on this origin)
 
 
 class Handler(globe_page.Handler):
+    posts = []     # (path, body) of every POST, to see which instance a sign-in asked for
+
+    def do_POST(self):
+        path = urllib.parse.urlparse(self.path).path
+        body = self.rfile.read(int(self.headers.get("content-length") or 0)).decode()
+        Handler.posts.append((path, body))
+        if path == "/api/operator/login":
+            return self.reply_json({"status": "ok", "session": {"session_token": "harness-session"}})
+        if path == "/api/operator/issue-bootstrap":
+            return self.reply_json({"status": "ok", "bootstrap_token": "harness-bootstrap"})
+        return self.reply_json({"status": "ok"})
+
     def do_GET(self):
         path = urllib.parse.urlparse(self.path).path
         if path == "/api/operator/session":
@@ -65,9 +77,38 @@ class Check:
         self.record(name, landed == want and not reached and not pwned, f"landed {landed}; reached {reached}; script ran {pwned}")
         context.close()
 
+    INSTANCE_CASES = [  # (name, the `instance` parameter, where sign-in should end up)
+        ("a valid instance id signs in to that instance", "scythe-ab12", "/scythe/i/scythe-ab12/command-ops-visualization.html"),
+        ("an instance id that climbs out of /scythe/i/ is ignored", "../../rf_scythe_home.html", "/rf_scythe_home.html"),
+        ("an instance id with a slash is ignored", "a/b", "/rf_scythe_home.html"),
+        ("an instance id with a query is ignored", "a?x=1", "/rf_scythe_home.html"),
+    ]
+
+    def instance_case(self, name, instance, want):
+        Handler.posts.clear()
+        context = self.browser.new_context(viewport={"width": 1200, "height": 800})
+        page = context.new_page()
+        page.add_init_script(f"window.SCYTHE_API_BASE = '{self.base}'")
+        page.goto(f"{self.base}/login.html?instance={urllib.parse.quote(instance, safe='')}", wait_until="domcontentloaded")
+        page.fill("#callsign", "HARNESS-1")
+        page.fill("#password", "x")
+        page.click("#submitBtn")
+        try:
+            page.wait_for_function("location.pathname !== '/login.html'", timeout=30000)
+        except Exception:
+            self.record(name, False, "sign-in never redirected")
+            context.close()
+            return
+        landed = page.evaluate("location.pathname")
+        asked = [body for path, body in Handler.posts if path == "/api/operator/issue-bootstrap"]
+        self.record(name, landed == want and (bool(asked) == (instance == "scythe-ab12")), f"landed {landed}; bootstrap asked for {asked}")
+        context.close()
+
     def run(self):
         for name, value, want in CASES:
             self.case(name, value, want)
+        for name, instance, want in self.INSTANCE_CASES:
+            self.instance_case(name, instance, want)
         return all(self.results)
 
 
