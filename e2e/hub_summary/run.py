@@ -45,7 +45,9 @@ class Handler(globe_page.Handler):
         if path == "/api/scythe/instances":
             if Handler.fail_instances:
                 return self.reply_json({"status": "error"}, 500)
-            return self.reply_json({"instances": [RUNNING, SPARSE, DEAD], "count": 3})
+            return self.reply_json({"instances": [RUNNING, SPARSE, DEAD], "count": 3, "orchestrator_uptime": 3700})
+        if path == "/api/operator/session":
+            return self.reply_json({"status": "ok", "operator": {"callsign": "HARNESS-1", "role": "operator"}})
         match = INSTANCE_PATH.match(path)
         if match:   # the orchestrator's reverse proxy: /scythe/i/<id>/<path> is that instance's <path>
             inner = match.group(2) or "/"
@@ -130,12 +132,54 @@ class Check:
             page.wait_for_function("document.getElementById('hub-summary-list')?.textContent.includes('Orchestrator unreachable')", timeout=30000)
             self.record("an orchestrator that does not answer is said, not shown as empty",
                         "Orchestrator unreachable (500)" in page.evaluate("document.getElementById('hub-summary-list').textContent"))
+            page.wait_for_function("document.getElementById('shell-orchestrator').textContent.startsWith('unreachable')", timeout=15000)
+            self.record("  and so does the state bar", page.evaluate("document.getElementById('shell-orchestrator').textContent") == "unreachable (500)")
             page.close()
         finally:
             Handler.fail_instances = False
 
+    NOT_ON_A_HUB = ["Melted Down", "NeRF Engine", "Threat Detection", "GEMMA LLM", "JWST", "LHC", "Remora", "X-37B", "Hypersonic", "hypersonic",
+                    "mastodon", "Spectrcyde", "WordPress", "All rights reserved", "Advanced Packet Capture"]
+    GONE = ["#scene-container", "#loading-screen", ".hero", ".modules-section", ".module-card", ".status-panel", "footer", "#system-time",
+            "#btn-wordpress-site", "#scythe-wp-nav-link"]
+
+    def shell_cases(self):
+        page = self.home()
+        page.wait_for_selector("#hub-summary-list .hub__card", timeout=60000)
+        page.wait_for_function("document.getElementById('shell-operator').textContent !== 'checking…'", timeout=30000)
+        present = page.evaluate("(sels) => sels.filter(s => document.querySelector(s))", self.GONE)
+        self.record("the marketing and decorative elements are gone", present == [], str(present))
+        text = page.evaluate("document.body.innerText + ' ' + document.documentElement.outerHTML")
+        found = [t for t in self.NOT_ON_A_HUB if t in text]
+        self.record("no invented status, demo promotion, social or sales text remains", found == [], str(found))
+        hrefs = page.evaluate("[...document.querySelectorAll('a[href]')].map(a => a.getAttribute('href')).filter(h => !h.startsWith('scythe/i/'))")
+        self.record("the only links off the page are the dashboard anchor, the documentation and the account page",
+                    sorted(set(hrefs)) == ["#dashboard", "docs/documentation.html", "user_account.html"], str(sorted(set(hrefs))))
+        self.record("the state bar shows the operator from the session", page.evaluate("document.getElementById('shell-operator').textContent") == "HARNESS-1 · operator",
+                    page.evaluate("document.getElementById('shell-operator').textContent"))
+        page.wait_for_function("document.getElementById('shell-instances').textContent.includes('running')", timeout=30000)
+        self.record("  and what the orchestrator reported",
+                    page.evaluate("[document.getElementById('shell-instances').textContent, document.getElementById('shell-orchestrator').textContent]") == ["2 running of 3", "reachable"])
+        self.record("  and a UTC clock", bool(page.evaluate("/^\\d\\d:\\d\\d:\\d\\dZ$/.test(document.getElementById('shell-clock').textContent)")))
+        fleet = page.evaluate("document.getElementById('hub-fleet').textContent")
+        want = "2 running of 3 · 2183 nodes (2 not reporting) · 8417 edges (2 not reporting) · 2 sessions (2 not reporting) · 1 dead · writes locked on 1 · orchestrator up 1h"
+        self.record("the fleet line totals only what instances reported, and says how many did not", fleet == want, fleet)
+        page.click("#btn-new-instance")
+        page.wait_for_selector("#modal-new-instance.active", timeout=15000)
+        self.record("New instance still opens its dialog", True)
+        page.keyboard.press("Escape")
+        page.click(".shell__nav >> text=Connect to an instance")
+        page.wait_for_selector("#modal-join-instance.active .instance-list li", timeout=15000)
+        self.record("Connect lists the instances to join", page.evaluate("document.querySelectorAll('#modal-join-instance .instance-list li').length") == 3)
+        page.keyboard.press("Escape")
+        page.click(".shell__nav >> text=Account")
+        page.wait_for_selector("#account-modal.active", timeout=15000)
+        self.record("Account still opens its dialog", True)
+        self.record("the page raised no script errors", not page.errors, "; ".join(page.errors[:3]))
+        page.close()
+
     def run(self):
-        for cases in (self.panel_cases, self.missions_cases, self.unreachable_cases):
+        for cases in (self.shell_cases, self.panel_cases, self.missions_cases, self.unreachable_cases):
             cases()
         return all(self.results)
 

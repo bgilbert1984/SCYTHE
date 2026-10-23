@@ -82,3 +82,46 @@ export function countsLine(counts) {
   const part = (value, noun) => (value === null ? `${noun}: not reported` : `${value} ${noun}`);
   return [part(counts.nodes, "nodes"), part(counts.edges, "edges"), part(counts.sessions, "sessions"), part(counts.bsgs, "BSGs")].join(" · ");
 }
+
+/**
+ * The fleet in one line: how many instances run, and the totals of what they report. A total counts only the instances that
+ * reported that figure; `silent` says how many did not, so a total is never presented as complete when it is not.
+ */
+export function fleetSummary(instances) {
+  const list = Array.isArray(instances) ? instances.filter(isObject) : [];
+  const fleet = {total: list.length, running: 0, dead: 0, other: 0, writesLocked: 0,
+    nodes: {sum: 0, silent: 0}, edges: {sum: 0, silent: 0}, sessions: {sum: 0, silent: 0}};
+  for (const instance of list) {
+    if (instance.status === "running") fleet.running++;
+    else if (instance.status === "dead") fleet.dead++;
+    else fleet.other++;
+    const counts = instanceCounts(instance);
+    for (const key of ["nodes", "edges", "sessions"]) {
+      if (counts[key] === null) fleet[key].silent++;
+      else fleet[key].sum += counts[key];
+    }
+    if (instance.authority?.write_access?.enabled === false) fleet.writesLocked++;
+  }
+  return fleet;
+}
+
+/** "up 3d", "up 2h", "up 5m", or null when the orchestrator did not say. */
+export function uptimeLabel(seconds) {
+  if (!Number.isFinite(seconds) || seconds < 0) return null;
+  if (seconds >= 86400) return `up ${Math.floor(seconds / 86400)}d`;
+  if (seconds >= 3600) return `up ${Math.floor(seconds / 3600)}h`;
+  return `up ${Math.max(1, Math.floor(seconds / 60))}m`;
+}
+
+/** One line: "2 running of 3 · 2183 nodes (1 not reporting) · 8417 edges (1 not reporting) · writes locked on 1 · up 1h". */
+export function fleetLine(fleet, uptimeSeconds = null) {
+  if (!fleet.total) return "No instances";
+  const total = (figure, noun) => (figure.silent === fleet.total ? `${noun}: not reported`
+    : `${figure.sum} ${noun}${figure.silent ? ` (${figure.silent} not reporting)` : ""}`);
+  const parts = [`${fleet.running} running of ${fleet.total}`, total(fleet.nodes, "nodes"), total(fleet.edges, "edges"), total(fleet.sessions, "sessions")];
+  if (fleet.dead) parts.push(`${fleet.dead} dead`);
+  if (fleet.writesLocked) parts.push(`writes locked on ${fleet.writesLocked}`);
+  const up = uptimeLabel(uptimeSeconds);
+  if (up) parts.push(`orchestrator ${up}`);
+  return parts.join(" · ");
+}

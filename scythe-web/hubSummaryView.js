@@ -1,16 +1,17 @@
 import {instanceDeepLink} from "./deepLink.js";
-import {STATE_MARK, countsLine, instanceCounts, instanceHealth, summarizeMissions} from "./hubSummary.js";
+import {STATE_MARK, countsLine, fleetLine, fleetSummary, instanceCounts, instanceHealth, summarizeMissions} from "./hubSummary.js";
 
 const TARGETS = [["globe", "Globe"], ["regional", "Regional"], ["ops", "Mission Ops"]];
 
 /**
  * The hub's instrument panel: one card per instance with what it reports about itself, links into its views, and, on request,
  * its missions with links that carry the mission. It only reads. Missions load when a card is expanded, not on every poll: a
- * long-lived instance can hold thousands and GET /api/missions has no limit.
+ * long-lived instance can hold thousands and GET /api/missions has no limit. `onUpdate({fleet, uptime, error})` is called after
+ * every render so the page's header can show the same figures.
  */
 export function mountHub({root, base = "", fetchImpl = globalThis.fetch?.bind(globalThis), now = () => Date.now(), pollMs = 10000,
-                          missionPollMs = 60000, setTimer = globalThis.setInterval?.bind(globalThis), document: doc = globalThis.document} = {}) {
-  const state = {instances: null, error: null, expanded: new Set(), missions: new Map()};
+                          missionPollMs = 60000, setTimer = globalThis.setInterval?.bind(globalThis), document: doc = globalThis.document, onUpdate = null} = {}) {
+  const state = {instances: null, error: null, uptime: null, expanded: new Set(), missions: new Map()};
 
   const el = (tag, className, text) => {
     const node = doc.createElement(tag);
@@ -39,7 +40,9 @@ export function mountHub({root, base = "", fetchImpl = globalThis.fetch?.bind(gl
 
   async function refresh() {
     try {
-      state.instances = (await getJson("/api/scythe/instances")).instances || [];
+      const data = await getJson("/api/scythe/instances");
+      state.instances = data.instances || [];
+      state.uptime = Number.isFinite(data.orchestrator_uptime) ? data.orchestrator_uptime : null;
       state.error = null;
     } catch (error) {
       state.error = error.message;
@@ -107,12 +110,24 @@ export function mountHub({root, base = "", fetchImpl = globalThis.fetch?.bind(gl
   }
 
   function render() {
+    draw();
+    notify();
+  }
+
+  function draw() {
     root.textContent = "";
     if (state.error && !state.instances) { root.append(el("div", "hub__note hub__note--bad", `Orchestrator unreachable (${state.error})`)); return; }
     if (state.error) root.append(el("div", "hub__note hub__note--bad", `Showing the last report; the orchestrator did not answer (${state.error})`));
     if (!state.instances) { root.append(el("div", "hub__note", "Loading instances…")); return; }
     if (!state.instances.length) { root.append(el("div", "hub__note", "No instances. Launch one to begin.")); return; }
+    const fleet = el("div", "hub__fleet", fleetLine(fleetSummary(state.instances), state.uptime));
+    fleet.id = "hub-fleet";
+    root.append(fleet);
     for (const instance of state.instances) root.append(card(instance));
+  }
+
+  function notify() {
+    onUpdate?.({fleet: state.instances ? fleetSummary(state.instances) : null, uptime: state.uptime, error: state.error});
   }
 
   render();
