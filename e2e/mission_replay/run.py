@@ -34,16 +34,20 @@ EVENTS = [
     event(5, 7, "EDGE_CREATE", "server-id-D", src="n6", dst="n7"),           # ends match two drawn edges: ambiguous
     event(6, 8, "EDGE_CREATE", "ghost"),                                      # names no ends
     event(7, 9, "probe", "n0"),
+    event(8, 3, "EDGE_CREATE", "edge-del", src="n8", dst="n9"),              # a drawn edge the server later deletes
+    event(9, 8, "EDGE_DELETE", "edge-del", id="edge-del"),
 ]
 # Drawn edges: id -> (src, dst). "edge-C" has no event at all.
-DRAWN = {"edge-by-id": ("n0", "n1"), "drawn-B": ("n2", "n3"), "edge-C": ("n4", "n5"), "dup-1": ("n6", "n7"), "dup-2": ("n6", "n7")}
+DRAWN = {"edge-by-id": ("n0", "n1"), "drawn-B": ("n2", "n3"), "edge-C": ("n4", "n5"), "dup-1": ("n6", "n7"), "dup-2": ("n6", "n7"),
+         "edge-del": ("n8", "n9")}
 SCRUBS = [   # seconds after T0 -> edges that must be hidden (among the drawn ones)
-    (2, {"edge-by-id", "drawn-B"}),         # before either was created
-    (5.5, {"drawn-B"}),                     # edge-by-id exists, drawn-B does not yet
-    (6.5, set()),                           # both exist
-    (9, set()),                             # unmatched events hide nothing
+    (2, {"edge-by-id", "drawn-B", "edge-del"}),   # before any of them was created
+    (5.5, {"drawn-B"}),                           # edge-by-id and edge-del exist, drawn-B does not yet
+    (6.5, set()),                                 # all exist
+    (8.5, {"edge-del"}),                          # edge-del was deleted at +8s; unmatched events hide nothing
+                                                  # (+9s is the newest event, where the slider means Live, so it is not probed)
 ]
-EXPECTED_IDENTITY = {"byId": 1, "byEndpoints": 1, "unmatched": 2}
+EXPECTED_IDENTITY = {"byId": 3, "byEndpoints": 1, "unmatched": 2}
 
 
 class Handler(globe_page.Handler):
@@ -63,6 +67,18 @@ class Check:
     def record(self, name, ok, detail=""):
         self.results.append(ok)
         print(f"{'PASS' if ok else 'FAIL'}  {name}{('  ' + detail) if detail else ''}")
+        if not ok:
+            print("      state:", self.page.evaluate("""() => JSON.stringify({
+              identity: scytheMissionViewport.state.edgeIdentity, scrubMs: scytheMissionViewport.state.scrubMs,
+              events: scytheMissionViewport.state.events.length, deleted: [...globe._deletedEdges], hidden: [...globe._hiddenEdges],
+              drawn: [...globe._graph.edges.entries()].filter(([id]) => !id.startsWith('prox:')).map(([id, e]) => [id, e.src, e.dst]),
+              queue: globe._updateQueue.length})"""))
+            print("      matches:", self.page.evaluate("""async () => {
+              const m = await import('/scythe-web/missionViewport.js');
+              const edges = globe._graph.edges;
+              return JSON.stringify(m.resolveEdgeEvents(scytheMissionViewport.state.events, edges).matches
+                .map(x => [x.event.entity_id, x.mode, x.edgeId, m.edgeEndpoints(x.event)]));
+            }"""))
 
     def hidden(self):
         drawn = set(DRAWN)
@@ -72,6 +88,32 @@ class Check:
         self.page.evaluate("(ms) => { const s = document.querySelector('.mvp__slider'); s.value = ms; s.dispatchEvent(new Event('input')); }",
                            T0 + seconds * SECOND)
         self.page.wait_for_timeout(400)
+
+    def visible_ids(self):
+        return {e["id"] for e in self.page.evaluate("globe._getVisibleEdges().map(e => ({id: e.id}))")}
+
+    def graph_event(self, event_type, entity_id, **data):
+        """Deliver an event through the page's own graph_event socket handler, as the server would."""
+        self.page.evaluate("""([type, id, data]) => globe._socket.listeners('graph_event')[0](
+            {event_type: type, entity_id: id, entity_kind: 'edge', data}) """, [event_type, entity_id, data])
+        # The globe applies queued updates on a timer, which software rendering can delay: wait for the queue to drain.
+        self.page.wait_for_function("globe._updateQueue.length === 0", timeout=15000)
+        self.page.wait_for_timeout(150)
+
+    def live_delete_cases(self):
+        self.record("before a delete, the edge is drawn live", "edge-del" in self.visible_ids())
+        self.graph_event("EDGE_DELETE", "edge-del", id="edge-del")
+        self.record("a live EDGE_DELETE hides the edge", "edge-del" not in self.visible_ids())
+        self.record("  and keeps it, so a scrub can still show it", self.page.evaluate("globe._graph.edges.has('edge-del')"))
+        before = self.visible_ids()
+        self.graph_event("EDGE_DELETE", "never-drawn", id="never-drawn")
+        self.record("deleting an edge that was never drawn changes nothing", self.visible_ids() == before)
+
+    def live_recreate_cases(self):
+        self.graph_event("EDGE_CREATE", "edge-del", src="n8", dst="n9", confidence=0.9)
+        self.record("an edge the server creates again is drawn again", "edge-del" in self.visible_ids())
+        self.graph_event("EDGE_DELETE", "edge-del", id="edge-del")
+        self.record("and a second delete hides it again", "edge-del" not in self.visible_ids())
 
     def run(self):
         page = self.page
@@ -83,7 +125,8 @@ class Check:
         page.wait_for_timeout(500)
         identity = page.evaluate("scytheMissionViewport.state.edgeIdentity")
         self.record("edge events are matched by id, by endpoints, or not at all", identity == EXPECTED_IDENTITY, f"{identity}")
-        self.record("live hides no edge", self.hidden() == set(), f"{sorted(self.hidden())}")
+        self.record("live hides no edge by the timeline", self.hidden() == set(), f"{sorted(self.hidden())}")
+        self.live_delete_cases()
         for seconds, expected in SCRUBS:
             self.scrub_to(seconds)
             got = self.hidden()
@@ -95,9 +138,13 @@ class Check:
         self.record("two edges sharing ends are never matched by their ends", not ({"dup-1", "dup-2"} & self.hidden()))
         page.evaluate("document.querySelector('.mvp__live').click()")
         page.wait_for_timeout(400)
-        self.record("Live restores every edge", self.hidden() == set())
+        self.record("Live restores every edge the timeline hid", self.hidden() == set())
+        self.record("back on Live, the deleted edge stays hidden", "edge-del" not in self.visible_ids())
+        self.live_recreate_cases()
+        page.evaluate("scytheMissionViewport.refresh()")     # recompute now rather than race the poll
+        page.wait_for_timeout(300)
         tooltip = page.evaluate("document.querySelector('.mvp__clock').title")
-        self.record("the tooltip reports the match counts", "1 by id, 1 by their ends, 2 not matched" in tooltip, tooltip)
+        self.record("the tooltip reports the match counts", "3 by id, 1 by their ends, 2 not matched" in tooltip, tooltip)
         self.record("the page raised no script errors", not page.errors, "; ".join(page.errors[:3]))
         return all(self.results)
 
@@ -125,6 +172,20 @@ def main():
                 page.wait_for_function("typeof globe !== 'undefined' && globe._viewer && globe._nodeCount >= 12 && typeof scytheMissionViewport !== 'undefined'", timeout=60000)
             except PlaywrightError as error:
                 print(f"INFRASTRUCTURE: the globe did not come up (CDN scripts unreachable?): {str(error)[:160]}")
+                return 2
+            # The page draws synthetic proximity arcs (prox:<a>-><b>) between nearby nodes from about 8 s after load. One of them
+            # would share its ends with a test edge, which the matcher rightly treats as ambiguous, so turn the generator off
+            # and remove what it already drew: this harness tests only the edges it draws itself.
+            page.evaluate("window.buildProximityEdges = () => 0")
+            # Upserts the generator already queued are applied on the globe's timer: let them land first, or they would
+            # put the edges back after the removal below.
+            for _ in range(3):
+                page.wait_for_function("globe._updateQueue.length === 0", timeout=30000)
+                page.wait_for_timeout(300)
+                page.evaluate("[...globe._graph.edges.keys()].filter(id => id.startsWith('prox:')).forEach(id => globe._queueUpdate({type: 'edge_remove', edge_id: id}))")
+            page.wait_for_function("globe._updateQueue.length === 0", timeout=30000)
+            if page.evaluate("[...globe._graph.edges.keys()].some(id => id.startsWith('prox:'))"):
+                print("INFRASTRUCTURE: proximity edges kept reappearing; the harness cannot isolate its own edges")
                 return 2
             ok = Check(page).run()
             browser.close()

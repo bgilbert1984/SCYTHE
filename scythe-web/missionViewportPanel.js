@@ -88,7 +88,7 @@ export class MissionViewportPanel {
     const links = linksNotPresent({events: this.state.events, at: this.state.scrubMs, hiddenNodes: hidden,
       edges: globe._graph.edges, hyperedges: globe._graph.hyperedges});
     this.state.edgeIdentity = links.identity;
-    globe.setHiddenLinks?.(links);
+    globe.setHiddenLinks?.({...links, scrubbing: this.state.scrubMs != null});
   }
 
   async refresh() {
