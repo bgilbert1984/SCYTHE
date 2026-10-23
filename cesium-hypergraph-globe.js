@@ -3693,6 +3693,8 @@ class CesiumHypergraphGlobe {
    * Node selection — O(1), zero re-render
    * ----------------------------------------------------------------------- */
   selectNode(entityId) {
+    // A node the mission timeline has hidden takes no part in interaction: render and interaction share one rule.
+    if (entityId && this._graph.nodes.get(entityId)?.visible === false) return;
     this._selectedEntityId = entityId;
     const idx = entityId ? this._nodeIdxMap.get(entityId) : -1;
     this._uSelectedId.value = (idx !== undefined) ? idx : -1;
@@ -3809,6 +3811,7 @@ class CesiumHypergraphGlobe {
     const attr = this._nodeMesh.geometry.attributes.instanceVisible;
     attr.array[node.idx] = visible ? 1 : 0;
     attr.needsUpdate = true;
+    if (!visible && this._selectedEntityId === id) this.selectNode(null);   // never leave a hidden node selected
   }
 
   upsertEdge(id, srcId, dstId, conf, options = {}) {
