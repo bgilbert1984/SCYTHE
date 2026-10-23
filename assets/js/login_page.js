@@ -9,6 +9,9 @@
 
     console.log('[Login Page] Initializing...');
 
+    // `next` is only followed when it is a path on this origin (see safe_next.js).
+    const nextDestination = (params) => SCYTHE_SAFE_NEXT.safeNext(params.get('next'), window.location.origin, '/rf_scythe_home.html');
+
     const form = document.getElementById('loginForm');
     const callsignInput = document.getElementById('callsign');
     const passwordInput = document.getElementById('password');
@@ -152,7 +155,7 @@
 
                 // Use 'next' parameter if available, otherwise default to home
                 const params = new URLSearchParams(window.location.search);
-                const next = params.get('next') || '/rf_scythe_home.html';
+                const next = nextDestination(params);
 
                 // Redirect to appropriate page
                 setTimeout(() => {
@@ -200,7 +203,7 @@
 
                 // Use 'next' parameter if available, otherwise default to home
                 const params = new URLSearchParams(window.location.search);
-                const next = params.get('next') || '/rf_scythe_home.html';
+                const next = nextDestination(params);
 
                 setTimeout(() => {
                     window.location.href = next;
@@ -283,7 +286,7 @@
         SCYTHE_AUTH.validateSession(existingToken).then(({ valid } = {}) => {
             if (valid) {
                 console.log('[Login Page] Existing session valid, redirecting...');
-                const next = params.get('next') || '/rf_scythe_home.html';
+                const next = nextDestination(params);
                 window.location.href = next;
                 return;
             }
