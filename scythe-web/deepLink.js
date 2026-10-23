@@ -55,14 +55,31 @@ export function relativePath(from, to) {
  * A link from page `from` to page `to` carrying `mission` and `select`. A value that is not valid is left out, so a bad
  * value never propagates. Returns a relative URL.
  */
-export function deepLink(to, {mission = null, select = null} = {}, from = to) {
+export function deepLink(to, context = {}, from = to) {
   if (!PAGES[to]) throw new RangeError(`unknown page: ${to}`);
   if (!PAGES[from]) throw new RangeError(`unknown page: ${from}`);
+  return relativePath(from, to) + queryFor(context);
+}
+
+/** The query string for a context, "" when it has nothing valid to carry. */
+function queryFor({mission = null, select = null} = {}) {
   const params = new URLSearchParams();
   if (isMissionId(mission)) params.set("mission", mission);
   if (isEntityId(select)) params.set("select", select);
   const query = params.toString();
-  return relativePath(from, to) + (query ? `?${query}` : "");
+  return query ? `?${query}` : "";
+}
+
+const INSTANCE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+
+/**
+ * A link from the hub (served at the orchestrator's root) to a page of one instance, e.g.
+ * scythe/i/scythe-ab12/cesium-hypergraph-globe.html?mission=m1. Relative, so it follows wherever the hub is served.
+ */
+export function instanceDeepLink(instanceId, to, context = {}) {
+  if (!INSTANCE_ID.test(String(instanceId))) throw new RangeError(`not an instance id: ${instanceId}`);
+  if (!PAGES[to]) throw new RangeError(`unknown page: ${to}`);
+  return `scythe/i/${instanceId}/${PAGES[to].path}${queryFor(context)}`;
 }
 
 /**

@@ -190,6 +190,35 @@
             font-weight: 700;
         }
 
+        /* ── Hub summary: what each instance reports about itself ──────────── */
+        .hub { max-width: 1100px; margin: 0 auto; padding: 8px 24px 32px; position: relative; z-index: 10; }
+        .hub__title { font-family: 'Titillium Web', sans-serif; color: #e0e0e0; font-size: 1.05rem; letter-spacing: 2px; text-transform: uppercase; margin: 0 0 4px; text-align: center; }
+        .hub__sub { color: #666; font-size: 0.75rem; font-family: 'Roboto Mono', monospace; text-align: center; margin: 0 0 16px; }
+        .hub__list { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; }
+        .hub__card { background: rgba(20, 24, 33, 0.9); border: 1px solid #2a3040; border-radius: 8px; padding: 14px 16px; font-family: 'Roboto Mono', monospace; font-size: 0.75rem; color: #b8c0cc; text-align: left; }
+        .hub__head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+        .hub__name { color: #e0e0e0; font-size: 0.9rem; }
+        .hub__port { margin-left: auto; color: #666; }
+        .hub__dot { width: 9px; height: 9px; border-radius: 50%; background: #666; flex: none; }
+        .hub__dot--running { background: #2ecc71; } .hub__dot--dead { background: #e74c3c; } .hub__dot--starting { background: #f1c40f; }
+        .hub__counts { color: #00cec9; margin-bottom: 8px; }
+        .hub__health { list-style: none; margin: 0 0 10px; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+        .hub__chip { border: 1px solid #333b4d; border-radius: 4px; padding: 2px 6px; display: inline-flex; gap: 5px; align-items: baseline; }
+        .hub__chip--ok { border-color: #1f6b46; } .hub__chip--down { border-color: #8f2d2d; color: #f0a0a0; }
+        .hub__chip--locked, .hub__chip--stale, .hub__chip--pending { border-color: #8a6d1d; color: #e6cf8a; }
+        .hub__chip--unknown { border-style: dashed; color: #888; }
+        .hub__detail { color: #777; }
+        .hub__links { display: inline-flex; flex-wrap: wrap; gap: 10px; }
+        .hub__link { color: #00cec9; text-decoration: none; border-bottom: 1px dotted #00cec980; }
+        .hub__link:hover { color: #fff; }
+        .hub__toggle { margin-left: 10px; background: none; border: 1px solid #333b4d; color: #b8c0cc; border-radius: 4px; padding: 2px 8px; font: inherit; cursor: pointer; }
+        .hub__missions { margin-top: 10px; border-top: 1px solid #2a3040; padding-top: 8px; }
+        .hub__mission { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; margin: 4px 0; }
+        .hub__mission-name { color: #e0e0e0; }
+        .hub__status { text-transform: uppercase; font-size: 0.65rem; padding: 0 5px; border: 1px solid #333b4d; border-radius: 3px; }
+        .hub__status--open { border-color: #1f6b46; color: #7fe0a8; } .hub__status--closed { color: #888; }
+        .hub__note { color: #888; margin: 4px 0; } .hub__note--bad { color: #f0a0a0; }
+
         /* ── Modal Overlay ────────────────────────────────────── */
         .scythe-modal-overlay {
             display: none;
@@ -733,6 +762,13 @@
             <div class="instance-live-count" id="instance-live-count">
                 Loading instance status...
             </div>
+        </section>
+
+        <!-- ════════ Hub summary: the state of the instrument, before any visualization ════════ -->
+        <section class="hub" id="hub-summary" aria-label="Instance summary">
+            <h2 class="hub__title">Instrument status</h2>
+            <p class="hub__sub">What each instance reports about itself. A value an instance does not report is shown as not reported.</p>
+            <div class="hub__list" id="hub-summary-list"></div>
         </section>
 
         <!-- ════════ NEW Instance Modal ════════ -->
@@ -1299,5 +1335,9 @@
         updateSystemTime();
     })();
     </script>
+<script type="module">
+    import { mountHub } from "./scythe-web/hubSummaryView.js";
+    window.scytheHub = mountHub({ root: document.getElementById("hub-summary-list") });
+</script>
 </body>
 </html>

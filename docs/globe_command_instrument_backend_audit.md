@@ -221,10 +221,16 @@ Reachable today (all require an authenticated identity via `_rf_bridge_principal
 | `GET /api/missions/<id>/operators` | `operator_id`, `role`, `joined_at` per member |
 | `GET /api/operator/session` | the caller's session and operator record |
 
-Not found (grep for `mutation_enabled`, `read_only`, `READ_ONLY`, `hardware.*lock`,
+**Correction:** the instance does report a write gate. `GET /api/authority/state` returns
+`write_access: {enabled, reason}` (enabled when an operator session exists), plus `health`
+(`graph_engine`, `authority`, `llm`) and `authoritative_state` (sessions, nodes, edges, bsgs). The orchestrator
+polls it into `GET /api/scythe/instances` as each instance's `authority`. The first audit missed it because it
+searched for `read_only` and `mutation_enabled`; the hub summary (`docs/hub_summary.md`) now shows it.
+
+Still not found (grep for `mutation_enabled`, `read_only`, `READ_ONLY`, `hardware.*lock`,
 `second_operator` and `two_operator` in the server returned nothing):
 
-- A single "mutation disabled", "authority read only" or "hardware locked" state.
+- A single "mutation disabled", "authority read only" or "hardware locked" state beyond that write gate.
 - A "second operator connected" signal. The pending-proposal list implies a second operator is
   needed to approve, and `own` marks the caller's proposals, but nothing reports whether a
   second operator is currently online. (`GET /api/operator/active` exists and lists active
