@@ -17,6 +17,7 @@ export function paletteEntries({instances = [], actions = [], missions = new Map
     if (!instance || typeof instance.id !== "string") continue;
     if (instance.status !== "running") { skipped++; continue; }
     const name = instance.name || instance.id;
+    try { instanceDeepLink(instance.id, "globe"); } catch { skipped++; continue; }   // an id that cannot be put in a URL has no destination
     for (const [target, label] of TARGETS) {
       entries.push({kind: "view", id: `view:${instance.id}:${target}`, label: `${name} — ${label}`, hint: "Open", href: instanceDeepLink(instance.id, target)});
     }

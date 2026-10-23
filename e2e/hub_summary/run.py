@@ -38,6 +38,7 @@ INSTANCE_PATH = re.compile(r"^/scythe/i/([A-Za-z0-9._-]+)(/.*)?$")
 class Handler(globe_page.Handler):
     requests = []          # every path asked for, to prove what was and was not fetched
     fail_instances = False
+    hostile = False        # serve an operator and an instance whose fields are markup, to prove they are shown as text
 
     def do_GET(self):
         path = urllib.parse.urlparse(self.path).path
@@ -45,8 +46,13 @@ class Handler(globe_page.Handler):
         if path == "/api/scythe/instances":
             if Handler.fail_instances:
                 return self.reply_json({"status": "error"}, 500)
+            if Handler.hostile:
+                bad = {**RUNNING, "id": "x'),window.__pwned=1,('", "name": "<img src=x onerror=window.__pwned=1>", "port": "<b>9</b>", "status": 'running" onmouseover="window.__pwned=1'}
+                return self.reply_json({"instances": [bad], "count": 1})
             return self.reply_json({"instances": [RUNNING, SPARSE, DEAD], "count": 3, "orchestrator_uptime": 3700})
         if path == "/api/operator/session":
+            if Handler.hostile:
+                return self.reply_json({"status": "ok", "operator": {"callsign": "<img src=x onerror=window.__pwned=1>", "email": "<script>window.__pwned=1</script>", "role": "</b><i id=injected>"}})
             return self.reply_json({"status": "ok", "operator": {"callsign": "HARNESS-1", "role": "operator"}})
         match = INSTANCE_PATH.match(path)
         if match:   # the orchestrator's reverse proxy: /scythe/i/<id>/<path> is that instance's <path>
@@ -193,7 +199,7 @@ class Check:
         self.record("it lists the hub's actions and the views of running instances only",
                     "action:new" in ids and "view:scythe-ab12:globe" in ids and "view:scythe-new:ops" in ids and not any("scythe-dead" in i for i in ids), str(ids))
         self.record("it offers no mission before the hub has loaded one", not any(i.startswith("mission:") for i in ids))
-        self.record("it says how many instances were left out", "1 instance is not running and not listed." in page.evaluate("document.querySelector('.palette__note').textContent"))
+        self.record("it says how many instances were left out", "1 instance is not listed (not running, or no usable id)." in page.evaluate("document.querySelector('.palette__note').textContent"))
         self.record("opening it fetched nothing", sum(p.endswith("/api/missions") for p in Handler.requests) == asked)
         page.keyboard.type("ops-1 reg")
         self.record("typing narrows the list", self.entries(page) == ["view:scythe-ab12:regional"], str(self.entries(page)))
@@ -227,8 +233,36 @@ class Check:
                     landed == "/scythe/i/scythe-ab12/cesium-hypergraph-globe.html?mission=m-e" and page.evaluate("scytheMissionViewport.missionId") == "m-e", landed)
         page.close()
 
+    def escaping_cases(self):
+        Handler.hostile = True
+        try:
+            page = self.home()
+            page.wait_for_selector("#hub-summary-list .hub__card", timeout=60000)
+            self.record("an instance whose id cannot go in a URL still gets a card, and says it has no links",
+                        page.evaluate("document.querySelector('#hub-summary-list .hub__card > .hub__links').textContent") == "No links: this instance's id is not usable in a URL.")
+            page.click(".shell__nav >> text=Account")
+            page.wait_for_function("document.getElementById('account-view').textContent.includes('Callsign')", timeout=15000)
+            view = page.evaluate("""() => ({text: document.getElementById('account-view').textContent,
+              injected: !!document.querySelector('#account-view img, #account-view script, #account-view i, #injected'), pwned: !!window.__pwned})""")
+            self.record("an operator's callsign, email and role are shown as text, not markup",
+                        "<img src=x" in view["text"] and "<script>" in view["text"] and "</b><i id=injected>" in view["text"] and not view["injected"] and not view["pwned"], str(view)[:200])
+            page.evaluate("closeAccountModal()")
+            page.click(".shell__nav >> text=Connect to an instance")
+            page.wait_for_selector("#modal-join-instance.active .instance-list li", timeout=15000)
+            join = page.evaluate("""() => { const li = document.querySelector('#modal-join-instance .instance-list li');
+              return {name: li.querySelector('.instance-name').textContent, meta: li.querySelector('.instance-meta').textContent,
+                      elements: li.querySelectorAll('img, b, [onmouseover], [onclick]').length, id: li.querySelector('.instance-join-btn').dataset.id,
+                      pwned: !!window.__pwned} }""")
+            self.record("an instance's name, port and status cannot add markup or attributes to the join list",
+                        "<img" in join["name"] and "<b>9</b>" in join["meta"] and join["elements"] == 0 and not join["pwned"], str(join)[:200])
+            self.record("its id travels as data, intact, and not as script", join["id"] == "x'),window.__pwned=1,('", join["id"])
+            self.record("the page raised no script errors", not page.errors, "; ".join(page.errors[:3]))
+            page.close()
+        finally:
+            Handler.hostile = False
+
     def run(self):
-        for cases in (self.shell_cases, self.panel_cases, self.missions_cases, self.palette_cases, self.unreachable_cases):
+        for cases in (self.escaping_cases, self.shell_cases, self.panel_cases, self.missions_cases, self.palette_cases, self.unreachable_cases):
             cases()
         return all(self.results)
 

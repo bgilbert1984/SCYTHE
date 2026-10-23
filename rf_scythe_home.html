@@ -557,6 +557,8 @@
 
     <script>
                 let currentUserData = null;
+                // Anything that came from the server or the operator's own profile is text, never markup.
+                const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
                 function openAccountModal() {
                     document.getElementById('account-modal').classList.add('active');
@@ -588,9 +590,9 @@
                     const { totpEnabled } = await SCYTHE_AUTH.getTOTPStatus();
 
                     viewDiv.innerHTML = `
-                        <div style="font-size:1.1em;margin-bottom:8px;"><b>Callsign:</b> ${operator?.callsign || '(unknown)'}</div>
-                        <div style="font-size:1em;margin-bottom:8px;"><b>Email:</b> ${operator?.email || '(not set)'}</div>
-                        <div style="font-size:1em;margin-bottom:8px;"><b>Role:</b> ${operator?.role || 'operator'}</div>
+                        <div style="font-size:1.1em;margin-bottom:8px;"><b>Callsign:</b> ${esc(operator?.callsign || '(unknown)')}</div>
+                        <div style="font-size:1em;margin-bottom:8px;"><b>Email:</b> ${esc(operator?.email || '(not set)')}</div>
+                        <div style="font-size:1em;margin-bottom:8px;"><b>Role:</b> ${esc(operator?.role || 'operator')}</div>
                         <div style="font-size:1em;margin-bottom:8px;"><b>2FA Status:</b> <span style="color:${totpEnabled ? '#4CAF50' : '#ff9800'}">${totpEnabled ? 'Enabled' : 'Disabled'}</span></div>
                     `;
                     document.getElementById('account-actions').style.display = 'flex';
@@ -654,7 +656,7 @@
                             renderAccountInfo();
                         }, 1500);
                     } else {
-                        document.getElementById('totp-setup-status').innerHTML = `<span style="color:#e74c3c;">${message || 'Failed to enable 2FA'}</span>`;
+                        document.getElementById('totp-setup-status').innerHTML = `<span style="color:#e74c3c;">${esc(message || 'Failed to enable 2FA')}</span>`;
                     }
                 }
                 function cancelTOTPSetup() {
@@ -698,7 +700,7 @@
 
                         if (!response.ok) {
                             const error = await response.json();
-                            statusDiv.innerHTML = `<span style="color:#e74c3c;">${error.message || 'Update failed'}</span>`;
+                            statusDiv.innerHTML = `<span style="color:#e74c3c;">${esc(error.message || 'Update failed')}</span>`;
                             return;
                         }
 
@@ -712,10 +714,10 @@
                                 renderAccountInfo();
                             }, 1000);
                         } else {
-                            statusDiv.innerHTML = `<span style="color:#e74c3c;">${result.message || 'Update failed'}</span>`;
+                            statusDiv.innerHTML = `<span style="color:#e74c3c;">${esc(result.message || 'Update failed')}</span>`;
                         }
                     } catch (e) {
-                        statusDiv.innerHTML = `<span style="color:#e74c3c;">Error: ${e.message}</span>`;
+                        statusDiv.innerHTML = `<span style="color:#e74c3c;">Error: ${esc(e.message)}</span>`;
                     }
                 }
                 function handleLogout() {
@@ -912,23 +914,23 @@
                 for (const inst of instances) {
                     const info = inst.info || {};
                     const age = inst.created ? timeSince(inst.created) : 'unknown';
-                    const nodes = info.node_count || 0;
-                    const sessions = info.session_count || 0;
-                    const bsgs = info.behavior_groups || 0;
+                    const nodes = Number(info.node_count) || 0;
+                    const sessions = Number(info.session_count) || 0;
+                    const bsgs = Number(info.behavior_groups) || 0;
                     html += `
                         <li>
-                            <span class="instance-status ${inst.status}"></span>
+                            <span class="instance-status ${escAttr(inst.status)}"></span>
                             <div class="instance-info">
                                 <div class="instance-name">${escHtml(inst.name)}</div>
                                 <div class="instance-meta">
-                                    Port ${inst.port} &nbsp;|&nbsp; ${age} &nbsp;|&nbsp;
+                                    Port ${escHtml(inst.port)} &nbsp;|&nbsp; ${escHtml(age)} &nbsp;|&nbsp;
                                     ${nodes} nodes &nbsp;|&nbsp; ${sessions} sessions &nbsp;|&nbsp; ${bsgs} BSGs
                                 </div>
                             </div>
-                            <button class="instance-join-btn" onclick="ScytheInstances.joinInstance('${inst.id}')">
+                            <button class="instance-join-btn" data-action="join" data-id="${escAttr(inst.id)}">
                                 Connect &#x2192;
                             </button>
-                            <button class="instance-kill-btn" onclick="ScytheInstances.killInstance('${inst.id}')" title="Terminate">
+                            <button class="instance-kill-btn" data-action="kill" data-id="${escAttr(inst.id)}" title="Terminate">
                                 &#x2716;
                             </button>
                         </li>
@@ -994,6 +996,17 @@
             d.textContent = s;
             return d.innerHTML;
         }
+        // For an attribute value: escHtml leaves quotes alone, which would let a value end the attribute.
+        function escAttr(s) {
+            return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+        }
+        // The buttons carry the instance id as data, not inside an inline handler.
+        document.addEventListener('click', (event) => {
+            const button = event.target.closest && event.target.closest('button[data-action][data-id]');
+            if (!button || !button.closest('.instance-list')) return;
+            if (button.dataset.action === 'join') joinInstance(button.dataset.id);
+            else if (button.dataset.action === 'kill') killInstance(button.dataset.id);
+        });
 
         function timeSince(isoStr) {
             const d = new Date(isoStr);

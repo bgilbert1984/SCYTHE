@@ -61,6 +61,6 @@ It offers only what exists:
 - Globe, Regional and Mission Ops for every instance that is **running**;
 - a mission's views only when the hub has **already loaded** that instance's mission list (by expanding its card). The palette never fetches, because `GET /api/missions` has no limit.
 
-An instance that is not running offers nothing, and the palette says how many were left out. Mission links are the deep links of `deep_link_contract.md`; an unusable mission id yields a link without it.
+An instance that is not running, or whose id cannot go in a URL, offers nothing, and the palette says how many were left out. Mission links are the deep links of `deep_link_contract.md`; an unusable mission id yields a link without it.
 
 Matching: every word of the query must appear in the label; labels that start with, then have a word starting with, the first word rank first. It does not search entities, alerts or evidence, because the hub has no source for them.
