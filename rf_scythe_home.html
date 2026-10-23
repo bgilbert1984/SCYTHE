@@ -863,19 +863,30 @@
                 }
 
                 ss.className = 'spawn-status success';
-                ss.innerHTML = `
-                    <strong>Instance launched!</strong><br>
-                    Name: ${data.name}<br>
-                    Port: ${data.port} &nbsp;|&nbsp; ID: ${data.instance_id}<br>
-                    <a href="${vizUrl}" target="_blank"
-                       style="color:#00cec9;text-decoration:underline;font-weight:600;">
-                        &#x2192; Open Command Ops Visualization
-                    </a>
-                `;
+                // Values from the server are text; the link is offered only if it is an http(s) URL, so a javascript: value is not.
+                const openable = /^https?:$/.test((() => { try { return new URL(vizUrl, window.location.href).protocol; } catch (e) { return ''; } })());
+                ss.textContent = '';
+                const line = (label, value) => { ss.append(label + value, document.createElement('br')); };
+                const launched = document.createElement('strong');
+                launched.textContent = 'Instance launched!';
+                ss.append(launched, document.createElement('br'));
+                line('Name: ', data.name);
+                line('Port: ', data.port + ' \u00a0|\u00a0 ID: ' + data.instance_id);
+                if (openable) {
+                    const link = document.createElement('a');
+                    link.href = vizUrl;
+                    link.target = '_blank';
+                    link.rel = 'noopener';
+                    link.style.cssText = 'color:#00cec9;text-decoration:underline;font-weight:600;';
+                    link.textContent = '\u2192 Open Command Ops Visualization';
+                    ss.append(link);
+                } else {
+                    ss.append('The server gave no link that can be opened.');
+                }
 
                 // Auto-open after 2s
-                setTimeout(() => {
-                    window.open(vizUrl, '_blank');
+                if (openable) setTimeout(() => {
+                    window.open(vizUrl, '_blank', 'noopener');
                 }, 2000);
 
                 if (window.scytheHub) window.scytheHub.refresh();

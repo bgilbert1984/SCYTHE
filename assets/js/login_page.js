@@ -110,6 +110,11 @@
                 }
             }
         }
+        // The id is placed in a path after sign-in: an id that could leave /scythe/i/<id>/ is ignored.
+        if (instanceId && !SCYTHE_SAFE_NEXT.isInstanceId(instanceId)) {
+            console.warn('[Login] Ignoring an instance id that is not valid');
+            return null;
+        }
         return instanceId;
     }
 

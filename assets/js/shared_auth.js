@@ -269,6 +269,11 @@ const SCYTHE_AUTH = (function() {
             return { success: true, data };
         }
 
+        // The id goes into a path below. Same rule as scythe-web/deepLink.js: it must not be able to leave /scythe/i/<id>/.
+        if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(String(instanceId))) {
+            return { success: false, message: 'Not a valid instance id.' };
+        }
+
         // 3. Instance bootstrap flow: Mint bootstrap token
         console.log('[Auth] Minting bootstrap token for:', instanceId);
         const bootstrapResp = await ScytheTransport.fetch('/api/operator/issue-bootstrap', {
