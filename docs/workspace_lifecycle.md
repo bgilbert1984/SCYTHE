@@ -232,9 +232,27 @@ through `fusionData` (the Sensors panel's sensors, read when it draws) and `fusi
   `window.FusionVisualization`, so those calls have never done anything, and the demo's geo points and flows have never been drawn locally.
   This tool does not assign it either. Doing so would switch them on; that is a decision, not a refactor.
 
+## Tenth tool: viewsheds (`scythe-web/viewshedPlugin.js`)
+
+`ViewshedManager` (a 490-line object in `command-ops-visualization.html`) is now the `viewsheds` tool. A viewshed is what one observer could see:
+a marker at the observer, a wedge for its field of view, and a fan of rays (36 by default), each ending where the terrain blocks it. The page
+creates them for recon entities and cell towers from the Settings panel and changes `DEFAULT_CONFIG` (field of view and range) from two sliders.
+The geometry and the line-of-sight test are plain functions in the plugin (`wedgePoints`, `rayEnds`, `haversine`, `checkLineOfSight`); the page is
+touched through `viewshedGlobe` (the Cesium entities), `terrainModel` (RFPropagationManager's elevation estimate) and `activityLog` (the metrics
+tool's `logMetric`). `window.ViewshedManager` is the tool's controls; the page still calls `initialize(viewer)` to hand over its viewer (a viewer
+handed over before the tool is active is kept), and still keeps `window.viewshedManager` as an alias, which the metrics probe reads.
+
+- Deactivating removes every viewshed's entities (each viewshed keeps the handles of what it drew).
+- Removed as dead after a repository-wide search: `raycastEntities`, `enabled`, `updateViewshed`, `setViewshedVisible`, `getActiveViewsheds`, and the
+  asynchronous `_checkLineOfSight` (the version that would sample real terrain). The page no longer links `propagationManager` onto the manager; the
+  `terrainModel` service looks RFPropagationManager up when it is used.
+- Pinned, not changed (tests named `PINNED:`): without a terrain model rays are blocked at random (beyond 60 % of the range, 30 % are); a ray count of 1
+  puts its ray at NaN; creating a viewshed with an id that is showing is refused by Cesium and the error reaches the caller; the wedge uses degrees
+  offset by `distance / 111320` at any latitude.
+
 ## Not done
 
-- Only ADS-B, AIS streaming, chat, metrics, the metrics explorer, propagation, the entity stream, sensors and the fusion overlays use the contract, and activation is not yet driven by the operator (a panel click).
+- Only ADS-B, AIS streaming, chat, metrics, the metrics explorer, propagation, the entity stream, sensors, the fusion overlays and the viewsheds use the contract, and activation is not yet driven by the operator (a panel click).
 - No unified transport: the tools take the realtime socket, `WebSocketSync` and `fetch` as services; they do not open their own.
 - Not run in a browser against a signed-in session; the tests cover the contract, the plugin, the boot wiring, and run the
   page's own `removeEntityMarker` against a fake collection.
