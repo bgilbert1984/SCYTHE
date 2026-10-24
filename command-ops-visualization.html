@@ -14585,352 +14585,8 @@ const originalComplete = options.complete;
             return rad * (180/Math.PI);
         }
 
-        // =====================================================================
-        // HIERARCHICAL RENDER MANAGER
-        // Handles clustering, zoom-dependent visibility, and level-of-detail
-        // =====================================================================
-        
-        const HierarchicalRenderManager = {
-            viewer: null,
-            dataSources: {},
-            cameraListener: null,
-            currentAltitude: 0,
-            
-            // Altitude thresholds (in meters)
-            THRESHOLDS: {
-                GLOBAL: 5000000,       // Above 5000km: Show only large clusters
-                REGIONAL: 500000,      // 500km-5000km: Show medium clusters
-                LOCAL: 50000,          // 50km-500km: Show small clusters + labels
-                DETAILED: 10000        // Below 50km: Show all details
-            },
-            
-            // Cluster configuration
-            CLUSTER_CONFIG: {
-                enabled: true,
-                pixelRange: 45,        // Pixels between clusters
-                minimumClusterSize: 2,
-                clusterBillboards: true,
-                clusterLabels: true,
-                clusterPoints: true
-            },
-            
-            initialize: function(cesiumViewer) {
-                this.viewer = cesiumViewer;
-                this.setupCameraListener();
-                console.log('HierarchicalRenderManager initialized');
-                return this;
-            },
-            
-            setupCameraListener: function() {
-                if (!this.viewer) return;
-                
-                const self = this;
-                
-                // Listen for camera movement to update visibility
-                this.cameraListener = this.viewer.camera.changed.addEventListener(function() {
-                    const cartographic = Cesium.Cartographic.fromCartesian(self.viewer.camera.position);
-                    self.currentAltitude = cartographic.height;
-                    self.updateVisibilityForAltitude();
-                });
-                
-                // Initial update
-                const cartographic = Cesium.Cartographic.fromCartesian(this.viewer.camera.position);
-                this.currentAltitude = cartographic.height;
-            },
-            
-            // Create a clustered data source for a layer
-            createClusteredDataSource: function(name, options = {}) {
-                if (!this.viewer) return null;
-                
-                const dataSource = new Cesium.CustomDataSource(name);
-                
-                // Configure clustering
-                dataSource.clustering.enabled = options.enabled !== false;
-                dataSource.clustering.pixelRange = options.pixelRange || this.CLUSTER_CONFIG.pixelRange;
-                dataSource.clustering.minimumClusterSize = options.minimumClusterSize || this.CLUSTER_CONFIG.minimumClusterSize;
-                dataSource.clustering.clusterBillboards = options.clusterBillboards !== false;
-                dataSource.clustering.clusterLabels = options.clusterLabels !== false;
-                dataSource.clustering.clusterPoints = options.clusterPoints !== false;
-                
-                // Store reference
-                this.dataSources[name] = dataSource;
-                
-                // Add to viewer
-                this.viewer.dataSources.add(dataSource);
-                
-                console.log(`Created clustered data source: ${name}`);
-                return dataSource;
-            },
-            
-            // Setup cluster event handler with custom styling
-            setupClusterStyling: function(dataSource, styleCallback) {
-                if (!dataSource || !dataSource.clustering) return;
-                
-                const self = this;
-                
-                dataSource.clustering.clusterEvent.addEventListener(function(clusteredEntities, cluster) {
-                    // Default cluster appearance
-                    cluster.label.show = true;
-                    cluster.label.text = clusteredEntities.length.toString();
-                    cluster.label.font = 'bold 14px sans-serif';
-                    cluster.label.outlineWidth = 2;
-                    cluster.label.outlineColor = Cesium.Color.BLACK;
-                    cluster.label.style = Cesium.LabelStyle.FILL_AND_OUTLINE;
-                    cluster.label.verticalOrigin = Cesium.VerticalOrigin.CENTER;
-                    cluster.label.horizontalOrigin = Cesium.HorizontalOrigin.CENTER;
-                    cluster.label.pixelOffset = new Cesium.Cartesian2(0, 0);
-                    
-                    cluster.billboard.show = true;
-                    cluster.billboard.verticalOrigin = Cesium.VerticalOrigin.CENTER;
-                    cluster.billboard.horizontalOrigin = Cesium.HorizontalOrigin.CENTER;
-                    
-                    // Apply custom styling if provided
-                    if (styleCallback) {
-                        styleCallback(clusteredEntities, cluster, self.currentAltitude);
-                    } else {
-                        // Default cluster icon
-                        cluster.billboard.image = self.createClusterIcon(clusteredEntities.length, Cesium.Color.GRAY);
-                        cluster.label.fillColor = Cesium.Color.WHITE;
-                    }
-                });
-            },
-            
-            // Create a cluster icon with entity count
-            createClusterIcon: function(count, color, size = 40) {
-                const canvas = document.createElement('canvas');
-                canvas.width = size;
-                canvas.height = size;
-                const ctx = canvas.getContext('2d');
-                
-                // Background circle
-                ctx.beginPath();
-                ctx.arc(size/2, size/2, size/2 - 2, 0, 2 * Math.PI);
-                ctx.fillStyle = color.toCssColorString();
-                ctx.fill();
-                
-                // Border
-                ctx.strokeStyle = 'rgba(255,255,255,0.8)';
-                ctx.lineWidth = 2;
-                ctx.stroke();
-                
-                // Inner circle for depth effect
-                ctx.beginPath();
-                ctx.arc(size/2, size/2, size/2 - 6, 0, 2 * Math.PI);
-                ctx.fillStyle = 'rgba(0,0,0,0.3)';
-                ctx.fill();
-                
-                return canvas.toDataURL();
-            },
-            
-            // Update visibility based on current altitude
-            updateVisibilityForAltitude: function() {
-                // Emit an event that layers can listen to
-                const event = new CustomEvent('altitudeChanged', {
-                    detail: {
-                        altitude: this.currentAltitude,
-                        level: this.getDetailLevel()
-                    }
-                });
-                document.dispatchEvent(event);
-            },
-            
-            // Get current detail level based on altitude
-            getDetailLevel: function() {
-                if (this.currentAltitude > this.THRESHOLDS.GLOBAL) return 'GLOBAL';
-                if (this.currentAltitude > this.THRESHOLDS.REGIONAL) return 'REGIONAL';
-                if (this.currentAltitude > this.THRESHOLDS.LOCAL) return 'LOCAL';
-                return 'DETAILED';
-            },
-            
-            // Check if a detail should be visible at current altitude
-            shouldShowDetail: function(detailType) {
-                const level = this.getDetailLevel();
-                
-                switch (detailType) {
-                    case 'labels':
-                        return level === 'LOCAL' || level === 'DETAILED';
-                    case 'rings':
-                    case 'trails':
-                        return level === 'DETAILED';
-                    case 'altitudeLines':
-                        return level === 'LOCAL' || level === 'DETAILED';
-                    case 'hyperedges':
-                        return level !== 'GLOBAL';
-                    default:
-                        return true;
-                }
-            },
-            
-            // Get cluster pixel range based on altitude (adaptive clustering)
-            getAdaptivePixelRange: function() {
-                const level = this.getDetailLevel();
-                switch (level) {
-                    case 'GLOBAL': return 80;
-                    case 'REGIONAL': return 60;
-                    case 'LOCAL': return 40;
-                    case 'DETAILED': return 20;
-                    default: return 45;
-                }
-            },
-            
-            // Client-side spatial index (simple quadtree)
-            SpatialQuadtree: class {
-                constructor(bounds, maxObjects = 10, maxLevels = 5, level = 0) {
-                    this.bounds = bounds; // { minLon, minLat, maxLon, maxLat }
-                    this.maxObjects = maxObjects;
-                    this.maxLevels = maxLevels;
-                    this.level = level;
-                    this.objects = [];
-                    this.nodes = [];
-                }
-                
-                clear() {
-                    this.objects = [];
-                    this.nodes.forEach(node => node.clear());
-                    this.nodes = [];
-                }
-                
-                split() {
-                    const midLon = (this.bounds.minLon + this.bounds.maxLon) / 2;
-                    const midLat = (this.bounds.minLat + this.bounds.maxLat) / 2;
-                    
-                    this.nodes = [
-                        new HierarchicalRenderManager.SpatialQuadtree(
-                            { minLon: this.bounds.minLon, minLat: midLat, maxLon: midLon, maxLat: this.bounds.maxLat },
-                            this.maxObjects, this.maxLevels, this.level + 1
-                        ),
-                        new HierarchicalRenderManager.SpatialQuadtree(
-                            { minLon: midLon, minLat: midLat, maxLon: this.bounds.maxLon, maxLat: this.bounds.maxLat },
-                            this.maxObjects, this.maxLevels, this.level + 1
-                        ),
-                        new HierarchicalRenderManager.SpatialQuadtree(
-                            { minLon: this.bounds.minLon, minLat: this.bounds.minLat, maxLon: midLon, maxLat: midLat },
-                            this.maxObjects, this.maxLevels, this.level + 1
-                        ),
-                        new HierarchicalRenderManager.SpatialQuadtree(
-                            { minLon: midLon, minLat: this.bounds.minLat, maxLon: this.bounds.maxLon, maxLat: midLat },
-                            this.maxObjects, this.maxLevels, this.level + 1
-                        )
-                    ];
-                }
-                
-                getIndex(obj) {
-                    const midLon = (this.bounds.minLon + this.bounds.maxLon) / 2;
-                    const midLat = (this.bounds.minLat + this.bounds.maxLat) / 2;
-                    
-                    const top = obj.lat > midLat;
-                    const left = obj.lon < midLon;
-                    
-                    if (top) {
-                        return left ? 0 : 1;
-                    } else {
-                        return left ? 2 : 3;
-                    }
-                }
-                
-                insert(obj) {
-                    if (this.nodes.length > 0) {
-                        const index = this.getIndex(obj);
-                        this.nodes[index].insert(obj);
-                        return;
-                    }
-                    
-                    this.objects.push(obj);
-                    
-                    if (this.objects.length > this.maxObjects && this.level < this.maxLevels) {
-                        if (this.nodes.length === 0) {
-                            this.split();
-                        }
-                        
-                        this.objects.forEach(o => {
-                            const index = this.getIndex(o);
-                            this.nodes[index].insert(o);
-                        });
-                        
-                        this.objects = [];
-                    }
-                }
-                
-                retrieve(bounds) {
-                    let results = [...this.objects];
-                    
-                    if (this.nodes.length > 0) {
-                        // Check which quadrants intersect with bounds
-                        this.nodes.forEach(node => {
-                            if (this.intersects(node.bounds, bounds)) {
-                                results = results.concat(node.retrieve(bounds));
-                            }
-                        });
-                    }
-                    
-                    return results;
-                }
-                
-                intersects(a, b) {
-                    return !(a.maxLon < b.minLon || a.minLon > b.maxLon ||
-                             a.maxLat < b.minLat || a.minLat > b.maxLat);
-                }
-            },
-            
-            // Create a quadtree for a set of entities
-            createQuadtree: function(entities) {
-                const tree = new this.SpatialQuadtree({
-                    minLon: -180, minLat: -90, maxLon: 180, maxLat: 90
-                });
-                
-                const list = Array.isArray(entities) ? entities
-                             : entities?.values ? entities.values
-                             : [];
-                list.forEach(e => {
-                    if (e.location || e.lat) {
-                        tree.insert({
-                            id: e.entity_id || e.mmsi || e.id,
-                            lat: e.location ? e.location.lat : e.lat,
-                            lon: e.location ? e.location.lon : e.lon,
-                            data: e
-                        });
-                    }
-                });
-                
-                return tree;
-            },
-            
-            // Get visible entities from quadtree based on current view
-            getVisibleEntities: function(quadtree) {
-                if (!this.viewer || !quadtree) return [];
-                
-                const rect = this.viewer.camera.computeViewRectangle();
-                if (!rect) return [];
-                
-                const bounds = {
-                    minLon: Cesium.Math.toDegrees(rect.west),
-                    minLat: Cesium.Math.toDegrees(rect.south),
-                    maxLon: Cesium.Math.toDegrees(rect.east),
-                    maxLat: Cesium.Math.toDegrees(rect.north)
-                };
-                
-                return quadtree.retrieve(bounds);
-            },
-            
-            // Cleanup
-            destroy: function() {
-                if (this.cameraListener) {
-                    this.cameraListener();
-                    this.cameraListener = null;
-                }
-                
-                Object.values(this.dataSources).forEach(ds => {
-                    if (this.viewer && this.viewer.dataSources.contains(ds)) {
-                        this.viewer.dataSources.remove(ds);
-                    }
-                });
-                
-                this.dataSources = {};
-            }
-        };
-        
-        // Make globally available
-        window.HierarchicalRenderManager = HierarchicalRenderManager;
+        // HierarchicalRenderManager (level of detail and clustering) is the "render" workspace tool: scythe-web/renderPlugin.js.
+        // The boot module at the end of this page sets window.HierarchicalRenderManager and activates it.
 
         // =====================================================================
         // RF PROPAGATION MANAGER - Advanced Terrain-Aware Propagation Modeling
@@ -15579,7 +15235,6 @@ const originalComplete = options.complete;
             // Clustering support
             dataSource: null,
             clusteringEnabled: true,
-            quadtree: null,
             
             initialize: function(cesiumViewer) {
                 this.viewer = cesiumViewer;
@@ -15955,18 +15610,6 @@ const originalComplete = options.complete;
                 
                 // Clear existing entities
                 this.clearAllEntities();
-                
-                // Build quadtree for spatial queries
-                if (typeof HierarchicalRenderManager !== 'undefined') {
-                    this.quadtree = HierarchicalRenderManager.createQuadtree(
-                        Object.values(this.vessels).map(v => ({
-                            id: v.mmsi,
-                            lat: v.lat,
-                            lon: v.lon,
-                            data: v
-                        }))
-                    );
-                }
                 
                 // Render each vessel (filtered by type)
                 Object.values(this.vessels).forEach(vessel => {
@@ -18817,7 +18460,6 @@ const originalComplete = options.complete;
             // Clustering support
             dataSource: null,
             clusteringEnabled: true,
-            quadtree: null,
             
             // Disposition colors matching MIL-STD-2525
             DISPOSITION_COLORS: {
@@ -19190,11 +18832,6 @@ const originalComplete = options.complete;
                 
                 // Clear existing
                 this.clearAllEntities();
-                
-                // Build quadtree for spatial queries
-                if (typeof HierarchicalRenderManager !== 'undefined') {
-                    this.quadtree = HierarchicalRenderManager.createQuadtree(Object.values(this.entities));
-                }
                 
                 // Add reference point marker (always to viewer, not clustered)
                 this.addReferencePointMarker();
@@ -39259,6 +38896,7 @@ ${unconfirmedBanner}
     workspace.activate("viewsheds").catch((error) => console.warn("[Workspace] viewsheds did not start:", error));
     workspace.activate("lpi").catch((error) => console.warn("[Workspace] lpi did not start:", error));
     workspace.activate("presence").catch((error) => console.warn("[Workspace] presence did not start:", error));
+    workspace.activate("render").catch((error) => console.warn("[Workspace] render did not start:", error));
     workspace.activate("metrics").catch((error) => console.warn("[Workspace] metrics did not start:", error));
     // The Metrics Explorer waits 2 s after the DOM is ready so the other panels exist first (as its old init did).
     const startExplorer = () => setTimeout(() => workspace.activate("metrics-explorer").catch((error) => console.warn("[Workspace] metrics explorer did not start:", error)), 2000);

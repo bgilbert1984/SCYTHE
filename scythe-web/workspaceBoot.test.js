@@ -2001,3 +2001,72 @@ test("the old inline OperatorPresence is gone; the boot module activates the too
   assert.doesNotMatch(page, /_createPresenceIndicator|updatePresenceIndicators/);
   assert.match(page, /workspace\.activate\("presence"\)/);
 });
+
+// --- level of detail and clustering ---
+
+function renderWindow() {
+  const listeners = new Set(), dataSources = [], dispatched = [];
+  const camera = {position: {height: 0}, changed: {addEventListener(fn) { listeners.add(fn); return () => listeners.delete(fn); }}};
+  const viewer = {
+    camera,
+    dataSources: {
+      add: (source) => dataSources.push(source), contains: (source) => dataSources.includes(source),
+      remove(source) { assert.ok(dataSources.includes(source), "removed a data source that is not in the viewer"); dataSources.splice(dataSources.indexOf(source), 1); },
+    },
+  };
+  const Cesium = {
+    Cartographic: {fromCartesian: (position) => ({height: position.height})},
+    CustomDataSource: class { constructor(name) { this.name = name; this.clustering = {}; } },
+  };
+  const win = fakeWindow({
+    setInterval: () => 1, clearInterval() {}, setTimeout: () => 1, clearTimeout() {},
+    viewer, Cesium,
+    CustomEvent: class { constructor(type, init) { this.type = type; this.detail = init.detail; } },
+    document: {dispatchEvent: (event) => dispatched.push(event)},
+  });
+  const move = (height) => { camera.position.height = height; for (const fn of [...listeners]) fn(); };
+  return {win, viewer, listeners, dataSources, dispatched, move};
+}
+
+test("booting registers the render tool inactive and exposes it as window.HierarchicalRenderManager", () => {
+  const {win} = renderWindow();
+  const workspace = bootWorkspace(win);
+  assert.equal(workspace.state("render"), "inactive");
+  assert.equal(win.HierarchicalRenderManager.shouldShowDetail("rings"), true);   // before initialize everything shows
+  assert.equal(win.HierarchicalRenderManager.viewer, null);
+});
+
+test("the render globe reads the camera's height, announces altitudeChanged on the document with {altitude, level}, and follows the camera", async () => {
+  const {win, viewer, dispatched, move} = renderWindow();
+  const workspace = bootWorkspace(win);
+  await workspace.activate("render");
+  viewer.camera.position.height = 700000;
+  assert.equal(win.HierarchicalRenderManager.initialize(viewer), win.HierarchicalRenderManager);
+  assert.equal(win.HierarchicalRenderManager.currentAltitude, 700000);
+  assert.deepEqual(dispatched, []);
+  move(30000);
+  assert.equal(dispatched.length, 1);
+  assert.equal(dispatched[0].type, "altitudeChanged");
+  assert.deepEqual(dispatched[0].detail, {altitude: 30000, level: "DETAILED"});
+  win.HierarchicalRenderManager.updateVisibilityForAltitude();
+  assert.equal(dispatched.length, 2);
+});
+
+test("the render globe's clustered data sources are CustomDataSources added to the viewer with the layer's clustering, and removed with the tool", async () => {
+  const {win, viewer, dataSources, listeners} = renderWindow();
+  const workspace = bootWorkspace(win);
+  await workspace.activate("render");
+  win.HierarchicalRenderManager.initialize(viewer);
+  assert.equal(win.HierarchicalRenderManager.viewer, viewer);
+  const ais = win.HierarchicalRenderManager.createClusteredDataSource("AIS_Vessels", {pixelRange: 50, minimumClusterSize: 3});
+  assert.equal(ais.name, "AIS_Vessels");
+  assert.deepEqual(ais.clustering, {enabled: true, pixelRange: 50, minimumClusterSize: 3, clusterBillboards: true, clusterLabels: true, clusterPoints: true});
+  assert.deepEqual(dataSources, [ais]);
+  assert.equal(listeners.size, 1);
+  viewer.dataSources.remove(ais);   // the page took it out itself: not removed twice
+  const recon = win.HierarchicalRenderManager.createClusteredDataSource("Recon_Entities", {});
+  assert.deepEqual(dataSources, [recon]);
+  await workspace.deactivate("render");
+  assert.deepEqual(dataSources, []);
+  assert.equal(listeners.size, 0);
+});

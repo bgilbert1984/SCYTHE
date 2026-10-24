@@ -287,9 +287,32 @@ through `presenceSource` (the operator session), `presenceView` (the list elemen
 - Pinned, not changed (tests named `PINNED:`): one operator whose view centre is not a pair stops the list updating (the error is logged); nothing is polled
   until `initialize` has been called, though the Refresh button works before that.
 
+## Thirteenth tool: level of detail and clustering (`scythe-web/renderPlugin.js`)
+
+`HierarchicalRenderManager` (a 340-line object in `command-ops-visualization.html`) is now the `render` tool. The page hands over its viewer with
+`initialize(viewer)`; from then on the camera's altitude decides a detail level (GLOBAL above 5000 km, REGIONAL above 500 km, LOCAL above 50 km, else
+DETAILED), every camera change announces `{altitude, level}` as an `altitudeChanged` event on the document, and the layers ask
+`shouldShowDetail('labels' | 'rings' | 'trails' | 'altitudeLines' | 'hyperedges')`. The AIS and recon layers get their clustered data sources from
+`createClusteredDataSource`. The decisions are plain functions in the plugin (`detailLevel`, `shouldShowDetail`, `clusterSettings`); the execution is
+two services in `workspaceBoot.js`: `renderGlobe` (the camera and the viewer's data sources) and `renderEvents` (the document event). The boot module
+sets `window.HierarchicalRenderManager` to the tool's controls, which the page's layers and about ten altitude call sites already used by that name.
+
+This is the first extraction where the page's remaining objects, not another tool, are the callers: none of the twelve earlier tools use it.
+
+- Deactivating unsubscribes from the camera and takes down every data source the tool created (the old `destroy` had no caller). Calling `initialize`
+  again replaces the camera subscription instead of adding a second. A viewer handed over before the tool is active is used when it activates.
+- Removed as dead after a repository search: the quadtree (`SpatialQuadtree`, `createQuadtree`, `getVisibleEntities`; the AIS and recon layers built
+  one at start-up and never read it, so those two calls and the `quadtree` fields are gone from the page), the manager's own `setupClusterStyling` and
+  `createClusterIcon` (each layer has its own), `getAdaptivePixelRange`, and the `THRESHOLDS` and `CLUSTER_CONFIG` properties.
+- Pinned, not changed (tests named `PINNED:`): before `initialize` the altitude is 0, so every detail shows; a level is chosen with `>`, so exactly 5000 km
+  is REGIONAL; the first altitude is read at `initialize` but not announced; a `pixelRange` or `minimumClusterSize` of 0 gives the default, and the cluster
+  flags are on unless exactly `false`.
+- While the tool is inactive `viewer` is null, `createClusteredDataSource` returns null (so the layers skip clustering, as they did before `initialize`),
+  and `updateVisibilityForAltitude` does nothing. `window.hierarchicalRenderer`, which the metrics gauge reads, is still set by the page's init.
+
 ## Not done
 
-- Only ADS-B, AIS streaming, chat, metrics, the metrics explorer, propagation, the entity stream, sensors, the fusion overlays, the viewsheds, LPI and operator presence use the contract, and activation is not yet driven by the operator (a panel click).
+- Only ADS-B, AIS streaming, chat, metrics, the metrics explorer, propagation, the entity stream, sensors, the fusion overlays, the viewsheds, LPI, operator presence and the level-of-detail manager use the contract, and activation is not yet driven by the operator (a panel click).
 - No unified transport: the tools take the realtime socket, `WebSocketSync` and `fetch` as services; they do not open their own.
 - Not run in a browser against a signed-in session; the tests cover the contract, the plugin, the boot wiring, and run the
   page's own `removeEntityMarker` against a fake collection.
