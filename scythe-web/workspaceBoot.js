@@ -135,7 +135,9 @@ export function bootWorkspace(win) {
   // --- fusion overlays ---
   workspace.provide("fusionData", {sensor: (id) => win.SensorManager?.sensors?.[id]});
   workspace.provide("fusionGlobe", fusionGlobe(win));
-  workspace.register(createFusionPlugin({log: win.console}).tool);
+  const fusion = createFusionPlugin({log: win.console});
+  workspace.register(fusion.tool);
+  win.FusionVisualization = fusion.controls;   // what the page's PCAP simulation calls to draw its geo points and flows
 
   // --- viewsheds ---
   workspace.provide("viewshedGlobe", viewshedGlobe(win));

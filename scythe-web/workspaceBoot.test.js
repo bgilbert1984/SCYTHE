@@ -1277,11 +1277,13 @@ function fusionWindow({withViewer = true, sensors} = {}) {
 const fire = (timers, i) => { timers[i].live = false; timers[i].fn(); };
 const activityEvent = (kind, payload, sensorId = "s1") => ({entity_id: `activity:${sensorId}:1`, entity_type: "SENSOR_ACTIVITY", entity_data: {sensor_id: sensorId, kind, payload}});
 
-test("booting registers fusion inactive and does not assign window.FusionVisualization (the PCAP demo's calls to it stay dormant)", () => {
+test("booting registers fusion inactive and assigns window.FusionVisualization, which the PCAP demo's guarded calls use", () => {
   const {win} = fusionWindow();
   const workspace = bootWorkspace(win);
   assert.equal(workspace.state("fusion"), "inactive");
-  assert.equal(win.FusionVisualization, undefined);
+  assert.equal(typeof win.FusionVisualization.updateGeoNode, "function");
+  assert.equal(typeof win.FusionVisualization.drawFlow, "function");
+  assert.equal(win.FusionVisualization.drawFlow("s", {src_ip: "10.0.0.1", dst_ip: "10.0.0.2"}), undefined);   // inactive: nothing
   assert.match(page, /if\(window\.FusionVisualization\) window\.FusionVisualization\.updateGeoNode\(payload\)/);
   assert.match(page, /if\(window\.FusionVisualization\) window\.FusionVisualization\.drawFlow\(sensorId, payload\)/);
 });
@@ -1404,6 +1406,33 @@ test("fusion reads the sensors from the Sensors panel's SensorManager when it dr
   assert.deepEqual(globe.entities.values, []);
   win.SensorManager = undefined;
   win.EntitySync.ingest("CREATE", activityEvent("aoa_measured", {bearing_deg: 1}));
+  assert.deepEqual(globe.entities.values, []);
+});
+
+test("the PCAP simulation's own events draw their geo points and flows through window.FusionVisualization", async () => {
+  // The simulation's mock events and the shape of the payloads it builds are read from the page, so this follows it if it changes.
+  const events = new Function(`return [${page.match(/const events = \[([\s\S]*?)\n                         \];/)[1]}];`)();
+  assert.match(page, /ip: e\.ip,\s*geo: \{ lat: e\.lat, lon: e\.lon, city: e\.city, country: e\.country \},\s*asn: \{ asn: e\.asn, org: e\.org \}/);
+  assert.match(page, /src_ip: e\.src,\s*dst_ip: e\.dst,\s*bytes: e\.bytes,\s*protocol_hist: e\.proto,/);
+  const {win, globe, timers} = fusionWindow();
+  const workspace = bootWorkspace(win);
+  await workspace.activate("fusion");
+  const sensorId = "SENSOR-VM-172-234-197-23";
+  for (const e of events.filter((x) => x.type !== "flow")) {
+    win.FusionVisualization.updateGeoNode({ip: e.ip, geo: {lat: e.lat, lon: e.lon, city: e.city, country: e.country}, asn: {asn: e.asn, org: e.org}});
+  }
+  assert.equal(globe.entities.values.length, 6);
+  assert.deepEqual(globe.entities.values.map((x) => x.label.text.split("\n")[1]), ["Mountain View", "Sydney", "San Francisco", "Mountain View", "Norwell", "San Francisco"]);
+  for (const e of events.filter((x) => x.type === "flow")) {
+    win.FusionVisualization.drawFlow(sensorId, {src_ip: e.src, dst_ip: e.dst, bytes: e.bytes, protocol_hist: e.proto, timestamp: 1});
+  }
+  const arcs = globe.entities.values.filter((x) => x.polyline);
+  assert.equal(arcs.length, 3);
+  assert.deepEqual(arcs.map((x) => x.polyline.material.color.name), ["lime", "magenta", "orange"]);   // TLS, QUIC, SSH
+  for (const arc of arcs) assert.deepEqual(arc.polyline.positions[0], {lon: -118.2437, lat: 34.0522, h: 0});   // from the simulated sensor in Los Angeles
+  assert.deepEqual(arcs[1].polyline.positions[1], {lon: -122.4194, lat: 37.7749, h: 0});   // 172.67.198.10 was located: its position wins over the "private" placement
+  assert.deepEqual(timers.map((t) => t.ms), [60000, 60000, 60000, 60000, 60000, 60000, 10000, 10000, 10000]);
+  await workspace.deactivate("fusion");
   assert.deepEqual(globe.entities.values, []);
 });
 

@@ -15,10 +15,11 @@
  *    (`reduce` of nothing); an activity that carries no payload is drawn with an empty one (an AoA ray at bearing 0).
  *  - Any IP starting `192.168.`, `10.` or `172.` is "private" and drawn at Los Angeles (a demo placement), which includes public `172.x` addresses.
  *  - The TDoA label carries its own `position`, which Cesium ignores, so the label cannot be seen.
- *  - Nothing on the page calls the PCAP demo's `window.FusionVisualization.updateGeoNode` / `drawFlow`, because nothing ever assigned
- *    `window.FusionVisualization`; they stay dormant. This tool does not set it either.
  *
  * Deliberate changes:
+ *  - `window.FusionVisualization` is assigned, with `updateGeoNode(payload)` and `drawFlow(sensorId, payload)`. The page's PCAP simulation has always
+ *    called them (guarded by `if (window.FusionVisualization)`), but nothing ever assigned the global, so its geo points and traffic flows were never
+ *    drawn. They do nothing while the tool is inactive. They share the tool's remembered IP positions with the stream events.
  *  - The stream subscription is removed on deactivate (the old one never was), and every overlay is removed with it. Each overlay's lifetime
  *    is owned by the globe service, so it is cleared with the tool (the old timers could not be cancelled).
  *  - Without a globe the draw calls do nothing, instead of throwing a TypeError from the stream handler.
@@ -87,6 +88,8 @@ export function aoaEndpoint(start, bearingDeg) {
 export const tdoaPoint = (s) => ({lon: s.lon || s.location.lon, lat: s.lat || s.location.lat, alt: s.alt || s.location.alt || 0});
 
 export function createFusionPlugin({log = console} = {}) {
+  let run = null;   // null while the tool is inactive
+
   const tool = {
     id: FUSION_ID,
     title: "Fusion overlays",
@@ -139,6 +142,8 @@ export function createFusionPlugin({log = console} = {}) {
       }
 
       ctx.onCleanup(() => { globe.clear(); });   // registered first, so it runs last: after the subscription is gone
+      ctx.onCleanup(() => { run = null; });
+      run = {drawFlow, updateGeoNode};
       const onEvent = ctx.guard((event) => {
         const activity = activityOf(event);
         if (activity) handleActivity(activity);
@@ -151,5 +156,11 @@ export function createFusionPlugin({log = console} = {}) {
     },
   };
 
-  return {tool};
+  /** What the page's PCAP simulation calls as `window.FusionVisualization`. Both do nothing while the tool is inactive. */
+  const controls = {
+    updateGeoNode: (payload) => run?.updateGeoNode(payload),
+    drawFlow: (sensorId, payload) => run?.drawFlow(sensorId, payload),
+  };
+
+  return {tool, controls};
 }
