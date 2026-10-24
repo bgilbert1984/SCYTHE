@@ -6,6 +6,7 @@ import {createMetricsPlugin} from "./metricsPlugin.js";
 import {createMetricsExplorerPlugin} from "./metricsExplorerPlugin.js";
 import {createPropagationPlugin} from "./propagationPlugin.js";
 import {createEntitySyncPlugin} from "./entitySyncPlugin.js";
+import * as sensorEvents from "./sensorEvents.js";
 
 /**
  * Create the workspace for command-ops-visualization.html, provide the page's services, and register its tools. Nothing is
@@ -114,6 +115,7 @@ export function bootWorkspace(win) {
   const entitySync = createEntitySyncPlugin({log: win.console});
   workspace.register(entitySync.tool);
   adoptEntitySyncStub(win, entitySync.controls);
+  win.ScytheSensorEvents = sensorEvents;   // how SensorManager, LPIManager and FusionVisualization read the stream's sensor events
   win.ScytheWorkspace = workspace;
   win.dispatchEvent(new win.Event("scythe:workspace_ready"));
   return workspace;
