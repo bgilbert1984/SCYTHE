@@ -154,9 +154,26 @@ plugin (`render*`, tested without a DOM), and the page's elements are touched on
   list updating); a failed session request ends the refresh; zero heap or update time shows `--`.
 - The recon-counter and heap fallback in the live stats never runs on the page (the metrics logger's `_lastMetrics` is always truthy), as before.
 
+## Sixth tool: Propagation Analysis (`scythe-web/propagationPlugin.js`)
+
+The Propagation panel (334 lines of `command-ops-visualization.html`) is now the `propagation-ui` tool. Like the explorer it splits in
+two: what to show is built as plain strings in the plugin (`render*`, tested without a DOM), and the page's elements are touched only
+by the `propagationView` service in `workspaceBoot.js`. Unlike the explorer it also owns state (the calculation history and the paths
+it drew) and drives an engine, `RFPropagationManager`, which stays on the page and is reached through the `propagationEngine` service.
+
+- Services: `propagationEngine`, `propagationView`, and `activityLog` (the metrics tool's `logMetric` / `logInteraction`, if present).
+  `window.PropagationUI.updateAtmosphericDisplay` is what `showPanel('propagation')` calls.
+- The boot module activates it 2.5 s after `DOMContentLoaded`, as the old `init` was delayed.
+- Teardown: the four button listeners and two slider listeners are released, the paths this tool drew are removed from the engine, and a
+  calculation or visualization that finishes after deactivation is dropped (a visualization the engine already drew is taken back down).
+- Deliberate changes: error text is HTML-escaped; a missing panel element is skipped instead of throwing out of `showPanel`; path ids come
+  from a counter that outlives an activation.
+- Pinned, not changed: inputs are `parseFloat`ed and not validated (an empty box sends `NaN`); a result that cannot be displayed is
+  already in the history; an empty visualization still uses up a path id.
+
 ## Not done
 
-- Only ADS-B, AIS streaming, chat, metrics and the metrics explorer use the contract, and activation is not yet driven by the operator (a panel click).
+- Only ADS-B, AIS streaming, chat, metrics, the metrics explorer and propagation use the contract, and activation is not yet driven by the operator (a panel click).
 - No unified transport: the tools take the realtime socket, `WebSocketSync` and `fetch` as services; they do not open their own.
 - Not run in a browser against a signed-in session; the tests cover the contract, the plugin, the boot wiring, and run the
   page's own `removeEntityMarker` against a fake collection.
