@@ -121,9 +121,26 @@ the cursor is (server timestamp of the newest message seen from any transport), 
 **Changed:** the history and poll requests now reject on an HTTP error instead of parsing an error page (both were already
 swallowed); a failed send keeps the text, as before.
 
+## Fourth tool: metrics logging (`scythe-web/metricsPlugin.js`)
+
+The page's `MetricsLogger` (261 lines of `command-ops-visualization.html`) is now the `metrics` tool. It is the first tool moved
+only to shrink the page: what it logs did not change. Why it was a good first extraction: it reached the rest of the page only
+through `window.*` reads, and it had the defects the contract exists for (its collection interval and `beforeunload` listener
+were never released).
+
+- Services: `httpFetch` (the page's `fetch`, read at call time) and `metricsProbe` (the gauges the page's renderers expose, the
+  browser environment, and the unload target). `gauges` is a generator, so a gauge that throws part way keeps the ones before it.
+- The page keeps its names: `window.metricsLogger` (the Metrics Explorer reads `_interactionLog` and `_lastMetrics`),
+  `window.logMetric`, `window.logInteraction`. They do nothing until the tool is active, and every caller on the page already
+  tests for them first. The boot module activates the tool; there is no page code that used to start it.
+- Teardown: the interval and unload hook are released, then the buffer is flushed. The session id, buffer and interaction log
+  survive a deactivate/activate.
+- Pinned, not changed: a flush ignores the HTTP status (a 500 drops the batch); `session_end` reports seconds since page load.
+- Not moved: the Metrics Explorer's own reads of `/api/metrics/session` and `/api/metrics/query`.
+
 ## Not done
 
-- Only ADS-B, AIS streaming and chat use the contract, and activation is not yet driven by the operator (a panel click).
+- Only ADS-B, AIS streaming, chat and metrics use the contract, and activation is not yet driven by the operator (a panel click).
 - No unified transport: the tools take the realtime socket, `WebSocketSync` and `fetch` as services; they do not open their own.
 - Not run in a browser against a signed-in session; the tests cover the contract, the plugin, the boot wiring, and run the
   page's own `removeEntityMarker` against a fake collection.
