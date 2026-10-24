@@ -13,6 +13,7 @@ import {createViewshedPlugin} from "./viewshedPlugin.js";
 import {createLpiPlugin, pulseRadius, pulseAlpha} from "./lpiPlugin.js";
 import {createPresencePlugin} from "./presencePlugin.js";
 import {createRenderPlugin} from "./renderPlugin.js";
+import {createPoiPlugin} from "./poiPlugin.js";
 import {escapeHtml} from "./htmlEscape.js";
 
 /**
@@ -177,6 +178,13 @@ export function bootWorkspace(win) {
   const render = createRenderPlugin({log: win.console});
   workspace.register(render.tool);
   win.HierarchicalRenderManager = render.controls;   // what the page's init, the layers and the altitude call sites use
+
+  // --- points of interest ---
+  workspace.provide("poiConsole", {message: (text, kind) => win.addConsoleMessage?.(text, kind)});
+  workspace.provide("poiGlobe", poiGlobe(win));
+  const poi = createPoiPlugin({log: win.console});
+  workspace.register(poi.tool);
+  win.POIVisualization = poi.controls;   // what the page's init, the POI panel and its inline handlers call
 
   win.ScytheWorkspace = workspace;
   win.dispatchEvent(new win.Event("scythe:workspace_ready"));
@@ -838,4 +846,106 @@ function renderGlobe(win) {
       if (viewer && viewer.dataSources.contains(source)) viewer.dataSources.remove(source);
     },
   };
+}
+
+const POI_CAMERA_CONTROLS = ["enableRotate", "enableTilt", "enableZoom", "enableTranslate", "enableLook"];
+
+/**
+ * The POI layer on the Cesium globe: a data source of pins and labels, and the two camera flights. The viewer comes from `attach`, as the page hands
+ * it over; `detach` takes the data source off it.
+ */
+function poiGlobe(win) {
+  let viewer = null;
+  let source = null;
+  const cameraFree = () => {   // always give the user the camera back after a flight
+    const controller = viewer.scene.screenSpaceCameraController;
+    for (const name of POI_CAMERA_CONTROLS) controller[name] = true;
+  };
+  return {
+    attach(handed) {
+      viewer = handed;
+      source = null;
+      if (!viewer) return;
+      source = new win.Cesium.CustomDataSource("POIs");
+      viewer.dataSources.add(source);
+    },
+    detach() {
+      if (source && viewer.dataSources.contains(source)) viewer.dataSources.remove(source);
+      source = null;
+      viewer = null;
+    },
+    available: () => Boolean(source),
+    add({id, name, description, lon, lat, alt, pinColor, label, properties}) {
+      const {Cesium} = win;
+      return source.entities.add({
+        id, name, description, position: Cesium.Cartesian3.fromDegrees(lon, lat, alt),
+        billboard: {
+          image: pinImage(win, Cesium.Color[pinColor]), verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+          heightReference: Cesium.HeightReference.CLAMP_TO_GROUND, scale: 0.8, disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        },
+        label: label === null ? undefined : {
+          text: label, font: "12px sans-serif", fillColor: Cesium.Color.WHITE, outlineColor: Cesium.Color.BLACK, outlineWidth: 2,
+          style: Cesium.LabelStyle.FILL_AND_OUTLINE, verticalOrigin: Cesium.VerticalOrigin.TOP, pixelOffset: new Cesium.Cartesian2(0, 10),
+          heightReference: Cesium.HeightReference.CLAMP_TO_GROUND, disableDepthTestDistance: Number.POSITIVE_INFINITY,
+          scaleByDistance: new Cesium.NearFarScalar(1.5e2, 1.0, 1.5e7, 0.3),
+        },
+        properties,
+      });
+    },
+    removeAll() { if (source) source.entities.removeAll(); },
+    remove(handle) { if (source) source.entities.remove(handle); },
+    setShown(shown) { if (source) source.show = shown; },
+    setEntityShown(handle, shown) { handle.show = shown; },
+    flyTo(handle) {
+      const {Cesium} = win;
+      viewer.flyTo(handle, {duration: 2.0, offset: new Cesium.HeadingPitchRange(0, -Math.PI / 4, 100000)}).then(() => {
+        viewer.camera.lookAtTransform(Cesium.Matrix4.IDENTITY);
+        viewer.trackedEntity = undefined;
+        cameraFree();
+      });
+    },
+    flyToPoints(points) {
+      const {Cesium} = win;
+      const sphere = Cesium.BoundingSphere.fromPoints(points.map((p) => Cesium.Cartesian3.fromDegrees(p.lon, p.lat, p.alt)));
+      viewer.camera.flyToBoundingSphere(sphere, {
+        duration: 2.5, offset: new Cesium.HeadingPitchRange(0, -Math.PI / 4, sphere.radius * 2.5),
+        complete() {
+          if (typeof win.ensureCameraFree === "function") win.ensureCameraFree();   // the page's own reset, if it has one
+          else { viewer.camera.lookAtTransform(Cesium.Matrix4.IDENTITY); viewer.trackedEntity = undefined; }
+          cameraFree();
+        },
+      });
+    },
+  };
+}
+
+/** A pin icon in `color` (a Cesium colour) as a data URL: a teardrop with a gradient, a border and a white dot. */
+function pinImage(win, color) {
+  const canvas = win.document.createElement("canvas");
+  canvas.width = 48;
+  canvas.height = 48;
+  const ctx = canvas.getContext("2d");
+  ctx.beginPath();
+  ctx.moveTo(24, 48);
+  ctx.bezierCurveTo(24, 32, 8, 28, 8, 16);
+  ctx.arc(24, 16, 16, Math.PI, 0, false);
+  ctx.bezierCurveTo(40, 28, 24, 32, 24, 48);
+  ctx.closePath();
+  const gradient = ctx.createRadialGradient(24, 16, 0, 24, 16, 16);
+  const shade = (k) => `rgba(${Math.floor(color.red * k)}, ${Math.floor(color.green * k)}, ${Math.floor(color.blue * k)}, 1)`;
+  gradient.addColorStop(0, shade(255));
+  gradient.addColorStop(1, shade(180));
+  ctx.fillStyle = gradient;
+  ctx.fill();
+  ctx.strokeStyle = "rgba(0, 0, 0, 0.5)";
+  ctx.lineWidth = 2;
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(24, 16, 6, 0, 2 * Math.PI);
+  ctx.fillStyle = "white";
+  ctx.fill();
+  ctx.strokeStyle = "rgba(0, 0, 0, 0.3)";
+  ctx.lineWidth = 1;
+  ctx.stroke();
+  return canvas.toDataURL();
 }
