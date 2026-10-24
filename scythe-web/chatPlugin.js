@@ -12,11 +12,13 @@
  *
  * Rendering stays with the page (`LiveChat.addMsg` escapes everything it prints); this tool only decides what to show when.
  *
+ * Timers, listeners and late results are handled by the activation's scope helpers (`ctx.interval`, `ctx.listen`, `ctx.guard`,
+ * and a child `ctx.scope()` per connection) rather than by hand.
+ *
  * Services it needs (see `requires`):
  *   openEventSource (url) => EventSource-like {onmessage, onerror, close()}
  *   fetchJson       (url) => Promise<json>
  *   postJson        (url, body) => Promise<json>
- *   timers          {setInterval, clearInterval, setTimeout, clearTimeout}
  *   chatView        {showConnecting(room), hideConnecting(), addMessage(msg), callsign(), messageText(), clearMessage(),
  *                    saveCallsign(text), restoreCallsign(), bind({send, callsignChanged}) => unbind}
  *   roomChanges     {subscribe(fn(roomId)) => unsubscribe}
@@ -35,25 +37,16 @@ export function createChatPlugin({log = console, pollMs = 2000, fallbackMs = 300
   const tool = {
     id: CHAT_ID,
     title: "Chat",
-    requires: ["openEventSource", "fetchJson", "postJson", "timers", "chatView", "roomChanges"],
+    requires: ["openEventSource", "fetchJson", "postJson", "chatView", "roomChanges"],
     activate(ctx) {
       const openEventSource = ctx.services.get("openEventSource");
       const fetchJson = ctx.services.get("fetchJson");
       const postJson = ctx.services.get("postJson");
-      const timers = ctx.services.get("timers");
       const view = ctx.services.get("chatView");
       const roomChanges = ctx.services.get("roomChanges");
-      const state = {live: true, room: DEFAULT_ROOM, conn: null};
+      const state = {room: DEFAULT_ROOM, conn: null};
 
-      function closeConnection() {
-        const conn = state.conn;
-        if (!conn) return;
-        conn.closed = true;
-        if (conn.es) { try { conn.es.close(); } catch (error) { log.debug?.("[Chat] close failed:", error); } conn.es = null; }
-        if (conn.poll !== null) { timers.clearInterval(conn.poll); conn.poll = null; }
-        if (conn.fallback !== null) { timers.clearTimeout(conn.fallback); conn.fallback = null; }
-        state.conn = null;
-      }
+      const closeConnection = () => { const conn = state.conn; state.conn = null; if (conn) conn.scope.close(); };
 
       const show = (conn, messages) => {
         if (!Array.isArray(messages) || !messages.length) return;
@@ -62,46 +55,38 @@ export function createChatPlugin({log = console, pollMs = 2000, fallbackMs = 300
       };
 
       function startPolling(conn) {
-        if (conn.closed || conn.poll !== null) return;
-        conn.poll = timers.setInterval(async () => {
+        if (conn.stopPoll) return;
+        conn.stopPoll = conn.scope.interval(async () => {
           try {
             const body = await fetchJson(messagesUrl(conn.room, conn.lastTs));
-            if (!conn.closed) show(conn, body && body.messages);
+            if (!conn.scope.signal.aborted) show(conn, body && body.messages);
           } catch (error) { /* transient: the next tick tries again */ }
         }, pollMs);
       }
 
       function connect(room) {
         closeConnection();
-        const conn = {room: room || DEFAULT_ROOM, closed: false, es: null, poll: null, fallback: null, connected: false, lastTs: ""};
+        const conn = {room: room || DEFAULT_ROOM, scope: ctx.scope(), stopPoll: null, connected: false, lastTs: ""};
+        const {scope} = conn;
         state.room = conn.room;
         state.conn = conn;
         view.showConnecting(conn.room);
 
-        // History first, through the polling endpoint, whichever transport ends up carrying new messages.
-        (async () => {
-          try {
-            const body = await fetchJson(messagesUrl(conn.room));
-            if (conn.closed) return;
-            view.hideConnecting();
-            show(conn, body && body.messages);
-          } catch (error) { log.debug?.("[Chat] history failed:", error); }
-        })();
+        fetchJson(messagesUrl(conn.room))
+          .then(scope.guard((body) => { view.hideConnecting(); show(conn, body && body.messages); }))
+          .catch((error) => log.debug?.("[Chat] history failed:", error));
 
         try {
-          conn.es = openEventSource(streamUrl(conn.room));
-          conn.es.onmessage = (event) => {
-            if (conn.closed) return;
+          const es = openEventSource(streamUrl(conn.room));
+          scope.onCleanup(() => es.close());
+          es.onmessage = scope.guard((event) => {
             let data;
             try { data = JSON.parse(event.data); } catch (error) { return; }
-            if (data.type === "connected") {
-              conn.connected = true;
-              if (conn.poll !== null) { timers.clearInterval(conn.poll); conn.poll = null; }   // the stream works: stop polling
-            }
+            if (data.type === "connected") { conn.connected = true; conn.stopPoll?.(); conn.stopPoll = null; }
             if (data.type === "chat") view.addMessage(data);
-          };
-          conn.es.onerror = () => startPolling(conn);
-          conn.fallback = timers.setTimeout(() => { conn.fallback = null; if (!conn.connected) startPolling(conn); }, fallbackMs);
+          });
+          es.onerror = scope.guard(() => startPolling(conn));
+          scope.timeout(() => { if (!conn.connected) startPolling(conn); }, fallbackMs);
         } catch (error) {
           log.warn?.("[Chat] event stream unavailable, polling:", error);
           startPolling(conn);
@@ -115,20 +100,17 @@ export function createChatPlugin({log = console, pollMs = 2000, fallbackMs = 300
         if (callsign) view.saveCallsign(callsign);
         try {
           await postJson(sendUrl(state.room), {message, callsign});
-          if (state.live) view.clearMessage();
+          if (!ctx.signal.aborted) view.clearMessage();
         } catch (error) {
           log.warn?.("[Chat] send failed:", error);
         }
       }
 
-      // Cleanups run last-registered first: stop accepting, drop the room hook, drop the view's listeners, close the connection.
-      ctx.onCleanup(() => closeConnection());
+      ctx.onCleanup(closeConnection);
       view.restoreCallsign();
-      const unbind = view.bind({send, callsignChanged: () => view.saveCallsign(view.callsign())});
-      ctx.onCleanup(() => unbind());
-      const unsubscribe = roomChanges.subscribe((room) => { if (state.live) connect(room); });
-      ctx.onCleanup(() => unsubscribe());
-      ctx.onCleanup(() => { state.live = false; run = null; });
+      ctx.onCleanup(view.bind({send, callsignChanged: () => view.saveCallsign(view.callsign())}));
+      ctx.onCleanup(roomChanges.subscribe(ctx.guard(connect)));
+      ctx.onCleanup(() => { run = null; });
 
       run = {send, switchRoom: connect, state};
       connect(DEFAULT_ROOM);

@@ -28,6 +28,30 @@ await workspace.activate("adsb");  await workspace.deactivate("adsb");  await wo
 - **Services are declared:** a tool can only `ctx.services.get()` what it listed in `requires`, and is refused (nothing of it
   runs) while one is missing.
 
+## Scope helpers on `ctx` (API v1)
+
+`ctx` is also a *scope*: it owns an abort signal and the resources taken under it. Helpers so a tool cannot forget the
+bookkeeping the first three tools each did by hand:
+
+- `ctx.signal` is aborted when the tool deactivates. `ctx.guard(fn)` is `fn` that does nothing once it is aborted (late events,
+  promise continuations; for an `async fn` it guards the start, so a continuation after an `await` checks `ctx.signal.aborted`).
+- `ctx.listen(target, event, fn, options?)` subscribes now and unsubscribes on close, for `on`/`off` emitters and DOM-style targets.
+- `ctx.interval(fn, ms)` / `ctx.timeout(fn, ms)` are cleared on close and guarded; they return a `stop()`. Timers come from
+  `createWorkspace({timers})` (default `globalThis`), so tests drive a fake clock.
+- `ctx.scope()` is a child scope with its own signal and cleanups, for something opened and closed on its own (chat's connection);
+  it closes with its parent, or alone with `scope.close()`. A child's cleanup errors are rethrown (an `AggregateError` for several)
+  so the parent's `deactivate()` reports them.
+
+Order and timing: teardown aborts the signal first, then runs the tool's `deactivate()` hook, then the cleanups last-registered
+first. Aborting is synchronous; releasing resources is awaited, so a "closed" assertion must await. A resource registered after
+its scope closed is undone at once. Closing twice runs each cleanup once.
+
+This API is treated as v1: the names (`listen`, `guard`, `interval`, `timeout`, `scope`), the child-scope `AggregateError` policy and the
+frozen `ctx` were decided in #301, and change only if migrating the remaining tools exposes a real ergonomic problem, not for
+terminology.
+
+ADS-B and chat use the helpers; AIS does not yet (its in-flight start still needs an explicit `ctx.signal.aborted` check).
+
 ## What the pilot changed
 
 - ADS-B moved out of `AISStreamManager.init` / `handleAircraftUpdate` into `adsbPlugin.js`. It is still activated where

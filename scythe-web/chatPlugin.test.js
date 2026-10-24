@@ -39,7 +39,7 @@ function setup({stream = true, history = {}, fetchImpl, postImpl} = {}) {
   const shown = [], posts = [], saved = [], events = [];
   const ui = {message: "", callsign: "", bound: 0, unbound: 0, connecting: [], hid: 0, cleared: 0, restored: 0, handlers: null};
   const roomHandlers = new Set();
-  const ws = createWorkspace({log: quiet});
+  const ws = createWorkspace({log: quiet, timers: clock});
   ws.provide("openEventSource", (url) => {
     if (!stream) throw new Error("no EventSource");
     const es = {url, closed: false, close() { this.closed = true; }};
@@ -48,7 +48,6 @@ function setup({stream = true, history = {}, fetchImpl, postImpl} = {}) {
   });
   ws.provide("fetchJson", fetchImpl || (async (url) => { fetched.push(url); return history[url] ?? {messages: []}; }));
   ws.provide("postJson", postImpl || (async (url, body) => { posts.push({url, body}); return {ok: true}; }));
-  ws.provide("timers", clock);
   ws.provide("chatView", {
     showConnecting: (room) => ui.connecting.push(room),
     hideConnecting: () => { ui.hid += 1; },
