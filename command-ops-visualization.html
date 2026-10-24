@@ -17772,277 +17772,16 @@ const originalComplete = options.complete;
         // REAL-TIME ENTITY SYNC VIA SSE (Based on Lattice SDK Patterns)
         // =====================================================================
         
-        const EntitySync = {
-            eventSource: null,
-            connected: false,
-            reconnectAttempts: 0,
-            maxReconnectAttempts: 5,
-            reconnectDelay: 3000, // 3 seconds
-            entityCache: {},
-            eventHandlers: {},
-            lastEventId: 0,
-            
-            // Connect to SSE stream
-            connect: async function(since) {
-                if (!OperatorSession.sessionToken) {
-                    console.warn('[EntitySync] Cannot connect - no session token');
-                    return;
-                }
-
-                if (this.eventSource) {
-                    this.disconnect();
-                }
-
-                let url = `/api/entities/stream?token=${encodeURIComponent(OperatorSession.sessionToken)}`;
-                if(since){
-                    url += `&since=${encodeURIComponent(since)}`;
-                }
-                const self = this;
-
-                // Preflight: check endpoint availability and auth using fetch
-                try {
-                    const probe = await fetch(url, { method: 'GET', headers: { 'Accept': 'text/event-stream' } });
-                    if (probe.status === 401) {
-                        // Unauthorized - clear session silently and bail
-                        console.debug('[EntitySync] SSE probe returned 401 - clearing session');
-                        OperatorSession.clearSession();
-                        addConsoleMessage('Entity stream unauthorized - please log in', 'alert');
-                        return;
-                    }
-                    if (!probe.ok) {
-                        console.debug(`[EntitySync] SSE probe returned status ${probe.status}`);
-                        // Schedule reconnect attempt with backoff
-                        this._scheduleReconnect();
-                        return;
-                    }
-                } catch (e) {
-                    console.debug('[EntitySync] SSE probe failed:', e);
-                    this._scheduleReconnect();
-                    return;
-                }
-
-                // Create EventSource after successful probe
-                try {
-                    this.eventSource = new EventSource(url);
-
-                    this.eventSource.onopen = function() {
-                        self.connected = true;
-                        self.reconnectAttempts = 0;
-                        self.reconnectDelay = 3000; // reset delay
-                        console.log('[EntitySync] Connected to entity stream');
-                        addConsoleMessage('📡 Connected to real-time entity stream', 'response');
-                        self._notifyHandlers('connected', {});
-                    };
-
-                    this.eventSource.onerror = function(e) {
-                        // EventSource error objects are opaque; log minimally
-                        console.debug('[EntitySync] Connection error (SSE event)', e);
-                        self.connected = false;
-                        self._notifyHandlers('error', { error: e });
-
-                        // Attempt reconnect with exponential backoff
-                        self._scheduleReconnect();
-                    };
-                } catch (e) {
-                    console.debug('[EntitySync] Failed to create EventSource:', e);
-                    this._scheduleReconnect();
-                    return;
-                }
-                
-                // Entity event handlers
-                this.eventSource.addEventListener('PREEXISTING', function(e) {
-                    self._handleEntityEvent('PREEXISTING', JSON.parse(e.data));
-                });
-                
-                this.eventSource.addEventListener('CREATE', function(e) {
-                    self._handleEntityEvent('CREATE', JSON.parse(e.data));
-                });
-                
-                this.eventSource.addEventListener('UPDATE', function(e) {
-                    self._handleEntityEvent('UPDATE', JSON.parse(e.data));
-                });
-                
-                this.eventSource.addEventListener('DELETE', function(e) {
-                    self._handleEntityEvent('DELETE', JSON.parse(e.data));
-                });
-                
-                this.eventSource.addEventListener('HEARTBEAT', function(e) {
-                    // Silent heartbeat
-                    self.lastEventId = JSON.parse(e.data).sequence_id || self.lastEventId;
-                });
-            },
-            
-            // Disconnect from SSE stream
-            disconnect: function() {
-                if (this.eventSource) {
-                    this.eventSource.close();
-                    this.eventSource = null;
-                }
-                this.connected = false;
-                console.log('[EntitySync] Disconnected from entity stream');
-            },
-            
-            // Handle incoming entity events
-            _handleEntityEvent: function(eventType, data) {
-                const entityId = data.entity_id;
-                const entityType = data.entity_type;
-                const entityData = data.entity_data;
-                const provenance = data.provenance;
-                
-                this.lastEventId = data.sequence_id || this.lastEventId;
-                
-                // Update local cache (capped at 5000 entries — evicts oldest on overflow)
-                if (eventType === 'DELETE') {
-                    delete this.entityCache[entityId];
-                } else {
-                    this.entityCache[entityId] = {
-                        id: entityId,
-                        type: entityType,
-                        data: entityData,
-                        provenance: provenance,
-                        lastUpdated: data.timestamp
-                    };
-                    // Trim every 100 inserts to avoid O(n) overhead on every write
-                    this._cacheInserts = (this._cacheInserts || 0) + 1;
-                    if (this._cacheInserts % 100 === 0) {
-                        const MAX_CACHE = 5000;
-                        const entries = Object.entries(this.entityCache);
-                        if (entries.length > MAX_CACHE) {
-                            entries.sort((a, b) => (a[1].lastUpdated || '') < (b[1].lastUpdated || '') ? -1 : 1);
-                            entries.slice(0, entries.length - MAX_CACHE).forEach(([k]) => delete this.entityCache[k]);
-                        }
-                    }
-                }
-                
-                // Log the event
-                const editor = provenance?.source_description || 'System';
-                if (eventType !== 'PREEXISTING') {
-                    console.log(`[EntitySync] ${eventType}: ${entityId} (${entityType}) by ${editor}`);
-                }
-                
-                // Notify registered handlers
-                this._notifyHandlers(eventType.toLowerCase(), data);
-                this._notifyHandlers('entity', { eventType, ...data });
-            },
-            
-            // Notify event handlers
-            _notifyHandlers: function(event, data) {
-                const handlers = this.eventHandlers[event] || [];
-                handlers.forEach(handler => {
-                    try {
-                        handler(data);
-                    } catch (e) {
-                        console.error(`[EntitySync] Handler error for ${event}:`, e);
-                    }
-                });
-            },
-
-            // Schedule reconnect with exponential backoff
-            _scheduleReconnect: function() {
-                const self = this;
-                if (self.reconnectAttempts >= self.maxReconnectAttempts) {
-                    addConsoleMessage('⚠️ Entity stream disconnected - max reconnects reached', 'alert');
-                    return;
-                }
-
-                self.reconnectAttempts = (self.reconnectAttempts || 0) + 1;
-                // Exponential backoff: base * 2^(attempt-1)
-                const delay = Math.min(60000, (self.reconnectDelay || 3000) * Math.pow(2, self.reconnectAttempts - 1));
-                console.log(`[EntitySync] Reconnect attempt ${self.reconnectAttempts}/${self.maxReconnectAttempts} in ${delay}ms`);
-                setTimeout(() => {
-                    try {
-                        self.connect();
-                    } catch (e) {
-                        console.debug('[EntitySync] reconnect.connect error:', e);
-                        self._scheduleReconnect();
-                    }
-                }, delay);
-            },
-            
-            // Register event handler
-            on: function(event, handler) {
-                if (!this.eventHandlers[event]) {
-                    this.eventHandlers[event] = [];
-                }
-                this.eventHandlers[event].push(handler);
-                return this; // Allow chaining
-            },
-            
-            // Remove event handler
-            off: function(event, handler) {
-                if (this.eventHandlers[event]) {
-                    this.eventHandlers[event] = this.eventHandlers[event].filter(h => h !== handler);
-                }
-                return this;
-            },
-            
-            // Publish entity to server (broadcasts to all clients)
-            publishEntity: async function(entityId, entityType, entityData) {
-                if (!OperatorSession.sessionToken) {
-                    console.warn('[EntitySync] Cannot publish - no session');
-                    return { success: false, message: 'Not authenticated' };
-                }
-                
-                try {
-                    const response = await fetch('/api/entities/publish', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'X-Session-Token': OperatorSession.sessionToken
-                        },
-                        body: JSON.stringify({
-                            entity_id: entityId,
-                            entity_type: entityType,
-                            entity_data: entityData
-                        })
-                    });
-                    
-                    const data = await response.json();
-                    return { success: data.status === 'ok', ...data };
-                } catch (e) {
-                    console.error('[EntitySync] Publish error:', e);
-                    return { success: false, message: e.message };
-                }
-            },
-            
-            // Delete entity (broadcasts to all clients)
-            deleteEntity: async function(entityId) {
-                if (!OperatorSession.sessionToken) {
-                    return { success: false, message: 'Not authenticated' };
-                }
-                
-                try {
-                    const response = await fetch(`/api/entities/delete/${entityId}`, {
-                        method: 'DELETE',
-                        headers: { 'X-Session-Token': OperatorSession.sessionToken }
-                    });
-                    
-                    const data = await response.json();
-                    return { success: data.status === 'ok', ...data };
-                } catch (e) {
-                    console.error('[EntitySync] Delete error:', e);
-                    return { success: false, message: e.message };
-                }
-            },
-            
-            // Get entity from local cache
-            getEntity: function(entityId) {
-                return this.entityCache[entityId];
-            },
-            
-            // Get all cached entities
-            getAllEntities: function() {
-                return Object.values(this.entityCache);
-            },
-            
-            // Get entities by type
-            getEntitiesByType: function(entityType) {
-                return Object.values(this.entityCache).filter(e => e.type === entityType);
-            }
+        // EntitySync is the 'entity-sync' workspace tool (scythe-web/entitySyncPlugin.js); the boot module at the end of this page
+        // starts it and replaces this stub. Until then the stub keeps what earlier scripts ask for (subscriptions, a connect) and the
+        // boot module replays it.
+        window.EntitySync = {
+            _stub: true, _queued: [], _pendingConnect: null, connected: false, entityCache: {},
+            on: function(event, handler) { this._queued.push([event, handler]); return this; },
+            off: function(event, handler) { this._queued = this._queued.filter(function(q) { return q[0] !== event || q[1] !== handler; }); return this; },
+            connect: function(since) { this._pendingConnect = [since]; },
+            disconnect: function() { this._pendingConnect = null; }
         };
-        
-        // Make globally available
-        window.EntitySync = EntitySync;
         
         // =====================================================================
         // OPERATOR PRESENCE VISUALIZATION
@@ -18680,37 +18419,13 @@ const originalComplete = options.complete;
             // Handle incoming entity event
             _handleEntityEvent: function(data) {
                 const eventType = data.event_type;
-                const entityId = data.entity_id;
                 
-                // Update EntitySync cache (capped — shares _cacheInserts counter with SSE handler)
-                if (eventType === 'DELETE') {
-                    delete EntitySync.entityCache[entityId];
-                } else if (entityId) {
-                    EntitySync.entityCache[entityId] = {
-                        id: entityId,
-                        type: data.entity_type,
-                        data: data.entity_data,
-                        provenance: data.provenance,
-                        lastUpdated: data.timestamp
-                    };
-                    EntitySync._cacheInserts = (EntitySync._cacheInserts || 0) + 1;
-                    if (EntitySync._cacheInserts % 100 === 0) {
-                        const MAX_CACHE = 5000;
-                        const entries = Object.entries(EntitySync.entityCache);
-                        if (entries.length > MAX_CACHE) {
-                            entries.sort((a, b) => (a[1].lastUpdated || '') < (b[1].lastUpdated || '') ? -1 : 1);
-                            entries.slice(0, entries.length - MAX_CACHE).forEach(([k]) => delete EntitySync.entityCache[k]);
-                        }
-                    }
-                }
+                // EntitySync updates its cache and notifies its handlers (the one place an event from either transport does that)
+                EntitySync.ingest(eventType, data);
                 
-                // Notify handlers
+                // This object's own handlers
                 this._notifyHandlers(eventType.toLowerCase(), data);
                 this._notifyHandlers('entity', { eventType, ...data });
-                
-                // Also notify EntitySync handlers for compatibility
-                EntitySync._notifyHandlers(eventType.toLowerCase(), data);
-                EntitySync._notifyHandlers('entity', { eventType, ...data });
             },
             
             // Send via WebSocket
@@ -41748,6 +41463,7 @@ ${unconfirmedBanner}
     // page code that used to start them; see AISStreamManager.init for ADS-B. Metrics has no such code: it starts here.
     import { bootWorkspace } from "./scythe-web/workspaceBoot.js";
     const workspace = bootWorkspace(window);
+    workspace.activate("entity-sync").catch((error) => console.warn("[Workspace] entity sync did not start:", error));
     workspace.activate("metrics").catch((error) => console.warn("[Workspace] metrics did not start:", error));
     // The Metrics Explorer waits 2 s after the DOM is ready so the other panels exist first (as its old init did).
     const startExplorer = () => setTimeout(() => workspace.activate("metrics-explorer").catch((error) => console.warn("[Workspace] metrics explorer did not start:", error)), 2000);
