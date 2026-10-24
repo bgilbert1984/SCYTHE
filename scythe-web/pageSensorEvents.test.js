@@ -52,26 +52,6 @@ test("LPIManager hands an activity event on in the flat form and ignores everyth
   assert.equal(seen.length, 2);
 });
 
-test("FusionVisualization does the same through handleActivity", () => {
-  const seen = [];
-  const {registered, window} = subscriberOf("const FusionVisualization = {", "init", {handleActivity: (a) => seen.push(a)});
-  assert.deepEqual(Object.keys(registered).sort(), ["create", "update"]);
-  registered.create[0](wire("CREATE", registryActivity.id, "SENSOR_ACTIVITY", registryActivity));
-  registered.update[0](wire("UPDATE", restActivity.activity_id, "SENSOR_ACTIVITY", restActivity));
-  registered.create[0](wire("CREATE", edge.id, "SENSOR_ASSIGNMENT", edge));
-  assert.deepEqual(seen.map((a) => [a.sensor_id, a.activity_type]), [["s1", "aoa_measured"], ["s1", "detection"]]);
-  delete window.ScytheSensorEvents;
-  registered.create[0](wire("CREATE", registryActivity.id, "SENSOR_ACTIVITY", registryActivity));
-  assert.equal(seen.length, 2);
-});
-
-test("the flat form is what handleActivity's second branch reads, so FusionVisualization uses the payload", () => {
-  const a = sensorEvents.activityOf(wire("CREATE", registryActivity.id, "SENSOR_ACTIVITY", registryActivity));
-  assert.ok(a.sensor_id && a.activity_type);                       // `data.sensor_id && data.activity_type`
-  assert.equal(a.entity_data, undefined);                          // so the edge branch (data.entity_data.kind) is not taken
-  assert.match(member("const FusionVisualization = {", "handleActivity"), /data\.sensor_id && data\.activity_type/);
-});
-
 test("the page no longer reads the event shape that never matched, and the boot exposes the helpers", () => {
   assert.doesNotMatch(page, /event\.entity\?\.type \|\| event\.type/);
   assert.doesNotMatch(page, /const entity = evt\.entity \|\| evt/);

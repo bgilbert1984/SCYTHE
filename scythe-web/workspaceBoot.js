@@ -8,6 +8,7 @@ import {createPropagationPlugin} from "./propagationPlugin.js";
 import {createEntitySyncPlugin} from "./entitySyncPlugin.js";
 import * as sensorEvents from "./sensorEvents.js";
 import {createSensorPlugin} from "./sensorPlugin.js";
+import {createFusionPlugin} from "./fusionPlugin.js";
 import {escapeHtml} from "./htmlEscape.js";
 
 /**
@@ -127,6 +128,11 @@ export function bootWorkspace(win) {
   const sensors = createSensorPlugin({log: win.console});
   workspace.register(sensors.tool);
   win.SensorManager = sensors.controls;   // what the page's other modules read and call
+
+  // --- fusion overlays ---
+  workspace.provide("fusionData", {sensor: (id) => win.SensorManager?.sensors?.[id]});
+  workspace.provide("fusionGlobe", fusionGlobe(win));
+  workspace.register(createFusionPlugin({log: win.console}).tool);
   win.ScytheWorkspace = workspace;
   win.dispatchEvent(new win.Event("scythe:workspace_ready"));
   return workspace;
@@ -504,6 +510,66 @@ function sensorGlobe(win) {
     clear() {
       for (const id of [...markers.keys()]) removeMarker(id);
       if (win.viewer) removeAssignmentLines();
+    },
+  };
+}
+
+/**
+ * The fusion overlays on the Cesium globe. Each draw adds one entity and removes it after `ttlMs`; `clear` removes what is left and
+ * cancels the pending removals. `available()` says whether there is a viewer; `drawAoa` and `drawTdoa` need it (the tool checks), the
+ * other two do nothing without one.
+ */
+function fusionGlobe(win) {
+  const live = new Map();   // entity -> the timer that removes it
+  const add = (spec, ttlMs) => {
+    const {viewer} = win;
+    const entity = viewer.entities.add(spec);
+    live.set(entity, win.setTimeout(() => { live.delete(entity); win.viewer?.entities.remove(entity); }, ttlMs));
+    return entity;
+  };
+  const point = (p) => win.Cesium.Cartesian3.fromDegrees(p.lon, p.lat, p.alt);
+  const color = ({name, alpha}) => (alpha === undefined ? win.Cesium.Color[name] : win.Cesium.Color[name].withAlpha(alpha));
+  return {
+    available: () => Boolean(win.viewer),
+    drawAoa({from, to, ttlMs}) {   // the tool checks `available()` first
+      const {Cesium} = win;
+      add({polyline: {positions: [point(from), point(to)], width: 4, material: new Cesium.PolylineDashMaterialProperty({color: Cesium.Color.YELLOW, dashLength: 16.0})}}, ttlMs);
+    },
+    drawTdoa({a, b, label, ttlMs}) {   // the tool checks `available()` first
+      const {Cesium} = win;
+      const [p1, p2] = [point(a), point(b)];
+      add({
+        polyline: {positions: [p1, p2], width: 2, material: Cesium.Color.CYAN.withAlpha(0.2)},
+        label: {
+          text: label, position: Cesium.Cartesian3.midpoint(p1, p2, new Cesium.Cartesian3()), font: "12px monospace", fillColor: Cesium.Color.CYAN,
+          pixelOffset: new Cesium.Cartesian2(0, -10), disableDepthTestDistance: Number.POSITIVE_INFINITY, scaleByDistance: new Cesium.NearFarScalar(1.5e2, 1.0, 1.5e7, 0.5),
+        },
+      }, ttlMs);
+    },
+    drawFlow({from, to, width, color: flowColor, ttlMs}) {
+      if (!win.viewer) return;
+      const {Cesium} = win;
+      add({polyline: {positions: [point(from), point(to)], width, material: new Cesium.PolylineArrowMaterialProperty(color(flowColor)), arcType: Cesium.ArcType.GEODESIC}}, ttlMs);
+    },
+    drawGeoNode({position, label, ttlMs}) {
+      if (!win.viewer) return;
+      const {Cesium} = win;
+      add({
+        position: point(position),
+        point: {pixelSize: 8, color: Cesium.Color.fromCssColorString("#4a9eff"), outlineColor: Cesium.Color.BLACK, outlineWidth: 1},
+        label: {
+          text: label, font: "10px monospace", verticalOrigin: Cesium.VerticalOrigin.TOP, pixelOffset: new Cesium.Cartesian2(0, 5),
+          distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 5000000),
+        },
+      }, ttlMs);
+    },
+    /** Take down everything still showing and cancel its timer. */
+    clear() {
+      for (const [entity, timer] of live) {
+        win.clearTimeout(timer);
+        win.viewer?.entities.remove(entity);
+      }
+      live.clear();
     },
   };
 }

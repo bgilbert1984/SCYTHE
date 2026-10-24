@@ -213,9 +213,28 @@ DOM) and `sensorGlobe` (the Cesium markers, lines and camera).
   are not updated, only its position; deleting a sensor leaves its assignment lines until the next redraw; moving a group swaps it with its
   neighbour in the full order, shown or not; loading replaces the sensors but not the assignments; only the server's `error` text is read on a failed save.
 
+## Ninth tool: fusion overlays (`scythe-web/fusionPlugin.js`)
+
+`FusionVisualization` (a 238-line object in `command-ops-visualization.html`) is now the `fusion` tool. While active it listens to the entity
+stream for sensor activity (read by `sensorEvents.js`) and draws what a measurement says for a few seconds: an angle-of-arrival ray from a
+sensor (3 s), a time-difference line between two sensors (3 s), a traffic-flow arc between two resolved IPs (10 s), and a geo-resolved IP as a
+point (60 s). What is drawn is plain data in the plugin (`aoaEndpoint`, `protocolColor`, `flowWidth`, `ipPosition`, ...); the page is touched
+through `fusionData` (the Sensors panel's sensors, read when it draws) and `fusionGlobe` (the Cesium entities, in `workspaceBoot.js`).
+
+- Each overlay's lifetime is owned by the globe service, so deactivating the tool removes what is showing and cancels the pending removals (the
+  old timers could not be cancelled), after the stream subscription is removed. Without a viewer nothing is drawn and nothing throws.
+- The old one-second retry loop that waited for the entity stream is gone, and so is the raw edge-event branch of `handleActivity`, which the
+  stream handler never reached (it passes the flat form from `activityOf`).
+- Pinned, not changed (tests named `PINNED:`): a sensor at latitude or longitude 0 gets no AoA ray, and positions are read from `lat` / `lon` or
+  `location`, not the panel's normalized `position`; a TDoA sensor with no altitude and no `location` throws; an empty protocol histogram throws;
+  any `172.x` address is "private" and drawn at Los Angeles with `192.168.` and `10.`; the TDoA label carries a `position` Cesium ignores.
+- **Dormant, not changed:** the PCAP demo calls `window.FusionVisualization.updateGeoNode` / `drawFlow`, but nothing ever assigned
+  `window.FusionVisualization`, so those calls have never done anything, and the demo's geo points and flows have never been drawn locally.
+  This tool does not assign it either. Doing so would switch them on; that is a decision, not a refactor.
+
 ## Not done
 
-- Only ADS-B, AIS streaming, chat, metrics, the metrics explorer, propagation, the entity stream and sensors use the contract, and activation is not yet driven by the operator (a panel click).
+- Only ADS-B, AIS streaming, chat, metrics, the metrics explorer, propagation, the entity stream, sensors and the fusion overlays use the contract, and activation is not yet driven by the operator (a panel click).
 - No unified transport: the tools take the realtime socket, `WebSocketSync` and `fetch` as services; they do not open their own.
 - Not run in a browser against a signed-in session; the tests cover the contract, the plugin, the boot wiring, and run the
   page's own `removeEntityMarker` against a fake collection.
