@@ -523,13 +523,14 @@ test("the metrics requests use the page's fetch as it is when they are made, and
   assert.ok(!hooks.has("beforeunload"));
 });
 
-test("the old inline MetricsLogger is gone; the boot module starts the tool; the explorer and callers still use the same globals", () => {
+test("the old inline MetricsLogger is gone; the boot module starts the tool; the explorer still reads the same globals", () => {
   assert.doesNotMatch(page, /const MetricsLogger = \{/);
   assert.doesNotMatch(page, /window\.metricsLogger = MetricsLogger/);
   assert.doesNotMatch(page, /fetch\('\/api\/metrics\/(log|interaction)'/);   // the explorer's own reads (session, query) stay on the page
   assert.match(page, /workspace\.activate\("metrics"\)/);
-  assert.match(page, /window\.metricsLogger && window\.metricsLogger\._interactionLog/);
-  assert.match(page, /window\.metricsLogger && window\.metricsLogger\._lastMetrics/);
+  const boot = readFileSync(new URL("./workspaceBoot.js", import.meta.url), "utf8");   // the explorer's reads moved here (liveSources)
+  assert.match(boot, /win\.metricsLogger\?\._interactionLog/);
+  assert.match(boot, /win\.metricsLogger\?\._lastMetrics/);
   const unguarded = page.split("\n").filter((line) => /window\.(logMetric|logInteraction)\(/.test(line) && !/^\s*window\.(logMetric|logInteraction) = /.test(line));
   assert.ok(unguarded.length > 10);   // the callers exist, and the guard test below covers them
 });
@@ -543,4 +544,115 @@ test("every page caller of the logging globals checks that the global exists fir
     if (!/if \((this\.CONFIG\.logPerformance && )?window\.(logMetric|logInteraction)\b/.test(context)) bad.push(i + 1);
   });
   assert.deepEqual(bad, []);
+});
+
+// --- metrics explorer ---
+
+function panelElement(extra = {}) {
+  const listeners = new Map();
+  return {
+    textContent: "", innerHTML: "", value: "", children: [], listeners,
+    classList: {contains: (c) => (extra.classes || []).includes(c)},
+    addEventListener: (e, f) => listeners.set(e, [...(listeners.get(e) || []), f]),
+    removeEventListener: (e, f) => listeners.set(e, (listeners.get(e) || []).filter((g) => g !== f)),
+    appendChild(child) { this.children.push(child); },
+    ...extra,
+  };
+}
+function explorerWindow(elements = {}, extra = {}) {
+  const requests = [];
+  const win = fakeWindow({
+    setInterval: () => 1, clearInterval() {}, setTimeout: () => 1, clearTimeout() {},
+    document: {getElementById: (id) => elements[id] || null, createElement: () => panelElement()},
+    fetch: async (url) => { requests.push(url); return {ok: true, json: async () => (url.startsWith("/api/metrics/query") ? {metrics: []} : {})}; },
+    ...extra,
+  });
+  return {win, requests};
+}
+const EXPLORER_IDS = ["session-duration", "total-metrics-count", "module-bars", "live-heap-used", "live-entity-count", "live-vessel-count",
+  "live-update-rate", "metrics-table-body", "interactions-list", "total-interactions-count", "metrics-filter-module", "metrics-filter-name",
+  "metrics-filter-limit", "metrics-panel", "refresh-metrics-btn"];
+
+test("booting registers the explorer inactive and exposes what showPanel('metrics') calls", () => {
+  const {win} = explorerWindow();
+  const workspace = bootWorkspace(win);
+  assert.equal(workspace.state("metrics-explorer"), "inactive");
+  assert.equal(typeof win.MetricsExplorer.fetchAllMetrics, "function");
+  assert.equal(win.MetricsExplorer.fetchAllMetrics(), undefined);
+});
+
+test("every element id the explorer's view uses exists in the page", () => {
+  for (const id of EXPLORER_IDS) assert.match(page, new RegExp(`id="${id}"`), id);
+});
+
+test("the explorer fills the page's elements, defaults an empty limit to 50, and the filter and button listeners come off on deactivate", async () => {
+  const els = Object.fromEntries(EXPLORER_IDS.map((id) => [id, panelElement()]));
+  const {win, requests} = explorerWindow(els);
+  const workspace = bootWorkspace(win);
+  await workspace.activate("metrics-explorer");
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(requests.slice(0, 2), ["/api/metrics/session", "/api/metrics/query?limit=50"]);
+  assert.match(els["metrics-table-body"].innerHTML, /No metrics found/);
+  assert.equal(els["session-duration"].textContent, "0s");
+  assert.equal(els["refresh-metrics-btn"].listeners.get("click").length, 1);
+  assert.equal(els["metrics-filter-name"].listeners.get("change").length, 1);
+  await workspace.deactivate("metrics-explorer");
+  assert.equal(els["refresh-metrics-btn"].listeners.get("click").length, 0);
+  for (const id of ["metrics-filter-module", "metrics-filter-name", "metrics-filter-limit"]) assert.equal(els[id].listeners.get("change").length, 0);
+});
+
+test("the metric-name filter is rebuilt from the server's names and keeps the current choice when it is still offered", async () => {
+  const select = panelElement({value: "vessel_count"});
+  const {win} = explorerWindow({"metrics-filter-name": select}, {
+    fetch: async (url) => ({ok: true, json: async () => (url === "/api/metrics/session" ? {metrics: {"ais.vessel_count": {count: 1}, "ais.other": {count: 1}}} : {metrics: []})}),
+  });
+  const workspace = bootWorkspace(win);
+  await workspace.activate("metrics-explorer");
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(select.innerHTML, '<option value="">All Metrics</option>');
+  assert.deepEqual(select.children.map((o) => o.value), ["other", "vessel_count"]);
+  assert.deepEqual(select.children.map((o) => Boolean(o.selected)), [false, true]);
+});
+
+test("the explorer reads the metrics tool's logs and the page's counters when asked, and tolerates a page with none of its elements", async () => {
+  const {win} = explorerWindow({}, {
+    metricsLogger: {_interactionLog: [{timestamp: 1, action: "a", target: ""}], _lastMetrics: {entity_count: 4}},
+  });
+  const workspace = bootWorkspace(win);
+  await workspace.activate("metrics-explorer");
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(workspace.state("metrics-explorer"), "active");
+  assert.deepEqual(await workspace.deactivate("metrics-explorer"), []);
+});
+
+test("the old inline MetricsExplorer is gone; the boot module starts the tool 2 s after the DOM is ready; showPanel still calls it", () => {
+  assert.doesNotMatch(page, /const MetricsExplorer = \{/);
+  assert.doesNotMatch(page, /MetricsExplorer\.init\(\)/);
+  assert.match(page, /workspace\.activate\("metrics-explorer"\)[\s\S]{0,120}, 2000\)/);
+  assert.match(page, /document\.readyState === "loading"\) document\.addEventListener\("DOMContentLoaded", startExplorer/);
+  assert.match(page, /typeof MetricsExplorer !== 'undefined' && MetricsExplorer\.fetchAllMetrics\)/);
+});
+
+test("without the metrics tool's values the explorer reads the recon counters and the browser heap from the page", async () => {
+  const els = Object.fromEntries(EXPLORER_IDS.map((id) => [id, panelElement()]));
+  const {win} = explorerWindow(els, {
+    RF_SCYTHE: {AutoReconVisualization: {perfMetrics: {entityUpdates: 7, avgUpdateMs: 2}}},
+    performance: {memory: {usedJSHeapSize: 3 * 1024 * 1024}},
+  });
+  const workspace = bootWorkspace(win);
+  delete win.metricsLogger;   // boot always sets it, and its `_lastMetrics` is truthy even when empty: the fallback needs it gone
+  await workspace.activate("metrics-explorer");
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(els["live-entity-count"].textContent, "7");
+  assert.equal(els["live-update-rate"].textContent, "2.0 ms");
+  assert.equal(els["live-heap-used"].textContent, "3.0 MB");
+});
+
+test("a missing interactions list is reported as missing, so the count is left alone", async () => {
+  const els = Object.fromEntries(EXPLORER_IDS.filter((id) => id !== "interactions-list").map((id) => [id, panelElement()]));
+  const {win} = explorerWindow(els, {metricsLogger: {_interactionLog: [{timestamp: 1, action: "a", target: ""}], _lastMetrics: null}});
+  const workspace = bootWorkspace(win);
+  await workspace.activate("metrics-explorer");
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(els["total-interactions-count"].textContent, "");
 });
