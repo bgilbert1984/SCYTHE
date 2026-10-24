@@ -11,13 +11,13 @@
  * element) and `presenceGlobe` (the Cesium markers).
  *
  * Kept as it was, including things that look unintended (see the tests that pin them):
- *  - Unchecking "Show operator positions on map" does not take the markers down: with the checkbox off the markers are neither redrawn nor removed, so
- *    the ones on the map stay, frozen, until the tool is deactivated.
  *  - A view whose `center` is not a pair makes the refresh throw after the list is built but before it is drawn, so one malformed operator stops the list
  *    updating; the error is logged.
  *  - Nothing is polled until `initialize` has been called, but the Refresh button works before that.
  *
  * Deliberate changes:
+ *  - Unchecking "Show operator positions on map" now takes the markers down, and they stay down while it is unchecked (each refresh keeps the set empty). The
+ *    old code returned before touching the markers when the checkbox was off, so unchecking it left them on the map, frozen, until reload.
  *  - Callsigns, roles and ids are escaped where they reach HTML. They come from other operators (a callsign is chosen at registration), and the old
  *    code put them into `innerHTML` as they were.
  *  - Deactivating stops the polling and removes the markers, and a refresh that finishes afterwards does nothing. The old `stopTracking` had no caller.
@@ -95,8 +95,8 @@ export function createPresencePlugin({log = console} = {}) {
       let tracking = false;
 
       function updateIndicators() {
-        if (!globe.available() || !visible) return;
-        globe.replace(indicatorsOf(Object.values(operators), source.myId()));
+        if (!globe.available()) return;
+        globe.replace(visible ? indicatorsOf(Object.values(operators), source.myId()) : []);
       }
 
       function updateList() {

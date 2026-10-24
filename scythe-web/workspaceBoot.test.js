@@ -1917,14 +1917,17 @@ test("operator presence reads the operator session when it asks: who is me, and 
   assert.equal(w.errors[0][0], "[OperatorPresence] Error fetching operators:");
 });
 
-test("the Operators panel's checkbox: off leaves the markers up (PINNED), on redraws; its handlers work without a viewer or a list", async () => {
+test("the Operators panel's checkbox: off takes the markers down and keeps them down through a refresh, on puts them back; its handlers work without a viewer or a list", async () => {
   const w = presenceWindow({operators: presenceOps});
   const workspace = bootWorkspace(w.win);
   await workspace.activate("presence");
   w.win.OperatorPresence.initialize(w.viewer);
   await flushAll();
-  w.win.OperatorPresence.toggleVisibility(false);
   assert.equal(w.globe.entities.values.length, 2);
+  w.win.OperatorPresence.toggleVisibility(false);
+  assert.equal(w.globe.entities.values.length, 0);
+  await w.win.OperatorPresence.fetchActiveOperators();
+  assert.equal(w.globe.entities.values.length, 0);
   w.win.OperatorPresence.toggleVisibility(true);
   assert.equal(w.globe.entities.values.length, 2);
   const bare = presenceWindow({operators: presenceOps, list: false});
