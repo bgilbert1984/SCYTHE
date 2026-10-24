@@ -2,6 +2,7 @@ import {createWorkspace} from "./lifecycle.js";
 import {createAdsbPlugin} from "./adsbPlugin.js";
 import {createAisStreamPlugin} from "./aisStreamPlugin.js";
 import {createChatPlugin} from "./chatPlugin.js";
+import {createMetricsPlugin} from "./metricsPlugin.js";
 
 /**
  * Create the workspace for command-ops-visualization.html, provide the page's services, and register its tools. Nothing is
@@ -73,6 +74,15 @@ export function bootWorkspace(win) {
   const chat = createChatPlugin({log: win.console});
   workspace.register(chat.tool);
   win.ScytheChat = chat.controls;   // what the page's LiveChat calls
+
+  // --- metrics ---
+  workspace.provide("httpFetch", (url, init) => win.fetch(url, init));   // read at call time: the page patches fetch for instance scoping
+  workspace.provide("metricsProbe", metricsProbe(win));
+  const metrics = createMetricsPlugin({log: win.console});
+  workspace.register(metrics.tool);
+  win.metricsLogger = metrics.controls;   // the Metrics Explorer reads _interactionLog and _lastMetrics from it
+  win.logMetric = (module, name, value, meta) => metrics.controls.log(module, name, value, meta);
+  win.logInteraction = (action, target, details) => metrics.controls.logInteraction(action, target, details);
   win.ScytheWorkspace = workspace;
   win.dispatchEvent(new win.Event("scythe:workspace_ready"));
   return workspace;
@@ -134,6 +144,46 @@ function roomChanges(win) {
         if (timer !== null) { win.clearTimeout(timer); timer = null; }
         if (attached) win.RoomManager?.off?.("current_room_changed", handler);
       };
+    },
+  };
+}
+
+/** What the metrics tool reads from the page: the renderers' counters and the browser's memory. Missing pieces are skipped. */
+function metricsProbe(win) {
+  const gauge = (module, name, value) => ({module, name, value});
+  return {
+    unloadTarget: win,
+    environment: () => ({userAgent: win.navigator.userAgent, screenWidth: win.innerWidth, screenHeight: win.innerHeight}),
+    *gauges({performance, hypergraph}) {
+      if (performance) {
+        const recon = win.reconViz;
+        if (recon && recon.perfMetrics) {
+          yield gauge("recon", "update_count", recon.perfMetrics.updateCount);
+          yield gauge("recon", "last_update_ms", recon.perfMetrics.lastUpdateMs);
+          yield gauge("recon", "avg_update_ms", recon.perfMetrics.avgUpdateMs);
+          const entities = recon.entities;   // a plain object or a Cesium EntityCollection
+          yield gauge("recon", "entity_count", entities?.values ? entities.values.length : Object.keys(entities || {}).length);
+        }
+        if (win.aisViz && win.aisViz.vessels) yield gauge("ais", "vessel_count", Object.keys(win.aisViz.vessels).length);
+        if (win.viewer && win.viewer.scene) {
+          yield gauge("cesium", "entity_count", win.viewer.entities.values.length);
+          let height = null;
+          try { height = win.Cesium.Cartographic.fromCartesian(win.viewer.camera.position).height; } catch (error) { /* no camera position yet */ }
+          if (height !== null) yield gauge("cesium", "camera_altitude_m", height);
+        }
+        if (win.hierarchicalRenderer) yield gauge("render", "current_altitude", win.hierarchicalRenderer.currentAltitude || 0);
+        if (win.viewshedManager) yield gauge("viewshed", "active_count", Object.keys(win.viewshedManager.viewsheds).length);
+      }
+      if (hypergraph && win.hypergraphVisualizer) {
+        const graph = win.hypergraphVisualizer;
+        if (graph.nodes) yield gauge("hypergraph", "node_count", graph.nodes.length);
+        if (graph.edges) yield gauge("hypergraph", "edge_count", graph.edges.length);
+      }
+      const memory = win.performance && win.performance.memory;
+      if (memory) {
+        yield gauge("browser", "heap_used_mb", memory.usedJSHeapSize / (1024 * 1024));
+        yield gauge("browser", "heap_total_mb", memory.totalJSHeapSize / (1024 * 1024));
+      }
     },
   };
 }

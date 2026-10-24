@@ -433,3 +433,114 @@ test("LiveChat.init activates the chat tool, waiting for the workspace if the mo
   assert.equal(waiting.name, "scythe:workspace_ready");
   assert.deepEqual(waiting.opts, {once: true});
 });
+
+// --- metrics ---
+
+function metricsWindow(extra = {}) {
+  const posts = [], hooks = new Set();
+  const win = fakeWindow({
+    setInterval: () => 1, clearInterval() {}, setTimeout: () => 1, clearTimeout() {},
+    addEventListener: (event) => hooks.add(event), removeEventListener: (event) => hooks.delete(event),
+    navigator: {userAgent: "UA"}, innerWidth: 1000, innerHeight: 700,
+    fetch: async (url, init) => { posts.push({url, body: init?.body ? JSON.parse(init.body) : null}); return {ok: true, json: async () => ({})}; },
+    ...extra,
+  });
+  return {win, posts, hooks};
+}
+const gaugesSent = (posts) => posts.filter((p) => p.url === "/api/metrics/log").flatMap((p) => p.body.batch).map((m) => `${m.module}.${m.metric_name}=${m.value}`);
+
+test("booting registers the metrics tool inactive; the page's logging globals exist and do nothing until it is active", async () => {
+  const {win, posts} = metricsWindow();
+  const workspace = bootWorkspace(win);
+  assert.equal(workspace.state("metrics"), "inactive");
+  assert.equal(typeof win.metricsLogger.sessionId, "string");
+  win.logMetric("m", "n", 1);
+  win.logInteraction("click", "x");
+  assert.deepEqual(posts, []);
+  await workspace.activate("metrics");
+  win.logInteraction("click", "x");
+  assert.deepEqual(posts.map((p) => p.body.action), ["session_start", "click"]);
+  assert.deepEqual(posts[0].body.details, {userAgent: "UA", screenWidth: 1000, screenHeight: 700, timestamp: posts[0].body.details.timestamp});
+  assert.equal(win.metricsLogger._interactionLog.length, 2);
+});
+
+test("the gauges read the page's counters, in the old order, tolerating a plain object or an EntityCollection", async () => {
+  const {win, posts} = metricsWindow({
+    reconViz: {perfMetrics: {updateCount: 3, lastUpdateMs: 4, avgUpdateMs: 5}, entities: {values: [1, 2]}},
+    aisViz: {vessels: {a: 1, b: 2, c: 3}},
+    viewer: {scene: {}, entities: {values: [1]}, camera: {position: "pos"}},
+    Cesium: {Cartographic: {fromCartesian: () => ({height: 1234})}},
+    hierarchicalRenderer: {currentAltitude: 0},
+    viewshedManager: {viewsheds: {v: 1}},
+    hypergraphVisualizer: {nodes: [1, 2], edges: [1]},
+    performance: {memory: {usedJSHeapSize: 2 * 1024 * 1024, totalJSHeapSize: 4 * 1024 * 1024}},
+  });
+  const workspace = bootWorkspace(win);
+  await workspace.activate("metrics");
+  await win.metricsLogger.collectAndLogMetrics();
+  assert.deepEqual(gaugesSent(posts), [
+    "recon.update_count=3", "recon.last_update_ms=4", "recon.avg_update_ms=5", "recon.entity_count=2",
+    "ais.vessel_count=3", "cesium.entity_count=1", "cesium.camera_altitude_m=1234", "render.current_altitude=0",
+    "viewshed.active_count=1", "hypergraph.node_count=2", "hypergraph.edge_count=1", "browser.heap_used_mb=2", "browser.heap_total_mb=4",
+  ]);
+  win.reconViz.entities = {x: 1, y: 2, z: 3};   // a plain object counts its keys
+  posts.length = 0;
+  await win.metricsLogger.collectAndLogMetrics();
+  assert.ok(gaugesSent(posts).includes("recon.entity_count=3"));
+});
+
+test("with nothing on the page yet the gauges are empty, a camera with no position skips only that gauge, and the config switches apply", async () => {
+  const {win, posts} = metricsWindow();
+  const workspace = bootWorkspace(win);
+  await workspace.activate("metrics");
+  await win.metricsLogger.collectAndLogMetrics();
+  assert.deepEqual(gaugesSent(posts), []);
+  Object.assign(win, {
+    viewer: {scene: {}, entities: {values: []}, camera: {}},
+    Cesium: {Cartographic: {fromCartesian: () => { throw new Error("no position"); }}},
+    hypergraphVisualizer: {nodes: [1]},
+  });
+  win.metricsLogger.config.logPerformance = false;
+  await win.metricsLogger.collectAndLogMetrics();
+  assert.deepEqual(gaugesSent(posts), ["hypergraph.node_count=1"]);
+  win.metricsLogger.config.logPerformance = true;
+  win.metricsLogger.config.logHypergraph = false;
+  posts.length = 0;
+  await win.metricsLogger.collectAndLogMetrics();
+  assert.deepEqual(gaugesSent(posts), ["cesium.entity_count=0"]);
+});
+
+test("the metrics requests use the page's fetch as it is when they are made, and deactivating releases the unload hook", async () => {
+  const {win, posts, hooks} = metricsWindow();
+  const workspace = bootWorkspace(win);
+  const patched = [];
+  win.fetch = async (url) => { patched.push(url); return {ok: true, json: async () => ({})}; };   // the page patches fetch after boot
+  await workspace.activate("metrics");
+  assert.deepEqual(patched, ["/api/metrics/interaction"]);
+  assert.deepEqual(posts, []);
+  assert.ok(hooks.has("beforeunload"));
+  await workspace.deactivate("metrics");
+  assert.ok(!hooks.has("beforeunload"));
+});
+
+test("the old inline MetricsLogger is gone; the boot module starts the tool; the explorer and callers still use the same globals", () => {
+  assert.doesNotMatch(page, /const MetricsLogger = \{/);
+  assert.doesNotMatch(page, /window\.metricsLogger = MetricsLogger/);
+  assert.doesNotMatch(page, /fetch\('\/api\/metrics\/(log|interaction)'/);   // the explorer's own reads (session, query) stay on the page
+  assert.match(page, /workspace\.activate\("metrics"\)/);
+  assert.match(page, /window\.metricsLogger && window\.metricsLogger\._interactionLog/);
+  assert.match(page, /window\.metricsLogger && window\.metricsLogger\._lastMetrics/);
+  const unguarded = page.split("\n").filter((line) => /window\.(logMetric|logInteraction)\(/.test(line) && !/^\s*window\.(logMetric|logInteraction) = /.test(line));
+  assert.ok(unguarded.length > 10);   // the callers exist, and the guard test below covers them
+});
+
+test("every page caller of the logging globals checks that the global exists first", () => {
+  const lines = page.split("\n");
+  const bad = [];
+  lines.forEach((line, i) => {
+    if (!/window\.(logMetric|logInteraction)\(/.test(line)) return;
+    const context = lines.slice(Math.max(0, i - 25), i + 1).join("\n");
+    if (!/if \((this\.CONFIG\.logPerformance && )?window\.(logMetric|logInteraction)\b/.test(context)) bad.push(i + 1);
+  });
+  assert.deepEqual(bad, []);
+});
