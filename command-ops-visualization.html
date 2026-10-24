@@ -31779,7 +31779,12 @@ API TIMING (avg ms):
             })();
 
             // --- MissionStore UI integration (module) ---
-            (async function(){ const { MissionStore } = await import('./assets/missions/missionStore.js');
+            (async function(){
+            // assets/missions/ (the module and its example package) is not in the repo, so this
+            // block never ran; bail out with one warning instead of an unhandled rejection.
+            let MissionStore;
+            try { ({ MissionStore } = await import('./assets/missions/missionStore.js')); }
+            catch (e) { console.warn('[MissionStore] module unavailable; mission panel integration disabled:', e.message); return; }
 
             let missionStore = null;
 
