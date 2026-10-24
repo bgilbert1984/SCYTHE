@@ -1133,7 +1133,7 @@ function fakeCesium() {
   };
   const Cesium = {
     Color: {
-      ...Object.fromEntries(["CYAN", "ORANGE", "YELLOW", "PURPLE", "LIME", "WHITE", "BLACK", "ALICEBLUE", "MAGENTA", "GREEN", "RED"].map((n) => [n, {name: n.toLowerCase(), withAlpha: (a) => ({name: n.toLowerCase(), alpha: a})}])),
+      ...Object.fromEntries(["CYAN", "ORANGE", "YELLOW", "PURPLE", "LIME", "WHITE", "BLACK", "ALICEBLUE", "MAGENTA", "GREEN", "RED", "GRAY"].map((n) => [n, {name: n.toLowerCase(), withAlpha: (a) => ({name: n.toLowerCase(), alpha: a})}])),
       fromCssColorString: (css) => ({css}),
     },
     Cartesian3: class {
@@ -1824,4 +1824,148 @@ test("the old inline LPIManager is gone; the boot module activates the tool; not
   assert.doesNotMatch(page, /window\.LPIManager\s*=/);
   assert.doesNotMatch(page, /LPIManager\.init\(\)/);
   assert.match(page, /workspace\.activate\("lpi"\)/);
+});
+
+// --- operator presence ---
+
+function presenceWindow({operators = [], myId = "me", viewer = true, list = true} = {}) {
+  const globe = fakeCesium();
+  const els = list ? {"operator-presence-list": panelElement()} : {};
+  const intervals = [], errors = [];
+  const win = fakeWindow({
+    setInterval: (fn, ms) => { intervals.push({fn, ms, live: true}); return intervals.length - 1; }, clearInterval: (id) => { if (intervals[id]) intervals[id].live = false; },
+    setTimeout: () => 1, clearTimeout() {},
+    console: {warn() {}, log() {}, debug() {}, error: (...a) => errors.push(a)},
+    document: {getElementById: (id) => els[id] || null}, Cesium: globe.Cesium,
+    OperatorSession: {operatorId: myId, getActiveOperators: async () => operators},
+  });
+  return {win, els, globe, intervals, errors, viewer: viewer ? globe.viewer : undefined};
+}
+const presenceOps = [
+  {operator_id: "me", callsign: "ME", role: "admin", current_view: {center: [1, 2]}},
+  {operator_id: "a", callsign: "ALPHA", role: "supervisor", current_view: {center: [36, -86]}},
+  {operator_id: "b", callsign: "BRAVO", role: "observer", current_view: {center: [10, 20]}},
+];
+const flushAll = async () => { for (let i = 0; i < 4; i++) await new Promise((resolve) => setImmediate(resolve)); };
+
+test("booting registers presence inactive and exposes what the page's init and the Operators panel's inline handlers call", () => {
+  const {win} = presenceWindow();
+  const workspace = bootWorkspace(win);
+  assert.equal(workspace.state("presence"), "inactive");
+  assert.equal(typeof win.OperatorPresence.initialize, "function");
+  assert.equal(typeof win.OperatorPresence.toggleVisibility, "function");
+  assert.equal(typeof win.OperatorPresence.fetchActiveOperators, "function");
+  assert.deepEqual(win.OperatorPresence.operators, {});
+});
+
+test("the page's inline handlers and init call exist as the tool expects them", () => {
+  assert.match(page, /id="show-operator-presence" checked onchange="OperatorPresence\.toggleVisibility\(this\.checked\)"/);
+  assert.match(page, /onclick="OperatorPresence\.fetchActiveOperators\(\)"/);
+  assert.match(page, /OperatorPresence\.initialize\(viewer\);/);
+  assert.match(page, /id="operator-presence-list"/);
+  assert.match(page, /Object\.keys\(OperatorPresence\.operators\)\.length/);
+});
+
+test("operator presence draws the list into the panel and one marker per other operator, replacing them on each refresh", async () => {
+  const w = presenceWindow({operators: presenceOps});
+  const workspace = bootWorkspace(w.win);
+  await workspace.activate("presence");
+  w.win.OperatorPresence.initialize(w.viewer);
+  await flushAll();
+  assert.match(w.els["operator-presence-list"].innerHTML, /ME \(You\)/);
+  assert.equal((w.els["operator-presence-list"].innerHTML.match(/operator-presence-item/g) || []).length, 3);
+  assert.equal(w.intervals.length, 1);
+  assert.equal(w.intervals[0].ms, 10000);
+  const [first, second] = w.globe.entities.values;
+  assert.equal(w.globe.entities.values.length, 2);
+  assert.equal(first.id, "operator_presence_a");
+  assert.deepEqual(first.position, {lon: -86, lat: 36, h: 0});
+  assert.deepEqual([first.point.pixelSize, first.point.color.name, first.point.outlineColor.name, first.point.outlineWidth], [12, "orange", "white", 2]);
+  assert.equal(first.label.text, "👤 ALPHA");
+  assert.deepEqual([first.label.font, first.label.fillColor.name, first.label.outlineColor.name, first.label.outlineWidth], ["12px sans-serif", "white", "black", 2]);
+  assert.equal(first.label.style, "fill");
+  assert.equal(first.label.verticalOrigin, "bottom");
+  assert.deepEqual([first.label.pixelOffset.x, first.label.pixelOffset.y], [0, -15]);
+  assert.equal(second.id, "operator_presence_b");
+  assert.equal(second.point.color.name, "gray");
+  w.intervals[0].fn();   // the next poll replaces the markers rather than stacking them
+  await flushAll();
+  assert.equal(w.globe.entities.values.length, 2);
+  assert.equal(w.globe.entities.removed.length, 2);
+});
+
+test("operator presence escapes callsigns and roles in the panel's list", async () => {
+  const evil = "<img src=x onerror=alert(1)>";
+  const w = presenceWindow({operators: [{operator_id: "x", callsign: evil, role: evil}]});
+  const workspace = bootWorkspace(w.win);
+  await workspace.activate("presence");
+  await w.win.OperatorPresence.fetchActiveOperators();
+  assert.doesNotMatch(w.els["operator-presence-list"].innerHTML, /<img/);
+  assert.match(w.els["operator-presence-list"].innerHTML, /&lt;img/);
+});
+
+test("operator presence reads the operator session when it asks: who is me, and the list; a missing session is logged, not thrown", async () => {
+  const w = presenceWindow({operators: presenceOps, myId: "a"});
+  const workspace = bootWorkspace(w.win);
+  await workspace.activate("presence");
+  w.win.OperatorSession.operatorId = "b";   // read at call time
+  w.win.OperatorPresence.initialize(w.viewer);
+  await flushAll();
+  assert.deepEqual(w.globe.entities.values.map((e) => e.id), ["operator_presence_me", "operator_presence_a"]);
+  w.win.OperatorSession = undefined;
+  await w.win.OperatorPresence.fetchActiveOperators();
+  assert.equal(w.errors[0][0], "[OperatorPresence] Error fetching operators:");
+});
+
+test("the Operators panel's checkbox: off leaves the markers up (PINNED), on redraws; its handlers work without a viewer or a list", async () => {
+  const w = presenceWindow({operators: presenceOps});
+  const workspace = bootWorkspace(w.win);
+  await workspace.activate("presence");
+  w.win.OperatorPresence.initialize(w.viewer);
+  await flushAll();
+  w.win.OperatorPresence.toggleVisibility(false);
+  assert.equal(w.globe.entities.values.length, 2);
+  w.win.OperatorPresence.toggleVisibility(true);
+  assert.equal(w.globe.entities.values.length, 2);
+  const bare = presenceWindow({operators: presenceOps, list: false});
+  const w2 = bootWorkspace(bare.win);
+  await w2.activate("presence");
+  await bare.win.OperatorPresence.fetchActiveOperators();
+  bare.win.OperatorPresence.toggleVisibility(true);
+  assert.equal(bare.globe.entities.values.length, 0);   // no viewer handed over
+});
+
+test("deactivating operator presence stops the polling and takes the markers down; the viewer stays attached", async () => {
+  const w = presenceWindow({operators: presenceOps});
+  const workspace = bootWorkspace(w.win);
+  await workspace.activate("presence");
+  w.win.OperatorPresence.initialize(w.viewer);
+  await flushAll();
+  assert.equal(w.globe.entities.values.length, 2);
+  await workspace.deactivate("presence");
+  assert.deepEqual(w.globe.entities.values, []);
+  assert.equal(w.intervals[0].live, false);
+  assert.deepEqual(w.win.OperatorPresence.operators, {});
+  await workspace.activate("presence");
+  await workspace.deactivate("presence");
+  assert.equal(w.globe.entities.removed.length, 2);   // nothing is taken down twice
+});
+
+test("a marker that something else already removed is not removed again", async () => {
+  const w = presenceWindow({operators: presenceOps});
+  const workspace = bootWorkspace(w.win);
+  await workspace.activate("presence");
+  w.win.OperatorPresence.initialize(w.viewer);
+  await flushAll();
+  w.globe.entities.remove(w.globe.entities.values[0]);
+  const before = w.globe.entities.removed.length;
+  w.win.OperatorPresence.fetchActiveOperators();
+  await flushAll();
+  assert.equal(w.globe.entities.removed.length - before, 1);   // only the one still showing
+});
+
+test("the old inline OperatorPresence is gone; the boot module activates the tool", () => {
+  assert.doesNotMatch(page, /const OperatorPresence = \{/);
+  assert.doesNotMatch(page, /_createPresenceIndicator|updatePresenceIndicators/);
+  assert.match(page, /workspace\.activate\("presence"\)/);
 });
