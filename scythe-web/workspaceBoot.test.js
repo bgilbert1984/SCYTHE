@@ -656,3 +656,125 @@ test("a missing interactions list is reported as missing, so the count is left a
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(els["total-interactions-count"].textContent, "");
 });
+
+// --- propagation analysis ---
+
+const PROPAGATION_IDS = ["atm-k-factor", "atm-refractivity", "atm-condition", "atm-humidity", "atm-humidity-val", "atm-temp", "atm-temp-val",
+  "atm-gradient", "apply-atmosphere-btn", "tx-lat", "tx-lon", "tx-height", "tx-freq", "tx-power", "rx-lat", "rx-lon", "rx-height",
+  "rx-sensitivity", "calculate-path-btn", "visualize-path-btn", "path-analysis-results", "propagation-history-body", "clear-paths-btn"];
+
+function propagationWindow(elements = {}, manager) {
+  const calls = [];
+  const analysis = {
+    geometry: {distance_km: 5}, losses: {total_db: 100, freeSpace_db: 90, diffraction_db: 0, atmospheric_db: 1},
+    linkBudget: {linkViable: true, linkMargin_db: 3, receivedPower_dbm: -90, rxSensitivity_dbm: -100}, terrain: {sampleCount: 8, obstructions: 0}, processingTime_ms: 1,
+  };
+  const win = fakeWindow({
+    setInterval: () => 1, clearInterval() {}, setTimeout: () => 1, clearTimeout() {},
+    document: {getElementById: (id) => elements[id] || null},
+    RFPropagationManager: manager === null ? undefined : {
+      atmosphericConditions: {kFactor: 1.3333, surfaceRefractivity: 315},
+      classifyAtmosphere: () => ({condition: "standard"}),
+      setAtmosphericConditions: (c) => calls.push(["set", c]),
+      calculatePathLoss: async (tx, rx) => { calls.push(["calc", tx, rx]); return analysis; },
+      visualizePropagationPath: async (id) => { calls.push(["vis", id]); return analysis; },
+      removePropagationPath: (id) => calls.push(["remove", id]),
+      clearAllPaths: () => calls.push(["clear"]),
+    },
+  });
+  return {win, calls};
+}
+
+test("booting registers propagation inactive and exposes what showPanel('propagation') calls", () => {
+  const {win} = propagationWindow();
+  const workspace = bootWorkspace(win);
+  assert.equal(workspace.state("propagation-ui"), "inactive");
+  assert.equal(win.PropagationUI.updateAtmosphericDisplay(), undefined);
+});
+
+test("every element id the propagation view uses exists in the page", () => {
+  for (const id of PROPAGATION_IDS) assert.match(page, new RegExp(`id="${id}"`), id);
+});
+
+test("the propagation view reads the page's boxes, fills its elements, labels the sliders, and its listeners come off on deactivate", async () => {
+  const els = Object.fromEntries(PROPAGATION_IDS.map((id) => [id, panelElement({value: "7", style: {}})]));
+  els["atm-condition"].style = {};
+  const {win, calls} = propagationWindow(els);
+  const workspace = bootWorkspace(win);
+  win.logMetric = (...a) => calls.push(["metric", ...a]);   // after the boot, which installs the metrics tool's; read at call time
+  win.logInteraction = (...a) => calls.push(["interaction", ...a]);
+  await workspace.activate("propagation-ui");
+  assert.equal(els["atm-k-factor"].textContent, "1.333");
+  assert.equal(els["atm-refractivity"].textContent, "315 N");
+  assert.equal(els["atm-condition"].style.color, "#00ff88");
+  els["atm-humidity"].listeners.get("input")[0]({target: {value: "65"}});
+  els["atm-temp"].listeners.get("input")[0]({target: {value: "-3"}});
+  assert.equal(els["atm-humidity-val"].textContent, "65%");
+  assert.equal(els["atm-temp-val"].textContent, "-3°C");
+  els["apply-atmosphere-btn"].listeners.get("click")[0]();
+  els["calculate-path-btn"].listeners.get("click")[0]();
+  await new Promise((resolve) => setImmediate(resolve));
+  els["visualize-path-btn"].listeners.get("click")[0]();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(calls[0], ["set", {humidity: 7, temperature: 7, refractivityGradient: 7}]);
+  assert.deepEqual(calls[1], ["metric", "propagation", "atmosphere_updated", 1]);
+  assert.deepEqual(calls[2], ["calc", {lat: 7, lon: 7, height_m: 7, frequency_mhz: 7, power_dbm: 7}, {lat: 7, lon: 7, height_m: 7, sensitivity_dbm: 7}]);
+  assert.deepEqual(calls[3], ["interaction", "calculate_path_loss", "5.0 km"]);
+  assert.deepEqual(calls[4], ["vis", "path_1"]);
+  assert.match(els["path-analysis-results"].innerHTML, /5\.00 km/);
+  els["clear-paths-btn"].listeners.get("click")[0]();
+  assert.deepEqual(calls.at(-2), ["clear"]);
+  assert.match(els["propagation-history-body"].innerHTML, /No calculations yet/);
+  await workspace.deactivate("propagation-ui");
+  for (const id of ["atm-humidity", "atm-temp", "apply-atmosphere-btn", "calculate-path-btn", "visualize-path-btn", "clear-paths-btn"]) {
+    for (const list of els[id].listeners.values()) assert.equal(list.length, 0, id);
+  }
+  assert.deepEqual(await workspace.deactivate("propagation-ui"), []);
+});
+
+test("propagation tolerates a page with none of its elements and no manager, and finds the manager when it appears later", async () => {
+  const {win} = propagationWindow({}, null);
+  const workspace = bootWorkspace(win);
+  await workspace.activate("propagation-ui");
+  assert.equal(workspace.state("propagation-ui"), "active");
+  win.PropagationUI.updateAtmosphericDisplay();   // no manager, no elements: nothing to do
+  assert.deepEqual(await workspace.deactivate("propagation-ui"), []);
+
+  const kFactor = panelElement();
+  const later = propagationWindow({"atm-k-factor": kFactor}, null);
+  const booted = bootWorkspace(later.win);
+  await booted.activate("propagation-ui");
+  assert.equal(kFactor.textContent, "");
+  later.win.RFPropagationManager = {atmosphericConditions: {kFactor: 1, surfaceRefractivity: 1}, classifyAtmosphere: () => ({condition: "standard"})};
+  later.win.PropagationUI.updateAtmosphericDisplay();   // read at call time
+  assert.equal(kFactor.textContent, "1.000");
+});
+
+test("deactivating takes down the paths that were drawn, through the manager", async () => {
+  const els = {"visualize-path-btn": panelElement(), "path-analysis-results": panelElement()};
+  const {win, calls} = propagationWindow(els);
+  const workspace = bootWorkspace(win);
+  await workspace.activate("propagation-ui");
+  els["visualize-path-btn"].listeners.get("click")[0]();
+  await new Promise((resolve) => setImmediate(resolve));
+  await workspace.deactivate("propagation-ui");
+  assert.deepEqual(calls, [["vis", "path_1"], ["remove", "path_1"]]);
+});
+
+test("an empty box reads as an empty string, not undefined", async () => {
+  const els = {"tx-lat": panelElement({value: undefined})};
+  const {win, calls} = propagationWindow({...els, "calculate-path-btn": panelElement()});
+  const workspace = bootWorkspace(win);
+  await workspace.activate("propagation-ui");
+  win.document.getElementById("calculate-path-btn").listeners.get("click")[0]();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.ok(Number.isNaN(calls[0][1].lat));
+});
+
+test("the old inline PropagationUI is gone; the boot module starts the tool 2.5 s after the DOM is ready; showPanel still calls it", () => {
+  assert.doesNotMatch(page, /const PropagationUI = \{/);
+  assert.doesNotMatch(page, /PropagationUI\.init\(\)/);
+  assert.match(page, /workspace\.activate\("propagation-ui"\)[\s\S]{0,120}, 2500\)/);
+  assert.match(page, /document\.readyState === "loading"\) document\.addEventListener\("DOMContentLoaded", startPropagation/);
+  assert.match(page, /typeof PropagationUI !== 'undefined' && PropagationUI\.updateAtmosphericDisplay\)/);
+});

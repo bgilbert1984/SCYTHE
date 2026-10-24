@@ -4,6 +4,7 @@ import {createAisStreamPlugin} from "./aisStreamPlugin.js";
 import {createChatPlugin} from "./chatPlugin.js";
 import {createMetricsPlugin} from "./metricsPlugin.js";
 import {createMetricsExplorerPlugin} from "./metricsExplorerPlugin.js";
+import {createPropagationPlugin} from "./propagationPlugin.js";
 
 /**
  * Create the workspace for command-ops-visualization.html, provide the page's services, and register its tools. Nothing is
@@ -91,6 +92,17 @@ export function bootWorkspace(win) {
   const explorer = createMetricsExplorerPlugin({log: win.console});
   workspace.register(explorer.tool);
   win.MetricsExplorer = explorer.controls;   // what showPanel('metrics') calls
+
+  // --- propagation analysis ---
+  workspace.provide("propagationEngine", propagationEngine(win));
+  workspace.provide("propagationView", propagationView(win));
+  workspace.provide("activityLog", {   // the metrics tool's loggers, if the page has them
+    metric: (module, name, value) => win.logMetric?.(module, name, value),
+    interaction: (action, target) => win.logInteraction?.(action, target),
+  });
+  const propagation = createPropagationPlugin({log: win.console});
+  workspace.register(propagation.tool);
+  win.PropagationUI = propagation.controls;   // what showPanel('propagation') calls
   win.ScytheWorkspace = workspace;
   win.dispatchEvent(new win.Event("scythe:workspace_ready"));
   return workspace;
@@ -244,5 +256,55 @@ function liveSources(win) {
     lastMetrics: () => win.metricsLogger?._lastMetrics || null,
     recon: () => win.RF_SCYTHE?.AutoReconVisualization || null,
     heapBytes: () => (win.performance?.memory ? win.performance.memory.usedJSHeapSize : null),
+  };
+}
+
+/** RFPropagationManager, looked up when used: the page creates it before this module runs, but a failed script would leave it out. */
+function propagationEngine(win) {
+  const manager = () => win.RFPropagationManager;
+  return {
+    available: () => Boolean(manager()),
+    atmosphere: () => ({conditions: manager().atmosphericConditions, classification: manager().classifyAtmosphere()}),
+    setAtmosphere: (conditions) => manager().setAtmosphericConditions(conditions),
+    calculate: (tx, rx) => manager().calculatePathLoss(tx, rx),
+    visualize: (id, tx, rx) => manager().visualizePropagationPath(id, tx, rx),
+    removePath: (id) => manager().removePropagationPath(id),
+    clearAll: () => manager().clearAllPaths(),
+  };
+}
+
+/** The Propagation panel's DOM, by the ids the page gives it. Every lookup happens when it is needed; a missing element is skipped. */
+function propagationView(win) {
+  const byId = (id) => win.document.getElementById(id);
+  const text = (id) => byId(id)?.value ?? "";
+  const place = (prefix) => (names) => Object.fromEntries(Object.entries(names).map(([key, id]) => [key, text(`${prefix}-${id}`)]));
+  const tx = place("tx"), rx = place("rx");
+  return {
+    setText(id, value) { const element = byId(id); if (element) element.textContent = value; },
+    setHtml(id, html) { const element = byId(id); if (!element) return false; element.innerHTML = html; return true; },
+    setColor(id, color) { const element = byId(id); if (element) element.style.color = color; },
+    atmosphereInputs: () => ({humidity: text("atm-humidity"), temperature: text("atm-temp"), gradient: text("atm-gradient")}),
+    pathInputs: () => ({
+      tx: tx({lat: "lat", lon: "lon", height: "height", frequency: "freq", power: "power"}),
+      rx: rx({lat: "lat", lon: "lon", height: "height", sensitivity: "sensitivity"}),
+    }),
+    /** The sliders show their value as they move (no tool logic); the four buttons call back. */
+    bind({apply, calculate, visualize, clear}) {
+      const bound = [];
+      const on = (id, type, handler) => {
+        const element = byId(id);
+        if (!element) return;
+        element.addEventListener(type, handler);
+        bound.push(() => element.removeEventListener(type, handler));
+      };
+      const label = (id, unit) => (event) => { const shown = byId(id); if (shown) shown.textContent = event.target.value + unit; };
+      on("atm-humidity", "input", label("atm-humidity-val", "%"));
+      on("atm-temp", "input", label("atm-temp-val", "°C"));
+      on("apply-atmosphere-btn", "click", () => apply());
+      on("calculate-path-btn", "click", () => calculate());
+      on("visualize-path-btn", "click", () => visualize());
+      on("clear-paths-btn", "click", () => clear());
+      return () => { for (const off of bound) off(); };
+    },
   };
 }
