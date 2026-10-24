@@ -879,3 +879,360 @@ test("a window.EntitySync that is not the page's stub is replaced without being 
   await workspace.activate("entity-sync");
   assert.equal(typeof win.EntitySync.on, "function");
 });
+
+// --- sensors ---
+
+const SENSOR_IDS = ["sensorList", "sensors-panel-count", "sensorLoadBtn", "sensorCreateBtn", "sensor-create-form", "sensor-cancel-btn", "sensor-save-btn",
+  "sensor-label", "sensor-type", "sensor-tx-freq", "sensor-rx-freq", "sensor-tx-power", "sensor-rx-sens", "sensor-lat", "sensor-lon", "sensor-assign-entity"];
+
+/** A button in the sensor list: `closest(selector)` finds it when its class is in the selector. */
+function sensorButton(cls, attrs) {
+  return {getAttribute: (name) => attrs[name], closest(selector) { return selector.split(",").some((part) => part.trim() === `.${cls}`) ? this : null; }};
+}
+
+function sensorWindow({sensors = [], recon, viewer, selectValue = ""} = {}) {
+  const els = Object.fromEntries(SENSOR_IDS.map((id) => [id, panelElement({value: "", style: {}})]));
+  els["sensor-create-form"].style.display = "none";
+  const select = els["sensor-assign-entity"];
+  select.value = selectValue;
+  Object.defineProperty(select, "innerHTML", {get() { return this._html; }, set(html) { this._html = html; this.children = []; }});
+  const requests = [], bodyChildren = [], dialogParts = {};
+  const document_ = {
+    getElementById: (id) => els[id] || null,
+    createElement: (tag) => {
+      const element = panelElement({style: {}, tag, parentNode: null});
+      element.querySelector = (selector) => (dialogParts[selector] ||= panelElement({value: "E1"}));
+      return element;
+    },
+    body: {
+      appendChild(child) { child.parentNode = this; bodyChildren.push(child); },
+      removeChild(child) { bodyChildren.splice(bodyChildren.indexOf(child), 1); child.parentNode = null; },
+    },
+  };
+  const win = fakeWindow({
+    setInterval: () => 1, clearInterval() {}, setTimeout: () => 1, clearTimeout() {},
+    document: document_, confirm: (text) => { win.confirmed.push(text); return true; }, confirmed: [],
+    AutoReconVisualization: recon ? {entities: recon} : undefined, OperatorSession: {sessionToken: "tok"},
+    consoleMessages: [], addConsoleMessage(text, kind) { win.consoleMessages.push([text, kind]); },
+    fetch: async (url, init = {}) => {
+      requests.push([`${init.method || "GET"} ${url}`, init.body ? JSON.parse(init.body) : undefined]);
+      if (url === "/api/sensors" && !init.method) return {ok: true, json: async () => ({sensors})};
+      if (url === "/api/sensors" && init.method === "POST") return {ok: true, json: async () => ({created: true, sensor: {sensor_id: "n1", label: JSON.parse(init.body).label}})};
+      return {ok: true, json: async () => ({})};
+    },
+    ...(viewer || {}),
+  });
+  return {win, els, requests, bodyChildren, dialogParts};
+}
+const flush = () => new Promise((resolve) => setImmediate(resolve));
+const S1 = {sensor_id: "s1", label: "Roof", type: "RADAR", position: [36, -86, 5], status: "ACTIVE"};
+
+test("booting registers the sensors tool inactive and exposes what the page's other modules read", () => {
+  const {win} = sensorWindow();
+  const workspace = bootWorkspace(win);
+  assert.equal(workspace.state("sensors"), "inactive");
+  assert.deepEqual(win.SensorManager.sensors, {});
+  assert.equal(typeof win.SensorManager.flyTo, "function");
+});
+
+test("every element id the sensor view uses exists in the page", () => {
+  for (const id of SENSOR_IDS) assert.match(page, new RegExp(`id="${id}"`), id);
+});
+
+test("the sensor view: Load fills the count and the list; the create form toggles, cancels and saves, then hides and clears", async () => {
+  const {win, els, requests} = sensorWindow({sensors: [S1], recon: {E1: {name: "Falcon"}, E2: {}}});
+  const workspace = bootWorkspace(win);
+  await workspace.activate("sensors");
+  els.sensorLoadBtn.listeners.get("click")[0]();
+  await flush();
+  assert.equal(els["sensors-panel-count"].textContent, 1);
+  assert.match(els.sensorList.innerHTML, /data-sensor-id="s1"/);
+  const form = els["sensor-create-form"];
+  els.sensorCreateBtn.listeners.get("click")[0]();
+  assert.equal(form.style.display, "block");
+  assert.equal(els["sensor-assign-entity"].innerHTML, '<option value="">-- None --</option>');
+  assert.deepEqual(els["sensor-assign-entity"].children.map((o) => [o.value, o.textContent]), [["E1", "Falcon"], ["E2", "E2"]]);
+  els.sensorCreateBtn.listeners.get("click")[0]();
+  assert.equal(form.style.display, "none");
+  els.sensorCreateBtn.listeners.get("click")[0]();
+  els["sensor-cancel-btn"].listeners.get("click")[0]();
+  assert.equal(form.style.display, "none");
+  els["sensor-label"].value = "New";
+  els["sensor-lat"].value = "1";
+  els["sensor-lon"].value = "2";
+  els["sensor-tx-freq"].value = "915";
+  form.style.display = "block";
+  requests.length = 0;
+  els["sensor-save-btn"].listeners.get("click")[0]();
+  await flush();
+  assert.deepEqual(requests, [["POST /api/sensors", {label: "New", type: "SDR", tx_config: {frequency_mhz: 915, power_dbm: null}, rx_config: null, position: {lat: 1, lon: 2}}]]);
+  assert.equal(form.style.display, "none");
+  for (const id of ["sensor-label", "sensor-lat", "sensor-lon", "sensor-tx-freq"]) assert.equal(els[id].value, "", id);
+});
+
+test("the sensor list's buttons are handled by one listener on the list; moving a group stops the click; deactivating removes every listener", async () => {
+  const {win, els, requests} = sensorWindow({sensors: [S1], recon: {E1: {name: "Falcon"}}});
+  const workspace = bootWorkspace(win);
+  await workspace.activate("sensors");
+  await win.SensorManager.load();
+  const click = (target) => els.sensorList.listeners.get("click")[0]({target, stopPropagation() { target.stopped = true; }});
+  assert.equal(els.sensorList.listeners.get("click").length, 1);
+  const track = sensorButton("sensor-track-btn", {"data-sensor-id": "s1"});
+  click(track);
+  assert.equal(track.stopped, undefined);
+  assert.ok(win.consoleMessages.some((m) => m[0] === "Tracking sensor: Roof"));   // the Track button reached flyTo
+  click(sensorButton("sensor-delete-btn", {"data-sensor-id": "s1"}));
+  await flush();
+  assert.deepEqual(win.confirmed, ["Delete sensor s1?"]);
+  assert.ok(requests.some((r) => r[0] === "DELETE /api/sensors/s1"));
+  const move = sensorButton("group-move-btn", {"data-group": "E1", "data-action": "down"});
+  click(move);
+  assert.equal(move.stopped, true);
+  click({closest: () => null});
+  click({});
+  await workspace.deactivate("sensors");
+  for (const id of ["sensorLoadBtn", "sensorCreateBtn", "sensor-cancel-btn", "sensor-save-btn", "sensorList"]) {
+    for (const handlers of els[id].listeners.values()) assert.equal(handlers.length, 0, id);
+  }
+});
+
+test("the group buttons reorder the list through the plugin: the data-group and data-action reach moveGroup in order", async () => {
+  const {win, els} = sensorWindow({sensors: [S1, {...S1, sensor_id: "s2", label: "Mast"}], recon: {E1: {name: "One"}, E2: {name: "Two"}}});
+  const workspace = bootWorkspace(win);
+  await workspace.activate("sensors");
+  await workspace.activate("entity-sync");
+  await win.SensorManager.load();
+  for (const [s, e] of [["s1", "E1"], ["s2", "E2"]]) {
+    win.EntitySync.ingest("CREATE", {entity_id: `edge:sensor_assigned:sensor:${s}->recon:${e}`, entity_type: "SENSOR_ASSIGNMENT", entity_data: {nodes: [`sensor:${s}`, `recon:${e}`]}});
+  }
+  const firstGroup = () => els.sensorList.innerHTML.match(/TASK FORCE:<\/span>(\w+) \(/)[1];
+  assert.equal(firstGroup(), "One");
+  els.sensorList.listeners.get("click")[0]({target: sensorButton("group-move-btn", {"data-group": "E1", "data-action": "down"}), stopPropagation() {}});
+  assert.equal(firstGroup(), "Two");
+  els.sensorList.listeners.get("click")[0]({target: sensorButton("group-move-btn", {"data-group": "E1", "data-action": "up"}), stopPropagation() {}});
+  assert.equal(firstGroup(), "One");
+});
+
+test("a declined delete confirmation sends nothing", async () => {
+  const {win, els, requests} = sensorWindow({sensors: [S1]});
+  win.confirm = () => false;
+  const workspace = bootWorkspace(win);
+  await workspace.activate("sensors");
+  await win.SensorManager.load();
+  requests.length = 0;
+  els.sensorList.listeners.get("click")[0]({target: sensorButton("sensor-delete-btn", {"data-sensor-id": "s1"})});
+  await flush();
+  assert.deepEqual(requests, []);
+});
+
+test("without the create form the toggle and cancel are not bound; without any element nothing throws", async () => {
+  const {win, els} = sensorWindow();
+  delete els["sensor-create-form"];
+  const workspace = bootWorkspace(win);
+  await workspace.activate("sensors");
+  assert.equal(els.sensorCreateBtn.listeners.size, 0);
+  assert.equal(els["sensor-cancel-btn"].listeners.size, 0);
+  assert.equal(els.sensorLoadBtn.listeners.get("click").length, 1);
+  const bare = sensorWindow();
+  for (const id of Object.keys(bare.els)) delete bare.els[id];
+  const w2 = bootWorkspace(bare.win);
+  await w2.activate("sensors");
+  bare.win.SensorManager.populateEntityDropdown();
+  await bare.win.SensorManager.load();
+  await w2.deactivate("sensors");
+});
+
+test("no entity chosen in the create form means no assignment is made; a chosen one is assigned", async () => {
+  const none = sensorWindow({selectValue: ""});
+  let workspace = bootWorkspace(none.win);
+  await workspace.activate("sensors");
+  none.els["sensor-label"].value = "A";
+  none.els["sensor-save-btn"].listeners.get("click")[0]();
+  await flush();
+  assert.ok(!none.requests.some((r) => /assign_sensor/.test(r[0])));
+  const chosen = sensorWindow({selectValue: "E1"});
+  workspace = bootWorkspace(chosen.win);
+  await workspace.activate("sensors");
+  chosen.els["sensor-label"].value = "B";
+  chosen.els["sensor-save-btn"].listeners.get("click")[0]();
+  await flush();
+  assert.ok(chosen.requests.some((r) => r[0] === "POST /api/recon/entity/E1/assign_sensor" && r[1].sensor_id === "n1"));
+});
+
+test("the assign dialog lists the entities (escaped), stays until the assignment finishes, and Cancel and deactivating close it", async () => {
+  const {win, els, requests, bodyChildren, dialogParts} = sensorWindow({sensors: [{...S1, label: "<b>Roof</b>"}], recon: {E1: {name: "<i>Falcon</i>"}}});
+  const workspace = bootWorkspace(win);
+  await workspace.activate("sensors");
+  await win.SensorManager.load();
+  const assign = () => els.sensorList.listeners.get("click")[0]({target: sensorButton("sensor-assign-btn", {"data-sensor-id": "s1"})});
+  assign();
+  assert.equal(bodyChildren.length, 1);
+  const html = bodyChildren[0].innerHTML;
+  assert.doesNotMatch(html, /<i>|<b>/);
+  assert.match(html, /Assign Sensor: &lt;b&gt;Roof&lt;\/b&gt;/);
+  assert.match(html, /<option value="E1">&lt;i&gt;Falcon&lt;\/i&gt;<\/option>/);
+  dialogParts[".assign-cancel-btn"].listeners.get("click").at(-1)();
+  assert.equal(bodyChildren.length, 0);
+  assign();
+  requests.length = 0;
+  dialogParts[".assign-confirm-btn"].listeners.get("click").at(-1)();
+  assert.equal(bodyChildren.length, 1);   // still open: the request is in flight
+  await flush();
+  await flush();
+  assert.ok(requests.some((r) => r[0] === "POST /api/recon/entity/E1/assign_sensor"));
+  assert.equal(bodyChildren.length, 0);
+  assign();
+  assert.equal(bodyChildren.length, 1);
+  await workspace.deactivate("sensors");
+  assert.equal(bodyChildren.length, 0);
+});
+
+test("confirming a dialog that has been replaced does not close the newer one", async () => {
+  const {win, els, bodyChildren, dialogParts} = sensorWindow({sensors: [S1], recon: {E1: {name: "F"}}});
+  const workspace = bootWorkspace(win);
+  await workspace.activate("sensors");
+  await win.SensorManager.load();
+  const assign = () => els.sensorList.listeners.get("click")[0]({target: sensorButton("sensor-assign-btn", {"data-sensor-id": "s1"})});
+  assign();
+  assign();
+  assert.equal(bodyChildren.length, 1);
+  dialogParts[".assign-confirm-btn"].listeners.get("click")[0]();   // the first dialog's own button
+  await flush();
+  await flush();
+  assert.equal(bodyChildren.length, 1);
+  dialogParts[".assign-cancel-btn"].listeners.get("click")[0]();    // likewise
+  assert.equal(bodyChildren.length, 1);
+});
+
+test("opening a second assign dialog replaces the first", async () => {
+  const {win, els, bodyChildren} = sensorWindow({sensors: [S1], recon: {E1: {name: "F"}}});
+  const workspace = bootWorkspace(win);
+  await workspace.activate("sensors");
+  await win.SensorManager.load();
+  const assign = () => els.sensorList.listeners.get("click")[0]({target: sensorButton("sensor-assign-btn", {"data-sensor-id": "s1"})});
+  assign();
+  assign();
+  assert.equal(bodyChildren.length, 1);
+});
+
+// the globe
+
+function fakeCesium() {
+  const calls = {flights: [], viewerFlights: []};
+  const entities = {
+    values: [],
+    add(spec) { const e = {...spec}; this.values.push(e); return e; },
+    remove(e) { const i = this.values.indexOf(e); if (i >= 0) this.values.splice(i, 1); },
+  };
+  const Cesium = {
+    Color: Object.fromEntries(["CYAN", "ORANGE", "YELLOW", "PURPLE", "LIME", "WHITE", "BLACK"].map((n) => [n, {name: n.toLowerCase(), withAlpha: (a) => ({name: n.toLowerCase(), alpha: a})}])),
+    Cartesian3: {fromDegrees: (lon, lat, h) => ({lon, lat, h}), distance: (a, b) => Math.hypot((a.lon - b.lon) * 1e5, (a.lat - b.lat) * 1e5)},
+    Cartesian2: class { constructor(x, y) { this.x = x; this.y = y; } },
+    LabelStyle: {FILL_AND_OUTLINE: "fill"}, VerticalOrigin: {BOTTOM: "bottom"}, ArcType: {GEODESIC: "geodesic"},
+    PolylineDashMaterialProperty: class { constructor(o) { this.options = o; } },
+    Math: {toRadians: (d) => d * Math.PI / 180},
+  };
+  const viewer = {entities, camera: {flyTo: (o) => calls.viewerFlights.push(o)}};
+  return {Cesium, viewer, entities, calls};
+}
+
+test("the sensor globe: a marker per sensor with a position (colour by type), moved but not relabelled when it changes, removed when the sensor goes", async () => {
+  const globe = fakeCesium();
+  const {win} = sensorWindow({sensors: [S1, {sensor_id: "s2", label: "Mast", type: "CAMERA", position: [1, 2, 3]}, {sensor_id: "s3", label: "Lost"}], viewer: {viewer: globe.viewer, Cesium: globe.Cesium}});
+  const workspace = bootWorkspace(win);
+  await workspace.activate("sensors");
+  await win.SensorManager.load();
+  const markers = globe.entities.values;
+  assert.deepEqual(markers.map((m) => m.id), ["sensor-s1", "sensor-s2"]);
+  assert.deepEqual(markers[0].position, {lon: -86, lat: 36, h: 100});
+  assert.equal(markers[0].point.color.name, "orange");
+  assert.equal(markers[1].point.color.name, "yellow");
+  assert.equal(markers[0].label.text, "Roof");
+  assert.equal(markers[0].point.pixelSize, 14);
+  assert.match(markers[0].description, /<strong>Roof<\/strong>/);
+  // the same sensors again, one moved and relabelled
+  win.fetch = async () => ({ok: true, json: async () => ({sensors: [{...S1, label: "Renamed", position: [40, -80, 0]}]})});
+  await win.SensorManager.load();
+  assert.deepEqual(globe.entities.values.map((m) => m.id), ["sensor-s1"]);   // s2 is gone
+  assert.deepEqual(globe.entities.values[0].position, {lon: -80, lat: 40, h: 100});
+  assert.equal(globe.entities.values[0].label.text, "Roof");                    // PINNED: the label is not updated
+  await workspace.deactivate("sensors");
+  assert.deepEqual(globe.entities.values, []);
+});
+
+test("the sensor globe colours markers by type: SDR cyan, RADAR orange, CAMERA yellow, ACOUSTIC purple, SIGINT lime", async () => {
+  const globe = fakeCesium();
+  const types = ["SDR", "RADAR", "CAMERA", "ACOUSTIC", "SIGINT"];
+  const {win} = sensorWindow({sensors: types.map((type, i) => ({sensor_id: `t${i}`, label: type, type, position: [i, i, 0]})), viewer: {viewer: globe.viewer, Cesium: globe.Cesium}});
+  const workspace = bootWorkspace(win);
+  await workspace.activate("sensors");
+  await win.SensorManager.load();
+  assert.deepEqual(globe.entities.values.map((m) => m.point.color.name), ["cyan", "orange", "yellow", "purple", "lime"]);
+});
+
+test("the sensor globe: an unknown sensor type gets the default colour; the description is escaped", async () => {
+  const globe = fakeCesium();
+  const {win} = sensorWindow({sensors: [{sensor_id: "s1", label: "<img src=x>", type: "WEIRD", position: [1, 2, 3]}], viewer: {viewer: globe.viewer, Cesium: globe.Cesium}});
+  const workspace = bootWorkspace(win);
+  await workspace.activate("sensors");
+  await win.SensorManager.load();
+  assert.equal(globe.entities.values[0].point.color.name, "cyan");
+  assert.doesNotMatch(globe.entities.values[0].description, /<img/);
+});
+
+test("the sensor globe: assignment lines are replaced on each redraw, skip points under a metre apart, and come down on deactivate", async () => {
+  const globe = fakeCesium();
+  const sensors = [S1, {sensor_id: "s2", label: "Twin", position: [10, 20, 0]}];
+  const {win} = sensorWindow({sensors, recon: {E1: {location: {lat: 11, lon: 21}}, E2: {location: {lat: 10, lon: 20}}}, viewer: {viewer: globe.viewer, Cesium: globe.Cesium}});
+  const workspace = bootWorkspace(win);
+  await workspace.activate("sensors");
+  await win.SensorManager.load();
+  await workspace.activate("entity-sync");
+  const assignment = (sensor, entity) => ({entity_id: `edge:sensor_assigned:sensor:${sensor}->recon:${entity}`, entity_type: "SENSOR_ASSIGNMENT", entity_data: {nodes: [`sensor:${sensor}`, `recon:${entity}`]}});
+  win.EntitySync.ingest("CREATE", assignment("s1", "E1"));
+  win.EntitySync.ingest("CREATE", assignment("s2", "E2"));
+  const lines = () => globe.entities.values.filter((e) => e.id.startsWith("sensor-assignment-"));
+  assert.deepEqual(lines().map((l) => l.id), ["sensor-assignment-s1-E1"]);   // s2 and E2 are at the same place
+  assert.equal(lines()[0].polyline.width, 2);
+  assert.equal(lines()[0].polyline.arcType, "geodesic");
+  assert.deepEqual(lines()[0].polyline.positions, [{lon: -86, lat: 36, h: 100}, {lon: 21, lat: 11, h: 100}]);
+  assert.equal(lines()[0].polyline.material.options.dashLength, 16);
+  win.EntitySync.ingest("CREATE", assignment("s1", "E1"));
+  assert.equal(lines().length, 1);   // replaced, not stacked
+  await workspace.deactivate("sensors");
+  assert.deepEqual(globe.entities.values, []);
+});
+
+test("the sensor globe flies with flyToWithReset when the page has it, else with the camera; nothing without a viewer", async () => {
+  const globe = fakeCesium();
+  const {win} = sensorWindow({sensors: [S1], viewer: {viewer: globe.viewer, Cesium: globe.Cesium}});
+  const workspace = bootWorkspace(win);
+  await workspace.activate("sensors");
+  await win.SensorManager.load();
+  win.SensorManager.flyTo("s1");
+  assert.equal(globe.calls.viewerFlights.length, 1);
+  assert.deepEqual(globe.calls.viewerFlights[0].destination, {lon: -86, lat: 36, h: 10000});
+  assert.equal(globe.calls.viewerFlights[0].duration, 1.5);
+  assert.equal(globe.calls.viewerFlights[0].orientation.heading, 0);
+  assert.equal(globe.calls.viewerFlights[0].orientation.roll, 0);
+  assert.ok(Math.abs(globe.calls.viewerFlights[0].orientation.pitch + Math.PI / 4) < 1e-9);
+  win.flyToWithReset = (options) => globe.calls.flights.push(options);
+  win.SensorManager.flyTo("s1");
+  assert.equal(globe.calls.flights.length, 1);
+  assert.equal(globe.calls.viewerFlights.length, 1);
+  const none = sensorWindow({sensors: [S1]});
+  const w2 = bootWorkspace(none.win);
+  await w2.activate("sensors");
+  await none.win.SensorManager.load();
+  none.win.SensorManager.flyTo("s1");   // no viewer: reports, does not throw
+  await w2.deactivate("sensors");
+});
+
+test("the old inline SensorManager is gone; the boot module activates the tool; the page calls the renamed dropdown refresh", () => {
+  assert.doesNotMatch(page, /const SensorManager = \{/);
+  assert.doesNotMatch(page, /window\.SensorManager\.init\(\)|subscribeToEntitySync\(\), 200/);
+  assert.doesNotMatch(page, /_populateEntityDropdown/);
+  assert.match(page, /workspace\.activate\("sensors"\)/);
+  assert.match(page, /window\.SensorManager\.populateEntityDropdown\(\)/);
+  assert.match(page, /typeof SensorManager !== 'undefined' && SensorManager\.load\)/);
+});
