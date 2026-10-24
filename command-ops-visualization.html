@@ -21923,30 +21923,36 @@ API TIMING (avg ms):
             },
             
             /**
-             * Handle EntitySync events for SENSOR and SENSOR_ASSIGNMENT types
+             * Handle EntitySync events for SENSOR and SENSOR_ASSIGNMENT types. The event is what the entity stream delivers
+             * ({event_type, entity_id, entity_type, entity_data, ...}); scythe-web/sensorEvents.js reads it.
              */
             applyEntitySyncEvent: function(event) {
-                const entityType = event.entity?.type || event.type;
+                const events = window.ScytheSensorEvents;
+                if (!events) return;
+                const kind = events.classify(event);
                 
-                if (entityType === 'SENSOR') {
-                    if (event.event === 'DELETE') {
-                        delete this.sensors[event.entity_id];
-                        this._removeMarker(event.entity_id);
-                    } else {
-                        // CREATE or UPDATE
-                        this.sensors[event.entity_id] = event.entity;
-                    }
+                if (kind === 'sensor') {
+                    const sensor = this._normalize(events.sensorOf(event));
+                    this.sensors[sensor.sensor_id] = sensor;
                     this._updateUI();
                     this._visualize();
                     
-                } else if (entityType === 'SENSOR_ASSIGNMENT') {
-                    // Handle assignment changes
-                    const entityId = event.entity?.entity_id;
-                    const sensorId = event.entity?.sensor_id;
+                } else if (kind === 'sensor-removed') {
+                    const sensorId = events.removedSensorId(event);
+                    delete this.sensors[sensorId];
+                    Object.keys(this.assignments).forEach(entityId => {
+                        this.assignments[entityId] = this.assignments[entityId].filter(sid => sid !== sensorId);
+                    });
+                    this._removeMarker(sensorId);
+                    this._updateUI();
+                    this._visualize();
                     
-                    if (!entityId || !sensorId) return;
+                } else if (kind === 'assignment' || kind === 'assignment-removed') {
+                    const pair = events.assignmentOf(event);
+                    if (!pair) return;
+                    const { sensorId, entityId } = pair;
                     
-                    if (event.event === 'DELETE') {
+                    if (kind === 'assignment-removed') {
                         if (this.assignments[entityId]) {
                             this.assignments[entityId] = this.assignments[entityId].filter(sid => sid !== sensorId);
                         }
@@ -21958,6 +21964,7 @@ API TIMING (avg ms):
                             this.assignments[entityId].push(sensorId);
                         }
                     }
+                    this._updateUI();
                     this._visualize();
                 }
             },
@@ -21973,8 +21980,9 @@ API TIMING (avg ms):
                 
                 const self = this;
                 const applyEvent = (event) => {
-                    const entityType = event.entity?.type || event.type;
-                    if (entityType === 'SENSOR' || entityType === 'SENSOR_ASSIGNMENT') {
+                    const events = window.ScytheSensorEvents;
+                    const kind = events && events.classify(event);
+                    if (kind && kind !== 'activity') {
                         self.applyEntitySyncEvent(event);
                     }
                 };
@@ -22101,9 +22109,10 @@ API TIMING (avg ms):
                 }
                 
                 const handler = (evt) => {
-                   const entity = evt.entity || evt; // Adapt to EntitySync event format
-                   if (entity && entity.type === 'SENSOR_ACTIVITY') {
-                       this.handleActivityEvent(entity);
+                   // The entity stream's event ({event_type, entity_id, entity_type, entity_data, ...}) in the flat form handleActivityEvent reads
+                   const activity = window.ScytheSensorEvents && window.ScytheSensorEvents.activityOf(evt);
+                   if (activity) {
+                       this.handleActivityEvent(activity);
                    }
                 };
 
@@ -22415,10 +22424,10 @@ API TIMING (avg ms):
             init: function() {
                 if (typeof EntitySync !== 'undefined') {
                     const handler = (evt) => {
-                        const entity = evt.entity || evt;
-                        // Handle sensor activity edges
-                        if (entity && entity.type === 'SENSOR_ACTIVITY') {
-                            this.handleActivity(entity);
+                        // Handle sensor activity edges, in the flat form handleActivity also reads (scythe-web/sensorEvents.js)
+                        const activity = window.ScytheSensorEvents && window.ScytheSensorEvents.activityOf(evt);
+                        if (activity) {
+                            this.handleActivity(activity);
                         }
                     };
                     EntitySync.on('create', handler);
