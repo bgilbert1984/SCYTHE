@@ -191,9 +191,31 @@ Events from the WebSocket path go through the same `ingest(eventType, data)`, wh
 - Not changed: a reconnect carries no `since`, so nothing is replayed after an outage; and 15 subscriptions in the page are never removed
   (`off` now works, but no caller uses it, so subscribing twice still doubles the handlers).
 
+## Eighth tool: sensors (`scythe-web/sensorPlugin.js`)
+
+`SensorManager` (an 899-line object in `command-ops-visualization.html`) is now the `sensors` tool: the Sensors panel's list and create
+form, the REST calls, the assignments to recon entities, the sensor events from the entity stream (read by `sensorEvents.js`, see #314), and
+a marker per sensor and a line per assignment on the globe. What the panel shows is plain strings and plain data in the plugin (`render*`,
+`markerOf`, `assignmentLinks`, `flightTarget`); the page is touched only through two services in `workspaceBoot.js`: `sensorView` (the panel's
+DOM) and `sensorGlobe` (the Cesium markers, lines and camera).
+
+- Services: `httpFetch`, `operatorSession`, `entityConsole`, `reconEntities`, `entityStream` (`on` / `off` of the entity stream's handlers),
+  `sensorView`, `sensorGlobe`. `window.SensorManager` exposes the live `sensors` and `assignments` (read by the LPI, Fusion and recon code),
+  `load`, `flyTo`, `populateEntityDropdown` (renamed from `_populateEntityDropdown`), and the two methods nothing calls, `unassign` and `emitActivity`.
+- The boot module activates it. The stream subscription is made on activation and removed on deactivation (the old one never was).
+- Teardown: the panel's listeners, the stream subscription, an open assign dialog, and every marker and line are removed; a request or dialog
+  result that arrives afterwards is dropped. Sensors and assignments start empty on each activation.
+- Deliberate changes: every sensor, entity and error text that reaches HTML is escaped (the list, the group headers, the assign dialog and the
+  globe's description balloon; sensors now arrive from other operators, and the old code put their labels into `innerHTML`); the list's
+  buttons use one listener instead of being wired after every redraw.
+- Pinned, not changed (tests named `PINNED:`): the create form turns a 0 into "none", so a coordinate or frequency of exactly 0 cannot be
+  entered; an entity at latitude or longitude 0 reads as having no position (`||`, where a sensor uses `??`); an existing marker's label and type
+  are not updated, only its position; deleting a sensor leaves its assignment lines until the next redraw; moving a group swaps it with its
+  neighbour in the full order, shown or not; loading replaces the sensors but not the assignments; only the server's `error` text is read on a failed save.
+
 ## Not done
 
-- Only ADS-B, AIS streaming, chat, metrics, the metrics explorer, propagation and the entity stream use the contract, and activation is not yet driven by the operator (a panel click).
+- Only ADS-B, AIS streaming, chat, metrics, the metrics explorer, propagation, the entity stream and sensors use the contract, and activation is not yet driven by the operator (a panel click).
 - No unified transport: the tools take the realtime socket, `WebSocketSync` and `fetch` as services; they do not open their own.
 - Not run in a browser against a signed-in session; the tests cover the contract, the plugin, the boot wiring, and run the
   page's own `removeEntityMarker` against a fake collection.

@@ -7,6 +7,8 @@ import {createMetricsExplorerPlugin} from "./metricsExplorerPlugin.js";
 import {createPropagationPlugin} from "./propagationPlugin.js";
 import {createEntitySyncPlugin} from "./entitySyncPlugin.js";
 import * as sensorEvents from "./sensorEvents.js";
+import {createSensorPlugin} from "./sensorPlugin.js";
+import {escapeHtml} from "./htmlEscape.js";
 
 /**
  * Create the workspace for command-ops-visualization.html, provide the page's services, and register its tools. Nothing is
@@ -115,7 +117,16 @@ export function bootWorkspace(win) {
   const entitySync = createEntitySyncPlugin({log: win.console});
   workspace.register(entitySync.tool);
   adoptEntitySyncStub(win, entitySync.controls);
-  win.ScytheSensorEvents = sensorEvents;   // how SensorManager, LPIManager and FusionVisualization read the stream's sensor events
+  win.ScytheSensorEvents = sensorEvents;   // how LPIManager and FusionVisualization read the stream's sensor events
+
+  // --- sensors ---
+  workspace.provide("reconEntities", () => win.AutoReconVisualization?.entities || {});
+  workspace.provide("entityStream", {on: (event, handler) => win.EntitySync?.on(event, handler), off: (event, handler) => win.EntitySync?.off(event, handler)});
+  workspace.provide("sensorView", sensorView(win));
+  workspace.provide("sensorGlobe", sensorGlobe(win));
+  const sensors = createSensorPlugin({log: win.console});
+  workspace.register(sensors.tool);
+  win.SensorManager = sensors.controls;   // what the page's other modules read and call
   win.ScytheWorkspace = workspace;
   win.dispatchEvent(new win.Event("scythe:workspace_ready"));
   return workspace;
@@ -333,4 +344,166 @@ function adoptEntitySyncStub(win, controls) {
   if (!stub || !stub._stub) return;
   for (const [event, handler] of stub._queued) controls.on(event, handler);
   if (stub._pendingConnect) controls.connect(...stub._pendingConnect);
+}
+
+/** The Sensors panel's DOM, by the ids the page gives it. Every lookup happens when it is needed; a missing element is skipped. */
+function sensorView(win) {
+  const byId = (id) => win.document.getElementById(id);
+  const FORM_INPUTS = ["sensor-label", "sensor-tx-freq", "sensor-rx-freq", "sensor-tx-power", "sensor-rx-sens", "sensor-lat", "sensor-lon"];
+  let dialog = null, dialogDone = null;
+  const closeDialog = () => {
+    const open = dialog;
+    dialog = null;
+    if (open && open.parentNode) open.parentNode.removeChild(open);
+  };
+  return {
+    hasList: () => Boolean(byId("sensorList")),
+    setList(html) { const list = byId("sensorList"); if (list) list.innerHTML = html; },
+    setCount(count) { const element = byId("sensors-panel-count"); if (element) element.textContent = count; },
+    /** The create form's entity choice: "-- None --" and then one option per entity. */
+    setEntityOptions(options) {
+      const select = byId("sensor-assign-entity");
+      if (!select) return;
+      select.innerHTML = '<option value="">-- None --</option>';
+      for (const {id, label} of options) {
+        const option = win.document.createElement("option");
+        option.value = id;
+        option.textContent = label;
+        select.appendChild(option);
+      }
+    },
+    readForm: () => ({
+      label: byId("sensor-label")?.value || "", type: byId("sensor-type")?.value || "",
+      txFreq: byId("sensor-tx-freq")?.value, rxFreq: byId("sensor-rx-freq")?.value, txPower: byId("sensor-tx-power")?.value,
+      rxSens: byId("sensor-rx-sens")?.value, lat: byId("sensor-lat")?.value, lon: byId("sensor-lon")?.value,
+      assignEntity: byId("sensor-assign-entity")?.value || null,
+    }),
+    hideForm() { const form = byId("sensor-create-form"); if (form) form.style.display = "none"; },
+    clearForm() { for (const id of FORM_INPUTS) { const input = byId(id); if (input) input.value = ""; } },
+    confirm: (text) => win.confirm(text),
+    /** A modal choice of one entity; `onConfirm(entityId)` may be async, and the dialog stays until it finishes. */
+    showAssignDialog({title, options, onConfirm}) {
+      closeDialog();
+      const element = win.document.createElement("div");
+      element.className = "sensor-assign-dialog";
+      element.style.cssText = "position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);background:rgba(20,20,20,0.98);padding:16px;border-radius:8px;border:1px solid #444;z-index:99999;min-width:300px;";
+      const optionsHtml = options.map(({id, label}) => `<option value="${escapeHtml(id)}">${escapeHtml(label)}</option>`).join("");
+      element.innerHTML = `
+                    <h4 style="margin:0 0 12px 0;color:#4a9eff;">${escapeHtml(title)}</h4>
+                    <div style="margin-bottom:12px;">
+                        <label style="font-size:11px;color:#888;">Select Recon Entity</label>
+                        <select id="assign-entity-select" style="width:100%;padding:8px;background:#222;border:1px solid #444;border-radius:4px;color:#fff;">
+                            ${optionsHtml}
+                        </select>
+                    </div>
+                    <div style="display:flex;gap:8px;justify-content:flex-end;">
+                        <button class="action-button assign-cancel-btn" style="background:#444;">Cancel</button>
+                        <button class="action-button assign-confirm-btn" style="background:#4a9eff;">Assign</button>
+                    </div>
+                `;
+      win.document.body.appendChild(element);
+      dialog = element;
+      element.querySelector(".assign-cancel-btn").addEventListener("click", () => { if (dialog === element) closeDialog(); });
+      element.querySelector(".assign-confirm-btn").addEventListener("click", async () => {
+        const entityId = element.querySelector("#assign-entity-select").value;
+        try { await onConfirm(entityId); } finally { if (dialog === element) closeDialog(); }
+      });
+    },
+    /** The panel's buttons: load, the create form (open, cancel, save), and one listener on the list for its buttons. */
+    bind({load, openForm, save, track, assign, remove, moveGroup}) {
+      const bound = [];
+      const on = (element, type, handler) => {
+        if (!element) return;
+        element.addEventListener(type, handler);
+        bound.push(() => element.removeEventListener(type, handler));
+      };
+      const form = byId("sensor-create-form");
+      on(byId("sensorLoadBtn"), "click", () => load());
+      if (form) {
+        on(byId("sensorCreateBtn"), "click", () => { form.style.display = form.style.display === "none" ? "block" : "none"; openForm(); });
+        on(byId("sensor-cancel-btn"), "click", () => { form.style.display = "none"; });
+      }
+      on(byId("sensor-save-btn"), "click", () => save());
+      on(byId("sensorList"), "click", (event) => {
+        const within = (selector) => event.target?.closest?.(selector);
+        const move = within(".group-move-btn");
+        if (move) { event.stopPropagation(); moveGroup(move.getAttribute("data-group"), move.getAttribute("data-action")); return; }
+        const track_ = within(".sensor-track-btn"), assign_ = within(".sensor-assign-btn"), remove_ = within(".sensor-delete-btn");
+        if (track_) track(track_.getAttribute("data-sensor-id"));
+        else if (assign_) assign(assign_.getAttribute("data-sensor-id"));
+        else if (remove_) remove(remove_.getAttribute("data-sensor-id"));
+      });
+      return () => { for (const off of bound) off(); closeDialog(); };
+    },
+  };
+}
+
+/** The sensors' markers and assignment lines on the Cesium globe, and its camera. Nothing happens while the page has no viewer. */
+function sensorGlobe(win) {
+  const markers = new Map();   // sensor id -> Cesium entity
+  const ASSIGNMENT_PREFIX = "sensor-assignment-";
+  const removeAssignmentLines = () => {
+    win.viewer.entities.values.filter((e) => e.id && e.id.startsWith(ASSIGNMENT_PREFIX)).forEach((e) => win.viewer.entities.remove(e));
+  };
+  const removeMarker = (id) => {
+    const marker = markers.get(id);
+    if (!marker) return;
+    if (win.viewer) win.viewer.entities.remove(marker);
+    markers.delete(id);
+  };
+  return {
+    available: () => Boolean(win.viewer),
+    removeMarker,
+    /** Remove the markers of sensors that are gone (`knownIds`); move the markers that exist; add the rest. */
+    syncMarkers(list, knownIds) {
+      const {Cesium, viewer} = win;
+      for (const id of [...markers.keys()]) if (!knownIds.includes(id)) removeMarker(id);
+      const colors = {SDR: Cesium.Color.CYAN, RADAR: Cesium.Color.ORANGE, CAMERA: Cesium.Color.YELLOW, ACOUSTIC: Cesium.Color.PURPLE, SIGINT: Cesium.Color.LIME};
+      for (const m of list) {
+        const position = Cesium.Cartesian3.fromDegrees(m.lon, m.lat, 100);
+        if (markers.has(m.id)) { markers.get(m.id).position = position; continue; }
+        const color = colors[m.type] || Cesium.Color.CYAN;
+        markers.set(m.id, viewer.entities.add({
+          id: `sensor-${m.id}`, position,
+          point: {pixelSize: 14, color, outlineColor: Cesium.Color.WHITE, outlineWidth: 2},
+          label: {
+            text: m.label, font: "11px sans-serif", style: Cesium.LabelStyle.FILL_AND_OUTLINE, outlineWidth: 2,
+            verticalOrigin: Cesium.VerticalOrigin.BOTTOM, pixelOffset: new Cesium.Cartesian2(0, -18), fillColor: color, outlineColor: Cesium.Color.BLACK,
+          },
+          description: m.description,
+        }));
+      }
+    },
+    /** Replace the dashed line from each sensor to the entity it is assigned to; points under a metre apart get none. */
+    drawAssignments(links) {
+      const {Cesium, viewer} = win;
+      removeAssignmentLines();
+      for (const link of links) {
+        const entityPosition = Cesium.Cartesian3.fromDegrees(link.entity.lon, link.entity.lat, 100);
+        const sensorPosition = Cesium.Cartesian3.fromDegrees(link.sensor.lon, link.sensor.lat, 100);
+        if (Cesium.Cartesian3.distance(entityPosition, sensorPosition) < 1.0) continue;
+        viewer.entities.add({
+          id: `${ASSIGNMENT_PREFIX}${link.sensorId}-${link.entityId}`,
+          polyline: {
+            positions: [sensorPosition, entityPosition], width: 2, arcType: Cesium.ArcType.GEODESIC,
+            material: new Cesium.PolylineDashMaterialProperty({color: Cesium.Color.CYAN.withAlpha(0.6), dashLength: 16}),
+          },
+        });
+      }
+    },
+    flyTo({lat, lon, altitude}) {
+      const {Cesium} = win;
+      const options = {
+        destination: Cesium.Cartesian3.fromDegrees(lon, lat, altitude), duration: 1.5,
+        orientation: {heading: Cesium.Math.toRadians(0), pitch: Cesium.Math.toRadians(-45), roll: 0.0},
+      };
+      if (typeof win.flyToWithReset === "function") win.flyToWithReset(options);
+      else win.viewer.camera.flyTo(options);
+    },
+    /** Take down everything this drew. */
+    clear() {
+      for (const id of [...markers.keys()]) removeMarker(id);
+      if (win.viewer) removeAssignmentLines();
+    },
+  };
 }
