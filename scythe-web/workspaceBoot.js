@@ -180,7 +180,7 @@ export function bootWorkspace(win) {
   win.HierarchicalRenderManager = render.controls;   // what the page's init, the layers and the altitude call sites use
 
   // --- points of interest ---
-  workspace.provide("poiConsole", {message: (text, kind) => win.addConsoleMessage?.(text, kind)});
+  workspace.provide("poiConsole", {message: (text, kind) => win.addConsoleMessage?.(escapeHtml(text), kind)});   // the page puts console messages in as HTML; these are text (a POI's name, the server's message)
   workspace.provide("poiGlobe", poiGlobe(win));
   const poi = createPoiPlugin({log: win.console});
   workspace.register(poi.tool);

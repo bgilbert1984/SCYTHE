@@ -328,7 +328,8 @@ page is touched through `httpFetch` (the page's fetch), `poiGlobe` (the Cesium d
 - Pinned, not changed (tests named `PINNED:`): a POI at latitude or longitude 0 gets no pin (though "fly to all" still counts it); showing or hiding the labels,
   or reloading, recreates every entity, so a hidden category's pins come back while its checkbox state stays; loading stops at the first POI whose
   description cannot be built; deleting does not reload, so the category counts stay as they were; a delete that fails on the network is only logged.
-- Not changed, and still unescaped: the panel's list (`updatePOIList` in the page) writes each POI's name and category into `innerHTML` as they are.
+- The panel's list and category filters (page code) and the console messages carrying a POI's name or the server's message escape what they show; the filter's inline handler is given the
+  category as a JSON string (HTML-escaping alone is undone by the browser before the script runs), and the list's buttons are given the id as a number.
 
 ## Not done
 
