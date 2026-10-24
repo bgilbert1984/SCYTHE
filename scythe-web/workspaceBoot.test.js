@@ -2070,3 +2070,149 @@ test("the render globe's clustered data sources are CustomDataSources added to t
   assert.deepEqual(dataSources, []);
   assert.equal(listeners.size, 0);
 });
+
+// --- points of interest ---
+
+function poiWindow({pois = [], ensureCameraFree} = {}) {
+  const drawn = [], sources = [], flights = {entity: [], sphere: []}, messages = [], requests = [];
+  const controller = {enableRotate: false, enableTilt: false, enableZoom: false, enableTranslate: false, enableLook: false};
+  const sourceEntities = {
+    values: [], add(spec) { const e = {...spec}; this.values.push(e); return e; },
+    removeAll() { this.values = []; }, remove(e) { assert.ok(this.values.includes(e)); this.values.splice(this.values.indexOf(e), 1); },
+  };
+  const viewer = {
+    dataSources: {add: (s) => sources.push(s), contains: (s) => sources.includes(s), remove(s) { assert.ok(sources.includes(s), "removed a data source that is not in the viewer"); sources.splice(sources.indexOf(s), 1); }},
+    scene: {screenSpaceCameraController: controller}, trackedEntity: "something",
+    flyTo(entity, options) { let done; const promise = new Promise((r) => { done = r; }); flights.entity.push({entity, options, done}); return promise; },
+    camera: {
+      lookAtTransform(matrix) { this.looked = matrix; },
+      flyToBoundingSphere(sphere, options) { flights.sphere.push({sphere, options}); },
+    },
+  };
+  const gradient = {stops: [], addColorStop(at, color) { this.stops.push([at, color]); }};
+  const canvas = {
+    getContext: () => new Proxy({}, {get: (t, name) => (name === "createRadialGradient" ? () => gradient : (...a) => { drawn.push([name, ...a]); }), set: (t, name, v) => { drawn.push(["set", name, v]); return true; }}),
+    toDataURL: () => "data:pin", width: 0, height: 0,
+  };
+  const Cesium = {
+    Color: Object.fromEntries(["RED", "MAROON", "YELLOW", "WHITE", "BLACK"].map((n, i) => [n, {name: n, red: [1, 0.5, 1, 1, 0][i], green: [0, 0, 1, 1, 0][i], blue: [0, 0, 0, 1, 0][i]}])),
+    CustomDataSource: class { constructor(name) { this.name = name; this.entities = sourceEntities; this.show = true; } },
+    Cartesian3: {fromDegrees: (lon, lat, alt) => ({lon, lat, alt})},
+    Cartesian2: class { constructor(x, y) { this.x = x; this.y = y; } },
+    NearFarScalar: class { constructor(...a) { this.args = a; } },
+    HeadingPitchRange: class { constructor(h, p, r) { this.h = h; this.p = p; this.r = r; } },
+    BoundingSphere: {fromPoints: (points) => ({points, radius: 1000})},
+    Matrix4: {IDENTITY: "identity"},
+    VerticalOrigin: {BOTTOM: "bottom", TOP: "top"}, HeightReference: {CLAMP_TO_GROUND: "clamp"}, LabelStyle: {FILL_AND_OUTLINE: "fill"},
+  };
+  const win = fakeWindow({
+    setInterval: () => 1, clearInterval() {}, setTimeout: () => 1, clearTimeout() {},
+    Cesium, viewer, document: {createElement: () => canvas}, ensureCameraFree,
+    addConsoleMessage: (text, kind) => messages.push([text, kind]),
+    fetch: async (url, init) => { requests.push([url, init && init.method]); return {json: async () => ({status: "ok", pois, categories: {}})}; },
+  });
+  return {win, viewer, sources, sourceEntities, flights, messages, requests, controller, drawn, gradient, canvas};
+}
+
+test("booting registers the poi tool inactive and exposes it as window.POIVisualization", () => {
+  const {win} = poiWindow();
+  const workspace = bootWorkspace(win);
+  assert.equal(workspace.state("poi"), "inactive");
+  assert.deepEqual(win.POIVisualization.pois, []);
+  assert.equal(win.POIVisualization.visible, true);
+});
+
+test("the POI globe adds a 'POIs' data source, draws a pin and a label per POI with the old properties, and removes the layer with the tool", async () => {
+  const {win, viewer, sources, sourceEntities, messages, requests, drawn, canvas} = poiWindow({pois: [{id: 1, name: "Tower", latitude: 36, longitude: -86, altitude: 5, category: "military"}]});
+  const workspace = bootWorkspace(win);
+  await workspace.activate("poi");
+  win.POIVisualization.initialize(viewer);
+  await new Promise((r) => setImmediate(r));
+  assert.deepEqual(sources.map((s) => s.name), ["POIs"]);
+  assert.deepEqual(requests, [["/api/poi/visualization", undefined]]);
+  assert.deepEqual(messages[0], ["Loading Points of Interest...", "info"]);
+  const [entity] = sourceEntities.values;
+  assert.equal(entity.id, "poi_1");
+  assert.deepEqual(entity.position, {lon: -86, lat: 36, alt: 5});
+  assert.deepEqual([entity.billboard.image, entity.billboard.verticalOrigin, entity.billboard.heightReference, entity.billboard.scale], ["data:pin", "bottom", "clamp", 0.8]);
+  assert.equal(entity.billboard.disableDepthTestDistance, Number.POSITIVE_INFINITY);
+  assert.deepEqual([entity.label.text, entity.label.font, entity.label.verticalOrigin, entity.label.outlineWidth], ["Tower", "12px sans-serif", "top", 2]);
+  assert.deepEqual([entity.label.pixelOffset.x, entity.label.pixelOffset.y], [0, 10]);
+  assert.deepEqual(entity.label.scaleByDistance.args, [1.5e2, 1.0, 1.5e7, 0.3]);
+  assert.deepEqual(entity.properties, {poiId: 1, category: "military", sourceFile: undefined, metadata: undefined});
+  assert.deepEqual([canvas.width, canvas.height], [48, 48]);
+  // the pin is drawn at 48x48 from the maroon icon colour: gradient stops 0.5 * 255 and 0.5 * 180, floored
+  assert.deepEqual(drawn.find((d) => d[0] === "moveTo"), ["moveTo", 24, 48]);
+  assert.deepEqual(drawn.filter((d) => d[0] === "arc"), [["arc", 24, 16, 16, Math.PI, 0, false], ["arc", 24, 16, 6, 0, 2 * Math.PI]]);
+  win.POIVisualization.toggleLabels(false);
+  assert.equal(sourceEntities.values[0].label, undefined);
+  win.POIVisualization.setVisible(false);
+  assert.equal(sources[0].show, false);
+  await workspace.deactivate("poi");
+  assert.deepEqual(sources, []);
+});
+
+test("the pin gradient runs from the colour to 180/255 of it, and the data source is not removed twice", async () => {
+  const {win, viewer, sources, gradient} = poiWindow({pois: [{id: 1, name: "T", latitude: 1, longitude: 2, category: "military"}]});
+  const workspace = bootWorkspace(win);
+  await workspace.activate("poi");
+  win.POIVisualization.initialize(viewer);
+  await new Promise((r) => setImmediate(r));
+  assert.deepEqual(gradient.stops, [[0, "rgba(127, 0, 0, 1)"], [1, "rgba(90, 0, 0, 1)"]]);   // MAROON in the fake is half red
+  sources.length = 0;   // the page took it out itself
+  assert.deepEqual(await workspace.deactivate("poi"), []);   // no cleanup failed
+  assert.deepEqual(sources, []);
+});
+
+test("the POI globe's flight to a pin: offset 100 km, then the camera is given back", async () => {
+  const {win, viewer, flights, controller} = poiWindow({pois: [{id: 1, name: "Tower", latitude: 36, longitude: -86, category: "military"}]});
+  const workspace = bootWorkspace(win);
+  await workspace.activate("poi");
+  win.POIVisualization.initialize(viewer);
+  await new Promise((r) => setImmediate(r));
+  win.POIVisualization.flyToPOI(1);
+  const [flight] = flights.entity;
+  assert.equal(flight.entity.id, "poi_1");
+  assert.deepEqual([flight.options.duration, flight.options.offset.h, flight.options.offset.p, flight.options.offset.r], [2.0, 0, -Math.PI / 4, 100000]);
+  assert.deepEqual(Object.values(controller), [false, false, false, false, false]);
+  flight.done();
+  await new Promise((r) => setImmediate(r));
+  assert.equal(viewer.camera.looked, "identity");
+  assert.equal(viewer.trackedEntity, undefined);
+  assert.deepEqual(Object.values(controller), [true, true, true, true, true]);
+});
+
+test("the POI globe's flight to all pins: a bounding sphere, 2.5 radii out, then the page's ensureCameraFree if it has one, else a manual reset", async () => {
+  for (const withPage of [true, false]) {
+    let freed = 0;
+    const {win, viewer, flights, controller} = poiWindow({pois: [{id: 1, name: "A", latitude: 36, longitude: -86, category: "x"}, {id: 2, name: "B", latitude: 35, longitude: -85, altitude: 9, category: "x"}], ensureCameraFree: withPage ? () => { freed++; } : undefined});
+    const workspace = bootWorkspace(win);
+    await workspace.activate("poi");
+    win.POIVisualization.initialize(viewer);
+    await new Promise((r) => setImmediate(r));
+    win.POIVisualization.flyToAllPOIs();
+    const [{sphere, options}] = flights.sphere;
+    assert.deepEqual(sphere.points, [{lon: -86, lat: 36, alt: 0}, {lon: -85, lat: 35, alt: 9}]);
+    assert.deepEqual([options.duration, options.offset.r], [2.5, 2500]);
+    options.complete();
+    assert.equal(freed, withPage ? 1 : 0);
+    assert.equal(viewer.camera.looked, withPage ? undefined : "identity");
+    assert.equal(viewer.trackedEntity, withPage ? "something" : undefined);
+    assert.deepEqual(Object.values(controller), [true, true, true, true, true]);   // always
+  }
+});
+
+test("the POI globe takes a deleted POI's pin off the layer, and a hidden category's pins are hidden", async () => {
+  const {win, viewer, sourceEntities} = poiWindow({pois: [
+    {id: 1, name: "A", latitude: 36, longitude: -86, category: "military"}, {id: 2, name: "B", latitude: 35, longitude: -85, category: "imported"}]});
+  win.fetch = async (url, init) => ({json: async () => (init && init.method === "DELETE" ? {status: "ok"} : {status: "ok", pois: [
+    {id: 1, name: "A", latitude: 36, longitude: -86, category: "military"}, {id: 2, name: "B", latitude: 35, longitude: -85, category: "imported"}], categories: {}})});
+  const workspace = bootWorkspace(win);
+  await workspace.activate("poi");
+  win.POIVisualization.initialize(viewer);
+  await new Promise((r) => setImmediate(r));
+  win.POIVisualization.setCategoryVisible("imported", false);
+  assert.deepEqual(sourceEntities.values.map((e) => [e.id, e.show]), [["poi_1", undefined], ["poi_2", false]]);
+  assert.equal(await win.POIVisualization.deletePOI(1), true);
+  assert.deepEqual(sourceEntities.values.map((e) => e.id), ["poi_2"]);
+});

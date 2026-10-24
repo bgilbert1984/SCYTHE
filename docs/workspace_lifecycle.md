@@ -310,9 +310,29 @@ This is the first extraction where the page's remaining objects, not another too
 - While the tool is inactive `viewer` is null, `createClusteredDataSource` returns null (so the layers skip clustering, as they did before `initialize`),
   and `updateVisibilityForAltitude` does nothing. `window.hierarchicalRenderer`, which the metrics gauge reads, is still set by the page's init.
 
+## Fourteenth tool: points of interest (`scythe-web/poiPlugin.js`)
+
+`POIVisualization` (a 370-line object in `command-ops-visualization.html`) is now the `poi` tool. Once the page has handed over its viewer with
+`initialize(viewer)` it loads the POIs from `/api/poi/visualization`, draws a pin and a label for each, and answers the POI panel: show or hide all pins,
+the labels, or one category; fly to one pin or to all; add, delete, reload. The panel's own code (the list, the counts, the category filters, the add
+form, the KMZ import) is still in the page and reads `pois`, `categories`, `visible` and `categoryVisibility` from `window.POIVisualization`, which the
+boot module sets to the tool's controls. What is decided is plain data in the plugin (`pinColorName`, `parseMetadata`, `describePoi`, `entitySpec`); the
+page is touched through `httpFetch` (the page's fetch), `poiGlobe` (the Cesium data source, the pins, the two flights and the pin icon) and `poiConsole`
+(the console messages).
+
+- Deactivating takes the "POIs" data source off the viewer with every pin, and an answer from the server that arrives afterwards changes nothing. A viewer
+  handed over before the tool is active is kept and used when it activates.
+- The name, description, category, source file and times a POI carries are escaped where they reach the entity's description (HTML): they come from the
+  server's POI store and from KMZ files an operator imports.
+- Removed as dead after a repository search: `getStatus`, `CATEGORY_COLORS` (worked out per pin and never read) and the `window.poiViz` alias (written, never read).
+- Pinned, not changed (tests named `PINNED:`): a POI at latitude or longitude 0 gets no pin (though "fly to all" still counts it); showing or hiding the labels,
+  or reloading, recreates every entity, so a hidden category's pins come back while its checkbox state stays; loading stops at the first POI whose
+  description cannot be built; deleting does not reload, so the category counts stay as they were; a delete that fails on the network is only logged.
+- Not changed, and still unescaped: the panel's list (`updatePOIList` in the page) writes each POI's name and category into `innerHTML` as they are.
+
 ## Not done
 
-- Only ADS-B, AIS streaming, chat, metrics, the metrics explorer, propagation, the entity stream, sensors, the fusion overlays, the viewsheds, LPI, operator presence and the level-of-detail manager use the contract, and activation is not yet driven by the operator (a panel click).
+- Only ADS-B, AIS streaming, chat, metrics, the metrics explorer, propagation, the entity stream, sensors, the fusion overlays, the viewsheds, LPI, operator presence and the level-of-detail manager and the points of interest use the contract, and activation is not yet driven by the operator (a panel click).
 - No unified transport: the tools take the realtime socket, `WebSocketSync` and `fetch` as services; they do not open their own.
 - Not run in a browser against a signed-in session; the tests cover the contract, the plugin, the boot wiring, and run the
   page's own `removeEntityMarker` against a fake collection.
