@@ -28,7 +28,7 @@ await workspace.activate("adsb");  await workspace.deactivate("adsb");  await wo
 - **Services are declared:** a tool can only `ctx.services.get()` what it listed in `requires`, and is refused (nothing of it
   runs) while one is missing.
 
-## Scope helpers on `ctx` (draft, see #301)
+## Scope helpers on `ctx` (API v1)
 
 `ctx` is also a *scope*: it owns an abort signal and the resources taken under it. Helpers so a tool cannot forget the
 bookkeeping the first three tools each did by hand:
@@ -45,6 +45,10 @@ bookkeeping the first three tools each did by hand:
 Order and timing: teardown aborts the signal first, then runs the tool's `deactivate()` hook, then the cleanups last-registered
 first. Aborting is synchronous; releasing resources is awaited, so a "closed" assertion must await. A resource registered after
 its scope closed is undone at once. Closing twice runs each cleanup once.
+
+This API is treated as v1: the names (`listen`, `guard`, `interval`, `timeout`, `scope`), the child-scope `AggregateError` policy and the
+frozen `ctx` were decided in #301, and change only if migrating the remaining tools exposes a real ergonomic problem, not for
+terminology.
 
 ADS-B and chat use the helpers; AIS does not yet (its in-flight start still needs an explicit `ctx.signal.aborted` check).
 
