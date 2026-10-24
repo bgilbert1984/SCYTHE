@@ -42,7 +42,7 @@ export function createAisStreamPlugin({log = console, now = () => Date.now(), zo
       const api = ctx.services.get("aisApi");
       const sink = ctx.services.get("vesselSink");
       const notify = ctx.services.get("notify");
-      const state = {live: true, active: false, starting: false, bbox: null, lastUpdate: 0};
+      const state = {active: false, starting: false, bbox: null, lastUpdate: 0};
 
       const nearEnough = () => {
         const altitude = camera.altitude();
@@ -50,12 +50,14 @@ export function createAisStreamPlugin({log = console, now = () => Date.now(), zo
       };
 
       async function startStreaming() {
-        if (!state.live || state.active || state.starting) return;
+        if (state.active || state.starting) return;
         state.starting = true;
         try {
           const bbox = camera.boundingBox() || WORLD_BBOX;
           const data = await api.start(bbox);
-          if (!state.live) {                     // deactivated while the request was in flight: undo what it just started
+          if (ctx.signal.aborted) {              // deactivated while the request was in flight: undo what it just started
+            // The one place a tool must check the signal itself: the helpers can drop a late callback, but only the tool knows
+            // that this late *answer* means something was started on the server and has to be undone.
             await api.stop().catch((error) => log.warn?.("[AISStream] could not stop a stream started during deactivation:", error));
             return;
           }
@@ -89,26 +91,23 @@ export function createAisStreamPlugin({log = console, now = () => Date.now(), zo
       }
 
       function onCameraChange() {
-        if (!state.live || !state.active) return;
+        if (!state.active) return;
         if (now() - state.lastUpdate < updateThrottle) return;
         if (nearEnough()) updateBoundingBox();
         // Zoomed out: nothing. See the header note.
       }
 
-      const onVessel = (vessel) => { if (state.live) sink.upsert(vessel); };
-      const onConnected = () => { log.log?.("[AISStream] WebSocket connected"); run?.checkAndStart(); };
+      // Late events after deactivation are dropped by the guards where one is needed (a vessel, a camera move); `run` is nulled
+      // first, which already stops the rest. Resources are released by the helpers, last registered first: the camera listener,
+      // then the socket and sync listeners, then the server's stream.
+      const onVessel = ctx.guard((vessel) => sink.upsert(vessel));
+      const onConnected = () => { log.log?.("[AISStream] WebSocket connected"); run?.checkAndStart(); };   // `run` is already null once deactivation starts
 
-      // Cleanups run last-registered first: stop accepting, stop listening, then stop the server's stream.
       ctx.onCleanup(() => stopServerStream());
-      sync.on("connected", onConnected);
-      ctx.onCleanup(() => sync.off("connected", onConnected));
-      if (socket) {
-        socket.on("ais_update", onVessel);
-        ctx.onCleanup(() => socket.off("ais_update", onVessel));
-      }
-      const stopFollowing = camera.onChange(onCameraChange);
-      ctx.onCleanup(() => stopFollowing());
-      ctx.onCleanup(() => { state.live = false; run = null; });
+      ctx.listen(sync, "connected", onConnected);
+      if (socket) ctx.listen(socket, "ais_update", onVessel);
+      ctx.onCleanup(camera.onChange(ctx.guard(onCameraChange)));
+      ctx.onCleanup(() => { run = null; });
 
       run = {
         checkAndStart: () => { if (nearEnough()) return startStreaming(); },
