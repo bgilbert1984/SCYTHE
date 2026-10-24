@@ -18830,29 +18830,16 @@ const originalComplete = options.complete;
                     });
                 }
 
-                // Listen for ADS-B aircraft updates (Safari) — mirrors ais_update.
-                // The server also pushes an adsb_snapshot on connect.
-                if (WebSocketSync.socket) {
-                    WebSocketSync.socket.on('adsb_update', function(track) {
-                        self.handleAircraftUpdate(track);
+                // ADS-B is a workspace tool (scythe-web/adsbPlugin.js): activated here so behaviour is unchanged,
+                // but it now has a deactivate that stops listening and removes the aircraft it drew.
+                const activateAdsb = function() {
+                    window.ScytheWorkspace.activate('adsb').catch(function(e) {
+                        console.warn('[ADS-B] activation failed:', e);
                     });
-                    WebSocketSync.socket.on('adsb_snapshot', function(data) {
-                        (data.tracks || []).forEach(function(track) {
-                            self.handleAircraftUpdate(track);
-                        });
-                    });
-                }
+                };
+                if (window.ScytheWorkspace) activateAdsb();
+                else window.addEventListener('scythe:workspace_ready', activateAdsb, { once: true });
 
-                // REST fallback: seed aircraft from the latest tracks snapshot
-                fetch('/api/adsb/tracks').then(function(r) { return r.json(); })
-                    .then(function(d) {
-                        (d.tracks || []).forEach(function(track) {
-                            self.handleAircraftUpdate(track);
-                        });
-                    }).catch(function(e) {
-                        console.debug('[ADS-B] tracks seed failed:', e);
-                    });
-                
                 // Monitor camera changes to update bounding box
                 if (viewer && viewer.camera) {
                     viewer.camera.changed.addEventListener(function() {
@@ -18971,29 +18958,6 @@ const originalComplete = options.complete;
                 }
             },
             
-            // Handle real-time ADS-B aircraft update (Safari) — mirrors handleVesselUpdate.
-            // Shapes the track as a recon entity so the existing aircraft renderer
-            // (triangle icon + altitude line for ontology including 'aircraft') picks it up.
-            // QUARANTINE: viz content only, never measurement evidence.
-            handleAircraftUpdate: function(track) {
-                if (!track || !track.icao) return;
-                var entity = {
-                    entity_id: 'adsb_' + track.icao,
-                    name: track.callsign || track.icao,
-                    location: {
-                        lat: track.lat,
-                        lon: track.lon,
-                        altitude_m: (track.alt_ft || 0) * 0.3048
-                    },
-                    ontology: ['aircraft', 'ads-b', 'safari'],
-                    disposition: 'NEUTRAL',
-                    source: 'adsb-live'
-                };
-                if (window.AutoReconVisualization && AutoReconVisualization.addEntityMarker) {
-                    AutoReconVisualization.addEntityMarker(entity);
-                }
-            },
-
             // Handle real-time vessel update from WebSocket
             handleVesselUpdate: function(vessel) {
                 if (!vessel || !vessel.mmsi) return;
@@ -20879,6 +20843,19 @@ const originalComplete = options.complete;
                 return colors[threat] || '#AAAAAA';
             },
             
+            // Remove one entity's markers (billboard, altitude line, threat ring), wherever they were added.
+            removeEntityMarker: function(entityId) {
+                const collections = [this.dataSource && this.dataSource.entities, this.viewer && this.viewer.entities].filter(Boolean);
+                const byId = collections.map(function(c) { return c.getById('recon_entity_' + entityId); }).filter(Boolean);
+                const keyed = [entityId, entityId + '_alt', entityId + '_threat'].map(function(k) { return this.entityMarkers[k]; }, this).filter(Boolean);
+                new Set(byId.concat(keyed)).forEach(function(marker) {
+                    collections.forEach(function(c) { if (c.contains(marker)) c.remove(marker); });
+                });
+                delete this.entityMarkers[entityId];
+                delete this.entityMarkers[entityId + '_alt'];
+                delete this.entityMarkers[entityId + '_threat'];
+            },
+
             clearAllEntities: function() {
                 // Clear from clustered data source if available
                 if (this.dataSource) {
@@ -44037,6 +44014,12 @@ ${unconfirmedBanner}
         const anchor = document.getElementById(id);
         if (anchor) anchor.href = deepLink(target, context, "ops");
     }
+</script>
+<script type="module">
+    // Workspace tools (scythe-web/lifecycle.js): registers the tools and provides their services. Tools are activated by the
+    // page code that used to start them; see AISStreamManager.init for ADS-B.
+    import { bootWorkspace } from "./scythe-web/workspaceBoot.js";
+    bootWorkspace(window);
 </script>
 </body>
 </html>
