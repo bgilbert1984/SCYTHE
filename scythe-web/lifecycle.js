@@ -7,7 +7,11 @@
  * - `activate(ctx)` wakes the tool. `ctx.services.get(name)` returns a service the workspace provides (a tool lists the
  *   ones it needs in `requires`, and activation is refused while one is missing). `ctx.onCleanup(fn)` registers undo work
  *   at the moment a resource is taken, so teardown does not depend on the tool remembering what it opened.
- * - `deactivate()` is optional extra teardown. Registered cleanups run after it, last registered first.
+ * - `ctx` is also a *scope* (see makeScope): `ctx.signal` is aborted when the tool deactivates; `ctx.guard(fn)`, `ctx.listen(...)`,
+ *   `ctx.interval(...)`, `ctx.timeout(...)` do the subscribe/guard/clear bookkeeping so a tool cannot forget it; `ctx.scope()` makes a
+ *   child scope for something that is opened and closed on its own (a connection, a request).
+ * - Teardown order: the signal is aborted first (guarded callbacks stop), then the optional `deactivate()` hook runs, then the
+ *   registered cleanups, last registered first.
  * - `dispose()` is optional and runs once, after deactivation, when the tool is retired for good.
  *
  * States: inactive -> activating -> active -> deactivating -> inactive, and disposed (terminal). Activating an active tool
@@ -38,7 +42,65 @@ function checkDefinition(def) {
   });
 }
 
-export function createWorkspace({log = console} = {}) {
+
+/**
+ * A scope owns resources and the abort signal that says "stop": the activation is the root scope and `ctx.scope()`
+ * makes child scopes (a connection, a request). Closing a scope aborts its signal first, so guarded callbacks stop, then runs
+ * its cleanups last-registered first and closes its children.
+ */
+function makeScope({timers, log}) {
+  const controller = new AbortController();
+  const cleanups = [];
+  const scope = {
+    signal: controller.signal,
+    onCleanup(fn) {
+      if (typeof fn !== "function") throw new TypeError("onCleanup needs a function");
+      if (controller.signal.aborted) { Promise.resolve().then(fn); return; }   // taken after close: undo at once
+      cleanups.push(fn);
+    },
+    // Subscribe and register the unsubscribe in one step. Works for on/off emitters and DOM-style targets.
+    listen(target, event, fn, options) {
+      const dom = typeof target.addEventListener === "function";
+      dom ? target.addEventListener(event, fn, options) : target.on(event, fn);
+      scope.onCleanup(() => (dom ? target.removeEventListener(event, fn, options) : target.off(event, fn)));
+      return fn;
+    },
+    // A callback that does nothing once this scope is closed: late events, late promise continuations.
+    guard: (fn) => (...args) => (controller.signal.aborted ? undefined : fn(...args)),
+    interval(fn, ms) {
+      const id = timers.setInterval(scope.guard(fn), ms);
+      const stop = () => timers.clearInterval(id);
+      scope.onCleanup(stop);
+      return stop;
+    },
+    timeout(fn, ms) {
+      const id = timers.setTimeout(scope.guard(fn), ms);
+      const stop = () => timers.clearTimeout(id);
+      scope.onCleanup(stop);
+      return stop;
+    },
+    scope() {
+      const child = makeScope({timers, log});
+      scope.onCleanup(async () => {                // surface the child's failures through the parent's teardown
+        const errors = await child.close();
+        if (errors.length) throw errors.length === 1 ? errors[0] : new AggregateError(errors, "child scope cleanup failed");
+      });
+      return child;
+    },
+    abort: () => controller.abort(),
+    async close() {
+      controller.abort();
+      const errors = [];
+      for (const fn of cleanups.splice(0).reverse()) {
+        try { await fn(); } catch (error) { errors.push(error); log.warn?.("[workspace] cleanup failed", error); }
+      }
+      return errors;
+    },
+  };
+  return scope;
+}
+
+export function createWorkspace({log = console, timers = globalThis} = {}) {
   const services = new Map();
   const tools = new Map();   // id -> record, in registration order
 
@@ -58,9 +120,12 @@ export function createWorkspace({log = console} = {}) {
   }
 
   async function teardown(rec) {
-    const cleanups = rec.cleanups.splice(0).reverse();
-    const steps = rec.def.deactivate ? [() => rec.def.deactivate(), ...cleanups] : cleanups;
-    return runAll(rec.def.id, steps);
+    const scope = rec.scope;
+    if (!scope) return [];
+    rec.scope = null;
+    scope.abort();                                              // stop guarded callbacks before anything is undone
+    const errors = rec.def.deactivate ? await runAll(rec.def.id, [() => rec.def.deactivate()]) : [];
+    return [...errors, ...await scope.close()];
   }
 
   async function doActivate(rec) {
@@ -69,16 +134,15 @@ export function createWorkspace({log = console} = {}) {
     if (missing.length) throw new Error(`tool ${def.id} needs services that are not provided: ${missing.join(", ")}`);
     rec.state = STATES.ACTIVATING;
     rec.error = null;
+    const scope = makeScope({timers, log});
+    rec.scope = scope;
     const ctx = Object.freeze({
+      ...scope,
       id: def.id,
       services: Object.freeze({get: (name) => {
         if (!def.requires.includes(name)) throw new Error(`tool ${def.id} did not declare service ${name} in requires`);
         return services.get(name);
       }}),
-      onCleanup: (fn) => {
-        if (typeof fn !== "function") throw new TypeError("onCleanup needs a function");
-        rec.cleanups.push(fn);
-      },
     });
     try {
       await def.activate(ctx);
@@ -141,7 +205,7 @@ export function createWorkspace({log = console} = {}) {
     register(definition) {
       const def = checkDefinition(definition);
       if (tools.has(def.id)) throw new Error(`tool already registered: ${def.id}`);
-      tools.set(def.id, {def, state: STATES.INACTIVE, cleanups: [], pending: null, error: null});
+      tools.set(def.id, {def, state: STATES.INACTIVE, scope: null, pending: null, error: null});
     },
     activate,
     deactivate,

@@ -44,35 +44,21 @@ export function createAdsbPlugin({log = console} = {}) {
       const socket = ctx.services.get("realtimeSocket")();
       const fetchJson = ctx.services.get("fetchJson");
       const drawn = new Set();
-      let live = true;
 
-      const ingest = (track) => {
-        if (!live) return;
+      const ingest = ctx.guard((track) => {
         const entity = trackToEntity(track);
         if (!entity) return;
         drawn.add(entity.entity_id);
         sink.upsert(entity);
-      };
+      });
       const onSnapshot = (data) => { for (const track of (data && data.tracks) || []) ingest(track); };
 
-      // Cleanups run last-registered first: stop accepting, then stop listening, then remove what was drawn.
-      ctx.onCleanup(() => {
-        for (const id of drawn) sink.remove(id);
-        drawn.clear();
-      });
-      if (socket) {
-        socket.on("adsb_update", ingest);
-        socket.on("adsb_snapshot", onSnapshot);
-        ctx.onCleanup(() => { socket.off("adsb_update", ingest); socket.off("adsb_snapshot", onSnapshot); });
-      } else {
-        log.debug?.("[ADS-B] no realtime socket yet; seeding from REST only");
-      }
-      ctx.onCleanup(() => { live = false; });
+      ctx.onCleanup(() => { for (const id of drawn) sink.remove(id); drawn.clear(); });
+      if (socket) { ctx.listen(socket, "adsb_update", ingest); ctx.listen(socket, "adsb_snapshot", onSnapshot); }
+      else log.debug?.("[ADS-B] no realtime socket yet; seeding from REST only");
 
-      // REST seed. Not awaited: activation should not wait on the network. A result that arrives after
-      // deactivation is dropped by `live`.
       Promise.resolve().then(() => fetchJson(TRACKS_URL))
-        .then((body) => { for (const track of (body && body.tracks) || []) ingest(track); })
+        .then(ctx.guard((body) => { for (const track of (body && body.tracks) || []) ingest(track); }))
         .catch((error) => log.debug?.("[ADS-B] tracks seed failed:", error));
     },
   };

@@ -9,7 +9,10 @@ import {createChatPlugin} from "./chatPlugin.js";
  * Services read the page's globals at call time because the renderer and socket are created after this module loads.
  */
 export function bootWorkspace(win) {
-  const workspace = createWorkspace({log: win.console});
+  const workspace = createWorkspace({log: win.console, timers: {   // read from the window at call time (the tests fake them)
+    setInterval: (fn, ms) => win.setInterval(fn, ms), clearInterval: (id) => win.clearInterval(id),
+    setTimeout: (fn, ms) => win.setTimeout(fn, ms), clearTimeout: (id) => win.clearTimeout(id),
+  }});
   workspace.provide("entityMarkers", {
     upsert: (entity) => win.AutoReconVisualization?.addEntityMarker?.(entity),
     remove: (entityId) => win.AutoReconVisualization?.removeEntityMarker?.(entityId),
@@ -65,10 +68,6 @@ export function bootWorkspace(win) {
 
   // --- chat ---
   workspace.provide("openEventSource", (url) => new win.EventSource(url));   // read at call time: the page wraps EventSource for instance scoping
-  workspace.provide("timers", {
-    setInterval: (fn, ms) => win.setInterval(fn, ms), clearInterval: (id) => win.clearInterval(id),
-    setTimeout: (fn, ms) => win.setTimeout(fn, ms), clearTimeout: (id) => win.clearTimeout(id),
-  });
   workspace.provide("chatView", chatView(win));
   workspace.provide("roomChanges", roomChanges(win));
   const chat = createChatPlugin({log: win.console});
