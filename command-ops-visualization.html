@@ -20440,7 +20440,7 @@ API TIMING (avg ms):
         // =====================================================================
 
         // FusionVisualization is the 'fusion' workspace tool (scythe-web/fusionPlugin.js), activated by the boot module at the end of this page.
-        // window.FusionVisualization was never assigned, so the PCAP demo's calls to it (below) still do nothing.
+        // The boot module also sets window.FusionVisualization (updateGeoNode, drawFlow), which the PCAP simulation below calls.
 
         // =====================================================================
         // PERSISTENT METRICS LOGGING SYSTEM

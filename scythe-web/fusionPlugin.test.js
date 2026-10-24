@@ -94,7 +94,13 @@ const activity = (kind, payload, sensorId = "s1", entityType = "SENSOR_ACTIVITY"
   event_type: "CREATE", entity_id: `activity:${sensorId}:1`, entity_type: entityType, entity_data: {sensor_id: sensorId, kind, payload}, sequence_id: 1,
 });
 
-function setup({sensors = {s1: {lat: 36, lon: -86, alt: 100}, s2: {lat: 36.1, lon: -86.1, alt: 5}}, globeAvailable = true} = {}) {
+function setupControls(options) {
+  const plugin = createFusionPlugin({log: quiet});
+  const t = setup({...options, plugin});
+  return {...t, controls: plugin.controls};
+}
+
+function setup({plugin, sensors = {s1: {lat: 36, lon: -86, alt: 100}, s2: {lat: 36.1, lon: -86.1, alt: 5}}, globeAvailable = true} = {}) {
   const state = {stream: new Map(), globe: [], sensors, globeAvailable};
   const globe = {available: () => state.globeAvailable, clear: () => state.globe.push(["clear"])};
   for (const name of ["drawAoa", "drawTdoa", "drawFlow", "drawGeoNode"]) globe[name] = (spec) => state.globe.push([name, spec]);
@@ -105,7 +111,7 @@ function setup({sensors = {s1: {lat: 36, lon: -86, alt: 100}, s2: {lat: 36.1, lo
   });
   workspace.provide("fusionData", {sensor: (id) => state.sensors[id]});
   workspace.provide("fusionGlobe", globe);
-  workspace.register(createFusionPlugin({log: quiet}).tool);
+  workspace.register((plugin || createFusionPlugin({log: quiet})).tool);
   const emit = (event) => { for (const h of state.stream.get(event.event_type.toLowerCase()) || []) h(event); };
   return {workspace, state, emit};
 }
@@ -280,4 +286,70 @@ test("events after deactivation are ignored, and a new activation starts with no
   await up(t);
   t.emit(activity("ndpi_flow_aggregate", {src_ip: "8.8.8.8", dst_ip: "10.0.0.1", bytes: 1, protocol_hist: {TLS: 1}}));
   assert.deepEqual(drawn(t), []);
+});
+
+// --- the controls the PCAP simulation calls ---
+
+const demoGeo = (ip, lat, lon, city) => ({ip, geo: {lat, lon, city, country: "US"}, asn: {asn: 1, org: "x"}});
+const demoFlow = (src, dst, bytes, proto) => ({src_ip: src, dst_ip: dst, bytes, protocol_hist: proto, timestamp: 1700000000});
+
+test("the controls do nothing while the tool is inactive", async () => {
+  const t = setupControls();
+  assert.equal(t.controls.updateGeoNode(demoGeo("8.8.8.8", 1, 2, "X")), undefined);
+  assert.equal(t.controls.drawFlow("s", demoFlow("10.0.0.1", "10.0.0.2", 1, {TLS: 1})), undefined);
+  assert.deepEqual(t.state.globe, []);
+});
+
+test("updateGeoNode draws a point for the demo's payload and drawFlow then draws an arc from the demo's private source to it", async () => {
+  const t = setupControls();
+  await up(t);
+  t.controls.updateGeoNode(demoGeo("142.250.190.46", 37.422, -122.084, "Mountain View"));
+  const [name, spec] = drawn(t)[0];
+  assert.equal(name, "drawGeoNode");
+  assert.deepEqual(spec.position, {lat: 37.422, lon: -122.084, alt: 0});
+  assert.equal(spec.label, "142.250.190.46\nMountain View");
+  assert.equal(spec.ttlMs, GEO_NODE_MS);
+  t.controls.drawFlow("SENSOR-VM-172-234-197-23", demoFlow("192.168.1.50", "142.250.190.46", 154000, {TLS: 100}));
+  const [flowName, flow] = drawn(t)[1];
+  assert.equal(flowName, "drawFlow");
+  assert.deepEqual(flow.from, {lat: 34.0522, lon: -118.2437, alt: 0});
+  assert.deepEqual(flow.to, {lat: 37.422, lon: -122.084, alt: 0});
+  assert.deepEqual(flow.color, {name: "LIME"});
+  near(flow.width, Math.log10(154000));
+  assert.equal(flow.ttlMs, FLOW_MS);
+});
+
+test("a flow to an address the simulation has not located is not drawn; one to a public 172.x address it has located uses that position, not Los Angeles", async () => {
+  const t = setupControls();
+  await up(t);
+  t.controls.drawFlow("s", demoFlow("192.168.1.50", "1.1.1.1", 10, {DNS: 1}));
+  assert.deepEqual(drawn(t), []);
+  t.controls.updateGeoNode(demoGeo("172.67.198.10", 37.7749, -122.4194, "San Francisco"));
+  t.controls.drawFlow("s", demoFlow("192.168.1.50", "172.67.198.10", 850000, {QUIC: 900}));
+  const flow = drawn(t)[1][1];
+  assert.deepEqual(flow.to, {lat: 37.7749, lon: -122.4194, alt: 0});
+  assert.deepEqual(flow.color, {name: "MAGENTA"});
+});
+
+test("the controls and the stream share what has been located", async () => {
+  const t = setupControls();
+  await up(t);
+  t.emit(activity("geoip_resolved", {ip: "8.8.8.8", geo: {lat: 1, lon: 2}}));
+  t.controls.drawFlow("s", demoFlow("10.0.0.1", "8.8.8.8", 10, {SSH: 1}));
+  assert.equal(drawn(t).length, 2);
+  t.controls.updateGeoNode(demoGeo("9.9.9.9", 3, 4, "Y"));
+  t.emit(activity("ndpi_flow_aggregate", demoFlow("10.0.0.1", "9.9.9.9", 10, {SSH: 1})));
+  assert.equal(drawn(t).length, 4);
+});
+
+test("a geo payload without a position is ignored by the control, and the controls stop when the tool is deactivated", async () => {
+  const t = setupControls();
+  await up(t);
+  t.controls.updateGeoNode({ip: "8.8.8.8"});
+  t.controls.updateGeoNode(undefined);
+  assert.deepEqual(drawn(t), []);
+  await t.workspace.deactivate(FUSION_ID);
+  t.state.globe.length = 0;
+  t.controls.updateGeoNode(demoGeo("8.8.8.8", 1, 2, "X"));
+  assert.deepEqual(t.state.globe, []);
 });

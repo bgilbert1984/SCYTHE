@@ -228,9 +228,9 @@ through `fusionData` (the Sensors panel's sensors, read when it draws) and `fusi
 - Pinned, not changed (tests named `PINNED:`): a sensor at latitude or longitude 0 gets no AoA ray, and positions are read from `lat` / `lon` or
   `location`, not the panel's normalized `position`; a TDoA sensor with no altitude and no `location` throws; an empty protocol histogram throws;
   any `172.x` address is "private" and drawn at Los Angeles with `192.168.` and `10.`; the TDoA label carries a `position` Cesium ignores.
-- **Dormant, not changed:** the PCAP demo calls `window.FusionVisualization.updateGeoNode` / `drawFlow`, but nothing ever assigned
-  `window.FusionVisualization`, so those calls have never done anything, and the demo's geo points and flows have never been drawn locally.
-  This tool does not assign it either. Doing so would switch them on; that is a decision, not a refactor.
+- `window.FusionVisualization` is assigned, with `updateGeoNode(payload)` and `drawFlow(sensorId, payload)`. The page's PCAP simulation has always called them
+  (guarded by `if (window.FusionVisualization)`), but nothing ever assigned the global, so the simulation's geo points and traffic flows were never drawn
+  locally; they are now. They do nothing while the tool is inactive and share its remembered IP positions with the stream events.
 
 ## Tenth tool: viewsheds (`scythe-web/viewshedPlugin.js`)
 
