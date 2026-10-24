@@ -138,9 +138,25 @@ were never released).
 - Pinned, not changed: a flush ignores the HTTP status (a 500 drops the batch); `session_end` reports seconds since page load.
 - Not moved: the Metrics Explorer's own reads of `/api/metrics/session` and `/api/metrics/query`.
 
+## Fifth tool: Metrics Explorer (`scythe-web/metricsExplorerPlugin.js`)
+
+The Metrics Explorer panel (308 lines of `command-ops-visualization.html`) is now the `metrics-explorer` tool. It was all DOM reads
+and `innerHTML` writes with nothing worth keeping as state, so it splits in two: what to show is built as plain strings in the
+plugin (`render*`, tested without a DOM), and the page's elements are touched only by the `explorerView` service in `workspaceBoot.js`.
+
+- Services: `httpFetch` (shared with the metrics tool), `explorerView`, and `liveSources` (the metrics tool's in-memory logs and the
+  page's counters). `window.MetricsExplorer.fetchAllMetrics` is what `showPanel('metrics')` calls.
+- The boot module activates it 2 s after `DOMContentLoaded`, as the old `init` was delayed.
+- Teardown: the Refresh button and filter listeners and the 30 s interval are released (the old object kept them), and a response
+  that lands after deactivation is dropped.
+- One deliberate change: server and user text (module and metric names, interaction action and target) is HTML-escaped.
+- Pinned, not changed: an unused `/api/metrics/query?module=interaction` request on every interactions refresh (its failure stops the
+  list updating); a failed session request ends the refresh; zero heap or update time shows `--`.
+- The recon-counter and heap fallback in the live stats never runs on the page (the metrics logger's `_lastMetrics` is always truthy), as before.
+
 ## Not done
 
-- Only ADS-B, AIS streaming, chat and metrics use the contract, and activation is not yet driven by the operator (a panel click).
+- Only ADS-B, AIS streaming, chat, metrics and the metrics explorer use the contract, and activation is not yet driven by the operator (a panel click).
 - No unified transport: the tools take the realtime socket, `WebSocketSync` and `fetch` as services; they do not open their own.
 - Not run in a browser against a signed-in session; the tests cover the contract, the plugin, the boot wiring, and run the
   page's own `removeEntityMarker` against a fake collection.

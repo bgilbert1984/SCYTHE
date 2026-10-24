@@ -3,6 +3,7 @@ import {createAdsbPlugin} from "./adsbPlugin.js";
 import {createAisStreamPlugin} from "./aisStreamPlugin.js";
 import {createChatPlugin} from "./chatPlugin.js";
 import {createMetricsPlugin} from "./metricsPlugin.js";
+import {createMetricsExplorerPlugin} from "./metricsExplorerPlugin.js";
 
 /**
  * Create the workspace for command-ops-visualization.html, provide the page's services, and register its tools. Nothing is
@@ -83,6 +84,13 @@ export function bootWorkspace(win) {
   win.metricsLogger = metrics.controls;   // the Metrics Explorer reads _interactionLog and _lastMetrics from it
   win.logMetric = (module, name, value, meta) => metrics.controls.log(module, name, value, meta);
   win.logInteraction = (action, target, details) => metrics.controls.logInteraction(action, target, details);
+
+  // --- metrics explorer ---
+  workspace.provide("explorerView", explorerView(win));
+  workspace.provide("liveSources", liveSources(win));
+  const explorer = createMetricsExplorerPlugin({log: win.console});
+  workspace.register(explorer.tool);
+  win.MetricsExplorer = explorer.controls;   // what showPanel('metrics') calls
   win.ScytheWorkspace = workspace;
   win.dispatchEvent(new win.Event("scythe:workspace_ready"));
   return workspace;
@@ -185,5 +193,56 @@ function metricsProbe(win) {
         yield gauge("browser", "heap_total_mb", memory.totalJSHeapSize / (1024 * 1024));
       }
     },
+  };
+}
+
+/** The Metrics Explorer panel's DOM, by the ids the page gives it. Every lookup happens when it is needed: the panel may not exist yet. */
+function explorerView(win) {
+  const byId = (id) => win.document.getElementById(id);
+  const NAME_FILTER = "metrics-filter-name";
+  return {
+    setText(id, text) { const element = byId(id); if (element) element.textContent = text; },
+    setHtml(id, html) { const element = byId(id); if (!element) return false; element.innerHTML = html; return true; },
+    filters: () => ({
+      module: byId("metrics-filter-module")?.value || "",
+      name: byId(NAME_FILTER)?.value || "",
+      limit: byId("metrics-filter-limit")?.value || "50",
+    }),
+    /** Rebuild the metric-name filter from the server's names, keeping the current choice if it is still there. */
+    setMetricNames(names) {
+      const select = byId(NAME_FILTER);
+      if (!select) return;
+      const current = select.value;
+      select.innerHTML = '<option value="">All Metrics</option>';
+      for (const name of names) {
+        const option = win.document.createElement("option");
+        option.value = name;
+        option.textContent = name;
+        if (name === current) option.selected = true;
+        select.appendChild(option);
+      }
+    },
+    panelActive: () => Boolean(byId("metrics-panel")?.classList.contains("active")),
+    bind({refresh, filtersChanged}) {
+      const onRefresh = () => refresh(), onFilter = () => filtersChanged();
+      const button = byId("refresh-metrics-btn");
+      const filters = ["metrics-filter-module", NAME_FILTER, "metrics-filter-limit"].map(byId);
+      button?.addEventListener("click", onRefresh);
+      for (const filter of filters) filter?.addEventListener("change", onFilter);
+      return () => {
+        button?.removeEventListener("click", onRefresh);
+        for (const filter of filters) filter?.removeEventListener("change", onFilter);
+      };
+    },
+  };
+}
+
+/** What the explorer shows beyond the server's answers: the metrics tool's in-memory logs, and the page's own counters. */
+function liveSources(win) {
+  return {
+    interactionLog: () => win.metricsLogger?._interactionLog || null,
+    lastMetrics: () => win.metricsLogger?._lastMetrics || null,
+    recon: () => win.RF_SCYTHE?.AutoReconVisualization || null,
+    heapBytes: () => (win.performance?.memory ? win.performance.memory.usedJSHeapSize : null),
   };
 }
