@@ -9,6 +9,7 @@ import {createEntitySyncPlugin} from "./entitySyncPlugin.js";
 import * as sensorEvents from "./sensorEvents.js";
 import {createSensorPlugin} from "./sensorPlugin.js";
 import {createFusionPlugin} from "./fusionPlugin.js";
+import {createViewshedPlugin} from "./viewshedPlugin.js";
 import {escapeHtml} from "./htmlEscape.js";
 
 /**
@@ -133,6 +134,13 @@ export function bootWorkspace(win) {
   workspace.provide("fusionData", {sensor: (id) => win.SensorManager?.sensors?.[id]});
   workspace.provide("fusionGlobe", fusionGlobe(win));
   workspace.register(createFusionPlugin({log: win.console}).tool);
+
+  // --- viewsheds ---
+  workspace.provide("viewshedGlobe", viewshedGlobe(win));
+  workspace.provide("terrainModel", terrainModel(win));
+  const viewsheds = createViewshedPlugin({log: win.console});
+  workspace.register(viewsheds.tool);
+  win.ViewshedManager = viewsheds.controls;   // what the page's init and Settings panel call (the page also keeps it as window.viewshedManager)
   win.ScytheWorkspace = workspace;
   win.dispatchEvent(new win.Event("scythe:workspace_ready"));
   return workspace;
@@ -570,6 +578,68 @@ function fusionGlobe(win) {
         win.viewer?.entities.remove(entity);
       }
       live.clear();
+    },
+  };
+}
+
+/** RFPropagationManager's terrain elevation estimate, looked up when used (it exists before the viewshed manager is initialized). */
+function terrainModel(win) {
+  const manager = () => win.RFPropagationManager;
+  return {
+    available: () => Boolean(manager()),
+    initialize: (viewer) => manager().initialize(viewer),
+    elevation: (lat, lon) => manager()._estimateElevation(lat, lon),
+  };
+}
+
+/** The viewshed entities on the Cesium globe: an observer marker, a coverage wedge and the rays. The viewer comes from `attach`, as the page hands it over. */
+function viewshedGlobe(win) {
+  let viewer = null;
+  const color = ({name, alpha}) => win.Cesium.Color[name].withAlpha(alpha);
+  const add = (spec) => viewer.entities.add(spec);
+  return {
+    attach(handed) { viewer = handed; },
+    available: () => Boolean(viewer),
+    drawObserver({id, position, label}) {
+      const {Cesium} = win;
+      return add({
+        id, position: Cesium.Cartesian3.fromDegrees(position.lon, position.lat, position.height),
+        point: {pixelSize: 12, color: Cesium.Color.CYAN, outlineColor: Cesium.Color.WHITE, outlineWidth: 2},
+        label: {
+          text: label, font: "11px sans-serif", fillColor: Cesium.Color.CYAN, outlineColor: Cesium.Color.BLACK, outlineWidth: 2,
+          style: Cesium.LabelStyle.FILL_AND_OUTLINE, verticalOrigin: Cesium.VerticalOrigin.BOTTOM, pixelOffset: new Cesium.Cartesian2(0, -15),
+        },
+      });
+    },
+    /** The field-of-view wedge, or null if Cesium refuses it (reported, not thrown). */
+    drawCoverage({id, points, height, visibleColor, lineColor}) {
+      const {Cesium} = win;
+      try {
+        return add({
+          id,
+          polygon: {
+            hierarchy: Cesium.Cartesian3.fromDegreesArray(points), material: color(visibleColor), outline: true, outlineColor: color(lineColor),
+            outlineWidth: 2, height, heightReference: Cesium.HeightReference.RELATIVE_TO_GROUND,
+          },
+        });
+      } catch (error) {
+        win.console.warn("Error creating coverage wedge:", error);
+        return null;
+      }
+    },
+    drawRay({id, from, to, blocked, visibleColor, hiddenColor}) {
+      const {Cesium} = win;
+      return add({
+        id,
+        polyline: {
+          positions: Cesium.Cartesian3.fromDegreesArrayHeights([from.lon, from.lat, from.height, to.lon, to.lat, to.height]), width: 1,
+          material: blocked ? new Cesium.PolylineDashMaterialProperty({color: color(hiddenColor), dashLength: 8.0}) : color(visibleColor),
+        },
+      });
+    },
+    /** Take one entity down, if it is still showing. The viewer stays attached: the page hands it over once. */
+    remove(handle) {
+      if (viewer && viewer.entities.contains(handle)) viewer.entities.remove(handle);
     },
   };
 }

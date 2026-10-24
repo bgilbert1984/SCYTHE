@@ -1121,24 +1121,33 @@ function fakeCesium() {
   const calls = {flights: [], viewerFlights: []};
   const entities = {
     values: [],
-    add(spec) { const e = {...spec}; this.values.push(e); return e; },
+    add(spec) {
+      if (spec.id && this.values.some((v) => v.id === spec.id)) throw new Error(`An entity with id ${spec.id} already exists in this collection.`);
+      const e = {...spec};
+      this.values.push(e);
+      return e;
+    },
+    contains(e) { return this.values.includes(e); },
     removed: [],
     remove(e) { this.removed.push(e); const i = this.values.indexOf(e); if (i >= 0) this.values.splice(i, 1); },
   };
   const Cesium = {
     Color: {
-      ...Object.fromEntries(["CYAN", "ORANGE", "YELLOW", "PURPLE", "LIME", "WHITE", "BLACK", "ALICEBLUE", "MAGENTA"].map((n) => [n, {name: n.toLowerCase(), withAlpha: (a) => ({name: n.toLowerCase(), alpha: a})}])),
+      ...Object.fromEntries(["CYAN", "ORANGE", "YELLOW", "PURPLE", "LIME", "WHITE", "BLACK", "ALICEBLUE", "MAGENTA", "GREEN", "RED"].map((n) => [n, {name: n.toLowerCase(), withAlpha: (a) => ({name: n.toLowerCase(), alpha: a})}])),
       fromCssColorString: (css) => ({css}),
     },
     Cartesian3: class {
       static fromDegrees(lon, lat, h) { return {lon, lat, h}; }
       static distance(a, b) { return Math.hypot((a.lon - b.lon) * 1e5, (a.lat - b.lat) * 1e5); }
+      static fromDegreesArray(points) { if (points.some((p) => Number.isNaN(p))) throw new Error("bad coordinates"); return {array: points}; }
+      static fromDegreesArrayHeights(points) { return {arrayHeights: points}; }
       static midpoint(a, b, result) { return Object.assign(result, {lon: (a.lon + b.lon) / 2, lat: (a.lat + b.lat) / 2, mid: true}); }
     },
     PolylineArrowMaterialProperty: class { constructor(color) { this.color = color; } },
     DistanceDisplayCondition: class { constructor(near, far) { this.near = near; this.far = far; } },
     NearFarScalar: class { constructor(...a) { this.args = a; } },
     Cartesian2: class { constructor(x, y) { this.x = x; this.y = y; } },
+    HeightReference: {RELATIVE_TO_GROUND: "relative"},
     LabelStyle: {FILL_AND_OUTLINE: "fill"}, VerticalOrigin: {BOTTOM: "bottom", TOP: "top"}, ArcType: {GEODESIC: "geodesic"},
     PolylineDashMaterialProperty: class { constructor(o) { this.options = o; } },
     Math: {toRadians: (d) => d * Math.PI / 180},
@@ -1400,4 +1409,177 @@ test("the old inline FusionVisualization is gone and the boot module activates t
   assert.doesNotMatch(page, /const FusionVisualization = \{/);
   assert.doesNotMatch(page, /FusionVisualization\.init\(\)/);
   assert.match(page, /workspace\.activate\("fusion"\)/);
+});
+
+// --- viewsheds ---
+
+function viewshedWindow({elevation = () => 0, withManager = true} = {}) {
+  const globe = fakeCesium();
+  const metrics = [], initialized = [];
+  const win = fakeWindow({
+    setInterval: () => 1, clearInterval() {}, setTimeout: () => 1, clearTimeout() {},
+    viewer: globe.viewer, Cesium: globe.Cesium,
+    RFPropagationManager: withManager ? {initialize: (v) => initialized.push(v), _estimateElevation: elevation} : undefined,
+  });
+  return {win, globe, metrics, initialized};
+}
+const rays = (globe) => globe.entities.values.filter((e) => e.id.startsWith("viewshed_ray_"));
+
+test("booting registers the viewsheds tool inactive and exposes it as window.ViewshedManager", () => {
+  const {win} = viewshedWindow();
+  const workspace = bootWorkspace(win);
+  assert.equal(workspace.state("viewsheds"), "inactive");
+  assert.deepEqual(win.ViewshedManager.viewsheds, {});
+  assert.equal(win.ViewshedManager.DEFAULT_CONFIG.horizontalFov, 60);
+  assert.equal(win.ViewshedManager.createTowerViewshed({name: "T", position: [1, 2]}), null);
+});
+
+test("the viewshed globe draws an observer, a wedge and the rays as Cesium entities with the old properties", async () => {
+  const {win, globe, initialized} = viewshedWindow();
+  const workspace = bootWorkspace(win);
+  win.logMetric = (...a) => (win.metricsSeen ||= []).push(a);
+  await workspace.activate("viewsheds");
+  win.ViewshedManager.initialize(win.viewer);
+  assert.deepEqual(initialized, [win.viewer]);   // the terrain model is initialized with the viewer, as before
+  const viewshed = win.ViewshedManager.createTowerViewshed({name: "T1", position: [-86, 36], height: 60, range: 8000});
+  const [observer, coverage, ...fan] = globe.entities.values;
+  assert.equal(observer.id, "viewshed_observer_tower_T1");
+  assert.deepEqual(observer.position, {lon: -86, lat: 36, h: 60});
+  assert.equal(observer.point.pixelSize, 12);
+  assert.deepEqual([observer.point.color.name, observer.point.outlineColor.name, observer.point.outlineWidth], ["cyan", "white", 2]);
+  assert.equal(observer.label.text, "📡 LOS: tower_T1");
+  assert.deepEqual([observer.label.font, observer.label.fillColor.name, observer.label.outlineColor.name, observer.label.outlineWidth], ["11px sans-serif", "cyan", "black", 2]);
+  assert.equal(observer.label.style, "fill");
+  assert.equal(observer.label.verticalOrigin, "bottom");
+  assert.deepEqual([observer.label.pixelOffset.x, observer.label.pixelOffset.y], [0, -15]);
+  assert.equal(coverage.id, "viewshed_coverage_tower_T1");
+  assert.equal(coverage.polygon.hierarchy.array.length, 54);
+  assert.deepEqual(coverage.polygon.material, {name: "green", alpha: 0.25});
+  assert.equal(coverage.polygon.outline, true);
+  assert.deepEqual(coverage.polygon.outlineColor, {name: "yellow", alpha: 0.6});
+  assert.deepEqual([coverage.polygon.outlineWidth, coverage.polygon.height, coverage.polygon.heightReference], [2, 60, "relative"]);
+  assert.equal(fan.length, 36);
+  assert.equal(fan[0].id, "viewshed_ray_tower_T1_0");
+  assert.equal(fan[0].polyline.width, 1);
+  assert.deepEqual(fan[0].polyline.material, {name: "green", alpha: 0.25});   // clear: the visible colour
+  assert.equal(fan[0].polyline.positions.arrayHeights.length, 6);
+  assert.deepEqual(fan[0].polyline.positions.arrayHeights.slice(0, 3), [-86, 36, 60]);
+  assert.equal(fan[0].polyline.positions.arrayHeights[5], 0);
+  assert.equal(viewshed.handles.length, 38);
+  assert.equal(win.metricsSeen.length, 4);
+});
+
+test("a blocked ray is dashed in the hidden colour and ends at the terrain; the globe's viewsheds are counted", async () => {
+  const {win, globe} = viewshedWindow({elevation: () => 5000});
+  const workspace = bootWorkspace(win);
+  await workspace.activate("viewsheds");
+  win.ViewshedManager.initialize(win.viewer);
+  win.ViewshedManager.createTowerViewshed({name: "T", position: [-86, 36], height: 60, range: 8000});
+  const first = rays(globe)[0].polyline;
+  assert.equal(first.material.options.dashLength, 8.0);
+  assert.deepEqual(first.material.options.color, {name: "red", alpha: 0.25});
+  assert.equal(first.positions.arrayHeights[5], 5000);
+  win.viewshedManager = win.ViewshedManager;
+  assert.equal(Object.keys(win.viewshedManager.viewsheds).length, 1);   // what the Settings panel counts
+});
+
+test("without RFPropagationManager the rays are blocked at random; it is not initialized", async () => {
+  const {win, globe, initialized} = viewshedWindow({withManager: false});
+  const workspace = bootWorkspace(win);
+  await workspace.activate("viewsheds");
+  win.ViewshedManager.initialize(win.viewer);
+  assert.deepEqual(initialized, []);
+  const random = Math.random;
+  Math.random = () => 0.99;
+  try { win.ViewshedManager.createTowerViewshed({name: "T", position: [-86, 36], range: 20000}); } finally { Math.random = random; }
+  assert.ok(rays(globe).every((r) => r.polyline.material.options));   // all dashed: blocked
+});
+
+test("a wedge Cesium refuses is reported and left out; the observer and rays are still drawn", async () => {
+  const {win, globe} = viewshedWindow();
+  const warnings = [];
+  win.console = {warn: (...a) => warnings.push(a), log() {}, debug() {}};
+  const workspace = bootWorkspace(win);
+  await workspace.activate("viewsheds");
+  win.ViewshedManager.initialize(win.viewer);
+  win.ViewshedManager.DEFAULT_CONFIG.rayCount = 2;
+  const viewshed = win.ViewshedManager.createTowerViewshed({name: "T", position: [-86, NaN]});   // NaN coordinates: Cesium refuses the wedge
+  assert.equal(warnings[0][0], "Error creating coverage wedge:");
+  assert.ok(!globe.entities.values.some((e) => e.id.startsWith("viewshed_coverage_")));
+  assert.equal(globe.entities.values.filter((e) => e.id.startsWith("viewshed_observer_")).length, 1);
+  assert.equal(viewshed.handles.length, 1 + 2);
+});
+
+test("clearing removes the viewsheds' entities; removal of one that is already gone is skipped; deactivating removes the rest", async () => {
+  const {win, globe} = viewshedWindow();
+  const workspace = bootWorkspace(win);
+  await workspace.activate("viewsheds");
+  win.ViewshedManager.initialize(win.viewer);
+  const a = win.ViewshedManager.createTowerViewshed({name: "A", position: [-86, 36]});
+  win.ViewshedManager.createTowerViewshed({name: "B", position: [-85, 35]});
+  const gone = a.handles[0];
+  globe.entities.remove(gone);   // something else already removed one
+  const removedBefore = globe.entities.removed.length;
+  win.ViewshedManager.clearAllViewsheds();
+  assert.deepEqual(globe.entities.values, []);
+  assert.equal(globe.entities.removed.length - removedBefore, 2 * 38 - 1);   // the missing one is not removed again
+  win.ViewshedManager.createTowerViewshed({name: "C", position: [-84, 34]});
+  assert.equal(globe.entities.values.length, 38);
+  await workspace.deactivate("viewsheds");
+  assert.deepEqual(globe.entities.values, []);
+  assert.deepEqual(win.ViewshedManager.viewsheds, {});
+});
+
+test("the viewer stays attached when the tool is deactivated and activated again", async () => {
+  const {win, globe} = viewshedWindow();
+  const workspace = bootWorkspace(win);
+  await workspace.activate("viewsheds");
+  win.ViewshedManager.initialize(win.viewer);
+  await workspace.deactivate("viewsheds");
+  await workspace.activate("viewsheds");
+  assert.ok(win.ViewshedManager.createTowerViewshed({name: "T", position: [-86, 36]}));
+  assert.equal(globe.entities.values.length, 38);
+});
+
+test("initialize with no viewer leaves the globe unattached", async () => {
+  const {win, globe} = viewshedWindow();
+  const workspace = bootWorkspace(win);
+  await workspace.activate("viewsheds");
+  win.ViewshedManager.initialize(null);
+  assert.equal(win.ViewshedManager.createTowerViewshed({name: "T", position: [-86, 36]}), null);
+  assert.deepEqual(globe.entities.values, []);
+});
+
+test("the old inline ViewshedManager is gone; the page still hands it the viewer and the Settings panel still calls it; the link onto the manager is gone", () => {
+  assert.doesNotMatch(page, /const ViewshedManager = \{/);
+  assert.doesNotMatch(page, /_checkLineOfSight|getActiveViewsheds|setViewshedVisible/);
+  assert.doesNotMatch(page, /viewshedManager\.propagationManager/);
+  assert.match(page, /ViewshedManager\.initialize\(viewer\);\s*window\.viewshedManager = ViewshedManager;/);
+  assert.match(page, /window\.viewshedManager\.DEFAULT_CONFIG\.horizontalFov = parseInt\(this\.value\)/);
+  assert.match(page, /window\.viewshedManager\.DEFAULT_CONFIG\.distance = parseInt\(this\.value\) \* 1000/);
+  assert.match(page, /workspace\.activate\("viewsheds"\)/);
+});
+
+test("the terrain model is asked for the elevation at (latitude, longitude) of each sample", async () => {
+  const asked = [];
+  const {win} = viewshedWindow({elevation: (lat, lon) => { asked.push([lat, lon]); return 0; }});
+  const workspace = bootWorkspace(win);
+  await workspace.activate("viewsheds");
+  win.ViewshedManager.initialize(win.viewer);
+  win.ViewshedManager.createTowerViewshed({name: "T", position: [-86, 36], range: 1000});
+  assert.equal(asked.length, 36 * 9);
+  for (const [lat, lon] of asked) { assert.ok(Math.abs(lat - 36) < 0.05); assert.ok(Math.abs(lon + 86) < 0.05); }
+});
+
+test("deactivating removes only the viewshed entities that are still showing", async () => {
+  const {win, globe} = viewshedWindow();
+  const workspace = bootWorkspace(win);
+  await workspace.activate("viewsheds");
+  win.ViewshedManager.initialize(win.viewer);
+  const viewshed = win.ViewshedManager.createTowerViewshed({name: "A", position: [-86, 36]});
+  globe.entities.remove(viewshed.handles[3]);   // something else took one down
+  const before = globe.entities.removed.length;
+  await workspace.deactivate("viewsheds");
+  assert.equal(globe.entities.removed.length - before, 37);
+  assert.deepEqual(globe.entities.values, []);
 });
