@@ -181,19 +181,43 @@ test("no operators lists the empty message and clears the markers", async () => 
   assert.deepEqual(t.state.replaced[0], []);
 });
 
-test("PINNED: turning the markers off does not take them down, and while off they are not redrawn; turning them on redraws", async () => {
+test("turning the markers off takes them down and they stay down while off; the list still updates; turning them on puts them back", async () => {
   const t = await up(setup({operators: OPS}));
   t.controls.initialize({v: 1});
   await settle();
   assert.equal(t.state.replaced.length, 1);
+  assert.equal(t.state.replaced[0].length, 1);
   t.controls.toggleVisibility(false);
-  assert.equal(t.state.replaced.length, 1);   // not replaced with an empty set: the markers stay on the map
-  assert.equal(t.state.cleared, 0);
+  assert.equal(t.state.replaced.length, 2);
+  assert.deepEqual(t.state.replaced[1], []);   // replaced with nothing: the markers come down
   await t.controls.fetchActiveOperators();
-  assert.equal(t.state.replaced.length, 1);   // not redrawn while off
+  assert.deepEqual(t.state.replaced.at(-1), []);   // a refresh while off keeps the set empty
   assert.equal(t.state.lists.length, 2);      // the list still updates
   t.controls.toggleVisibility(true);
-  assert.equal(t.state.replaced.length, 2);
+  assert.equal(t.state.replaced.at(-1).length, 1);
+  t.controls.toggleVisibility(true);
+  assert.equal(t.state.replaced.at(-1).length, 1);   // on again is harmless
+});
+
+test("the markers are not worked out while they are off, so a malformed view does not stop the list", async () => {
+  const t = await up(setup({operators: OPS}));
+  t.controls.initialize({v: 1});
+  await settle();
+  t.controls.toggleVisibility(false);
+  t.state.operators = [OPS[1], {operator_id: "z", callsign: "Z", role: "x", current_view: {center: 5}}];
+  const lists = t.state.lists.length;
+  await t.controls.fetchActiveOperators();
+  assert.equal(t.state.errors.length, 0);
+  assert.equal(t.state.lists.length, lists + 1);
+});
+
+test("turning the markers off before the viewer is handed over does nothing, and they are not drawn when it arrives while off", async () => {
+  const t = await up(setup({operators: OPS}));
+  t.controls.toggleVisibility(false);
+  assert.deepEqual(t.state.replaced, []);   // no globe yet
+  t.controls.initialize({v: 1});
+  await settle();
+  assert.deepEqual(t.state.replaced, [[]]);
 });
 
 test("the list is skipped when the page has none; markers are skipped when the globe is not there", async () => {

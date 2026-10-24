@@ -282,9 +282,10 @@ through `presenceSource` (the operator session), `presenceView` (the list elemen
   viewer handed over before the tool is active is kept and used when it activates.
 - Callsigns, roles and ids are escaped where they reach HTML: a callsign is chosen by the operator who registers it, so it comes from other operators.
 - The markers are worked out before the old ones come down, so a malformed view leaves the previous markers instead of a half-drawn set.
-- Pinned, not changed (tests named `PINNED:`): unchecking the checkbox does **not** take the markers down (with it off they are neither redrawn nor
-  removed, so the ones on the map stay until the tool is deactivated); one operator whose view centre is not a pair stops the list updating (the error is
-  logged); nothing is polled until `initialize` has been called, though the Refresh button works before that.
+- Unchecking "Show operator positions on map" takes the markers down and keeps them down while it is unchecked (the old code left them on the map, frozen,
+  until reload).
+- Pinned, not changed (tests named `PINNED:`): one operator whose view centre is not a pair stops the list updating (the error is logged); nothing is polled
+  until `initialize` has been called, though the Refresh button works before that.
 
 ## Not done
 
