@@ -25427,7 +25427,9 @@ API TIMING (avg ms):
         // Clear nmap hypergraph data
         function clearNmapHypergraphData() {
             if (hypergraphVisualizer) {
-                hypergraphVisualizer.clearNmapData();
+                // The Cesium visualizer keeps every hypergraph entity in one set (and each scan's loadData replaces it all), so
+                // clearing the results is clearing the hypergraph. clearNmapData belonged to the removed Three.js class.
+                hypergraphVisualizer.clearHypergraph();
             }
             
             // Reset UI
