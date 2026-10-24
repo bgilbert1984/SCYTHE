@@ -18806,158 +18806,25 @@ const originalComplete = options.complete;
         // =====================================================================
         
         const AISStreamManager = {
-            active: false,
-            streamSocket: null,
-            currentBBox: null,
-            updateThrottle: 1000, // ms between bbox updates
-            lastBBoxUpdate: 0,
-            zoomThreshold: 100000, // Only stream when zoomed closer than 100km altitude
-            
-            // Initialize and monitor camera for zoom-based streaming
+            // The streaming half is the 'ais-stream' workspace tool (scythe-web/aisStreamPlugin.js) and ADS-B is the 'adsb'
+            // tool (scythe-web/adsbPlugin.js). This object keeps the entry points the rest of the page calls.
             init: function() {
-                const self = this;
-                
-                // Listen for WebSocket connections
-                WebSocketSync.on('connected', function() {
-                    console.log('[AISStream] WebSocket connected');
-                    self.checkAndStartStream();
-                });
-                
-                // Listen for AIS updates from server
-                if (WebSocketSync.socket) {
-                    WebSocketSync.socket.on('ais_update', function(vessel) {
-                        self.handleVesselUpdate(vessel);
-                    });
-                }
-
-                // ADS-B is a workspace tool (scythe-web/adsbPlugin.js): activated here so behaviour is unchanged,
-                // but it now has a deactivate that stops listening and removes the aircraft it drew.
-                const activateAdsb = function() {
-                    window.ScytheWorkspace.activate('adsb').catch(function(e) {
-                        console.warn('[ADS-B] activation failed:', e);
+                const activateTools = function() {
+                    ['ais-stream', 'adsb'].forEach(function(id) {
+                        window.ScytheWorkspace.activate(id).catch(function(e) {
+                            console.warn('[' + id + '] activation failed:', e);
+                        });
                     });
                 };
-                if (window.ScytheWorkspace) activateAdsb();
-                else window.addEventListener('scythe:workspace_ready', activateAdsb, { once: true });
-
-                // Monitor camera changes to update bounding box
-                if (viewer && viewer.camera) {
-                    viewer.camera.changed.addEventListener(function() {
-                        self.onCameraChange();
-                    });
-                }
-                
+                if (window.ScytheWorkspace) activateTools();
+                else window.addEventListener('scythe:workspace_ready', activateTools, { once: true });
                 console.log('[AISStream] Initialized');
             },
-            
-            // Check zoom level and start/stop streaming accordingly
-            onCameraChange: function() {
-                if (!this.active) return;
-                
-                const now = Date.now();
-                if (now - this.lastBBoxUpdate < this.updateThrottle) return;
-                
-                const altitude = viewer.camera.positionCartographic.height;
-                
-                // Only stream when zoomed in close enough
-                if (altitude < this.zoomThreshold) {
-                    this.updateBoundingBox();
-                } else if (this.streamSocket) {
-                    this.stopStreaming();
-                }
-            },
-            
-            // Calculate current visible bounding box
-            getCurrentBoundingBox: function() {
-                try {
-                    const rectangle = viewer.camera.computeViewRectangle();
-                    if (!rectangle) return null;
-                    
-                    const west = Cesium.Math.toDegrees(rectangle.west);
-                    const south = Cesium.Math.toDegrees(rectangle.south);
-                    const east = Cesium.Math.toDegrees(rectangle.east);
-                    const north = Cesium.Math.toDegrees(rectangle.north);
-                    
-                    // AISStream format: [[[lon_sw, lat_sw], [lon_ne, lat_ne]]]
-                    return [[[west, south], [east, north]]];
-                } catch (e) {
-                    console.warn('[AISStream] Could not compute bbox:', e);
-                    return null;
-                }
-            },
-            
-            // Update bounding box on server
-            updateBoundingBox: function() {
-                const bbox = this.getCurrentBoundingBox();
-                if (!bbox || JSON.stringify(bbox) === JSON.stringify(this.currentBBox)) {
-                    return; // No change
-                }
-                
-                this.currentBBox = bbox;
-                this.lastBBoxUpdate = Date.now();
-                
-                fetch('/api/ais/stream/start', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ bounding_box: bbox })
-                })
-                .then(r => r.json())
-                .then(data => {
-                    console.log('[AISStream] Bounding box updated:', bbox);
-                })
-                .catch(e => console.error('[AISStream] Failed to update bbox:', e));
-            },
-            
-            // Check conditions and start streaming if appropriate
-            checkAndStartStream: function() {
-                const altitude = viewer?.camera?.positionCartographic?.height || 1000000;
-                
-                if (altitude < this.zoomThreshold && !this.streamSocket) {
-                    this.startStreaming();
-                }
-            },
-            
-            // Start AIS streaming
-            startStreaming: async function() {
-                if (this.active) return;
-                
-                try {
-                    const bbox = this.getCurrentBoundingBox() || [[[-180, -90], [180, 90]]];
-                    
-                    const response = await fetch('/api/ais/stream/start', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ bounding_box: bbox })
-                    });
-                    
-                    const data = await response.json();
-                    
-                    if (data.status === 'started') {
-                        this.active = true;
-                        this.currentBBox = bbox;
-                        addConsoleMessage('🚢 AIS real-time streaming started', 'response');
-                        console.log('[AISStream] Streaming started with bbox:', bbox);
-                    }
-                } catch (e) {
-                    console.error('[AISStream] Failed to start:', e);
-                }
-            },
-            
-            // Stop AIS streaming
-            stopStreaming: async function() {
-                if (!this.active) return;
-                
-                try {
-                    await fetch('/api/ais/stream/stop', { method: 'POST' });
-                    this.active = false;
-                    this.currentBBox = null;
-                    addConsoleMessage('🚢 AIS streaming stopped', 'response');
-                    console.log('[AISStream] Streaming stopped');
-                } catch (e) {
-                    console.error('[AISStream] Failed to stop:', e);
-                }
-            },
-            
+
+            // The AIS toggle calls these; they do nothing while the tool is inactive.
+            checkAndStartStream: function() { if (window.ScytheAisStream) window.ScytheAisStream.checkAndStart(); },
+            stopStreaming: function() { return window.ScytheAisStream ? window.ScytheAisStream.stop() : undefined; },
+
             // Handle real-time vessel update from WebSocket
             handleVesselUpdate: function(vessel) {
                 if (!vessel || !vessel.mmsi) return;
