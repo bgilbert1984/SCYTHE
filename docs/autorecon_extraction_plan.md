@@ -20,9 +20,9 @@ shared entity store behind one explicit door before any code moves.
    test in `workspaceBoot.test.js` takes the first match, so it checks code that never runs. The live version removes from the data source if the marker
    is there, else from the viewer, and takes the altitude line and threat ring from the viewer only. The tested version checks both collections for all
    three. They agree for today's markers (the altitude line and threat ring are always in `viewer.entities`), but the test is not testing the page.
-2. **The entity store is written from about 13 other places.** The nmap, satellite, geolocation, sensor and map-click code do
-   `window.AutoReconVisualization = window.AutoReconVisualization || {}`, then `.entities[id] = entity`, then `.addEntityMarker(entity)`. Some of these
-   create a bare `{}` before the object exists. A boot module that sets `window.AutoReconVisualization` later would silently drop anything written to such a stub.
+2. **The entity store is written from 10 other places**: the satellite button and toggle, the nmap geolocation, the AIS correlation, the upload and
+   session re-ingest code, and the geo-point ingest. They do `.entities[id] = entity` and `.addEntityMarker(entity)`, and five of them first do
+   `window.AutoReconVisualization = window.AutoReconVisualization || {}`, which creates a bare `{}` if the object does not exist yet. A boot module that sets `window.AutoReconVisualization` later would silently drop anything written to such a stub.
    `adoptEntitySyncStub` already solved the same problem for EntitySync.
 3. **`subscribeToEntitySync` can run twice**: once from a 100 ms timer and once on `DOMContentLoaded`, and `EntitySync.on` is never undone. Each event
    is applied twice.
@@ -49,7 +49,7 @@ recon tool  (scythe-web/reconPlugin.js, tool id "recon")
 │          markerSpec, altitudeLineNeeded, threatNeeded, mldcLabel(entity, now), runningAverage,
 │          describeEntity (escaped), alertRow (escaped), listRow (escaped)
 └── services
-    ├── reconStore    entities map: get / upsert / remove / all / onChange   (the one door the 13 writers use)
+    ├── reconStore    entities map: get / upsert / remove / all / onChange   (the one door the 10 writers use)
     ├── reconApi      over httpFetch: entities, alerts, simulate, changes, reference, task, batch, nearest, disposition
     ├── reconStream   over openEventSource, with the 5 s reconnect and resync
     ├── entityStream  (exists) the page's EntitySync handlers, with off
@@ -66,7 +66,7 @@ Each step is its own PR, in this order. The first three change no drawing and ar
    where that is still true), and guard `subscribeToEntitySync` against running twice. Small and behaviour-preserving, apart from the double subscription.
 2. **Escape the three HTML sinks** (the description, the alert list, `updateReconList`), with ids passed to handlers as JSON or numbers as in #324.
    Tests run the page's own functions against hostile names and ids; one real-browser check as in #324.
-3. **Put the entity store behind one door.** Add `reconStore`; move the 13 outside writers to it; have the boot adopt a stub that was created before it,
+3. **Put the entity store behind one door.** Add `reconStore`; move the 10 outside writers to it; have the boot adopt a stub that was created before it,
    as `adoptEntitySyncStub` does. No drawing moves; `AutoReconVisualization.entities` stays a view onto the store.
 4. **Extract the controller (the data, the sync, the stream, auto-update, alerts, tasks, the panel) as the `recon` tool.** Drawing stays in a smaller page object that
    the tool calls through `reconGlobe`, so analysis and rendering are separate before either moves. Removes the dead members. Sets
@@ -87,7 +87,7 @@ Each step is its own PR, in this order. The first three change no drawing and ar
 ## 6. Risks
 
 - **Boot ordering and stubs** (finding 2): the biggest chance of a silent loss. Step 3 exists to make it a tested case.
-- **Many external callers use the global name**, including inline `onclick`s in generated HTML. The controls keep the name; only delegation can retire it.
+- **Many external callers use the global name** (about 40 references outside the object), including inline `onclick`s in generated HTML. The controls keep the name; only delegation can retire it.
 - **Real-scene behaviour** (clustering, MLDC, flights, the infobox) cannot be tested without Cesium and a signed-in session. Each of steps 4 and 5 ends with a
   manual checklist, and neither should merge on test results alone.
 - **Scope:** step 4 is the largest single move so far (about 900 lines). If it proves too large for one review it splits cleanly into data-and-sync, then panel.
