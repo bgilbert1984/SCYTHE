@@ -26081,10 +26081,9 @@ API TIMING (avg ms):
                 const generatedData = await simulateImmGeneration(rfFeatures, options);
                 addConsoleMessage(`Generated ${generatedData.points} 3D points`, 'response');
                 
-                if (hypergraphVisualizer) {
-                    await hypergraphVisualizer.updateWithImmData(generatedData);
-                    showPanel('hypergraph');
-                }
+                // The hypergraph visualizer has never had an updateWithImmData (the call this replaces threw a TypeError), and the
+                // simulated data above is only a point count, so there is nothing to draw. Say so instead of failing.
+                addConsoleMessage('IMM visualization is not implemented; the generated data was not drawn', 'info');
                 
             } catch (error) {
                 addConsoleMessage(`Generation error: ${error.message}`, 'alert');
