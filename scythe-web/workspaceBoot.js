@@ -5,6 +5,7 @@ import {createChatPlugin} from "./chatPlugin.js";
 import {createMetricsPlugin} from "./metricsPlugin.js";
 import {createMetricsExplorerPlugin} from "./metricsExplorerPlugin.js";
 import {createPropagationPlugin} from "./propagationPlugin.js";
+import {createEntitySyncPlugin} from "./entitySyncPlugin.js";
 
 /**
  * Create the workspace for command-ops-visualization.html, provide the page's services, and register its tools. Nothing is
@@ -103,6 +104,16 @@ export function bootWorkspace(win) {
   const propagation = createPropagationPlugin({log: win.console});
   workspace.register(propagation.tool);
   win.PropagationUI = propagation.controls;   // what showPanel('propagation') calls
+
+  // --- entity stream ---
+  workspace.provide("operatorSession", {token: () => win.OperatorSession?.sessionToken || null, clear: () => win.OperatorSession?.clearSession?.()});
+  workspace.provide("entityConsole", {
+    info: (text) => win.addConsoleMessage?.(text, "response"),
+    alert: (text) => win.addConsoleMessage?.(text, "alert"),
+  });
+  const entitySync = createEntitySyncPlugin({log: win.console});
+  workspace.register(entitySync.tool);
+  adoptEntitySyncStub(win, entitySync.controls);
   win.ScytheWorkspace = workspace;
   win.dispatchEvent(new win.Event("scythe:workspace_ready"));
   return workspace;
@@ -307,4 +318,17 @@ function propagationView(win) {
       return () => { for (const off of bound) off(); };
     },
   };
+}
+
+/**
+ * `window.EntitySync` is a stub from the moment the page's scripts run, so modules that subscribe while the page loads (before this
+ * module has run) are not lost. The real controls replace it here, and what the stub kept is replayed: the subscriptions, and a
+ * `connect` (which the tool makes once it is active).
+ */
+function adoptEntitySyncStub(win, controls) {
+  const stub = win.EntitySync;
+  win.EntitySync = controls;
+  if (!stub || !stub._stub) return;
+  for (const [event, handler] of stub._queued) controls.on(event, handler);
+  if (stub._pendingConnect) controls.connect(...stub._pendingConnect);
 }

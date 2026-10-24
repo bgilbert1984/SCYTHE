@@ -778,3 +778,104 @@ test("the old inline PropagationUI is gone; the boot module starts the tool 2.5 
   assert.match(page, /document\.readyState === "loading"\) document\.addEventListener\("DOMContentLoaded", startPropagation/);
   assert.match(page, /typeof PropagationUI !== 'undefined' && PropagationUI\.updateAtmosphericDisplay\)/);
 });
+
+// --- entity stream ---
+
+function entityWindow(extra = {}) {
+  const console_ = [], sources = [], requests = [];
+  class Source {
+    constructor(url) { this.url = url; this.listeners = new Map(); this.closed = false; sources.push(this); }
+    addEventListener(type, fn) { this.listeners.set(type, [...(this.listeners.get(type) || []), fn]); }
+    removeEventListener(type, fn) { this.listeners.set(type, (this.listeners.get(type) || []).filter((f) => f !== fn)); }
+    close() { this.closed = true; }
+    emit(type, data) { for (const fn of this.listeners.get(type) || []) fn({data: JSON.stringify(data)}); }
+  }
+  const win = fakeWindow({
+    setInterval: () => 1, clearInterval() {}, setTimeout: () => 1, clearTimeout() {},
+    EventSource: Source,
+    fetch: async (url, init) => { requests.push([url, init]); return {status: 200, ok: true, json: async () => ({status: "ok"})}; },
+    addConsoleMessage: (text, kind) => console_.push([text, kind]),
+    OperatorSession: {sessionToken: "tok-9", cleared: 0, clearSession() { this.cleared++; }},
+    ...extra,
+  });
+  return {win, sources, requests, console_};
+}
+const entityStub = () => ({
+  _stub: true, _queued: [], _pendingConnect: null,
+  on(event, handler) { this._queued.push([event, handler]); return this; },
+});
+
+test("booting registers the entity stream inactive and replaces the page's stub with its controls", () => {
+  const {win} = entityWindow({EntitySync: entityStub()});
+  const workspace = bootWorkspace(win);
+  assert.equal(workspace.state("entity-sync"), "inactive");
+  assert.equal(win.EntitySync._stub, undefined);
+  assert.equal(typeof win.EntitySync.connect, "function");
+});
+
+test("subscriptions and a connect made on the stub before the boot are replayed", async () => {
+  const stub = entityStub();
+  const seen = [];
+  stub.on("create", (d) => seen.push(d.entity_id));
+  stub._pendingConnect = ["seq-1"];
+  const {win, sources, requests} = entityWindow({EntitySync: stub});
+  const workspace = bootWorkspace(win);
+  await workspace.activate("entity-sync");
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(requests[0][0], "/api/entities/stream?token=tok-9&since=seq-1");
+  sources[0].emit("CREATE", {entity_id: "early"});
+  assert.deepEqual(seen, ["early"]);
+});
+
+test("without a stub the boot still works", async () => {
+  const {win} = entityWindow();
+  const workspace = bootWorkspace(win);
+  await workspace.activate("entity-sync");
+  assert.equal(workspace.state("entity-sync"), "active");
+});
+
+test("the entity stream reads the operator session and the page's console when used, and a 401 clears the session", async () => {
+  const {win, sources, requests, console_} = entityWindow({EntitySync: entityStub()});
+  const workspace = bootWorkspace(win);
+  await workspace.activate("entity-sync");
+  win.OperatorSession.sessionToken = "tok-new";   // read at call time
+  await win.EntitySync.connect();
+  assert.match(requests[0][0], /token=tok-new/);
+  sources[0].listeners.get("open")[0]();
+  assert.deepEqual(console_.at(-1), ["📡 Connected to real-time entity stream", "response"]);
+  win.fetch = async () => ({status: 401, ok: false});
+  await win.EntitySync.connect();
+  assert.equal(win.OperatorSession.cleared, 1);
+  assert.deepEqual(console_.at(-1), ["Entity stream unauthorized - please log in", "alert"]);
+  win.OperatorSession = undefined;   // logged out entirely: no token, nothing thrown
+  await win.EntitySync.connect();
+  await workspace.deactivate("entity-sync");
+});
+
+test("the old inline EntitySync is gone; WebSocketSync hands events to EntitySync.ingest; the boot module starts the tool", () => {
+  assert.doesNotMatch(page, /const EntitySync = \{/);
+  assert.doesNotMatch(page, /getEntitiesByType|deleteEntity|lastEventId/);
+  assert.doesNotMatch(page, /_cacheInserts|EntitySync\._notifyHandlers/);
+  assert.match(page, /window\.EntitySync = \{\s*_stub: true/);
+  assert.match(page, /EntitySync\.ingest\(eventType, data\);/);
+  assert.match(page, /workspace\.activate\("entity-sync"\)/);
+});
+
+test("everything the page calls on EntitySync exists on the stub or the controls", () => {
+  const called = new Set([...page.matchAll(/\bEntitySync\??\.(\w+)/g)].map((m) => m[1]));
+  const stub = new Set(["on", "off", "connect", "disconnect", "connected", "entityCache", "_stub", "_queued", "_pendingConnect"]);
+  const {win} = entityWindow({EntitySync: entityStub()});
+  bootWorkspace(win);
+  const real = new Set(Object.keys(Object.getOwnPropertyDescriptors(win.EntitySync)));
+  for (const name of called) {
+    assert.ok(real.has(name), `${name} is not on the controls`);
+    if (!["ingest", "publishEntity"].includes(name)) assert.ok(stub.has(name), `${name} is not on the stub`);
+  }
+});
+
+test("a window.EntitySync that is not the page's stub is replaced without being read", async () => {
+  const {win} = entityWindow({EntitySync: {}});
+  const workspace = bootWorkspace(win);
+  await workspace.activate("entity-sync");
+  assert.equal(typeof win.EntitySync.on, "function");
+});

@@ -171,9 +171,29 @@ it drew) and drives an engine, `RFPropagationManager`, which stays on the page a
 - Pinned, not changed: inputs are `parseFloat`ed and not validated (an empty box sends `NaN`); a result that cannot be displayed is
   already in the history; an empty visualization still uses up a path id.
 
+## Seventh tool: the entity stream (`scythe-web/entitySyncPlugin.js`)
+
+`EntitySync` (a 270-line object in `command-ops-visualization.html`) is now the `entity-sync` tool. It holds the entity cache and the
+event handlers other modules register, opens the server-sent-events stream on `connect(since)`, and reconnects with a growing delay.
+Events from the WebSocket path go through the same `ingest(eventType, data)`, which replaced a copy of the cache logic in
+`WebSocketSync._handleEntityEvent`.
+
+- Services: `httpFetch`, `openEventSource`, `operatorSession` (`token()`, `clear()`), and `entityConsole` (the page's console messages).
+- `window.EntitySync` is a small stub from the moment the page's scripts run, because modules subscribe while the page loads, before the
+  boot module has run. The boot module activates the tool, replaces the stub, and replays what the stub kept: the subscriptions, and a
+  `connect` (made once the tool is active).
+- Handlers (`on` / `off`) outlive an activation, because the modules that subscribe do not know about the lifecycle. The cache and the
+  connection belong to an activation: deactivating closes the stream, cancels a pending probe or reconnect, and empties the cache.
+- Deliberate changes: the status probe is aborted once its status is known (it used to leave a second stream open on every connect); a new
+  `connect` replaces one in progress (two used to open two streams and lose the first); `disconnect` cancels a pending reconnect; an event
+  without an entity id is not cached; WebSocket events reach `EntitySync`'s handlers before `WebSocketSync`'s own; the unused
+  `deleteEntity`, `getEntity`, `getAllEntities`, `getEntitiesByType` and the write-only `lastEventId` are gone.
+- Not changed: a reconnect carries no `since`, so nothing is replayed after an outage; and 15 subscriptions in the page are never removed
+  (`off` now works, but no caller uses it, so subscribing twice still doubles the handlers).
+
 ## Not done
 
-- Only ADS-B, AIS streaming, chat, metrics, the metrics explorer and propagation use the contract, and activation is not yet driven by the operator (a panel click).
+- Only ADS-B, AIS streaming, chat, metrics, the metrics explorer, propagation and the entity stream use the contract, and activation is not yet driven by the operator (a panel click).
 - No unified transport: the tools take the realtime socket, `WebSocketSync` and `fetch` as services; they do not open their own.
 - Not run in a browser against a signed-in session; the tests cover the contract, the plugin, the boot wiring, and run the
   page's own `removeEntityMarker` against a fake collection.
