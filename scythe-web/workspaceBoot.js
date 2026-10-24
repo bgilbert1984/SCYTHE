@@ -1,6 +1,7 @@
 import {createWorkspace} from "./lifecycle.js";
 import {createAdsbPlugin} from "./adsbPlugin.js";
 import {createAisStreamPlugin} from "./aisStreamPlugin.js";
+import {createChatPlugin} from "./chatPlugin.js";
 
 /**
  * Create the workspace for command-ops-visualization.html, provide the page's services, and register its tools. Nothing is
@@ -50,6 +51,7 @@ export function bootWorkspace(win) {
     if (!response.ok) throw new Error(`${url}: HTTP ${response.status}`);
     return response.json();
   };
+  workspace.provide("postJson", postJson);
   workspace.provide("aisApi", {
     start: (bbox) => postJson("/api/ais/stream/start", {bounding_box: bbox}),
     stop: () => postJson("/api/ais/stream/stop"),
@@ -60,7 +62,79 @@ export function bootWorkspace(win) {
   const ais = createAisStreamPlugin({log: win.console});
   workspace.register(ais.tool);
   win.ScytheAisStream = ais.controls;   // what the page's AIS toggle calls
+
+  // --- chat ---
+  workspace.provide("openEventSource", (url) => new win.EventSource(url));   // read at call time: the page wraps EventSource for instance scoping
+  workspace.provide("timers", {
+    setInterval: (fn, ms) => win.setInterval(fn, ms), clearInterval: (id) => win.clearInterval(id),
+    setTimeout: (fn, ms) => win.setTimeout(fn, ms), clearTimeout: (id) => win.clearTimeout(id),
+  });
+  workspace.provide("chatView", chatView(win));
+  workspace.provide("roomChanges", roomChanges(win));
+  const chat = createChatPlugin({log: win.console});
+  workspace.register(chat.tool);
+  win.ScytheChat = chat.controls;   // what the page's LiveChat calls
   win.ScytheWorkspace = workspace;
   win.dispatchEvent(new win.Event("scythe:workspace_ready"));
   return workspace;
+}
+
+/** The chat panel's DOM, by the ids the page gives it. Rendering a message stays with the page's LiveChat.addMsg. */
+function chatView(win) {
+  const byId = (id) => win.document.getElementById(id);
+  const saveCallsign = (text) => { try { win.localStorage.setItem("rpChatCallsign", text); } catch (error) { /* storage blocked */ } };
+  return {
+    showConnecting(room) {
+      const label = byId("lc-room-label");
+      if (label) label.textContent = room;
+      const feed = byId("lc-feed");
+      if (feed) feed.innerHTML = '<div style="color:#383838;font-size:10px;text-align:center;padding:8px;">Connecting…</div>';
+    },
+    hideConnecting() { byId("lc-feed")?.querySelector('div[style*="Connecting"]')?.remove(); },
+    addMessage: (message) => win.LiveChat?.addMsg?.(message),
+    callsign: () => (byId("lc-callsign")?.value || "").trim(),
+    messageText: () => (byId("lc-msg-input")?.value || "").trim(),
+    clearMessage() { const input = byId("lc-msg-input"); if (input) input.value = ""; },
+    saveCallsign,
+    restoreCallsign() {
+      let stored = null;
+      try { stored = win.localStorage.getItem("rpChatCallsign"); } catch (error) { /* storage blocked */ }
+      const input = byId("lc-callsign");
+      if (input && stored) input.value = stored;
+    },
+    bind({send, callsignChanged}) {
+      const sendButton = byId("lc-send-btn"), messageInput = byId("lc-msg-input"), callsignInput = byId("lc-callsign");
+      const onKey = (event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); send(); } };
+      sendButton?.addEventListener("click", send);
+      messageInput?.addEventListener("keydown", onKey);
+      callsignInput?.addEventListener("change", callsignChanged);
+      return () => {
+        sendButton?.removeEventListener("click", send);
+        messageInput?.removeEventListener("keydown", onKey);
+        callsignInput?.removeEventListener("change", callsignChanged);
+      };
+    },
+  };
+}
+
+/** RoomManager's current-room changes. RoomManager may not exist yet, so look for it (300 ms, then every 500 ms) until it
+ *  does or the subscription is cancelled; the old code retried forever and never unhooked. */
+function roomChanges(win) {
+  return {
+    subscribe(fn) {
+      let timer = null, attached = false;
+      const handler = (change) => { if (change && change.roomId) fn(change.roomId); };
+      const attach = () => {
+        timer = null;
+        const manager = win.RoomManager;
+        if (manager && manager.on) { manager.on("current_room_changed", handler); attached = true; }
+        else timer = win.setTimeout(attach, 500);
+      };
+      timer = win.setTimeout(attach, 300);
+      return () => {
+        if (timer !== null) { win.clearTimeout(timer); timer = null; }
+        if (attached) win.RoomManager?.off?.("current_room_changed", handler);
+      };
+    },
+  };
 }

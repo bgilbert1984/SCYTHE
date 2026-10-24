@@ -219,3 +219,217 @@ test("the AIS toggle's entry points on the page delegate to the tool's controls,
   early.checkAndStartStream();
   assert.equal(early.stopStreaming(), undefined);
 });
+
+// --- the chat tool's adapters: DOM, room manager, event source, timers ---
+
+function clockWindow(extra = {}) {
+  let now = 0, next = 1;
+  const timers = new Map();
+  const win = fakeWindow({
+    setTimeout: (fn, ms) => { const id = next++; timers.set(id, {at: now + ms, fn, every: 0}); return id; },
+    setInterval: (fn, ms) => { const id = next++; timers.set(id, {at: now + ms, fn, every: ms}); return id; },
+    clearTimeout: (id) => timers.delete(id),
+    clearInterval: (id) => timers.delete(id),
+    ...extra,
+  });
+  win.advance = async (ms) => {
+    const target = now + ms;
+    for (;;) {
+      const due = [...timers.entries()].filter(([, t]) => t.at <= target).sort((a, b) => a[1].at - b[1].at)[0];
+      if (!due) break;
+      const [id, t] = due;
+      now = t.at;
+      if (t.every) t.at += t.every; else timers.delete(id);
+      t.fn();
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    now = target;
+  };
+  win.pendingTimers = () => timers.size;
+  return win;
+}
+
+function fakeElement(extra = {}) {
+  const listeners = new Map();
+  return {
+    value: "", textContent: "", innerHTML: "", listeners,
+    addEventListener(type, fn) { listeners.set(type, [...(listeners.get(type) || []), fn]); },
+    removeEventListener(type, fn) { listeners.set(type, (listeners.get(type) || []).filter((f) => f !== fn)); },
+    fire(type, event = {}) { for (const fn of listeners.get(type) || []) fn(event); },
+    count: (type) => (listeners.get(type) || []).length,
+    querySelector: () => null,
+    ...extra,
+  };
+}
+
+function chatWindow({history = {messages: []}, storage = {}} = {}) {
+  const elements = {
+    "lc-room-label": fakeElement(), "lc-feed": fakeElement(), "lc-callsign": fakeElement(),
+    "lc-msg-input": fakeElement(), "lc-send-btn": fakeElement(),
+  };
+  const rendered = [], requests = [], sources = [];
+  const win = clockWindow({
+    document: {getElementById: (id) => elements[id] || null},
+    localStorage: {getItem: (k) => storage[k] ?? null, setItem: (k, v) => { storage[k] = v; }},
+    LiveChat: {addMsg: (m) => rendered.push(m.message)},
+    fetch: async (url, init) => {
+      requests.push({url, method: init?.method || "GET", body: init?.body && JSON.parse(init.body)});
+      return {ok: true, json: async () => (url.endsWith("/messages") ? history : {ok: true})};
+    },
+  });
+  const workspace = bootWorkspace(win);
+  win.EventSource = class { constructor(url) { this.url = url; this.closed = false; sources.push(this); } close() { this.closed = true; } };
+  return {win, workspace, elements, rendered, requests, sources, storage};
+}
+const settle = () => new Promise((resolve) => setImmediate(resolve));
+
+test("booting registers the chat tool inactive and exposes the controls LiveChat calls", () => {
+  const win = fakeWindow();
+  const workspace = bootWorkspace(win);
+  assert.equal(workspace.state("chat"), "inactive");
+  assert.deepEqual(Object.keys(win.ScytheChat).sort(), ["room", "send", "switchRoom"]);
+});
+
+test("activating shows 'Connecting…', renders history through LiveChat.addMsg and opens the room's stream", async () => {
+  const {win, workspace, elements, rendered, sources} = chatWindow({history: {messages: [{message: "one", timestamp: "t"}]}});
+  await workspace.activate("chat");
+  await settle();
+  assert.equal(elements["lc-room-label"].textContent, "GLOBAL");
+  assert.deepEqual(rendered, ["one"]);
+  assert.equal(sources[0].url, "/api/chat/GLOBAL/stream", "EventSource is looked up when called, so the page's wrapped one is used");
+  assert.equal(win.ScytheChat.room(), "GLOBAL");
+});
+
+test("the send button and Enter send; Shift+Enter does not; listeners are removed on deactivate", async () => {
+  const {workspace, elements, requests} = chatWindow();
+  await workspace.activate("chat");
+  await settle();
+  elements["lc-msg-input"].value = "  hello  ";
+  elements["lc-callsign"].value = " ALPHA ";
+  elements["lc-send-btn"].fire("click");
+  await settle();
+  assert.deepEqual(requests.at(-1), {url: "/api/chat/GLOBAL/send", method: "POST", body: {message: "hello", callsign: "ALPHA"}});
+  assert.equal(elements["lc-msg-input"].value, "", "cleared after a successful send");
+
+  let prevented = 0;
+  elements["lc-msg-input"].value = "enter";
+  elements["lc-msg-input"].fire("keydown", {key: "Enter", shiftKey: false, preventDefault() { prevented += 1; }});
+  await settle();
+  assert.equal(prevented, 1);
+  const sent = requests.filter((r) => r.method === "POST").length;
+  elements["lc-msg-input"].value = "no";
+  elements["lc-msg-input"].fire("keydown", {key: "Enter", shiftKey: true, preventDefault() {}});
+  elements["lc-msg-input"].fire("keydown", {key: "a", shiftKey: false, preventDefault() {}});
+  await settle();
+  assert.equal(requests.filter((r) => r.method === "POST").length, sent);
+
+  await workspace.deactivate("chat");
+  assert.equal(elements["lc-send-btn"].count("click") + elements["lc-msg-input"].count("keydown") + elements["lc-callsign"].count("change"), 0);
+});
+
+test("re-activating does not stack the view's listeners (the old init added them every time)", async () => {
+  const {workspace, elements} = chatWindow();
+  for (let i = 0; i < 3; i += 1) { await workspace.activate("chat"); await workspace.deactivate("chat"); }
+  await workspace.activate("chat");
+  assert.equal(elements["lc-send-btn"].count("click"), 1);
+});
+
+test("the callsign is restored on activation and saved when it changes; blocked storage is tolerated", async () => {
+  const first = chatWindow({storage: {rpChatCallsign: "SAVED"}});
+  await first.workspace.activate("chat");
+  assert.equal(first.elements["lc-callsign"].value, "SAVED");
+  first.elements["lc-callsign"].value = "  NEW ";
+  first.elements["lc-callsign"].fire("change");
+  assert.equal(first.storage.rpChatCallsign, "NEW");
+
+  const blocked = chatWindow();
+  blocked.win.localStorage = {getItem() { throw new Error("blocked"); }, setItem() { throw new Error("blocked"); }};
+  await blocked.workspace.activate("chat");
+  blocked.elements["lc-callsign"].fire("change");
+  assert.equal(blocked.workspace.state("chat"), "active");
+});
+
+test("a room manager that does not exist yet is waited for (300 ms, then every 500 ms) and then followed", async () => {
+  const {win, workspace, sources} = chatWindow();
+  await workspace.activate("chat");
+  await win.advance(300);
+  await win.advance(500);
+  assert.equal(win.RoomManager, undefined);
+  let handler;
+  win.RoomManager = {on: (event, fn) => { assert.equal(event, "current_room_changed"); handler = fn; }, off() {}};
+  await win.advance(500);
+  handler({roomId: "OPS"});
+  await settle();
+  assert.equal(sources.at(-1).url, "/api/chat/OPS/stream");
+  handler({});                                            // a change without a room id is ignored
+  handler(undefined);
+  assert.equal(sources.length, 2);
+});
+
+test("deactivating cancels a room-manager lookup still waiting, and unhooks one already attached", async () => {
+  const waiting = chatWindow();
+  await waiting.workspace.activate("chat");
+  await waiting.workspace.deactivate("chat");
+  assert.equal(waiting.win.pendingTimers(), 0, "no retry timer survives");
+  waiting.win.RoomManager = {on() { throw new Error("attached after deactivation"); }, off() {}};
+  await waiting.win.advance(5000);
+
+  const attached = chatWindow();
+  const offs = [];
+  attached.win.RoomManager = {on() {}, off: (event) => offs.push(event)};
+  await attached.workspace.activate("chat");
+  await attached.win.advance(300);
+  await attached.workspace.deactivate("chat");
+  assert.deepEqual(offs, ["current_room_changed"]);
+});
+
+test("deactivating leaves no timers or open streams behind", async () => {
+  const {win, workspace, sources} = chatWindow();
+  await workspace.activate("chat");
+  await settle();
+  sources[0].onerror();                                   // polling interval starts
+  assert.ok(win.pendingTimers() > 0);
+  assert.deepEqual(await workspace.deactivate("chat"), []);
+  assert.equal(win.pendingTimers(), 0);
+  assert.equal(sources.every((s) => s.closed), true);
+});
+
+// --- the page ---
+
+test("the old inline chat connection is gone from LiveChat, so the room is not connected twice", () => {
+  const live = page.slice(page.indexOf("const LiveChat = (function() {"), page.indexOf("window.LiveChat = LiveChat;"));
+  assert.ok(live.length > 100);
+  assert.doesNotMatch(live, /new EventSource/);
+  assert.doesNotMatch(live, /_pollTimer/);
+  assert.doesNotMatch(live, /setInterval/);
+  assert.doesNotMatch(live, /_hookRoomManager/);
+  assert.match(page, /window\.LiveChat = LiveChat;/);
+});
+
+test("LiveChat keeps its rendering, and its entry points delegate to the tool and are harmless before it exists", () => {
+  const live = page.slice(page.indexOf("const LiveChat = (function() {"), page.indexOf("window.LiveChat = LiveChat;"));
+  for (const name of ["_badgeColor", "_myCallsign", "addMsg", "_esc"]) assert.match(live, new RegExp(`function ${name}\\(`), `${name} is kept`);
+  const grab = (name) => live.match(new RegExp(`function ${name}\\([^)]*\\) \\{[^\\n]*\\}`))[0];
+  const build = (win) => new Function("window", `${grab("connect")} ${grab("switchRoom")} ${grab("send")} return {connect, switchRoom, send};`)(win);
+  const calls = [];
+  const chat = build({ScytheChat: {switchRoom: (r) => calls.push(r), send: () => "sent"}});
+  chat.connect(); chat.switchRoom("OPS");
+  assert.equal(chat.send(), "sent");
+  assert.deepEqual(calls, ["GLOBAL", "OPS"]);
+  const early = build({});
+  early.connect("x");
+  assert.equal(early.send(), undefined);
+});
+
+test("LiveChat.init activates the chat tool, waiting for the workspace if the module has not run yet", () => {
+  const live = page.slice(page.indexOf("const LiveChat = (function() {"), page.indexOf("window.LiveChat = LiveChat;"));
+  const init = live.match(/function init\(\) \{[\s\S]*?\n            \}\n/)[0];
+  const run = (win) => new Function("window", "console", `${init} init();`)(win, quiet);
+  const activated = [];
+  run({ScytheWorkspace: {activate: (id) => { activated.push(id); return Promise.resolve(); }}});
+  assert.deepEqual(activated, ["chat"]);
+  let waiting;
+  run({addEventListener: (name, fn, opts) => { waiting = {name, fn, opts}; }});
+  assert.equal(waiting.name, "scythe:workspace_ready");
+  assert.deepEqual(waiting.opts, {once: true});
+});

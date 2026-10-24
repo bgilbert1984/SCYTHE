@@ -70,9 +70,33 @@ stream marked active so it can be retried, as before.
 **Not covered:** the operator's "search visible area" action starts the server stream on its own path, so the tool does not
 know about a stream started that way and deactivation will not stop it.
 
+## Third pilot: room chat (`scythe-web/chatPlugin.js`)
+
+ADS-B and AIS are streams. Chat adds timers, an `EventSource` with a polling fallback, DOM listeners, a hook into another
+object (`RoomManager`) and room switching. The tool owns *one connection object*; closing it is the only way anything stops
+(the event stream, the poll interval and the fallback timer all belong to it), and a late result for a closed connection is
+dropped. What that fixed in the old `LiveChat`:
+
+- The 3 s fallback timeout was never cleared; the poll interval lived on `connect._pollTimer` (a property on a function).
+- A history fetch that landed after a room switch wrote the old room's messages into the new room's feed.
+- `init` added its click / Enter / callsign listeners every time it ran, and the `RoomManager` hook retried every 500 ms
+  forever and was never unhooked. Both now go through `ctx.onCleanup`; the lookup retry is cancelled by deactivation.
+
+Rendering stays with the page (`LiveChat.addMsg`, which escapes everything it prints; now exported as `window.LiveChat` so the
+tool's view adapter can reach it). `LiveChat.init/connect/switchRoom/send` remain as shims that delegate to the tool and do
+nothing while it is inactive. Timers, `EventSource`, `RoomManager` and the DOM are services, so the tests run the whole
+fallback sequence on a fake clock.
+
+**Kept as it was, and pinned by a test:** messages delivered by the stream do not advance the poll cursor (`since`), so if the
+stream drops and polling takes over, messages already shown from the stream can be shown again. Fixing it means deciding what
+the cursor is (server timestamp of the newest message seen from any transport), which is a behaviour change.
+
+**Changed:** the history and poll requests now reject on an HTTP error instead of parsing an error page (both were already
+swallowed); a failed send keeps the text, as before.
+
 ## Not done
 
-- Only ADS-B and AIS streaming use the contract, and activation is not yet driven by the operator (a panel click).
+- Only ADS-B, AIS streaming and chat use the contract, and activation is not yet driven by the operator (a panel click).
 - No unified transport: the tools take the realtime socket, `WebSocketSync` and `fetch` as services; they do not open their own.
 - Not run in a browser against a signed-in session; the tests cover the contract, the plugin, the boot wiring, and run the
   page's own `removeEntityMarker` against a fake collection.

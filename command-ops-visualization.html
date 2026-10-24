@@ -19284,9 +19284,6 @@ const originalComplete = options.complete;
         
         // ── LiveChat: YouTube-style room chat (no auth required) ────────
         const LiveChat = (function() {
-            let _roomId = 'GLOBAL';
-            let _es = null;  // current EventSource
-
             function _badgeColor(callsign) {
                 let h = 0;
                 for (let i = 0; i < callsign.length; i++) {
@@ -19335,150 +19332,23 @@ const originalComplete = options.complete;
                     .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
             }
 
-            function connect(roomId) {
-                _roomId = roomId || 'GLOBAL';
-                const label = document.getElementById('lc-room-label');
-                if (label) label.textContent = _roomId;
-
-                // Stop any existing EventSource
-                if (_es) { try { _es.close(); } catch(e){} _es = null; }
-                // Stop any existing poll interval
-                if (connect._pollTimer) { clearInterval(connect._pollTimer); connect._pollTimer = null; }
-
-                const feed = document.getElementById('lc-feed');
-                if (feed) feed.innerHTML = '<div style="color:#383838;font-size:10px;text-align:center;padding:8px;">Connecting…</div>';
-
-                // Track last seen timestamp for incremental polling
-                connect._lastTs = connect._lastTs || {};
-                connect._lastTs[_roomId] = '';
-
-                // Try SSE first; fall back to polling after 3s if no 'connected' event
-                let _sseFailed = false;
-                let _sseConnected = false;
-
-                function _startPolling() {
-                    if (connect._pollTimer) return;
-                    connect._pollTimer = setInterval(async function() {
-                        try {
-                            const since = connect._lastTs[_roomId] || '';
-                            const url = `/api/chat/${encodeURIComponent(_roomId)}/messages` +
-                                        (since ? `?since=${encodeURIComponent(since)}` : '');
-                            const r = await fetch(url);
-                            const d = await r.json();
-                            if (d.messages && d.messages.length > 0) {
-                                d.messages.forEach(addMsg);
-                                connect._lastTs[_roomId] = d.messages[d.messages.length - 1].timestamp || '';
-                            }
-                        } catch(err) { /* ignore transient errors */ }
-                    }, 2000);
-                }
-
-                // Load history immediately via polling endpoint
-                (async function() {
-                    try {
-                        const r = await fetch(`/api/chat/${encodeURIComponent(_roomId)}/messages`);
-                        const d = await r.json();
-                        if (feed) {
-                            // Clear placeholder
-                            const ph = feed.querySelector('div[style*="Connecting"]');
-                            if (ph) ph.remove();
-                        }
-                        if (d.messages && d.messages.length > 0) {
-                            d.messages.forEach(addMsg);
-                            connect._lastTs[_roomId] = d.messages[d.messages.length - 1].timestamp || '';
-                        }
-                    } catch(err) {}
-                })();
-
-                // Try SSE
-                try {
-                    _es = new EventSource(`/api/chat/${encodeURIComponent(_roomId)}/stream`);
-                    _es.onmessage = function(e) {
-                        try {
-                            const data = JSON.parse(e.data);
-                            if (data.type === 'connected') {
-                                _sseConnected = true;
-                                // Stop polling if SSE is working
-                                if (connect._pollTimer) { clearInterval(connect._pollTimer); connect._pollTimer = null; }
-                            }
-                            if (data.type === 'chat') addMsg(data);
-                        } catch(err) {}
-                    };
-                    _es.onerror = function() {
-                        _sseFailed = true;
-                        const f = document.getElementById('lc-feed');
-                        if (f && !f.querySelector('.lc-msg')) {
-                            // Show polling indicator instead
-                        }
-                        _startPolling();
-                    };
-                    // If no SSE 'connected' event within 3s, fall back to polling
-                    setTimeout(function() {
-                        if (!_sseConnected) { _startPolling(); }
-                    }, 3000);
-                } catch(err) {
-                    console.warn('LiveChat: SSE unavailable, using polling');
-                    _startPolling();
-                }
-            }
-
-            async function send() {
-                const msgEl = document.getElementById('lc-msg-input');
-                const csEl  = document.getElementById('lc-callsign');
-                const msg   = msgEl?.value.trim();
-                if (!msg) return;
-                const callsign = csEl?.value.trim() || '';
-                if (callsign) localStorage.setItem('rpChatCallsign', callsign);
-                try {
-                    await fetch(`/api/chat/${encodeURIComponent(_roomId)}/send`, {
-                        method: 'POST',
-                        headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({message: msg, callsign})
-                    });
-                    if (msgEl) msgEl.value = '';
-                } catch(err) {
-                    console.warn('LiveChat send error', err);
-                }
-            }
-
-            function switchRoom(roomId) {
-                connect(roomId || 'GLOBAL');
-            }
-
+            // The connection half (stream, polling fallback, send, room changes) is the 'chat' workspace tool
+            // (scythe-web/chatPlugin.js). These keep LiveChat's entry points; they do nothing while the tool is inactive.
             function init() {
-                // Restore callsign from localStorage
-                const stored = localStorage.getItem('rpChatCallsign');
-                const csEl = document.getElementById('lc-callsign');
-                if (csEl && stored) csEl.value = stored;
-
-                const sendBtn = document.getElementById('lc-send-btn');
-                const msgInput = document.getElementById('lc-msg-input');
-                if (sendBtn) sendBtn.addEventListener('click', send);
-                if (msgInput) msgInput.addEventListener('keydown', function(e) {
-                    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
-                });
-                if (csEl) csEl.addEventListener('change', function() {
-                    localStorage.setItem('rpChatCallsign', csEl.value.trim());
-                });
-
-                connect('GLOBAL');
-
-                // Hook into RoomManager if it's available
-                function _hookRoomManager() {
-                    if (typeof RoomManager !== 'undefined' && RoomManager.on) {
-                        RoomManager.on('current_room_changed', function(d) {
-                            if (d && d.roomId) switchRoom(d.roomId);
-                        });
-                    } else {
-                        // RoomManager not yet defined — retry shortly
-                        setTimeout(_hookRoomManager, 500);
-                    }
-                }
-                setTimeout(_hookRoomManager, 300);
+                const activate = function() {
+                    window.ScytheWorkspace.activate('chat').catch(function(e) { console.warn('[chat] activation failed:', e); });
+                };
+                if (window.ScytheWorkspace) activate();
+                else window.addEventListener('scythe:workspace_ready', activate, { once: true });
             }
+            function connect(roomId) { if (window.ScytheChat) window.ScytheChat.switchRoom(roomId || 'GLOBAL'); }
+            function switchRoom(roomId) { connect(roomId); }
+            function send() { return window.ScytheChat ? window.ScytheChat.send() : undefined; }
 
             return { init, connect, switchRoom, send, addMsg, _badgeColor };
         })();
+
+        window.LiveChat = LiveChat;   // the chat tool's view adapter renders through LiveChat.addMsg
 
         // Stub for backward compat — delegates to LiveChat
         function sendRoomChatMessage() { LiveChat.send(); }
