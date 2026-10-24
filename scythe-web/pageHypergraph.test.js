@@ -13,7 +13,7 @@ test("the Three.js hypergraph visualizer and nmap scanner are gone (nothing ever
 
 // The page's one hypergraph is the Cesium object from RF_SCYTHE.createHypergraphVisualizer. The deleted class had 45 methods, and
 // some callers were written against it; this finds calls on the real object to methods it does not have.
-const KNOWN_MISSING = new Set(["updateWithImmData"]);   // a call that throws today; not part of the Clear-button fix
+const KNOWN_MISSING = new Set();   // calls that throw today; none
 
 test("every method the page calls on hypergraphVisualizer exists on the Cesium object, except the ones known to be missing", () => {
   const start = page.indexOf("window.RF_SCYTHE.createHypergraphVisualizer = function");
@@ -59,4 +59,37 @@ test("Clear Results clears the hypergraph through the Cesium visualizer's clearH
 test("Clear Results still resets the panel when there is no visualizer yet, and when the panel's elements are missing", () => {
   assert.equal(clearRun({visualizer: null}).messages.length, 1);
   assert.equal(clearRun({visualizer: {clearHypergraph() {}}}).notes.length, 1);
+});
+
+// --- imm generate ---
+
+/** The page's performImmGeneration, run against fakes. */
+function immGeneration({simulate, visualizer}) {
+  const start = page.indexOf("async function performImmGeneration(");
+  const end = page.indexOf("\n        }\n", start);
+  assert.ok(start > 0 && end > start);
+  const source = page.slice(start, end + "\n        }".length);
+  const messages = [], panels = [];
+  const run = new Function("addConsoleMessage", "simulateImmGeneration", "hypergraphVisualizer", "showPanel", `${source}\nreturn performImmGeneration;`)(
+    (text, kind) => messages.push([text, kind]), simulate, visualizer, (name) => panels.push(name));
+  return {run, messages, panels};
+}
+
+test("imm generate reports that nothing is drawn, with or without a visualizer, and does not open the panel", async () => {
+  for (const visualizer of [null, {}]) {
+    const {run, messages, panels} = immGeneration({simulate: async () => ({points: 8}), visualizer});
+    await run("features", {});
+    assert.deepEqual(messages, [
+      ["Generating RF visualization data from features: features", "response"],
+      ["Generated 8 3D points", "response"],
+      ["IMM visualization is not implemented; the generated data was not drawn", "info"],
+    ]);
+    assert.deepEqual(panels, []);
+  }
+});
+
+test("imm generate still reports a generation error", async () => {
+  const {run, messages} = immGeneration({simulate: async () => { throw new Error("no features"); }, visualizer: {}});
+  await run("x", {});
+  assert.deepEqual(messages.at(-1), ["Generation error: no features", "alert"]);
 });
