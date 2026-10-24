@@ -50,7 +50,10 @@ This API is treated as v1: the names (`listen`, `guard`, `interval`, `timeout`, 
 frozen `ctx` were decided in #301, and change only if migrating the remaining tools exposes a real ergonomic problem, not for
 terminology.
 
-ADS-B and chat use the helpers; AIS does not yet (its in-flight start still needs an explicit `ctx.signal.aborted` check).
+ADS-B, chat and AIS streaming use the helpers. AIS keeps one explicit `ctx.signal.aborted` check, after the `await` on starting the
+server stream: the helpers can drop a late callback, but only the tool knows that a late *answer* means something was started on the
+server and must be stopped. Where a guard looks redundant it was removed (a handler that goes through `run`, which is nulled first),
+and every guard that remains has a test that fires an event in the gap between two awaited cleanups.
 
 ## What the pilot changed
 

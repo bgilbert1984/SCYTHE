@@ -249,3 +249,59 @@ test("it is refused while a service is missing", async () => {
   ws.register(createAisStreamPlugin({log: quiet}).tool);
   await assert.rejects(ws.activate(AIS_STREAM_ID), /syncEvents|cameraView|aisApi|vesselSink|notify/);
 });
+
+// Cleanups are awaited one at a time, so an event can arrive between two of them: the listener is still attached but the tool
+// is already deactivating. Hold the camera cleanup (which runs before the socket and sync listeners are removed) open.
+function slowCameraRelease(camera) {
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  camera.onChange = () => async () => { await gate; };
+  return release;
+}
+
+test("a vessel that arrives while deactivation is still releasing resources is dropped", async () => {
+  const {ws, world, socket, camera} = setup();
+  const release = slowCameraRelease(camera);
+  await ws.activate(AIS_STREAM_ID);
+  const deactivating = ws.deactivate(AIS_STREAM_ID);
+  await flush();
+  assert.equal(socket.count("ais_update"), 1, "the listener is still attached at this point");
+  socket.emit("ais_update", {mmsi: 555});
+  release();
+  await deactivating;
+  assert.deepEqual(world.vessels, []);
+});
+
+test("a 'connected' event that arrives while deactivation is still releasing resources does not start a stream", async () => {
+  const {ws, world, sync, camera} = setup();
+  const release = slowCameraRelease(camera);
+  await ws.activate(AIS_STREAM_ID);
+  const deactivating = ws.deactivate(AIS_STREAM_ID);
+  await flush();
+  assert.equal(sync.count("connected"), 1);
+  sync.fire("connected");
+  release();
+  await deactivating;
+  await flush();
+  assert.equal(world.started.length, 0);
+});
+
+test("a camera move that arrives while deactivation is still releasing resources posts nothing to the server", async () => {
+  const {ws, ais, world, camera} = setup();
+  const handlers = new Set();
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  camera.onChange = (fn) => { handlers.add(fn); return async () => { await gate; handlers.delete(fn); }; };
+  await ws.activate(AIS_STREAM_ID);
+  ais.controls.checkAndStart(); await flush();
+  assert.equal(world.started.length, 1);
+  const deactivating = ws.deactivate(AIS_STREAM_ID);
+  await flush();
+  assert.equal(handlers.size, 1, "the camera listener is still attached at this point");
+  world.bbox = boxB; world.clock += 5000;
+  for (const fn of handlers) fn();
+  await flush();
+  release();
+  await deactivating;
+  assert.equal(world.started.length, 1, "no bounding-box update was posted during deactivation");
+});
