@@ -10,6 +10,7 @@ import * as sensorEvents from "./sensorEvents.js";
 import {createSensorPlugin} from "./sensorPlugin.js";
 import {createFusionPlugin} from "./fusionPlugin.js";
 import {createViewshedPlugin} from "./viewshedPlugin.js";
+import {createLpiPlugin, pulseRadius, pulseAlpha} from "./lpiPlugin.js";
 import {escapeHtml} from "./htmlEscape.js";
 
 /**
@@ -141,6 +142,18 @@ export function bootWorkspace(win) {
   const viewsheds = createViewshedPlugin({log: win.console});
   workspace.register(viewsheds.tool);
   win.ViewshedManager = viewsheds.controls;   // what the page's init and Settings panel call (the page also keeps it as window.viewshedManager)
+
+  // --- LPI ---
+  workspace.provide("lpiSensors", {
+    ids: () => Object.keys(win.SensorManager?.sensors || {}),
+    sensor: (id) => win.SensorManager?.sensors?.[id],
+    flyTo: (id) => win.SensorManager?.flyTo?.(id),
+  });
+  workspace.provide("frames", {request: (fn) => win.requestAnimationFrame(fn), cancel: (id) => win.cancelAnimationFrame(id)});
+  workspace.provide("clock", {now: () => Date.now()});
+  workspace.provide("lpiView", lpiView(win));
+  workspace.provide("lpiGlobe", lpiGlobe(win));
+  workspace.register(createLpiPlugin({log: win.console}).tool);
   win.ScytheWorkspace = workspace;
   win.dispatchEvent(new win.Event("scythe:workspace_ready"));
   return workspace;
@@ -640,6 +653,113 @@ function viewshedGlobe(win) {
     /** Take one entity down, if it is still showing. The viewer stays attached: the page hands it over once. */
     remove(handle) {
       if (viewer && viewer.entities.contains(handle)) viewer.entities.remove(handle);
+    },
+  };
+}
+
+/** The LPI panel's DOM, by the ids the page gives it. Every lookup happens when it is needed; a missing element is skipped. */
+function lpiView(win) {
+  const byId = (id) => win.document.getElementById(id);
+  return {
+    hasFeed: () => Boolean(byId("lpiList")),
+    clearFeed() {
+      const list = byId("lpiList");
+      if (list) list.innerHTML = "";
+      const count = byId("lpi-event-count");
+      if (count) count.textContent = "0";
+    },
+    setFeed(html, count) {
+      const element = byId("lpi-event-count");
+      if (element) element.textContent = count;
+      const list = byId("lpiList");
+      if (list) list.innerHTML = html;
+    },
+    /** One status card per sensor, newest first; the first card replaces the "Waiting" placeholder. */
+    ensureSummaryCard(sensorId) {
+      const container = byId("lpi-summary-container");
+      if (!container || byId(`lpi-card-${sensorId}`)) return;
+      if (container.innerText.includes("Waiting")) container.innerHTML = "";
+      const card = win.document.createElement("div");
+      card.id = `lpi-card-${sensorId}`;
+      card.className = "settings-group";   // re-use the existing style class for the box
+      card.style.cssText = "padding: 8px; background: rgba(20,20,30,0.8); border: 1px solid #444; border-radius: 4px;";
+      container.prepend(card);
+    },
+    setSummaryCard(sensorId, borderColor, html) {
+      const card = byId(`lpi-card-${sensorId}`);
+      if (!card) return;
+      card.style.borderColor = borderColor;
+      card.innerHTML = html;
+    },
+    resetSummary(html) { const container = byId("lpi-summary-container"); if (container) container.innerHTML = html; },
+    showDetails(text) {
+      const panel = byId("lpi-details-panel"), pre = byId("lpi-details-json");
+      if (!panel || !pre) return;
+      panel.style.display = "block";
+      pre.textContent = text;
+    },
+    /** The Clear and Run-simulation buttons, and one listener on the feed: a click on a row calls `select` with its position. */
+    bind({clear, runSimulation, select}) {
+      const bound = [];
+      const on = (element, type, handler) => {
+        if (!element) return;
+        element.addEventListener(type, handler);
+        bound.push(() => element.removeEventListener(type, handler));
+      };
+      on(byId("lpi-clear-btn"), "click", () => clear());
+      on(byId("lpi-run-sim-btn"), "click", () => runSimulation());
+      on(byId("lpiList"), "click", (event) => {
+        const row = event.target?.closest?.("li[data-index]");
+        if (row) select(row.getAttribute("data-index"));
+      });
+      return () => { for (const off of bound) off(); };
+    },
+  };
+}
+
+/** The LPI pulse (an expanding circle at a sensor) and its floating label on the Cesium globe. Each animates or times out by itself; `clear` stops them all. */
+function lpiGlobe(win) {
+  const pulses = new Map();   // entity -> its pending animation frame
+  const labels = new Map();   // entity -> its removal timer
+  return {
+    available: () => Boolean(win.viewer),
+    pulse({id, lat, lon, color, durationMs}) {
+      const {Cesium, viewer} = win;
+      const base = Cesium.Color[color];
+      let radius = pulseRadius(0);
+      const entity = viewer.entities.add({
+        id, position: Cesium.Cartesian3.fromDegrees(lon, lat),
+        ellipse: {
+          semiMajorAxis: new Cesium.CallbackProperty(() => radius, false), semiMinorAxis: new Cesium.CallbackProperty(() => radius, false),
+          material: new Cesium.ColorMaterialProperty(new Cesium.CallbackProperty(() => base.withAlpha(pulseAlpha(radius)), false)), height: 50.0,
+        },
+      });
+      const start = Date.now();
+      const animate = () => {
+        const elapsed = Date.now() - start;
+        if (elapsed > durationMs) { pulses.delete(entity); win.viewer?.entities.remove(entity); return; }
+        radius = pulseRadius(elapsed / durationMs);
+        pulses.set(entity, win.requestAnimationFrame(animate));
+      };
+      pulses.set(entity, win.requestAnimationFrame(animate));
+    },
+    label({id, lat, lon, text, offsetY, ttlMs}) {
+      const {Cesium, viewer} = win;
+      const entity = viewer.entities.add({
+        id, position: Cesium.Cartesian3.fromDegrees(lon, lat, 2000),
+        label: {
+          text, font: "16px Monospace", style: Cesium.LabelStyle.FILL_AND_OUTLINE, fillColor: Cesium.Color.RED, outlineColor: Cesium.Color.BLACK, outlineWidth: 2,
+          verticalOrigin: Cesium.VerticalOrigin.BOTTOM, pixelOffset: new Cesium.Cartesian2(0, offsetY),
+        },
+      });
+      labels.set(entity, win.setTimeout(() => { labels.delete(entity); win.viewer?.entities.remove(entity); }, ttlMs));
+    },
+    /** Stop every pulse and label still showing and take it down. */
+    clear() {
+      for (const [entity, frame] of pulses) { win.cancelAnimationFrame(frame); win.viewer?.entities.remove(entity); }
+      pulses.clear();
+      for (const [entity, timer] of labels) { win.clearTimeout(timer); win.viewer?.entities.remove(entity); }
+      labels.clear();
     },
   };
 }
