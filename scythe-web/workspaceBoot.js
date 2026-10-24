@@ -12,6 +12,7 @@ import {createFusionPlugin} from "./fusionPlugin.js";
 import {createViewshedPlugin} from "./viewshedPlugin.js";
 import {createLpiPlugin, pulseRadius, pulseAlpha} from "./lpiPlugin.js";
 import {createPresencePlugin} from "./presencePlugin.js";
+import {createRenderPlugin} from "./renderPlugin.js";
 import {escapeHtml} from "./htmlEscape.js";
 
 /**
@@ -167,6 +168,16 @@ export function bootWorkspace(win) {
   const presence = createPresencePlugin({log: win.console});
   workspace.register(presence.tool);
   win.OperatorPresence = presence.controls;   // what the page's init and the inline handlers in the Operators panel call
+
+  // --- level of detail and clustering ---
+  workspace.provide("renderGlobe", renderGlobe(win));
+  workspace.provide("renderEvents", {
+    altitudeChanged: (detail) => win.document.dispatchEvent(new win.CustomEvent("altitudeChanged", {detail})),
+  });
+  const render = createRenderPlugin({log: win.console});
+  workspace.register(render.tool);
+  win.HierarchicalRenderManager = render.controls;   // what the page's init, the layers and the altitude call sites use
+
   win.ScytheWorkspace = workspace;
   win.dispatchEvent(new win.Event("scythe:workspace_ready"));
   return workspace;
@@ -802,5 +813,29 @@ function presenceGlobe(win) {
     },
     /** Take down every marker still showing. The viewer stays attached: the page hands it over once. */
     clear: takeDown,
+  };
+}
+
+/** The viewer's camera and data sources, as the level-of-detail tool needs them. The viewer comes from `attach`, as the page hands it over. */
+function renderGlobe(win) {
+  let viewer = null;
+  const height = () => win.Cesium.Cartographic.fromCartesian(viewer.camera.position).height;
+  return {
+    attach(handed) { viewer = handed; },
+    available: () => Boolean(viewer),
+    viewer: () => viewer,
+    altitude: height,
+    /** Calls `fn` on every camera change; returns the function that stops it. */
+    onCameraChanged: (fn) => viewer.camera.changed.addEventListener(fn),
+    addDataSource(name, clustering) {
+      const source = new win.Cesium.CustomDataSource(name);
+      Object.assign(source.clustering, clustering);
+      viewer.dataSources.add(source);
+      return source;
+    },
+    /** Take a data source down, if it is still in the viewer. The viewer stays attached: the page hands it over once. */
+    removeDataSource(source) {
+      if (viewer && viewer.dataSources.contains(source)) viewer.dataSources.remove(source);
+    },
   };
 }
