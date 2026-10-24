@@ -1122,13 +1122,24 @@ function fakeCesium() {
   const entities = {
     values: [],
     add(spec) { const e = {...spec}; this.values.push(e); return e; },
-    remove(e) { const i = this.values.indexOf(e); if (i >= 0) this.values.splice(i, 1); },
+    removed: [],
+    remove(e) { this.removed.push(e); const i = this.values.indexOf(e); if (i >= 0) this.values.splice(i, 1); },
   };
   const Cesium = {
-    Color: Object.fromEntries(["CYAN", "ORANGE", "YELLOW", "PURPLE", "LIME", "WHITE", "BLACK"].map((n) => [n, {name: n.toLowerCase(), withAlpha: (a) => ({name: n.toLowerCase(), alpha: a})}])),
-    Cartesian3: {fromDegrees: (lon, lat, h) => ({lon, lat, h}), distance: (a, b) => Math.hypot((a.lon - b.lon) * 1e5, (a.lat - b.lat) * 1e5)},
+    Color: {
+      ...Object.fromEntries(["CYAN", "ORANGE", "YELLOW", "PURPLE", "LIME", "WHITE", "BLACK", "ALICEBLUE", "MAGENTA"].map((n) => [n, {name: n.toLowerCase(), withAlpha: (a) => ({name: n.toLowerCase(), alpha: a})}])),
+      fromCssColorString: (css) => ({css}),
+    },
+    Cartesian3: class {
+      static fromDegrees(lon, lat, h) { return {lon, lat, h}; }
+      static distance(a, b) { return Math.hypot((a.lon - b.lon) * 1e5, (a.lat - b.lat) * 1e5); }
+      static midpoint(a, b, result) { return Object.assign(result, {lon: (a.lon + b.lon) / 2, lat: (a.lat + b.lat) / 2, mid: true}); }
+    },
+    PolylineArrowMaterialProperty: class { constructor(color) { this.color = color; } },
+    DistanceDisplayCondition: class { constructor(near, far) { this.near = near; this.far = far; } },
+    NearFarScalar: class { constructor(...a) { this.args = a; } },
     Cartesian2: class { constructor(x, y) { this.x = x; this.y = y; } },
-    LabelStyle: {FILL_AND_OUTLINE: "fill"}, VerticalOrigin: {BOTTOM: "bottom"}, ArcType: {GEODESIC: "geodesic"},
+    LabelStyle: {FILL_AND_OUTLINE: "fill"}, VerticalOrigin: {BOTTOM: "bottom", TOP: "top"}, ArcType: {GEODESIC: "geodesic"},
     PolylineDashMaterialProperty: class { constructor(o) { this.options = o; } },
     Math: {toRadians: (d) => d * Math.PI / 180},
   };
@@ -1235,4 +1246,158 @@ test("the old inline SensorManager is gone; the boot module activates the tool; 
   assert.match(page, /workspace\.activate\("sensors"\)/);
   assert.match(page, /window\.SensorManager\.populateEntityDropdown\(\)/);
   assert.match(page, /typeof SensorManager !== 'undefined' && SensorManager\.load\)/);
+});
+
+// --- fusion overlays ---
+
+function fusionWindow({withViewer = true, sensors} = {}) {
+  const globe = fakeCesium();
+  const timers = [], errors = [];
+  const win = fakeWindow({
+    setInterval: () => 1, clearInterval() {},
+    console: {warn() {}, log() {}, debug() {}, error: (...a) => errors.push(a)},
+    setTimeout: (fn, ms) => { timers.push({fn, ms, live: true}); return timers.length - 1; },
+    clearTimeout: (id) => { if (timers[id]) timers[id].live = false; },
+    ...(withViewer ? {viewer: globe.viewer, Cesium: globe.Cesium} : {}),
+    OperatorSession: {sessionToken: "tok"},
+  });
+  return {win, globe, timers, errors, sensors};
+}
+const fire = (timers, i) => { timers[i].live = false; timers[i].fn(); };
+const activityEvent = (kind, payload, sensorId = "s1") => ({entity_id: `activity:${sensorId}:1`, entity_type: "SENSOR_ACTIVITY", entity_data: {sensor_id: sensorId, kind, payload}});
+
+test("booting registers fusion inactive and does not assign window.FusionVisualization (the PCAP demo's calls to it stay dormant)", () => {
+  const {win} = fusionWindow();
+  const workspace = bootWorkspace(win);
+  assert.equal(workspace.state("fusion"), "inactive");
+  assert.equal(win.FusionVisualization, undefined);
+  assert.match(page, /if\(window\.FusionVisualization\) window\.FusionVisualization\.updateGeoNode\(payload\)/);
+  assert.match(page, /if\(window\.FusionVisualization\) window\.FusionVisualization\.drawFlow\(sensorId, payload\)/);
+});
+
+test("the fusion globe draws an AoA ray, a TDoA line, a flow arc and a geo point as Cesium entities, each removed after its lifetime", async () => {
+  const {win, globe, timers} = fusionWindow();
+  const workspace = bootWorkspace(win);
+  win.SensorManager = {sensors: {s1: {lat: 36, lon: -86, alt: 100}, s2: {lat: 36.1, lon: -86.1, alt: 5}}};   // read at call time
+  await workspace.activate("fusion");
+  await workspace.activate("entity-sync");
+  const ingest = (event) => win.EntitySync.ingest("CREATE", event);
+  ingest(activityEvent("aoa_measured", {bearing_deg: 0}));
+  ingest(activityEvent("tdoa_measured", {ref_sensor_id: "s2", tau_ns: 12.34}));
+  ingest(activityEvent("geoip_resolved", {ip: "8.8.8.8", geo: {lat: 37, lon: -122, city: "MV"}}));
+  ingest(activityEvent("ndpi_flow_aggregate", {src_ip: "10.0.0.1", dst_ip: "8.8.8.8", bytes: 1000, protocol_hist: {TLS: 3}}));
+  const [aoa, tdoa, geo, flow] = globe.entities.values;
+  assert.deepEqual(aoa.polyline.positions[0], {lon: -86, lat: 36, h: 100});
+  assert.ok(aoa.polyline.positions[1].lat > 36);
+  assert.equal(aoa.polyline.width, 4);
+  assert.equal(aoa.polyline.material.options.dashLength, 16.0);
+  assert.equal(aoa.polyline.material.options.color.name, "yellow");
+  assert.equal(tdoa.polyline.width, 2);
+  assert.deepEqual(tdoa.polyline.material, {name: "cyan", alpha: 0.2});
+  assert.equal(tdoa.label.text, "Δt: 12.3ns");
+  assert.equal(tdoa.label.position.mid, true);   // PINNED: the label carries a position of its own, which Cesium ignores
+  assert.equal(tdoa.label.font, "12px monospace");
+  assert.equal(tdoa.label.disableDepthTestDistance, Number.POSITIVE_INFINITY);
+  assert.deepEqual(tdoa.label.scaleByDistance.args, [1.5e2, 1.0, 1.5e7, 0.5]);
+  assert.deepEqual(geo.position, {lon: -122, lat: 37, h: 0});
+  assert.equal(geo.point.pixelSize, 8);
+  assert.equal(geo.point.color.css, "#4a9eff");
+  assert.deepEqual([geo.point.outlineColor.name, geo.point.outlineWidth], ["black", 1]);
+  assert.equal(geo.label.verticalOrigin, "top");
+  assert.equal(geo.label.font, "10px monospace");
+  assert.equal(geo.label.text, "8.8.8.8\nMV");
+  assert.deepEqual([geo.label.distanceDisplayCondition.near, geo.label.distanceDisplayCondition.far], [0, 5000000]);
+  assert.equal(flow.polyline.arcType, "geodesic");
+  assert.equal(flow.polyline.material.color.name, "lime");
+  assert.equal(flow.polyline.material.color.alpha, undefined);   // not made transparent
+  assert.ok(Math.abs(flow.polyline.width - 3) < 1e-9);
+  assert.deepEqual(flow.polyline.positions, [{lon: -118.2437, lat: 34.0522, h: 0}, {lon: -122, lat: 37, h: 0}]);
+  assert.deepEqual(timers.map((t) => t.ms), [3000, 3000, 60000, 10000]);
+  fire(timers, 0);
+  assert.equal(globe.entities.values.length, 3);
+  assert.ok(!globe.entities.values.includes(aoa));
+  fire(timers, 3);
+  assert.ok(!globe.entities.values.includes(flow));
+});
+
+test("the fusion globe's flow arc takes the colour name as given, with the fallback half-transparent", async () => {
+  const {win, globe} = fusionWindow();
+  const workspace = bootWorkspace(win);
+  await workspace.activate("fusion");
+  await workspace.activate("entity-sync");
+  win.EntitySync.ingest("CREATE", activityEvent("ndpi_flow_aggregate", {src_ip: "10.0.0.1", dst_ip: "10.0.0.2", bytes: 10, protocol_hist: {FTP: 1}}));
+  assert.deepEqual(globe.entities.values[0].polyline.material.color, {name: "white", alpha: 0.5});
+});
+
+test("deactivating fusion removes every overlay still showing and cancels their timers; a timer that fires later does nothing", async () => {
+  const {win, globe, timers} = fusionWindow();
+  const workspace = bootWorkspace(win);
+  win.SensorManager = {sensors: {s1: {lat: 36, lon: -86, alt: 1}}};
+  await workspace.activate("fusion");
+  await workspace.activate("entity-sync");
+  win.EntitySync.ingest("CREATE", activityEvent("aoa_measured", {bearing_deg: 10}));
+  win.EntitySync.ingest("CREATE", activityEvent("geoip_resolved", {ip: "8.8.8.8", geo: {lat: 1, lon: 2}}));
+  assert.equal(globe.entities.values.length, 2);
+  await workspace.deactivate("fusion");
+  assert.deepEqual(globe.entities.values, []);
+  assert.deepEqual(timers.map((t) => t.live), [false, false]);
+  fire(timers, 0);   // a stale callback: the entity is already gone, nothing throws
+});
+
+test("each overlay is removed from the globe once: by its timer or by clear, never both, and clearing twice removes nothing more", async () => {
+  const {win, globe, timers} = fusionWindow();
+  const workspace = bootWorkspace(win);
+  win.SensorManager = {sensors: {s1: {lat: 36, lon: -86, alt: 1}}};
+  await workspace.activate("fusion");
+  await workspace.activate("entity-sync");
+  win.EntitySync.ingest("CREATE", activityEvent("aoa_measured", {bearing_deg: 10}));
+  win.EntitySync.ingest("CREATE", activityEvent("geoip_resolved", {ip: "8.8.8.8", geo: {lat: 1, lon: 2}}));
+  fire(timers, 0);                                 // the AoA ray's timer
+  assert.equal(globe.entities.removed.length, 1);
+  await workspace.deactivate("fusion");            // clears the geo point only
+  assert.equal(globe.entities.removed.length, 2);
+  await workspace.activate("fusion");
+  await workspace.deactivate("fusion");            // nothing left to clear
+  assert.equal(globe.entities.removed.length, 2);
+});
+
+test("without a viewer fusion draws nothing and throws nothing; the page clears its viewer later and a timer still does not throw", async () => {
+  const none = fusionWindow({withViewer: false});
+  const workspace = bootWorkspace(none.win);
+  none.win.SensorManager = {sensors: {s1: {lat: 36, lon: -86, alt: 1}, s2: {lat: 1, lon: 2, alt: 1}}};
+  await workspace.activate("fusion");
+  await workspace.activate("entity-sync");
+  for (const event of [activityEvent("aoa_measured", {bearing_deg: 1}), activityEvent("tdoa_measured", {ref_sensor_id: "s2", tau_ns: 1}),
+    activityEvent("geoip_resolved", {ip: "8.8.8.8", geo: {lat: 1, lon: 2}}), activityEvent("ndpi_flow_aggregate", {src_ip: "10.0.0.1", dst_ip: "10.0.0.2", bytes: 1, protocol_hist: {TLS: 1}})]) {
+    none.win.EntitySync.ingest("CREATE", event);
+  }
+  assert.deepEqual(none.timers, []);
+  assert.deepEqual(none.errors, []);   // nothing was thrown out of the stream handlers either
+  const later = fusionWindow();
+  const w2 = bootWorkspace(later.win);
+  later.win.SensorManager = {sensors: {s1: {lat: 36, lon: -86, alt: 1}}};
+  await w2.activate("fusion");
+  await w2.activate("entity-sync");
+  later.win.EntitySync.ingest("CREATE", activityEvent("aoa_measured", {bearing_deg: 1}));
+  later.win.viewer = undefined;
+  fire(later.timers, 0);   // the viewer went away: the removal is skipped
+  await w2.deactivate("fusion");
+});
+
+test("fusion reads the sensors from the Sensors panel's SensorManager when it draws, and ignores an AoA event for an unknown one", async () => {
+  const {win, globe} = fusionWindow();
+  const workspace = bootWorkspace(win);
+  await workspace.activate("fusion");
+  await workspace.activate("entity-sync");
+  win.EntitySync.ingest("CREATE", activityEvent("aoa_measured", {bearing_deg: 1}));   // the real SensorManager is inactive: no sensors
+  assert.deepEqual(globe.entities.values, []);
+  win.SensorManager = undefined;
+  win.EntitySync.ingest("CREATE", activityEvent("aoa_measured", {bearing_deg: 1}));
+  assert.deepEqual(globe.entities.values, []);
+});
+
+test("the old inline FusionVisualization is gone and the boot module activates the tool", () => {
+  assert.doesNotMatch(page, /const FusionVisualization = \{/);
+  assert.doesNotMatch(page, /FusionVisualization\.init\(\)/);
+  assert.match(page, /workspace\.activate\("fusion"\)/);
 });
