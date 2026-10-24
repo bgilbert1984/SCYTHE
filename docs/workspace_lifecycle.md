@@ -250,9 +250,28 @@ handed over before the tool is active is kept), and still keeps `window.viewshed
   puts its ray at NaN; creating a viewshed with an id that is showing is refused by Cesium and the error reaches the caller; the wedge uses degrees
   offset by `distance / 111320` at any latitude.
 
+## Eleventh tool: LPI (`scythe-web/lpiPlugin.js`)
+
+`LPIManager` (a 390-line object in `command-ops-visualization.html`) is now the `lpi` tool. While active it listens to the entity stream for sensor
+activity (read by `sensorEvents.js`), keeps the latest 500 events per sensor, and shows them: a feed of the 50 newest across sensors, one status card
+per sensor (a classification or a candidate in the last 10 s, else idle), and a details box for a clicked row. A detection or classification also
+pulses on the globe at its sensor (2 s) and a classification floats its top class (4 s). The "Run simulation" button asks the server to simulate a
+detection and shows the returned trace at once. What is shown is plain strings and data in the plugin; the page is touched through `lpiView` (the
+panel's DOM), `lpiGlobe` (the Cesium pulse and label, which animate and time out themselves), `lpiSensors` (the Sensors panel's sensors and camera),
+`frames` (animation frames) and `clock`.
+
+- Deactivating removes the stream subscription, the buttons' listeners, pending frames, and every pulse and label (the old animation loops and removal
+  timers could not be cancelled). The feed's rows use one listener on the list instead of an `onclick` each.
+- Everything from an event or a sensor is escaped where it reaches HTML (sensor ids, kinds, class names): events arrive from other operators now.
+- Removed: `config.pulseDuration` (never read) and `state.artifacts`, an evidence-pointer index written for every event and read by nothing, which only
+  grew. `window.LPIManager` is no longer assigned; nothing on the page read it.
+- Pinned, not changed (tests named `PINNED:`): Clear empties the feed and the count but not the latest-per-sensor data, so a status card can return; a zero
+  SNR shows as `--` and is not remembered; a recent classification with no classes or no SNR throws while its card renders; a sensor at latitude or
+  longitude 0 gets no pulse; the simulation's request carries no session token and picks its sensor, family and SNR at random.
+
 ## Not done
 
-- Only ADS-B, AIS streaming, chat, metrics, the metrics explorer, propagation, the entity stream, sensors, the fusion overlays and the viewsheds use the contract, and activation is not yet driven by the operator (a panel click).
+- Only ADS-B, AIS streaming, chat, metrics, the metrics explorer, propagation, the entity stream, sensors, the fusion overlays, the viewsheds and LPI use the contract, and activation is not yet driven by the operator (a panel click).
 - No unified transport: the tools take the realtime socket, `WebSocketSync` and `fetch` as services; they do not open their own.
 - Not run in a browser against a signed-in session; the tests cover the contract, the plugin, the boot wiring, and run the
   page's own `removeEntityMarker` against a fake collection.

@@ -1148,6 +1148,8 @@ function fakeCesium() {
     NearFarScalar: class { constructor(...a) { this.args = a; } },
     Cartesian2: class { constructor(x, y) { this.x = x; this.y = y; } },
     HeightReference: {RELATIVE_TO_GROUND: "relative"},
+    CallbackProperty: class { constructor(fn) { this.fn = fn; } },
+    ColorMaterialProperty: class { constructor(color) { this.color = color; } },
     LabelStyle: {FILL_AND_OUTLINE: "fill"}, VerticalOrigin: {BOTTOM: "bottom", TOP: "top"}, ArcType: {GEODESIC: "geodesic"},
     PolylineDashMaterialProperty: class { constructor(o) { this.options = o; } },
     Math: {toRadians: (d) => d * Math.PI / 180},
@@ -1582,4 +1584,244 @@ test("deactivating removes only the viewshed entities that are still showing", a
   await workspace.deactivate("viewsheds");
   assert.equal(globe.entities.removed.length - before, 37);
   assert.deepEqual(globe.entities.values, []);
+});
+
+// --- LPI ---
+
+const LPI_IDS = ["lpiList", "lpi-event-count", "lpi-summary-container", "lpi-details-panel", "lpi-details-json", "lpi-clear-btn", "lpi-run-sim-btn"];
+
+function lpiWindow({elements = LPI_IDS, viewer = true} = {}) {
+  const els = Object.fromEntries(elements.map((id) => [id, panelElement({style: {}})]));
+  const cards = {};
+  if (els["lpi-summary-container"]) {
+    const container = els["lpi-summary-container"];
+    container.innerText = "Waiting for signal activity...";
+    container.innerHTML = '<div>Waiting for signal activity...</div>';
+    container.children = [];
+    container.prepend = (card) => { container.children.unshift(card); cards[card.id] = card; container.innerText = ""; };
+  }
+  const globe = fakeCesium();
+  const frames = new Map(), timers = [], requests = [];
+  let nextFrame = 1;
+  const win = fakeWindow({
+    setInterval: () => 1, clearInterval() {},
+    setTimeout: (fn, ms) => { timers.push({fn, ms, live: true}); return timers.length - 1; }, clearTimeout: (id) => { if (timers[id]) timers[id].live = false; },
+    requestAnimationFrame: (fn) => { const id = nextFrame++; frames.set(id, fn); return id; }, cancelAnimationFrame: (id) => frames.delete(id),
+    document: {getElementById: (id) => els[id] || cards[id] || null, createElement: () => panelElement({style: {}})},
+    ...(viewer ? {viewer: globe.viewer, Cesium: globe.Cesium} : {}),
+    fetch: async (url, init) => { requests.push([url, init]); return {ok: true, json: async () => ({})}; },
+    SensorManager: undefined, consoleMessages: [], addConsoleMessage(text, kind) { win.consoleMessages.push([text, kind]); },
+  });
+  const runFrames = () => { const pending = [...frames.entries()]; frames.clear(); for (const [, fn] of pending) fn(); };
+  return {win, els, cards, globe, frames, timers, requests, runFrames};
+}
+const lpiEvent = (kind, payload = {}, sensorId = "s1") => ({entity_id: `a:${sensorId}`, entity_type: "SENSOR_ACTIVITY", entity_data: {sensor_id: sensorId, kind, payload}});
+async function lpiUp(w, sensors = {s1: {position: {lat: 36, lon: -86}}}) {
+  const workspace = bootWorkspace(w.win);
+  w.win.SensorManager = {sensors, flyTo: (id) => (w.flights ||= []).push(id)};
+  await workspace.activate("lpi");
+  await workspace.activate("entity-sync");
+  return workspace;
+}
+const withDate = async (ms, fn) => { const real = Date.now; Date.now = () => ms; try { return await fn(); } finally { Date.now = real; } };
+
+test("booting registers lpi inactive and does not assign window.LPIManager", () => {
+  const {win} = lpiWindow();
+  const workspace = bootWorkspace(win);
+  assert.equal(workspace.state("lpi"), "inactive");
+  assert.equal(win.LPIManager, undefined);
+});
+
+test("every element id the LPI view uses exists in the page", () => {
+  for (const id of LPI_IDS) assert.match(page, new RegExp(`id="${id}"`), id);
+});
+
+test("the LPI view fills the feed, the count and one status card per sensor on the next frame; the first card replaces the placeholder, newest card first", async () => {
+  const w = lpiWindow();
+  const workspace = await lpiUp(w, {s1: {}, s2: {}});
+  await withDate(1_700_000_000_000, async () => {
+    w.win.EntitySync.ingest("CREATE", lpiEvent("lpi_candidate_detected", {snr_db: 8, timestamp: 1_700_000_000}));
+    assert.equal(w.els.lpiList.innerHTML, "");   // nothing until the frame
+    w.runFrames();
+    assert.match(w.els.lpiList.innerHTML, /s1 \/ LPI CANDIDATE DETECTED/);
+    assert.equal(w.els["lpi-event-count"].textContent, 1);
+    assert.deepEqual(Object.keys(w.cards), ["lpi-card-s1"]);
+    assert.equal(w.els["lpi-summary-container"].innerHTML, "");   // the placeholder was cleared
+    assert.equal(w.cards["lpi-card-s1"].style.borderColor, "#fd0");
+    assert.match(w.cards["lpi-card-s1"].innerHTML, /LPI SIGNAL DETECTED/);
+    assert.equal(w.cards["lpi-card-s1"].className, "settings-group");
+    w.win.EntitySync.ingest("CREATE", lpiEvent("tf_computed", {snr_db: 5, timestamp: 1_700_000_001}, "s2"));
+    w.win.EntitySync.ingest("CREATE", lpiEvent("tf_computed", {snr_db: 6, timestamp: 1_700_000_002}, "s1"));
+    w.runFrames();
+    assert.deepEqual(w.els["lpi-summary-container"].children.map((c) => c.id), ["lpi-card-s2", "lpi-card-s1"]);   // s2 was prepended; s1's card was reused
+    assert.equal(w.els["lpi-event-count"].textContent, 3);
+  });
+  await workspace.deactivate("lpi");
+});
+
+test("clicking a feed row shows its event; Clear empties the feed and resets the summary; Run simulation posts", async () => {
+  const w = lpiWindow();
+  const workspace = await lpiUp(w);
+  w.win.EntitySync.ingest("CREATE", lpiEvent("tf_computed", {snr_db: 5, timestamp: 100}));
+  w.runFrames();
+  const click = (target) => w.els.lpiList.listeners.get("click")[0]({target});
+  click({closest: (selector) => (selector === "li[data-index]" ? {getAttribute: () => "0"} : null)});
+  assert.equal(w.els["lpi-details-panel"].style.display, "block");
+  assert.match(w.els["lpi-details-json"].textContent, /"activity_type": "tf_computed"/);
+  w.els["lpi-details-json"].textContent = "untouched";
+  click({closest: () => null});
+  click({});
+  assert.equal(w.els["lpi-details-json"].textContent, "untouched");
+  w.els["lpi-clear-btn"].listeners.get("click")[0]();
+  assert.equal(w.els.lpiList.innerHTML, "");
+  assert.equal(w.els["lpi-event-count"].textContent, "0");
+  assert.match(w.els["lpi-summary-container"].innerHTML, /Waiting for signal activity/);
+  w.els["lpi-run-sim-btn"].listeners.get("click")[0]();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.match(w.requests[0][0], /^\/api\/sensors\/s1\/process\/lpi$/);
+  assert.ok(w.win.consoleMessages.some((m) => m[0] === "Starting LPI Simulation..." && m[1] === "response"));
+  await workspace.deactivate("lpi");
+  for (const id of ["lpi-clear-btn", "lpi-run-sim-btn", "lpiList"]) for (const handlers of w.els[id].listeners.values()) assert.equal(handlers.length, 0, id);
+});
+
+test("without the LPI panel's elements nothing throws", async () => {
+  const w = lpiWindow({elements: []});
+  const workspace = await lpiUp(w);
+  w.win.EntitySync.ingest("CREATE", lpiEvent("waveform_classified", {snr_db: 5, classes: [{class: "fmcw", confidence: 1}]}));
+  w.runFrames();
+  await workspace.deactivate("lpi");
+  const partial = lpiWindow({elements: ["lpiList", "lpi-summary-container"]});
+  const w2 = await lpiUp(partial);
+  partial.win.EntitySync.ingest("CREATE", lpiEvent("tf_computed", {snr_db: 5}));
+  partial.runFrames();
+  assert.equal(partial.els["lpi-summary-container"].children.length, 1);
+  partial.els["lpiList"].listeners.get("click")[0]({target: {closest: () => ({getAttribute: () => "0"})}});   // no details panel: skipped
+  await w2.deactivate("lpi");
+});
+
+test("a count element without a feed is left alone: nothing is drawn for a missing feed", async () => {
+  const w = lpiWindow({elements: ["lpi-event-count", "lpi-summary-container"]});
+  const workspace = await lpiUp(w);
+  w.win.EntitySync.ingest("CREATE", lpiEvent("tf_computed", {snr_db: 5}));
+  w.runFrames();
+  assert.equal(w.els["lpi-event-count"].textContent, "");
+  assert.equal(w.els["lpi-summary-container"].children.length, 1);
+  await workspace.deactivate("lpi");
+});
+
+test("the LPI globe animates a pulse that grows and fades, removes it when its time is up, and floats a label that times out", async () => {
+  const w = lpiWindow();
+  const workspace = await lpiUp(w);
+  await withDate(5_000_000, async () => {
+    w.win.EntitySync.ingest("CREATE", lpiEvent("waveform_classified", {snr_db: 5, classes: [{class: "fmcw", confidence: 1}]}));
+  });
+  const [pulse, label] = w.globe.entities.values;
+  assert.equal(pulse.id, "lpi-pulse-s1-5000000");
+  assert.deepEqual(pulse.position, {lon: -86, lat: 36, h: undefined});
+  assert.equal(pulse.ellipse.height, 50.0);
+  assert.equal(pulse.ellipse.semiMajorAxis.fn(), 100);
+  assert.equal(pulse.ellipse.material.color.fn().alpha, 1 - 100 / 5000);
+  assert.equal(pulse.ellipse.material.color.fn().name, "red");
+  await withDate(5_000_500, async () => w.runFrames());   // a quarter of the way through its 2 s
+  assert.equal(pulse.ellipse.semiMajorAxis.fn(), 100 + 5000 * 0.25);
+  assert.equal(pulse.ellipse.semiMinorAxis.fn(), 100 + 5000 * 0.25);
+  assert.ok(Math.abs(pulse.ellipse.material.color.fn().alpha - (1 - 1350 / 5000)) < 1e-9);
+  await withDate(5_001_999, async () => w.runFrames());
+  assert.ok(w.globe.entities.values.includes(pulse));
+  await withDate(5_002_001, async () => w.runFrames());   // past 2 s: removed, and no further frame is asked for
+  assert.ok(!w.globe.entities.values.includes(pulse));
+  assert.equal(w.frames.size, 0);
+  assert.equal(w.globe.entities.removed.length, 1);
+  assert.equal(label.id.startsWith("lpi-label-s1-"), true);
+  assert.deepEqual(label.position, {lon: -86, lat: 36, h: 2000});
+  assert.equal(label.label.text, "⚠ fmcw");
+  assert.deepEqual([label.label.font, label.label.fillColor.name, label.label.outlineColor.name, label.label.outlineWidth], ["16px Monospace", "red", "black", 2]);
+  assert.equal(label.label.verticalOrigin, "bottom");
+  assert.equal(label.label.pixelOffset.x, 0);
+  assert.ok(label.label.pixelOffset.y <= -10 && label.label.pixelOffset.y > -60);
+  assert.equal(w.timers[0].ms, 4000);
+  w.timers[0].fn();
+  assert.ok(!w.globe.entities.values.includes(label));
+  assert.equal(w.globe.entities.removed.length, 2);
+  await workspace.deactivate("lpi");
+  await workspace.activate("lpi");
+  await workspace.deactivate("lpi");
+  assert.equal(w.globe.entities.removed.length, 2);   // what had already come down is not taken down again
+});
+
+test("a candidate pulses yellow without a label; the pulse stops growing at exactly its time", async () => {
+  const w = lpiWindow();
+  const workspace = await lpiUp(w);
+  await withDate(1_000, async () => w.win.EntitySync.ingest("CREATE", lpiEvent("lpi_candidate_detected", {snr_db: 5})));
+  assert.equal(w.globe.entities.values.length, 1);
+  assert.equal(w.globe.entities.values[0].ellipse.material.color.fn().name, "yellow");
+  assert.equal(w.timers.length, 0);
+  await withDate(3_000, async () => w.runFrames());   // exactly 2000 ms: not past it, so it grows to its full size
+  assert.equal(w.globe.entities.values[0].ellipse.semiMajorAxis.fn(), 5100);
+  assert.equal(w.globe.entities.values[0].ellipse.material.color.fn().alpha, 0);
+  await workspace.deactivate("lpi");
+});
+
+test("deactivating LPI stops the animations and removes every pulse and label; a late frame or timer does nothing", async () => {
+  const w = lpiWindow();
+  const workspace = await lpiUp(w);
+  await withDate(1_000, async () => w.win.EntitySync.ingest("CREATE", lpiEvent("waveform_classified", {snr_db: 5, classes: [{class: "x", confidence: 1}]})));
+  assert.equal(w.globe.entities.values.length, 2);
+  await workspace.deactivate("lpi");
+  assert.deepEqual(w.globe.entities.values, []);
+  assert.equal(w.frames.size, 0);
+  assert.equal(w.timers[0].live, false);
+  w.timers[0].fn();   // a stale timer: the entity is already gone
+});
+
+test("a second deactivation does not take down again what the first one did", async () => {
+  const w = lpiWindow();
+  const workspace = await lpiUp(w);
+  await withDate(1_000, async () => w.win.EntitySync.ingest("CREATE", lpiEvent("waveform_classified", {snr_db: 5, classes: [{class: "x", confidence: 1}]})));
+  await workspace.deactivate("lpi");
+  assert.equal(w.globe.entities.removed.length, 2);   // the pulse and the label
+  await workspace.activate("lpi");
+  await workspace.deactivate("lpi");
+  assert.equal(w.globe.entities.removed.length, 2);
+});
+
+test("without a viewer LPI draws no pulse; if the viewer goes away mid-animation the frame and timer still do not throw", async () => {
+  const none = lpiWindow({viewer: false});
+  const w1 = await lpiUp(none);
+  none.win.EntitySync.ingest("CREATE", lpiEvent("waveform_classified", {snr_db: 5, classes: [{class: "x", confidence: 1}]}));
+  none.runFrames();
+  await w1.deactivate("lpi");
+  const gone = lpiWindow();
+  const w2 = await lpiUp(gone);
+  await withDate(1_000, async () => gone.win.EntitySync.ingest("CREATE", lpiEvent("waveform_classified", {snr_db: 5, classes: [{class: "x", confidence: 1}]})));
+  gone.win.viewer = undefined;
+  await withDate(9_000, async () => gone.runFrames());
+  gone.timers[0].fn();
+  await w2.deactivate("lpi");
+});
+
+test("the LPI tool reads the Sensors panel when it needs it: no SensorManager means no pulse and the simulation uses SENSOR-TEST", async () => {
+  const w = lpiWindow();
+  const workspace = bootWorkspace(w.win);
+  await workspace.activate("lpi");
+  await workspace.activate("entity-sync");
+  w.win.EntitySync.ingest("CREATE", lpiEvent("lpi_candidate_detected", {snr_db: 5}));
+  assert.deepEqual(w.globe.entities.values, []);
+  w.els["lpi-run-sim-btn"].listeners.get("click")[0]();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(w.requests[0][0], "/api/sensors/SENSOR-TEST/process/lpi");
+  w.win.SensorManager = {sensors: {s1: {}}, flyTo: (id) => (w.flown ||= []).push(id)};
+  w.els["lpi-run-sim-btn"].listeners.get("click")[0]();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(w.flown, ["s1"]);   // the simulation flies the camera through the Sensors panel
+  w.win.SensorManager = {sensors: {s1: {}}, flyTo: undefined};   // no flyTo: skipped, not thrown
+  w.els["lpi-run-sim-btn"].listeners.get("click")[0]();
+  await new Promise((resolve) => setImmediate(resolve));
+});
+
+test("the old inline LPIManager is gone; the boot module activates the tool; nothing assigns window.LPIManager", () => {
+  assert.doesNotMatch(page, /const LPIManager = \{/);
+  assert.doesNotMatch(page, /window\.LPIManager\s*=/);
+  assert.doesNotMatch(page, /LPIManager\.init\(\)/);
+  assert.match(page, /workspace\.activate\("lpi"\)/);
 });
