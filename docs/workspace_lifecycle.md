@@ -39,9 +39,40 @@ await workspace.activate("adsb");  await workspace.deactivate("adsb");  await wo
 - Changed: the REST seed now rejects on an HTTP error instead of parsing an error page as JSON; a track with a missing or
   non-numeric position is skipped.
 
+## Second pilot: AIS streaming (`scythe-web/aisStreamPlugin.js`)
+
+ADS-B has no state worth tearing down. AIS streaming does: a server-side upstream stream, a bounding box that follows the
+camera, and three listeners. Moving it behind the contract showed what the old `AISStreamManager` never cleaned up:
+
+- **Listeners were never removed:** the `ais_update` socket handler, the `WebSocketSync` `connected` handler and the Cesium
+  `camera.changed` listener (whose remove function was discarded). They stacked on every `init`. Now each is registered with
+  `ctx.onCleanup` and removed on deactivate.
+- **The server's stream was never stopped on teardown.** Deactivating now stops it if this tool started it, and a start
+  request still in flight when the tool is deactivated is stopped when it lands (it is never announced as running).
+- **Double start:** two calls before the first answered made two server requests; now one.
+- **Activated after the socket connected:** the `connected` event has gone by, so the tool checks `syncEvents.connected` and
+  starts instead of waiting. At page startup this changes nothing (the socket is not connected yet).
+- The tool owns the stream, not the vessels: vessels already handed to the renderer stay, because the renderer also holds
+  vessels loaded from the REST archive.
+
+`AISStreamManager` remains as a shim: `init` activates the tools; `checkAndStartStream` / `stopStreaming` (called by the AIS
+toggle) delegate to the tool's controls and do nothing while it is inactive; `handleVesselUpdate` is still the renderer adapter
+the tool forwards vessels to.
+
+**Kept as it was, and pinned by tests, though it looks unintended:** zooming out does **not** stop the stream. The old guard
+was `else if (this.streamSocket)`, a field declared `null` and never assigned, so the branch never ran. Making zoom-out stop
+the stream means also deciding how it resumes on zoom-in, which is a behaviour change (it starts and stops the upstream
+AIS feed), so it is left for a decision. Also unchanged: a bounding-box update re-posts to the *start* endpoint.
+
+**Changed:** an HTTP error from the stream endpoints is now an error instead of parsing the body. A failed stop leaves the
+stream marked active so it can be retried, as before.
+
+**Not covered:** the operator's "search visible area" action starts the server stream on its own path, so the tool does not
+know about a stream started that way and deactivation will not stop it.
+
 ## Not done
 
-- No other subsystem uses the contract, and activation is not yet driven by the operator (a panel click).
-- No unified transport: ADS-B still takes the realtime socket and `fetch` as services, it does not open its own.
+- Only ADS-B and AIS streaming use the contract, and activation is not yet driven by the operator (a panel click).
+- No unified transport: the tools take the realtime socket, `WebSocketSync` and `fetch` as services; they do not open their own.
 - Not run in a browser against a signed-in session; the tests cover the contract, the plugin, the boot wiring, and run the
   page's own `removeEntityMarker` against a fake collection.
