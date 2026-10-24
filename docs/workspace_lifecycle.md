@@ -269,9 +269,26 @@ panel's DOM), `lpiGlobe` (the Cesium pulse and label, which animate and time out
   SNR shows as `--` and is not remembered; a recent classification with no classes or no SNR throws while its card renders; a sensor at latitude or
   longitude 0 gets no pulse; the simulation's request carries no session token and picks its sensor, family and SNR at random.
 
+## Twelfth tool: operator presence (`scythe-web/presencePlugin.js`)
+
+`OperatorPresence` (a 160-line object in `command-ops-visualization.html`) is now the `presence` tool. Once the page has handed over its viewer with
+`initialize(viewer)` it asks the server who is on every 10 s, lists them in the Operators panel (the current operator marked "(You)"), and marks on the
+globe where each of the others is looking. The Refresh button and the "Show operator positions on map" checkbox are inline `onclick` / `onchange`
+attributes in the page that call `OperatorPresence` by name; the boot module sets `window.OperatorPresence` for them, for the viewer init, and for the
+panel's active-operator count. What is shown is plain strings and data in the plugin (`renderPresenceList`, `indicatorsOf`); the page is touched
+through `presenceSource` (the operator session), `presenceView` (the list element) and `presenceGlobe` (the Cesium markers).
+
+- Deactivating stops the polling and takes the markers down (the old `stopTracking` had no caller); a refresh that finishes afterwards does nothing. A
+  viewer handed over before the tool is active is kept and used when it activates.
+- Callsigns, roles and ids are escaped where they reach HTML: a callsign is chosen by the operator who registers it, so it comes from other operators.
+- The markers are worked out before the old ones come down, so a malformed view leaves the previous markers instead of a half-drawn set.
+- Pinned, not changed (tests named `PINNED:`): unchecking the checkbox does **not** take the markers down (with it off they are neither redrawn nor
+  removed, so the ones on the map stay until the tool is deactivated); one operator whose view centre is not a pair stops the list updating (the error is
+  logged); nothing is polled until `initialize` has been called, though the Refresh button works before that.
+
 ## Not done
 
-- Only ADS-B, AIS streaming, chat, metrics, the metrics explorer, propagation, the entity stream, sensors, the fusion overlays, the viewsheds and LPI use the contract, and activation is not yet driven by the operator (a panel click).
+- Only ADS-B, AIS streaming, chat, metrics, the metrics explorer, propagation, the entity stream, sensors, the fusion overlays, the viewsheds, LPI and operator presence use the contract, and activation is not yet driven by the operator (a panel click).
 - No unified transport: the tools take the realtime socket, `WebSocketSync` and `fetch` as services; they do not open their own.
 - Not run in a browser against a signed-in session; the tests cover the contract, the plugin, the boot wiring, and run the
   page's own `removeEntityMarker` against a fake collection.

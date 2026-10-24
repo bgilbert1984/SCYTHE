@@ -11,6 +11,7 @@ import {createSensorPlugin} from "./sensorPlugin.js";
 import {createFusionPlugin} from "./fusionPlugin.js";
 import {createViewshedPlugin} from "./viewshedPlugin.js";
 import {createLpiPlugin, pulseRadius, pulseAlpha} from "./lpiPlugin.js";
+import {createPresencePlugin} from "./presencePlugin.js";
 import {escapeHtml} from "./htmlEscape.js";
 
 /**
@@ -154,6 +155,16 @@ export function bootWorkspace(win) {
   workspace.provide("lpiView", lpiView(win));
   workspace.provide("lpiGlobe", lpiGlobe(win));
   workspace.register(createLpiPlugin({log: win.console}).tool);
+
+  // --- operator presence ---
+  workspace.provide("presenceSource", {operators: () => win.OperatorSession.getActiveOperators(), myId: () => win.OperatorSession?.operatorId});
+  workspace.provide("presenceView", {
+    setList(html) { const list = win.document.getElementById("operator-presence-list"); if (!list) return false; list.innerHTML = html; return true; },
+  });
+  workspace.provide("presenceGlobe", presenceGlobe(win));
+  const presence = createPresencePlugin({log: win.console});
+  workspace.register(presence.tool);
+  win.OperatorPresence = presence.controls;   // what the page's init and the inline handlers in the Operators panel call
   win.ScytheWorkspace = workspace;
   win.dispatchEvent(new win.Event("scythe:workspace_ready"));
   return workspace;
@@ -761,5 +772,33 @@ function lpiGlobe(win) {
       for (const [entity, timer] of labels) { win.clearTimeout(timer); win.viewer?.entities.remove(entity); }
       labels.clear();
     },
+  };
+}
+
+/** The other operators' view markers on the Cesium globe. `replace` takes the old ones down and puts the new ones up; the viewer comes from `attach`. */
+function presenceGlobe(win) {
+  let viewer = null;
+  let shown = [];
+  const takeDown = () => {   // an entity that is already gone is skipped
+    for (const entity of shown) if (viewer && viewer.entities.contains(entity)) viewer.entities.remove(entity);
+  };
+  return {
+    attach(handed) { viewer = handed; },
+    available: () => Boolean(viewer),
+    replace(indicators) {
+      const {Cesium} = win;
+      takeDown();
+      shown = indicators.map(({id, lat, lon, label, color}) =>
+        viewer.entities.add({
+          id: `operator_presence_${id}`, position: Cesium.Cartesian3.fromDegrees(lon, lat, 0),
+          point: {pixelSize: 12, color: Cesium.Color[color], outlineColor: Cesium.Color.WHITE, outlineWidth: 2},
+          label: {
+            text: label, font: "12px sans-serif", fillColor: Cesium.Color.WHITE, outlineColor: Cesium.Color.BLACK, outlineWidth: 2,
+            style: Cesium.LabelStyle.FILL_AND_OUTLINE, verticalOrigin: Cesium.VerticalOrigin.BOTTOM, pixelOffset: new Cesium.Cartesian2(0, -15),
+          },
+        }));
+    },
+    /** Take down every marker still showing. The viewer stays attached: the page hands it over once. */
+    clear: takeDown,
   };
 }
