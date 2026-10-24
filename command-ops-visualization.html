@@ -13321,7 +13321,7 @@ const originalComplete = options.complete;
                     if (window.POIVisualization) {
                         const poiId = await POIVisualization.addPOI(name, lat, lon, category, description);
                         if (poiId) {
-                            showNotification('POI Added', `"${name}" added successfully`, 'success');
+                            showNotification('POI Added', `"${escapeHtml(name)}" added successfully`, 'success');
                             // Clear form
                             document.getElementById('new-poi-name').value = '';
                             document.getElementById('new-poi-lat').value = '';
@@ -13397,7 +13397,7 @@ const originalComplete = options.complete;
                     }
                     
                     try {
-                        addConsoleMessage(`Importing POIs from ${filePath}...`, 'info');
+                        addConsoleMessage(`Importing POIs from ${escapeHtml(filePath)}...`, 'info');
                         const response = await fetch('/api/poi/import', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
@@ -13406,8 +13406,8 @@ const originalComplete = options.complete;
                         
                         const data = await response.json();
                         if (data.status === 'ok') {
-                            showNotification('Import Complete', `Imported ${data.count} POIs`, 'success');
-                            addConsoleMessage(`Successfully imported ${data.count} POIs from ${filePath}`, 'response');
+                            showNotification('Import Complete', `Imported ${escapeHtml(data.count)} POIs`, 'success');
+                            addConsoleMessage(`Successfully imported ${escapeHtml(data.count)} POIs from ${escapeHtml(filePath)}`, 'response');
                             // Reload POIs
                             if (window.POIVisualization) {
                                 await POIVisualization.loadPOIs();
@@ -13416,12 +13416,12 @@ const originalComplete = options.complete;
                             }
                             document.getElementById('import-kmz-path').value = '';
                         } else {
-                            showNotification('Import Failed', data.message, 'error');
-                            addConsoleMessage('Import failed: ' + data.message, 'alert');
+                            showNotification('Import Failed', escapeHtml(data.message), 'error');
+                            addConsoleMessage('Import failed: ' + escapeHtml(data.message), 'alert');
                         }
                     } catch (error) {
                         showNotification('Error', 'Failed to import file', 'error');
-                        addConsoleMessage('Import error: ' + error.message, 'alert');
+                        addConsoleMessage('Import error: ' + escapeHtml(error.message), 'alert');
                     }
                 });
             }
@@ -13475,15 +13475,15 @@ const originalComplete = options.complete;
                         <div class="poi-list-item" style="padding: 8px; margin-bottom: 5px; background: rgba(255,255,255,0.05); border-radius: 4px; border-left: 3px solid ${color};">
                             <div style="display: flex; justify-content: space-between; align-items: center;">
                                 <div>
-                                    <div style="font-weight: bold; font-size: 12px;">${poi.name}</div>
+                                    <div style="font-weight: bold; font-size: 12px;">${escapeHtml(poi.name)}</div>
                                     <div style="font-size: 10px; color: #888;">
                                         ${poi.latitude.toFixed(4)}, ${poi.longitude.toFixed(4)}
                                     </div>
-                                    <div style="font-size: 9px; color: ${color}; text-transform: uppercase;">${poi.category}</div>
+                                    <div style="font-size: 9px; color: ${color}; text-transform: uppercase;">${escapeHtml(poi.category)}</div>
                                 </div>
                                 <div style="display: flex; gap: 5px;">
-                                    <button class="action-button" style="padding: 3px 8px; font-size: 10px;" onclick="flyToPOI(${poi.id})">📍</button>
-                                    <button class="action-button" style="padding: 3px 8px; font-size: 10px; background: #ff4444;" onclick="deletePOI(${poi.id})">🗑️</button>
+                                    <button class="action-button" style="padding: 3px 8px; font-size: 10px;" onclick="flyToPOI(${Number(poi.id)})">📍</button>
+                                    <button class="action-button" style="padding: 3px 8px; font-size: 10px; background: #ff4444;" onclick="deletePOI(${Number(poi.id)})">🗑️</button>
                                 </div>
                             </div>
                         </div>
@@ -13502,8 +13502,8 @@ const originalComplete = options.complete;
                     const isVisible = POIVisualization.categoryVisibility[cat] !== false;
                     return `
                         <label style="display: flex; align-items: center; gap: 5px; padding: 5px 10px; background: ${isVisible ? 'rgba(74,158,255,0.2)' : 'rgba(255,255,255,0.05)'}; border-radius: 15px; cursor: pointer; font-size: 11px;">
-                            <input type="checkbox" ${isVisible ? 'checked' : ''} onchange="togglePOICategory('${cat}', this.checked)">
-                            <span>${cat} (${count})</span>
+                            <input type="checkbox" ${isVisible ? 'checked' : ''} onchange="togglePOICategory(${escapeHtml(JSON.stringify(cat))}, this.checked)">
+                            <span>${escapeHtml(cat)} (${escapeHtml(count)})</span>
                         </label>
                     `;
                 }).join('');
@@ -13532,7 +13532,7 @@ const originalComplete = options.complete;
             window.togglePOICategory = function(category, visible) {
                 if (window.POIVisualization) {
                     POIVisualization.setCategoryVisible(category, visible);
-                    addConsoleMessage(`Category "${category}" ${visible ? 'shown' : 'hidden'}`, 'info');
+                    addConsoleMessage(`Category "${escapeHtml(category)}" ${visible ? 'shown' : 'hidden'}`, 'info');
                 }
             };
             
