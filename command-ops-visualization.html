@@ -18892,18 +18892,6 @@ const originalComplete = options.complete;
             },
             
             // Remove one entity's markers (billboard, altitude line, threat ring), wherever they were added.
-            removeEntityMarker: function(entityId) {
-                const collections = [this.dataSource && this.dataSource.entities, this.viewer && this.viewer.entities].filter(Boolean);
-                const byId = collections.map(function(c) { return c.getById('recon_entity_' + entityId); }).filter(Boolean);
-                const keyed = [entityId, entityId + '_alt', entityId + '_threat'].map(function(k) { return this.entityMarkers[k]; }, this).filter(Boolean);
-                new Set(byId.concat(keyed)).forEach(function(marker) {
-                    collections.forEach(function(c) { if (c.contains(marker)) c.remove(marker); });
-                });
-                delete this.entityMarkers[entityId];
-                delete this.entityMarkers[entityId + '_alt'];
-                delete this.entityMarkers[entityId + '_threat'];
-            },
-
             clearAllEntities: function() {
                 // Clear from clustered data source if available
                 if (this.dataSource) {
@@ -19550,6 +19538,10 @@ API TIMING (avg ms):
                     console.warn('[AutoRecon] EntitySync not available - real-time sync disabled');
                     return;
                 }
+                
+                // Called from a timer and again on DOMContentLoaded: subscribe once
+                if (this._entitySyncSubscribed) return;
+                this._entitySyncSubscribed = true;
                 
                 const self = this;
                 

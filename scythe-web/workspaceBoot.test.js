@@ -91,31 +91,93 @@ test("AISStreamManager keeps the entry points the page calls, and the vessel ada
   assert.match(page, /AISStreamManager\.stopStreaming\(\)/);
 });
 
-test("AutoReconVisualization.removeEntityMarker removes the marker, its altitude line and threat ring from both collections", () => {
-  const start = page.indexOf("            removeEntityMarker: function(entityId) {");
-  assert.ok(start > 0, "removeEntityMarker is defined on the page");
-  const end = page.indexOf("            clearAllEntities: function() {", start);
-  const source = page.slice(start, end).trim().replace(/,$/, "").replace(/^removeEntityMarker: /, "");
-  const removeEntityMarker = new Function(`return (${source})`)();
+/** A member of the page's AutoReconVisualization object, as a function: from `name: function(` to the member's closing brace. */
+function reconMember(name) {
+  const header = `            ${name}: function(`;
+  assert.equal(page.split(header).length - 1, 1, `${name} is defined once on the page (a second definition silently replaces the first)`);
+  const start = page.indexOf(header);
+  const end = page.indexOf("\n            }", start);
+  const source = page.slice(start, end + "\n            }".length).trim().replace(new RegExp(`^${name}: `), "");
+  return new Function(`return (${source})`)();
+}
 
-  const collection = (items = {}) => ({
-    items: {...items},
-    getById(id) { return this.items[id]; },
-    contains(m) { return Object.values(this.items).includes(m); },
-    remove(m) { for (const k of Object.keys(this.items)) if (this.items[k] === m) delete this.items[k]; return true; },
-  });
-  const marker = {n: "marker"}, alt = {n: "alt"}, ring = {n: "ring"}, other = {n: "other"};
+const collection = (items = {}) => ({
+  items: {...items},
+  contains(m) { return Object.values(this.items).includes(m); },
+  remove(m) { for (const k of Object.keys(this.items)) if (this.items[k] === m) delete this.items[k]; return true; },
+});
+
+test("AutoReconVisualization.removeEntityMarker takes the marker from the data source, or else the viewer, and forgets it", () => {
+  const removeEntityMarker = reconMember("removeEntityMarker");
+  const marker = {n: "marker"}, other = {n: "other"};
+  const clustered = {dataSource: {entities: collection({m1: marker, m2: other})}, viewer: {entities: collection({v: marker})}, entityMarkers: {adsb_1: marker, adsb_2: other}};
+  removeEntityMarker.call(clustered, "adsb_1");
+  assert.deepEqual(Object.keys(clustered.dataSource.entities.items), ["m2"]);
+  assert.deepEqual(Object.keys(clustered.viewer.entities.items), ["v"]);   // PINNED: only the data source was tried, the viewer's copy stays
+  assert.deepEqual(Object.keys(clustered.entityMarkers), ["adsb_2"]);
+  const plain = {viewer: {entities: collection({m1: marker})}, entityMarkers: {adsb_1: marker}};
+  removeEntityMarker.call(plain, "adsb_1");
+  assert.deepEqual(Object.keys(plain.viewer.entities.items), []);
+  assert.deepEqual(plain.entityMarkers, {});
+});
+
+test("AutoReconVisualization.removeEntityMarker takes the altitude line and the threat ring from the viewer", () => {
+  const removeEntityMarker = reconMember("removeEntityMarker");
+  const marker = {n: "marker"}, alt = {n: "alt"}, ring = {n: "ring"};
   const self = {
-    dataSource: {entities: collection({recon_entity_adsb_1: marker, recon_entity_adsb_2: other})},
-    viewer: {entities: collection({alt_line: alt, threat_ring: ring})},
-    entityMarkers: {adsb_1: marker, adsb_1_alt: alt, adsb_1_threat: ring, adsb_2: other},
+    dataSource: {entities: collection({m1: marker})}, viewer: {entities: collection({a: alt, t: ring})},
+    entityMarkers: {adsb_1: marker, adsb_1_alt: alt, adsb_1_threat: ring},
   };
   removeEntityMarker.call(self, "adsb_1");
-  assert.deepEqual(Object.keys(self.dataSource.entities.items), ["recon_entity_adsb_2"]);
+  assert.deepEqual(Object.keys(self.dataSource.entities.items), []);
   assert.deepEqual(Object.keys(self.viewer.entities.items), []);
-  assert.deepEqual(Object.keys(self.entityMarkers), ["adsb_2"]);
-  removeEntityMarker.call(self, "adsb_1");                       // removing again is harmless
-  removeEntityMarker.call({entityMarkers: {}}, "adsb_9");        // no viewer, no data source
+  assert.deepEqual(self.entityMarkers, {});
+});
+
+test("PINNED: an altitude line or threat ring that is not in the viewer is left, and so is its key", () => {
+  const removeEntityMarker = reconMember("removeEntityMarker");
+  const alt = {n: "alt"}, ring = {n: "ring"};
+  const self = {dataSource: {entities: collection({a: alt})}, viewer: {entities: collection({})}, entityMarkers: {adsb_1_alt: alt, adsb_1_threat: ring}};
+  removeEntityMarker.call(self, "adsb_1");
+  assert.deepEqual(Object.keys(self.dataSource.entities.items), ["a"]);
+  assert.deepEqual(Object.keys(self.entityMarkers), ["adsb_1_alt", "adsb_1_threat"]);
+});
+
+test("AutoReconVisualization.removeEntityMarker is harmless for an unknown id, twice, and with no viewer or data source", () => {
+  const removeEntityMarker = reconMember("removeEntityMarker");
+  const marker = {n: "marker"};
+  const self = {viewer: {entities: collection({m: marker})}, entityMarkers: {adsb_1: marker}};
+  removeEntityMarker.call(self, "adsb_1");
+  removeEntityMarker.call(self, "adsb_1");
+  removeEntityMarker.call(self, "adsb_9");
+  removeEntityMarker.call({entityMarkers: {}}, "adsb_9");
+  assert.deepEqual(self.entityMarkers, {});
+});
+
+test("AutoReconVisualization.subscribeToEntitySync subscribes to the four event types once, however often it is called", () => {
+  const subscribeToEntitySync = reconMember("subscribeToEntitySync");
+  const calls = [], applied = [];
+  const EntitySync = {on: (type, fn) => calls.push([type, fn])};
+  const self = {applyEntitySyncEvent: (e) => applied.push(e)};
+  const run = new Function("EntitySync", "return " + subscribeToEntitySync.toString());
+  const subscribe = run(EntitySync);
+  subscribe.call(self);
+  subscribe.call(self);   // the 100 ms timer and DOMContentLoaded both call it
+  assert.deepEqual(calls.map((c) => c[0]), ["preexisting", "create", "update", "delete"]);
+  calls[1][1]({entity_id: "x"});
+  assert.deepEqual(applied, [{entity_id: "x"}]);
+});
+
+test("AutoReconVisualization.subscribeToEntitySync without EntitySync does nothing and does not use up its one subscription", () => {
+  const subscribeToEntitySync = reconMember("subscribeToEntitySync");
+  const self = {applyEntitySyncEvent() {}};
+  const without = new Function("return " + subscribeToEntitySync.toString())();
+  without.call(self);
+  assert.equal(self._entitySyncSubscribed, undefined);
+  const calls = [];
+  const withSync = new Function("EntitySync", "return " + subscribeToEntitySync.toString())({on: (type) => calls.push(type)});
+  withSync.call(self);   // EntitySync arrived later
+  assert.equal(calls.length, 4);
 });
 
 // --- the AIS tool's adapters, against the page's real shapes (a Cesium-like camera, fetch) ---
