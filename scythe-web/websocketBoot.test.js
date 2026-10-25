@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {readFileSync} from "node:fs";
-import {bootWorkspace} from "./workspaceBoot.js";
+import {bootKeepingSession as bootWorkspace} from "./bootForTest.js";
 
 const quiet = {warn() {}, debug() {}, log() {}, error() {}, info() {}};
 const page = readFileSync(new URL("../command-ops-visualization.html", import.meta.url), "utf8");
@@ -105,12 +105,10 @@ test("deactivating closes the socket", async () => {
 
 // --- the page ---
 
-test("the page has no WebSocketSync object of its own; its init, and the operator session's login, restore and logout, use the controls", () => {
+test("the page has no WebSocketSync object of its own; its init uses the controls", () => {
   assert.equal(/const WebSocketSync = \{/.test(page), false);
   assert.equal(page.includes("window.WebSocketSync = WebSocketSync"), false);
   assert.match(page, /WebSocketSync\.init\(\);/);
-  assert.equal(page.match(/window\.WebSocketSync && WebSocketSync\.useWebSocket/g).length, 1, "one helper, shared by the session's login and restore effects");
-  assert.match(page, /WebSocketSync\.disconnect\(\);/);
   assert.equal(/WebSocketSync\.(?:send|joinRoom|publishEntity|sendHeartbeat)\b/.test(page), false);
   assert.match(page, /workspace\.activate\("websocket-sync"\)/);
 });

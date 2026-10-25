@@ -20,6 +20,7 @@ import {createReconPlugin} from "./reconPlugin.js";
 import {createReconGlobe} from "./reconGlobe.js";
 import {createRoomsPlugin} from "./roomsPlugin.js";
 import {createWebSocketSyncPlugin} from "./websocketSyncPlugin.js";
+import {createSessionPlugin} from "./sessionPlugin.js";
 import {escapeHtml} from "./htmlEscape.js";
 
 /**
@@ -49,6 +50,13 @@ export function bootWorkspace(win) {
   });
   workspace.provide("cameraView", {
     altitude: () => win.viewer?.camera?.positionCartographic?.height ?? null,
+    /** Where the camera is looking, for the session's heartbeat: [latitude, longitude] and heading in degrees, altitude in metres; null with no viewer. */
+    position() {
+      if (!(win.viewer && win.viewer.camera)) return null;
+      const pos = win.viewer.camera.positionCartographic;
+      const deg = win.Cesium.Math.toDegrees;
+      return {center: [deg(pos.latitude), deg(pos.longitude)], altitude: pos.height, heading: deg(win.viewer.camera.heading)};
+    },
     // AISStream format: [[[lon_sw, lat_sw], [lon_ne, lat_ne]]]
     boundingBox() {
       try {
@@ -222,9 +230,74 @@ export function bootWorkspace(win) {
   workspace.register(websocket.tool);
   win.WebSocketSync = websocket.controls;   // what the page's init, the operator session and (through realtimeSocket and syncEvents) the ADS-B and AIS tools use
 
+  // --- the operator's session ---
+  workspace.provide("sessionStore", sessionStore(win));
+  const session = createSessionPlugin({log: win.console});
+  workspace.register(session.tool);
+  wireSessionEffects(win, session.controls);
+  win.OperatorSession = session.controls;   // what the page, the other tools (through operatorSession) and cesium-hypergraph-globe.js read
+
   win.ScytheWorkspace = workspace;
   win.dispatchEvent(new win.Event("scythe:workspace_ready"));
   return workspace;
+}
+
+/** The saved session: `SCYTHE_AUTH` (the shared auth module), `localStorage` and the cookie, looked up when they are needed. */
+function sessionStore(win) {
+  return {
+    restoreToken: () => win.SCYTHE_AUTH.restoreSession(),
+    validate: (token) => win.SCYTHE_AUTH.validateSession(token),
+    setItem: (key, value) => win.localStorage.setItem(key, value),
+    removeItem: (key) => win.localStorage.removeItem(key),
+    setCookie(name, value, days) {
+      let expires = "";
+      if (typeof days === "number") {
+        const date = new Date();
+        date.setTime(date.getTime() + days * 24 * 60 * 60 * 1000);
+        expires = "; expires=" + date.toUTCString();
+      }
+      win.document.cookie = `${name}=${value || ""}${expires}; path=/`;
+    },
+    clearCookie(name) { win.document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/`; },
+  };
+}
+
+/**
+ * What the page does when the session changes (these were the session's own onLoginSuccess, onSessionRestored and onLogout callbacks, then the page's
+ * `wireOperatorSessionEffects`): the console message, the status UI, GraphOps, the streams, the rooms. One handler per event, in the order the old code ran them.
+ * An error in one reaches whoever called `login`, `validateSession` or `logout`, as it did then.
+ */
+export function wireSessionEffects(win, session) {
+  // Connect to the entity stream (prefer WebSocket if available)
+  const connectStreams = () => {
+    if (win.WebSocketSync && win.WebSocketSync.useWebSocket) win.WebSocketSync.connect();
+    else if (win.EntitySync) win.EntitySync.connect();
+  };
+  session.on("login", () => {
+    win.addConsoleMessage?.(`👤 Operator ${escapeHtml(session.callsign)} logged in`, "info");
+    win.updateOperatorStatusUI?.();
+    win.GraphOpsBotRebind?.();   // unlocks inference
+    connectStreams();
+    if (win.RoomManager) { win.RoomManager.fetchRooms(); win.RoomManager.fetchMyRooms(); }   // fetch and auto-join rooms
+    if (typeof win.populateRooms === "function") {   // the DSL explorer's room selector
+      try { win.populateRooms(); } catch (error) { win.console?.debug?.("populateRooms failed:", error); }
+    }
+  });
+  session.on("restored", () => {
+    win.addConsoleMessage?.(`👤 Session restored for ${escapeHtml(session.callsign)}`, "info");
+    win.updateOperatorStatusUI?.();
+    win.GraphOpsBotRebind?.();
+    connectStreams();
+    if (win.RoomManager) { win.RoomManager.fetchRooms(); win.RoomManager.fetchMyRooms(); }
+  });
+  session.on("logout", () => {
+    win.addConsoleMessage?.("👤 Operator logged out", "info");
+    win.updateOperatorStatusUI?.();
+    win.GraphOpsBotReset?.("Operator logged out");   // prevents stale inference
+    if (win.WebSocketSync) win.WebSocketSync.disconnect();
+    if (win.EntitySync) win.EntitySync.disconnect();
+    if (win.RoomManager) win.RoomManager.reset();
+  });
 }
 
 /** The Operators panel's room widgets, by the ids the page gives them. A missing element is skipped; `html` is called only if the element is there. */

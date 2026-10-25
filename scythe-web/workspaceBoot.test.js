@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {readFileSync} from "node:fs";
-import {bootWorkspace} from "./workspaceBoot.js";
+import {bootKeepingSession as bootWorkspace} from "./bootForTest.js";
 
 const page = readFileSync(new URL("../command-ops-visualization.html", import.meta.url), "utf8");
 const quiet = {warn() {}, debug() {}, log() {}};
