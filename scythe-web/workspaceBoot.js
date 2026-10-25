@@ -14,6 +14,7 @@ import {createLpiPlugin, pulseRadius, pulseAlpha} from "./lpiPlugin.js";
 import {createPresencePlugin} from "./presencePlugin.js";
 import {createRenderPlugin} from "./renderPlugin.js";
 import {createPoiPlugin} from "./poiPlugin.js";
+import {adoptReconStore} from "./reconStore.js";
 import {escapeHtml} from "./htmlEscape.js";
 
 /**
@@ -123,6 +124,7 @@ export function bootWorkspace(win) {
   const entitySync = createEntitySyncPlugin({log: win.console});
   workspace.register(entitySync.tool);
   adoptEntitySyncStub(win, entitySync.controls);
+  win.ReconStore = adoptReconStore(win);   // the one door the page's recon writers use; AutoReconVisualization.entities is its map
   win.ScytheSensorEvents = sensorEvents;   // how LPIManager and FusionVisualization read the stream's sensor events
 
   // --- sensors ---

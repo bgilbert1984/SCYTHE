@@ -5636,9 +5636,7 @@
                                         entity.location.lon = Number(entity.location.lon) || 0;
                                         entity.location.altitude_m = Number(entity.location.altitude_m ?? entity.location.alt ?? 0) || 0;
 
-                                        window.AutoReconVisualization = window.AutoReconVisualization || {};
-                                        window.AutoReconVisualization.entities = window.AutoReconVisualization.entities || {};
-                                        window.AutoReconVisualization.entities[entity.entity_id] = entity;
+                                        ReconStore.upsert(entity);
                                         if (window.AutoReconVisualization.addEntityMarker) window.AutoReconVisualization.addEntityMarker(entity);
                                         if (window.updateReconList) window.updateReconList();
                                         addConsoleMessage(`Added to Recon (server): ${entity.name}`, 'response');
@@ -5666,9 +5664,7 @@
                                     entity.location.lon = Number(entity.location.lon) || 0;
                                     entity.location.altitude_m = Number(entity.location.altitude_m) || 0;
 
-                                    window.AutoReconVisualization = window.AutoReconVisualization || {};
-                                    window.AutoReconVisualization.entities = window.AutoReconVisualization.entities || {};
-                                    window.AutoReconVisualization.entities[entity.entity_id] = entity;
+                                    ReconStore.upsert(entity);
                                     if (window.AutoReconVisualization.addEntityMarker) window.AutoReconVisualization.addEntityMarker(entity);
                                     if (window.updateReconList) window.updateReconList();
                                     addConsoleMessage(`Added to Recon (client): ${entity.name}`, 'response');
@@ -5777,9 +5773,7 @@
                                                 ontology: ['satellite'],
                                                 source: 'satellite_ui'
                                             };
-                                            window.AutoReconVisualization = window.AutoReconVisualization || {};
-                                            window.AutoReconVisualization.entities = window.AutoReconVisualization.entities || {};
-                                            window.AutoReconVisualization.entities[entity.entity_id] = entity;
+                                            ReconStore.upsert(entity);
                                             if (window.AutoReconVisualization.addEntityMarker) window.AutoReconVisualization.addEntityMarker(entity);
                                             if (window.updateReconList) window.updateReconList();
                                             addConsoleMessage(`Added to Recon: ${entity.name}`, 'response');
@@ -12553,7 +12547,7 @@ const originalComplete = options.complete;
                             ontology: ['satellite']
                         };
 
-                        window.AutoReconVisualization.entities[id] = entity;
+                        ReconStore.upsert(entity);
                         window.AutoReconVisualization.renderEntities();
                         addConsoleMessage(`Added ${name} as recon entity (${id})`, 'response');
                     } catch (e) { console.warn('sat_to_recon failed', e); }
@@ -18361,7 +18355,7 @@ const originalComplete = options.complete;
                     const data = await response.json();
                     
                     if (data.status === 'ok') {
-                        this.entities = {};
+                        ReconStore.clear();   // in place: the store's map is the one everything reads
                         data.entities.forEach(e => {
                             // Normalize entity structure: some entities have data nested in 'data' field
                             let normalized = e;
@@ -18374,7 +18368,7 @@ const originalComplete = options.complete;
                                 console.warn(`[AutoRecon] Skipping entity ${normalized.entity_id || 'unknown'}: missing valid location data`);
                                 return;
                             }
-                            this.entities[normalized.entity_id] = normalized;
+                            ReconStore.upsert(normalized);
                         });
                         
                         // Update count display
@@ -21931,7 +21925,7 @@ API TIMING (avg ms):
                             };
                             
                             // 1. Inject entity into global store (Optimistic UI)
-                            window.AutoReconVisualization.entities[nmapId] = nmapEntity;
+                            ReconStore.upsert(nmapEntity);
                             
                             // 2. Persist to Server (Async/Low Priority)
                             fetch('/api/recon/entity', {
@@ -27110,9 +27104,7 @@ API TIMING (avg ms):
                 entity.location.lon = Number(entity.location.lon) || 0;
                 entity.location.altitude_m = Number(entity.location.altitude_m ?? entity.location.alt ?? 0) || 0;
 
-                window.AutoReconVisualization = window.AutoReconVisualization || {};
-                window.AutoReconVisualization.entities = window.AutoReconVisualization.entities || {};
-                window.AutoReconVisualization.entities[entity.entity_id] = entity;
+                ReconStore.upsert(entity);
                 if (window.AutoReconVisualization.addEntityMarker) window.AutoReconVisualization.addEntityMarker(entity);
                 if (window.updateReconList) window.updateReconList();
                 
@@ -27139,9 +27131,7 @@ API TIMING (avg ms):
                 meta: { vessel, correlation }
             };
 
-            window.AutoReconVisualization = window.AutoReconVisualization || {};
-            window.AutoReconVisualization.entities = window.AutoReconVisualization.entities || {};
-            window.AutoReconVisualization.entities[entity.entity_id] = entity;
+            ReconStore.upsert(entity);
             if (window.AutoReconVisualization.addEntityMarker) window.AutoReconVisualization.addEntityMarker(entity);
             if (window.updateReconList) window.updateReconList();
             log(`Added to Recon (client): ${entity.name}`, 'response');
@@ -29055,7 +29045,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     };
 
                     // 2. Inject into AutoReconVisualization store (optimistic UI)
-                    arv.entities[pcapId] = reconEntity;
+                    ReconStore.upsert(reconEntity);
 
                     // 3. Persist to server (async, non-blocking)
                     fetch('/api/recon/entity', {
@@ -30137,7 +30127,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             metadata: { source: 'pcap_reingest', session_id: sessionId, ip: p.ip, org: p.org || '', city: p.city || '', country: p.country || '', bytes: p.bytes || 0 }
                         };
                         
-                        if (arv && arv.entities) arv.entities[pcapId] = reconEntity;
+                        if (arv && arv.entities) ReconStore.upsert(reconEntity);
                         fetch('/api/recon/entity', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(reconEntity) }).catch(() => {});
                         
                         try {
@@ -30298,7 +30288,7 @@ document.addEventListener('DOMContentLoaded', () => {
             };
 
             // 2. Inject into AutoReconVisualization entity store
-            arv.entities[pcapId] = reconEntity;
+            ReconStore.upsert(reconEntity);
 
             // 3. Persist to server (async, non-blocking)
             // ⚠️ In a high‑volume ingest loop this single-entity POST pattern
