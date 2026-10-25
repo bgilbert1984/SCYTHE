@@ -154,32 +154,6 @@ test("AutoReconVisualization.removeEntityMarker is harmless for an unknown id, t
   assert.deepEqual(self.entityMarkers, {});
 });
 
-test("AutoReconVisualization.subscribeToEntitySync subscribes to the four event types once, however often it is called", () => {
-  const subscribeToEntitySync = reconMember("subscribeToEntitySync");
-  const calls = [], applied = [];
-  const EntitySync = {on: (type, fn) => calls.push([type, fn])};
-  const self = {applyEntitySyncEvent: (e) => applied.push(e)};
-  const run = new Function("EntitySync", "return " + subscribeToEntitySync.toString());
-  const subscribe = run(EntitySync);
-  subscribe.call(self);
-  subscribe.call(self);   // the 100 ms timer and DOMContentLoaded both call it
-  assert.deepEqual(calls.map((c) => c[0]), ["preexisting", "create", "update", "delete"]);
-  calls[1][1]({entity_id: "x"});
-  assert.deepEqual(applied, [{entity_id: "x"}]);
-});
-
-test("AutoReconVisualization.subscribeToEntitySync without EntitySync does nothing and does not use up its one subscription", () => {
-  const subscribeToEntitySync = reconMember("subscribeToEntitySync");
-  const self = {applyEntitySyncEvent() {}};
-  const without = new Function("return " + subscribeToEntitySync.toString())();
-  without.call(self);
-  assert.equal(self._entitySyncSubscribed, undefined);
-  const calls = [];
-  const withSync = new Function("EntitySync", "return " + subscribeToEntitySync.toString())({on: (type) => calls.push(type)});
-  withSync.call(self);   // EntitySync arrived later
-  assert.equal(calls.length, 4);
-});
-
 // --- the AIS tool's adapters, against the page's real shapes (a Cesium-like camera, fetch) ---
 
 test("booting also registers the AIS stream tool inactive and exposes the toggle's controls", () => {

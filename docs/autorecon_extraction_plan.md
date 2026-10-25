@@ -64,7 +64,7 @@ recon tool  (scythe-web/reconPlugin.js, tool id "recon")
 
 ## 4. Steps
 
-Each step is its own PR, in this order. Steps 1 to 3 are merged (#326, #327, #328); step 4 is split in two: **4a** moves the pure logic (the
+Each step is its own PR, in this order. Steps 1 to 3 and 4a are merged (#326, #327, #328, #329); 4b is the `recon` tool (below, `reconApi` and `reconStream` were not needed: `httpFetch` and `openEventSource` already cover them). Step 4 was split in two: **4a** moves the pure logic (the
 description, the lists' HTML, the normalising, the sync and stream decisions, the MLDC label, the running average) into `reconLogic.js` and routes
 every write through the store, and **4b** moves the controller and the services into the `recon` tool. The first three change no drawing and are the cheapest to review. The last two are the extraction.
 

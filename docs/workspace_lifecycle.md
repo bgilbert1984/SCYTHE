@@ -331,9 +331,27 @@ page is touched through `httpFetch` (the page's fetch), `poiGlobe` (the Cesium d
 - The panel's list and category filters (page code) and the console messages carrying a POI's name or the server's message escape what they show; the filter's inline handler is given the
   category as a JSON string (HTML-escaping alone is undone by the browser before the script runs), and the list's buttons are given the id as a number.
 
+## Fifteenth tool: Auto-Recon (`scythe-web/reconPlugin.js`)
+
+The controller half of `AutoReconVisualization` is now the `recon` tool, and `window.AutoReconVisualization` is its controls (the boot module sets it). What is
+left in the page is the drawing, renamed `ReconDrawing` (markers, rings, icons, cluster styling, the camera), which the tool reaches only through the
+`reconGlobe` service; step 5 of `docs/autorecon_extraction_plan.md` moves it into that service. The tool loads the entities and the alerts, applies EntitySync
+events and the entity stream to the store (`reconStore.js`), runs the auto-update (the stream, and every two seconds the server's simulator and the changes
+since), sets the reference point from the camera, creates tasks and changes dispositions. The decisions are plain functions in `reconLogic.js`; the services
+are the existing `httpFetch`, `openEventSource`, `operatorSession` and `entityStream`, and three new ones: `reconGlobe`, `reconView` (the panel by id) and
+`reconConsole`. The plan's `reconApi` and `reconStream` were not needed: the tool's requests go through `httpFetch` and its stream through `openEventSource`.
+
+- The tool subscribes to EntitySync once per activation and unsubscribes when it deactivates (the page used to subscribe from a timer and again on `DOMContentLoaded`, and never unsubscribe).
+- Deactivating stops the auto-update and the stream, cancels a pending retry, unwires the panel, takes the drawing down, and an answer from the server that arrives afterwards changes nothing.
+- Stopping the auto-update cancels a pending stream retry; the old code rebound the stream five seconds later even though the update had been stopped.
+- Entity names, task ids and the server's messages are escaped where they reach the console and the notifications (the page puts both in as HTML).
+- The entity map is the store's and is never replaced: a reload from the server clears it in place.
+- Pinned, not changed: the page's client polls the server's simulator every two seconds (`/api/recon/simulate`); hiding the layer stops the auto-update (and says so) even if it was not running; a reload drops entities that only the client has; a partial update resets the fields it does not carry (plan, finding 10).
+- Verified against the old page code with a randomised differential (2,000 scenarios of 14 steps: loads, alerts, sync events, stream messages and errors, retries, ticks, dispositions, tasks, reference points): same requests, same console messages, same drawing calls, same store, apart from the retry change above.
+
 ## Not done
 
-- Only ADS-B, AIS streaming, chat, metrics, the metrics explorer, propagation, the entity stream, sensors, the fusion overlays, the viewsheds, LPI, operator presence and the level-of-detail manager and the points of interest use the contract, and activation is not yet driven by the operator (a panel click).
+- Only ADS-B, AIS streaming, chat, metrics, the metrics explorer, propagation, the entity stream, sensors, the fusion overlays, the viewsheds, LPI, operator presence the level-of-detail manager, the points of interest and Auto-Recon (its controller; the drawing is still page code) use the contract, and activation is not yet driven by the operator (a panel click).
 - No unified transport: the tools take the realtime socket, `WebSocketSync` and `fetch` as services; they do not open their own.
 - Not run in a browser against a signed-in session; the tests cover the contract, the plugin, the boot wiring, and run the
   page's own `removeEntityMarker` against a fake collection.
