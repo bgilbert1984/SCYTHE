@@ -18433,13 +18433,13 @@ const originalComplete = options.complete;
                 this.alerts.forEach(alert => {
                     const threatClass = alert.threat_level.toLowerCase();
                     html += `
-                        <div class="alert-item threat-${threatClass}" onclick="AutoReconVisualization.flyToEntity('${alert.entity_id}')">
+                        <div class="alert-item threat-${escapeHtml(threatClass)}" onclick="AutoReconVisualization.flyToEntity(${escapeHtml(JSON.stringify(String(alert.entity_id)))})">
                             <div class="alert-header">
-                                <span class="alert-name">${alert.name}</span>
-                                <span class="alert-threat">${alert.threat_level}</span>
+                                <span class="alert-name">${escapeHtml(alert.name)}</span>
+                                <span class="alert-threat">${escapeHtml(alert.threat_level)}</span>
                             </div>
                             <div class="alert-details">
-                                <span>${alert.disposition}</span>
+                                <span>${escapeHtml(alert.disposition)}</span>
                                 <span>${alert.distance_nm.toFixed(1)} NM @ ${alert.bearing_deg.toFixed(0)}°</span>
                             </div>
                         </div>
@@ -18835,26 +18835,26 @@ const originalComplete = options.complete;
                 
                 return `
                     <div style="padding: 10px; font-family: sans-serif;">
-                        <h3 style="margin: 0 0 10px 0; color: #00aaff;">🎯 ${entity.name}</h3>
+                        <h3 style="margin: 0 0 10px 0; color: #00aaff;">🎯 ${escapeHtml(entity.name)}</h3>
                         <table style="width: 100%; border-collapse: collapse;">
-                            <tr><td style="padding: 3px; color: #888;">Entity ID:</td><td style="padding: 3px;">${entity.entity_id}</td></tr>
-                            <tr><td style="padding: 3px; color: #888;">Disposition:</td><td style="padding: 3px; color: ${this.getDispositionCssColor(entity.disposition)};">${entity.disposition}</td></tr>
-                            <tr><td style="padding: 3px; color: #888;">Threat Level:</td><td style="padding: 3px; color: ${this.getThreatCssColor(entity.threat_level)};">${entity.threat_level}</td></tr>
+                            <tr><td style="padding: 3px; color: #888;">Entity ID:</td><td style="padding: 3px;">${escapeHtml(entity.entity_id)}</td></tr>
+                            <tr><td style="padding: 3px; color: #888;">Disposition:</td><td style="padding: 3px; color: ${this.getDispositionCssColor(entity.disposition)};">${escapeHtml(entity.disposition)}</td></tr>
+                            <tr><td style="padding: 3px; color: #888;">Threat Level:</td><td style="padding: 3px; color: ${this.getThreatCssColor(entity.threat_level)};">${escapeHtml(entity.threat_level)}</td></tr>
                             <tr><td style="padding: 3px; color: #888;">Position:</td><td style="padding: 3px;">${(Number(entity.location?.lat ?? 0)).toFixed(5)}°, ${(Number(entity.location?.lon ?? 0)).toFixed(5)}°</td></tr>
                             <tr><td style="padding: 3px; color: #888;">Distance:</td><td style="padding: 3px;">${(Number(entity.distance_nm ?? 0)).toFixed(2)} NM</td></tr>
                             <tr><td style="padding: 3px; color: #888;">Bearing:</td><td style="padding: 3px;">${(Number(entity.bearing_deg ?? 0)).toFixed(1)}°</td></tr>
                             <tr><td style="padding: 3px; color: #888;">Speed:</td><td style="padding: 3px;">${(entity.velocity?.speed_kts ?? 0).toFixed(1)} kts</td></tr>
                             <tr><td style="padding: 3px; color: #888;">Heading:</td><td style="padding: 3px;">${(entity.velocity?.heading_deg ?? 0).toFixed(1)}°</td></tr>
-                            <tr><td style="padding: 3px; color: #888;">Ontology:</td><td style="padding: 3px;">${entity.ontology}</td></tr>
+                            <tr><td style="padding: 3px; color: #888;">Ontology:</td><td style="padding: 3px;">${escapeHtml(entity.ontology)}</td></tr>
                             <tr><td style="padding: 3px; color: #888;">RF Emissions:</td><td style="padding: 3px;">${entity.rf_emissions ? '📡 Detected' : 'None'}</td></tr>
                             <tr><td style="padding: 3px; color: #888;">IFF Response:</td><td style="padding: 3px;">${entity.iff_response ? '✅ Valid' : '❌ None'}</td></tr>
                         </table>
                         <div style="margin-top: 10px;">
-                            <button onclick="AutoReconVisualization.createTaskForEntity('${entity.entity_id}')" 
+                            <button onclick="AutoReconVisualization.createTaskForEntity(${escapeHtml(JSON.stringify(String(entity.entity_id)))})" 
                                     style="padding: 5px 10px; background: #0066aa; color: white; border: none; border-radius: 3px; cursor: pointer;">
                                 📋 Create Task
                             </button>
-                            <button onclick="AutoReconVisualization.updateDisposition('${entity.entity_id}')" 
+                            <button onclick="AutoReconVisualization.updateDisposition(${escapeHtml(JSON.stringify(String(entity.entity_id)))})" 
                                     style="padding: 5px 10px; background: #aa6600; color: white; border: none; border-radius: 3px; cursor: pointer; margin-left: 5px;">
                                 🏷️ Change Disposition
                             </button>
@@ -19603,14 +19603,14 @@ API TIMING (avg ms):
                         li.className = 'list-item';
                         li.innerHTML = `
                             <div class="list-item-header">
-                                <span class="list-item-title">${e.name}</span>
+                                <span class="list-item-title">${escapeHtml(e.name)}</span>
                                 <span class="status-dot" style="background-color:${e.disposition === 'HOSTILE' ? '#ff4d4d' : '#4a9eff'}"></span>
                             </div>
-                            <div class="list-item-subtitle">${e.disposition} | ${e.threat_level} | ${e.location.lat.toFixed(3)}, ${e.location.lon.toFixed(3)}</div>
+                            <div class="list-item-subtitle">${escapeHtml(e.disposition)} | ${escapeHtml(e.threat_level)} | ${e.location.lat.toFixed(3)}, ${e.location.lon.toFixed(3)}</div>
                             <div class="list-item-actions">
-                                <button class="action-button" data-entity-id="${e.entity_id}" data-action="track">Track</button>
-                                <button class="action-button" data-entity-id="${e.entity_id}" data-action="task">Task</button>
-                                <button class="action-button" data-entity-id="${e.entity_id}" data-action="info">Info</button>
+                                <button class="action-button" data-entity-id="${escapeHtml(e.entity_id)}" data-action="track">Track</button>
+                                <button class="action-button" data-entity-id="${escapeHtml(e.entity_id)}" data-action="task">Task</button>
+                                <button class="action-button" data-entity-id="${escapeHtml(e.entity_id)}" data-action="info">Info</button>
                             </div>
                         `;
 
@@ -19630,7 +19630,7 @@ API TIMING (avg ms):
                                 } else if (action === 'info') {
                                     const ent = (window.AutoReconVisualization && window.AutoReconVisualization.entities) ? window.AutoReconVisualization.entities[entId] : null;
                                     if (ent) {
-                                    const desc = window.AutoReconVisualization.createEntityDescription ? window.AutoReconVisualization.createEntityDescription(ent) : `<pre>${JSON.stringify(ent, null, 2)}</pre>`;
+                                    const desc = window.AutoReconVisualization.createEntityDescription ? window.AutoReconVisualization.createEntityDescription(ent) : `<pre>${escapeHtml(JSON.stringify(ent, null, 2))}</pre>`;
                                         // Create a simple modal for entity info.  Use a
                                         // unique close button selector scoped to the panel
                                         // itself so we do not depend on a global id that
