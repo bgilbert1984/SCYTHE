@@ -18056,19 +18056,16 @@ const originalComplete = options.complete;
         // AUTO-RECONNAISSANCE VISUALIZATION
         // =====================================================================
         
-        const AutoReconVisualization = {
+        const ReconDrawing = {
             viewer: null,
-            entities: {},
+            // The entities are the store's (reconStore.js); the drawing reads them from there.
+            get entities() { return ReconStore.entities; },
             entityMarkers: {},
             proximityCircles: {},
             taskLines: {},
-            alerts: [],
-            visible: false,
+            visible: false,   // set by the recon tool through setVisible
             showProximityRings: true,
             showLabels: true,
-            autoUpdate: false,
-            updateInterval: null,
-            _reconSSE: null,      // EventSource handle for /api/recon/entities/stream
             referencePoint: { lat: 37.7749, lon: -122.4194 },
             
             // Clustering support
@@ -18098,12 +18095,13 @@ const originalComplete = options.complete;
                 'NONE': Cesium.Color.CYAN
             },
             
-            initialize: function(cesiumViewer) {
+            // Takes the viewer from the recon tool (reconPlugin.js, through the reconGlobe service) and makes the drawing's data source.
+            attach: function(cesiumViewer) {
                 this.viewer = cesiumViewer;
-                console.log('Auto-Recon Visualization initialized');
+                console.log('Auto-Recon drawing attached');
                 
                 // Setup clustered data source if HierarchicalRenderManager is available
-                if (typeof HierarchicalRenderManager !== 'undefined' && HierarchicalRenderManager.viewer) {
+                if (!this.dataSource && typeof HierarchicalRenderManager !== 'undefined' && HierarchicalRenderManager.viewer) {
                     this.dataSource = HierarchicalRenderManager.createClusteredDataSource('Recon_Entities', {
                         pixelRange: 45,
                         minimumClusterSize: 2
@@ -18113,12 +18111,28 @@ const originalComplete = options.complete;
                     this.setupClusterStyling();
                 }
                 
-                this.setupEventListeners();
-                
                 // Listen for altitude changes
                 this.setupAltitudeListener();
                 
                 return this;
+            },
+            
+            // What the tool decides, set from outside
+            setVisible: function(shown) { this.visible = shown; },
+            setShowRings: function(shown) {
+                this.showProximityRings = shown;
+                this.updateProximityRingsVisibility();
+            },
+            setShowLabels: function(shown) {
+                this.showLabels = shown;
+                this.updateLabelVisibility();
+            },
+            setReferencePoint: function(point) { this.referencePoint = point; },
+            
+            // Where the camera is, in degrees
+            cameraPosition: function() {
+                const cartographic = Cesium.Cartographic.fromCartesian(this.viewer.camera.position);
+                return {lat: Cesium.Math.toDegrees(cartographic.latitude), lon: Cesium.Math.toDegrees(cartographic.longitude)};
             },
             
             setupClusterStyling: function() {
@@ -18234,6 +18248,8 @@ const originalComplete = options.complete;
             },
             
             setupAltitudeListener: function() {
+                if (this._altitudeListenerBound) return;
+                this._altitudeListenerBound = true;
                 const self = this;
                 
                 document.addEventListener('altitudeChanged', function(e) {
@@ -18268,154 +18284,9 @@ const originalComplete = options.complete;
                 });
             },
             
-            setupEventListeners: function() {
-                const self = this;
-                
-                // Toggle Recon entities
-                const reconToggle = document.getElementById('toggleReconEntities');
-                if (reconToggle) {
-                    reconToggle.addEventListener('change', function(e) {
-                        if (e.target.checked) {
-                            self.show();
-                        } else {
-                            self.hide();
-                        }
-                    });
-                }
-                
-                // Proximity rings toggle
-                const ringsToggle = document.getElementById('reconShowRings');
-                if (ringsToggle) {
-                    ringsToggle.addEventListener('change', function(e) {
-                        self.showProximityRings = e.target.checked;
-                        self.updateProximityRingsVisibility();
-                    });
-                }
-                
-                // Labels toggle
-                const labelsToggle = document.getElementById('reconShowLabels');
-                if (labelsToggle) {
-                    labelsToggle.addEventListener('change', function(e) {
-                        self.showLabels = e.target.checked;
-                        self.updateLabelVisibility();
-                    });
-                }
-                
-                // Auto-update toggle
-                const autoUpdateToggle = document.getElementById('reconAutoUpdate');
-                if (autoUpdateToggle) {
-                    autoUpdateToggle.addEventListener('change', function(e) {
-                        self.autoUpdate = e.target.checked;
-                        if (self.autoUpdate) {
-                            self.startAutoUpdate();
-                        } else {
-                            self.stopAutoUpdate();
-                        }
-                    });
-                }
-                
-                // Set reference point button
-                const setRefBtn = document.getElementById('reconSetReference');
-                if (setRefBtn) {
-                    setRefBtn.addEventListener('click', function() {
-                        self.setReferenceFromView();
-                    });
-                }
-                
-                // Check alerts button
-                const alertsBtn = document.getElementById('reconCheckAlerts');
-                if (alertsBtn) {
-                    alertsBtn.addEventListener('click', function() {
-                        self.loadAlerts();
-                    });
-                }
-            },
-            
-            show: function() {
-                this.visible = true;
-                const filtersEl = document.getElementById('reconFilters');
-                if (filtersEl) filtersEl.style.display = 'block';
-                this.loadEntities();
-            },
-            
-            hide: function() {
-                this.visible = false;
-                const filtersEl = document.getElementById('reconFilters');
-                if (filtersEl) filtersEl.style.display = 'none';
-                this.clearAllEntities();
-                this.stopAutoUpdate();
-            },
-            
-            loadEntities: async function() {
-                try {
-                    addConsoleMessage('Loading Auto-Recon entities...', 'command');
-                    
-                    const response = await fetch('/api/recon/entities');
-                    const data = await response.json();
-                    
-                    if (data.status === 'ok') {
-                        ReconStore.clear();   // in place: the store's map is the one everything reads
-                        data.entities.forEach(e => {
-                            const normalized = ReconLogic.normalizeLoaded(e);
-                            if (!normalized) {
-                                console.warn(`[AutoRecon] Skipping entity ${e.entity_id || e.id || 'unknown'}: missing valid location data`);
-                                return;
-                            }
-                            ReconStore.upsert(normalized);
-                        });
-                        
-                        // Update count display
-                        const countEl = document.getElementById('recon-entity-count');
-                        if (countEl) countEl.textContent = data.entity_count;
-                        
-                        // Render entities on map
-                        this.renderEntities();
-                        
-                        // Load alerts
-                        this.loadAlerts();
-                        
-                        addConsoleMessage(`Loaded ${data.entity_count} reconnaissance entities`, 'response');
-                        showNotification('Recon Data Loaded', `Tracking ${data.entity_count} entities`, 'info');
-                    }
-                } catch (error) {
-                    console.error('Error loading recon entities:', error);
-                    addConsoleMessage('Error loading recon entities: ' + error.message, 'alert');
-                }
-            },
-            
-            loadAlerts: async function() {
-                try {
-                    const response = await fetch('/api/recon/alerts');
-                    const data = await response.json();
-                    
-                    if (data.status === 'ok') {
-                        this.alerts = data.alerts;
-                        
-                        // Update alert count display
-                        const alertCountEl = document.getElementById('recon-alert-count');
-                        if (alertCountEl) alertCountEl.textContent = data.alert_count;
-                        
-                        // Update alert list UI
-                        this.updateAlertList();
-                        
-                        if (data.alert_count > 0) {
-                            addConsoleMessage(`⚠️ ${data.alert_count} proximity alerts active!`, 'alert');
-                        }
-                    }
-                } catch (error) {
-                    console.error('Error loading alerts:', error);
-                }
-            },
-            
-            updateAlertList: function() {
-                const listEl = document.getElementById('recon-alert-list');
-                if (!listEl) return;
-                
-                listEl.innerHTML = ReconLogic.alertListHtml(this.alerts);
-            },
-            
+            // Draws the layer; returns whether it did (the tool then refreshes the panel's list).
             renderEntities: function() {
-                if (!this.viewer || !this.visible) return;
+                if (!this.viewer || !this.visible) return false;
                 
                 // Clear existing
                 this.clearAllEntities();
@@ -18438,12 +18309,7 @@ const originalComplete = options.complete;
                     this.addEntityMarker(entity);
                 });
 
-                // After rendering entities, update the Recon list UI if available
-                try {
-                    if (window.updateReconList) window.updateReconList();
-                } catch (e) {
-                    console.debug('updateReconList failed:', e);
-                }
+                return true;
             },
             
             addReferencePointMarker: function() {
@@ -18578,7 +18444,7 @@ const originalComplete = options.complete;
                             pixelOffset: new Cesium.Cartesian2(0, 18),
                             show: showLabelsNow
                         },
-                        description: this.createEntityDescription(entity),
+                        description: ReconLogic.describeEntity(entity),
                         properties: {
                             type: 'recon_entity',
                             entityId: entityId,
@@ -18744,10 +18610,6 @@ const originalComplete = options.complete;
                 return canvas.toDataURL();
             },
             
-            createEntityDescription: function(entity) {
-                return ReconLogic.describeEntity(entity);
-            },
-            
             // Remove one entity's markers (billboard, altitude line, threat ring), wherever they were added.
             clearAllEntities: function() {
                 // Clear from clustered data source if available
@@ -18801,118 +18663,6 @@ const originalComplete = options.complete;
                 });
             },
             
-            // Track last update timestamp for incremental updates
-            lastUpdateTimestamp: null,
-            
-            // Performance metrics for frontend
-            perfMetrics: {
-                updateCount: 0,
-                lastUpdateMs: 0,
-                avgUpdateMs: 0,
-                entityUpdates: 0
-            },
-            
-            startAutoUpdate: function() {
-                if (this.updateInterval) return;
-                
-                const self = this;
-                
-                // SSE stream for real-time entity patches (alongside incremental polling).
-                this._bindReconSSE();
-
-                // Initialize timestamp for incremental updates
-                this.lastUpdateTimestamp = Date.now() / 1000;
-                
-                this.updateInterval = setInterval(async function() {
-                    if (!self.visible) return;
-                    
-                    const updateStart = performance.now();
-                    
-                    try {
-                        // Simulate movement
-                        await fetch('/api/recon/simulate');
-                        
-                        // OPTIMIZATION: Use incremental updates - only fetch changed entities
-                        const response = await fetch(`/api/recon/changes?since=${self.lastUpdateTimestamp}`);
-                        const data = await response.json();
-                        
-                        if (data.status === 'ok') {
-                            // Update timestamp for next incremental fetch
-                            self.lastUpdateTimestamp = data.timestamp;
-                            
-                            // Only update changed entities (not the full list)
-                            if (data.entity_count > 0) {
-                                data.entities.forEach(e => {
-                                    ReconStore.upsert(e);
-                                    self.updateEntityPosition(e);
-                                });
-                                self.perfMetrics.entityUpdates += data.entity_count;
-                            }
-                            
-                            // Update performance metrics
-                            const updateDuration = performance.now() - updateStart;
-                            self.perfMetrics.updateCount++;
-                            self.perfMetrics.lastUpdateMs = updateDuration;
-                            self.perfMetrics.avgUpdateMs = ReconLogic.runningAverage(self.perfMetrics.avgUpdateMs, self.perfMetrics.updateCount, updateDuration);
-                            
-                            // Refresh alerts (these are cached on backend)
-                            self.loadAlerts();
-                        }
-                    } catch (error) {
-                        console.error('Error updating recon entities:', error);
-                    }
-                }, 2000); // Update every 2 seconds
-                
-                addConsoleMessage('Recon auto-update started (incremental mode)', 'command');
-            },
-            
-            stopAutoUpdate: function() {
-                if (this.updateInterval) {
-                    clearInterval(this.updateInterval);
-                    this.updateInterval = null;
-                }
-                if (this._reconSSE) {
-                    this._reconSSE.close();
-                    this._reconSSE = null;
-                }
-                addConsoleMessage('Recon auto-update stopped', 'command');
-            },
-
-            // Connect to the SSE entity stream for push-based patches.
-            // On a dropped stream, retry after 5 s with a full reload of the entities.
-            _bindReconSSE: function() {
-                if (this._reconSSE) return;
-                const self = this;
-                try {
-                    const src = new EventSource('/api/recon/entities/stream');
-                    src.onmessage = function(event) {
-                        try {
-                            const raw = JSON.parse(event.data);
-                            const evt = ReconLogic.streamEvent(raw, self.entities);
-                            if (evt) self.applyEntitySyncEvent(evt);
-                        } catch (e) {
-                            console.debug('[AutoRecon] SSE parse error:', e);
-                        }
-                    };
-                    src.onerror = function() {
-                        console.warn('[AutoRecon] SSE stream disconnected');
-                        src.close();
-                        self._reconSSE = null;
-                        // Full resync on retry
-                        if (self.visible || self.updateInterval) {
-                            setTimeout(function() {
-                                if (self.visible) self.loadEntities();
-                                self._bindReconSSE();
-                            }, 5000);
-                        }
-                    };
-                    this._reconSSE = src;
-                    console.log('[AutoRecon] SSE stream connected');
-                } catch (e) {
-                    console.warn('[AutoRecon] SSE bind failed:', e);
-                }
-            },
-            
             updateEntityPosition: function(entity) {
                 const marker = this.entityMarkers[entity.entity_id];
                 if (!marker) return;
@@ -18931,36 +18681,6 @@ const originalComplete = options.complete;
                 if (marker.label) {
                     marker.label.text = `${entity.name}\n${entity.disposition}`;
                     marker.label.fillColor = this.DISPOSITION_COLORS[entity.disposition] || Cesium.Color.GRAY;
-                }
-            },
-            
-            setReferenceFromView: async function() {
-                if (!this.viewer) return;
-                
-                try {
-                    const camera = this.viewer.camera;
-                    const cartographic = Cesium.Cartographic.fromCartesian(camera.position);
-                    const lat = Cesium.Math.toDegrees(cartographic.latitude);
-                    const lon = Cesium.Math.toDegrees(cartographic.longitude);
-                    
-                    // Update server reference point
-                    const response = await fetch('/api/recon/reference', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ lat, lon })
-                    });
-                    
-                    const data = await response.json();
-                    if (data.status === 'ok') {
-                        this.referencePoint = data.reference_point;
-                        addConsoleMessage(`Reference point set to: ${lat.toFixed(4)}, ${lon.toFixed(4)}`, 'response');
-                        
-                        // Reload entities with new reference
-                        this.loadEntities();
-                    }
-                } catch (error) {
-                    console.error('Error setting reference point:', error);
-                    addConsoleMessage('Error setting reference point: ' + error.message, 'alert');
                 }
             },
             
@@ -19023,34 +18743,6 @@ const originalComplete = options.complete;
                 });
             },
             
-            createTaskForEntity: async function(entityId) {
-                try {
-                    const response = await fetch('/api/recon/task', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            entity_id: entityId,
-                            task_type: 'INVESTIGATE',
-                            priority: 5
-                        })
-                    });
-                    
-                    const data = await response.json();
-                    if (data.status === 'ok') {
-                        addConsoleMessage(`Task ${data.task.task_id} created for ${data.task.entity_name}`, 'response');
-                        showNotification('Task Created', `Investigation task assigned: ${data.task.task_id}`, 'info');
-                        
-                        // Show task line on map
-                        this.addTaskLine(data.task);
-                    } else {
-                        addConsoleMessage('Failed to create task: ' + data.message, 'alert');
-                    }
-                } catch (error) {
-                    console.error('Error creating task:', error);
-                    addConsoleMessage('Error creating task: ' + error.message, 'alert');
-                }
-            },
-            
             addTaskLine: function(task) {
                 if (!this.viewer) return;
                 
@@ -19081,84 +18773,6 @@ const originalComplete = options.complete;
                 }
             },
             
-            updateDisposition: async function(entityId) {
-                const entity = this.entities[entityId];
-                if (!entity) return;
-                
-                const dispositions = ['UNKNOWN', 'PENDING', 'ASSUMED_FRIEND', 'FRIEND', 'NEUTRAL', 'SUSPICIOUS', 'HOSTILE'];
-                const currentIdx = dispositions.indexOf(entity.disposition);
-                const newDisposition = prompt(
-                    `Update disposition for ${entity.name}\nCurrent: ${entity.disposition}\n\nOptions: ${dispositions.join(', ')}`,
-                    entity.disposition
-                );
-                
-                if (!newDisposition || newDisposition.toUpperCase() === entity.disposition) return;
-                
-                try {
-                    // Include session token for provenance tracking
-                    const headers = { 'Content-Type': 'application/json' };
-                    if (window.OperatorSession && window.OperatorSession.sessionToken) {
-                        headers['X-Session-Token'] = window.OperatorSession.sessionToken;
-                    }
-                    
-                    const response = await fetch(`/api/recon/entity/${entityId}/disposition`, {
-                        method: 'POST',
-                        headers: headers,
-                        body: JSON.stringify({ disposition: newDisposition.toUpperCase() })
-                    });
-                    
-                    const data = await response.json();
-                    if (data.status === 'ok') {
-                        ReconStore.upsert(data.entity, entityId);
-                        addConsoleMessage(`${entity.name} disposition changed to ${newDisposition.toUpperCase()}`, 'response');
-                        
-                        // Re-render to update colors
-                        this.renderEntities();
-                    } else {
-                        addConsoleMessage('Failed to update disposition: ' + data.message, 'alert');
-                    }
-                } catch (error) {
-                    console.error('Error updating disposition:', error);
-                    addConsoleMessage('Error updating disposition: ' + error.message, 'alert');
-                }
-            },
-            
-            // ========================================================================
-            // ENTITY SYNC INTEGRATION (Real-time multi-operator synchronization)
-            // ========================================================================
-            
-            /**
-             * Apply an EntitySync event to the Recon visualization.
-             * Handles CREATE, UPDATE, DELETE, and PREEXISTING events for RECON_ENTITY/NMAP_TARGET types.
-             */
-            applyEntitySyncEvent: function(evt) {
-                const plan = ReconLogic.planSyncEvent(evt, this.entities, Date.now());
-                if (!plan) return;
-                console.log(`[AutoRecon] EntitySync ${evt.eventType || evt.event_type || 'UPDATE'}: ${evt.entity_id} (${evt.entity_type || ''})`);
-
-                if (plan.kind === 'upsert') {
-                    ReconStore.upsert(plan.entity, plan.id);
-                    if (this.visible) {
-                        this.removeEntityMarker(plan.id); // Remove existing if any
-                        this.addEntityMarker(this.entities[plan.id]);
-                    }
-                } else if (plan.existed) {
-                    ReconStore.remove(plan.id);
-                    if (this.visible) {
-                        this.removeEntityMarker(plan.id);
-                    }
-                }
-
-                // Update the Recon list UI
-                if (window.updateReconList) {
-                    try { window.updateReconList(); } catch(e) { /* ignore */ }
-                }
-
-                // Update count display
-                const countEl = document.getElementById('recon-entity-count');
-                if (countEl) countEl.textContent = Object.keys(this.entities).length;
-            },
-
             /**
              * Remove a specific entity marker from the visualization
              */
@@ -19190,59 +18804,12 @@ const originalComplete = options.complete;
                 }
             },
             
-            /**
-             * Subscribe to EntitySync events for real-time updates
-             */
-            subscribeToEntitySync: function() {
-                if (typeof EntitySync === 'undefined') {
-                    console.warn('[AutoRecon] EntitySync not available - real-time sync disabled');
-                    return;
-                }
-                
-                // Called from a timer and again on DOMContentLoaded: subscribe once
-                if (this._entitySyncSubscribed) return;
-                this._entitySyncSubscribed = true;
-                
-                const self = this;
-                
-                // Handler for all entity events
-                const applyEvent = function(data) {
-                    self.applyEntitySyncEvent(data);
-                };
-                
-                // Subscribe to all relevant event types
-                EntitySync.on('preexisting', applyEvent);
-                EntitySync.on('create', applyEvent);
-                EntitySync.on('update', applyEvent);
-                EntitySync.on('delete', applyEvent);
-                
-                console.log('[AutoRecon] Subscribed to EntitySync for real-time updates');
-            }
         };
         
-        // Make Auto-Recon visualization globally available
-        window.AutoReconVisualization = AutoReconVisualization;
+        // The drawing, reached by the recon tool through the reconGlobe service (scythe-web/workspaceBoot.js).
+        // The recon tool (scythe-web/reconPlugin.js) is `window.AutoReconVisualization`: the boot module at the end of this page sets it.
+        window.ReconDrawing = ReconDrawing;
         
-        // Wire up EntitySync subscription after EntitySync is available
-        // This runs when the page loads and EntitySync connects
-        (function() {
-            // Try to subscribe immediately if EntitySync is available
-            if (typeof EntitySync !== 'undefined') {
-                setTimeout(function() {
-                    if (window.AutoReconVisualization) {
-                        window.AutoReconVisualization.subscribeToEntitySync();
-                    }
-                }, 100);
-            }
-            
-            // Also subscribe when EntitySync connects (handles async loading)
-            document.addEventListener('DOMContentLoaded', function() {
-                if (typeof EntitySync !== 'undefined' && window.AutoReconVisualization) {
-                    window.AutoReconVisualization.subscribeToEntitySync();
-                }
-            });
-        })();
-
         // Global helper: update Recon UI list from current AutoReconVisualization.entities
         window.updateReconList = function() {
             try {
@@ -38156,6 +37723,7 @@ ${unconfirmedBanner}
     workspace.activate("presence").catch((error) => console.warn("[Workspace] presence did not start:", error));
     workspace.activate("render").catch((error) => console.warn("[Workspace] render did not start:", error));
     workspace.activate("poi").catch((error) => console.warn("[Workspace] poi did not start:", error));
+    workspace.activate("recon").catch((error) => console.warn("[Workspace] recon did not start:", error));
     workspace.activate("metrics").catch((error) => console.warn("[Workspace] metrics did not start:", error));
     // The Metrics Explorer waits 2 s after the DOM is ready so the other panels exist first (as its old init did).
     const startExplorer = () => setTimeout(() => workspace.activate("metrics-explorer").catch((error) => console.warn("[Workspace] metrics explorer did not start:", error)), 2000);

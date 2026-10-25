@@ -1,7 +1,9 @@
 /**
  * What Auto-Recon decides, as plain functions (moved out of `AutoReconVisualization` in command-ops-visualization.html; step 4a of
- * docs/autorecon_extraction_plan.md). Nothing here touches the page, the globe or the network: the page's object calls these through
+ * docs/autorecon_extraction_plan.md). Nothing here touches the page, the globe or the network: the page's drawing calls these through
  * `window.ReconLogic` (set by the boot module) and does the drawing and the fetching itself.
+ *
+ * Since step 4b the recon tool (reconPlugin.js) imports these directly; the page's drawing still calls `ReconLogic.describeEntity`.
  *
  * The HTML builders (`describeEntity`, `alertListHtml`, `reconRowHtml`) escape every field an entity carries; ids that go inside an inline
  * handler are passed as escaped JSON strings (see #327).

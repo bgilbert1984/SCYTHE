@@ -13,22 +13,13 @@ const escapeHtml = new Function(`const _HTML_ESC = ${JSON.stringify(_HTML_ESC)};
   return page.slice(start, page.indexOf("\n    }\n", start) + "\n    }\n".length);
 })()}\nreturn escapeHtml;`)();
 
-/** A member of the page's AutoReconVisualization object, as a function: from `name: function(` to the member's closing brace. */
-function reconMember(name) {
-  const header = `            ${name}: function(`;
-  assert.equal(page.split(header).length - 1, 1, `${name} is defined once`);
-  const start = page.indexOf(header);
-  const end = page.indexOf("\n            }", start);
-  return page.slice(start, end + "\n            }".length).trim().replace(new RegExp(`^${name}: `), "");
-}
-
-/** The recon object's description and alert-list members, run against a fake document. */
+/** What the tool's controls and the alert list do with an entity, against a fake document: the HTML comes from ReconLogic, the tool puts it in. */
 function recon({alerts = []} = {}) {
   const els = {"recon-alert-list": {innerHTML: ""}};
-  const members = ["createEntityDescription", "updateAlertList"];
-  const source = `return {${members.map((name) => `${name}: ${reconMember(name)}`).join(",\n")}};`;
-  const object = new Function("document", "ReconLogic", source)({getElementById: (id) => els[id]}, ReconLogic);
-  object.alerts = alerts;
+  const object = {
+    alerts, createEntityDescription: (entity) => ReconLogic.describeEntity(entity),
+    updateAlertList() { els["recon-alert-list"].innerHTML = ReconLogic.alertListHtml(this.alerts); },
+  };
   return {object, els};
 }
 
@@ -181,11 +172,6 @@ test("the three pieces of HTML do not put an entity's fields in unescaped", () =
   const body = page.slice(start, page.indexOf("\n        };", start));
   assert.doesNotMatch(body, /<pre>\$\{JSON/);
   assert.doesNotMatch(body, /\$\{e\./, "the list's row comes from ReconLogic.reconRowHtml");
-});
-
-test("the page's members hand the work to ReconLogic", () => {
-  assert.match(reconMember("createEntityDescription"), /return ReconLogic\.describeEntity\(entity\);/);
-  assert.match(reconMember("updateAlertList"), /listEl\.innerHTML = ReconLogic\.alertListHtml\(this\.alerts\);/);
 });
 
 test("an id that is a number, or missing, reaches the handlers as a string, as it did when the id sat inside quotes", () => {

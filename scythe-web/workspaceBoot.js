@@ -16,6 +16,7 @@ import {createRenderPlugin} from "./renderPlugin.js";
 import {createPoiPlugin} from "./poiPlugin.js";
 import {adoptReconStore} from "./reconStore.js";
 import * as reconLogic from "./reconLogic.js";
+import {createReconPlugin} from "./reconPlugin.js";
 import {escapeHtml} from "./htmlEscape.js";
 
 /**
@@ -190,9 +191,80 @@ export function bootWorkspace(win) {
   workspace.register(poi.tool);
   win.POIVisualization = poi.controls;   // what the page's init, the POI panel and its inline handlers call
 
+  // --- Auto-Recon (after the render tool: the drawing takes its clustered data source) ---
+  workspace.provide("reconGlobe", reconGlobe(win));
+  workspace.provide("reconView", reconView(win));
+  workspace.provide("reconConsole", {   // the page puts console messages and notifications in as HTML; these are text (an entity's name, the server's message)
+    message: (text, kind) => win.addConsoleMessage?.(escapeHtml(text), kind),
+    notify: (title, text, kind) => win.showNotification?.(escapeHtml(title), escapeHtml(text), kind),
+  });
+  const recon = createReconPlugin({log: win.console, store: win.ReconStore, clock: {perf: () => win.performance.now()}});
+  workspace.register(recon.tool);
+  win.AutoReconVisualization = recon.controls;   // what the page's init, the Recon panel, the inline handlers and the other modules call
+
   win.ScytheWorkspace = workspace;
   win.dispatchEvent(new win.Event("scythe:workspace_ready"));
   return workspace;
+}
+
+/**
+ * The recon tool's view of the drawing: the page's `ReconDrawing` object (markers, rings, icons, clusters, camera flights), looked up at call time.
+ * Step 5 of the plan moves the drawing into this service and deletes the page object.
+ */
+function reconGlobe(win) {
+  const draw = () => win.ReconDrawing;
+  return {
+    attach: (viewer) => draw().attach(viewer),
+    available: () => Boolean(draw()?.viewer),
+    render: () => Boolean(draw()?.renderEntities()),
+    addMarker: (entity) => draw()?.addEntityMarker(entity),
+    removeMarker: (entityId) => draw()?.removeEntityMarker(entityId),
+    updatePosition: (entity) => draw()?.updateEntityPosition(entity),
+    clear: () => draw()?.clearAllEntities(),
+    flyTo: (entityId) => draw()?.flyToEntity(entityId),
+    addTaskLine: (task) => draw()?.addTaskLine(task),
+    createEntityIcon: (...args) => draw()?.createEntityIcon(...args),
+    setVisible: (shown) => draw()?.setVisible(shown),
+    setShowRings: (shown) => draw()?.setShowRings(shown),
+    setShowLabels: (shown) => draw()?.setShowLabels(shown),
+    setReferencePoint: (point) => draw()?.setReferencePoint(point),
+    cameraPosition: () => draw().cameraPosition(),
+  };
+}
+
+/** The Recon panel's DOM, by the ids the page gives it. Every lookup happens when it is needed; a missing element is skipped. */
+function reconView(win) {
+  const byId = (id) => win.document.getElementById(id);
+  return {
+    /** Wires the panel's controls to `handlers`; returns the function that unwires them. */
+    bind(handlers) {
+      const wiring = [
+        ["toggleReconEntities", "change", (e) => handlers.showEntities(e.target.checked)],
+        ["reconShowRings", "change", (e) => handlers.showRings(e.target.checked)],
+        ["reconShowLabels", "change", (e) => handlers.showLabels(e.target.checked)],
+        ["reconAutoUpdate", "change", (e) => handlers.autoUpdate(e.target.checked)],
+        ["reconSetReference", "click", () => handlers.setReference()],
+        ["reconCheckAlerts", "click", () => handlers.checkAlerts()],
+      ];
+      const bound = [];
+      for (const [id, event, fn] of wiring) {
+        const element = byId(id);
+        if (!element) continue;
+        element.addEventListener(event, fn);
+        bound.push(() => element.removeEventListener(event, fn));
+      }
+      return () => { for (const off of bound) off(); };
+    },
+    setFiltersShown(shown) { const element = byId("reconFilters"); if (element) element.style.display = shown ? "block" : "none"; },
+    setEntityCount(count) { const element = byId("recon-entity-count"); if (element) element.textContent = count; },
+    setAlertCount(count) { const element = byId("recon-alert-count"); if (element) element.textContent = count; },
+    /** `html` is a function, called only if the list exists (building it can throw on a malformed alert). */
+    setAlertList(html) { const element = byId("recon-alert-list"); if (element) element.innerHTML = html(); },
+    refreshList() {
+      try { win.updateReconList?.(); } catch (error) { win.console?.debug?.("updateReconList failed:", error); }
+    },
+    askDisposition: (message, current) => win.prompt(message, current),
+  };
 }
 
 /** The chat panel's DOM, by the ids the page gives it. Rendering a message stays with the page's LiveChat.addMsg. */
