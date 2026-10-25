@@ -43,7 +43,9 @@ The four steps are kept separate on purpose.
    declared effect (see below), never from its name. `HARDWARE_CONTROL` requires
    `SECOND_PRINCIPAL` unless the deployment says otherwise (`MCP_APPROVAL_MODES`, which can also raise any
    other effect; `HARDWARE_CONTROL=AUTOMATED` restores single-operator behavior explicitly). For hardware
-   the caller's `confidence` is recorded but does not decide. Approval authority is granted
+   the caller's `confidence` is recorded but does not decide. Pending and approved-but-unexecuted proposals
+   live in memory: a restart drops them (they can no longer be decided or run) and the audit records them as
+   `proposal.expired`, orphaned by restart. Approval authority is granted
    explicitly: only operators whose `operator_id` is listed in `MCP_APPROVERS` may approve or deny, and an
    empty list means nobody can (a hardware proposal then cannot run). When an effect requires
    `SECOND_PRINCIPAL`, a proposal that passes the

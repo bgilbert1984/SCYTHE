@@ -30,12 +30,14 @@ except ImportError:
 import control_audit
 import rf_scythe_api_server as rf
 from hypergraph_engine import HypergraphEngine
-from mcp_effects import APPROVAL_MODES_ENV
+from mcp_effects import APPROVAL_MODES_ENV, APPROVERS_ENV
 from mcp_server import MCPHandler
 from rf_mcp import register_rf_tools
 
-TOKENS = {"tok-alpha": ("op-1", "s1"), "tok-alpha2": ("op-1", "s1b"), "tok-bravo": ("op-2", "s2")}
-OPERATORS = {"op-1": "ALPHA", "op-2": "BRAVO"}
+TOKENS = {"tok-alpha": ("op-1", "s1"), "tok-alpha2": ("op-1", "s1b"), "tok-bravo": ("op-2", "s2"),
+          "tok-charlie": ("op-3", "s3")}
+OPERATORS = {"op-1": "ALPHA", "op-2": "BRAVO", "op-3": "CHARLIE"}
+APPROVERS = "op-1,op-2"      # CHARLIE is signed in but has not been granted approval authority
 
 
 class FakeBridge:
@@ -57,9 +59,16 @@ class FakeBridge:
 
 def build(port):
     bridge = FakeBridge()
-    with mock.patch.dict(os.environ, {APPROVAL_MODES_ENV: "HARDWARE_CONTROL=SECOND_PRINCIPAL"}):
-        handler = MCPHandler(HypergraphEngine(), use_orchestrator=True)
-    register_rf_tools(handler.engine, handler)
+
+    def make_handler():
+        """What a process start builds: a handler and orchestrator with an empty in-memory proposal log."""
+        with mock.patch.dict(os.environ, {APPROVAL_MODES_ENV: "HARDWARE_CONTROL=SECOND_PRINCIPAL", APPROVERS_ENV: APPROVERS}):
+            h = MCPHandler(HypergraphEngine(), use_orchestrator=True)
+        register_rf_tools(h.engine, h)
+        return h
+
+    handler = make_handler()
+    live = {"handler": handler}
     operators = {oid: SimpleNamespace(operator_id=oid, callsign=name, role=SimpleNamespace(value="operator"))
                  for oid, name in OPERATORS.items()}
     manager = SimpleNamespace(
@@ -88,8 +97,16 @@ def build(port):
 
     @app.route("/__lifecycle/<state>")
     def _lifecycle(state):
-        rf.mcp_handler = handler if state == "on" else None
+        rf.mcp_handler = live["handler"] if state == "on" else None
         return "ok"
+
+    @app.route("/__restart")
+    def _restart():
+        """Simulate a process restart: a fresh handler (so the pending proposals are gone) and the startup step
+        that closes in the audit what the previous process left open."""
+        live["handler"] = make_handler()
+        rf.mcp_handler = live["handler"]
+        return json.dumps(control_audit.close_orphaned_proposals())
 
     if "/" not in [r.rule for r in app.url_map.iter_rules()]:
         from flask import send_from_directory

@@ -195,6 +195,22 @@ class ControlAuditStore:
             cols = [c[0] for c in cur.description]
             return [dict(zip(cols, r)) for r in cur.fetchall()]
 
+    def open_proposals(self) -> List[Dict[str, Any]]:
+        """Proposals the audit shows as created and still undecided: ``pending_approval`` or ``approved``
+        by the automated checks, with no denial, no expiry and no execution row.
+
+        A proposal whose execution began but did not finish (a ``started`` row) is not open: whether
+        it ran is unknown, and this does not claim otherwise."""
+        sql = ("SELECT proposal_id, effect, initiator, MIN(ts_epoch) AS ts_epoch FROM control_audit_events"
+               " WHERE action = ? AND result IN ('pending_approval', 'approved') AND proposal_id IS NOT NULL"
+               " AND proposal_id NOT IN (SELECT proposal_id FROM control_audit_events WHERE proposal_id IS NOT NULL"
+               "   AND (action IN (?, ?) OR action NOT LIKE 'proposal.%'))"
+               " GROUP BY proposal_id ORDER BY ts_epoch")
+        with self._lock:
+            cur = self._conn().execute(sql, (PROPOSAL_CREATED, PROPOSAL_DENIED, PROPOSAL_EXPIRED))
+            cols = [c[0] for c in cur.description]
+            return [dict(zip(cols, r)) for r in cur.fetchall()]
+
     def purge_expired(self) -> int:
         """Delete rows older than the retention window; returns how many.  Never automatic."""
         with self._lock:
@@ -294,6 +310,31 @@ def record_transition(*, action: str, effect: Optional[str], principal: Optional
                              result_summary=summary, source=source or current_source(), initiator=initiator)
 
 
+ORPHANED_BY_RESTART = ("orphaned by restart: pending proposals are not persisted, "
+                       "so this one can no longer be decided or executed")
+
+
+def close_orphaned_proposals(store: Optional["ControlAuditStore"] = None) -> List[str]:
+    """Record that proposals left open by a previous process can no longer run (ADR 0006, Durability).
+
+    Proposals live in memory, so after a restart no proposal the audit shows as open exists any
+    more: it cannot be approved, denied or executed.  This appends one ``proposal.expired`` row
+    for each, so the history ends truthfully instead of at ``pending_approval``.  Call it once,
+    at startup, by the one process that owns the store.  Evidence only: it changes no decision,
+    and it is idempotent (a closed proposal is no longer open).  Returns the proposal ids closed.
+    """
+    store = store or _store
+    if store is None:
+        return []
+    closed = []
+    for row in store.open_proposals():
+        if store.safe_record(execution_id=str(uuid.uuid4()), action=PROPOSAL_EXPIRED, effect=row["effect"] or "UNDECLARED",
+                             result="expired", proposal_id=row["proposal_id"], result_summary=ORPHANED_BY_RESTART,
+                             source="startup", initiator=row["initiator"]):
+            closed.append(row["proposal_id"])
+    return closed
+
+
 def reconstruct_proposal(store: "ControlAuditStore", proposal_id: str) -> Dict[str, Any]:
     """The recorded history of one proposal, from its audit rows alone.
 
@@ -304,7 +345,7 @@ def reconstruct_proposal(store: "ControlAuditStore", proposal_id: str) -> Dict[s
     rows = store.events(proposal_id=proposal_id, limit=1000)
     out: Dict[str, Any] = {"proposal_id": proposal_id, "events": [(r["action"], r["result"]) for r in rows],
                            "proposed_by": None, "approved_by": None, "denied_by": None, "executed_by": None,
-                           "expired": False, "executed": False}
+                           "expired": False, "executed": False, "orphaned_by_restart": False}
     for r in rows:
         who = r["principal_id"] or r["principal_kind"]
         if r["action"] == PROPOSAL_CREATED:
@@ -316,6 +357,7 @@ def reconstruct_proposal(store: "ControlAuditStore", proposal_id: str) -> Dict[s
             out["denied_by"] = who
         elif r["action"] == PROPOSAL_EXPIRED:
             out["expired"] = True
+            out["orphaned_by_restart"] = r["result_summary"] == ORPHANED_BY_RESTART
         elif r["result"] == "success":
             out["executed_by"], out["executed"] = who, True
     return out

@@ -8,7 +8,7 @@ fake radio. A second phase drives the Mission Governance page (`scythe-web/regio
 python e2e/sdr_approvals/run.py            # screenshots go to e2e/sdr_approvals/out/ (git-ignored)
 ```
 
-Expected result: **19/19 passed**, exit status 0. That is the reference lifecycle behaviour.
+Expected result: **22/22 passed**, exit status 0. That is the reference lifecycle behaviour.
 
 ## Coverage
 
@@ -23,6 +23,8 @@ Validated:
 - Governance header reflecting the server's reported mission, lifecycle, phase, approval mode and remote-phase setting
 - Signed-out governance page: no lifecycle state shown
 - The audit chain behind each console case (proposer, approver, executor)
+- An operator without approval authority (no buttons, 403 on both decisions) on the console and the governance page
+- A restart: pending commands are gone, the old id is a 404, and the audit ends them as orphaned
 
 Not validated (intentionally):
 
@@ -56,8 +58,14 @@ Not validated (intentionally):
 | 17 | Deny from the page runs nothing and shows it denied by the approver. |
 | 18 | The proposer cannot approve their own command through the decision route (403). |
 | 19 | With the lifecycle unavailable the header says Disabled instead of failing. |
+| 20 | CHARLIE is signed in but has not been granted approval authority (`MCP_APPROVERS` lists ALPHA and BRAVO only): the console shows the held command with no Approve/Deny and says why, deciding it is a 403 for both approve and deny, and nothing runs. |
+| 21 | After a restart (the harness builds a fresh handler and runs the startup step) the held command is gone: the approver sees nothing waiting, approving the old id is a 404, nothing runs, and the audit ends the proposal as `proposal.expired`, orphaned by restart. |
+| 22 | The governance page shows CHARLIE the held command with no Approve/Deny and "You are not authorized to approve commands". |
 
-Reference screenshots (pending, approved, denied, lifecycle unavailable, validation error, governance header, approver view and approved) are in `reference/`.
+Cases 20 to 22 run in the order the phases need them (20 and 21 after 11, 22 after 19). Each was checked by mutation: breaking the
+`caller_may_approve` handling in either page, or the startup step that closes orphaned proposals, fails exactly the case that covers it.
+
+Reference screenshots (pending, approved, denied, lifecycle unavailable, validation error, governance header, approver view and approved, ungranted operator, after restart, ungranted on the governance page) are in `reference/`.
 They are evidence for reviews and release notes, not an assertion: the run does not compare pixels.
 
 ## What it does not verify
