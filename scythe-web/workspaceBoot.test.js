@@ -171,9 +171,9 @@ test("vessels reach AISStreamManager.handleVesselUpdate through the tool", async
   const seen = [];
   let handler;
   const {win} = aisWindow();
-  win.WebSocketSync.socket = {on: (name, fn) => { if (name === "ais_update") handler = fn; }, off() {}};
   win.AISStreamManager = {handleVesselUpdate: (v) => seen.push(v.mmsi)};
   const workspace = bootWorkspace(win);
+  win.WebSocketSync = {connected: false, socket: {on: (name, fn) => { if (name === "ais_update") handler = fn; }, off() {}}, on() {}, off() {}};   // read at call time
   await workspace.activate("ais-stream");
   handler({mmsi: 123});
   assert.deepEqual(seen, [123]);
@@ -822,12 +822,11 @@ test("the entity stream reads the operator session and the page's console when u
   await workspace.deactivate("entity-sync");
 });
 
-test("the old inline EntitySync is gone; WebSocketSync hands events to EntitySync.ingest; the boot module starts the tool", () => {
+test("the old inline EntitySync is gone; the boot module starts the tool", () => {
   assert.doesNotMatch(page, /const EntitySync = \{/);
   assert.doesNotMatch(page, /getEntitiesByType|deleteEntity|lastEventId/);
   assert.doesNotMatch(page, /_cacheInserts|EntitySync\._notifyHandlers/);
   assert.match(page, /window\.EntitySync = \{\s*_stub: true/);
-  assert.match(page, /EntitySync\.ingest\(eventType, data\);/);
   assert.match(page, /workspace\.activate\("entity-sync"\)/);
 });
 

@@ -368,9 +368,25 @@ token), `roomView` (the three widgets) and `roomConsole`.
 - Pinned, not changed (tests named `PINNED:`): joining refreshes the joined list but not the available list; leaving the current room does not change the current room; making a room current does not redraw the joined list, so its active mark lags; the room ids are put into the request paths as they are, without URL encoding.
 - Verified against the old object with a randomised differential (3,000 scenarios of 16 steps, with random server replies, failures and a session that comes and goes): the same requests and headers, console messages, DOM writes, handler notifications, return values and state, apart from the quoting of the ids in the inline handlers.
 
+## Seventeenth tool: the realtime socket (`scythe-web/websocketSyncPlugin.js`)
+
+`WebSocketSync` (a 210-line object in `command-ops-visualization.html`) is now the `websocket-sync` tool, and `window.WebSocketSync` is its controls (the boot module sets it).
+`init()` asks the server whether it offers WebSockets; `connect()` opens a socket.io connection authenticated with the operator's session token, or falls back to EntitySync's
+server-sent-events stream when WebSockets are not on offer, there is no session, or socket.io did not load. Once connected it passes the server's entity events to EntitySync's
+`ingest` and to its own handlers, keeps the room lists in step with the server's room events, and tells subscribers when it connects, disconnects or fails. `socket`, `connected`
+and `on` / `off` are what the ADS-B and AIS tools use, through the boot module's `realtimeSocket` and `syncEvents` services. The page is touched through `httpFetch`,
+`operatorSession` (the token), `socketClient` (the `io` global), `realtimeEnv` (the page's origin and bootstrap record), `entityFeed` (EntitySync's controls), `roomSync`
+(RoomManager's controls) and `realtimeConsole`.
+
+- Handlers outlive an activation, like EntitySync's and the rooms tool's (the shared `createHandlerRegistry`); the socket belongs to an activation, and whether the server offers WebSockets (a fact about the server) survives one.
+- Deactivating closes the socket without telling the subscribers, and a late event from it does nothing. An `init()` asked for before the tool is active is made when it activates.
+- Removed as dead after a repository search: `send`, `joinRoom`, `leaveRoom`, `createRoom`, `publishEntity`, `sendMessage`, `sendHeartbeat`, the write-only `reconnectAttempts`, `maxReconnectAttempts` and `reconnectDelay` (socket.io reconnects by itself), and the `heartbeat_ack` handler that did nothing.
+- Pinned, not changed: the SSE fallback asks EntitySync to connect (the operator session does the same when `useWebSocket` is false, so it may be asked twice); a second `connect()` closes the first socket, which tells the subscribers it disconnected; an entity event with no `event_type` reaches EntitySync and then throws.
+- Verified against the old object with a randomised differential (3,000 scenarios of 18 steps, with a socket stand-in, a token and socket.io that come and go, a bootstrap record, and random server events): the same sockets opened with the same options, the same handlers registered, the same calls to EntitySync and the room manager, console messages, notifications and state, apart from the handler that did nothing.
+
 ## Not done
 
-- Only ADS-B, AIS streaming, chat, metrics, the metrics explorer, propagation, the entity stream, sensors, the fusion overlays, the viewsheds, LPI, operator presence the level-of-detail manager, the points of interest and Auto-Recon (its controller and its drawing) and the rooms use the contract, and activation is not yet driven by the operator (a panel click).
+- Only ADS-B, AIS streaming, chat, metrics, the metrics explorer, propagation, the entity stream, sensors, the fusion overlays, the viewsheds, LPI, operator presence the level-of-detail manager, the points of interest and Auto-Recon (its controller and its drawing) the rooms and the realtime socket use the contract, and activation is not yet driven by the operator (a panel click).
 - No unified transport: the tools take the realtime socket, `WebSocketSync` and `fetch` as services; they do not open their own.
 - Not run in a browser against a signed-in session; the tests cover the contract, the plugin, the boot wiring, and run the
   page's own `removeEntityMarker` against a fake collection.
