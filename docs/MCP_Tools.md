@@ -103,6 +103,12 @@ Enforced by tests, not by convention.
 - `validate_tool_contract` (`mcp_effects.py`) checks schema, explicit effect, flag
   consistency, approval consistency and name uniqueness. It runs in CI over the Registry
   tools as served and over the `ToolDef` tools.
+- The same check runs at startup (`MCPHandler.assert_contract`): after `register_mcp_routes`
+  registers its tools, and again in `rf_scythe_api_server` after the embedding and GraphOps
+  registrations. A violation raises `ToolContractError` and stops the server; it is not
+  caught by the log-and-continue blocks around the registrations. An integration that cannot
+  load registers no tools and is not a violation. A tool that never declared an effect is
+  still a violation, and (before this check) was served with the conservative review policy.
 - Approval is derived from the declared effect.
 - Principal, proposal ID and effect are carried into the audit record.
 - `/api/sdr/*` hardware routes are adapters into the lifecycle (`operator_command`), so they leave the same
