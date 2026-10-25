@@ -1611,9 +1611,6 @@
             
             // Operators panel hook
             if (panelName === 'operators') {
-                if (typeof OperatorSession !== 'undefined' && OperatorSession.refreshPresence) {
-                    OperatorSession.refreshPresence();
-                }
                 if (typeof RoomManager !== 'undefined' && RoomManager.fetchRooms) {
                     RoomManager.fetchRooms();
                 }
@@ -16604,16 +16601,6 @@ const originalComplete = options.complete;
                 }
             },
 
-            // Helper: get a cookie value by name
-            getCookie: function(name) {
-                const value = `; ${document.cookie}`;
-                const parts = value.split(`; ${name}=`);
-                if (parts.length === 2) {
-                    return parts.pop().split(';').shift();
-                }
-                return null;
-            },
-
             // Helper: set a cookie (optionally specify days to expire)
             setCookie: function(name, value, days) {
                 let expires = '';
@@ -16768,8 +16755,6 @@ const originalComplete = options.complete;
                     localStorage.setItem('scythe_session_token', this.sessionToken);
                 } catch (e) { /* noop */ }
 
-                console.log(`[OperatorSession] Logged in as ${this.callsign} (${this.role})`);
-                
                 console.log(`[OperatorSession] Logged in as ${this.callsign} (${this.role})`);
             },
             
@@ -27226,7 +27211,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         function sessionToken() {
-            return window.OperatorSession?.sessionToken || window.SCYTHE_AUTH?.getSessionToken?.() || '';
+            return window.OperatorSession?.sessionToken || '';
         }
 
         function jsonHeaders() {

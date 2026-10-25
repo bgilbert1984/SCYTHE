@@ -2,7 +2,7 @@
 
 Status: plan only. Nothing here is implemented. It is written so each step can be agreed, built and merged on its own.
 
-Progress: step 2 (escaping the operator's identity where it reaches HTML) is done. The rest is not started.
+Progress: step 2 (escaping the operator's identity where it reaches HTML) is done, and step 1 (pinning the object, `scythe-web/pageOperatorSession.test.js`, and removing its dead code) is done. The rest is not started.
 
 `OperatorSession` is the last of the big page objects: about 315 lines in `command-ops-visualization.html`, 25 members. It is small, but it is the one every
 other piece leans on. The `EntitySync`, rooms, recon, sensors and websocket-sync tools read its token through the `operatorSession` service, the presence tool reads
@@ -31,8 +31,10 @@ The page's login and register dialog (`showOperatorLoginDialog`, `doOperatorLogi
    for the broker role) and in `ScytheTransport`. `OperatorSession` keeps its own copy under different, un-namespaced keys (`operatorSession`, `scythe_session_token`, the cookie
    `operatorSessionToken`) and never updates `SCYTHE_AUTH` or `ScytheTransport`. `cesium-hypergraph-globe.js` reads `scythe_session_token` and `SCYTHE_AUTH.restoreSession()`.
 2. **Logout clears only the legacy copy.** `clearSession` removes `localStorage.operatorSession` and the cookie `operatorSessionToken`; it does not call `SCYTHE_AUTH.logout()` and
-   does not clear the transport's token. From reading the code (not reproduced signed in), the per-instance token survives an in-page logout, and the next load restores it
-   through `requireAuth`. The `EntitySync` 401 path (`operatorSession.clear`) goes through the same `clearSession`. What logout should clear is decision 1.
+   does not clear the transport's token. The per-instance token survives an in-page logout, and the next load can restore it
+   through `requireAuth`. Reproduced in step 1 in a browser with the real `shared_auth.js`, a dummy token and local routes: after `OperatorSession.logout()` the `SCYTHE_AUTH` stores and
+   `scythe_session_token` are still there, `SCYTHE_AUTH.isAuthenticated()` is still true, and after a reload `restoreSession()` still returns the token. Whether the page then signs in again
+   depends on the role: for the broker role `requireAuth` also asks the server, which has dropped the session; for an instance server the check is local (finding 3). The `EntitySync` 401 path (`operatorSession.clear`) goes through the same `clearSession`. What logout should clear is decision 1.
 3. **Validation on the client is a local check.** For an instance server `SCYTHE_AUTH.validateSession` decodes the token and checks `exp` (and optionally the issuer and audience);
    only the broker role asks the server. So `isAuthenticated` is for showing and hiding things, not a security boundary. The server has to enforce, as it does on each request.
 4. **An unescaped sink:** `updateOperatorStatusUI` puts `OperatorSession.callsign` into `innerHTML` and `OperatorSession.role` into a class attribute. Operators choose their callsign when they register.
