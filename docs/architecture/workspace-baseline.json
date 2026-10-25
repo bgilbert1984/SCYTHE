@@ -1,0 +1,67 @@
+{
+  "commit": "a75e3d94",
+  "page": {
+    "lines": 36112,
+    "inlineScripts": 29,
+    "inlineScriptLines": 30199,
+    "externalScripts": 70,
+    "objects": [
+      {
+        "name": "AISVisualization",
+        "lines": 1368
+      },
+      {
+        "name": "RFPropagationManager",
+        "lines": 609
+      },
+      {
+        "name": "PcapGlobeOverlay",
+        "lines": 379
+      },
+      {
+        "name": "AISStreamManager",
+        "lines": 84
+      }
+    ],
+    "classes": [
+      "CesiumEntityManager",
+      "ScytheVirtualList",
+      "WebGLHypergraphRenderer"
+    ],
+    "resources": {
+      "fetch": 140,
+      "eventSource": 7,
+      "setInterval": 18,
+      "addEventListener": 322,
+      "cesiumReferences": 738,
+      "cesiumConstructions": 140,
+      "viewerReferences": 357
+    },
+    "dom": {
+      "innerHTMLWrites": 217,
+      "textContentWrites": 309,
+      "styleWrites": 448,
+      "getElementById": 818,
+      "querySelector": 115,
+      "inlineHandlers": 106
+    },
+    "globals": {
+      "windowAssignments": 221
+    }
+  },
+  "runtime": {
+    "plugins": 18,
+    "pluginLines": 3973,
+    "lifecycleTools": 18,
+    "services": 52,
+    "stores": 2,
+    "logicModules": 73,
+    "logicLines": 11969,
+    "bootLines": 1086,
+    "windowShims": 22,
+    "windowReadsInPlugins": 24,
+    "testFiles": 88,
+    "testLines": 16720,
+    "testCases": 1206
+  }
+}
