@@ -19,6 +19,7 @@ import * as reconLogic from "./reconLogic.js";
 import {createReconPlugin} from "./reconPlugin.js";
 import {createReconGlobe} from "./reconGlobe.js";
 import {createRoomsPlugin} from "./roomsPlugin.js";
+import {createWebSocketSyncPlugin} from "./websocketSyncPlugin.js";
 import {escapeHtml} from "./htmlEscape.js";
 
 /**
@@ -210,6 +211,16 @@ export function bootWorkspace(win) {
   const rooms = createRoomsPlugin({log: win.console});
   workspace.register(rooms.tool);
   win.RoomManager = rooms.controls;   // what the page's init, the Operators panel, the lists' inline handlers, the session and the WebSocket code call
+
+  // --- the realtime socket ---
+  workspace.provide("socketClient", {available: () => typeof win.io !== "undefined", open: (url, options) => win.io(url, options)});
+  workspace.provide("realtimeEnv", {origin: () => win.location.origin, bootstrap: () => win.__SCYTHE_BOOTSTRAP__});
+  workspace.provide("entityFeed", {connect: () => win.EntitySync.connect(), ingest: (eventType, data) => win.EntitySync.ingest(eventType, data)});   // EntitySync's controls: the boot module sets them above
+  workspace.provide("roomSync", {refreshMine: () => win.RoomManager.fetchMyRooms(), refreshAll: () => win.RoomManager.fetchRooms(), setRooms: (list) => win.RoomManager.setRooms(list)});
+  workspace.provide("realtimeConsole", {message: (text, kind) => win.addConsoleMessage?.(escapeHtml(text), kind)});
+  const websocket = createWebSocketSyncPlugin({log: win.console});
+  workspace.register(websocket.tool);
+  win.WebSocketSync = websocket.controls;   // what the page's init, the operator session and (through realtimeSocket and syncEvents) the ADS-B and AIS tools use
 
   win.ScytheWorkspace = workspace;
   win.dispatchEvent(new win.Event("scythe:workspace_ready"));
