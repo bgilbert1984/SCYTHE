@@ -54,3 +54,19 @@ test("adopting with no page object makes an empty store and does not create the 
   assert.deepEqual(Object.keys(store.entities), []);
   assert.equal("AutoReconVisualization" in win, false);
 });
+
+test("upsert can file an entity under another id, as the sync code does with the id its event carries", () => {
+  const store = createReconStore();
+  const entity = {entity_id: "from-data"};
+  store.upsert(entity, "from-event");
+  assert.deepEqual(Object.keys(store.entities), ["from-event"]);
+  assert.equal(store.entities["from-event"], entity);
+});
+
+test("remove drops one entity and leaves the others, and removing one that is not held does nothing", () => {
+  const store = createReconStore({a: {entity_id: "a"}, b: {entity_id: "b"}});
+  store.remove("a");
+  assert.deepEqual(Object.keys(store.entities), ["b"]);
+  store.remove("nonesuch");
+  assert.deepEqual(Object.keys(store.entities), ["b"]);
+});
