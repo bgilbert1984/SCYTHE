@@ -50,10 +50,13 @@ class AtARef(unittest.TestCase):
                 run("add", "-A"); run("commit", "-q", "-m", "with the runtime")
                 write(mw.PAGE, "changed in the working tree only\n")
                 after = mw.measure("HEAD")
+                os.chdir(os.path.join(repo, mw.RUNTIME_DIR))   # a path in ls-tree is relative to where the command runs, so run it from a subdirectory too
+                from_subdir = mw.measure("HEAD")
             finally:
                 os.chdir(old)
         self.assertEqual((before["page"]["lines"], before["page"]["inlineScripts"], before["page"]["externalScripts"], before["page"]["resources"]["fetch"]), (3, 1, 1, 1))
         self.assertEqual((before["runtime"]["plugins"], before["runtime"]["services"]), (0, 0))
+        self.assertEqual(from_subdir, after)
         self.assertEqual((after["page"]["lines"], after["runtime"]["plugins"], after["runtime"]["lifecycleTools"], after["runtime"]["services"],
                           after["runtime"]["windowShims"], after["runtime"]["testCases"]), (3, 1, 1, 2, 1, 2))
 

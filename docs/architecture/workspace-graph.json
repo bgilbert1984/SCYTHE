@@ -1,0 +1,1250 @@
+{
+  "commit": "39822c42",
+  "plugins": [
+    {
+      "id": "adsb",
+      "file": "adsbPlugin.js",
+      "requires": [
+        "entityMarkers",
+        "realtimeSocket",
+        "fetchJson"
+      ],
+      "uses": [
+        "entityMarkers",
+        "fetchJson",
+        "realtimeSocket"
+      ],
+      "usedNotDeclared": [],
+      "declaredNotUsed": [],
+      "imports": []
+    },
+    {
+      "id": "ais-stream",
+      "file": "aisStreamPlugin.js",
+      "requires": [
+        "realtimeSocket",
+        "syncEvents",
+        "cameraView",
+        "aisApi",
+        "vesselSink",
+        "notify"
+      ],
+      "uses": [
+        "aisApi",
+        "cameraView",
+        "notify",
+        "realtimeSocket",
+        "syncEvents",
+        "vesselSink"
+      ],
+      "usedNotDeclared": [],
+      "declaredNotUsed": [],
+      "imports": []
+    },
+    {
+      "id": "chat",
+      "file": "chatPlugin.js",
+      "requires": [
+        "openEventSource",
+        "fetchJson",
+        "postJson",
+        "chatView",
+        "roomChanges"
+      ],
+      "uses": [
+        "chatView",
+        "fetchJson",
+        "openEventSource",
+        "postJson",
+        "roomChanges"
+      ],
+      "usedNotDeclared": [],
+      "declaredNotUsed": [],
+      "imports": []
+    },
+    {
+      "id": "entity-sync",
+      "file": "entitySyncPlugin.js",
+      "requires": [
+        "httpFetch",
+        "openEventSource",
+        "operatorSession",
+        "entityConsole"
+      ],
+      "uses": [
+        "entityConsole",
+        "httpFetch",
+        "openEventSource",
+        "operatorSession"
+      ],
+      "usedNotDeclared": [],
+      "declaredNotUsed": [],
+      "imports": []
+    },
+    {
+      "id": "fusion",
+      "file": "fusionPlugin.js",
+      "requires": [
+        "entityStream",
+        "fusionData",
+        "fusionGlobe"
+      ],
+      "uses": [
+        "entityStream",
+        "fusionData",
+        "fusionGlobe"
+      ],
+      "usedNotDeclared": [],
+      "declaredNotUsed": [],
+      "imports": [
+        "sensorEvents.js"
+      ]
+    },
+    {
+      "id": "lpi",
+      "file": "lpiPlugin.js",
+      "requires": [
+        "entityStream",
+        "httpFetch",
+        "entityConsole",
+        "lpiSensors",
+        "lpiView",
+        "lpiGlobe",
+        "frames",
+        "clock"
+      ],
+      "uses": [
+        "clock",
+        "entityConsole",
+        "entityStream",
+        "frames",
+        "httpFetch",
+        "lpiGlobe",
+        "lpiSensors",
+        "lpiView"
+      ],
+      "usedNotDeclared": [],
+      "declaredNotUsed": [],
+      "imports": [
+        "htmlEscape.js",
+        "sensorEvents.js"
+      ]
+    },
+    {
+      "id": "metrics",
+      "file": "metricsPlugin.js",
+      "requires": [
+        "httpFetch",
+        "metricsProbe"
+      ],
+      "uses": [
+        "httpFetch",
+        "metricsProbe"
+      ],
+      "usedNotDeclared": [],
+      "declaredNotUsed": [],
+      "imports": []
+    },
+    {
+      "id": "metrics-explorer",
+      "file": "metricsExplorerPlugin.js",
+      "requires": [
+        "httpFetch",
+        "explorerView",
+        "liveSources"
+      ],
+      "uses": [
+        "explorerView",
+        "httpFetch",
+        "liveSources"
+      ],
+      "usedNotDeclared": [],
+      "declaredNotUsed": [],
+      "imports": []
+    },
+    {
+      "id": "poi",
+      "file": "poiPlugin.js",
+      "requires": [
+        "httpFetch",
+        "poiConsole",
+        "poiGlobe"
+      ],
+      "uses": [
+        "httpFetch",
+        "poiConsole",
+        "poiGlobe"
+      ],
+      "usedNotDeclared": [],
+      "declaredNotUsed": [],
+      "imports": [
+        "htmlEscape.js"
+      ]
+    },
+    {
+      "id": "presence",
+      "file": "presencePlugin.js",
+      "requires": [
+        "presenceSource",
+        "presenceView",
+        "presenceGlobe"
+      ],
+      "uses": [
+        "presenceGlobe",
+        "presenceSource",
+        "presenceView"
+      ],
+      "usedNotDeclared": [],
+      "declaredNotUsed": [],
+      "imports": [
+        "htmlEscape.js"
+      ]
+    },
+    {
+      "id": "propagation-ui",
+      "file": "propagationPlugin.js",
+      "requires": [
+        "propagationEngine",
+        "propagationView",
+        "activityLog"
+      ],
+      "uses": [
+        "activityLog",
+        "propagationEngine",
+        "propagationView"
+      ],
+      "usedNotDeclared": [],
+      "declaredNotUsed": [],
+      "imports": []
+    },
+    {
+      "id": "recon",
+      "file": "reconPlugin.js",
+      "requires": [
+        "httpFetch",
+        "openEventSource",
+        "operatorSession",
+        "entityStream",
+        "reconGlobe",
+        "reconView",
+        "reconConsole"
+      ],
+      "uses": [
+        "entityStream",
+        "httpFetch",
+        "openEventSource",
+        "operatorSession",
+        "reconConsole",
+        "reconGlobe",
+        "reconView"
+      ],
+      "usedNotDeclared": [],
+      "declaredNotUsed": [],
+      "imports": [
+        "reconLogic.js"
+      ]
+    },
+    {
+      "id": "render",
+      "file": "renderPlugin.js",
+      "requires": [
+        "renderGlobe",
+        "renderEvents"
+      ],
+      "uses": [
+        "renderEvents",
+        "renderGlobe"
+      ],
+      "usedNotDeclared": [],
+      "declaredNotUsed": [],
+      "imports": []
+    },
+    {
+      "id": "rooms",
+      "file": "roomsPlugin.js",
+      "requires": [
+        "httpFetch",
+        "operatorSession",
+        "roomView",
+        "roomConsole"
+      ],
+      "uses": [
+        "httpFetch",
+        "operatorSession",
+        "roomConsole",
+        "roomView"
+      ],
+      "usedNotDeclared": [],
+      "declaredNotUsed": [],
+      "imports": [
+        "entitySyncPlugin.js",
+        "htmlEscape.js"
+      ]
+    },
+    {
+      "id": "sensors",
+      "file": "sensorPlugin.js",
+      "requires": [
+        "httpFetch",
+        "operatorSession",
+        "entityConsole",
+        "reconEntities",
+        "entityStream",
+        "sensorView",
+        "sensorGlobe"
+      ],
+      "uses": [
+        "entityConsole",
+        "entityStream",
+        "httpFetch",
+        "operatorSession",
+        "reconEntities",
+        "sensorGlobe",
+        "sensorView"
+      ],
+      "usedNotDeclared": [],
+      "declaredNotUsed": [],
+      "imports": [
+        "htmlEscape.js",
+        "sensorEvents.js"
+      ]
+    },
+    {
+      "id": "session",
+      "file": "sessionPlugin.js",
+      "requires": [
+        "httpFetch",
+        "sessionStore",
+        "cameraView"
+      ],
+      "uses": [
+        "cameraView",
+        "httpFetch",
+        "sessionStore"
+      ],
+      "usedNotDeclared": [],
+      "declaredNotUsed": [],
+      "imports": []
+    },
+    {
+      "id": "viewsheds",
+      "file": "viewshedPlugin.js",
+      "requires": [
+        "viewshedGlobe",
+        "terrainModel",
+        "activityLog"
+      ],
+      "uses": [
+        "activityLog",
+        "terrainModel",
+        "viewshedGlobe"
+      ],
+      "usedNotDeclared": [],
+      "declaredNotUsed": [],
+      "imports": []
+    },
+    {
+      "id": "websocket-sync",
+      "file": "websocketSyncPlugin.js",
+      "requires": [
+        "httpFetch",
+        "operatorSession",
+        "socketClient",
+        "realtimeEnv",
+        "entityFeed",
+        "roomSync",
+        "realtimeConsole"
+      ],
+      "uses": [
+        "entityFeed",
+        "httpFetch",
+        "operatorSession",
+        "realtimeConsole",
+        "realtimeEnv",
+        "roomSync",
+        "socketClient"
+      ],
+      "usedNotDeclared": [],
+      "declaredNotUsed": [],
+      "imports": [
+        "entitySyncPlugin.js"
+      ]
+    }
+  ],
+  "services": {
+    "activityLog": {
+      "reads": [
+        "console",
+        "logInteraction",
+        "logMetric"
+      ],
+      "requiredBy": [
+        "propagation-ui",
+        "viewsheds"
+      ]
+    },
+    "aisApi": {
+      "reads": [],
+      "requiredBy": [
+        "ais-stream"
+      ]
+    },
+    "cameraView": {
+      "reads": [
+        "Cesium",
+        "console",
+        "fetch",
+        "viewer"
+      ],
+      "requiredBy": [
+        "ais-stream",
+        "session"
+      ]
+    },
+    "chatView": {
+      "reads": [],
+      "requiredBy": [
+        "chat"
+      ]
+    },
+    "clock": {
+      "reads": [],
+      "requiredBy": [
+        "lpi"
+      ]
+    },
+    "entityConsole": {
+      "reads": [
+        "addConsoleMessage",
+        "console"
+      ],
+      "requiredBy": [
+        "entity-sync",
+        "lpi",
+        "sensors"
+      ]
+    },
+    "entityFeed": {
+      "reads": [
+        "EntitySync"
+      ],
+      "requiredBy": [
+        "websocket-sync"
+      ]
+    },
+    "entityMarkers": {
+      "reads": [
+        "AutoReconVisualization"
+      ],
+      "requiredBy": [
+        "adsb"
+      ]
+    },
+    "entityStream": {
+      "reads": [
+        "EntitySync"
+      ],
+      "requiredBy": [
+        "fusion",
+        "lpi",
+        "recon",
+        "sensors"
+      ]
+    },
+    "explorerView": {
+      "reads": [],
+      "requiredBy": [
+        "metrics-explorer"
+      ]
+    },
+    "fetchJson": {
+      "reads": [
+        "fetch"
+      ],
+      "requiredBy": [
+        "adsb",
+        "chat"
+      ]
+    },
+    "frames": {
+      "reads": [
+        "cancelAnimationFrame",
+        "requestAnimationFrame"
+      ],
+      "requiredBy": [
+        "lpi"
+      ]
+    },
+    "fusionData": {
+      "reads": [
+        "SensorManager"
+      ],
+      "requiredBy": [
+        "fusion"
+      ]
+    },
+    "fusionGlobe": {
+      "reads": [
+        "console"
+      ],
+      "requiredBy": [
+        "fusion"
+      ]
+    },
+    "httpFetch": {
+      "reads": [
+        "fetch"
+      ],
+      "requiredBy": [
+        "entity-sync",
+        "lpi",
+        "metrics",
+        "metrics-explorer",
+        "poi",
+        "recon",
+        "rooms",
+        "sensors",
+        "session",
+        "websocket-sync"
+      ]
+    },
+    "liveSources": {
+      "reads": [
+        "console"
+      ],
+      "requiredBy": [
+        "metrics-explorer"
+      ]
+    },
+    "lpiGlobe": {
+      "reads": [],
+      "requiredBy": [
+        "lpi"
+      ]
+    },
+    "lpiSensors": {
+      "reads": [
+        "SensorManager"
+      ],
+      "requiredBy": [
+        "lpi"
+      ]
+    },
+    "lpiView": {
+      "reads": [],
+      "requiredBy": [
+        "lpi"
+      ]
+    },
+    "metricsProbe": {
+      "reads": [
+        "console"
+      ],
+      "requiredBy": [
+        "metrics"
+      ]
+    },
+    "notify": {
+      "reads": [
+        "addConsoleMessage"
+      ],
+      "requiredBy": [
+        "ais-stream"
+      ]
+    },
+    "openEventSource": {
+      "reads": [
+        "EventSource"
+      ],
+      "requiredBy": [
+        "chat",
+        "entity-sync",
+        "recon"
+      ]
+    },
+    "operatorSession": {
+      "reads": [
+        "OperatorSession"
+      ],
+      "requiredBy": [
+        "entity-sync",
+        "recon",
+        "rooms",
+        "sensors",
+        "websocket-sync"
+      ]
+    },
+    "poiConsole": {
+      "reads": [
+        "addConsoleMessage"
+      ],
+      "requiredBy": [
+        "poi"
+      ]
+    },
+    "poiGlobe": {
+      "reads": [
+        "console"
+      ],
+      "requiredBy": [
+        "poi"
+      ]
+    },
+    "postJson": {
+      "reads": [],
+      "requiredBy": [
+        "chat"
+      ]
+    },
+    "presenceGlobe": {
+      "reads": [
+        "console"
+      ],
+      "requiredBy": [
+        "presence"
+      ]
+    },
+    "presenceSource": {
+      "reads": [
+        "OperatorSession"
+      ],
+      "requiredBy": [
+        "presence"
+      ]
+    },
+    "presenceView": {
+      "reads": [
+        "document"
+      ],
+      "requiredBy": [
+        "presence"
+      ]
+    },
+    "propagationEngine": {
+      "reads": [],
+      "requiredBy": [
+        "propagation-ui"
+      ]
+    },
+    "propagationView": {
+      "reads": [],
+      "requiredBy": [
+        "propagation-ui"
+      ]
+    },
+    "realtimeConsole": {
+      "reads": [
+        "addConsoleMessage",
+        "console"
+      ],
+      "requiredBy": [
+        "websocket-sync"
+      ]
+    },
+    "realtimeEnv": {
+      "reads": [
+        "__SCYTHE_BOOTSTRAP__",
+        "location"
+      ],
+      "requiredBy": [
+        "websocket-sync"
+      ]
+    },
+    "realtimeSocket": {
+      "reads": [
+        "WebSocketSync"
+      ],
+      "requiredBy": [
+        "adsb",
+        "ais-stream"
+      ]
+    },
+    "reconConsole": {
+      "reads": [
+        "ReconStore",
+        "addConsoleMessage",
+        "console",
+        "performance",
+        "showNotification"
+      ],
+      "requiredBy": [
+        "recon"
+      ]
+    },
+    "reconEntities": {
+      "reads": [
+        "AutoReconVisualization"
+      ],
+      "requiredBy": [
+        "sensors"
+      ]
+    },
+    "reconGlobe": {
+      "reads": [
+        "ReconStore",
+        "console"
+      ],
+      "requiredBy": [
+        "recon"
+      ]
+    },
+    "reconView": {
+      "reads": [],
+      "requiredBy": [
+        "recon"
+      ]
+    },
+    "renderEvents": {
+      "reads": [
+        "CustomEvent",
+        "console",
+        "document"
+      ],
+      "requiredBy": [
+        "render"
+      ]
+    },
+    "renderGlobe": {
+      "reads": [],
+      "requiredBy": [
+        "render"
+      ]
+    },
+    "roomChanges": {
+      "reads": [
+        "console"
+      ],
+      "requiredBy": [
+        "chat"
+      ]
+    },
+    "roomConsole": {
+      "reads": [
+        "addConsoleMessage",
+        "console"
+      ],
+      "requiredBy": [
+        "rooms"
+      ]
+    },
+    "roomSync": {
+      "reads": [
+        "RoomManager"
+      ],
+      "requiredBy": [
+        "websocket-sync"
+      ]
+    },
+    "roomView": {
+      "reads": [],
+      "requiredBy": [
+        "rooms"
+      ]
+    },
+    "sensorGlobe": {
+      "reads": [
+        "console"
+      ],
+      "requiredBy": [
+        "sensors"
+      ]
+    },
+    "sensorView": {
+      "reads": [],
+      "requiredBy": [
+        "sensors"
+      ]
+    },
+    "sessionStore": {
+      "reads": [
+        "console"
+      ],
+      "requiredBy": [
+        "session"
+      ]
+    },
+    "socketClient": {
+      "reads": [
+        "io"
+      ],
+      "requiredBy": [
+        "websocket-sync"
+      ]
+    },
+    "syncEvents": {
+      "reads": [
+        "WebSocketSync"
+      ],
+      "requiredBy": [
+        "ais-stream"
+      ]
+    },
+    "terrainModel": {
+      "reads": [
+        "console"
+      ],
+      "requiredBy": [
+        "viewsheds"
+      ]
+    },
+    "vesselSink": {
+      "reads": [
+        "AISStreamManager"
+      ],
+      "requiredBy": [
+        "ais-stream"
+      ]
+    },
+    "viewshedGlobe": {
+      "reads": [],
+      "requiredBy": [
+        "viewsheds"
+      ]
+    }
+  },
+  "windowGlobals": {
+    "page": {
+      "AISStreamManager": [
+        "vesselSink"
+      ],
+      "__SCYTHE_BOOTSTRAP__": [
+        "realtimeEnv"
+      ],
+      "addConsoleMessage": [
+        "entityConsole",
+        "notify",
+        "poiConsole",
+        "realtimeConsole",
+        "reconConsole",
+        "roomConsole"
+      ],
+      "showNotification": [
+        "reconConsole"
+      ],
+      "viewer": [
+        "cameraView"
+      ]
+    },
+    "runtime": {
+      "AutoReconVisualization": [
+        "entityMarkers",
+        "reconEntities"
+      ],
+      "EntitySync": [
+        "entityFeed",
+        "entityStream"
+      ],
+      "OperatorSession": [
+        "operatorSession",
+        "presenceSource"
+      ],
+      "ReconStore": [
+        "reconConsole",
+        "reconGlobe"
+      ],
+      "RoomManager": [
+        "roomSync"
+      ],
+      "SensorManager": [
+        "fusionData",
+        "lpiSensors"
+      ],
+      "WebSocketSync": [
+        "realtimeSocket",
+        "syncEvents"
+      ],
+      "logInteraction": [
+        "activityLog"
+      ],
+      "logMetric": [
+        "activityLog"
+      ]
+    },
+    "library": {
+      "Cesium": [
+        "cameraView"
+      ],
+      "io": [
+        "socketClient"
+      ]
+    },
+    "browser": {
+      "CustomEvent": [
+        "renderEvents"
+      ],
+      "EventSource": [
+        "openEventSource"
+      ],
+      "cancelAnimationFrame": [
+        "frames"
+      ],
+      "console": [
+        "activityLog",
+        "cameraView",
+        "entityConsole",
+        "fusionGlobe",
+        "liveSources",
+        "metricsProbe",
+        "poiGlobe",
+        "presenceGlobe",
+        "realtimeConsole",
+        "reconConsole",
+        "reconGlobe",
+        "renderEvents",
+        "roomChanges",
+        "roomConsole",
+        "sensorGlobe",
+        "sessionStore",
+        "terrainModel"
+      ],
+      "document": [
+        "presenceView",
+        "renderEvents"
+      ],
+      "fetch": [
+        "cameraView",
+        "fetchJson",
+        "httpFetch"
+      ],
+      "location": [
+        "realtimeEnv"
+      ],
+      "performance": [
+        "reconConsole"
+      ],
+      "requestAnimationFrame": [
+        "frames"
+      ]
+    }
+  },
+  "bootImports": [
+    "adsbPlugin.js",
+    "aisStreamPlugin.js",
+    "chatPlugin.js",
+    "entitySyncPlugin.js",
+    "fusionPlugin.js",
+    "htmlEscape.js",
+    "lifecycle.js",
+    "lpiPlugin.js",
+    "metricsExplorerPlugin.js",
+    "metricsPlugin.js",
+    "poiPlugin.js",
+    "presencePlugin.js",
+    "propagationPlugin.js",
+    "reconGlobe.js",
+    "reconLogic.js",
+    "reconPlugin.js",
+    "reconStore.js",
+    "renderPlugin.js",
+    "roomsPlugin.js",
+    "sensorEvents.js",
+    "sensorPlugin.js",
+    "sessionPlugin.js",
+    "viewshedPlugin.js",
+    "websocketSyncPlugin.js"
+  ],
+  "modules": {
+    "investigationStore.js": [],
+    "reconStore.js": [],
+    "addressContextWorkflow.js": [],
+    "browser-entry.js": [
+      "contractLoader.js",
+      "monocleOverlayLayer.js",
+      "opticsSampler.js",
+      "rfSampler.js",
+      "scenarioManifestWeb.js",
+      "scytheWebConfig.js"
+    ],
+    "browserIntegration.browser.js": [],
+    "celestialBodies.js": [],
+    "cityContextProjection.js": [],
+    "commandPalette.js": [
+      "deepLink.js"
+    ],
+    "commandPaletteView.js": [
+      "commandPalette.js"
+    ],
+    "contextualWorkbench.js": [],
+    "contractLoader.js": [
+      "evidenceStyles.js"
+    ],
+    "deepLink.js": [],
+    "deepLinkNav.js": [
+      "deepLink.js"
+    ],
+    "directiveProtocol.js": [],
+    "effectRuntime.js": [
+      "directiveProtocol.js"
+    ],
+    "evidenceStyles.js": [],
+    "flowEvidenceWorkflow.js": [],
+    "geoFrames.js": [],
+    "geographicGraphProjection.js": [],
+    "graphEntityTooltip.js": [],
+    "graphExplorerView.js": [
+      "graphEntityTooltip.js"
+    ],
+    "graphOpsConversation.js": [],
+    "graphOpsInvestigationTabs.js": [],
+    "graphOpsTransportStatus.js": [],
+    "graphOverlayLayer.js": [
+      "evidenceStyles.js",
+      "geographicGraphProjection.js",
+      "graphVisualScale.js"
+    ],
+    "graphResultTabs.js": [
+      "viewIntent.js"
+    ],
+    "graphVisualScale.js": [],
+    "hostTraceWorkflow.js": [],
+    "htmlEscape.js": [],
+    "hubSummary.js": [],
+    "hubSummaryView.js": [
+      "deepLink.js",
+      "hubSummary.js"
+    ],
+    "hypergraphLocation.js": [],
+    "hypergraphLocationView.js": [
+      "graphEntityTooltip.js",
+      "hypergraphLocation.js"
+    ],
+    "infrastructureController.js": [],
+    "infrastructureGlobeLayer.js": [],
+    "infrastructureLensView.js": [],
+    "investigationContext.js": [],
+    "liveGraphController.js": [],
+    "liveHypergraph3DView.js": [
+      "cityContextProjection.js",
+      "evidenceStyles.js",
+      "graphEntityTooltip.js",
+      "graphVisualScale.js",
+      "topologyGeometry.js"
+    ],
+    "liveHypergraphView.js": [
+      "cityContextProjection.js",
+      "evidenceStyles.js",
+      "graphEntityTooltip.js",
+      "graphVisualScale.js",
+      "liveGraphController.js",
+      "topologyGeometry.js"
+    ],
+    "lunarDataset.js": [],
+    "lunarPrism.js": [],
+    "lunarWorld.js": [
+      "celestialBodies.js"
+    ],
+    "missionGovernance.js": [],
+    "missionGovernancePanel.js": [
+      "missionGovernance.js"
+    ],
+    "missionViewport.js": [],
+    "missionViewportPanel.js": [
+      "missionGovernance.js",
+      "missionViewport.js"
+    ],
+    "monocleOverlayLayer.js": [
+      "evidenceStyles.js",
+      "geoFrames.js"
+    ],
+    "nesdrSpectrumModel.js": [
+      "rfAntennaDeclaration.js"
+    ],
+    "nesdrSpectrumView.js": [
+      "nesdrSpectrumModel.js",
+      "rfAntennaDeclaration.js",
+      "rfBandPresets.us.js",
+      "rfClassificationOutcomes.js",
+      "rfSurveyController.js",
+      "spectrumCanvasRenderer.js"
+    ],
+    "offlineHypergraphBundle.browser.js": [
+      "offlineHypergraphBundle.js"
+    ],
+    "offlineHypergraphBundle.js": [],
+    "opticsSampler.js": [
+      "contractLoader.js"
+    ],
+    "realityPrism.js": [],
+    "reconGlobe.js": [
+      "reconLogic.js"
+    ],
+    "reconLogic.js": [
+      "htmlEscape.js"
+    ],
+    "regionalRfDataset.js": [
+      "tileIndex.js",
+      "tileLoader.js"
+    ],
+    "resizablePanel.js": [],
+    "rfAntennaDeclaration.js": [],
+    "rfBandPresets.us.js": [],
+    "rfClassificationOutcomes.js": [],
+    "rfSampler.js": [
+      "contractLoader.js"
+    ],
+    "rfSurveyController.js": [],
+    "scenarioManifestWeb.js": [],
+    "scytheWebConfig.js": [
+      "evidenceStyles.js"
+    ],
+    "selectionModel.js": [
+      "directiveProtocol.js"
+    ],
+    "sensorEvents.js": [],
+    "spectrumCanvasRenderer.js": [],
+    "systemEvidenceTicker.js": [
+      "rfClassificationOutcomes.js"
+    ],
+    "tileIndex.js": [],
+    "tileLoader.js": [],
+    "topologyGeometry.js": [
+      "graphVisualScale.js"
+    ],
+    "viewIntent.js": [
+      "directiveProtocol.js"
+    ],
+    "visualEffects.js": [
+      "realityPrism.js"
+    ],
+    "worldStack.js": []
+  },
+  "findings": {
+    "requiredButNotProvided": [],
+    "providedButNotRequired": [],
+    "pluginsWithUndeclaredServices": {},
+    "pluginsWithUnusedRequires": {},
+    "modulesNotImportedByTheRuntime": {
+      "addressContextWorkflow.js": [
+        "scythe-web/regional-rf-demo.html"
+      ],
+      "browser-entry.js": [
+        "cesium-hypergraph-globe.html",
+        "scythe-web/README.md",
+        "scythe-web/browserIntegration.browser.js",
+        "scythe-web/regional-rf-demo.html"
+      ],
+      "browserIntegration.browser.js": [
+        "scythe-web/package.json"
+      ],
+      "commandPaletteView.js": [
+        "rf_scythe_home.html"
+      ],
+      "contextualWorkbench.js": [
+        "scythe-web/browserIntegration.browser.js",
+        "scythe-web/regional-rf-demo.html"
+      ],
+      "deepLinkNav.js": [
+        "cesium-hypergraph-globe.html",
+        "scythe-web/regional-rf-demo.html"
+      ],
+      "effectRuntime.js": [
+        "scythe-web/README.md",
+        "scythe-web/regional-rf-demo.html"
+      ],
+      "flowEvidenceWorkflow.js": [
+        "scythe-web/regional-rf-demo.html"
+      ],
+      "graphExplorerView.js": [
+        "scythe-web/README.md",
+        "scythe-web/regional-rf-demo.html"
+      ],
+      "graphOpsConversation.js": [
+        "scythe-web/regional-rf-demo.html"
+      ],
+      "graphOpsInvestigationTabs.js": [
+        "scythe-web/regional-rf-demo.html"
+      ],
+      "graphOpsTransportStatus.js": [
+        "scythe-web/regional-rf-demo.html"
+      ],
+      "graphOverlayLayer.js": [
+        "scythe-web/README.md",
+        "scythe-web/regional-rf-demo.html"
+      ],
+      "graphResultTabs.js": [
+        "scythe-web/regional-rf-demo.html"
+      ],
+      "hostTraceWorkflow.js": [
+        "scythe-web/regional-rf-demo.html"
+      ],
+      "hubSummaryView.js": [
+        "deploy/nginx-spectrcyde-auth.conf",
+        "rf_scythe_home.html"
+      ],
+      "hypergraphLocationView.js": [
+        "scythe-web/regional-rf-demo.html"
+      ],
+      "infrastructureController.js": [
+        "scythe-web/regional-rf-demo.html"
+      ],
+      "infrastructureGlobeLayer.js": [
+        "scythe-web/regional-rf-demo.html"
+      ],
+      "infrastructureLensView.js": [
+        "scythe-web/regional-rf-demo.html"
+      ],
+      "investigationContext.js": [
+        "scythe-web/regional-rf-demo.html"
+      ],
+      "investigationStore.js": [
+        "scythe-web/regional-rf-demo.html"
+      ],
+      "liveHypergraph3DView.js": [
+        "scythe-web/regional-rf-demo.html"
+      ],
+      "liveHypergraphView.js": [
+        "scythe-web/README.md",
+        "scythe-web/regional-rf-demo.html"
+      ],
+      "lunarDataset.js": [
+        "scythe-web/README.md",
+        "scythe-web/lunar-ops-demo.html"
+      ],
+      "lunarPrism.js": [
+        "scythe-web/README.md",
+        "scythe-web/lunar-ops-demo.html"
+      ],
+      "lunarWorld.js": [
+        "scythe-web/README.md",
+        "scythe-web/lunar-ops-demo.html"
+      ],
+      "missionGovernancePanel.js": [
+        "scythe-web/regional-rf-demo.html"
+      ],
+      "missionViewportPanel.js": [
+        "cesium-hypergraph-globe.html"
+      ],
+      "nesdrSpectrumView.js": [
+        "scythe-web/regional-rf-demo.html"
+      ],
+      "offlineHypergraphBundle.browser.js": [],
+      "regionalRfDataset.js": [
+        "scythe-web/README.md",
+        "scythe-web/browserIntegration.browser.js",
+        "scythe-web/regional-rf-demo.html"
+      ],
+      "resizablePanel.js": [
+        "scythe-web/regional-rf-demo.html"
+      ],
+      "selectionModel.js": [
+        "scythe-web/README.md",
+        "scythe-web/lunar-ops-demo.html",
+        "scythe-web/regional-rf-demo.html"
+      ],
+      "systemEvidenceTicker.js": [
+        "scythe-web/README.md",
+        "scythe-web/regional-rf-demo.html"
+      ],
+      "visualEffects.js": [
+        "scythe-web/README.md",
+        "scythe-web/regional-rf-demo.html"
+      ],
+      "worldStack.js": [
+        "scythe-web/regional-rf-demo.html"
+      ]
+    },
+    "modulesNothingReferences": [
+      "offlineHypergraphBundle.browser.js"
+    ]
+  }
+}

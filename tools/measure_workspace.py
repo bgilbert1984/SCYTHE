@@ -97,7 +97,7 @@ def page_objects(text):
 
 def measure(ref="HEAD"):
     page = read(ref, PAGE)
-    names = [n for n in git("ls-tree", "-r", "--name-only", ref, RUNTIME_DIR).split("\n") if n]
+    names = [n for n in git("ls-tree", "-r", "--full-tree", "--name-only", ref, RUNTIME_DIR).split("\n") if n]
     files = classify(names)
     boot = read(ref, BOOT, missing_ok=True)
     contents = {n: read(ref, n) for n in files["plugins"] + files["stores"] + files["logic"] + files["boot"] + files["tests"]}
