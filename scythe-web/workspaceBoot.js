@@ -17,6 +17,7 @@ import {createPoiPlugin} from "./poiPlugin.js";
 import {adoptReconStore} from "./reconStore.js";
 import * as reconLogic from "./reconLogic.js";
 import {createReconPlugin} from "./reconPlugin.js";
+import {createReconGlobe} from "./reconGlobe.js";
 import {escapeHtml} from "./htmlEscape.js";
 
 /**
@@ -192,7 +193,7 @@ export function bootWorkspace(win) {
   win.POIVisualization = poi.controls;   // what the page's init, the POI panel and its inline handlers call
 
   // --- Auto-Recon (after the render tool: the drawing takes its clustered data source) ---
-  workspace.provide("reconGlobe", reconGlobe(win));
+  workspace.provide("reconGlobe", createReconGlobe({win, store: win.ReconStore, log: win.console}));
   workspace.provide("reconView", reconView(win));
   workspace.provide("reconConsole", {   // the page puts console messages and notifications in as HTML; these are text (an entity's name, the server's message)
     message: (text, kind) => win.addConsoleMessage?.(escapeHtml(text), kind),
@@ -205,31 +206,6 @@ export function bootWorkspace(win) {
   win.ScytheWorkspace = workspace;
   win.dispatchEvent(new win.Event("scythe:workspace_ready"));
   return workspace;
-}
-
-/**
- * The recon tool's view of the drawing: the page's `ReconDrawing` object (markers, rings, icons, clusters, camera flights), looked up at call time.
- * Step 5 of the plan moves the drawing into this service and deletes the page object.
- */
-function reconGlobe(win) {
-  const draw = () => win.ReconDrawing;
-  return {
-    attach: (viewer) => draw().attach(viewer),
-    available: () => Boolean(draw()?.viewer),
-    render: () => Boolean(draw()?.renderEntities()),
-    addMarker: (entity) => draw()?.addEntityMarker(entity),
-    removeMarker: (entityId) => draw()?.removeEntityMarker(entityId),
-    updatePosition: (entity) => draw()?.updateEntityPosition(entity),
-    clear: () => draw()?.clearAllEntities(),
-    flyTo: (entityId) => draw()?.flyToEntity(entityId),
-    addTaskLine: (task) => draw()?.addTaskLine(task),
-    createEntityIcon: (...args) => draw()?.createEntityIcon(...args),
-    setVisible: (shown) => draw()?.setVisible(shown),
-    setShowRings: (shown) => draw()?.setShowRings(shown),
-    setShowLabels: (shown) => draw()?.setShowLabels(shown),
-    setReferencePoint: (point) => draw()?.setReferencePoint(point),
-    cameraPosition: () => draw().cameraPosition(),
-  };
 }
 
 /** The Recon panel's DOM, by the ids the page gives it. Every lookup happens when it is needed; a missing element is skipped. */
