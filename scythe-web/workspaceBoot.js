@@ -18,6 +18,7 @@ import {adoptReconStore} from "./reconStore.js";
 import * as reconLogic from "./reconLogic.js";
 import {createReconPlugin} from "./reconPlugin.js";
 import {createReconGlobe} from "./reconGlobe.js";
+import {createRoomsPlugin} from "./roomsPlugin.js";
 import {escapeHtml} from "./htmlEscape.js";
 
 /**
@@ -203,9 +204,26 @@ export function bootWorkspace(win) {
   workspace.register(recon.tool);
   win.AutoReconVisualization = recon.controls;   // what the page's init, the Recon panel, the inline handlers and the other modules call
 
+  // --- rooms ---
+  workspace.provide("roomView", roomView(win));
+  workspace.provide("roomConsole", {message: (text, kind) => win.addConsoleMessage?.(escapeHtml(text), kind)});   // the page puts console messages in as HTML; these are text (a room's name)
+  const rooms = createRoomsPlugin({log: win.console});
+  workspace.register(rooms.tool);
+  win.RoomManager = rooms.controls;   // what the page's init, the Operators panel, the lists' inline handlers, the session and the WebSocket code call
+
   win.ScytheWorkspace = workspace;
   win.dispatchEvent(new win.Event("scythe:workspace_ready"));
   return workspace;
+}
+
+/** The Operators panel's room widgets, by the ids the page gives them. A missing element is skipped; `html` is called only if the element is there. */
+function roomView(win) {
+  const byId = (id) => win.document.getElementById(id);
+  return {
+    setAvailable(html) { const element = byId("available-rooms-list"); if (element) element.innerHTML = html(); },
+    setJoined(html) { const element = byId("joined-rooms-list"); if (element) element.innerHTML = html(); },
+    setCurrent(text) { const element = byId("current-room-name"); if (element) element.textContent = text; },
+  };
 }
 
 /** The Recon panel's DOM, by the ids the page gives it. Every lookup happens when it is needed; a missing element is skipped. */
@@ -281,24 +299,13 @@ function chatView(win) {
   };
 }
 
-/** RoomManager's current-room changes. RoomManager may not exist yet, so look for it (300 ms, then every 500 ms) until it
- *  does or the subscription is cancelled; the old code retried forever and never unhooked. */
+/** The rooms tool's current-room changes. Its controls exist from the moment the boot module has run, and handlers outlive its activation, so this subscribes at once. */
 function roomChanges(win) {
   return {
     subscribe(fn) {
-      let timer = null, attached = false;
       const handler = (change) => { if (change && change.roomId) fn(change.roomId); };
-      const attach = () => {
-        timer = null;
-        const manager = win.RoomManager;
-        if (manager && manager.on) { manager.on("current_room_changed", handler); attached = true; }
-        else timer = win.setTimeout(attach, 500);
-      };
-      timer = win.setTimeout(attach, 300);
-      return () => {
-        if (timer !== null) { win.clearTimeout(timer); timer = null; }
-        if (attached) win.RoomManager?.off?.("current_room_changed", handler);
-      };
+      win.RoomManager.on("current_room_changed", handler);
+      return () => { win.RoomManager.off("current_room_changed", handler); };
     },
   };
 }

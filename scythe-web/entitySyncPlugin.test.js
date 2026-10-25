@@ -80,12 +80,20 @@ test("handler registry: calls in order, off removes, a throwing handler is repor
   registry.notify("x", 1);
   assert.deepEqual(seen, [["h1", 1], ["h3", 1]]);
   assert.equal(errors.length, 1);
-  assert.match(errors[0][0], /Handler error for x/);
+  assert.match(errors[0][0], /^\[EntitySync\] Handler error for x/, "the default label");
   registry.off("x", h1);
   registry.notify("x", 2);
   assert.deepEqual(seen.slice(2), [["h3", 2]]);
   registry.off("never", h1);   // no such event: fine
   registry.notify("never", 1);
+});
+
+test("handler registry: the label in the error message can be chosen", () => {
+  const errors = [];
+  const registry = createHandlerRegistry({log: {error: (...a) => errors.push(a)}, label: "RoomManager"});
+  registry.on("x", () => { throw new Error("bad"); });
+  registry.notify("x", 1);
+  assert.match(errors[0][0], /^\[RoomManager\] Handler error for x/);
 });
 
 test("entity cache: stores the latest state, deletes, skips events without an id, and DELETE of an unknown id is fine", () => {

@@ -322,38 +322,35 @@ test("the callsign is restored on activation and saved when it changes; blocked 
   assert.equal(blocked.workspace.state("chat"), "active");
 });
 
-test("a room manager that does not exist yet is waited for (300 ms, then every 500 ms) and then followed", async () => {
+test("the chat tool follows the room manager's current room: a change with a room id opens that room's stream, one without is ignored", async () => {
   const {win, workspace, sources} = chatWindow();
-  await workspace.activate("chat");
-  await win.advance(300);
-  await win.advance(500);
-  assert.equal(win.RoomManager, undefined);
   let handler;
-  win.RoomManager = {on: (event, fn) => { assert.equal(event, "current_room_changed"); handler = fn; }, off() {}};
-  await win.advance(500);
+  win.RoomManager.on = (event, fn) => { assert.equal(event, "current_room_changed"); handler = fn; return win.RoomManager; };
+  await workspace.activate("chat");
   handler({roomId: "OPS"});
   await settle();
   assert.equal(sources.at(-1).url, "/api/chat/OPS/stream");
-  handler({});                                            // a change without a room id is ignored
+  handler({});
   handler(undefined);
   assert.equal(sources.length, 2);
 });
 
-test("deactivating cancels a room-manager lookup still waiting, and unhooks one already attached", async () => {
-  const waiting = chatWindow();
-  await waiting.workspace.activate("chat");
-  await waiting.workspace.deactivate("chat");
-  assert.equal(waiting.win.pendingTimers(), 0, "no retry timer survives");
-  waiting.win.RoomManager = {on() { throw new Error("attached after deactivation"); }, off() {}};
-  await waiting.win.advance(5000);
+test("the chat tool follows the real rooms tool: making a room current opens its stream", async () => {
+  const {win, workspace, sources} = chatWindow();
+  await workspace.activate("rooms");
+  await workspace.activate("chat");
+  win.RoomManager.setCurrentRoom("OPS");
+  await settle();
+  assert.equal(sources.at(-1).url, "/api/chat/OPS/stream");
+});
 
-  const attached = chatWindow();
+test("deactivating the chat tool unhooks it from the room manager", async () => {
+  const {win, workspace} = chatWindow();
   const offs = [];
-  attached.win.RoomManager = {on() {}, off: (event) => offs.push(event)};
-  await attached.workspace.activate("chat");
-  await attached.win.advance(300);
-  await attached.workspace.deactivate("chat");
-  assert.deepEqual(offs, ["current_room_changed"]);
+  win.RoomManager.off = (event, fn) => { offs.push([event, typeof fn]); return win.RoomManager; };
+  await workspace.activate("chat");
+  await workspace.deactivate("chat");
+  assert.deepEqual(offs, [["current_room_changed", "function"]]);
 });
 
 test("deactivating leaves no timers or open streams behind", async () => {

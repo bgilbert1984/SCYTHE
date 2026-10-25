@@ -43,14 +43,14 @@ const TRIM_EVERY = 100;
 const SSE_EVENTS = ["PREEXISTING", "CREATE", "UPDATE", "DELETE"];
 
 /** Event handlers by event name. A handler that throws is reported and does not stop the others. */
-export function createHandlerRegistry({log = console} = {}) {
+export function createHandlerRegistry({log = console, label = "EntitySync"} = {}) {
   const handlers = {};
   return {
     on(event, handler) { (handlers[event] ||= []).push(handler); },
     off(event, handler) { if (handlers[event]) handlers[event] = handlers[event].filter((h) => h !== handler); },
     notify(event, data) {
       for (const handler of handlers[event] || []) {
-        try { handler(data); } catch (error) { log.error?.(`[EntitySync] Handler error for ${event}:`, error); }
+        try { handler(data); } catch (error) { log.error?.(`[${label}] Handler error for ${event}:`, error); }
       }
     },
   };

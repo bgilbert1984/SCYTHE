@@ -351,9 +351,26 @@ are the existing `httpFetch`, `openEventSource`, `operatorSession` and `entitySt
 - Pinned, not changed: the page's client polls the server's simulator every two seconds (`/api/recon/simulate`); hiding the layer stops the auto-update (and says so) even if it was not running; a reload drops entities that only the client has; a partial update resets the fields it does not carry (plan, finding 10).
 - The drawing was checked against the old page object with a second randomised differential (3,000 scenarios of 18 steps, with a Cesium whose every call, entity spec and property write is recorded): the same Cesium calls, entity specs, canvas drawing operations, MLDC calls and results, apart from the two changes above. The controller was checked the same way (2,000 scenarios of 14 steps: loads, alerts, sync events, stream messages and errors, retries, ticks, dispositions, tasks, reference points): same requests, same console messages, same drawing calls, same store, apart from the retry change above.
 
+## Sixteenth tool: rooms (`scythe-web/roomsPlugin.js`)
+
+`RoomManager` (a 340-line object in `command-ops-visualization.html`) is now the `rooms` tool, and `window.RoomManager` is its controls (the boot module sets it, so the
+inline `onclick`s in the room lists and the panel's refresh button, the session code, the WebSocket code, the chat tool and `doCreateRoom` call it as before). It lists the
+rooms the server has and the ones this operator has joined, creates, joins and leaves rooms, keeps the current room, tells subscribers (`on('room_joined', ...)`,
+`on('current_room_changed', ...)`, `rooms_updated`, `my_rooms_updated`, `room_left`), and draws the Operators panel's three room widgets. The rendering is plain functions
+in the plugin (`renderAvailableRooms`, `renderJoinedRooms`, `currentRoomLabel`, `roomTypeIcon`, `indexRooms`); the page is touched through `httpFetch`, `operatorSession` (the
+token), `roomView` (the three widgets) and `roomConsole`.
+
+- Handlers outlive an activation, like EntitySync's (the shared `createHandlerRegistry`, which now takes a label for its error message); the rooms and the current room belong to an activation.
+- Room names and ids are escaped where they reach HTML and the console, with ids given to the inline handlers as JSON strings. Operators choose room names; the old code put them in as they were.
+- The session and WebSocket code no longer write into the object: `RoomManager.reset()` (logout) and `RoomManager.setRooms(list)` (the WebSocket's `rooms_list`) are controls, and neither tells the handlers, as before.
+- Because the controls now exist from the moment the boot module has run, the chat tool follows the current room at once; its 300 ms / 500 ms wait for a `RoomManager` that did not exist yet is gone.
+- Removed as dead after a repository search: `getRoomDetails`, `publishToRoom`, `sendMessage`.
+- Pinned, not changed (tests named `PINNED:`): joining refreshes the joined list but not the available list; leaving the current room does not change the current room; making a room current does not redraw the joined list, so its active mark lags; the room ids are put into the request paths as they are, without URL encoding.
+- Verified against the old object with a randomised differential (3,000 scenarios of 16 steps, with random server replies, failures and a session that comes and goes): the same requests and headers, console messages, DOM writes, handler notifications, return values and state, apart from the quoting of the ids in the inline handlers.
+
 ## Not done
 
-- Only ADS-B, AIS streaming, chat, metrics, the metrics explorer, propagation, the entity stream, sensors, the fusion overlays, the viewsheds, LPI, operator presence the level-of-detail manager, the points of interest and Auto-Recon (its controller and its drawing) use the contract, and activation is not yet driven by the operator (a panel click).
+- Only ADS-B, AIS streaming, chat, metrics, the metrics explorer, propagation, the entity stream, sensors, the fusion overlays, the viewsheds, LPI, operator presence the level-of-detail manager, the points of interest and Auto-Recon (its controller and its drawing) and the rooms use the contract, and activation is not yet driven by the operator (a panel click).
 - No unified transport: the tools take the realtime socket, `WebSocketSync` and `fetch` as services; they do not open their own.
 - Not run in a browser against a signed-in session; the tests cover the contract, the plugin, the boot wiring, and run the
   page's own `removeEntityMarker` against a fake collection.
