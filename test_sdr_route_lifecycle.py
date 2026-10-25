@@ -8,7 +8,7 @@ from unittest import mock
 
 import control_audit
 from hypergraph_engine import HypergraphEngine
-from mcp_effects import APPROVAL_MODES_ENV
+from mcp_effects import APPROVAL_MODES_ENV, APPROVERS_ENV
 from mcp_server import MCPHandler
 from rf_mcp import register_rf_tools
 
@@ -45,7 +45,7 @@ class _Fixture(unittest.TestCase):
     def setUp(self):
         rf = self.rf
         self.bridge = FakeBridge()
-        with mock.patch.dict(os.environ, {APPROVAL_MODES_ENV: self.SETTING}):
+        with mock.patch.dict(os.environ, {APPROVAL_MODES_ENV: self.SETTING, APPROVERS_ENV: "op-1,op-2"}):
             self.handler = MCPHandler(HypergraphEngine(), use_orchestrator=True)
         register_rf_tools(self.handler.engine, self.handler)
         self.orch = self.handler._orchestrator

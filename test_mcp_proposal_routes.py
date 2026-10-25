@@ -7,7 +7,7 @@ from unittest import mock
 
 import control_audit
 from hypergraph_engine import HypergraphEngine
-from mcp_effects import APPROVAL_MODES_ENV
+from mcp_effects import APPROVAL_MODES_ENV, APPROVERS_ENV
 from mcp_server import MCPHandler
 from rf_mcp import register_rf_tools
 from test_sdr_route_lifecycle import FakeBridge
@@ -26,13 +26,13 @@ class ProposalRoutesTest(unittest.TestCase):
     def setUp(self):
         rf = self.rf
         self.bridge = FakeBridge()
-        with mock.patch.dict(os.environ, {APPROVAL_MODES_ENV: "HARDWARE_CONTROL=SECOND_PRINCIPAL"}):
+        with mock.patch.dict(os.environ, {APPROVAL_MODES_ENV: "HARDWARE_CONTROL=SECOND_PRINCIPAL", APPROVERS_ENV: "op-1,op-2"}):
             self.handler = MCPHandler(HypergraphEngine(), use_orchestrator=True)
         register_rf_tools(self.handler.engine, self.handler)
         self.orch = self.handler._orchestrator
         ops = {f"op-{i}": SimpleNamespace(operator_id=f"op-{i}", callsign=f"CALL{i}", role=SimpleNamespace(value="operator"))
-               for i in (1, 2)}
-        sessions = {"t1": ("op-1", "s1"), "t1b": ("op-1", "s1b"), "t2": ("op-2", "s2")}
+               for i in (1, 2, 3)}
+        sessions = {"t1": ("op-1", "s1"), "t1b": ("op-1", "s1b"), "t2": ("op-2", "s2"), "t3": ("op-3", "s3")}
         manager = SimpleNamespace(
             operators=ops,
             validate_session=lambda t: SimpleNamespace(operator_id=sessions[t][0], session_id=sessions[t][1])
@@ -106,6 +106,26 @@ class DecisionTest(ProposalRoutesTest):
                          ("op-1", "op-2", "op-2"))
         run = [e for e in self.store.events(proposal_id=pid) if e["action"] == "rf_tune"]
         self.assertEqual({(e["source"], e["initiator"]) for e in run}, {("api.mcp.approve", "operator_command")})
+
+    def test_an_authenticated_operator_without_a_grant_gets_a_403_and_changes_nothing(self):
+        pid = self.tune()
+        for decision in ("approve", "deny"):
+            r = self.decide(pid, decision, token="t3")        # op-3 is signed in, but is not in MCP_APPROVERS
+            self.assertEqual(r.status_code, 403, r.get_json())
+            self.assertIn("not authorized", r.get_json()["message"])
+        self.assertEqual(self.bridge.calls, [])
+        self.assertEqual(len(self.call("get", "/api/mcp/proposals/pending", "t2").get_json()["proposals"]), 1)
+
+    def test_the_pending_list_says_whether_the_caller_may_approve(self):
+        self.tune()
+        for token, may in (("t2", True), ("t3", False)):
+            self.assertIs(self.call("get", "/api/mcp/proposals/pending", token).get_json()["caller_may_approve"], may, token)
+
+    def test_governance_reports_the_grant_without_listing_who_holds_it(self):
+        j2 = self.call("get", "/api/mcp/governance", "t2").get_json()
+        j3 = self.call("get", "/api/mcp/governance", "t3").get_json()
+        self.assertEqual((j2["approvers_configured"], j2["caller_may_approve"], j3["caller_may_approve"]), (2, True, False))
+        self.assertNotIn("op-2", str({k: v for k, v in j2.items() if k != "caller"}))
 
     def test_the_proposer_cannot_approve_even_from_another_session(self):
         pid = self.tune()

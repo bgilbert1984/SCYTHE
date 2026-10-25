@@ -10,7 +10,7 @@ import mcp_orchestrator
 import mcp_safety
 from hypergraph_engine import HypergraphEngine
 from mcp_effects import (
-    APPROVAL_MODES_ENV, APPROVAL_TTL_ENV, DEFAULT_APPROVAL_TTL_SECONDS, LOCAL_STATE, READ_ONLY, deployment_approval_ttl,
+    APPROVAL_MODES_ENV, APPROVAL_TTL_ENV, APPROVERS_ENV, DEFAULT_APPROVAL_TTL_SECONDS, LOCAL_STATE, READ_ONLY, deployment_approval_ttl,
 )
 from mcp_principal import OPERATOR_SESSION, Principal, principal_scope
 from mcp_server import MCPHandler, ToolDef
@@ -40,7 +40,7 @@ class _Fixture(unittest.TestCase):
         self.o.set_phase(2, dry_run=False)
 
     def handler(self, setting=None):
-        env = {APPROVAL_MODES_ENV: self.SETTING if setting is None else setting}
+        env = {APPROVAL_MODES_ENV: self.SETTING if setting is None else setting, APPROVERS_ENV: "alice,bob"}
         with mock.patch.dict(os.environ, env):
             h = MCPHandler(HypergraphEngine(), use_orchestrator=True)
         h._tools["probe_write"] = ToolDef("probe_write", "d", SCHEMA, lambda p: self.ran.append(p) or {"ok": True},

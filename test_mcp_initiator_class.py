@@ -6,7 +6,7 @@ from unittest import mock
 
 import control_audit
 from hypergraph_engine import HypergraphEngine
-from mcp_effects import APPROVAL_MODES_ENV, LOCAL_STATE
+from mcp_effects import APPROVAL_MODES_ENV, APPROVERS_ENV, LOCAL_STATE
 from mcp_principal import (
     AUTONOMOUS, INITIATOR_CLASSES, OPERATOR_COMMAND, OPERATOR_SESSION, Principal, current_initiator, principal_scope,
 )
@@ -34,7 +34,7 @@ class _Fixture(unittest.TestCase):
         self.addCleanup(self.dir.cleanup)
         self.store = control_audit.configure(os.path.join(self.dir.name, "a.sqlite3"), 90)
         self.addCleanup(control_audit.reset)
-        with mock.patch.dict(os.environ, {APPROVAL_MODES_ENV: self.SETTING}):
+        with mock.patch.dict(os.environ, {APPROVAL_MODES_ENV: self.SETTING, APPROVERS_ENV: "alice,bob"}):
             self.h = MCPHandler(HypergraphEngine(), use_orchestrator=True)
         self.h._tools["probe_write"] = ToolDef(
             "probe_write", "d", SCHEMA,

@@ -3905,7 +3905,8 @@ if FLASK_AVAILABLE:
         ttl = orchestrator.dual_agent.pending_ttl
         pending = [_proposal_view(p, principal, ttl) for p in orchestrator.dual_agent.decision_log
                    if p.get('status') == 'pending_approval']
-        return jsonify({'status': 'ok', 'proposals': pending, 'caller': principal.to_dict()})
+        return jsonify({'status': 'ok', 'proposals': pending, 'caller': principal.to_dict(),
+                        'caller_may_approve': orchestrator.dual_agent.may_approve(principal.operator_id)})
 
     @app.route('/api/mcp/governance', methods=['GET'])
     def mcp_governance():
@@ -3924,6 +3925,8 @@ if FLASK_AVAILABLE:
                 phase={'value': orchestrator.phase.value, 'name': orchestrator.phase.name},
                 approval_modes={effect: required_approval_mode(effect, deployment) for effect in sorted(MINIMUM_APPROVAL_MODE)},
                 approval_mode_overrides=deployment,
+                approvers_configured=len(orchestrator.dual_agent.approvers),
+                caller_may_approve=orchestrator.dual_agent.may_approve(principal.operator_id),
                 pending_ttl_seconds=orchestrator.dual_agent.pending_ttl)
         return jsonify(body)
 
@@ -20793,7 +20796,7 @@ def _decision_error_status(message):
     """HTTP status for a refused approval decision (``decide_proposal`` error text)."""
     if 'not found' in message:
         return 404
-    if 'identified operator' in message or 'differ from the proposer' in message:
+    if 'identified operator' in message or 'differ from the proposer' in message or 'not authorized' in message:
         return 403
     return 409
 

@@ -7,7 +7,7 @@ from unittest import mock
 import control_audit
 from hypergraph_engine import HypergraphEngine
 from mcp_effects import (
-    APPROVAL_MODES_ENV, AUTOMATED, DIRECT, HARDWARE_CONTROL, LOCAL_STATE, READ_ONLY, SECOND_PRINCIPAL,
+    APPROVAL_MODES_ENV, APPROVERS_ENV, AUTOMATED, DIRECT, HARDWARE_CONTROL, LOCAL_STATE, READ_ONLY, SECOND_PRINCIPAL,
     deployment_approval_modes, parse_approval_modes,
 )
 from mcp_registry import Tool
@@ -129,10 +129,17 @@ class ProposalModeTest(unittest.TestCase):
             o = DualAgentOrchestrator(tool_resolver={"h": _tool("h", HARDWARE_CONTROL)}.get)
         self.assertEqual(o.propose_action("h", {}, confidence=0.9)["status"], "pending_approval")
 
-    def test_a_raised_mode_logs_that_an_identified_operator_must_approve(self):
+    def test_a_raised_mode_logs_that_an_authorized_operator_must_approve(self):
         with self.assertLogs("mcp_safety", level="WARNING") as cap:
-            DualAgentOrchestrator(approval_modes={HARDWARE_CONTROL: SECOND_PRINCIPAL})
-        self.assertIn("identified operator approves", cap.output[0])
+            DualAgentOrchestrator(approval_modes={HARDWARE_CONTROL: SECOND_PRINCIPAL}, approvers={"alice"})
+        self.assertIn("authorized operator approves", cap.output[0])
+        self.assertIn("1 operator(s) are authorized", cap.output[0])
+
+    def test_the_log_says_so_when_nobody_is_authorized(self):
+        with self.assertLogs("mcp_safety", level="WARNING") as cap:
+            DualAgentOrchestrator(approvers=set())      # the HARDWARE_CONTROL default needs a second principal
+        self.assertIn("NO operator is authorized", cap.output[0])
+        self.assertIn("HARDWARE_CONTROL", cap.output[0])
 
 
 class FullOrchestratorTest(unittest.TestCase):
@@ -151,7 +158,7 @@ class FullOrchestratorTest(unittest.TestCase):
         self.addCleanup(control_audit.reset)
 
     def handler(self, setting):
-        with mock.patch.dict(os.environ, {APPROVAL_MODES_ENV: setting} if setting else {}, clear=False):
+        with mock.patch.dict(os.environ, ({APPROVAL_MODES_ENV: setting} if setting else {}) | {APPROVERS_ENV: "alice,bob"}, clear=False):
             if not setting:
                 os.environ.pop(APPROVAL_MODES_ENV, None)
             h = MCPHandler(HypergraphEngine(), use_orchestrator=True)

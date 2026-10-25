@@ -147,6 +147,33 @@ def deployment_approval_modes(environ=None) -> dict:
     return parse_approval_modes((os.environ if environ is None else environ).get(APPROVAL_MODES_ENV))
 
 
+APPROVERS_ENV = "MCP_APPROVERS"
+
+
+def parse_approvers(text: Optional[str]) -> frozenset:
+    """Parse ``MCP_APPROVERS``: comma-separated ``operator_id`` values entitled to approve proposals.
+
+    Approval authority is granted, never assumed (#228): an authenticated operator is not
+    thereby an approver.  Empty or ``None`` grants nobody.  An id containing whitespace is
+    refused, so a typo stops startup instead of silently granting or withholding authority.
+    """
+    ids = set()
+    for item in (text or "").split(","):
+        item = item.strip()
+        if not item:
+            continue
+        if any(ch.isspace() for ch in item):
+            raise ValueError(f"{APPROVERS_ENV}: operator ids may not contain whitespace, got {item!r}")
+        ids.add(item)
+    return frozenset(ids)
+
+
+def deployment_approvers(environ=None) -> frozenset:
+    """The operator ids entitled to approve, read from ``MCP_APPROVERS`` (see ``parse_approvers``)."""
+    import os
+    return parse_approvers((os.environ if environ is None else environ).get(APPROVERS_ENV))
+
+
 APPROVAL_TTL_ENV = "MCP_APPROVAL_TTL_SECONDS"
 DEFAULT_APPROVAL_TTL_SECONDS = 900.0
 

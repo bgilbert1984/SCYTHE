@@ -22,8 +22,8 @@
     `validate_tool_contract`, caps the mode at `AUTOMATED`; `rf_capture_control` is split into
     `rf_capture_start` and `rf_capture_stop`, and only the stop tool halts.
   - **Not yet implemented:** durable pending proposals (a restart drops them, which fails
-    closed; the audit keeps the record, #219), role checks on who may approve, and any change
-    of default. The approval action is exposed beyond `/mcp` as `GET /api/mcp/proposals/pending`
+    closed; the audit keeps the record, #219), a per-effect approver list, and a persistent grant
+    store (the grant is an environment setting). The approval action is exposed beyond `/mcp` as `GET /api/mcp/proposals/pending`
     and `POST /api/mcp/proposals/<id>/decision`, with a list and buttons in the SDR++ panel.
     The `/api/sdr/*` control routes now enter the lifecycle as `operator_command`
     (ADR 0005 Decision 5); with a raised `HARDWARE_CONTROL` mode their start, tune and config
@@ -179,10 +179,22 @@ still apply to an autonomous hardware proposal.
 `mcp_principal.py`); `loopback`, `internal_token`, `anonymous` and `unspecified` cannot
 approve, because they do not identify an individual. The approver's `operator_id` must
 differ from the proposer's, so two sessions of one operator are one principal. A proposer
-that is not an identified operator (an internal automation) may create the proposal, and
-any identified operator may approve it. `agent_id` is never used as an identity. The
-approver may also execute: the control is independent approval, not separation of
-execution.
+that is not an identified operator (an internal automation) may create the proposal.
+`agent_id` is never used as an identity: it is stored as `claimed_agent_id`, descriptive
+only, and `proposed_by` comes from the authenticated principal. The approver may also
+execute: the control is independent approval, not separation of execution.
+
+**Approval authority is granted, not assumed (#228).** Being an authenticated operator does
+not entitle anyone to approve or deny. `MCP_APPROVERS` is a comma-separated list of
+`operator_id` values (read at startup like `MCP_APPROVAL_MODES`; an id with whitespace stops
+startup). Unset or empty grants nobody, so a `SECOND_PRINCIPAL` proposal cannot be approved
+and cannot run: it fails closed. The grant is checked when a decision is made and again when
+an approved proposal executes, so withdrawing it stops a proposal that was approved but has
+not yet run. It is deliberately not a role: a role is a label an operator account carries,
+the grant is an explicit deployment decision about a named operator, and an `admin` role
+confers no approval authority. Authority is one list for all effects; per-effect lists are
+future work. `GET /api/mcp/proposals/pending` and `/api/mcp/governance` report whether the
+caller holds the grant (`caller_may_approve`) and how many are configured, never who.
 
 **The approval action.** A distinct action (`orchestrate/approve`: `proposal_id`, a
 decision of approve or deny, an optional note) is the only way out of `pending_approval`.
@@ -297,4 +309,5 @@ capped at `AUTOMATED` whatever a deployment sets.
 | The mechanism for exempting halting actions | decided and implemented: `halts`, split `rf_capture_stop` (Decision 7) |
 | Whether the direct `/api/sdr/*` routes join the proposal flow | decided in ADR 0005 Decision 5 and implemented (#236, #218) |
 | Durable proposals; fail-closed audit; loopback/anonymous hardware control | #219 |
-| Who is entitled to approve (roles) | not tracked |
+| Who is entitled to approve | decided: explicit `MCP_APPROVERS` grant, not roles (Decision 6) |
+| Per-effect approver lists; a persistent grant store | not tracked |

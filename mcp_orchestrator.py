@@ -159,7 +159,9 @@ class AliasMCPOrchestrator:
             initiator=initiator,
         )
 
-        proposal["agent_id"] = agent_id
+        # What the caller said it was.  Descriptive only: no decision or audit identity reads it;
+        # who proposed is ``proposed_by``, set from the authenticated principal.
+        proposal["claimed_agent_id"] = agent_id
 
         logger.info(
             "[orchestrator] Proposal %s: %s status=%s (confidence=%.2f)",

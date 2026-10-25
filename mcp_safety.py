@@ -150,7 +150,7 @@ class DualAgentOrchestrator:
     """
 
     def __init__(self, default_mutation_budget: int = 3, tool_resolver=None, approval_modes=None,
-                 pending_ttl_seconds=None):
+                 pending_ttl_seconds=None, approvers=None):
         # name -> tool object (with .effect / .effect_declared / .mutates_state).
         # Approval is decided from the tool's declared effect, never its name.
         self.tool_resolver = tool_resolver
@@ -169,15 +169,24 @@ class DualAgentOrchestrator:
 
         # Deployment approval settings (ADR 0006): they may raise an effect's mode, never
         # lower it.  None reads MCP_APPROVAL_MODES.
-        from mcp_effects import SECOND_PRINCIPAL, deployment_approval_modes, deployment_approval_ttl
+        from mcp_effects import (
+            MINIMUM_APPROVAL_MODE, SECOND_PRINCIPAL, deployment_approval_modes, deployment_approval_ttl,
+            deployment_approvers, required_approval_mode,
+        )
         self.approval_modes = dict(approval_modes) if approval_modes is not None else deployment_approval_modes()
+        # Operator ids entitled to approve (MCP_APPROVERS).  Authentication alone is not authority.
+        self.approvers = frozenset(approvers) if approvers is not None else deployment_approvers()
         # How long a pending_approval proposal stays approvable (MCP_APPROVAL_TTL_SECONDS).
         self.pending_ttl = float(pending_ttl_seconds) if pending_ttl_seconds is not None else deployment_approval_ttl()
-        if SECOND_PRINCIPAL in self.approval_modes.values():
+        needing = sorted(e for e in MINIMUM_APPROVAL_MODE
+                         if required_approval_mode(e, self.approval_modes) == SECOND_PRINCIPAL)
+        if needing:
             logging.getLogger(__name__).warning(
                 "[approval] %s requires %s: matching proposals wait as pending_approval until a different "
-                "identified operator approves them (orchestrate/approve); without identified operators they cannot run",
-                sorted(e for e, m in self.approval_modes.items() if m == SECOND_PRINCIPAL), SECOND_PRINCIPAL)
+                "authorized operator approves them (orchestrate/approve); %s",
+                needing, SECOND_PRINCIPAL,
+                f"{len(self.approvers)} operator(s) are authorized to approve" if self.approvers
+                else "NO operator is authorized (MCP_APPROVERS is empty), so they cannot run")
 
     def _audit_transition(self, action: str, proposal: Dict[str, Any], principal, result: str,
                           summary: Optional[str] = None, parameters: Optional[Dict[str, Any]] = None) -> None:
@@ -215,11 +224,16 @@ class DualAgentOrchestrator:
                                 if not (p["status"] == "expired" and now - p.get("expired_at", now) > self.pending_ttl)]
         return expired
 
+    def may_approve(self, operator_id) -> bool:
+        """True when ``operator_id`` has been granted approval authority (``MCP_APPROVERS``)."""
+        return bool(operator_id) and operator_id in self.approvers
+
     def decide_proposal(self, proposal_id: str, decision: str, approver, note: str = "") -> Dict[str, Any]:
         """Approve or deny a ``pending_approval`` proposal (ADR 0006, Decision 6).
 
         ``approver`` is the authenticated ``Principal`` making the call.  It must be an
-        identified operator session whose ``operator_id`` differs from the proposer's, so
+        identified operator session that has been granted approval authority
+        (``MCP_APPROVERS``) and whose ``operator_id`` differs from the proposer's, so
         two sessions of one operator are one principal.  A proposer that is not an
         identified operator (an internal automation) can be approved by any identified
         operator.  Approval authorizes execution; it does not run anything, and execution
@@ -238,6 +252,8 @@ class DualAgentOrchestrator:
             return {"ok": False, "error": f"proposal status is {proposal['status']}, not pending_approval"}
         if approver is None or not getattr(approver, "identified", False):
             return {"ok": False, "error": "approval requires an identified operator session"}
+        if not self.may_approve(approver.operator_id):
+            return {"ok": False, "error": "this operator is not authorized to approve or deny proposals"}
         proposer_id = (proposal.get("proposed_by") or {}).get("operator_id")
         if proposer_id and proposer_id == approver.operator_id:
             return {"ok": False, "error": "the approver must differ from the proposer"}
@@ -274,6 +290,8 @@ class DualAgentOrchestrator:
         approver = proposal.get("approved_by") or {}
         if approver.get("kind") != OPERATOR_SESSION or not approver.get("operator_id"):
             return "a second-principal proposal has no recorded approval by an identified operator"
+        if not self.may_approve(approver.get("operator_id")):
+            return "the recorded approver is not (or is no longer) authorized to approve"
         proposer_id = (proposal.get("proposed_by") or {}).get("operator_id")
         if proposer_id and proposer_id == approver.get("operator_id"):
             return "the recorded approver is the proposer"
