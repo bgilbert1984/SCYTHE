@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {readFileSync} from "node:fs";
+import {wireSessionEffects} from "./workspaceBoot.js";
 
 const page = readFileSync(new URL("../command-ops-visualization.html", import.meta.url), "utf8");
 
@@ -113,17 +114,13 @@ test("the session panel does nothing if the page has no such element", () => {
   updateSessionInfoPanel();
 });
 
-/** One of the session's events, run through the page's wiring against fakes that record the console and the calls. */
+/** One of the session's events, run through the boot module's wiring against fakes that record the console and the calls. */
 function callback(name, session) {
   const event = {onLoginSuccess: "login", onSessionRestored: "restored", onLogout: "logout"}[name];
   const messages = [], calls = [], handlers = {};
   const fake = {...session, on(e, fn) { handlers[e] = fn; return fake; }};
-  const scope = {
-    addConsoleMessage: (text, kind) => messages.push([text, kind]), updateOperatorStatusUI: () => calls.push("status"), escapeHtml: pageEscape,
-    window: {}, populateRooms: undefined, WebSocketSync: undefined, EntitySync: undefined, RoomManager: undefined, console,
-  };
-  const keys = Object.keys(scope);
-  new Function(...keys, `return (${functionSource("wireOperatorSessionEffects")});`)(...keys.map((k) => scope[k]))(fake);
+  const win = {addConsoleMessage: (text, kind) => messages.push([text, kind]), updateOperatorStatusUI: () => calls.push("status")};
+  wireSessionEffects(win, fake);
   handlers[event]();
   return {messages, calls};
 }

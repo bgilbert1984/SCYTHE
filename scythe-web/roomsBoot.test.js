@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {readFileSync} from "node:fs";
-import {bootWorkspace} from "./workspaceBoot.js";
+import {bootKeepingSession as bootWorkspace} from "./bootForTest.js";
 
 const quiet = {warn() {}, debug() {}, log() {}, error() {}, info() {}};
 const page = readFileSync(new URL("../command-ops-visualization.html", import.meta.url), "utf8");
@@ -111,11 +111,10 @@ test("the chat tool is told when a room becomes current", async () => {
 
 // --- the page ---
 
-test("the page has no RoomManager object of its own; the operator session's logout uses the controls", () => {
+test("the page has no RoomManager object of its own; nothing in the page assigns into it", () => {
   assert.equal(/const RoomManager = \{/.test(page), false);
   assert.equal(page.includes("window.RoomManager = RoomManager"), false);
   assert.equal(/RoomManager\.(?:rooms|joinedRooms|currentRoomId)\s*=[^=]/.test(page), false, "nothing assigns into the manager");
-  assert.match(page, /RoomManager\.reset\(\);/);
   for (const dead of ["getRoomDetails", "publishToRoom"]) assert.equal(page.includes(dead), false, dead);
 });
 

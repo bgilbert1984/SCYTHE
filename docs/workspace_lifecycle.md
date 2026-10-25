@@ -384,9 +384,28 @@ and `on` / `off` are what the ADS-B and AIS tools use, through the boot module's
 - Pinned, not changed: the SSE fallback asks EntitySync to connect (the operator session does the same when `useWebSocket` is false, so it may be asked twice); a second `connect()` closes the first socket, which tells the subscribers it disconnected; an entity event with no `event_type` reaches EntitySync and then throws.
 - Verified against the old object with a randomised differential (3,000 scenarios of 18 steps, with a socket stand-in, a token and socket.io that come and go, a bootstrap record, and random server events): the same sockets opened with the same options, the same handlers registered, the same calls to EntitySync and the room manager, console messages, notifications and state, apart from the handler that did nothing.
 
+## Eighteenth tool: the operator's session (`scythe-web/sessionPlugin.js`)
+
+`OperatorSession` (a 315-line object in `command-ops-visualization.html`) is now the `session` tool, and `window.OperatorSession` is its controls (the boot module sets it; the page activates the
+tool first). It holds who is signed in, restores and validates a saved session (`init`), logs in, registers and logs out over REST, sends the server a heartbeat every 30 seconds with where
+the camera is looking, and lists the active operators. The page reads its state as before (`sessionToken`, `isAuthenticated`, `callsign`, `role`, `teamId`, `operatorName`, `operatorId`, `sessionId`),
+now as read-only getters, and so do the other tools through the `operatorSession` service and `cesium-hypergraph-globe.js` through `window.OperatorSession`. The page is touched through `httpFetch`,
+`sessionStore` (`SCYTHE_AUTH`, `localStorage` and the cookie) and `cameraView` (which gains `position()` for the heartbeat).
+
+- It tells subscribers about a login, a restored session and a logout (`on('login' | 'restored' | 'logout', handler)`); what the page does on them (the console message, the status UI, GraphOps, the
+  streams, the rooms) is `wireSessionEffects` in the boot module, in the order the old callbacks ran them. Handlers outlive an activation.
+- **An error in a handler reaches the caller**, as it did in the callbacks: a failing login effect makes `login` report failure although the session is set, a failing restore effect makes the restore
+  fail and signs the session out, a failing logout effect makes `logout` reject after the session was cleared. Pinned; deciding otherwise is a separate step.
+- Pinned, not changed: a session is saved in `localStorage.operatorSession`, the cookie `operatorSessionToken` (seven days) and `localStorage.scythe_session_token`; clearing it removes the first and the
+  cookie and leaves `scythe_session_token` and whatever `SCYTHE_AUTH` keeps (plan, finding 2: reproduced in a browser with the real `shared_auth.js`, and decided in step 5).
+- Deactivating stops the heartbeat and forgets the session without telling the subscribers, and an answer that arrives afterwards changes nothing. An `init()` asked for before the tool is active is made when it activates.
+- Verified against the old object with a randomised differential through the real boot module (5,000 scenarios of 12 steps: init, validate, login, register, logout, the heartbeat, clearing, the active operators,
+  with every combination of streams, rooms, GraphOps and the DSL explorer's room list, a failing storage write or cookie, and an effect that throws): the same requests, storage and cookie writes, timers,
+  messages, effects in order, return values, errors and state.
+
 ## Not done
 
-- Only ADS-B, AIS streaming, chat, metrics, the metrics explorer, propagation, the entity stream, sensors, the fusion overlays, the viewsheds, LPI, operator presence the level-of-detail manager, the points of interest and Auto-Recon (its controller and its drawing) the rooms and the realtime socket use the contract, and activation is not yet driven by the operator (a panel click).
+- Only ADS-B, AIS streaming, chat, metrics, the metrics explorer, propagation, the entity stream, sensors, the fusion overlays, the viewsheds, LPI, operator presence the level-of-detail manager, the points of interest and Auto-Recon (its controller and its drawing) the rooms, the realtime socket and the operator's session use the contract, and activation is not yet driven by the operator (a panel click).
 - No unified transport: the tools take the realtime socket, `WebSocketSync` and `fetch` as services; they do not open their own.
 - Not run in a browser against a signed-in session; the tests cover the contract, the plugin, the boot wiring, and run the
   page's own `removeEntityMarker` against a fake collection.
