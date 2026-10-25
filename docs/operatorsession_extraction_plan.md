@@ -2,6 +2,8 @@
 
 Status: plan only. Nothing here is implemented. It is written so each step can be agreed, built and merged on its own.
 
+Progress: step 2 (escaping the operator's identity where it reaches HTML) is done. The rest is not started.
+
 `OperatorSession` is the last of the big page objects: about 315 lines in `command-ops-visualization.html`, 25 members. It is small, but it is the one every
 other piece leans on. The `EntitySync`, rooms, recon, sensors and websocket-sync tools read its token through the `operatorSession` service, the presence tool reads
 its operator list and id, and about fifty places in the page and one in `cesium-hypergraph-globe.js` read its properties directly. A mistake here does not break

@@ -16831,7 +16831,7 @@ const originalComplete = options.complete;
             
             // Event callbacks (can be overridden)
             onLoginSuccess: function() {
-                addConsoleMessage(`👤 Operator ${this.callsign} logged in`, 'info');
+                addConsoleMessage(`👤 Operator ${escapeHtml(this.callsign)} logged in`, 'info');
                 updateOperatorStatusUI();
                 
                 // Rebind GraphOps to this instance (unlocks inference)
@@ -16857,7 +16857,7 @@ const originalComplete = options.complete;
             },
             
             onSessionRestored: function() {
-                addConsoleMessage(`👤 Session restored for ${this.callsign}`, 'info');
+                addConsoleMessage(`👤 Session restored for ${escapeHtml(this.callsign)}`, 'info');
                 updateOperatorStatusUI();
                 
                 // Rebind GraphOps to this instance (unlocks inference)
@@ -17036,8 +17036,8 @@ const originalComplete = options.complete;
             if (OperatorSession.isAuthenticated) {
                 if (statusEl) {
                     statusEl.innerHTML = `
-                        <span class="operator-badge role-${OperatorSession.role}">
-                            ${OperatorSession.callsign}
+                        <span class="operator-badge role-${escapeHtml(OperatorSession.role)}">
+                            ${escapeHtml(OperatorSession.callsign)}
                         </span>
                     `;
                 }
@@ -17226,12 +17226,12 @@ const originalComplete = options.complete;
                 infoEl.innerHTML = `
                     <div style="padding: 10px; background: rgba(42, 42, 42, 0.8); border-radius: 4px;">
                         <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
-                            <span class="operator-badge role-${OperatorSession.role}">${OperatorSession.callsign}</span>
+                            <span class="operator-badge role-${escapeHtml(OperatorSession.role)}">${escapeHtml(OperatorSession.callsign)}</span>
                         </div>
                         <div style="font-size: 11px; color: #888;">
-                            <div>Role: ${OperatorSession.role}</div>
-                            <div>Email: ${OperatorSession.operatorName}</div>
-                            ${OperatorSession.teamId ? `<div>Team: ${OperatorSession.teamId}</div>` : ''}
+                            <div>Role: ${escapeHtml(OperatorSession.role)}</div>
+                            <div>Email: ${escapeHtml(OperatorSession.operatorName)}</div>
+                            ${OperatorSession.teamId ? `<div>Team: ${escapeHtml(OperatorSession.teamId)}</div>` : ''}
                         </div>
                     </div>
                 `;
