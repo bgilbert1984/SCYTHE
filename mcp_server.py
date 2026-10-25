@@ -233,6 +233,21 @@ class MCPHandler:
             return registry._tools[name]
         return self._tools.get(name)
 
+    def served_tools(self) -> Dict[str, Any]:
+        """Every tool this handler can run, as the object that carries its declared metadata."""
+        tools: Dict[str, Any] = {}
+        orchestrator = getattr(self, "_orchestrator", None)
+        if orchestrator is not None:
+            tools.update(orchestrator.registry._tools)
+        for name in self._tools:
+            tools[name] = self._resolve_tool(name)
+        return tools
+
+    def assert_contract(self) -> None:
+        """Fail startup when a registered tool's declaration is invalid (``ToolContractError``)."""
+        from mcp_effects import assert_tool_contract
+        assert_tool_contract(self.served_tools())
+
     def _handle_tools_call(self, params: Dict[str, Any]):
         name = params.get("name", "")
         arguments = params.get("arguments", {}) or {}
@@ -455,6 +470,11 @@ def register_mcp_routes(app, engine, use_orchestrator: bool = False, auth_valida
         logger.info("[mcp] RF evidence and guarded control tools registered")
     except Exception as exc:
         logger.warning("[mcp] RF tool registration failed: %s", exc)
+
+    # Unavailable integrations above only log; an invalid declaration on a tool that did
+    # register must stop startup, because the approval boundary trusts these declarations.
+    if hasattr(handler, "assert_contract"):
+        handler.assert_contract()
 
     from flask import request, jsonify
 

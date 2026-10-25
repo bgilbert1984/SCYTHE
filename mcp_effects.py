@@ -254,3 +254,23 @@ def validate_tool_contract(tools) -> list[str]:
         if getattr(tool, "effect_declared", False) and approval_policy(tool) != expected:
             problems.append(f"{name}: approval policy {approval_policy(tool)} does not match effect {effect}")
     return problems
+
+
+class ToolContractError(RuntimeError):
+    """Registered tools violate the declarative contract.  Raised at startup, never swallowed."""
+
+    def __init__(self, problems):
+        self.problems = list(problems)
+        super().__init__(
+            f"{len(self.problems)} MCP tool contract violation(s): " + "; ".join(self.problems))
+
+
+def assert_tool_contract(tools) -> None:
+    """Raise ``ToolContractError`` when ``validate_tool_contract`` finds a violation.
+
+    This judges the metadata of tools that are registered.  A tool whose integration is
+    unavailable is simply not registered, so it is not a violation.
+    """
+    problems = validate_tool_contract(tools)
+    if problems:
+        raise ToolContractError(problems)

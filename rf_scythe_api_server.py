@@ -21414,6 +21414,7 @@ def main():
         logger.info('ADS-B replay disabled (use --adsb-refresh to enable)')
 
     # Register MCP JSON-RPC endpoint on the Flask app (same port, /mcp path)
+    from mcp_effects import ToolContractError
     try:
         from mcp_server import register_mcp_routes
 
@@ -21465,8 +21466,13 @@ def main():
                 )
             except Exception as emb_err:
                 logger.warning('Could not init EmbeddingEngine: %s', emb_err)
+            # Tools registered after register_mcp_routes returned (embedding, GraphOps agent)
+            # are checked too; an invalid declaration stops startup.
+            mcp_handler.assert_contract()
         else:
             logger.info('Skipping MCP server — no HypergraphEngine available')
+    except ToolContractError:
+        raise
     except Exception as e:
         logger.warning('Could not register MCP routes: %s', e)
 
