@@ -221,7 +221,12 @@ dropped proposal is not found, so it can be neither approved, denied nor execute
 proposer proposes again. The audit rows keep the record, and at startup the one process that
 owns the store appends a `proposal.expired` row ("orphaned by restart") for each proposal the
 audit shows as created and undecided (`control_audit.close_orphaned_proposals`), so the history
-ends truthfully instead of at `pending_approval`. That step is evidence only and idempotent. It
+ends truthfully instead of at `pending_approval`. That step is evidence only and idempotent. Its failure policy is warn-only on purpose: the
+proposals are in memory, so a failed audit write cannot let an old command run, and refusing to start
+over an audit-database fault would take the orchestrator (and the stop path) down with it. The
+failure is logged at ERROR (`RESTART AUDIT INCOMPLETE`); until the next successful startup those
+proposals' history may end at `pending_approval`, so the audit is not a completeness guarantee under
+database failure. It
 does not touch a proposal that was denied, expired or executed, or one whose execution began
 (a `started` row): whether that one ran is unknown and the audit does not claim otherwise.
 It assumes one process per audit store, which holds because each instance has its own data

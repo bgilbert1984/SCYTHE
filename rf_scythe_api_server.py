@@ -21438,7 +21438,8 @@ def main():
                 if orphaned:
                     logger.warning('Closed %d proposal(s) left open by the previous run (not persisted)', len(orphaned))
             except Exception as exc:
-                logger.warning('Could not close orphaned proposals in the control audit: %s', exc)
+                logger.error('RESTART AUDIT INCOMPLETE: could not close orphaned proposals in the control audit '
+                             '(proposals are in memory and cannot run; their audit history may end at pending_approval): %s', exc)
             logger.info('MCP server registered at /mcp (%d tools, %d resources)',
                         len(mcp_handler._tools), len(mcp_handler._resources))
 

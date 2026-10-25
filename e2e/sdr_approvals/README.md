@@ -8,7 +8,7 @@ fake radio. A second phase drives the Mission Governance page (`scythe-web/regio
 python e2e/sdr_approvals/run.py            # screenshots go to e2e/sdr_approvals/out/ (git-ignored)
 ```
 
-Expected result: **22/22 passed**, exit status 0. That is the reference lifecycle behaviour.
+Expected result: **23/23 passed**, exit status 0. That is the reference lifecycle behaviour.
 
 ## Coverage
 
@@ -61,8 +61,9 @@ Not validated (intentionally):
 | 20 | CHARLIE is signed in but has not been granted approval authority (`MCP_APPROVERS` lists ALPHA and BRAVO only): the console shows the held command with no Approve/Deny and says why, deciding it is a 403 for both approve and deny, and nothing runs. |
 | 21 | After a restart (the harness builds a fresh handler and runs the startup step) the held command is gone: the approver sees nothing waiting, approving the old id is a 404, nothing runs, and the audit ends the proposal as `proposal.expired`, orphaned by restart. |
 | 22 | The governance page shows CHARLIE the held command with no Approve/Deny and "You are not authorized to approve commands". |
+| 23 | A granted approver is shown no Approve/Deny when the server's answer omits `caller_may_approve` (the console fails closed). |
 
-Cases 20 to 22 run in the order the phases need them (20 and 21 after 11, 22 after 19). Each was checked by mutation: breaking the
+Cases 20 to 23 run in the order the phases need them (20 and 21 after 11, 22 after 19). Each was checked by mutation: breaking the
 `caller_may_approve` handling in either page, or the startup step that closes orphaned proposals, fails exactly the case that covers it.
 
 Reference screenshots (pending, approved, denied, lifecycle unavailable, validation error, governance header, approver view and approved, ungranted operator, after restart, ungranted on the governance page) are in `reference/`.

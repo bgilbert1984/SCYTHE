@@ -282,6 +282,27 @@ class Walkthrough:
                        and ended["orphaned_by_restart"] and not ended["executed"] and self.badge(a) == "Approvals")
             c["detail"] = f"before={before!r} after={after!r} old_id_status={code} audit={self.events(ended)} badge={self.badge(a)!r}"
 
+        with self.case(23, "BRAVO (granted) is shown no Approve/Deny when the server's answer does not say whether the caller may approve (the console fails closed)") as c:
+            def strip(r):
+                resp = r.fetch()
+                body = resp.json()
+                body.pop("caller_may_approve", None)
+                r.fulfill(response=resp, body=json.dumps(body))
+            a.fill("#sdrpp-frequency-input", "99M")
+            a.click("#sdrpp-tune-btn")
+            a.wait_for_timeout(1000)
+            b.route("**/api/mcp/proposals/pending", strip)
+            self.refresh(b)
+            unknown = self.panel(b)
+            unknown_buttons = b.locator("#sdrpp-approvals button").count()
+            b.unroute("**/api/mcp/proposals/pending", strip)
+            self.refresh(b)
+            known_buttons = b.locator("#sdrpp-approvals button").count()
+            c["ok"] = ("99.000 MHz" in unknown and unknown_buttons == 0 and known_buttons >= 2
+                       and "tune 99000000.0" not in self.calls())
+            c["detail"] = f"buttons_when_unknown={unknown_buttons} buttons_when_stated={known_buttons} panel={unknown!r}"
+            self.decide(b, "99.000 MHz", "Deny")
+
         print("page errors:", json.dumps({k: p.errors for k, p in (("alpha", a), ("bravo", b), ("alpha2", a2), ("charlie", ch)) if p})[:600])
         for page in (a, b, a2, ch):      # the console pages (Cesium) are done; closing them keeps the next phase's clicks responsive
             if page:

@@ -76,7 +76,7 @@ export class MissionGovernancePanel {
         pending: pending.status === 200 ? pending.data.proposals || [] : [],
         recent: recent.status === 200 ? recent.data.proposals || [] : []});
       this.caller = governance.data.caller || null;
-      s.mayApprove = governance.data.caller_may_approve !== false;   // only an explicit "no" hides the buttons
+      s.mayApprove = governance.data.caller_may_approve === true;   // fail closed: only an explicit "yes" shows the buttons
     }
     this.render();
   }
@@ -144,7 +144,7 @@ export class MissionGovernancePanel {
       row.append(this.stripFor({status: "pending_approval"}));
       if (item.own) {
         row.append(this.el("em", "mgov__own", "Yours: another operator must approve"));
-      } else if (this.state.mayApprove === false) {
+      } else if (this.state.mayApprove !== true) {
         row.append(this.el("em", "mgov__own", "You are not authorized to approve commands"));
       } else {
         for (const [decision, label] of [["approve", "Approve"], ["deny", "Deny"]]) {
