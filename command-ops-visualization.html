@@ -18068,7 +18068,6 @@ const originalComplete = options.complete;
             showLabels: true,
             autoUpdate: false,
             updateInterval: null,
-            _lastSnapshotMs: 0,   // epoch ms of last authoritative snapshot fetch
             _reconSSE: null,      // EventSource handle for /api/recon/entities/stream
             referencePoint: { lat: 37.7749, lon: -122.4194 },
             
@@ -18357,15 +18356,9 @@ const originalComplete = options.complete;
                     if (data.status === 'ok') {
                         ReconStore.clear();   // in place: the store's map is the one everything reads
                         data.entities.forEach(e => {
-                            // Normalize entity structure: some entities have data nested in 'data' field
-                            let normalized = e;
-                            if (e.data && typeof e.data === 'object') {
-                                // Merge nested data to top level, preserving entity_id
-                                normalized = { ...e.data, entity_id: e.data.entity_id || e.id || e.entity_id };
-                            }
-                            // Validate that entity has required location data
-                            if (!normalized.location || typeof normalized.location.lat !== 'number' || typeof normalized.location.lon !== 'number') {
-                                console.warn(`[AutoRecon] Skipping entity ${normalized.entity_id || 'unknown'}: missing valid location data`);
+                            const normalized = ReconLogic.normalizeLoaded(e);
+                            if (!normalized) {
+                                console.warn(`[AutoRecon] Skipping entity ${e.entity_id || e.id || 'unknown'}: missing valid location data`);
                                 return;
                             }
                             ReconStore.upsert(normalized);
@@ -18418,28 +18411,7 @@ const originalComplete = options.complete;
                 const listEl = document.getElementById('recon-alert-list');
                 if (!listEl) return;
                 
-                if (this.alerts.length === 0) {
-                    listEl.innerHTML = '<div class="no-alerts">No active alerts</div>';
-                    return;
-                }
-                
-                let html = '';
-                this.alerts.forEach(alert => {
-                    const threatClass = alert.threat_level.toLowerCase();
-                    html += `
-                        <div class="alert-item threat-${escapeHtml(threatClass)}" onclick="AutoReconVisualization.flyToEntity(${escapeHtml(JSON.stringify(String(alert.entity_id)))})">
-                            <div class="alert-header">
-                                <span class="alert-name">${escapeHtml(alert.name)}</span>
-                                <span class="alert-threat">${escapeHtml(alert.threat_level)}</span>
-                            </div>
-                            <div class="alert-details">
-                                <span>${escapeHtml(alert.disposition)}</span>
-                                <span>${alert.distance_nm.toFixed(1)} NM @ ${alert.bearing_deg.toFixed(0)}°</span>
-                            </div>
-                        </div>
-                    `;
-                });
-                listEl.innerHTML = html;
+                listEl.innerHTML = ReconLogic.alertListHtml(this.alerts);
             },
             
             renderEntities: function() {
@@ -18619,58 +18591,7 @@ const originalComplete = options.complete;
                     // ── Push to MLDC Deck.gl TextLayer (multi-channel signal) ──
                     if (window.__MLDC__) {
                         window._mldcLabelMap = window._mldcLabelMap || {};
-
-                        const THREAT_PRI = {
-                            CRITICAL:   0.95, HIGH:       0.85,
-                            SUSPICIOUS: 0.70, NONE:       0.30,
-                        };
-                        const DISP_PRI = {
-                            HOSTILE:   0.90, SUSPICIOUS: 0.75,
-                            UNKNOWN:   0.50, FRIENDLY:   0.40, NEUTRAL: 0.35,
-                        };
-                        const priority = THREAT_PRI[threatLevel] ?? DISP_PRI[disposition] ?? 0.5;
-
-                        // trust: classification confidence (0-1). Defaults to 0.8 if absent.
-                        const trust = typeof entity.classification_confidence === 'number'
-                            ? entity.classification_confidence
-                            : (entity.confidence ?? 0.8);
-
-                        // recency: decays from 1→0 over 10 minutes of staleness.
-                        const nowMs   = Date.now();
-                        const seenMs  = entity.last_seen
-                            ? new Date(entity.last_seen).getTime()
-                            : nowMs;
-                        const ageSec  = Math.max(0, (nowMs - seenMs) / 1000);
-                        const recency = Math.exp(-ageSec / 600); // τ = 10 min
-
-                        // rfConfidence: signal detection strength (0-1).
-                        const rfConfidence = entity.rf_confidence
-                            ?? entity.signal_confidence
-                            ?? (entity.rf_emissions ? 0.85 : 0.5);
-
-                        // frequencyHz for SDF color-band encoding
-                        const frequencyHz = entity.frequency_hz
-                            ?? (entity.rf_emissions?.frequency_mhz
-                                ? entity.rf_emissions.frequency_mhz * 1e6
-                                : undefined);
-
-                        const labelColor =
-                            disposition === 'HOSTILE'    ? [255,  60,  60] :
-                            disposition === 'SUSPICIOUS' ? [255, 165,   0] :
-                            disposition === 'FRIENDLY'   ? [  0, 220, 100] :
-                                                           [180, 210, 255];
-
-                        window._mldcLabelMap[entityId] = {
-                            id:           entityId,
-                            coordinates:  [lon, lat],
-                            label:        entity.name || entityId,
-                            priority,
-                            trust,
-                            recency,
-                            rfConfidence,
-                            frequencyHz,
-                            color:        labelColor,
-                        };
+                        window._mldcLabelMap[entityId] = ReconLogic.mldcLabel(entity, Date.now());
                         window.__MLDC__.setLabelData(Object.values(window._mldcLabelMap));
                     }
 
@@ -18824,65 +18745,7 @@ const originalComplete = options.complete;
             },
             
             createEntityDescription: function(entity) {
-                const threatClass = entity.threat_level.toLowerCase();
-                const dispClass = entity.disposition.toLowerCase();
-                
-                return `
-                    <div style="padding: 10px; font-family: sans-serif;">
-                        <h3 style="margin: 0 0 10px 0; color: #00aaff;">🎯 ${escapeHtml(entity.name)}</h3>
-                        <table style="width: 100%; border-collapse: collapse;">
-                            <tr><td style="padding: 3px; color: #888;">Entity ID:</td><td style="padding: 3px;">${escapeHtml(entity.entity_id)}</td></tr>
-                            <tr><td style="padding: 3px; color: #888;">Disposition:</td><td style="padding: 3px; color: ${this.getDispositionCssColor(entity.disposition)};">${escapeHtml(entity.disposition)}</td></tr>
-                            <tr><td style="padding: 3px; color: #888;">Threat Level:</td><td style="padding: 3px; color: ${this.getThreatCssColor(entity.threat_level)};">${escapeHtml(entity.threat_level)}</td></tr>
-                            <tr><td style="padding: 3px; color: #888;">Position:</td><td style="padding: 3px;">${(Number(entity.location?.lat ?? 0)).toFixed(5)}°, ${(Number(entity.location?.lon ?? 0)).toFixed(5)}°</td></tr>
-                            <tr><td style="padding: 3px; color: #888;">Distance:</td><td style="padding: 3px;">${(Number(entity.distance_nm ?? 0)).toFixed(2)} NM</td></tr>
-                            <tr><td style="padding: 3px; color: #888;">Bearing:</td><td style="padding: 3px;">${(Number(entity.bearing_deg ?? 0)).toFixed(1)}°</td></tr>
-                            <tr><td style="padding: 3px; color: #888;">Speed:</td><td style="padding: 3px;">${(entity.velocity?.speed_kts ?? 0).toFixed(1)} kts</td></tr>
-                            <tr><td style="padding: 3px; color: #888;">Heading:</td><td style="padding: 3px;">${(entity.velocity?.heading_deg ?? 0).toFixed(1)}°</td></tr>
-                            <tr><td style="padding: 3px; color: #888;">Ontology:</td><td style="padding: 3px;">${escapeHtml(entity.ontology)}</td></tr>
-                            <tr><td style="padding: 3px; color: #888;">RF Emissions:</td><td style="padding: 3px;">${entity.rf_emissions ? '📡 Detected' : 'None'}</td></tr>
-                            <tr><td style="padding: 3px; color: #888;">IFF Response:</td><td style="padding: 3px;">${entity.iff_response ? '✅ Valid' : '❌ None'}</td></tr>
-                        </table>
-                        <div style="margin-top: 10px;">
-                            <button onclick="AutoReconVisualization.createTaskForEntity(${escapeHtml(JSON.stringify(String(entity.entity_id)))})" 
-                                    style="padding: 5px 10px; background: #0066aa; color: white; border: none; border-radius: 3px; cursor: pointer;">
-                                📋 Create Task
-                            </button>
-                            <button onclick="AutoReconVisualization.updateDisposition(${escapeHtml(JSON.stringify(String(entity.entity_id)))})" 
-                                    style="padding: 5px 10px; background: #aa6600; color: white; border: none; border-radius: 3px; cursor: pointer; margin-left: 5px;">
-                                🏷️ Change Disposition
-                            </button>
-                        </div>
-                    </div>
-                `;
-            },
-            
-            getDispositionCssColor: function(disposition) {
-                const colors = {
-                    'UNKNOWN': '#FFFF00',
-                    'PENDING': '#FFFF00',
-                    'ASSUMED_FRIEND': '#4444FF',
-                    'FRIEND': '#0000FF',
-                    'NEUTRAL': '#00FF00',
-                    'SUSPICIOUS': '#FFA500',
-                    'HOSTILE': '#FF0000',
-                    'ELIMINATED': '#888888',
-                    'JOKER': '#FF00FF',
-                    'FAKER': '#800080'
-                };
-                return colors[disposition] || '#AAAAAA';
-            },
-            
-            getThreatCssColor: function(threat) {
-                const colors = {
-                    'CRITICAL': '#FF0000',
-                    'HIGH': '#FF4500',
-                    'MEDIUM': '#FFA500',
-                    'LOW': '#FFFF00',
-                    'MINIMAL': '#00FF00',
-                    'NONE': '#00FFFF'
-                };
-                return colors[threat] || '#AAAAAA';
+                return ReconLogic.describeEntity(entity);
             },
             
             // Remove one entity's markers (billboard, altitude line, threat ring), wherever they were added.
@@ -18980,7 +18843,7 @@ const originalComplete = options.complete;
                             // Only update changed entities (not the full list)
                             if (data.entity_count > 0) {
                                 data.entities.forEach(e => {
-                                    self.entities[e.entity_id] = e;
+                                    ReconStore.upsert(e);
                                     self.updateEntityPosition(e);
                                 });
                                 self.perfMetrics.entityUpdates += data.entity_count;
@@ -18990,9 +18853,7 @@ const originalComplete = options.complete;
                             const updateDuration = performance.now() - updateStart;
                             self.perfMetrics.updateCount++;
                             self.perfMetrics.lastUpdateMs = updateDuration;
-                            self.perfMetrics.avgUpdateMs = 
-                                (self.perfMetrics.avgUpdateMs * (self.perfMetrics.updateCount - 1) + updateDuration) 
-                                / self.perfMetrics.updateCount;
+                            self.perfMetrics.avgUpdateMs = ReconLogic.runningAverage(self.perfMetrics.avgUpdateMs, self.perfMetrics.updateCount, updateDuration);
                             
                             // Refresh alerts (these are cached on backend)
                             self.loadAlerts();
@@ -19018,8 +18879,7 @@ const originalComplete = options.complete;
             },
 
             // Connect to the SSE entity stream for push-based patches.
-            // On reconnect, resets _lastSnapshotMs so show() forces a full
-            // authoritative resync — closing the stale-state gap after restarts.
+            // On a dropped stream, retry after 5 s with a full reload of the entities.
             _bindReconSSE: function() {
                 if (this._reconSSE) return;
                 const self = this;
@@ -19028,18 +18888,8 @@ const originalComplete = options.complete;
                     src.onmessage = function(event) {
                         try {
                             const raw = JSON.parse(event.data);
-                            if (raw.type === 'connected') return;
-                            const entity = raw.entity || raw;
-                            if (!entity || !entity.entity_id) return;
-                            // Map server-side event type to applyEntitySyncEvent contract
-                            const evtType = raw.type === 'entity_deleted' ? 'DELETE'
-                                          : (self.entities[entity.entity_id] ? 'UPDATE' : 'CREATE');
-                            self.applyEntitySyncEvent({
-                                event_type:  evtType,
-                                entity_id:   entity.entity_id,
-                                entity_type: entity.entity_type || 'RECON_ENTITY',
-                                entity_data: entity,
-                            });
+                            const evt = ReconLogic.streamEvent(raw, self.entities);
+                            if (evt) self.applyEntitySyncEvent(evt);
                         } catch (e) {
                             console.debug('[AutoRecon] SSE parse error:', e);
                         }
@@ -19048,8 +18898,7 @@ const originalComplete = options.complete;
                         console.warn('[AutoRecon] SSE stream disconnected');
                         src.close();
                         self._reconSSE = null;
-                        // Force full resync on next show() / retry
-                        self._lastSnapshotMs = 0;
+                        // Full resync on retry
                         if (self.visible || self.updateInterval) {
                             setTimeout(function() {
                                 if (self.visible) self.loadEntities();
@@ -19260,7 +19109,7 @@ const originalComplete = options.complete;
                     
                     const data = await response.json();
                     if (data.status === 'ok') {
-                        this.entities[entityId] = data.entity;
+                        ReconStore.upsert(data.entity, entityId);
                         addConsoleMessage(`${entity.name} disposition changed to ${newDisposition.toUpperCase()}`, 'response');
                         
                         // Re-render to update colors
@@ -19275,116 +19124,6 @@ const originalComplete = options.complete;
             },
             
             // ========================================================================
-            // PERFORMANCE MONITORING (Optimization: visibility into system performance)
-            // ========================================================================
-            
-            getPerformanceStats: function() {
-                return {
-                    frontend: {
-                        updateCount: this.perfMetrics.updateCount,
-                        lastUpdateMs: this.perfMetrics.lastUpdateMs.toFixed(2),
-                        avgUpdateMs: this.perfMetrics.avgUpdateMs.toFixed(2),
-                        entityUpdatesTotal: this.perfMetrics.entityUpdates,
-                        entitiesTracked: Object.keys(this.entities).length
-                    },
-                    incremental: {
-                        enabled: true,
-                        lastTimestamp: this.lastUpdateTimestamp
-                    }
-                };
-            },
-            
-            showPerformanceMetrics: async function() {
-                try {
-                    // Get backend metrics
-                    const response = await fetch('/api/metrics');
-                    const backendMetrics = await response.json();
-                    
-                    // Get frontend metrics
-                    const frontendStats = this.getPerformanceStats();
-                    
-                    // Format and display
-                    const msg = `
-=== RECON SYSTEM PERFORMANCE ===
-FRONTEND:
-  Updates: ${frontendStats.frontend.updateCount}
-  Last update: ${frontendStats.frontend.lastUpdateMs}ms
-  Avg update: ${frontendStats.frontend.avgUpdateMs}ms
-  Entities tracked: ${frontendStats.frontend.entitiesTracked}
-
-BACKEND:
-  Spatial Index: ${backendMetrics.spatial_index?.point_count || 'N/A'} points
-  Build time: ${backendMetrics.spatial_index?.last_build_time_ms?.toFixed(2) || 'N/A'}ms
-  Alerts cache: ${backendMetrics.recon_performance?.alerts_cache_valid ? 'VALID' : 'DIRTY'}
-  
-API TIMING (avg ms):
-  get_all_entities: ${backendMetrics.operations?.get_all_entities?.avg_ms?.toFixed(3) || 'N/A'}
-  get_nearest: ${backendMetrics.operations?.get_nearest_entities?.avg_ms?.toFixed(3) || 'N/A'}
-  get_batch: ${backendMetrics.operations?.get_entities_batch?.avg_ms?.toFixed(3) || 'N/A'}
-================================`;
-                    
-                    console.log(msg);
-                    addConsoleMessage('Performance metrics retrieved (see console)', 'response');
-                    
-                    return { frontend: frontendStats, backend: backendMetrics };
-                } catch (error) {
-                    console.error('Error fetching metrics:', error);
-                    return null;
-                }
-            },
-            
-            // ========================================================================
-            // BATCH API HELPERS (Optimization: reduce network round-trips)
-            // ========================================================================
-            
-            loadEntitiesBatch: async function(entityIds) {
-                try {
-                    const response = await fetch('/api/recon/entities/batch', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ entity_ids: entityIds })
-                    });
-                    
-                    const data = await response.json();
-                    
-                    if (data.status === 'ok') {
-                        data.entities.forEach(e => {
-                            this.entities[e.entity_id] = e;
-                        });
-                        return data.entities;
-                    }
-                    return [];
-                } catch (error) {
-                    console.error('Error loading batch entities:', error);
-                    return [];
-                }
-            },
-            
-            loadNearestEntities: async function(k = 10) {
-                try {
-                    const response = await fetch(`/api/recon/nearest?k=${k}`);
-                    const data = await response.json();
-                    
-                    if (data.status === 'ok') {
-                        // Clear and reload only nearest entities for focus view
-                        this.clearAllEntities();
-                        
-                        data.entities.forEach(e => {
-                            this.entities[e.entity_id] = e;
-                        });
-                        
-                        this.renderEntities();
-                        addConsoleMessage(`Showing ${data.entity_count} nearest entities`, 'response');
-                        return data.entities;
-                    }
-                    return [];
-                } catch (error) {
-                    console.error('Error loading nearest entities:', error);
-                    return [];
-                }
-            },
-
-            // ========================================================================
             // ENTITY SYNC INTEGRATION (Real-time multi-operator synchronization)
             // ========================================================================
             
@@ -19393,106 +19132,33 @@ API TIMING (avg ms):
              * Handles CREATE, UPDATE, DELETE, and PREEXISTING events for RECON_ENTITY/NMAP_TARGET types.
              */
             applyEntitySyncEvent: function(evt) {
-                if (!evt) return;
-                
-                const entityId = evt.entity_id;
-                const entityType = evt.entity_type || '';
-                const entityData = evt.entity_data || {};
-                const eventType = evt.eventType || evt.event_type || 'UPDATE';
-                
-                // Filter: only process RECON_ENTITY and NMAP_TARGET types
-                if (entityType !== 'RECON_ENTITY' && entityType !== 'NMAP_TARGET' && 
-                    !entityId?.startsWith('AIS-') && !entityId?.startsWith('ENTITY-')) {
-                    return;
+                const plan = ReconLogic.planSyncEvent(evt, this.entities, Date.now());
+                if (!plan) return;
+                console.log(`[AutoRecon] EntitySync ${evt.eventType || evt.event_type || 'UPDATE'}: ${evt.entity_id} (${evt.entity_type || ''})`);
+
+                if (plan.kind === 'upsert') {
+                    ReconStore.upsert(plan.entity, plan.id);
+                    if (this.visible) {
+                        this.removeEntityMarker(plan.id); // Remove existing if any
+                        this.addEntityMarker(this.entities[plan.id]);
+                    }
+                } else if (plan.existed) {
+                    ReconStore.remove(plan.id);
+                    if (this.visible) {
+                        this.removeEntityMarker(plan.id);
+                    }
                 }
-                
-                console.log(`[AutoRecon] EntitySync ${eventType}: ${entityId} (${entityType})`);
-                
-                switch (eventType.toUpperCase()) {
-                    case 'CREATE':
-                    case 'PREEXISTING':
-                        // Add or update entity
-                        this.entities[entityId] = this._normalizeEntityData(entityData);
-                        if (this.visible) {
-                            this.removeEntityMarker(entityId); // Remove existing if any
-                            this.addEntityMarker(this.entities[entityId]);
-                        }
-                        break;
-                        
-                    case 'UPDATE':
-                        // Update existing entity
-                        if (this.entities[entityId]) {
-                            // Merge updates while preserving existing fields
-                            this.entities[entityId] = {
-                                ...this.entities[entityId],
-                                ...this._normalizeEntityData(entityData),
-                                entity_id: entityId // Ensure ID is preserved
-                            };
-                        } else {
-                            // Entity doesn't exist locally, create it
-                            this.entities[entityId] = this._normalizeEntityData(entityData);
-                        }
-                        
-                        if (this.visible) {
-                            // Update marker (remove and re-add for color/disposition changes)
-                            this.removeEntityMarker(entityId);
-                            this.addEntityMarker(this.entities[entityId]);
-                        }
-                        break;
-                        
-                    case 'DELETE':
-                        // Remove entity
-                        if (this.entities[entityId]) {
-                            delete this.entities[entityId];
-                            if (this.visible) {
-                                this.removeEntityMarker(entityId);
-                            }
-                        }
-                        break;
-                        
-                    default:
-                        console.debug(`[AutoRecon] Unhandled event type: ${eventType}`);
-                        return;
-                }
-                
+
                 // Update the Recon list UI
                 if (window.updateReconList) {
                     try { window.updateReconList(); } catch(e) { /* ignore */ }
                 }
-                
+
                 // Update count display
                 const countEl = document.getElementById('recon-entity-count');
                 if (countEl) countEl.textContent = Object.keys(this.entities).length;
             },
-            
-            /**
-             * Normalize entity data to ensure consistent structure
-             */
-            _normalizeEntityData: function(data) {
-                const entity = { ...data };
-                
-                // Ensure entity_id
-                entity.entity_id = entity.entity_id || data.id || `ENTITY-${Date.now()}`;
-                
-                // Normalize location
-                entity.location = entity.location || {};
-                entity.location.lat = Number(entity.location.lat ?? data.lat ?? 0);
-                entity.location.lon = Number(entity.location.lon ?? data.lon ?? 0);
-                entity.location.altitude_m = Number(entity.location.altitude_m ?? entity.location.alt ?? 0);
-                
-                // Ensure required fields
-                entity.name = entity.name || entity.entity_id;
-                entity.disposition = entity.disposition || 'UNKNOWN';
-                entity.threat_level = entity.threat_level || 'NONE';
-                entity.velocity = entity.velocity || { speed_kts: 0, heading_deg: 0 };
-                entity.ontology = entity.ontology || 'unknown';
-                entity.distance_nm = entity.distance_nm || 0;
-                entity.bearing_deg = entity.bearing_deg || 0;
-                entity.last_update = entity.last_update || Date.now() / 1000;
-                
-                return entity;
-            },
-            
+
             /**
              * Remove a specific entity marker from the visualization
              */
@@ -19595,18 +19261,7 @@ API TIMING (avg ms):
                         const e = entities[id];
                         const li = document.createElement('li');
                         li.className = 'list-item';
-                        li.innerHTML = `
-                            <div class="list-item-header">
-                                <span class="list-item-title">${escapeHtml(e.name)}</span>
-                                <span class="status-dot" style="background-color:${e.disposition === 'HOSTILE' ? '#ff4d4d' : '#4a9eff'}"></span>
-                            </div>
-                            <div class="list-item-subtitle">${escapeHtml(e.disposition)} | ${escapeHtml(e.threat_level)} | ${e.location.lat.toFixed(3)}, ${e.location.lon.toFixed(3)}</div>
-                            <div class="list-item-actions">
-                                <button class="action-button" data-entity-id="${escapeHtml(e.entity_id)}" data-action="track">Track</button>
-                                <button class="action-button" data-entity-id="${escapeHtml(e.entity_id)}" data-action="task">Task</button>
-                                <button class="action-button" data-entity-id="${escapeHtml(e.entity_id)}" data-action="info">Info</button>
-                            </div>
-                        `;
+                        li.innerHTML = ReconLogic.reconRowHtml(e);
 
                         // Attach handlers
                         li.querySelectorAll('.list-item-actions .action-button').forEach(btn => {

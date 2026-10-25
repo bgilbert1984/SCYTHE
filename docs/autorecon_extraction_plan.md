@@ -40,6 +40,10 @@ shared entity store behind one explicit door before any code moves.
 9. **Unverified:** the Cesium description's buttons (`onclick="AutoReconVisualization.createTaskForEntity(...)"`) sit inside the infobox iframe. If
    its sandbox has no scripts, those buttons have never worked. I have not seen it run signed in; this needs one look before we decide whether to keep the
    names global or move to delegation.
+10. **A partial update overwrites what the entity held** (found in step 4a, kept as it was). An UPDATE event (or stream message) is normalised before it is
+    merged, and normalising fills every missing field with a default, so an update that carries only a name resets the held disposition to `UNKNOWN`, the threat
+    level to `NONE`, the position to 0, 0 and the velocity to zero. The tests pin it (`planSyncEvent`). Whether the server ever sends partial updates is
+    not known; if it does, the fix is to merge the raw data first and normalise the result.
 
 ## 3. Target shape
 
@@ -60,7 +64,9 @@ recon tool  (scythe-web/reconPlugin.js, tool id "recon")
 
 ## 4. Steps
 
-Each step is its own PR, in this order. The first three change no drawing and are the cheapest to review. The last two are the extraction.
+Each step is its own PR, in this order. Steps 1 to 3 are merged (#326, #327, #328); step 4 is split in two: **4a** moves the pure logic (the
+description, the lists' HTML, the normalising, the sync and stream decisions, the MLDC label, the running average) into `reconLogic.js` and routes
+every write through the store, and **4b** moves the controller and the services into the `recon` tool. The first three change no drawing and are the cheapest to review. The last two are the extraction.
 
 1. **Make the pinned test test the live code.** Delete the dead `removeEntityMarker`, point the test at the surviving one (keeping what it checks
    where that is still true), and guard `subscribeToEntitySync` against running twice. Small and behaviour-preserving, apart from the double subscription.

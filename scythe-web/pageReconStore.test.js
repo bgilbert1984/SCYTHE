@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {readFileSync} from "node:fs";
 import {createReconStore} from "./reconStore.js";
+import * as ReconLogic from "./reconLogic.js";
 import {bootWorkspace} from "./workspaceBoot.js";
 
 const page = readFileSync(new URL("../command-ops-visualization.html", import.meta.url), "utf8");
@@ -14,20 +15,18 @@ const where = (pattern) => lines.flatMap((line, i) => (pattern.test(line) ? [i +
 const objectStart = lines.findIndex((line) => /^\s*const AutoReconVisualization = \{/.test(line)) + 1;
 const objectEnd = lines.findIndex((line) => /^\s*window\.AutoReconVisualization = AutoReconVisualization;/.test(line)) + 1;
 
-test("the page's recon writers go through ReconStore: eleven calls, and no assignment into the map left outside the object's own sync code", () => {
-  assert.equal(where(/ReconStore\.upsert\(/).length, 11);
+test("the page's recon writers go through ReconStore: fourteen upserts, one clear, one remove, and no assignment into the map anywhere", () => {
+  assert.equal(where(/ReconStore\.upsert\(/).length, 14);
   assert.equal(where(/ReconStore\.clear\(/).length, 1);
-  const direct = where(/(?:AutoReconVisualization|arv)\.entities\[[^\]]+\]\s*=[^=]/);
-  assert.deepEqual(direct, [], "no writer outside the object reaches into the map");
-  const stubs = where(/window\.AutoReconVisualization = window\.AutoReconVisualization \|\| \{\}/);
-  assert.deepEqual(stubs, [], "no writer creates a bare AutoReconVisualization to write into");
+  assert.equal(where(/ReconStore\.remove\(/).length, 1);
+  assert.deepEqual(where(/(?:AutoReconVisualization|arv|this|self)\.entities\[[^\]]+\]\s*=[^=]/), [], "no writer reaches into the map, inside the object or out of it");
+  assert.deepEqual(where(/window\.AutoReconVisualization = window\.AutoReconVisualization \|\| \{\}/), [], "no writer creates a bare AutoReconVisualization to write into");
   assert.deepEqual(where(/window\.AutoReconVisualization\.entities = window\.AutoReconVisualization\.entities \|\| \{\}/), []);
 });
 
-test("the writes still inside the object are its own sync code (the disposition update, the change feed, the stream), left for the extraction", () => {
-  const inside = where(/this\.entities\[[^\]]+\]\s*=[^=]/);
-  assert.ok(inside.length >= 5);
-  for (const n of inside) assert.ok(n > objectStart && n < objectEnd, `line ${n} is inside the object`);
+test("the object's own writers (the disposition update, the change feed, the sync handler) are inside the object and use the store", () => {
+  const inside = where(/ReconStore\.(?:upsert|remove)\(/).filter((n) => n > objectStart && n < objectEnd);
+  assert.equal(inside.length, 5, "loadEntities, the change feed, the disposition update, and the sync handler's upsert and remove");
 });
 
 test("the object's entity map is never replaced after it is made", () => {
@@ -44,8 +43,8 @@ function reload(store, {response, calls = []}) {
   const source = page.slice(start, end + "\n            }".length).trim().replace(/^loadEntities: /, "");
   const object = {entities: store.entities, renderEntities: () => calls.push("render"), loadAlerts: () => calls.push("alerts")};
   const els = {"recon-entity-count": {}};
-  const load = new Function("ReconStore", "fetch", "addConsoleMessage", "showNotification", "document", "console", `return (${source})`)(
-    store, async () => ({json: async () => response}), () => {}, () => {}, {getElementById: (id) => els[id]}, {warn() {}, error() {}},
+  const load = new Function("ReconStore", "ReconLogic", "fetch", "addConsoleMessage", "showNotification", "document", "console", `return (${source})`)(
+    store, ReconLogic, async () => ({json: async () => response}), () => {}, () => {}, {getElementById: (id) => els[id]}, {warn() {}, error() {}},
   );
   return {object, run: () => load.call(object), els, calls};
 }
@@ -109,6 +108,8 @@ test("booting gives the page ReconStore, sharing the map AutoReconVisualization 
   win.ReconStore.upsert({entity_id: "x"});
   assert.deepEqual(Object.keys(win.AutoReconVisualization.entities), ["early", "x"]);
   assert.equal(win.AutoReconVisualization.entities.early, early);
+  assert.equal(typeof win.ReconLogic.planSyncEvent, "function", "and the page's pure logic");
+  assert.equal(win.ReconLogic.describeEntity, ReconLogic.describeEntity);
 });
 
 test("booting without the page's object does not create one", () => {

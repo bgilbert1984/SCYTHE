@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {readFileSync} from "node:fs";
+import * as ReconLogic from "./reconLogic.js";
 
 const page = readFileSync(new URL("../command-ops-visualization.html", import.meta.url), "utf8");
 
@@ -24,9 +25,9 @@ function reconMember(name) {
 /** The recon object's description and alert-list members, run against a fake document. */
 function recon({alerts = []} = {}) {
   const els = {"recon-alert-list": {innerHTML: ""}};
-  const members = ["createEntityDescription", "getDispositionCssColor", "getThreatCssColor", "updateAlertList"];
+  const members = ["createEntityDescription", "updateAlertList"];
   const source = `return {${members.map((name) => `${name}: ${reconMember(name)}`).join(",\n")}};`;
-  const object = new Function("document", "escapeHtml", source)({getElementById: (id) => els[id]}, escapeHtml);
+  const object = new Function("document", "ReconLogic", source)({getElementById: (id) => els[id]}, ReconLogic);
   object.alerts = alerts;
   return {object, els};
 }
@@ -44,7 +45,7 @@ function reconList(entities) {
     getElementById: (id) => els[id],
     createElement: () => ({className: "", innerHTML: "", querySelectorAll: () => []}),
   };
-  new Function("window", "document", "escapeHtml", "console", `${source}\nwindow.updateReconList();`)(window, document, escapeHtml, {debug() {}});
+  new Function("window", "document", "ReconLogic", "console", `${source}\nwindow.updateReconList();`)(window, document, ReconLogic, {debug() {}});
   return {list, els};
 }
 
@@ -171,20 +172,20 @@ test("the recon list is as it was for ordinary entities, and an empty one says s
   assert.match(reconList({}).list.innerHTML, /No recon entities available/);
 });
 
-test("the page no longer puts an entity's fields into these three pieces of HTML unescaped", () => {
-  for (const name of ["createEntityDescription", "updateAlertList"]) {
-    const source = reconMember(name);
-    for (const field of ["name", "entity_id", "disposition", "threat_level", "ontology"]) {
-      const bare = new RegExp(`\\$\\{(?:entity|alert)\\.${field}\\}`);
-      assert.doesNotMatch(source, bare, `${name}: ${field}`);
-    }
+test("the three pieces of HTML do not put an entity's fields in unescaped", () => {
+  const logic = readFileSync(new URL("./reconLogic.js", import.meta.url), "utf8");
+  for (const field of ["name", "entity_id", "disposition", "threat_level", "ontology"]) {
+    assert.doesNotMatch(logic, new RegExp(`\\$\\{(?:entity|alert|e)\\.${field}\\}`), `a bare ${field} in the HTML builders`);
   }
   const start = page.indexOf("window.updateReconList = function() {");
   const body = page.slice(start, page.indexOf("\n        };", start));
-  for (const field of ["name", "entity_id", "disposition", "threat_level"]) {
-    assert.doesNotMatch(body, new RegExp(`\\$\\{e\\.${field}\\}`), `updateReconList: ${field}`);
-  }
   assert.doesNotMatch(body, /<pre>\$\{JSON/);
+  assert.doesNotMatch(body, /\$\{e\./, "the list's row comes from ReconLogic.reconRowHtml");
+});
+
+test("the page's members hand the work to ReconLogic", () => {
+  assert.match(reconMember("createEntityDescription"), /return ReconLogic\.describeEntity\(entity\);/);
+  assert.match(reconMember("updateAlertList"), /listEl\.innerHTML = ReconLogic\.alertListHtml\(this\.alerts\);/);
 });
 
 test("an id that is a number, or missing, reaches the handlers as a string, as it did when the id sat inside quotes", () => {

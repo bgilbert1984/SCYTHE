@@ -13,10 +13,14 @@
 export function createReconStore(entities = {}) {
   return {
     entities,
-    /** Adds the entity, or replaces the one with its id. Returns it. */
-    upsert(entity) {
-      entities[entity.entity_id] = entity;
+    /** Adds the entity, or replaces the one held under its id (or under `id`, for the sync code, which files an entity under the id its event carries). Returns it. */
+    upsert(entity, id = entity.entity_id) {
+      entities[id] = entity;
       return entity;
+    },
+    /** Drops the entity held under `id`. */
+    remove(id) {
+      delete entities[id];
     },
     /** Empties the map in place. */
     clear() {
