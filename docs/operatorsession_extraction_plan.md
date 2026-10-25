@@ -2,7 +2,7 @@
 
 Status: plan only. Nothing here is implemented. It is written so each step can be agreed, built and merged on its own.
 
-Progress: step 2 (escaping the operator's identity where it reaches HTML) is done, and step 1 (pinning the object, `scythe-web/pageOperatorSession.test.js`, and removing its dead code) is done, and step 3 (the three callbacks are now `login` / `restored` / `logout` events, with their effects in `wireOperatorSessionEffects`) is done. Step 4 (the `session` tool, `scythe-web/sessionPlugin.js`, with `sessionStore` doing exactly what the object did and the subscribers in the boot module) is done. Step 5 is not started: it needs decisions 1 and 2.
+Progress: step 2 (escaping the operator's identity where it reaches HTML) is done, and step 1 (pinning the object, `scythe-web/pageOperatorSession.test.js`, and removing its dead code) is done, and step 3 (the three callbacks are now `login` / `restored` / `logout` events, with their effects in `wireOperatorSessionEffects`) is done. Step 4 (the `session` tool, `scythe-web/sessionPlugin.js`, with `sessionStore` doing exactly what the object did and the subscribers in the boot module) is done. Step 5 is done (logout and every clearing of the session also sign `SCYTHE_AUTH` out and remove `scythe_session_token`; the unread `operatorSession` key and cookie are no longer written; see the note under section 4). Decisions 1 and 2 were taken from the recommendations in section 7.
 
 `OperatorSession` is the last of the big page objects: about 315 lines in `command-ops-visualization.html`, 25 members. It is small, but it is the one every
 other piece leans on. The `EntitySync`, rooms, recon, sensors and websocket-sync tools read its token through the `operatorSession` service, the presence tool reads
@@ -82,6 +82,8 @@ Each step is its own PR, in this order. The first three change no storage and no
    Differential test against the old object, as for the others.
 5. **Only if decisions 1 and 2 ask for it: make `sessionStore` the one store.** Logout clears what `SCYTHE_AUTH` keeps too; the legacy keys are written, or not, as decided. This is the one step that
    changes behaviour users can see, so it is its own PR with its own manual checklist.
+
+**Step 5, as done.** `clearSession` (logout, a restore that fails validation, and the stream 401 path) now removes, each on its own so one that fails does not leave the others, `localStorage.operatorSession`, the old cookie, `localStorage.scythe_session_token` and `SCYTHE_AUTH`'s copy (`SCYTHE_AUTH.logout()`: its per-instance stores, its cookie and the transport token). Readers found before retiring anything: only `cesium-hypergraph-globe.js` reads `scythe_session_token` (so it stays, and is written and cleared); nothing in the repo reads `operatorSession` or the un-prefixed `operatorSessionToken` cookie (the `SCYTHE_AUTH` cookie has a prefixed name), so those two are no longer written. Verified in a browser with the real `shared_auth.js` for both runtime roles: before, after logout `SCYTHE_AUTH.isAuthenticated()` stayed true and a reload restored the token; now both are false. Not changed: an in-page login still does not save to `SCYTHE_AUTH`, so it still does not survive a reload (it never did).
 
 ## 5. What to pin (tests named `PINNED:`, changed only in their own PRs)
 

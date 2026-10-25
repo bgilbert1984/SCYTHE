@@ -14,21 +14,22 @@
  * Kept as it was, including things that look unintended (see the tests that pin them):
  *  - An error in an event handler reaches the caller, as an error in the old callbacks did: a failing login effect makes `login` report failure although the session is set, a failing restore
  *    effect makes the restore fail and signs the session out, and a failing logout effect makes `logout` reject after the session was cleared. The handlers after it do not run.
- *  - A session is saved in three places: `localStorage.operatorSession`, the cookie `operatorSessionToken` (seven days) and `localStorage.scythe_session_token`; each write may fail without
- *    stopping the others.
- *  - Clearing the session removes `localStorage.operatorSession` and the cookie, and leaves `scythe_session_token` and whatever `SCYTHE_AUTH` keeps (plan, finding 2; step 5 decides).
  *  - `validateSession` with an operator that has no id gives the session no id; `operatorName` is the operator's email.
  *  - `logout` with no session does nothing; with one, a failing request is only warned about and the session is cleared and the logout handlers run all the same.
  *  - The heartbeat does nothing without a session, sends no view without a viewer, and a failing request is only warned about.
  *
- * Deliberate changes:
+ * Deliberate changes (step 5 of the plan):
+ *  - Clearing the session (logout, a failed restore, a 401 from a stream) also signs `SCYTHE_AUTH` out (its per-instance stores and the transport token) and removes
+ *    `localStorage.scythe_session_token`, so a reload does not restore the session. Each removal may fail without stopping the others.
+ *  - A session is saved only in `localStorage.scythe_session_token` (`cesium-hypergraph-globe.js` reads it). `localStorage.operatorSession` and the cookie `operatorSessionToken` are no longer
+ *    written, since nothing read them; clearing still removes them, so a browser that has them loses them.
  *  - Deactivating stops the heartbeat and forgets the session, without telling the subscribers, and an answer from the server that arrives afterwards changes nothing.
  *  - `init()` asked for before the tool is active is made when it activates.
  *  - Gone: the public cookie helpers `setCookie` and `clearCookie` (nothing outside the object called them; they live in `sessionStore`).
  *
  * Services it needs (see `requires`):
  *   httpFetch     (url, init?) => Promise<Response>
- *   sessionStore  {restoreToken() => string|null, validate(token) => Promise<{valid, operator?}>, setItem(key, value), removeItem(key), setCookie(name, value, days), clearCookie(name)}
+ *   sessionStore  {restoreToken() => string|null, validate(token) => Promise<{valid, operator?}>, setItem(key, value), removeItem(key), clearCookie(name), forget()}
  *   cameraView    {position() => {center: [lat, lon], altitude, heading} | null}: see `workspaceBoot.js`
  */
 
@@ -38,7 +39,6 @@ export const HEARTBEAT_INTERVAL = 30000;
 const LEGACY_SESSION_KEY = "operatorSession";
 const LEGACY_TOKEN_KEY = "scythe_session_token";
 const LEGACY_COOKIE = "operatorSessionToken";
-const COOKIE_DAYS = 7;
 const JSON_HEADERS = {"Content-Type": "application/json"};
 
 export function createSessionPlugin({log = console} = {}) {
@@ -90,8 +90,15 @@ export function createSessionPlugin({log = console} = {}) {
         stopHeartbeat();
         operatorId = operatorName = callsign = role = teamId = sessionToken = sessionId = null;
         isAuthenticated = false;
-        store.removeItem(LEGACY_SESSION_KEY);
-        store.clearCookie(LEGACY_COOKIE);   // so the token does not linger
+        // Every copy goes, each on its own: one that cannot be removed must not leave the others behind.
+        for (const [what, remove] of [
+          ["operatorSession", () => store.removeItem(LEGACY_SESSION_KEY)],
+          ["session cookie", () => store.clearCookie(LEGACY_COOKIE)],
+          [LEGACY_TOKEN_KEY, () => store.removeItem(LEGACY_TOKEN_KEY)],
+          ["SCYTHE_AUTH", () => store.forget()],
+        ]) {
+          try { remove(); } catch (error) { log.warn?.(`[OperatorSession] Could not remove ${what}:`, error); }
+        }
       }
 
       function setSessionData(session, operator) {
@@ -103,16 +110,6 @@ export function createSessionPlugin({log = console} = {}) {
         role = operator.role;
         teamId = operator.team_id;
         isAuthenticated = true;
-        try {   // for legacy consumers
-          store.setItem(LEGACY_SESSION_KEY, JSON.stringify({sessionToken}));
-        } catch (error) {
-          log.warn?.("[OperatorSession] Could not persist operatorSession to localStorage:", error);
-        }
-        try {   // to support cross-tab boots
-          store.setCookie(LEGACY_COOKIE, sessionToken, COOKIE_DAYS);
-        } catch (error) {
-          log.warn?.("[OperatorSession] Could not set session cookie:", error);
-        }
         try {   // for pages that read this key directly
           store.setItem(LEGACY_TOKEN_KEY, sessionToken);
         } catch (error) { /* noop */ }
