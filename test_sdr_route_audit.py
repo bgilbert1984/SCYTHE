@@ -54,7 +54,9 @@ class _SdrFixture(unittest.TestCase):
                                        validate_session=lambda t: sess if t == "good" else None)
         from hypergraph_engine import HypergraphEngine
         from mcp_server import MCPHandler
-        self.handler = MCPHandler(HypergraphEngine(), use_orchestrator=True)
+        # These tests are about auditing, not approval: state the single-principal mode explicitly.
+        with mock.patch.dict(os.environ, {"MCP_APPROVAL_MODES": "HARDWARE_CONTROL=AUTOMATED"}):
+            self.handler = MCPHandler(HypergraphEngine(), use_orchestrator=True)
         from rf_mcp import register_rf_tools
         register_rf_tools(self.handler.engine, self.handler)
         patches = [mock.patch.object(rf, "_rf_bridge_or_error", lambda: (self.bridge, None)),

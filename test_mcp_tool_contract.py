@@ -3,7 +3,7 @@ from unittest import mock
 
 import mcp_effects
 from mcp_effects import (
-    APPROVAL_MODES, AUTO_APPROVE, AUTOMATED, DIRECT, EFFECT_CATEGORIES, HARDWARE_CONTROL, LOCAL_STATE,
+    APPROVAL_MODES, AUTO_APPROVE, DEFAULT_APPROVAL_MODE, AUTOMATED, DIRECT, EFFECT_CATEGORIES, HARDWARE_CONTROL, LOCAL_STATE,
     MINIMUM_APPROVAL_MODE, NON_MUTATING, READ_ONLY, REQUIRES_REVIEW, SECOND_PRINCIPAL,
     approval_policy, required_approval_mode, validate_approval_table, validate_tool_contract,
 )
@@ -144,10 +144,24 @@ class ApprovalModeTableTest(unittest.TestCase):
         with mock.patch.object(mcp_effects, "MINIMUM_APPROVAL_MODE", table):
             self.assertTrue(any("no minimum mode" in p for p in validate_approval_table()))
 
-    def test_with_no_deployment_setting_the_floor_applies(self):
+    def test_with_no_deployment_setting_the_default_applies(self):
         for effect in EFFECT_CATEGORIES:
-            self.assertEqual(required_approval_mode(effect), MINIMUM_APPROVAL_MODE[effect])
-            self.assertEqual(required_approval_mode(effect, {}), MINIMUM_APPROVAL_MODE[effect])
+            expected = DEFAULT_APPROVAL_MODE.get(effect, MINIMUM_APPROVAL_MODE[effect])
+            self.assertEqual(required_approval_mode(effect), expected)
+            self.assertEqual(required_approval_mode(effect, {}), expected)
+
+    def test_hardware_control_defaults_to_a_second_principal(self):
+        self.assertEqual(required_approval_mode(HARDWARE_CONTROL), SECOND_PRINCIPAL)
+        self.assertEqual(DEFAULT_APPROVAL_MODE, {HARDWARE_CONTROL: SECOND_PRINCIPAL})
+
+    def test_a_deployment_may_state_a_weaker_mode_for_hardware_down_to_the_floor_only(self):
+        self.assertEqual(required_approval_mode(HARDWARE_CONTROL, {HARDWARE_CONTROL: AUTOMATED}), AUTOMATED)
+        with self.assertRaises(ValueError):
+            required_approval_mode(HARDWARE_CONTROL, {HARDWARE_CONTROL: DIRECT})
+
+    def test_the_default_may_not_be_below_the_floor(self):
+        with mock.patch.dict(mcp_effects.DEFAULT_APPROVAL_MODE, {LOCAL_STATE: DIRECT}):
+            self.assertTrue(any("below its floor" in p for p in validate_approval_table()))
 
     def test_a_deployment_may_raise_the_mode(self):
         self.assertEqual(required_approval_mode(HARDWARE_CONTROL, {HARDWARE_CONTROL: SECOND_PRINCIPAL}), SECOND_PRINCIPAL)

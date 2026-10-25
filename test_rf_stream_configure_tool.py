@@ -4,6 +4,7 @@ import os
 import sqlite3
 import tempfile
 import unittest
+from unittest import mock
 
 import control_audit
 from mcp_effects import HARDWARE_CONTROL
@@ -28,7 +29,8 @@ class StreamConfigureToolTest(unittest.TestCase):
         self.addCleanup(logging.disable, logging.NOTSET)
         reset_rf_bridge_for_tests()
         self.addCleanup(reset_rf_bridge_for_tests)
-        self.handler = MCPHandler(_Engine(), use_orchestrator=True)
+        with mock.patch.dict(os.environ, {"MCP_APPROVAL_MODES": "HARDWARE_CONTROL=AUTOMATED"}):
+            self.handler = MCPHandler(_Engine(), use_orchestrator=True)
         register_rf_tools(self.handler.engine, self.handler)
         self.orch = self.handler._orchestrator
         self.tool = self.orch.registry._tools["rf_stream_configure"]

@@ -33,7 +33,7 @@ class FakeBridge:
 
 class _Fixture(unittest.TestCase):
     """ADR 0005 Decision 4 and 5: the four SDR control routes are adapters into the lifecycle, as operator commands."""
-    SETTING = ""
+    SETTING = "HARDWARE_CONTROL=AUTOMATED"   # explicit: the unset default is SECOND_PRINCIPAL (see UnsetDeploymentTest)
 
     @classmethod
     def setUpClass(cls):
@@ -67,6 +67,24 @@ class _Fixture(unittest.TestCase):
     def post(self, path, body=None):
         return self.client.post(path, json=body, headers={"X-Session-Token": "good"},
                                 environ_base={"REMOTE_ADDR": "203.0.113.5"})
+
+
+class UnsetDeploymentTest(_Fixture):
+    """No MCP_APPROVAL_MODES: hardware control needs an independent approver (#228)."""
+    SETTING = ""
+
+    def test_start_tune_and_config_wait_for_a_second_principal_and_the_bridge_is_untouched(self):
+        for path, body in (("/api/sdr/start", {}), ("/api/sdr/tune", {"frequency_hz": 433.92e6}),
+                           ("/api/sdr/config", {"fft_size": 1024})):
+            with self.subTest(path=path):
+                r = self.post(path, body)
+                self.assertEqual((r.status_code, r.get_json()["outcome"]), (409, "pending_approval"), r.get_json())
+        self.assertEqual(self.bridge.calls, [])
+
+    def test_stop_still_runs_because_a_halting_tool_is_capped_at_automated(self):
+        r = self.post("/api/sdr/stop")
+        self.assertEqual((r.status_code, r.get_json()["outcome"]), (200, "executed"))
+        self.assertEqual(self.bridge.calls, ["stop"])
 
 
 class DefaultDeploymentTest(_Fixture):

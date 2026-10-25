@@ -163,8 +163,17 @@ the proposal `pending_approval`. The proposal records its `approval_mode`. The d
 setting comes from one source read at startup, an environment variable
 (for example `MCP_APPROVAL_MODES=HARDWARE_CONTROL=SECOND_PRINCIPAL`, parsed like
 `MCP_ALLOW_REMOTE_PHASE_CONTROL`). A value below the floor, an unknown effect or an
-unknown mode stops startup. Unset means the floor, so there is no behavior change by
-default.
+unknown mode stops startup. Unset means the effect's default: the floor, except
+`HARDWARE_CONTROL`, which defaults to `SECOND_PRINCIPAL` (`DEFAULT_APPROVAL_MODE` in
+`mcp_effects.py`, #228). A missing configuration therefore never selects automated approval
+for physical hardware. A deployment that runs a single operator states
+`MCP_APPROVAL_MODES=HARDWARE_CONTROL=AUTOMATED`; that is the floor, so it is allowed, and it is
+an explicit, visible setting rather than an absence. `halts` tools stay capped at `AUTOMATED`.
+
+For `HARDWARE_CONTROL` the caller's `confidence` is recorded and shown but is not part of the
+decision, in either mode: it is supplied by the caller, and its absence was filled with 0.75,
+which cleared the 0.70 threshold. The stability checks (executor trust, oscillation, entropy)
+still apply to an autonomous hardware proposal.
 
 **Who may approve.** The approver must be an identified principal (`operator_session`, per
 `mcp_principal.py`); `loopback`, `internal_token`, `anonymous` and `unspecified` cannot

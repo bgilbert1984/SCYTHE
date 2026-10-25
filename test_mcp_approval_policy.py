@@ -61,10 +61,10 @@ class ProposeActionTest(unittest.TestCase):
         self.assertEqual(p["status"], "rejected")
 
     def test_high_confidence_mutation_still_follows_existing_checks(self):
-        orch = self._orch(_tool("rf_tune_like", True, HARDWARE_CONTROL))
-        p = orch.propose_action("rf_tune_like", {}, confidence=0.95)
+        orch = self._orch(_tool("w", True, LOCAL_STATE))
+        p = orch.propose_action("w", {}, confidence=0.95)
         self.assertEqual(p["status"], "approved")
-        self.assertIn("effect HARDWARE_CONTROL", p["approval_reason"])
+        self.assertIn("effect LOCAL_STATE", p["approval_reason"])
 
 
 class ServerWiringTest(unittest.TestCase):
@@ -86,10 +86,15 @@ class ServerWiringTest(unittest.TestCase):
             self.assertEqual(self.propose(name)["status"], "approved", name)
 
     def test_mutating_tools_need_the_mutation_checks(self):
-        for name in ("decay_now", "rf_tune"):
-            p = self.propose(name, confidence=0.1)
-            self.assertEqual(p["status"], "rejected", name)
-            self.assertNotIn("not found", p["approval_reason"], name)   # resolved, then rejected on merit
+        p = self.propose("decay_now", confidence=0.1)
+        self.assertEqual(p["status"], "rejected")
+        self.assertNotIn("not found", p["approval_reason"])   # resolved, then rejected on merit
+
+    def test_hardware_waits_for_a_second_principal_whatever_the_confidence(self):
+        for confidence in (0.0, 0.1, 0.99, None):
+            p = self.propose("rf_tune", confidence=confidence)
+            self.assertEqual((p["status"], p["approval_mode"]), ("pending_approval", "SECOND_PRINCIPAL"), confidence)
+            self.assertNotIn("confidence", p["approval_reason"])
 
     def test_resolver_returns_metadata_not_wrappers(self):
         tool = self.handler._resolve_tool("decay_now")

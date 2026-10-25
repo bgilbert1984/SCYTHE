@@ -59,7 +59,8 @@ class ProposalModeTest(unittest.TestCase):
         o = self.orch(None, _tool("r", READ_ONLY), _tool("w", LOCAL_STATE), _tool("h", HARDWARE_CONTROL))
         got = {n: o.propose_action(n, {}, confidence=0.9) for n in ("r", "w", "h")}
         self.assertEqual({n: (p["status"], p["approval_mode"]) for n, p in got.items()},
-                         {"r": ("approved", DIRECT), "w": ("approved", AUTOMATED), "h": ("approved", AUTOMATED)})
+                         {"r": ("approved", DIRECT), "w": ("approved", AUTOMATED),
+                          "h": ("pending_approval", SECOND_PRINCIPAL)})
 
     def test_undeclared_and_unknown_tools_are_automated(self):
         o = self.orch(None, _tool("legacy", None))
@@ -75,9 +76,35 @@ class ProposalModeTest(unittest.TestCase):
         self.assertEqual(o.propose_action("w", {}, confidence=0.9)["status"], "approved")
 
     def test_the_automated_checks_still_filter_first(self):
-        o = self.orch({HARDWARE_CONTROL: SECOND_PRINCIPAL}, _tool("h", HARDWARE_CONTROL))
-        p = o.propose_action("h", {}, confidence=0.1)
+        o = self.orch({LOCAL_STATE: SECOND_PRINCIPAL}, _tool("w", LOCAL_STATE))
+        p = o.propose_action("w", {}, confidence=0.1)
         self.assertEqual((p["status"], p["approval_mode"]), ("rejected", SECOND_PRINCIPAL))
+
+    def test_hardware_confidence_is_recorded_but_never_decides(self):
+        o = self.orch(None, _tool("h", HARDWARE_CONTROL))
+        for confidence in (0.0, 0.1, 0.99):
+            p = o.propose_action("h", {}, confidence=confidence)
+            self.assertEqual(p["status"], "pending_approval", confidence)
+            self.assertEqual(p["confidence"], confidence)
+
+    def test_the_stability_gates_still_apply_to_hardware(self):
+        o = self.orch(None, _tool("h", HARDWARE_CONTROL))
+        with mock.patch.object(o.stability, "is_oscillating", return_value=True):
+            p = o.propose_action("h", {}, confidence=0.99)
+        self.assertEqual(p["status"], "rejected")
+        self.assertIn("oscillation", p["approval_reason"])
+
+    def test_an_explicit_automated_setting_is_honoured_and_ignores_confidence(self):
+        o = self.orch({HARDWARE_CONTROL: AUTOMATED}, _tool("h", HARDWARE_CONTROL))
+        for confidence in (0.0, 0.99):
+            p = o.propose_action("h", {}, confidence=confidence)
+            self.assertEqual((p["status"], p["approval_mode"]), ("approved", AUTOMATED), confidence)
+
+    def test_a_halting_hardware_tool_is_not_made_to_wait_by_the_default(self):
+        stop = _tool("stop", HARDWARE_CONTROL)
+        stop.halts = True
+        o = self.orch(None, stop)
+        self.assertEqual(o.propose_action("stop", {}, confidence=0.9)["approval_mode"], AUTOMATED)
 
     def test_a_pending_proposal_cannot_be_executed_by_the_safety_layer(self):
         o = self.orch({HARDWARE_CONTROL: SECOND_PRINCIPAL}, _tool("h", HARDWARE_CONTROL))
