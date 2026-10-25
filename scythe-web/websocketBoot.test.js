@@ -109,7 +109,7 @@ test("the page has no WebSocketSync object of its own; its init, and the operato
   assert.equal(/const WebSocketSync = \{/.test(page), false);
   assert.equal(page.includes("window.WebSocketSync = WebSocketSync"), false);
   assert.match(page, /WebSocketSync\.init\(\);/);
-  assert.equal(page.match(/window\.WebSocketSync && WebSocketSync\.useWebSocket/g).length, 2, "login and restore");
+  assert.equal(page.match(/window\.WebSocketSync && WebSocketSync\.useWebSocket/g).length, 1, "one helper, shared by the session's login and restore effects");
   assert.match(page, /WebSocketSync\.disconnect\(\);/);
   assert.equal(/WebSocketSync\.(?:send|joinRoom|publishEntity|sendHeartbeat)\b/.test(page), false);
   assert.match(page, /workspace\.activate\("websocket-sync"\)/);

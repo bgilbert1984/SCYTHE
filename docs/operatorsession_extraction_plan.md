@@ -2,7 +2,7 @@
 
 Status: plan only. Nothing here is implemented. It is written so each step can be agreed, built and merged on its own.
 
-Progress: step 2 (escaping the operator's identity where it reaches HTML) is done, and step 1 (pinning the object, `scythe-web/pageOperatorSession.test.js`, and removing its dead code) is done. The rest is not started.
+Progress: step 2 (escaping the operator's identity where it reaches HTML) is done, and step 1 (pinning the object, `scythe-web/pageOperatorSession.test.js`, and removing its dead code) is done, and step 3 (the three callbacks are now `login` / `restored` / `logout` events, with their effects in `wireOperatorSessionEffects`) is done. Steps 4 and 5 are not started.
 
 `OperatorSession` is the last of the big page objects: about 315 lines in `command-ops-visualization.html`, 25 members. It is small, but it is the one every
 other piece leans on. The `EntitySync`, rooms, recon, sensors and websocket-sync tools read its token through the `operatorSession` service, the presence tool reads
