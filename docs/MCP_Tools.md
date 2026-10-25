@@ -43,7 +43,9 @@ The four steps are kept separate on purpose.
    declared effect (see below), never from its name. `HARDWARE_CONTROL` requires
    `SECOND_PRINCIPAL` unless the deployment says otherwise (`MCP_APPROVAL_MODES`, which can also raise any
    other effect; `HARDWARE_CONTROL=AUTOMATED` restores single-operator behavior explicitly). For hardware
-   the caller's `confidence` is recorded but does not decide. When an effect requires
+   the caller's `confidence` is recorded but does not decide. Approval authority is granted
+   explicitly: only operators whose `operator_id` is listed in `MCP_APPROVERS` may approve or deny, and an
+   empty list means nobody can (a hardware proposal then cannot run). When an effect requires
    `SECOND_PRINCIPAL`, a proposal that passes the
    automated checks waits as `pending_approval` until a different identified operator
    calls `orchestrate/approve` (`proposal_id`, `decision` of `approve` or `deny`, an optional

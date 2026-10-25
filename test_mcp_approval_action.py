@@ -6,7 +6,7 @@ from unittest import mock
 
 import control_audit
 from hypergraph_engine import HypergraphEngine
-from mcp_effects import APPROVAL_MODES_ENV, AUTOMATED, LOCAL_STATE, SECOND_PRINCIPAL
+from mcp_effects import APPROVAL_MODES_ENV, APPROVERS_ENV, AUTOMATED, LOCAL_STATE, SECOND_PRINCIPAL
 from mcp_principal import (
     ANONYMOUS, INTERNAL_TOKEN, LOOPBACK, OPERATOR_SESSION, UNSPECIFIED, Principal, principal_scope,
 )
@@ -33,7 +33,7 @@ class ApprovalActionTest(unittest.TestCase):
         self.addCleanup(self.dir.cleanup)
         control_audit.configure(os.path.join(self.dir.name, "a.sqlite3"), 90)
         self.addCleanup(control_audit.reset)
-        with mock.patch.dict(os.environ, {APPROVAL_MODES_ENV: "LOCAL_STATE=SECOND_PRINCIPAL"}):
+        with mock.patch.dict(os.environ, {APPROVAL_MODES_ENV: "LOCAL_STATE=SECOND_PRINCIPAL", APPROVERS_ENV: "alice,bob"}):
             self.h = MCPHandler(HypergraphEngine(), use_orchestrator=True)
         self.h._tools["probe_write"] = ToolDef(
             "probe_write", "d", {"type": "object", "properties": {"n": {"type": "integer"}}},
