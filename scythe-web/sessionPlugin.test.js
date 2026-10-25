@@ -14,8 +14,8 @@ const settle = () => new Promise((resolve) => setImmediate(resolve));
  * The session tool against fakes for everything it touches; nothing here is a real token. `replies` maps "METHOD url" (GET by default) to the JSON body
  * or a function returning it (a function that throws fails the request). `wired` puts the boot module's effects on the session's events, as the page has them.
  */
-function world({replies = {}, auth = {}, viewer = null, storage = {}, failStorage = [], failCookie = false, gates = {}, wired = true, activate = true} = {}) {
-  const log = [], requests = [], messages = [], cookies = [], store = {...storage}, timers = [], warnings = [], errors = [], logs = [];
+function world({replies = {}, auth = {}, viewer = null, storage = {}, failStorage = [], failRemove = [], failCookie = false, failForget = false, gates = {}, wired = true, activate = true} = {}) {
+  const log = [], requests = [], messages = [], cookies = [], authSignOuts = [], store = {...storage}, timers = [], warnings = [], errors = [], logs = [];
   const note = (...a) => log.push(a);
   const workspace = createWorkspace({log: {warn() {}, error() {}, log() {}, info() {}, debug() {}}, timers: {
     setInterval: (fn, ms) => { timers.push({fn, ms, cleared: false}); return timers.length; },
@@ -33,9 +33,9 @@ function world({replies = {}, auth = {}, viewer = null, storage = {}, failStorag
     restoreToken: () => auth.token ?? null,
     validate: async (token) => { note("validate", token); if (auth.hold) return auth.hold; if (auth.throws) throw new Error("bad"); return auth.result ?? {valid: false}; },
     setItem: (k, v) => { if (failStorage.includes(k)) throw new Error("quota"); store[k] = String(v); note("set", k); },
-    removeItem: (k) => { delete store[k]; note("remove", k); },
-    setCookie: (name, value, days) => { if (failCookie) throw new Error("blocked"); cookies.push([name, value, days]); },
-    clearCookie: (name) => cookies.push([name, "cleared"]),
+    removeItem: (k) => { if (failRemove.includes(k)) throw new Error("locked"); delete store[k]; note("remove", k); },
+    clearCookie: (name) => { if (failCookie) throw new Error("blocked"); cookies.push([name, "cleared"]); },
+    forget: () => { if (failForget) throw new Error("auth gone"); authSignOuts.push(true); note("forget"); },
   });
   workspace.provide("cameraView", {position: () => (viewer ? {center: [50, 25], altitude: 1234, heading: 10} : null)});
   const plugin = createSessionPlugin({log: {log: (...a) => logs.push(a.join(" ")), warn: (...a) => warnings.push(a.join(" ")), error: (...a) => errors.push(a.join(" "))}});
@@ -47,7 +47,7 @@ function world({replies = {}, auth = {}, viewer = null, storage = {}, failStorag
   };
   if (wired) wireSessionEffects(win, plugin.controls);
   const ready = activate ? workspace.activate(SESSION_ID) : Promise.resolve();
-  return {session: plugin.controls, workspace, ready, log, requests, messages, cookies, store, timers, warnings, errors, logs, note, plugin};
+  return {session: plugin.controls, workspace, ready, log, requests, messages, cookies, authSignOuts, store, timers, warnings, errors, logs, note, plugin};
 }
 async function started(options) { const w = world(options); await w.ready; return w; }
 
@@ -204,51 +204,66 @@ test("registering sends the role it is given, and a refusal or a failure comes b
 
 // --- what a session persists ---
 
-test("a session is saved in three places: localStorage.operatorSession, the cookie operatorSessionToken for seven days, and localStorage.scythe_session_token", async () => {
+test("a session is saved in localStorage.scythe_session_token only: the old operatorSession key and the cookie are no longer written", async () => {
   const w = await started({replies: loginReply()});
   await w.session.login("VIPER", "pw");
-  assert.equal(w.store.operatorSession, '{"sessionToken":"tok-1"}');
-  assert.equal(w.store.scythe_session_token, "tok-1");
-  assert.deepEqual(w.cookies, [["operatorSessionToken", "tok-1", 7]]);
+  assert.deepEqual(w.store, {scythe_session_token: "tok-1"});
+  assert.deepEqual(w.cookies, []);
+  assert.deepEqual(w.authSignOuts, []);
 });
 
-test("each of the three writes may fail without stopping the others; the first two say so", async () => {
-  const first = await started({replies: loginReply(), failStorage: ["operatorSession"]});
-  await first.session.login("VIPER", "pw");
-  assert.equal(first.cookies.length, 1);
-  assert.equal(first.store.scythe_session_token, "tok-1");
-  assert.match(first.warnings[0], /Could not persist operatorSession/);
-  const last = await started({replies: loginReply(), failStorage: ["scythe_session_token"]});
-  await last.session.login("VIPER", "pw");
-  assert.equal(last.store.operatorSession, '{"sessionToken":"tok-1"}');
-  assert.deepEqual(last.warnings, [], "the last write fails silently");
-  assert.equal(last.session.isAuthenticated, true);
-});
-
-test("a blocked cookie is warned about and the session is still set", async () => {
-  const w = await started({replies: loginReply(), failCookie: true});
+test("a session whose write fails still succeeds and says nothing", async () => {
+  const w = await started({replies: loginReply(), failStorage: ["scythe_session_token"]});
   await w.session.login("VIPER", "pw");
-  assert.match(w.warnings[0], /Could not set session cookie/);
-  assert.equal(w.store.scythe_session_token, "tok-1");
+  assert.deepEqual(w.warnings, []);
   assert.equal(w.session.isAuthenticated, true);
 });
 
-test("a session with no token is saved with an undefined cookie value, which the store writes as empty", async () => {
+test("a session with no token is saved as an undefined token", async () => {
   const w = await started({replies: loginReply({session: {session_id: "s"}})});
   await w.session.login("VIPER", "pw");
-  assert.deepEqual(w.cookies, [["operatorSessionToken", undefined, 7]]);
+  assert.equal(w.store.scythe_session_token, "undefined");
 });
 
-test("PINNED: clearing the session forgets the fields, stops the heartbeat, and removes localStorage.operatorSession and the cookie, but leaves scythe_session_token and anything SCYTHE_AUTH keeps", async () => {
-  const w = await signedIn({storage: {"scythe:orchestrator:operatorSession": '{"sessionToken":"auth-copy"}'}});
+test("clearing the session forgets the fields, stops the heartbeat, and removes every copy: the two old ones, scythe_session_token, and SCYTHE_AUTH's", async () => {
+  const w = await signedIn({storage: {operatorSession: '{"sessionToken":"old"}', "scythe:orchestrator:operatorSession": '{"sessionToken":"auth-copy"}'}});
   w.session.clearSession();
   assert.deepEqual([w.session.operatorId, w.session.operatorName, w.session.callsign, w.session.role, w.session.teamId, w.session.sessionToken, w.session.sessionId, w.session.isAuthenticated],
     [null, null, null, null, null, null, null, false]);
   assert.equal(w.timers[0].cleared, true);
   assert.equal("operatorSession" in w.store, false);
+  assert.equal("scythe_session_token" in w.store, false);
   assert.deepEqual(w.cookies.at(-1), ["operatorSessionToken", "cleared"]);
-  assert.equal(w.store.scythe_session_token, "tok-1", "PINNED: left behind");
-  assert.equal(w.store["scythe:orchestrator:operatorSession"], '{"sessionToken":"auth-copy"}', "PINNED: SCYTHE_AUTH's copy is not touched");
+  assert.deepEqual(w.authSignOuts, [true], "SCYTHE_AUTH is signed out once");
+});
+
+test("every copy is removed even when another cannot be: each failure is warned about by name and the rest still go", async () => {
+  for (const [options, name] of [[{failRemove: ["operatorSession"]}, "operatorSession"], [{failCookie: true}, "session cookie"], [{failRemove: ["scythe_session_token"]}, "scythe_session_token"], [{failForget: true}, "SCYTHE_AUTH"]]) {
+    const w = await signedIn({...options, storage: {operatorSession: "x"}});
+    w.session.clearSession();
+    assert.equal(w.warnings.length, 1, name);
+    assert.match(w.warnings[0], new RegExp(`Could not remove ${name}`));
+    const gone = {operatorSession: !options.failRemove?.includes("operatorSession"), scythe_session_token: !options.failRemove?.includes("scythe_session_token")};
+    assert.deepEqual([("operatorSession" in w.store) === !gone.operatorSession, ("scythe_session_token" in w.store) === !gone.scythe_session_token], [true, true], name);
+    assert.equal(w.authSignOuts.length, options.failForget ? 0 : 1, name);
+    assert.equal(w.session.isAuthenticated, false, name);
+  }
+});
+
+test("a failed restore signs SCYTHE_AUTH out too, so the next load does not try the same token again", async () => {
+  const w = await started({auth: {token: "saved", result: {valid: false}}});
+  w.session.init();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual([w.session.isAuthenticated, w.authSignOuts], [false, [true]]);
+});
+
+test("logging out signs SCYTHE_AUTH out, whether or not the server's answer arrived", async () => {
+  const ok = await signedIn({replies: {...loginReply(), "POST /api/operator/logout": {status: "ok"}}});
+  await ok.session.logout();
+  assert.deepEqual([ok.authSignOuts, "scythe_session_token" in ok.store], [[true], false]);
+  const offline = await signedIn({replies: {...loginReply(), "POST /api/operator/logout": () => { throw new Error("offline"); }}});
+  await offline.session.logout();
+  assert.deepEqual([offline.authSignOuts, "scythe_session_token" in offline.store], [[true], false]);
 });
 
 // --- logging out ---

@@ -242,23 +242,15 @@ export function bootWorkspace(win) {
   return workspace;
 }
 
-/** The saved session: `SCYTHE_AUTH` (the shared auth module), `localStorage` and the cookie, looked up when they are needed. */
+/** The saved session: `SCYTHE_AUTH` (the shared auth module) and `localStorage`, looked up when they are needed. */
 function sessionStore(win) {
   return {
     restoreToken: () => win.SCYTHE_AUTH.restoreSession(),
     validate: (token) => win.SCYTHE_AUTH.validateSession(token),
     setItem: (key, value) => win.localStorage.setItem(key, value),
     removeItem: (key) => win.localStorage.removeItem(key),
-    setCookie(name, value, days) {
-      let expires = "";
-      if (typeof days === "number") {
-        const date = new Date();
-        date.setTime(date.getTime() + days * 24 * 60 * 60 * 1000);
-        expires = "; expires=" + date.toUTCString();
-      }
-      win.document.cookie = `${name}=${value || ""}${expires}; path=/`;
-    },
     clearCookie(name) { win.document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/`; },
+    forget: () => win.SCYTHE_AUTH?.logout?.(),   // its per-instance stores and the transport token
   };
 }
 

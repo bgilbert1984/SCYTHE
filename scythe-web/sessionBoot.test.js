@@ -17,14 +17,14 @@ async function atNow(fn) {
 
 /** A fake window for the real boot module: storage, a cookie jar, a fake SCYTHE_AUTH, a viewer, and the objects the effects call. */
 function sessionWindow({viewer, auth = {}, replies = {}} = {}) {
-  const store = {}, cookies = [], requests = [], messages = [], calls = [], timers = [];
+  const store = {}, cookies = [], requests = [], messages = [], calls = [], timers = [], authCalls = [];
   const win = {
     console: quiet, Event: class { constructor(type) { this.type = type; } }, dispatchEvent() {},
     setInterval: (fn, ms) => { timers.push({fn, ms, cleared: false}); return timers.length; }, clearInterval: (id) => { timers[id - 1].cleared = true; },
     setTimeout: () => 1, clearTimeout() {},
     localStorage: {getItem: (k) => store[k] ?? null, setItem: (k, v) => { store[k] = String(v); }, removeItem: (k) => { delete store[k]; }},
     document: {}, viewer, Cesium: {Math: {toDegrees: (r) => r * 100}},
-    SCYTHE_AUTH: {restoreSession: () => auth.token ?? null, validateSession: async () => auth.result ?? {valid: false}},
+    SCYTHE_AUTH: {restoreSession: () => auth.token ?? null, validateSession: async () => auth.result ?? {valid: false}, logout: () => authCalls.push("logout")},
     fetch: async (url, init = {}) => { const key = `${init.method || "GET"} ${url}`; requests.push({key, init}); if (!(key in replies)) throw new Error(`no reply for ${key}`); return {json: async () => replies[key]}; },
     addConsoleMessage: (text, kind) => messages.push([text, kind]), updateOperatorStatusUI: () => calls.push("status"),
   };
@@ -34,7 +34,7 @@ function sessionWindow({viewer, auth = {}, replies = {}} = {}) {
     win.EntitySync = {connect: () => calls.push("es.connect"), disconnect: () => calls.push("es.disconnect")};
     win.RoomManager = {fetchRooms: () => calls.push("rooms.all"), fetchMyRooms: () => calls.push("rooms.mine"), reset: () => calls.push("rooms.reset")};
   };
-  return {win, store, cookies, requests, messages, calls, timers, install};
+  return {win, store, cookies, requests, messages, calls, timers, authCalls, install};
 }
 const loginReplies = {"POST /api/operator/login": {status: "ok", session: {session_id: "s", session_token: "tok-1"}, operator: OPERATOR}};
 
@@ -46,31 +46,33 @@ test("booting registers the session tool inactive and sets OperatorSession to it
   assert.equal(win.OperatorSession.isAuthenticated, false);
 });
 
-test("the saved session store reads SCYTHE_AUTH when it is asked, and writes localStorage and the cookie", async () => {
-  const {win, store, cookies} = sessionWindow({auth: {token: "saved", result: {valid: true, operator: OPERATOR}}});
+test("the saved session store reads SCYTHE_AUTH when it is asked, writes localStorage, and on clearing removes both old copies and signs SCYTHE_AUTH out", async () => {
+  const {win, store, cookies, authCalls} = sessionWindow({auth: {token: "saved", result: {valid: true, operator: OPERATOR}}});
+  store.operatorSession = '{"sessionToken":"old"}';
   const workspace = bootWorkspace(win);
   await workspace.activate("session");
-  await atNow(async () => {
-    win.OperatorSession.init();
-    await new Promise((resolve) => setImmediate(resolve));
-  });
+  win.OperatorSession.init();
+  await new Promise((resolve) => setImmediate(resolve));
   assert.equal(win.OperatorSession.sessionToken, "saved");
   assert.equal(win.OperatorSession.callsign, "VIPER");
-  assert.equal(store.operatorSession, '{"sessionToken":"saved"}');
   assert.equal(store.scythe_session_token, "saved");
-  assert.deepEqual(cookies, [`operatorSessionToken=saved; expires=${new Date(NOW + 7 * 24 * 3600 * 1000).toUTCString()}; path=/`]);
+  assert.deepEqual([cookies, authCalls], [[], []], "no cookie is written, and SCYTHE_AUTH is left alone while signed in");
   win.OperatorSession.clearSession();
-  assert.equal("operatorSession" in store, false);
-  assert.equal(cookies.at(-1), "operatorSessionToken=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/");
+  assert.deepEqual(store, {});
+  assert.deepEqual(cookies, ["operatorSessionToken=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/"]);
+  assert.deepEqual(authCalls, ["logout"]);
 });
 
-test("a cookie with no value is written empty, and one with no days has no expiry", async () => {
-  const {win, cookies} = sessionWindow({replies: {"POST /api/operator/login": {status: "ok", session: {session_id: "s"}, operator: OPERATOR}}});
+test("clearing with a SCYTHE_AUTH that has no logout still clears the rest, and warns of nothing", async () => {
+  const {win, store} = sessionWindow();
+  const warnings = [];
+  win.console = {...quiet, warn: (...a) => warnings.push(a.join(" "))};
+  delete win.SCYTHE_AUTH.logout;
   const workspace = bootWorkspace(win);
   await workspace.activate("session");
-  await win.OperatorSession.login("V", "pw");
-  assert.equal(cookies[0].split(";")[0], "operatorSessionToken=");
-  assert.match(cookies[0], /; expires=.*GMT; path=\/$/);
+  store.scythe_session_token = "x";
+  win.OperatorSession.clearSession();
+  assert.deepEqual([store, warnings], [{}, []]);
 });
 
 test("the heartbeat sends the camera's view: latitude and longitude, altitude and heading in degrees", async () => {

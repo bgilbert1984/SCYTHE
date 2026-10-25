@@ -396,8 +396,7 @@ now as read-only getters, and so do the other tools through the `operatorSession
   streams, the rooms) is `wireSessionEffects` in the boot module, in the order the old callbacks ran them. Handlers outlive an activation.
 - **An error in a handler reaches the caller**, as it did in the callbacks: a failing login effect makes `login` report failure although the session is set, a failing restore effect makes the restore
   fail and signs the session out, a failing logout effect makes `logout` reject after the session was cleared. Pinned; deciding otherwise is a separate step.
-- Pinned, not changed: a session is saved in `localStorage.operatorSession`, the cookie `operatorSessionToken` (seven days) and `localStorage.scythe_session_token`; clearing it removes the first and the
-  cookie and leaves `scythe_session_token` and whatever `SCYTHE_AUTH` keeps (plan, finding 2: reproduced in a browser with the real `shared_auth.js`, and decided in step 5).
+- Step 5 (plan, finding 2): a session is saved only in `localStorage.scythe_session_token` (the globe reads it); clearing it (logout, a failed restore, a stream 401) also signs `SCYTHE_AUTH` out, removes that key, and removes the old `operatorSession` key and cookie that are no longer written. Each removal is attempted on its own.
 - Deactivating stops the heartbeat and forgets the session without telling the subscribers, and an answer that arrives afterwards changes nothing. An `init()` asked for before the tool is active is made when it activates.
 - Verified against the old object with a randomised differential through the real boot module (5,000 scenarios of 12 steps: init, validate, login, register, logout, the heartbeat, clearing, the active operators,
   with every combination of streams, rooms, GraphOps and the DSL explorer's room list, a failing storage write or cookie, and an effect that throws): the same requests, storage and cookie writes, timers,
