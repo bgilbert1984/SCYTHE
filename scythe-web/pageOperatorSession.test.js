@@ -7,10 +7,22 @@ const page = readFileSync(new URL("../command-ops-visualization.html", import.me
 /** The page's OperatorSession object literal, from `const OperatorSession = {` to its closing `};`. */
 const objectSource = (() => {
   const start = page.indexOf("const OperatorSession = {") + "const OperatorSession = ".length;
-  const end = page.indexOf("        };\n        \n        // Make globally available\n        window.OperatorSession = OperatorSession;", start);
+  const end = page.indexOf("        };\n        \n        // What the page does when the session changes", start);
   assert.ok(start > 30 && end > start, "OperatorSession is in the page");
   return page.slice(start, end + "        }".length);
 })();
+
+/** The source of a function declaration in the page, from its `function name(` to its closing brace at the same indent. */
+function functionSource(name) {
+  const start = page.indexOf(`function ${name}(`);
+  assert.ok(start > 0, `${name} is in the page`);
+  const indent = page.lastIndexOf("\n", start) + 1;
+  const pad = page.slice(indent, start);
+  const end = page.indexOf(`\n${pad}}\n`, start);
+  assert.ok(end > start);
+  return page.slice(start, end + pad.length + 2);
+}
+const wireSource = functionSource("wireOperatorSessionEffects");
 
 const NOW = Date.UTC(2026, 9, 25, 12, 0, 0);
 const OPERATOR = {operator_id: "op-1", callsign: "VIPER", email: "viper@example.org", role: "operator", team_id: "t1"};
@@ -20,7 +32,7 @@ const SESSION = {session_id: "s-1", session_token: "tok-1"};
  * The page's own OperatorSession, run against fakes for everything it touches. Nothing here is a real token: they are opaque strings.
  * `replies` maps "METHOD url" (GET by default) to the JSON body, or a function returning it (a function that throws fails the request).
  */
-function world({replies = {}, auth = {}, viewer = null, storage = {}, failStorage = [], failCookie = false, gates = {}} = {}) {
+function world({replies = {}, auth = {}, viewer = null, storage = {}, failStorage = [], failCookie = false, gates = {}, wired = true} = {}) {
   const log = [], requests = [], messages = [], cookies = [], store = {...storage}, timers = [];
   const note = (...a) => log.push(a);
   const localStorage = {
@@ -54,13 +66,14 @@ function world({replies = {}, auth = {}, viewer = null, storage = {}, failStorag
     setInterval: (fn, ms) => { timers.push({fn, ms, cleared: false}); return timers.length; },
     clearInterval: (id) => { timers[id - 1].cleared = true; note("clearInterval"); },
     Cesium: {Math: {toDegrees: (r) => r * 100}},
-    addConsoleMessage: (text, kind) => messages.push([text, kind]),
+    addConsoleMessage: (text, kind) => { messages.push([text, kind]); note("message"); },
     updateOperatorStatusUI: () => note("status"),
     escapeHtml: (s) => s,
     WebSocketSync: gates.WebSocketSync, EntitySync: gates.EntitySync, RoomManager: gates.RoomManager, populateRooms: gates.populateRooms,
   };
   const keys = Object.keys(scope);
   const session = new Function(...keys, `return (${objectSource});`)(...keys.map((k) => scope[k]));
+  if (wired) new Function(...keys, `return (${wireSource});`)(...keys.map((k) => scope[k]))(session);   // what the page does with the session's events
   return {session, log, requests, messages, cookies, store, timers, warnings, errors, logs, win, note};
 }
 
@@ -317,7 +330,7 @@ test("the active operators are the server's list, or none; a failure is logged",
 // --- the three callbacks ---
 
 test("on login the streams connect through WebSocketSync if it is on offer, else through EntitySync, else not at all", async () => {
-  const via = async (gates) => { const calls = []; const w = world({gates: gates(calls)}); w.session.callsign = "V"; w.session.onLoginSuccess(); return calls; };
+  const via = async (gates) => { const calls = []; const w = world({gates: gates(calls)}); w.session.callsign = "V"; w.session._emit("login"); return calls; };
   assert.deepEqual(await via((c) => ({WebSocketSync: {useWebSocket: true, connect: () => c.push("ws")}, EntitySync: {connect: () => c.push("entity")}})), ["ws"]);
   assert.deepEqual(await via((c) => ({WebSocketSync: {useWebSocket: false, connect: () => c.push("ws")}, EntitySync: {connect: () => c.push("entity")}})), ["entity"]);
   assert.deepEqual(await via((c) => ({EntitySync: {connect: () => c.push("entity")}})), ["entity"]);
@@ -325,51 +338,52 @@ test("on login the streams connect through WebSocketSync if it is on offer, else
 });
 
 test("on login the effects run in order: message, status, GraphOps, streams, rooms, then the DSL explorer's room list", () => {
-  const order = [];
-  const w = world({gates: {
-    GraphOpsBotRebind: () => order.push("graphops"), WebSocketSync: {useWebSocket: true, connect: () => order.push("stream")},
-    RoomManager: {fetchRooms: () => order.push("rooms"), fetchMyRooms: () => order.push("mine")}, populateRooms: () => order.push("populate"),
+  let w;
+  const step = (name) => () => w.note(name);
+  w = world({gates: {
+    GraphOpsBotRebind: step("graphops"), WebSocketSync: {useWebSocket: true, connect: step("stream")},
+    RoomManager: {fetchRooms: step("rooms"), fetchMyRooms: step("mine")}, populateRooms: step("populate"),
   }});
   w.session.callsign = "V";
-  w.session.onLoginSuccess();
-  const all = [...w.log.filter((e) => e[0] === "status").map(() => "status")];
-  assert.deepEqual(all, ["status"]);
-  assert.deepEqual(order, ["graphops", "stream", "rooms", "mine", "populate"]);
+  w.session._emit("login");
+  const order = w.log.filter((e) => !["set", "remove", "clearInterval"].includes(e[0])).map((e) => e[0]);
+  assert.deepEqual(order, ["message", "status", "graphops", "stream", "rooms", "mine", "populate"]);
   assert.deepEqual(w.messages, [["👤 Operator V logged in", "info"]]);
 });
 
 test("a DSL explorer room list that throws is only noted, and without one nothing happens", () => {
   const w = world({gates: {populateRooms: () => { throw new Error("boom"); }}});
   w.session.callsign = "V";
-  w.session.onLoginSuccess();
+  w.session._emit("login");
   assert.deepEqual(w.log.filter((e) => e[0] === "debug"), [["debug", "populateRooms failed:"]]);
   const without = world();
   without.session.callsign = "V";
-  without.session.onLoginSuccess();
+  without.session._emit("login");
 });
 
 test("on restore the effects run as on login, but with no DSL explorer room list and the restored message", () => {
   const order = [];
   const w = world({gates: {GraphOpsBotRebind: () => order.push("graphops"), EntitySync: {connect: () => order.push("stream")}, RoomManager: {fetchRooms: () => order.push("rooms"), fetchMyRooms: () => order.push("mine")}, populateRooms: () => order.push("populate")}});
   w.session.callsign = "V";
-  w.session.onSessionRestored();
+  w.session._emit("restored");
   assert.deepEqual(order, ["graphops", "stream", "rooms", "mine"]);
   assert.deepEqual(w.messages, [["👤 Session restored for V", "info"]]);
+  assert.deepEqual(w.log.filter((e) => ["message", "status"].includes(e[0])).map((e) => e[0]), ["message", "status"], "the message, then the status");
   assert.deepEqual(w.log.filter((e) => e[0] === "status").length, 1);
 });
 
 test("on logout each part is optional: GraphOps, the two streams and the rooms are only told if they exist", () => {
   const none = world();
-  none.session.onLogout();
+  none.session._emit("logout");
   assert.deepEqual(none.messages, [["👤 Operator logged out", "info"]]);
   const some = world({gates: {EntitySync: {disconnect() { some.note("entity"); }}}});
-  some.session.onLogout();
+  some.session._emit("logout");
   assert.deepEqual(some.log.filter((e) => e[0] === "entity"), [["entity"]]);
 });
 
-test("nothing outside the object overrides the callbacks or writes to the session's fields", () => {
+test("the object has no callbacks any more, only events; nothing outside it writes to its fields", () => {
+  assert.equal(/\bon(?:LoginSuccess|SessionRestored|Logout)\s*[:(=]|\.on(?:LoginSuccess|SessionRestored|Logout)\b/.test(page), false, "no member, call or override of the old callbacks");
   const outside = page.replace(objectSource, "");
-  assert.equal(/OperatorSession\.(?:onLoginSuccess|onSessionRestored|onLogout)\s*=[^=]/.test(outside), false);
   assert.equal(/OperatorSession\.(?:operatorId|operatorName|callsign|role|teamId|sessionToken|sessionId|isAuthenticated)\s*=[^=]/.test(outside), false);
 });
 
@@ -396,4 +410,84 @@ test("the page's token helper is the operator session's token, or empty, with no
   assert.equal(run({OperatorSession: {sessionToken: "tok"}}), "tok");
   assert.equal(run({OperatorSession: {sessionToken: null}}), "");
   assert.equal(run({}), "");
+});
+
+// --- the events ---
+
+test("a session with nothing wired to it still logs in, restores and logs out: emitting with no handler is harmless", async () => {
+  const w = world({wired: false, replies: {...loginReply(), "POST /api/operator/logout": {}}, auth: {result: {valid: true, operator: OPERATOR}}});
+  assert.equal((await w.session.login("V", "pw")).success, true);
+  w.session.sessionToken = "saved";
+  assert.equal(await w.session.validateSession(), true);
+  await w.session.logout();
+  assert.deepEqual(w.messages, []);
+});
+
+test("handlers for an event run in the order they were added, each once per emit; on and off return the session; off removes one", () => {
+  const w = world({wired: false});
+  const order = [];
+  const a = () => order.push("a");
+  assert.equal(w.session.on("login", a), w.session);
+  w.session.on("login", () => order.push("b"));
+  w.session.on("logout", () => order.push("c"));
+  w.session._emit("login");
+  assert.deepEqual(order, ["a", "b"]);
+  assert.equal(w.session.off("login", a), w.session);
+  w.session._emit("login");
+  assert.deepEqual(order, ["a", "b", "b"]);
+  w.session.off("never_added", a);
+  w.session._emit("unknown");
+});
+
+test("login, restore and logout each emit their own event, and only after the state is set", async () => {
+  const w = world({wired: false, replies: {...loginReply(), "POST /api/operator/logout": {}}, auth: {result: {valid: true, operator: OPERATOR}}});
+  const seen = [];
+  for (const event of ["login", "restored", "logout"]) w.session.on(event, () => seen.push([event, w.session.isAuthenticated, w.session.callsign]));
+  await w.session.login("V", "pw");
+  w.session.sessionToken = "saved";
+  await w.session.validateSession();
+  await w.session.logout();
+  assert.deepEqual(seen, [["login", true, "VIPER"], ["restored", true, "VIPER"], ["logout", false, null]]);
+});
+
+test("PINNED: an error in a handler reaches the caller, as an error in the old callbacks did: a failing login effect makes login report failure although the session is set", async () => {
+  const w = world({wired: false, replies: loginReply()});
+  w.session.on("login", () => { throw new Error("effect failed"); });
+  assert.deepEqual(await w.session.login("V", "pw"), {success: false, message: "effect failed"});
+  assert.equal(w.session.isAuthenticated, true);
+});
+
+test("PINNED: a failing restore effect makes the restore fail and signs the session out", async () => {
+  const w = world({wired: false, auth: {result: {valid: true, operator: OPERATOR}}});
+  w.session.on("restored", () => { throw new Error("effect failed"); });
+  w.session.sessionToken = "saved";
+  assert.equal(await w.session.validateSession(), false);
+  assert.equal(w.session.isAuthenticated, false);
+  assert.match(w.warnings[0], /Session validation failed/);
+});
+
+test("PINNED: a failing logout effect makes logout reject, after the session was cleared", async () => {
+  const w = await signedIn({replies: {...loginReply(), "POST /api/operator/logout": {}}, wired: false});
+  w.session.on("logout", () => { throw new Error("effect failed"); });
+  await assert.rejects(w.session.logout(), /effect failed/);
+  assert.equal(w.session.sessionToken, null);
+});
+
+test("an error in a handler stops the handlers after it", () => {
+  const w = world({wired: false});
+  const order = [];
+  w.session.on("login", () => { order.push(1); throw new Error("x"); });
+  w.session.on("login", () => order.push(2));
+  assert.throws(() => w.session._emit("login"), /x/);
+  assert.deepEqual(order, [1]);
+});
+
+test("the page wires the effects to the session once, and the wiring registers exactly the three events", () => {
+  assert.equal(page.split("wireOperatorSessionEffects(OperatorSession);").length - 1, 1);
+  const w = world({wired: false});
+  const seen = [];
+  const fake = {callsign: "V", on(event) { seen.push(event); return fake; }};
+  new Function("window", "WebSocketSync", "EntitySync", "RoomManager", "addConsoleMessage", "updateOperatorStatusUI", "escapeHtml", "populateRooms", "console", `return (${wireSource});`)({}, undefined, undefined, undefined, () => {}, () => {}, (x) => x, undefined, console)(fake);
+  assert.deepEqual(seen, ["login", "restored", "logout"]);
+  assert.equal(Object.keys(w.session.eventHandlers).length, 0);
 });

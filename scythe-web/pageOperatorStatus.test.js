@@ -113,16 +113,18 @@ test("the session panel does nothing if the page has no such element", () => {
   updateSessionInfoPanel();
 });
 
-/** One of the session's login callbacks, run against fakes that record the console and the calls. */
+/** One of the session's events, run through the page's wiring against fakes that record the console and the calls. */
 function callback(name, session) {
-  const messages = [], calls = [];
+  const event = {onLoginSuccess: "login", onSessionRestored: "restored", onLogout: "logout"}[name];
+  const messages = [], calls = [], handlers = {};
+  const fake = {...session, on(e, fn) { handlers[e] = fn; return fake; }};
   const scope = {
     addConsoleMessage: (text, kind) => messages.push([text, kind]), updateOperatorStatusUI: () => calls.push("status"), escapeHtml: pageEscape,
-    window: {}, populateRooms: undefined,
+    window: {}, populateRooms: undefined, WebSocketSync: undefined, EntitySync: undefined, RoomManager: undefined, console,
   };
   const keys = Object.keys(scope);
-  const fn = new Function(...keys, `return (${sessionMember(name)});`)(...keys.map((k) => scope[k]));
-  fn.call(session);
+  new Function(...keys, `return (${functionSource("wireOperatorSessionEffects")});`)(...keys.map((k) => scope[k]))(fake);
+  handlers[event]();
   return {messages, calls};
 }
 

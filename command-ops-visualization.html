@@ -16589,6 +16589,7 @@ const originalComplete = options.complete;
             sessionId: null,
             isAuthenticated: false,
             heartbeatInterval: null,
+            eventHandlers: {},
             
             HEARTBEAT_INTERVAL: 30000, // 30 seconds
             
@@ -16629,7 +16630,7 @@ const originalComplete = options.complete;
                         // Create a minimal session object for compatibility
                         this._setSessionData({ session_id: operator.operator_id || null, session_token: this.sessionToken }, operator);
                         this.startHeartbeat();
-                        this.onSessionRestored();
+                        this._emit('restored');
                         return true;
                     }
 
@@ -16657,7 +16658,7 @@ const originalComplete = options.complete;
                     if (data.status === 'ok') {
                         this._setSessionData(data.session, data.operator);
                         this.startHeartbeat();
-                        this.onLoginSuccess();
+                        this._emit('login');
                         return { success: true, operator: data.operator };
                     } else {
                         return { success: false, message: data.message };
@@ -16705,7 +16706,7 @@ const originalComplete = options.complete;
                 }
                 
                 this.clearSession();
-                this.onLogout();
+                this._emit('logout');
             },
             
             // Clear session data
@@ -16814,20 +16815,47 @@ const originalComplete = options.complete;
                 }
             },
             
-            // Event callbacks (can be overridden)
-            onLoginSuccess: function() {
-                addConsoleMessage(`👤 Operator ${escapeHtml(this.callsign)} logged in`, 'info');
-                updateOperatorStatusUI();
-                
-                // Rebind GraphOps to this instance (unlocks inference)
-                if (window.GraphOpsBotRebind) window.GraphOpsBotRebind();
-                
-                // Connect to entity stream (prefer WebSocket if available)
+            // Events: 'login' (after a login), 'restored' (after a saved session validates) and 'logout' (after a logout).
+            // The handlers run in order, in the caller's place, and an error in one reaches the caller, as the callbacks these replace did.
+            on: function(event, handler) {
+                if (!this.eventHandlers[event]) {
+                    this.eventHandlers[event] = [];
+                }
+                this.eventHandlers[event].push(handler);
+                return this;
+            },
+
+            off: function(event, handler) {
+                if (this.eventHandlers[event]) {
+                    this.eventHandlers[event] = this.eventHandlers[event].filter(h => h !== handler);
+                }
+                return this;
+            },
+
+            _emit: function(event) {
+                (this.eventHandlers[event] || []).forEach(handler => handler());
+            }
+        };
+        
+        // What the page does when the session changes (these were the session's own onLoginSuccess, onSessionRestored and onLogout callbacks).
+        function wireOperatorSessionEffects(session) {
+            // Connect to the entity stream (prefer WebSocket if available)
+            function connectStreams() {
                 if (window.WebSocketSync && WebSocketSync.useWebSocket) {
                     WebSocketSync.connect();
                 } else if (window.EntitySync) {
                     EntitySync.connect();
                 }
+            }
+
+            session.on('login', function() {
+                addConsoleMessage(`👤 Operator ${escapeHtml(session.callsign)} logged in`, 'info');
+                updateOperatorStatusUI();
+                
+                // Rebind GraphOps to this instance (unlocks inference)
+                if (window.GraphOpsBotRebind) window.GraphOpsBotRebind();
+                
+                connectStreams();
                 
                 // Fetch and auto-join rooms
                 if (window.RoomManager) {
@@ -16839,30 +16867,25 @@ const originalComplete = options.complete;
                 if (typeof populateRooms === 'function') {
                     try { populateRooms(); } catch(e) { console.debug('populateRooms failed:', e); }
                 }
-            },
-            
-            onSessionRestored: function() {
-                addConsoleMessage(`👤 Session restored for ${escapeHtml(this.callsign)}`, 'info');
+            });
+
+            session.on('restored', function() {
+                addConsoleMessage(`👤 Session restored for ${escapeHtml(session.callsign)}`, 'info');
                 updateOperatorStatusUI();
                 
                 // Rebind GraphOps to this instance (unlocks inference)
                 if (window.GraphOpsBotRebind) window.GraphOpsBotRebind();
                 
-                // Connect to entity stream
-                if (window.WebSocketSync && WebSocketSync.useWebSocket) {
-                    WebSocketSync.connect();
-                } else if (window.EntitySync) {
-                    EntitySync.connect();
-                }
+                connectStreams();
                 
                 // Fetch rooms
                 if (window.RoomManager) {
                     RoomManager.fetchRooms();
                     RoomManager.fetchMyRooms();
                 }
-            },
-            
-            onLogout: function() {
+            });
+
+            session.on('logout', function() {
                 addConsoleMessage('👤 Operator logged out', 'info');
                 updateOperatorStatusUI();
                 
@@ -16881,8 +16904,9 @@ const originalComplete = options.complete;
                 if (window.RoomManager) {
                     RoomManager.reset();
                 }
-            }
-        };
+            });
+        }
+        wireOperatorSessionEffects(OperatorSession);
         
         // Make globally available
         window.OperatorSession = OperatorSession;
