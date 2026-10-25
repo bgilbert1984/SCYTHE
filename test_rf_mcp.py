@@ -62,7 +62,8 @@ class RFMCPTests(unittest.TestCase):
         self.assertEqual(result["correlations"][0]["finding_class"], "INFERRED")
 
     def test_mcp_query_is_read_only_and_direct_control_is_rejected(self):
-        handler = MCPHandler(_Engine(), use_orchestrator=True)
+        with patch.dict(os.environ, {"MCP_APPROVAL_MODES": "HARDWARE_CONTROL=AUTOMATED"}):
+            handler = MCPHandler(_Engine(), use_orchestrator=True)
         register_rf_tools(handler.engine, handler)
         query = handler.handle({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
                                 "params": {"name": "rf_observations_query", "arguments": {}}})

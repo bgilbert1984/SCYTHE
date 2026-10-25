@@ -40,8 +40,11 @@ The four steps are kept separate on purpose.
 3. **Proposal and approval (state-changing tools).** A direct `tools/call` of a tool with
    `mutates_state` is refused. The caller uses `orchestrate/propose`,
    `orchestrate/decide` and `orchestrate/execute`. Approval is decided from the tool's
-   declared effect (see below), never from its name. When a deployment requires
-   `SECOND_PRINCIPAL` for an effect (`MCP_APPROVAL_MODES`), a proposal that passes the
+   declared effect (see below), never from its name. `HARDWARE_CONTROL` requires
+   `SECOND_PRINCIPAL` unless the deployment says otherwise (`MCP_APPROVAL_MODES`, which can also raise any
+   other effect; `HARDWARE_CONTROL=AUTOMATED` restores single-operator behavior explicitly). For hardware
+   the caller's `confidence` is recorded but does not decide. When an effect requires
+   `SECOND_PRINCIPAL`, a proposal that passes the
    automated checks waits as `pending_approval` until a different identified operator
    calls `orchestrate/approve` (`proposal_id`, `decision` of `approve` or `deny`, an optional
    `note`); execution then re-checks the approval and that the parameters are unchanged.

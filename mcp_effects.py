@@ -78,13 +78,23 @@ MINIMUM_APPROVAL_MODE = {
     HARDWARE_CONTROL: AUTOMATED,
 }
 
+# What an effect requires when the deployment says nothing: above the floor where the floor
+# is too weak to be a silent default.  Missing configuration must not select automated
+# approval for physical hardware (#228).  A deployment may state a different mode for the
+# effect in ``MCP_APPROVAL_MODES``, down to the floor; that is then an explicit, visible choice.
+DEFAULT_APPROVAL_MODE = {
+    HARDWARE_CONTROL: SECOND_PRINCIPAL,
+}
+
 
 def required_approval_mode(effect: str, deployment: Optional[dict] = None, halts: bool = False) -> str:
     """The approval mode an effect requires: the floor, or a stricter deployment setting.
 
-    ``deployment`` maps effect to a requested mode.  A deployment may raise the mode and
-    may never lower it, so no configuration undoes a guarantee the declared effect
-    establishes; a request below the floor raises ``ValueError`` instead of being ignored.
+    ``deployment`` maps effect to a requested mode.  Without a request the mode is the
+    effect's default (``DEFAULT_APPROVAL_MODE``), else its floor.  A request may raise the
+    mode, or lower it to the floor at most, so no configuration undoes a guarantee the
+    declared effect establishes; a request below the floor raises ``ValueError`` instead
+    of being ignored.
 
     ``halts`` is the one exception (ADR 0006 Decision 7): a tool whose author declared in code
     that it only stops activity is capped at ``AUTOMATED``, so a deployment that raises the
@@ -96,7 +106,7 @@ def required_approval_mode(effect: str, deployment: Optional[dict] = None, halts
     floor = MINIMUM_APPROVAL_MODE[effect]
     requested = (deployment or {}).get(effect)
     if requested is None:
-        return floor
+        requested = DEFAULT_APPROVAL_MODE.get(effect, floor)
     if requested not in APPROVAL_MODES:
         raise ValueError(f"effect {effect}: unknown approval mode {requested!r}; expected one of {list(APPROVAL_MODES)}")
     if APPROVAL_MODES.index(requested) < APPROVAL_MODES.index(floor):
@@ -172,6 +182,13 @@ def validate_approval_table() -> list[str]:
             problems.append(f"approval table: effect {effect} has unknown mode {mode!r}")
         elif (effect in NON_MUTATING) != (mode == DIRECT):
             problems.append(f"approval table: effect {effect} mapped to {mode}; only non-mutating effects may be DIRECT, and they must be")
+    for effect, mode in sorted(DEFAULT_APPROVAL_MODE.items()):
+        if effect not in MINIMUM_APPROVAL_MODE:
+            problems.append(f"approval table: default for {effect!r}, which is not an effect category")
+        elif mode not in APPROVAL_MODES:
+            problems.append(f"approval table: effect {effect} has unknown default mode {mode!r}")
+        elif APPROVAL_MODES.index(mode) < APPROVAL_MODES.index(MINIMUM_APPROVAL_MODE[effect]):
+            problems.append(f"approval table: default mode {mode} for {effect} is below its floor")
     return problems
 
 
