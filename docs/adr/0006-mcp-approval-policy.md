@@ -23,7 +23,8 @@
     `rf_capture_start` and `rf_capture_stop`, and only the stop tool halts.
   - **Not yet implemented:** durable pending proposals (a restart drops them, which fails
     closed; the audit keeps the record, #219), a per-effect approver list, and a persistent grant
-    store (the grant is an environment setting). The approval action is exposed beyond `/mcp` as `GET /api/mcp/proposals/pending`
+    store (the grant is an environment setting). The restart policy above is documented and
+    tested; durable pending proposals are still not built. The approval action is exposed beyond `/mcp` as `GET /api/mcp/proposals/pending`
     and `POST /api/mcp/proposals/<id>/decision`, with a list and buttons in the SDR++ panel.
     The `/api/sdr/*` control routes now enter the lifecycle as `operator_command`
     (ADR 0005 Decision 5); with a raised `HARDWARE_CONTROL` mode their start, tune and config
@@ -215,8 +216,21 @@ proposal's history (proposer, approver, executor) from the audit, and it must no
 reused or re-derived.
 
 **Durability.** Proposals stay in memory in the first implementation. A restart drops
-pending proposals, which fails closed: the proposer proposes again, and the audit rows keep
-the record. A pending proposal expires after a TTL (proposed default: 15 minutes,
+every pending proposal and every approved one that has not yet run, which fails closed: the
+dropped proposal is not found, so it can be neither approved, denied nor executed, and the
+proposer proposes again. The audit rows keep the record, and at startup the one process that
+owns the store appends a `proposal.expired` row ("orphaned by restart") for each proposal the
+audit shows as created and undecided (`control_audit.close_orphaned_proposals`), so the history
+ends truthfully instead of at `pending_approval`. That step is evidence only and idempotent. Its failure policy is warn-only on purpose: the
+proposals are in memory, so a failed audit write cannot let an old command run, and refusing to start
+over an audit-database fault would take the orchestrator (and the stop path) down with it. The
+failure is logged at ERROR (`RESTART AUDIT INCOMPLETE`); until the next successful startup those
+proposals' history may end at `pending_approval`, so the audit is not a completeness guarantee under
+database failure. It
+does not touch a proposal that was denied, expired or executed, or one whose execution began
+(a `started` row): whether that one ran is unknown and the audit does not claim otherwise.
+It assumes one process per audit store, which holds because each instance has its own data
+directory. A pending proposal expires after a TTL (proposed default: 15 minutes,
 configurable) so a stale proposal cannot be approved after its context has changed.
 Durable pending proposals need a store that keeps parameters unredacted, which the audit
 store deliberately does not; that is tracked with #219.

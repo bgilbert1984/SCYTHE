@@ -47,7 +47,7 @@
     }
 
     // Commands waiting for a second operator (ADR 0006), and the controls to approve or deny them.
-    const approvals = { timer: null, items: [] };
+    const approvals = { timer: null, items: [], mayApprove: false };
 
     function approvalsPanel() { return document.getElementById('sdrpp-approvals'); }
 
@@ -75,6 +75,10 @@
                 const note = document.createElement('em');
                 note.textContent = ' (yours: another operator must approve)';
                 row.appendChild(note);
+            } else if (approvals.mayApprove !== true) {
+                const note = document.createElement('em');
+                note.textContent = ' (you are not authorized to approve commands)';
+                row.appendChild(note);
             } else {
                 [['approve', 'Approve'], ['deny', 'Deny']].forEach(([decision, label]) => {
                     const choice = document.createElement('button');
@@ -95,6 +99,7 @@
             if (!response.ok) return;   // not signed in as an operator, or approvals unavailable: show nothing
             const data = await response.json();
             approvals.items = Array.isArray(data.proposals) ? data.proposals : [];
+            approvals.mayApprove = data.caller_may_approve === true;   // fail closed: only an explicit "yes" shows the buttons
             renderApprovals();
         } catch (error) { /* keep the last list */ }
     }

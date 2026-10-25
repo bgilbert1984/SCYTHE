@@ -21431,6 +21431,15 @@ def main():
                 selection_engine=globals().get('hypergraph_store'),
             )
             globals()['mcp_handler'] = mcp_handler  # read by the /api/embedding/entity adapter
+            # Proposals are in memory: whatever the previous process left open can no longer run.
+            try:
+                import control_audit
+                orphaned = control_audit.close_orphaned_proposals()
+                if orphaned:
+                    logger.warning('Closed %d proposal(s) left open by the previous run (not persisted)', len(orphaned))
+            except Exception as exc:
+                logger.error('RESTART AUDIT INCOMPLETE: could not close orphaned proposals in the control audit '
+                             '(proposals are in memory and cannot run; their audit history may end at pending_approval): %s', exc)
             logger.info('MCP server registered at /mcp (%d tools, %d resources)',
                         len(mcp_handler._tools), len(mcp_handler._resources))
 

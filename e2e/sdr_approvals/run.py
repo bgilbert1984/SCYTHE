@@ -22,7 +22,8 @@ REPO = HERE.parents[1]
 
 OPERATORS = {"tok-alpha": {"operator_id": "op-1", "callsign": "ALPHA"},
              "tok-alpha2": {"operator_id": "op-1", "callsign": "ALPHA"},
-             "tok-bravo": {"operator_id": "op-2", "callsign": "BRAVO"}}
+             "tok-bravo": {"operator_id": "op-2", "callsign": "BRAVO"},
+             "tok-charlie": {"operator_id": "op-3", "callsign": "CHARLIE"}}
 
 
 class InfrastructureError(Exception):
@@ -38,6 +39,9 @@ class Walkthrough:
     # --- server state -------------------------------------------------------------------------------------------------
     def get(self, path):
         return json.load(urllib.request.urlopen(self.base + path, timeout=10))
+
+    def restart(self):
+        return self.get("/__restart")
 
     def set_lifecycle(self, state):
         urllib.request.urlopen(f"{self.base}/__lifecycle/{state}", timeout=10).read()
@@ -238,8 +242,69 @@ class Walkthrough:
             c["ok"] = all(code == 400 and outcome == "invalid" for code, outcome in got) and len(self.get("/__audit")) == before
             c["detail"] = f"responses={got} new_proposals={len(self.get('/__audit')) - before}"
 
-        print("page errors:", json.dumps({k: p.errors for k, p in (("alpha", a), ("bravo", b), ("alpha2", a2)) if p})[:600])
-        for page in (a, b, a2):      # the console pages (Cesium) are done; closing them keeps the next phase's clicks responsive
+        ch = self.open_page(browser, "tok-charlie")
+        with self.case(20, "CHARLIE (signed in, never granted approval authority) sees a held command with no Approve/Deny; deciding is a 403 and nothing runs") as c:
+            a.fill("#sdrpp-frequency-input", "88M")
+            a.click("#sdrpp-tune-btn")
+            a.wait_for_timeout(1000)
+            self.show_spectrogram(ch)
+            ch.click("#sdrpp-approvals-btn")
+            self.refresh(ch)
+            seen = self.panel(ch)
+            pid = ch.evaluate("async () => (await (await ScytheTransport.fetch('/api/mcp/proposals/pending')).json()).proposals[0].proposal_id")
+            codes = [ch.evaluate("""async ([id, d]) => (await ScytheTransport.fetch('/api/mcp/proposals/' + id + '/decision', {method: 'POST',
+                headers: {'Content-Type': 'application/json'}, body: JSON.stringify({decision: d})})).status""", [pid, d]) for d in ("approve", "deny")]
+            self.shot(ch, "15-ungranted-operator")
+            c["ok"] = (ch.locator("#sdrpp-approvals button").count() == 0 and "not authorized" in seen and "88.000 MHz" in seen
+                       and codes == [403, 403] and "tune 88000000.0" not in self.calls()
+                       and len(self.get("/__audit")[-1]["events"]) == 1)
+            c["detail"] = f"panel={seen!r} decisions={codes}"
+            self.decide(b, "88.000 MHz", "Deny")
+
+        with self.case(21, "After a restart the held command is gone: the approver sees nothing waiting, approving the old id is a 404, nothing runs, the audit ends it as orphaned") as c:
+            a.fill("#sdrpp-frequency-input", "77M")
+            a.click("#sdrpp-tune-btn")
+            a.wait_for_timeout(1000)
+            self.refresh(b)
+            before = self.panel(b)
+            old = self.last("rf_tune")
+            closed = self.restart()
+            self.refresh(b)
+            self.refresh(a)
+            after = self.panel(b)
+            code = b.evaluate("""async id => (await ScytheTransport.fetch('/api/mcp/proposals/' + id + '/decision', {method: 'POST',
+                headers: {'Content-Type': 'application/json'}, body: JSON.stringify({decision: 'approve'})})).status""",
+                              old["proposal_id"])
+            ended = self.last("rf_tune")
+            self.shot(b, "16-after-restart")
+            c["ok"] = ("77.000 MHz" in before and "No commands are waiting" in after and code == 404
+                       and "tune 77000000.0" not in self.calls() and len(closed) == 1
+                       and ended["orphaned_by_restart"] and not ended["executed"] and self.badge(a) == "Approvals")
+            c["detail"] = f"before={before!r} after={after!r} old_id_status={code} audit={self.events(ended)} badge={self.badge(a)!r}"
+
+        with self.case(23, "BRAVO (granted) is shown no Approve/Deny when the server's answer does not say whether the caller may approve (the console fails closed)") as c:
+            def strip(r):
+                resp = r.fetch()
+                body = resp.json()
+                body.pop("caller_may_approve", None)
+                r.fulfill(response=resp, body=json.dumps(body))
+            a.fill("#sdrpp-frequency-input", "99M")
+            a.click("#sdrpp-tune-btn")
+            a.wait_for_timeout(1000)
+            b.route("**/api/mcp/proposals/pending", strip)
+            self.refresh(b)
+            unknown = self.panel(b)
+            unknown_buttons = b.locator("#sdrpp-approvals button").count()
+            b.unroute("**/api/mcp/proposals/pending", strip)
+            self.refresh(b)
+            known_buttons = b.locator("#sdrpp-approvals button").count()
+            c["ok"] = ("99.000 MHz" in unknown and unknown_buttons == 0 and known_buttons >= 2
+                       and "tune 99000000.0" not in self.calls())
+            c["detail"] = f"buttons_when_unknown={unknown_buttons} buttons_when_stated={known_buttons} panel={unknown!r}"
+            self.decide(b, "99.000 MHz", "Deny")
+
+        print("page errors:", json.dumps({k: p.errors for k, p in (("alpha", a), ("bravo", b), ("alpha2", a2), ("charlie", ch)) if p})[:600])
+        for page in (a, b, a2, ch):      # the console pages (Cesium) are done; closing them keeps the next phase's clicks responsive
             if page:
                 page.context.close()
         self.run_governance(browser)
@@ -347,6 +412,18 @@ class Walkthrough:
                 c["detail"] = head
             finally:
                 self.set_lifecycle("on")
+
+        with self.case(22, "Governance page, CHARLIE (not granted): sees the held command and who is waiting, with no Approve/Deny and a plain reason") as c:
+            ch = self.open_governance(browser, "tok-charlie")
+            code, body = self.api(a, "POST", "/api/sdr/tune", "tok-alpha", {"frequency_hz": 66e6})
+            self.load_governance(ch, expand=True)
+            text = self.gov_text(ch)
+            self.shot(ch, "17-governance-ungranted")
+            c["ok"] = (code == 409 and "Tune SDR to 66.000 MHz" in text and "not authorized to approve" in text
+                       and ch.locator("#mission-governance .mgov__action").count() == 0 and "tune 66000000.0" not in self.calls())
+            c["detail"] = f"http={code} {text[:240]}"
+            pid = self.api(a, "GET", "/api/mcp/proposals/pending", "tok-alpha")[1]["proposals"][0]["proposal_id"]
+            self.api(b, "POST", f"/api/mcp/proposals/{pid}/decision", "tok-bravo", {"decision": "deny"})
 
         print("governance page errors:", json.dumps({k: p.errors for k, p in (("anon", anon), ("alpha", a), ("bravo", b))})[:400])
 
