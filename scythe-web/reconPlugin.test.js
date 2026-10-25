@@ -57,6 +57,7 @@ function setup({replies = {}, drawn = true, token = null, answer = null, duratio
     removeMarker: (id) => globeCalls.push(["remove", id]),
     updatePosition: (e) => globeCalls.push(["position", e.entity_id]),
     clear: () => globeCalls.push(["clear"]),
+    detach: () => globeCalls.push(["detach"]),
     flyTo: (id) => globeCalls.push(["flyTo", id]),
     addTaskLine: (t) => globeCalls.push(["taskLine", t.task_id]),
     createEntityIcon: (...a) => { globeCalls.push(["icon", ...a]); return "icon-data"; },
@@ -692,7 +693,7 @@ test("deactivating takes the drawing down, unwires the panel, stops the timers a
   s.globeCalls.length = 0;
   const errors = await s.workspace.deactivate(RECON_ID);
   assert.deepEqual(errors, []);
-  assert.deepEqual(s.globeCalls, [["clear"], ["visible", false]]);
+  assert.deepEqual(s.globeCalls, [["detach"]]);
   assert.equal(s.view.unbound, 1);
   assert.equal(s.timers.live("interval").length, 0);
   assert.equal(s.sources[0].closed, true);

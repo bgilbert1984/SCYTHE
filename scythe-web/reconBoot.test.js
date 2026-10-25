@@ -16,24 +16,46 @@ function element() {
   };
 }
 
-/** A window for booting the workspace with the recon tool: a panel, a fake drawing, fake page functions. */
+/** A Cesium whose values describe themselves, and a viewer whose entity collection records what is drawn into it. */
+function describing(path) {
+  return new Proxy(function () {}, {
+    get: (t, k) => (k === Symbol.toPrimitive || k === "toJSON" ? () => path : typeof k === "symbol" ? undefined : k === "toCssColorString" ? () => `css(${path})` : describing(`${path}.${k}`)),
+    apply: (t, self, args) => describing(`${path}(${args.map((a) => (typeof a === "object" ? JSON.stringify(a) : String(a))).join(",")})`),
+    construct: (t, args) => describing(`new ${path}(${args.map((a) => (typeof a === "object" ? JSON.stringify(a) : String(a))).join(",")})`),
+  });
+}
+
+function fakeViewer() {
+  const items = [];
+  const flights = [];
+  return {
+    items, flights,
+    entities: {
+      get values() { return [...items]; }, add(spec) { const e = {...spec}; items.push(e); return e; }, getById: (id) => items.find((i) => i.id === id),
+      remove(e) { const i = items.indexOf(e); if (i >= 0) items.splice(i, 1); }, removeAll() { items.length = 0; }, contains: (e) => items.includes(e),
+    },
+    trackedEntity: undefined, scene: {screenSpaceCameraController: {}},
+    camera: {position: describing("camera.position"), heading: 0, lookAtTransform() {}, flyTo: (o) => flights.push(o)},
+  };
+}
+
+/** A window for booting the workspace with the recon tool: a panel, a fake Cesium, fake page functions. */
 function reconWindow({console: consoleOverride, ids = ["toggleReconEntities", "reconShowRings", "reconShowLabels", "reconAutoUpdate", "reconSetReference", "reconCheckAlerts", "reconFilters", "recon-entity-count", "recon-alert-count", "recon-alert-list"], replies = {}} = {}) {
   const els = Object.fromEntries(ids.map((id) => [id, element()]));
-  const drawing = {viewer: null, calls: [], rendered: true};
-  for (const name of ["addEntityMarker", "removeEntityMarker", "updateEntityPosition", "clearAllEntities", "flyToEntity", "addTaskLine", "setVisible", "setShowRings", "setShowLabels", "setReferencePoint"]) {
-    drawing[name] = (...args) => { drawing.calls.push([name, ...args]); };
-  }
-  drawing.attach = (viewer) => { drawing.viewer = viewer; drawing.calls.push(["attach", viewer]); };
-  drawing.renderEntities = () => { drawing.calls.push(["renderEntities"]); return drawing.rendered; };
-  drawing.createEntityIcon = (...args) => { drawing.calls.push(["createEntityIcon", ...args]); return "icon"; };
-  drawing.cameraPosition = () => ({lat: 1.5, lon: 2.5});
+  const viewer = fakeViewer();
   const messages = [], notes = [], requests = [], prompts = [];
   const sources = [];
   const win = {
     console: consoleOverride || quiet, Event: class { constructor(type) { this.type = type; } }, dispatchEvent() {},
     setInterval: () => 1, clearInterval() {}, setTimeout: () => 1, clearTimeout() {},
-    performance: {now: () => 5}, document: {getElementById: (id) => els[id] || null},
-    ReconDrawing: drawing, EventSource: class { constructor(url) { this.url = url; sources.push(this); } close() { this.closed = true; } },
+    performance: {now: () => 5},
+    Cesium: new Proxy({}, {get: (t, k) => (k === "Cartographic" ? {fromCartesian: () => ({latitude: 0.015, longitude: 0.025})} : k === "Math" ? {toDegrees: (r) => r * 100, toRadians: (d) => `rad(${d})`} : describing(String(k)))}),
+    document: {
+      getElementById: (id) => els[id] || null,
+      createElement: () => ({getContext: () => new Proxy({}, {get: () => () => ({addColorStop() {}}), set: () => true}), toDataURL: () => "data:icon"}),
+      addEventListener() {}, removeEventListener() {},
+    },
+    EventSource: class { constructor(url) { this.url = url; sources.push(this); } close() { this.closed = true; } },
     addConsoleMessage: (text, kind) => messages.push([text, kind]), showNotification: (title, text, kind) => notes.push([title, text, kind]),
     prompt: (message, current) => { prompts.push([message, current]); return "HOSTILE"; },
     updateReconList: () => { win.listRefreshes = (win.listRefreshes || 0) + 1; },
@@ -44,7 +66,8 @@ function reconWindow({console: consoleOverride, ids = ["toggleReconEntities", "r
       return {ok: true, json: async () => replies[key]};
     },
   };
-  return {win, els, drawing, messages, notes, requests, prompts, sources};
+  const drawn = () => viewer.items.map((i) => i.id);
+  return {win, els, viewer, drawn, messages, notes, requests, prompts, sources};
 }
 
 test("booting registers the recon tool inactive and sets AutoReconVisualization to its controls", () => {
@@ -57,43 +80,46 @@ test("booting registers the recon tool inactive and sets AutoReconVisualization 
   assert.equal(win.AutoReconVisualization.entities, win.ReconStore.entities);
 });
 
-test("the globe service hands the tool's drawing calls to the page's ReconDrawing", async () => {
-  const {win, drawing} = reconWindow();
+test("the controls draw through the globe service into the viewer, and take the markers down again", async () => {
+  const {win, viewer, drawn} = reconWindow();
   const workspace = bootWorkspace(win);
   await workspace.activate("recon");
-  win.AutoReconVisualization.initialize({id: "v"});
-  drawing.calls.length = 0;
+  win.AutoReconVisualization.initialize(viewer);
   const c = win.AutoReconVisualization;
-  const entity = {entity_id: "a"};
-  c.addEntityMarker(entity); c.removeEntityMarker("a"); c.flyToEntity("a");
-  assert.equal(c.createEntityIcon("red", "HOSTILE", false), "icon");
-  assert.deepEqual(drawing.calls, [["addEntityMarker", entity], ["removeEntityMarker", "a"], ["flyToEntity", "a"], ["createEntityIcon", "red", "HOSTILE", false]]);
+  const entity = {entity_id: "a", name: "A", disposition: "HOSTILE", threat_level: "LOW", location: {lat: 1, lon: 2}};
+  c.addEntityMarker(entity);
+  assert.deepEqual(drawn(), ["recon_entity_a"]);
+  win.ReconStore.upsert(entity);
+  c.flyToEntity("a");
+  assert.equal(viewer.flights.length, 1);
+  assert.equal(c.createEntityIcon(win.Cesium.Color.RED, "HOSTILE", false), "data:icon");
+  c.removeEntityMarker("a");
+  assert.deepEqual(drawn(), []);
 });
 
-test("the globe service reports it is unavailable until the drawing has a viewer, and tolerates a page with no drawing", async () => {
-  const {win, drawing} = reconWindow({replies: {"POST /api/recon/reference": {status: "ok", reference_point: {lat: 0, lon: 0}}}});
+test("nothing is drawn until a viewer has been handed over, and the page boots and the tool activates without Cesium", async () => {
+  const {win, viewer, drawn} = reconWindow();
   const workspace = bootWorkspace(win);
   await workspace.activate("recon");
-  win.AutoReconVisualization.initialize({id: "v"});
-  assert.equal(drawing.viewer.id, "v");
+  win.AutoReconVisualization.addEntityMarker({entity_id: "a", name: "A", disposition: "D", threat_level: "T", location: {lat: 1, lon: 2}});
+  assert.deepEqual(drawn(), []);
   const bare = reconWindow();
-  delete bare.win.ReconDrawing;
+  delete bare.win.Cesium;
   const w2 = bootWorkspace(bare.win);
   await w2.activate("recon");
-  bare.win.AutoReconVisualization.addEntityMarker({entity_id: "x"});
   bare.win.AutoReconVisualization.hide();
   assert.deepEqual((await w2.deactivate("recon")), []);
 });
 
 test("the panel's controls are wired to the tool: the checkbox shows the layer, the buttons make requests", async () => {
   const replies = {
-    "GET /api/recon/entities": {status: "ok", entity_count: 1, entities: [{entity_id: "a", name: "A", location: {lat: 1, lon: 2}}]},
+    "GET /api/recon/entities": {status: "ok", entity_count: 1, entities: [{entity_id: "a", name: "A", disposition: "HOSTILE", threat_level: "LOW", location: {lat: 1, lon: 2}}]},
     "GET /api/recon/alerts": {status: "ok", alerts: [], alert_count: 0},
   };
-  const {win, els, drawing, requests, messages, notes} = reconWindow({replies});
+  const {win, els, viewer, drawn, requests, messages, notes} = reconWindow({replies});
   const workspace = bootWorkspace(win);
   await workspace.activate("recon");
-  win.AutoReconVisualization.initialize({id: "v"});
+  win.AutoReconVisualization.initialize(viewer);
   els.toggleReconEntities.checked = true;
   els.toggleReconEntities.fire("change");
   await settle();
@@ -102,18 +128,26 @@ test("the panel's controls are wired to the tool: the checkbox shows the layer, 
   assert.equal(els["recon-alert-list"].innerHTML, '<div class="no-alerts">No active alerts</div>');
   assert.equal(els["recon-alert-count"].textContent, 0);
   assert.equal(win.listRefreshes, 1);
-  assert.deepEqual(drawing.calls.filter(([n]) => n === "setVisible"), [["setVisible", true]]);
+  assert.deepEqual(drawn(), ["recon_reference_point", "recon_proximity_ring_0", "recon_proximity_ring_1", "recon_proximity_ring_2", "recon_proximity_ring_3", "recon_entity_a"]);
   assert.deepEqual(Object.keys(win.ReconStore.entities), ["a"]);
   assert.deepEqual(notes, [["Recon Data Loaded", "Tracking 1 entities", "info"]]);
   els.reconCheckAlerts.fire("click");
   await settle();
   assert.equal(requests.filter((r) => r === "GET /api/recon/alerts").length, 2);
+  const rings = viewer.items.filter((i) => i.id.startsWith("recon_proximity_ring_"));
   els.reconShowRings.checked = false; els.reconShowRings.fire("change");
+  assert.deepEqual(rings.map((r) => r.show), [false, false, false, false]);
+  els.reconShowRings.checked = true; els.reconShowRings.fire("change");
+  assert.deepEqual(rings.map((r) => r.show), [true, true, true, true]);
+  const marker = viewer.items.find((i) => i.id === "recon_entity_a");
+  els.reconShowLabels.checked = false; els.reconShowLabels.fire("change");
+  assert.equal(marker.label.show, false);
   els.reconShowLabels.checked = true; els.reconShowLabels.fire("change");
-  assert.deepEqual(drawing.calls.filter(([n]) => n === "setShowRings" || n === "setShowLabels"), [["setShowRings", false], ["setShowLabels", true]]);
+  assert.equal(marker.label.show, true);
   els.toggleReconEntities.checked = false;
   els.toggleReconEntities.fire("change");
   assert.equal(els.reconFilters.style.display, "none");
+  assert.deepEqual(drawn(), []);
   assert.deepEqual(messages.at(-1), ["Recon auto-update stopped", "command"]);
 });
 
@@ -167,71 +201,77 @@ test("a failing list refresh is swallowed, and with no updateReconList the panel
   assert.deepEqual(messages.filter(([text]) => /Error loading/.test(text)), []);
 });
 
-test("the list is refreshed only when the drawing drew", async () => {
+test("the list is refreshed only when the drawing drew: not before a viewer is attached and the layer shown", async () => {
   const replies = {"GET /api/recon/entities": {status: "ok", entity_count: 0, entities: []}, "GET /api/recon/alerts": {status: "ok", alerts: [], alert_count: 0}};
-  const {win, drawing} = reconWindow({replies});
-  drawing.rendered = false;
+  const {win, viewer} = reconWindow({replies});
   const workspace = bootWorkspace(win);
   await workspace.activate("recon");
-  win.AutoReconVisualization.initialize({id: "v"});
-  await win.AutoReconVisualization.loadEntities();
+  await win.AutoReconVisualization.loadEntities();   // no viewer, layer hidden
   assert.equal(win.listRefreshes, undefined);
-  drawing.rendered = true;
-  await win.AutoReconVisualization.loadEntities();
+  win.AutoReconVisualization.initialize(viewer);
+  await win.AutoReconVisualization.loadEntities();   // a viewer, but the layer is still hidden
+  assert.equal(win.listRefreshes, undefined);
+  win.AutoReconVisualization.show();
+  await settle();
   assert.equal(win.listRefreshes, 1);
 });
 
 test("hiding the layer takes the drawing down", async () => {
-  const {win, drawing} = reconWindow();
+  const replies = {"GET /api/recon/entities": {status: "ok", entity_count: 0, entities: []}, "GET /api/recon/alerts": {status: "ok", alerts: [], alert_count: 0}};
+  const {win, viewer, drawn} = reconWindow({replies});
   const workspace = bootWorkspace(win);
   await workspace.activate("recon");
-  win.AutoReconVisualization.initialize({id: "v"});
-  drawing.calls.length = 0;
+  win.AutoReconVisualization.initialize(viewer);
+  win.AutoReconVisualization.show();
+  await settle();
+  assert.ok(drawn().length > 0);
   win.AutoReconVisualization.hide();
-  assert.deepEqual(drawing.calls, [["setVisible", false], ["clearAllEntities"]]);
+  assert.deepEqual(drawn(), []);
 });
 
-test("the reference point button reads the camera, posts it, tells the drawing, and does nothing without a viewer", async () => {
+test("the reference point button reads the camera, posts it, moves the reference marker, and does nothing without a viewer", async () => {
   const replies = {"POST /api/recon/reference": {status: "ok", reference_point: {lat: 9, lon: 8}}, "GET /api/recon/entities": {status: "ok", entity_count: 0, entities: []}, "GET /api/recon/alerts": {status: "ok", alerts: [], alert_count: 0}};
-  const {win, els, drawing, requests, messages} = reconWindow({replies});
+  const {win, els, viewer, requests, messages} = reconWindow({replies});
   const workspace = bootWorkspace(win);
   await workspace.activate("recon");
-  win.AutoReconVisualization.initialize({id: "v"});
+  win.AutoReconVisualization.initialize(viewer);
+  win.AutoReconVisualization.show();
   els.reconSetReference.fire("click");
   await settle();
-  assert.equal(requests[0], "POST /api/recon/reference");
-  assert.deepEqual(drawing.calls.filter(([n]) => n === "setReferencePoint"), [["setReferencePoint", {lat: 9, lon: 8}]]);
+  assert.ok(requests.includes("POST /api/recon/reference"));
   assert.ok(messages.some(([text]) => text === "Reference point set to: 1.5000, 2.5000"));
+  assert.equal(String(viewer.items.find((i) => i.id === "recon_reference_point").position), "Cartesian3.fromDegrees(8,9,0)");
   const bare = reconWindow({replies});
-  bare.drawing.attach = () => {};   // the drawing never gets a viewer
   const w2 = bootWorkspace(bare.win);
   await w2.activate("recon");
-  bare.win.AutoReconVisualization.initialize({id: "v"});
+  bare.win.AutoReconVisualization.initialize(null);   // no viewer to read the camera from
   bare.els.reconSetReference.fire("click");
   await settle();
   assert.deepEqual(bare.requests, []);
 });
 
-test("changes move markers and a task draws its line, through the drawing", async () => {
+test("changes move markers and a task draws its line, through the globe service", async () => {
   const replies = {
-    "GET /api/recon/simulate": {}, "GET /api/recon/changes?since=1700000000": {status: "ok", timestamp: 1, entity_count: 1, entities: [{entity_id: "p"}]},
-    "GET /api/recon/alerts": {status: "ok", alerts: [], alert_count: 0}, "POST /api/recon/task": {status: "ok", task: {task_id: "T", entity_name: "n"}},
-    "GET /api/recon/entities": {status: "ok", entity_count: 0, entities: []},
+    "GET /api/recon/simulate": {}, "GET /api/recon/changes?since=1700000000": {status: "ok", timestamp: 1, entity_count: 1, entities: [{entity_id: "p", location: {lat: 7, lon: 8}}]},
+    "GET /api/recon/alerts": {status: "ok", alerts: [], alert_count: 0}, "POST /api/recon/task": {status: "ok", task: {task_id: "T", entity_name: "n", entity_id: "p"}},
+    "GET /api/recon/entities": {status: "ok", entity_count: 1, entities: [{entity_id: "p", name: "P", disposition: "UNKNOWN", threat_level: "NONE", location: {lat: 1, lon: 2}}]},
   };
-  const {win, els, drawing} = reconWindow({replies});
+  const {win, els, viewer, drawn} = reconWindow({replies});
   win.setInterval = (fn) => { win.tick = fn; return 1; };
   const realNow = Date.now; Date.now = () => 1700000000000;
   try {
     const workspace = bootWorkspace(win);
     await workspace.activate("recon");
-    win.AutoReconVisualization.initialize({id: "v"});
+    win.AutoReconVisualization.initialize(viewer);
     win.AutoReconVisualization.show(); await settle();
+    const marker = viewer.items.find((i) => i.id === "recon_entity_p");
+    assert.equal(String(marker.position), "Cartesian3.fromDegrees(2,1,0)");
     els.reconAutoUpdate.checked = true; els.reconAutoUpdate.fire("change");
     await win.tick(); await settle();
+    assert.equal(String(marker.position), "Cartesian3.fromDegrees(8,7,0)");
   } finally { Date.now = realNow; }
-  assert.deepEqual(drawing.calls.filter(([n]) => n === "updateEntityPosition").map(([, e]) => e.entity_id), ["p"]);
   await win.AutoReconVisualization.createTaskForEntity("p");
-  assert.deepEqual(drawing.calls.filter(([n]) => n === "addTaskLine"), [["addTaskLine", {task_id: "T", entity_name: "n"}]]);
+  assert.ok(drawn().includes("recon_task_T"));
 });
 
 test("an alert list that cannot be built is not even attempted when the page has no list", async () => {

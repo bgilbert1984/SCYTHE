@@ -2,7 +2,7 @@
  * Auto-Recon as a workspace tool (the fifteenth tool on the lifecycle contract in lifecycle.js; the controller moved out of
  * command-ops-visualization.html as `AutoReconVisualization`, step 4b of docs/autorecon_extraction_plan.md).
  *
- * It owns what Auto-Recon does, and the page's `ReconDrawing` object (the drawing: markers, rings, icons, clusters, the camera) is reached
+ * It owns what Auto-Recon does, and the drawing (markers, rings, icons, clusters, the camera: `reconGlobe.js`) is reached
  * only through the `reconGlobe` service. Once the page has handed over its viewer with `initialize(viewer)` the tool wires the Recon panel's
  * controls. "Show Recon entities" loads the entities from the server (`/api/recon/entities`) and the alerts, and draws them; "Auto-update"
  * opens the entity stream (`/api/recon/entities/stream`) and every two seconds asks the server to move its simulated targets
@@ -37,9 +37,9 @@
  *   openEventSource  (url) => EventSource
  *   operatorSession  {token() => string|null, clear()}
  *   entityStream     {on(event, handler), off(event, handler)}: EntitySync's handlers (the boot module's controls, there from the moment it runs)
- *   reconGlobe       the drawing: {attach(viewer), available(), render() => drawn, addMarker(entity), removeMarker(id), updatePosition(entity), clear(),
+ *   reconGlobe       the drawing: {attach(viewer), detach(), available(), render() => drawn, addMarker(entity), removeMarker(id), updatePosition(entity), clear(),
  *                    flyTo(id), addTaskLine(task), createEntityIcon(...), setVisible(shown), setShowRings(shown), setShowLabels(shown),
- *                    setReferencePoint(point), cameraPosition() => {lat, lon}}: see `workspaceBoot.js`
+ *                    setReferencePoint(point), cameraPosition() => {lat, lon}}: see `reconGlobe.js`
  *   reconView        the panel: {bind(handlers) => unbind, setFiltersShown(shown), setEntityCount(n), setAlertCount(n), setAlertList(html()), refreshList(),
  *                    askDisposition(message, current) => string|null}
  *   reconConsole     {message(text, kind), notify(title, text, kind)}: text, not HTML
@@ -336,7 +336,7 @@ export function createReconPlugin({log = console, store, clock = {}} = {}) {
       }
       log.log?.("[AutoRecon] Subscribed to EntitySync for real-time updates");
 
-      ctx.onCleanup(() => { globe.clear(); globe.setVisible(false); });   // registered early, so it runs late
+      ctx.onCleanup(() => { globe.detach(); });   // registered early, so it runs late
       ctx.onCleanup(() => { run = null; });
       ctx.onCleanup(() => { if (source) { source.close(); source = null; } });
       run = {

@@ -11,8 +11,6 @@ const lines = page.split("\n");
 const where = (pattern) => lines.flatMap((line, i) => (pattern.test(line) ? [i + 1] : []));
 
 /** The page's object spans from `const AutoReconVisualization = {` to its `window.AutoReconVisualization = AutoReconVisualization;`. */
-const objectStart = lines.findIndex((line) => /^\s*const ReconDrawing = \{/.test(line)) + 1;
-const objectEnd = lines.findIndex((line) => /^\s*window\.ReconDrawing = ReconDrawing;/.test(line)) + 1;
 
 test("the page's recon writers go through ReconStore: ten upserts, and no assignment into the map anywhere", () => {
   assert.equal(where(/ReconStore\.upsert\(/).length, 10);
@@ -21,12 +19,11 @@ test("the page's recon writers go through ReconStore: ten upserts, and no assign
   assert.deepEqual(where(/window\.AutoReconVisualization\.entities = window\.AutoReconVisualization\.entities \|\| \{\}/), []);
 });
 
-test("the drawing is not a writer: it reads the store's map and the page's controller code is gone from it", () => {
-  const drawing = lines.slice(objectStart, objectEnd).join("\n");
-  assert.doesNotMatch(drawing, /ReconStore\.(?:upsert|remove|clear)\(/);
-  assert.match(drawing, /get entities\(\) \{ return ReconStore\.entities; \}/);
-  for (const gone of ["loadEntities", "loadAlerts", "startAutoUpdate", "stopAutoUpdate", "_bindReconSSE", "applyEntitySyncEvent", "subscribeToEntitySync", "setupEventListeners", "createTaskForEntity", "updateDisposition", "setReferenceFromView", "perfMetrics"]) {
-    assert.doesNotMatch(drawing, new RegExp(`\\b${gone}\\b`), `${gone} is the tool's now`);
+test("the page no longer has the recon controller or its drawing: both are modules now", () => {
+  assert.equal(/const (?:AutoReconVisualization|ReconDrawing) = \{/.test(page), false);
+  assert.equal(page.includes("window.ReconDrawing"), false);
+  for (const gone of ["loadEntities", "_bindReconSSE", "applyEntitySyncEvent", "subscribeToEntitySync", "addProximityRings", "createTacticalClusterIcon", "addThreatIndicator", "createOwnShipIcon"]) {
+    assert.equal(new RegExp(`\\b${gone}\\b`).test(page), false, `${gone} is not in the page`);
   }
 });
 
@@ -70,6 +67,5 @@ test("the page activates the recon tool, after the render tool whose clustered d
   const render = page.indexOf('workspace.activate("render")');
   const recon = page.indexOf('workspace.activate("recon")');
   assert.ok(render > 0 && recon > render, "recon is activated after render");
-  assert.ok(page.indexOf("window.ReconDrawing = ReconDrawing;") > 0);
   assert.equal(page.includes("window.AutoReconVisualization = AutoReconVisualization"), false, "the page no longer sets the controller itself");
 });
