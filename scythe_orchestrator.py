@@ -208,6 +208,9 @@ try:
 except ImportError:
     HAS_OPERATOR_MANAGER = False
 
+# Which role a self-registering caller may get; needs nothing else, so the FusionAuth path has it even without the operator manager.
+from registration_policy import RegistrationRoleError, public_registration_role
+
 try:
     from flask import Flask, jsonify, request, send_from_directory, abort
     from flask_cors import CORS
@@ -1610,10 +1613,15 @@ def orchestrator_user_register():
         callsign = data.get('callsign')
         email = data.get('email')
         password = data.get('password')
-        role = data.get('role', 'operator')
 
         if not all([callsign, email, password]):
             return jsonify({'status': 'error', 'message': 'Missing required fields'}), 400
+
+        # The caller never chooses their own authority (registration_policy.py).
+        try:
+            role = public_registration_role(data.get('role'))
+        except RegistrationRoleError as e:
+            return jsonify({'status': 'error', 'message': str(e)}), 400
 
         # 1. Try FusionAuth Register if client is available
         if fa_client:
@@ -1646,15 +1654,8 @@ def orchestrator_user_register():
 
         # 2. Fallback to Legacy Operator Manager
         if operator_manager:
-            role_map = {
-                'observer': OperatorRole.OBSERVER,
-                'operator': OperatorRole.OPERATOR,
-                'supervisor': OperatorRole.SUPERVISOR,
-                'admin': OperatorRole.ADMIN
-            }
-            operator_role = role_map.get(role, OperatorRole.OPERATOR)
             operator = operator_manager.register_operator(
-                callsign=callsign, email=email, password=password, role=operator_role
+                callsign=callsign, email=email, password=password, role=OperatorRole(role)
             )
             if operator:
                 return jsonify({'status': 'ok', 'user': operator.to_dict()})
