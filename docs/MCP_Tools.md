@@ -129,6 +129,32 @@ Enforced by tests, not by convention.
 The validator checks metadata only. It does not check that a backing implementation
 exists.
 
+## Mutation boundary classification
+
+Per ADR 0007 (Proposed), each mutating tool has one documented boundary. Classified so far
+(#218); `test_mcp_mutation_boundary.py` pins both against a `strict_no_bypass=True` engine.
+
+| Tool | Category | Boundary | Level (ADR 0008) | Partial failure (ADR 0009) |
+|---|---|---|---|---|
+| `ingest_live_event` | durable graph mutation | `WriteBus.commit`, one commit per event, carrying the principal and proposal id (`correlation_id`) | Audit: the commit records provenance; the event payload is not retained beyond the graph | Partial by nature. Result reports `committed`, `dequeued`, `rejected` and the first 50 `rejected_events` with reasons. Rejected events are not requeued but are no longer lost silently |
+| `decay_now` | runtime control with a graph effect (maintenance) | Documented exception: `HypergraphEngine.decay_edges_pruned` runs inside `writebus.maintenance_scope()`, which permits only that pruning under `strict_no_bypass` | Forensic: pruned edge ids are logged (`[DECAY_PRUNED]`) and their SHA-256 is in the audited result | Prunes edge by edge; an exception part-way propagates and the ids pruned before it are not reported |
+
+Notes:
+
+- The maintenance exception applies to every `decay_edges` caller: the tool, the engine's
+  background thread and the server's post-ingest hook. Before this, under
+  `strict_no_bypass` the last two failed silently (they swallow exceptions); that was
+  inferred from the guard, not observed on a live server.
+- `ingest_live_event` refuses, before dequeuing, if WriteBus is not initialised or is bound
+  to a different engine.
+- Open: the server's live-ingest worker also drains the same queue and writes
+  `RECON_ENTITY` records directly into `recon_system.entities`, outside the graph boundary
+  and the control audit. The two consumers race for events. Unclassified.
+- Open: the other mutating Registry tools, and the direct HTTP routes not yet in the
+  lifecycle (#236).
+- Technical debt noticed, not changed: `decay_now`'s `lambda` does not affect which edges
+  are pruned (the persistence score reads the engine's own `decay_lambda`).
+
 ## Current limitations
 
 - **Registry and ToolDef split.** The orchestrator knows only Registry tools. A mutating
@@ -140,9 +166,8 @@ exists.
 - **Approval semantics.** `REQUIRES_REVIEW` is automated policy evaluation over a
   caller-supplied confidence, executor trust and graph stability. No independent approver
   is required, and the proposer can execute. Tracked in #228.
-- **State boundary.** Some tools write to the engine directly rather than through
-  WriteBus, and whether that is acceptable per tool is undecided. Replayability of
-  mutations is also open. Tracked in #218.
+- **State boundary.** Two tools are classified (below); the other mutating tools are not
+  yet, and replayability of mutations is open. Tracked in #218.
 - **Data egress is not an effect.** `graphops_investigate` sends prompts built from graph
   data to the configured Ollama endpoint, which can be Ollama Cloud. The DSL embedding
   verbs call an Ollama embedding endpoint. Neither changes state on the remote, so they

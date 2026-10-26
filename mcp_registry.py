@@ -15,6 +15,7 @@ import time
 import logging
 import uuid
 import json
+import hashlib
 
 logger = logging.getLogger(__name__)
 
@@ -311,13 +312,30 @@ class Registry:
 # These tools modify engine state. All have rate limiting and mutates_state=True.
 
 def _decay_now(engine, params):
-    """Apply exponential decay to edges. Rate limit: 1.0s between calls."""
+    """Apply exponential decay to edges. Rate limit: 1.0s between calls.
+
+    Runtime control with a graph effect (maintenance), a documented exception to WriteBus's
+    strict_no_bypass guard (ADR 0007, #218; docs/MCP_Tools.md). Pruning is irreversible, so
+    the pruned edge ids are logged and digested into the audited result (Forensic, ADR 0008).
+    """
     lambda_ = params.get("lambda", 0.001)
-    if hasattr(engine, "decay_edges"):
+    if hasattr(engine, "decay_edges_pruned"):
+        pruned_ids = list(engine.decay_edges_pruned(lambda_))
+    elif hasattr(engine, "decay_edges"):
+        pruned_ids = None
         pruned = engine.decay_edges(lambda_)
-        remaining = len(getattr(engine, "edges", []))
-        return {"edges_pruned": pruned, "edges_remaining": remaining}
-    return {"edges_pruned": 0, "edges_remaining": 0}
+    else:
+        return {"edges_pruned": 0, "edges_remaining": 0}
+    if pruned_ids is not None:
+        pruned = len(pruned_ids)
+        digest = hashlib.sha256("\n".join(sorted(pruned_ids)).encode("utf-8")).hexdigest()
+        if pruned_ids:
+            logger.info("[DECAY_PRUNED] %s", json.dumps({"count": pruned, "sha256": digest, "edge_ids": pruned_ids}))
+    remaining = len(getattr(engine, "edges", []))
+    out = {"edges_pruned": pruned, "edges_remaining": remaining}
+    if pruned_ids is not None:
+        out["pruned_ids_sha256"] = digest
+    return out
 
 
 def _ingest_pcap(engine, params):
@@ -338,31 +356,81 @@ def _ingest_pcap(engine, params):
     raise RuntimeError("ingest_pcap is not supported: no engine implements it (see #215)")
 
 
+MAX_REJECTED_REPORTED = 50
+
+
 def _ingest_live_event(engine, params):
-    """Commit a batch of events previously queued via WebSocket.
+    """Commit a batch of events previously queued via WebSocket, through WriteBus.
 
     `limit` controls how many to dequeue (default 10).  This tool is gated by
     the usual MCP safety checks (confidence/trust/stability/drift) and counts
     against the mutation budget.  The queue resides in live_ingest.py.
+
+    A durable graph mutation (ADR 0007, #218): each event is committed with
+    `writebus.bus().commit`, carrying the executing principal and proposal id, so it
+    works under `strict_no_bypass`.  Outcomes are per event (ADR 0009): `committed`,
+    `rejected` (count), and `rejected_events` (first MAX_REJECTED_REPORTED, with reasons).
+    Rejected events are not requeued, but they are no longer silently lost.
     """
     from live_ingest import dequeue
+    from mcp_principal import current_proposal_id, current_principal
+    from writebus import GraphOp, WriteContext, bus
 
     limit = params.get("limit", 10)
     if not isinstance(limit, int) or limit < 1:
         raise ValueError("limit must be positive integer")
+    if not hasattr(engine, "apply_graph_event"):
+        raise RuntimeError("Engine does not support apply_graph_event")
 
-    if hasattr(engine, "apply_graph_event"):
-        events = dequeue(limit)
-        committed = 0
-        for ev in events:
-            try:
-                engine.apply_graph_event(ev)
+    # Check the boundary before dequeuing, so a misconfiguration cannot consume events.
+    try:
+        wb = bus()
+    except RuntimeError as e:
+        raise RuntimeError(f"ingest_live_event requires WriteBus: {e}") from e
+    if wb.hypergraph is not engine:
+        raise RuntimeError("ingest_live_event: WriteBus is bound to a different engine")
+
+    principal = current_principal()
+    proposal_id = current_proposal_id()
+    ctx = WriteContext(
+        operator_id=(principal.operator_id if principal is not None else None) or "mcp",
+        source="mcp_ingest_live_event",
+        session_token=None,
+        correlation_id=proposal_id,
+    )
+
+    events = dequeue(limit)
+    committed = 0
+    rejected = []
+    for ev in events:
+        eid = ev.get("entity_id") if isinstance(ev, dict) else getattr(ev, "entity_id", None)
+        etype = ev.get("event_type") if isinstance(ev, dict) else getattr(ev, "event_type", None)
+        data = (ev.get("entity_data") if isinstance(ev, dict) else getattr(ev, "entity_data", None)) or {}
+        try:
+            if not eid or not etype:
+                raise ValueError("event needs event_type and entity_id")
+            res = wb.commit(
+                entity_id=str(eid),
+                entity_type="LIVE_EVENT",
+                entity_data={"id": str(eid), "event_type": str(etype)},
+                graph_ops=[GraphOp(event_type=str(etype), entity_id=str(eid), entity_data=dict(data))],
+                ctx=ctx,
+                persist=False,
+                audit=False,
+            )
+            if res.ok:
                 committed += 1
-            except Exception:
-                # swallow errors to avoid aborting whole batch
-                continue
-        return {"committed": committed, "requested": limit}
-    raise RuntimeError("Engine does not support apply_graph_event")
+            else:
+                rejected.append({"entity_id": eid, "event_type": etype, "errors": list(res.errors)})
+        except Exception as e:
+            rejected.append({"entity_id": eid, "event_type": etype, "errors": [f"{type(e).__name__}: {e}"]})
+    return {
+        "committed": committed,
+        "requested": limit,
+        "dequeued": len(events),
+        "rejected": len(rejected),
+        "rejected_events": rejected[:MAX_REJECTED_REPORTED],
+    }
 
 
 def _run_tak_ml(engine, params):
@@ -626,6 +694,7 @@ def build_registry(engine) -> Dict[str, Any]:
             "properties": {
                 "edges_pruned": {"type": "integer"},
                 "edges_remaining": {"type": "integer"},
+                "pruned_ids_sha256": {"type": "string"},
             },
             "required": ["edges_pruned", "edges_remaining"],
         },
@@ -660,7 +729,7 @@ def build_registry(engine) -> Dict[str, Any]:
     # live ingestion tool takes events already sitting in queue
     reg.register(Tool(
         name="ingest_live_event",
-        description="Commit a batch of previously queued live events",
+        description="Commit a batch of previously queued live events through WriteBus; reports per-event rejections",
         parameters={
             "type": "object",
             "properties": {
@@ -672,6 +741,9 @@ def build_registry(engine) -> Dict[str, Any]:
             "properties": {
                 "committed": {"type": "integer"},
                 "requested": {"type": "integer"},
+                "dequeued": {"type": "integer"},
+                "rejected": {"type": "integer"},
+                "rejected_events": {"type": "array"},
             },
         },
         run=_ingest_live_event,
