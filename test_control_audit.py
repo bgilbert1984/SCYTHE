@@ -171,6 +171,42 @@ class RegistryHookTest(unittest.TestCase):
         self.assertEqual((started["result"], failed["result"]), ("started", "error"))
         self.assertIn("rig refused", failed["result_summary"])
 
+    def _done_summary(self, tool_name):
+        *_, done = self.store.events()
+        self.assertEqual(done["action"], tool_name)
+        return json.loads(done["result_summary"])
+
+    def test_hardware_result_keeps_the_resulting_state_not_just_dict_markers(self):
+        """#219: the audit says what state the hardware ended in."""
+        result = {"action": "start", "changed": True,
+                  "bridge": {"bridge_state": "streaming", "running": True, "latest_sequence": 7,
+                             "config": {"sample_rate_hz": 2.4e6, "api_key": "k-123", "deep": {"x": {"y": 1}}},
+                             "gains": [1, 2, 3]}}
+        self.registry.register(_tool("rf_capture_start", lambda **k: result))
+        self.registry.execute(self.engine, "rf_capture_start", {}, agent_mode="mutate")
+        summary = self._done_summary("rf_capture_start")
+        self.assertEqual(summary["bridge.bridge_state"], "streaming")
+        self.assertIs(summary["bridge.running"], True)
+        self.assertEqual(summary["bridge.config.sample_rate_hz"], 2.4e6)
+        self.assertEqual(summary["bridge.config.api_key"], "<redacted>")
+        self.assertEqual(summary["bridge.config.deep"], "<dict>")
+        self.assertEqual(summary["bridge.gains"], "<list: 3 items>")
+        self.assertNotIn("k-123", json.dumps(summary))
+
+    def test_hardware_summary_is_bounded(self):
+        big = {f"k{i}": "x" * 1000 for i in range(200)}
+        self.registry.register(_tool("rf_stream_configure", lambda **k: {"bridge": big}))
+        self.registry.execute(self.engine, "rf_stream_configure", {}, agent_mode="mutate")
+        summary = self._done_summary("rf_stream_configure")
+        self.assertLessEqual(len(summary), 61)
+        self.assertIs(summary["_truncated"], True)
+        self.assertTrue(all(len(v) <= 256 for v in summary.values() if isinstance(v, str)))
+
+    def test_non_hardware_results_keep_the_scalar_only_summary(self):
+        self.registry.register(_tool("decay_like", lambda **k: {"n": 1, "inner": {"a": 1}}, effect=LOCAL_STATE))
+        self.registry.execute(self.engine, "decay_like", {}, agent_mode="mutate")
+        self.assertEqual(self._done_summary("decay_like"), {"n": 1, "inner": "<dict>"})
+
     def test_read_only_tool_is_not_audited(self):
         self.registry.register(_tool("lookup", lambda **k: {}, mutates_state=False, effect=READ_ONLY))
         self.registry.execute(self.engine, "lookup", {}, agent_mode="observe")

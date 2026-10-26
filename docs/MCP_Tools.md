@@ -79,7 +79,10 @@ The four steps are kept separate on purpose.
    `proposal.expired` rows (written for proposals whose approval mode is above `DIRECT`),
    each carrying the `initiator` class and the `proposal_id` that also appears on the execution rows, so the
    proposer, approver and executor can be read back after a restart
-   (`control_audit.reconstruct_proposal`). These rows are evidence only: no approval or
+   (`control_audit.reconstruct_proposal`). The `result_summary` of a `HARDWARE_CONTROL` execution keeps the
+   result's nested scalars under dotted keys (for example `bridge.bridge_state`), so the row says what state
+   the hardware ended in; it is bounded to 60 keys, 3 levels and 256 characters, and secret-named keys are
+   redacted. Other effects keep the scalar-only summary. These rows are evidence only: no approval or
    execution decision reads them. A `pending_approval` proposal expires after
    `MCP_APPROVAL_TTL_SECONDS` (default 900) and can no longer be approved.
 
