@@ -291,7 +291,10 @@ class Registry:
             result = tool.run(engine=engine, params=params or {})
         except Exception as e:
             self._metrics["errors"][name] += 1
-            logger.exception("[mcp.registry] tool failed: %s", name)
+            if isinstance(e, CapabilityUnsupported):
+                logger.warning("[mcp.registry] %s", e)    # a known gap, not a defect worth a traceback
+            else:
+                logger.exception("[mcp.registry] tool failed: %s", name)
             finish_execution(audit, error=e)
             raise
         finish_execution(audit, result_summary=self._summarize(result, getattr(tool, "effect", None)))
