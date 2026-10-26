@@ -249,6 +249,11 @@ class Registry:
             from jsonschema import validate
             validate(instance=params or {}, schema=tool.parameters)
         except ImportError:
+            # A tool that changes state is never run on unchecked input: with no validator the
+            # schema, including the closed ``additionalProperties``, is not enforced (#217).
+            if tool.mutates_state:
+                self._metrics["errors"][name] += 1
+                raise RuntimeError(f"Cannot validate parameters for {name}: jsonschema is not installed")
             logger.warning("[mcp] jsonschema not installed; skipping parameter validation")
         except Exception as e:
             self._metrics["errors"][name] += 1
