@@ -20,6 +20,29 @@ import hashlib
 logger = logging.getLogger(__name__)
 
 
+class CapabilityUnsupported(RuntimeError):
+    """The engine behind a tool lacks the capability the tool needs (#217).
+
+    Distinct from an execution failure (the capability exists and the call failed) and from an
+    empty result (the capability exists and nothing matched).  A subclass of RuntimeError so every
+    existing caller that already reports a failed tool keeps working.
+    """
+
+    def __init__(self, capability: str, tool: str, detail: str = ""):
+        self.capability = capability
+        self.tool = tool
+        msg = f"{tool}: unsupported capability {capability!r}: the engine does not implement it"
+        super().__init__(f"{msg} ({detail})" if detail else msg)
+
+
+def _require(engine, method: str, capability: str, tool: str):
+    """The bound ``engine.<method>``, or CapabilityUnsupported instead of a default result."""
+    fn = getattr(engine, method, None)
+    if not callable(fn):
+        raise CapabilityUnsupported(capability, tool, f"missing {method}")
+    return fn
+
+
 class Tool:
     """Production MCP tool definition with schema contracts and operational metadata."""
 
@@ -501,25 +524,20 @@ def _reinforce_edge(engine, params):
     weight = params.get("weight", 1.0)
     if not (src and dst):
         raise ValueError("src and dst required")
-    if hasattr(engine, "reinforce_edge"):
-        engine.reinforce_edge(src, dst, weight)
-        return {"ok": True, "src": src, "dst": dst, "weight": weight}
-    return {"ok": False, "error": "reinforce_edge not supported"}
+    _require(engine, "reinforce_edge", "edge_reinforcement", "reinforce_edge")(src, dst, weight)
+    return {"ok": True, "src": src, "dst": dst, "weight": weight}
 
 
 def _prune_below_weight(engine, params):
     """Remove edges below a weight threshold."""
     threshold = params.get("threshold", 0.1)
-    if hasattr(engine, "prune_below_weight"):
-        pruned = engine.prune_below_weight(threshold)
-        return {"edges_pruned": pruned, "threshold": threshold}
-    return {"edges_pruned": 0}
+    pruned = _require(engine, "prune_below_weight", "edge_pruning", "prune_below_weight")(threshold)
+    return {"edges_pruned": pruned, "threshold": threshold}
 
 
 def _clear_scope_cache(engine, params):
     """Clear all WebSocket scope streaming caches."""
-    if hasattr(engine, "clear_scope_cache"):
-        engine.clear_scope_cache()
+    _require(engine, "clear_scope_cache", "scope_management", "clear_scope_cache")()
     return {"ok": True}
 
 
@@ -583,10 +601,8 @@ def _get_entity_neighbors(engine, params):
     limit = params.get("limit", 20)
     if not entity_id:
         raise ValueError("entity_id required")
-    if hasattr(engine, "get_neighbors"):
-        neighbors = engine.get_neighbors(entity_id, limit=limit)
-        return {"entity_id": entity_id, "neighbors": neighbors}
-    return {"entity_id": entity_id, "neighbors": []}
+    neighbors = _require(engine, "get_neighbors", "neighbor_lookup", "get_entity_neighbors")(entity_id, limit=limit)
+    return {"entity_id": entity_id, "neighbors": neighbors}
 
 
 def _get_edge_by_id(engine, params):
@@ -609,9 +625,9 @@ def _subscribe_scope(engine, params):
     """Subscribe to a scope (returns scope_id)."""
     kind = params.get("kind", "default")
     min_weight = params.get("min_weight", 0)
+    create = _require(engine, "create_scope", "scope_management", "subscribe_scope")
     scope_id = str(uuid.uuid4())
-    if hasattr(engine, "create_scope"):
-        engine.create_scope(scope_id, kind=kind, min_weight=min_weight)
+    create(scope_id, kind=kind, min_weight=min_weight)
     return {"scope_id": scope_id}
 
 
@@ -620,8 +636,7 @@ def _unsubscribe_scope(engine, params):
     scope_id = params.get("scope_id", "")
     if not scope_id:
         raise ValueError("scope_id required")
-    if hasattr(engine, "destroy_scope"):
-        engine.destroy_scope(scope_id)
+    _require(engine, "destroy_scope", "scope_management", "unsubscribe_scope")(scope_id)
     return {"ok": True, "scope_id": scope_id}
 
 
@@ -631,10 +646,8 @@ def _scrub_scope_time(engine, params):
     timestamp = params.get("timestamp", 0)
     if not scope_id:
         raise ValueError("scope_id required")
-    if hasattr(engine, "scrub_scope_before_time"):
-        count = engine.scrub_scope_before_time(scope_id, timestamp)
-        return {"ok": True, "scope_id": scope_id, "pruned": count}
-    return {"ok": False}
+    count = _require(engine, "scrub_scope_before_time", "scope_management", "scrub_scope_time")(scope_id, timestamp)
+    return {"ok": True, "scope_id": scope_id, "pruned": count}
 
 
 def _set_scope_filter(engine, params):
@@ -643,17 +656,13 @@ def _set_scope_filter(engine, params):
     min_weight = params.get("min_weight", 0)
     if not scope_id:
         raise ValueError("scope_id required")
-    if hasattr(engine, "set_scope_filter"):
-        engine.set_scope_filter(scope_id, min_weight=min_weight)
+    _require(engine, "set_scope_filter", "scope_management", "set_scope_filter")(scope_id, min_weight=min_weight)
     return {"ok": True, "scope_id": scope_id, "min_weight": min_weight}
 
 
 def _list_active_scopes(engine, params):
     """Get list of active scope IDs."""
-    if hasattr(engine, "list_scopes"):
-        scopes = engine.list_scopes()
-        return {"scopes": scopes}
-    return {"scopes": []}
+    return {"scopes": _require(engine, "list_scopes", "scope_management", "list_active_scopes")()}
 
 
 # ============================================================================
@@ -687,8 +696,7 @@ def _get_decay_config(engine, params):
 def _set_decay_lambda(engine, params):
     """Update decay rate (rate limit: 1s)."""
     new_lambda = params.get("lambda", 0.001)
-    if hasattr(engine, "set_decay_lambda"):
-        engine.set_decay_lambda(new_lambda)
+    _require(engine, "set_decay_lambda", "decay_configuration", "set_decay_lambda")(new_lambda)
     return {"ok": True, "new_lambda": new_lambda}
 
 
@@ -712,8 +720,7 @@ def _get_socket_metrics(engine, params):
 
 def _reload_rules(engine, params):
     """Reload rule_prompt definitions (rate limit: 5s)."""
-    if hasattr(engine, "reload_rules"):
-        engine.reload_rules()
+    _require(engine, "reload_rules", "rule_reload", "reload_rules")()
     return {"ok": True}
 
 
@@ -1250,6 +1257,11 @@ def build_registry(engine) -> Dict[str, Any]:
         effect=LOCAL_STATE,
         rate_limit=5.0,
     ))
+
+    # A key the schema does not name is a mistake, not an option (#217): without this, a misspelled
+    # parameter validates and the handler silently falls back to its default.
+    for tool in reg._tools.values():
+        tool.parameters.setdefault("additionalProperties", False)
 
     # Compatibility: wrap tools as ToolDef-compatible objects for mcp_server
     tools_map = {}

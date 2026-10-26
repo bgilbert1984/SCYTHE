@@ -163,6 +163,20 @@ Notes:
 - Technical debt noticed, not changed: `decay_now`'s `lambda` does not affect which edges
   are pruned (the persistence score reads the engine's own `decay_lambda`).
 
+## Missing engine capability (#217)
+
+A registry tool whose backing engine method is absent raises `mcp_registry.CapabilityUnsupported`
+(a `RuntimeError` carrying `.tool` and `.capability`) instead of returning a default. The four
+outcomes stay distinct: executed (normal result), supported with no matching data (a legitimate
+empty result), unsupported (`CapabilityUnsupported`), failed (any other exception). A mutating tool
+that is unsupported is audited as an error, not as a success. Registry tool schemas are closed
+(`additionalProperties: false`), so a misspelled key is rejected rather than replaced by the
+handler default.
+
+Not covered: handlers outside the list in `test_mcp_capability_contract.py` that still fall back to
+a default (`run_tak_ml`, the query tools, `get_edge_by_id`), and tools with no implementation on any
+engine in the repo (remove, mark unavailable or implement: undecided).
+
 ## Current limitations
 
 - **Registry and ToolDef split.** The orchestrator knows only Registry tools. A mutating
