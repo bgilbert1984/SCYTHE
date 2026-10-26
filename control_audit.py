@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import contextvars
 import datetime as _dt
 import json
 import logging
@@ -231,6 +232,15 @@ class ControlAuditStore:
 
 _store: Optional[ControlAuditStore] = None
 
+# The execution now running in this context (set by begin_action, cleared by finish_execution), so
+# an effect further down the call stack can name the execution that caused it (#219).
+_current_execution: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
+    "control_audit_execution", default=None)
+
+
+def current_execution_id() -> Optional[str]:
+    return _current_execution.get()
+
 
 def configure(path: Union[str, Callable[[], str]], retention_days: Optional[int] = None,
               deployment_id: Union[None, str, Callable[[], Optional[str]]] = None) -> ControlAuditStore:
@@ -271,6 +281,7 @@ def begin_action(*, action: str, effect: str, params: Optional[Dict[str, Any]], 
         "initiator": initiator,
     }
     _write(ctx, "started")
+    ctx["_exec_token"] = _current_execution.set(ctx["execution_id"])
     return ctx
 
 
@@ -289,6 +300,12 @@ PROPOSAL_APPROVED = "proposal.approved"
 PROPOSAL_DENIED = "proposal.denied"
 PROPOSAL_EXPIRED = "proposal.expired"
 PROPOSAL_ACTIONS = (PROPOSAL_CREATED, PROPOSAL_APPROVED, PROPOSAL_DENIED, PROPOSAL_EXPIRED)
+
+# An effect of an execution, not an execution: the IQ ring was cleared while a lifecycle execution
+# ran (#219).  Its ``result`` is RECORDED, never "success", so it cannot be read as the execution's
+# outcome; ``parameters`` carry ``triggering_execution_id``.
+RETENTION_INVALIDATED = "rf.retention.invalidated"
+RECORDED = "recorded"
 
 
 def record_transition(*, action: str, effect: Optional[str], principal: Optional[Dict[str, Any]], proposal_id: str,
@@ -358,6 +375,11 @@ def reconstruct_proposal(store: "ControlAuditStore", proposal_id: str) -> Dict[s
         elif r["action"] == PROPOSAL_EXPIRED:
             out["expired"] = True
             out["orphaned_by_restart"] = r["result_summary"] == ORPHANED_BY_RESTART
+        elif r["action"] == RETENTION_INVALIDATED:
+            params = json.loads(r["parameters_json"])
+            out.setdefault("retention_invalidations", []).append(
+                {"reason": params.get("reason"), "epoch": params.get("epoch"),
+                 "triggering_execution_id": params.get("triggering_execution_id")})
         elif r["result"] == "success":
             out["executed_by"], out["executed"] = who, True
     return out
@@ -390,6 +412,12 @@ def finish_execution(ctx: Optional[Dict[str, Any]], *, result_summary: Optional[
                      error: Optional[BaseException] = None) -> None:
     if ctx is None:
         return
+    token = ctx.pop("_exec_token", None)
+    if token is not None:
+        try:
+            _current_execution.reset(token)
+        except ValueError:      # finished from a different context than it began in
+            _current_execution.set(None)
     if error is not None:
         _write(ctx, "error", f"{type(error).__name__}: {error}"[:500])
     else:

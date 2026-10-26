@@ -82,7 +82,12 @@ The four steps are kept separate on purpose.
    (`control_audit.reconstruct_proposal`). The `result_summary` of a `HARDWARE_CONTROL` execution keeps the
    result's nested scalars under dotted keys (for example `bridge.bridge_state`), so the row says what state
    the hardware ended in; it is bounded to 60 keys, 3 levels and 256 characters, and secret-named keys are
-   redacted. Other effects keep the scalar-only summary. These rows are evidence only: no approval or
+   redacted. Other effects keep the scalar-only summary. When an execution clears the bounded IQ ring (a retune or a
+   capture stop), the same store gets an `rf.retention.invalidated` row (`result` `recorded`) carrying the reason, the ring's
+   epoch and `triggering_execution_id`, with the execution's `proposal_id` and principal, and `reconstruct_proposal` lists it
+   under `retention_invalidations` without counting it as the execution's outcome. Invalidations the system causes itself
+   (reconnect, a starved source, a clock discontinuity) have no principal; they stay in the ring's bounded in-memory
+   `invalidation_history`, marked `cause.kind = system`, and are not written to this append-only store. These rows are evidence only: no approval or
    execution decision reads them. A `pending_approval` proposal expires after
    `MCP_APPROVAL_TTL_SECONDS` (default 900) and can no longer be approved.
 
