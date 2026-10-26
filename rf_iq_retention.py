@@ -532,6 +532,51 @@ def signal_chain_hash(*, sensor_id: str, sample_type: str, sample_rate_hz: float
         sample_rate_hz=sample_rate_hz, gain_db=gain_db, **resolved)
 
 
+def _invalidation_cause() -> Dict[str, Any]:
+    """Who caused this invalidation: a lifecycle execution, or the system itself (#219).
+
+    ``lifecycle`` when a control-plane execution is running in this context (an operator's
+    retune or stop, through MCP or an /api/sdr route); it names the execution, proposal and
+    principal.  Everything else (a reconnect, a starved source, a clock discontinuity) is
+    ``system``: it has no principal to attribute and is deliberately not made durable, since
+    a flapping stream would otherwise append to an audit that cannot be trimmed early.
+    """
+    try:
+        from control_audit import current_execution_id
+        from mcp_principal import current_principal, current_proposal_id, current_source
+        execution_id = current_execution_id()
+        principal = current_principal()
+        proposal_id = current_proposal_id()
+        # No execution id when auditing is not configured, but a principal or proposal still
+        # says an operator's action is running.
+        if execution_id is None and principal is None and proposal_id is None:
+            return {"kind": "system"}
+        return {"kind": "lifecycle", "execution_id": execution_id, "proposal_id": proposal_id,
+                "principal_id": getattr(principal, "operator_id", None) or getattr(principal, "kind", None),
+                "source": current_source()}
+    except Exception:       # attribution must never break the ring
+        return {"kind": "system"}
+
+
+def _record_lifecycle_invalidation(reason: str, epoch: Optional[int], cause: Dict[str, Any]) -> None:
+    """Append the invalidation to the control audit, linked to the execution that caused it.
+
+    The control audit stays the one authority: this adds a row to it, it does not keep a
+    second store.  Best effort; a no-op without a configured store.
+    """
+    try:
+        from control_audit import RECORDED, RETENTION_INVALIDATED, record_transition
+        from mcp_effects import LOCAL_STATE
+        from mcp_principal import current_initiator, principal_dict
+        record_transition(
+            action=RETENTION_INVALIDATED, effect=LOCAL_STATE, principal=principal_dict(),
+            proposal_id=cause.get("proposal_id"), result=RECORDED,
+            parameters={"reason": reason, "epoch": epoch, "triggering_execution_id": cause.get("execution_id")},
+            source=cause.get("source"), initiator=current_initiator())
+    except Exception:
+        LOG.exception("control audit write for an IQ ring invalidation failed")
+
+
 class IQRetentionOwner:
     """Allocates, feeds, clears and publishes one bounded IQ ring.
 
@@ -812,7 +857,10 @@ class IQRetentionOwner:
 
     def _record_locked(self, reason: str, epoch: Optional[int]) -> None:
         preceding = self._history[-1]["reason"] if self._history else None
-        self._history.append({"reason": reason, "at": time.time(), "epoch": epoch})
+        cause = _invalidation_cause()
+        self._history.append({"reason": reason, "at": time.time(), "epoch": epoch, "cause": cause})
+        if cause["kind"] == "lifecycle":
+            _record_lifecycle_invalidation(reason, epoch, cause)
         if reason == "CLOCK_DISCONTINUITY":
             self._note_clock_incident_locked(preceding)
 
