@@ -947,7 +947,24 @@ class HypergraphEngine:
     def decay_edges(self, lambda_const: float = None, min_weight: float = 0.05) -> int:
         """Apply attention-weighted temporal decay to all edges and prune those
         whose *effective* persistence score falls below *min_weight*.
+
+        Returns the number of edges pruned; see decay_edges_pruned() for their ids.
         """
+        return len(self.decay_edges_pruned(lambda_const, min_weight))
+
+    def decay_edges_pruned(self, lambda_const: float = None, min_weight: float = 0.05) -> List[str]:
+        """decay_edges(), returning the ids of the edges it pruned (the forensic record).
+
+        Pruning is engine-internal maintenance, a documented exception to WriteBus's
+        strict_no_bypass guard (ADR 0007, #218): it runs inside writebus.maintenance_scope()
+        for every caller (MCP decay_now, the background thread, the post-ingest hook).
+        """
+        try:
+            from writebus import maintenance_scope
+        except ImportError:  # writebus unavailable: no guard to satisfy
+            import contextlib
+            maintenance_scope = contextlib.nullcontext
+
         with self._lock:
             if lambda_const is None:
                 lambda_const = self.decay_lambda
@@ -965,9 +982,10 @@ class HypergraphEngine:
                     # edge.weight = persistence
                     pass
 
-            for eid in to_delete:
-                self.remove_edge(eid)
-            return len(to_delete)
+            with maintenance_scope():
+                for eid in to_delete:
+                    self.remove_edge(eid)
+            return to_delete
 
     # ---------- Frequency band helpers ----------
     def _freq_band(self, freq: float, step: float = 10.0) -> str:

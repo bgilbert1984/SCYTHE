@@ -95,6 +95,16 @@ class _WriteBusKernelScope:
         return False
 
 
+def maintenance_scope() -> "_WriteBusKernelScope":
+    """Sanctioned exception to ``strict_no_bypass`` for engine-internal maintenance (ADR 0007, #218).
+
+    Opens the same scope as ``WriteBus.commit()`` so guarded engine methods are permitted.
+    It is not a way to write graph state: use it only for pruning the engine does to itself
+    (``HypergraphEngine.decay_edges``), which is runtime control, not authoritative input.
+    """
+    return _WriteBusKernelScope()
+
+
 class CommitStatus:
     PENDING_GRAPH = "PENDING_GRAPH"
     GRAPH_APPLIED = "GRAPH_APPLIED"
