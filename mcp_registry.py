@@ -10,7 +10,7 @@ Features:
 """
 from typing import Any, Callable, Dict, Optional
 
-from mcp_effects import LOCAL_STATE, READ_ONLY
+from mcp_effects import HARDWARE_CONTROL, LOCAL_STATE, READ_ONLY
 import time
 import logging
 import uuid
@@ -122,6 +122,49 @@ def describe_schema_error(error) -> str:
     return f"{field}: {error.message}" if field else error.message
 
 
+AUDIT_SUMMARY_MAX_KEYS = 60
+AUDIT_SUMMARY_MAX_DEPTH = 3
+AUDIT_SUMMARY_MAX_STR = 256
+
+
+def _flatten_for_audit(result: Dict[str, Any]) -> Dict[str, Any]:
+    """Nested scalars of a hardware-control result under dotted keys, bounded.
+
+    Dicts deeper than AUDIT_SUMMARY_MAX_DEPTH become "<dict>", lists their length, strings are
+    truncated, secret-named keys are redacted (control_audit's word list), and past
+    AUDIT_SUMMARY_MAX_KEYS keys the rest is dropped with "_truncated": true.
+    """
+    from control_audit import _SECRET_WORDS
+
+    out: Dict[str, Any] = {}
+
+    def walk(prefix: str, value: Any, depth: int) -> None:
+        if len(out) >= AUDIT_SUMMARY_MAX_KEYS:
+            out["_truncated"] = True
+            return
+        if isinstance(value, dict):
+            if depth >= AUDIT_SUMMARY_MAX_DEPTH:
+                out[prefix] = "<dict>"
+                return
+            for k, v in value.items():
+                key = f"{prefix}.{k}" if prefix else str(k)
+                if any(w in str(k).lower() for w in _SECRET_WORDS):
+                    out[key] = "<redacted>"
+                else:
+                    walk(key, v, depth + 1)
+        elif isinstance(value, (list, tuple)):
+            out[prefix] = f"<list: {len(value)} items>"
+        elif value is None or isinstance(value, (bool, int, float)):
+            out[prefix] = value
+        elif isinstance(value, str):
+            out[prefix] = value[:AUDIT_SUMMARY_MAX_STR]
+        else:
+            out[prefix] = f"<{type(value).__name__}>"
+
+    walk("", result, 0)
+    return out
+
+
 class Registry:
     """Production registry with validation, audit, and rate limiting."""
 
@@ -228,7 +271,7 @@ class Registry:
             logger.exception("[mcp.registry] tool failed: %s", name)
             finish_execution(audit, error=e)
             raise
-        finish_execution(audit, result_summary=self._summarize(result))
+        finish_execution(audit, result_summary=self._summarize(result, getattr(tool, "effect", None)))
 
         # record invocation
         self._metrics["invocations"][name] += 1
@@ -284,13 +327,19 @@ class Registry:
             "params": params or {},
             "proposal_id": current_proposal_id(),
             "principal": principal_dict(),
-            "result_summary": self._summarize(result),
+            "result_summary": self._summarize(result, getattr(tool, "effect", None)),
         }
         logger.info(f"[MCP_AUDIT] {json.dumps(record, default=str)}")
 
     @staticmethod
-    def _summarize(result: Any) -> str:
-        """Return a safe summary of result (never full snapshot)."""
+    def _summarize(result: Any, effect: Optional[str] = None) -> str:
+        """Return a safe summary of result (never full snapshot).
+
+        A HARDWARE_CONTROL result keeps its nested scalars (dotted keys, bounded), so the
+        record says what state the hardware ended in, not just "<dict>" (#219).
+        """
+        if effect == HARDWARE_CONTROL and isinstance(result, dict):
+            return json.dumps(_flatten_for_audit(result), default=str)
         if isinstance(result, dict):
             # Return only keys and types, not values (unless simple)
             summary = {}
