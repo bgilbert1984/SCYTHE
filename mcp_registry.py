@@ -321,15 +321,21 @@ def _decay_now(engine, params):
 
 
 def _ingest_pcap(engine, params):
-    """Queue PCAP ingest. Returns status + job_id. Rate limit: 10s."""
+    """Unsupported: no engine implements ingest_pcap (#215).
+
+    Fails closed instead of reporting a job that never ran. Wiring it to
+    registries.pcap_registry.ingest_pcap_session needs two decisions first: that path falls
+    back to a simulated graph when no capture parses, and its identity domain differs from
+    pcap_ingest.py (docs/finding-dual-pcap-graph-builders.md); the WriteBus bypass
+    classification is #218.
+    """
     path = params.get("path", "")
     if not path:
         raise ValueError("path required")
     if hasattr(engine, "ingest_pcap"):
-        job_id = str(uuid.uuid4())
-        engine.ingest_pcap(path)  # Fire async
-        return {"status": "started", "job_id": job_id}
-    raise RuntimeError("Engine does not support ingest_pcap")
+        engine.ingest_pcap(path)
+        return {"status": "started"}
+    raise RuntimeError("ingest_pcap is not supported: no engine implements it (see #215)")
 
 
 def _ingest_live_event(engine, params):
@@ -631,7 +637,7 @@ def build_registry(engine) -> Dict[str, Any]:
 
     reg.register(Tool(
         name="ingest_pcap",
-        description="Queue a PCAP ingest job",
+        description="Queue a PCAP ingest job. Currently unsupported: always fails closed (#215).",
         parameters={
             "type": "object",
             "properties": {
@@ -643,7 +649,6 @@ def build_registry(engine) -> Dict[str, Any]:
             "type": "object",
             "properties": {
                 "status": {"type": "string"},
-                "job_id": {"type": "string"},
             },
         },
         run=_ingest_pcap,

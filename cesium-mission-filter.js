@@ -6,6 +6,10 @@
  * filtering against the existing stream, no server change") -- and ONLY step 1. It is not
  * wired into cesium-hypergraph-globe.js's rendering pipeline here.
  *
+ * UPDATE (#201): the globe now listens for "entity_event" through cesium-entity-event-adapter.js,
+ * which flattens entity_data. The event-name gap below is closed; wiring this filter in is still
+ * deferred until it can be verified in a running browser.
+ *
  * Why not wired in yet, stated plainly rather than worked around: cesium-hypergraph-globe.js
  * listens for Socket.IO events named "entity_update"/"entity_delete". The only server-side
  * emitter found anywhere in this repository (operator_session_manager.py, the
