@@ -21,7 +21,7 @@ Only 1 node id is shared between the two graphs; host ids share none.
 Part of the host/flow gap is the `min_session_packets=2` filter (193 sessions / 73 hosts at 1; 37 / 34 at 2).
 The session model, enrichment and id scheme differ regardless.
 
-`mcp_registry._ingest_pcap` calls `engine.ingest_pcap`, which is not defined anywhere in the repo.
+`mcp_registry._ingest_pcap` calls `engine.ingest_pcap`, which is not defined anywhere in the repo (#215). The tool now says so and fails closed; it is not wired to `ingest_pcap_session`, which falls back to a simulated graph when no capture parses.
 
 ## 2. The registry graph is a product surface, not dead code
 

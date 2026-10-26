@@ -3042,11 +3042,13 @@ class CesiumHypergraphGlobe {
       }
     });
 
-    this._socket.on('entity_update', (ev) => {
+    // Server emits one 'entity_event' (operator_session_manager.py); the adapter maps it to
+    // node_update / node_remove (see cesium-entity-event-adapter.js, #201).
+    this._socket.on('entity_event', (ev) => {
       this._lastEventTs = Date.now();
-      this._queueUpdate({ type: 'node_update', ...ev });
+      const update = window.entityEventToUpdate && window.entityEventToUpdate(ev);
+      if (update) this._queueUpdate(update);
     });
-    this._socket.on('entity_delete', (ev) => this._queueUpdate({ type: 'node_remove', id: ev.entity_id }));
 
     this._socket.on('graphops_convergence', (ev) => this._onConvergence(ev));
     this._socket.on('graphops_suggest',     (ev) => this._onSuggestedPrompts(ev));

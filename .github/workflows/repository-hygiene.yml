@@ -179,7 +179,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - run: node --test cesium-mission-filter.test.js sdrpp-outcome.test.js node-picking.test.js
+      - run: node --test cesium-entity-event-adapter.test.js cesium-mission-filter.test.js sdrpp-outcome.test.js node-picking.test.js
 
   sdrpp-lock-source-contract:
     runs-on: ubuntu-latest
