@@ -19,7 +19,12 @@ from collections import defaultdict
 from contextlib import nullcontext
 from typing import Any, Dict
 
+from mcp_registry import CapabilityUnsupported
+
 logger = logging.getLogger(__name__)
+
+# JSON-RPC reserves -32000..-32099 for the server; this one says "the engine lacks the capability".
+CAPABILITY_UNSUPPORTED_CODE = -32001
 
 MCP_PROTOCOL_VERSION = "2025-03-26"
 MCP_SERVER_NAME = "RF_SCYTHE"
@@ -117,8 +122,11 @@ class MCPHandler:
         return {"jsonrpc": "2.0", "id": req_id, "result": result}
 
     @staticmethod
-    def _rpc_error(req_id, code, message):
-        return {"jsonrpc": "2.0", "id": req_id, "error": {"code": code, "message": message}}
+    def _rpc_error(req_id, code, message, data=None):
+        error = {"code": code, "message": message}
+        if data is not None:
+            error["data"] = data
+        return {"jsonrpc": "2.0", "id": req_id, "error": error}
 
     def handle(self, request: Dict[str, Any]):
         req_id = request.get("id")
@@ -161,6 +169,12 @@ class MCPHandler:
                 return self._rpc_ok(req_id, {})
             else:
                 return self._rpc_error(req_id, -32601, f"Method not found: {method}")
+        except CapabilityUnsupported as e:
+            # A client must be able to tell "this deployment cannot do that" from "that failed" without
+            # reading the message (#217): a server-defined code plus the capability in ``data``.
+            logger.warning("[mcp] unsupported capability: %s", e)
+            return self._rpc_error(req_id, CAPABILITY_UNSUPPORTED_CODE, str(e),
+                                   {"kind": "unsupported_capability", "tool": e.tool, "capability": e.capability})
         except Exception as e:
             logger.exception("[mcp] handler error")
             return self._rpc_error(req_id, -32603, str(e))

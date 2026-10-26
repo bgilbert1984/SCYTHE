@@ -299,7 +299,10 @@ class AliasMCPOrchestrator:
             if phase_applies:
                 self.dual_agent.executor_trust.update(success=False)
             logger.error("[orchestrator] Proposal %s failed: %s", proposal_id[:8], e)
-            return {"ok": False, "error": str(e), "error_type": type(e).__name__}
+            failure = {"ok": False, "error": str(e), "error_type": type(e).__name__}
+            if getattr(e, "capability", None):    # CapabilityUnsupported: not a failed execution (#217)
+                failure["capability"] = e.capability
+            return failure
 
     def get_organism_status(self) -> Dict[str, Any]:
         """Return full orchestrator status (the "organism status")."""
