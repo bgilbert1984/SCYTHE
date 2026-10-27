@@ -35,6 +35,68 @@ def _norm_location(entity: Dict[str, Any]) -> Dict[str, Any]:
     return out
 
 
+# Fields an analyst or a sensor decision owns. A write that does not carry them must leave them
+# alone, and a null/empty value means "not provided", never "clear".
+_PROTECTED_FIELDS = ("disposition", "threat_level")
+_POSITION_KEYS = ("lat", "lon", "lng", "alt", "location", "geo")
+
+
+def _is_blank(value) -> bool:
+    return value is None or value == ""
+
+
+def _existing_entity(entity_id: str, ctx: WriteContext, writer) -> Optional[Dict[str, Any]]:
+    """The durable payload the room already holds for this entity, if any."""
+    try:
+        operator_manager = getattr(writer, "operator_manager", None)
+        if not operator_manager:
+            return None
+        room = operator_manager.get_room_by_name(ctx.room_name)
+        if not room:
+            return None
+        room_id = room.get("room_id") or room.get("id") if isinstance(room, dict) else getattr(room, "room_id", None)
+        held = (operator_manager.room_entities.get(room_id) or {}).get(entity_id)
+        data = held.get("data") if isinstance(held, dict) else None
+        return dict(data) if isinstance(data, dict) else None
+    except Exception:
+        return None
+
+
+def merge_recon_update(existing: Optional[Dict[str, Any]], patch: Dict[str, Any]) -> Dict[str, Any]:
+    """PATCH semantics for a recon write.
+
+    - No existing entity: the patch is the entity (creation).
+    - Keys the patch omits keep their held values; false, 0 and empty lists are values.
+    - disposition / threat_level: null or "" counts as omitted.
+    - Position: replaced as a unit when the patch carries a complete lat/lon pair, preserved
+      when it carries none, and a lone coordinate is rejected (ValueError) so a position is
+      never half-written.
+    """
+    patch = dict(patch or {})
+    if not existing:
+        return patch
+
+    for field in _PROTECTED_FIELDS:
+        if field in patch and _is_blank(patch[field]):
+            del patch[field]
+
+    carries_position = any(not _is_blank(patch.get(k)) for k in _POSITION_KEYS)
+    if carries_position:
+        new_location = _norm_location(patch)
+        if not new_location:
+            raise ValueError("position update needs both lat and lon")
+    else:
+        for key in _POSITION_KEYS:
+            patch.pop(key, None)
+
+    merged = dict(existing)
+    if carries_position:
+        for key in _POSITION_KEYS:
+            merged.pop(key, None)
+    merged.update(patch)
+    return merged
+
+
 def _recon_node_id(entity_id: str) -> str:
     # Keep a stable namespace so sensors/edges don't collide
     return f"recon:{entity_id}"
@@ -86,13 +148,15 @@ def _recon_graph_node(entity: Dict[str, Any], entity_id: str, ctx: WriteContext)
 # Public API
 # ---------------------------
 
-def upsert_recon_entity(entity: Dict[str, Any], ctx: WriteContext, *, room_persist: bool = True) -> Dict[str, Any]:
+def upsert_recon_entity(entity: Dict[str, Any], ctx: WriteContext, *, room_persist: bool = True, writer=None) -> Dict[str, Any]:
     """
     Upsert a recon entity through the WriteBus.
-    Returns WriteResult dict for easy JSON serialization.
+    An update carries only what changed: omitted fields keep what the room holds (see
+    merge_recon_update). Returns WriteResult dict for easy JSON serialization.
     """
     entity = dict(entity or {})
     entity_id = _norm_entity_id(entity)
+    entity = merge_recon_update(_existing_entity(entity_id, ctx, writer or bus()), entity)
 
     durable = _recon_room_entity_payload(entity, entity_id)
     node = _recon_graph_node(durable, entity_id, ctx)
@@ -102,7 +166,7 @@ def upsert_recon_entity(entity: Dict[str, Any], ctx: WriteContext, *, room_persi
     ]
 
     # Persist a durable RECON_ENTITY into the room + broadcast
-    res = bus().commit(
+    res = (writer or bus()).commit(
         entity_id=entity_id,                   # durable entity id
         entity_type="RECON_ENTITY",
         entity_data=durable,
