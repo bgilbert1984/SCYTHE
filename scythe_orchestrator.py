@@ -992,6 +992,16 @@ def list_instances():
     })
 
 
+def _instance_bind_host():
+    """Interface a spawned instance listens on.
+
+    The orchestrator and nginx reach instances over loopback (/scythe/i/<id>/), and an
+    instance serves files from this directory, so it must not be reachable directly from
+    the network by default. SCYTHE_INSTANCE_BIND overrides it for a deliberate LAN setup.
+    """
+    return os.environ.get('SCYTHE_INSTANCE_BIND', '').strip() or '127.0.0.1'
+
+
 @app.route('/api/scythe/instances/new', methods=['POST'])
 def spawn_instance():
     """Spawn a new isolated SCYTHE server instance."""
@@ -1018,6 +1028,7 @@ def spawn_instance():
     cmd = [
         sys.executable,
         str(_API_SERVER),
+        '--host', _instance_bind_host(),
         '--port', str(port),
         '--instance-id', instance_id,
         '--orchestrator-url', orchestrator_url,

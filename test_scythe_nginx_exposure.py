@@ -26,6 +26,7 @@ MARKER = b'SYNTHETIC-PRIVATE-MARKER-7f3a'
 HERE = Path(__file__).resolve().parent
 CONF = HERE / 'deploy' / 'nginx-spectrcyde-auth.conf'
 NGINX = shutil.which('nginx') or ('/usr/sbin/nginx' if Path('/usr/sbin/nginx').exists() else None)
+DOTFILES = ['.env', '.env.production', 'a/.git/config', 'instances/x/.secret']
 PRIVATE = ['zz_nx_operator_sessions.db', 'zz_nx_operator_sessions.db-wal', 'zz_nx.sqlite3',
            'zz_nx.log', 'zz_nx.env', 'zz_nx.pem', 'zz_nx.key', 'zz_nx.py', 'zz_nx.sh',
            'zz_nx.bak', 'zz_nx.sql', 'zz_nx.pcap', 'ZZ_NX_OPERATOR_SESSIONS.DB']
@@ -72,8 +73,25 @@ def _render(listen_port, orchestrator_port, wordpress_port, workdir):
             % {'w': workdir, 's': server})
 
 
+SCYTHE_CONF = HERE / 'deploy' / 'nginx' / 'scythe.conf'
+
+
+def _render_scythe(listen_port, orchestrator_port, workdir):
+    """deploy/nginx/scythe.conf (port-80 default server) with only listeners and upstream rewritten."""
+    text = SCYTHE_CONF.read_text()
+    text = re.sub(r'\n\s*listen[^\n]*', '', text)
+    text = text.replace('server_name _;', 'listen 127.0.0.1:%d;\n    server_name _;' % listen_port, 1)
+    text = text.replace('server 127.0.0.1:5001;', 'server 127.0.0.1:%d;' % orchestrator_port)
+    return ('worker_processes 1;\ndaemon off;\npid %(w)s/nginx.pid;\nerror_log %(w)s/error.log;\n'
+            'events { worker_connections 64; }\nhttp {\n'
+            '  access_log off; client_body_temp_path %(w)s/b; proxy_temp_path %(w)s/p;\n'
+            '  fastcgi_temp_path %(w)s/f; uwsgi_temp_path %(w)s/u; scgi_temp_path %(w)s/s;\n%(s)s\n}\n'
+            % {'w': workdir, 's': text})
+
+
 class _NginxHarness:
     upstream_port = None
+    which_conf = 'auth'
 
     @classmethod
     def start_nginx(cls, upstream_port):
@@ -81,7 +99,10 @@ class _NginxHarness:
         cls.wp, wp_port = _serve(_wordpress_app)
         cls.port = _free_port()
         conf = Path(cls.tmp) / 'nginx.conf'
-        conf.write_text(_render(cls.port, upstream_port, wp_port, cls.tmp))
+        if cls.which_conf == 'scythe':
+            conf.write_text(_render_scythe(cls.port, upstream_port, cls.tmp))
+        else:
+            conf.write_text(_render(cls.port, upstream_port, wp_port, cls.tmp))
         check = subprocess.run([NGINX, '-t', '-p', cls.tmp, '-c', str(conf)],
                                capture_output=True, text=True)
         if check.returncode:
@@ -172,6 +193,57 @@ class NginxEndToEndTests(_NginxHarness, unittest.TestCase):
 
     def test_public_asset_served_through_alias(self):
         self.assertEqual(self.get('/SCYTHE/zz_nx_public.js'), (200, b'/* public */'))
+
+
+@unittest.skipUnless(NGINX, 'nginx not installed')
+class NginxDotfileTests(_NginxHarness, unittest.TestCase):
+    """.env and other dotfiles under the proxied prefixes of the auth server block."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.up, up_port = _serve(_leaky_app)
+        cls.start_nginx(up_port)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.stop_nginx()
+        cls.up.shutdown()
+
+    def test_dotfiles_blocked_under_every_proxied_prefix(self):
+        for prefix in PREFIXES:
+            for name in DOTFILES:
+                status, body = self.get(prefix + name)
+                self.assertEqual((status, MARKER in body), (404, False), prefix + name)
+
+
+@unittest.skipUnless(NGINX, 'nginx not installed')
+class NginxDefaultServerTests(_NginxHarness, unittest.TestCase):
+    """deploy/nginx/scythe.conf: the port-80 default server that proxies every path."""
+    which_conf = 'scythe'
+
+    @classmethod
+    def setUpClass(cls):
+        cls.up, up_port = _serve(_leaky_app)
+        cls.start_nginx(up_port)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.stop_nginx()
+        cls.up.shutdown()
+
+    def test_private_extensions_and_dotfiles_blocked_at_any_path(self):
+        for name in PRIVATE + DOTFILES + ['instances/scythe-1/operator_sessions.db',
+                                          'instances/scythe-1/api_server.log']:
+            status, body = self.get('/' + name)
+            self.assertEqual((status, MARKER in body), (404, False), name)
+
+    def test_other_paths_still_proxied(self):
+        for path in ('/', '/login.html', '/scythe-web/hub.js', '/api/bootstrap.js', '/zz_nx_public.js'):
+            self.assertEqual(self.get(path), (200, MARKER), path)
+
+    def test_query_string_does_not_bypass(self):
+        status, body = self.get('/zz_nx_operator_sessions.db?x=.js')
+        self.assertEqual((status, MARKER in body), (404, False))
 
 
 if __name__ == '__main__':

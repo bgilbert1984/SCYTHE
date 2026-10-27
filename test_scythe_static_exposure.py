@@ -49,7 +49,9 @@ class PolicyTests(unittest.TestCase):
             self.assertFalse(is_public_static(name), repr(name))
 
     def test_hidden_and_private_directories_rejected(self):
-        for name in ['.git/config.js', 'x/.hidden/a.js', '__pycache__/a.js',
+        for name in ['instances/scythe-1/api_server.log', 'instances/scythe-1/page.js',
+                     'metrics_logs/map_cache.db', 'metrics_logs/page.js', '.env', '.env.example',
+                     '.git/config.js', 'x/.hidden/a.js', '__pycache__/a.js',
                      'venv/lib/a.js', '.venv/a.js', 'tests/a.js', 'deploy/a.js',
                      'tools/a.js', 'logs/a.txt', 'Venv/a.js', 'TESTS/a.js']:
             self.assertFalse(is_public_static(name), name)
@@ -67,6 +69,46 @@ class PolicyTests(unittest.TestCase):
         for ext in ('.db', '.sqlite', '.sqlite3', '.log', '.env', '.py', '.sh',
                     '.pem', '.key', '.yml', '.yaml', '.sql', '.bak', '.pcap'):
             self.assertNotIn(ext, PUBLIC_EXTENSIONS)
+
+
+class InstanceBindTests(unittest.TestCase):
+    """A spawned instance serves files from this directory; it must not listen on the network."""
+
+    def _spawn_command(self, env=None):
+        import tempfile
+        from unittest import mock
+        import scythe_orchestrator as orch
+        captured = {}
+
+        class _Proc:
+            pid = 4242
+
+        def fake_popen(cmd, **kwargs):
+            captured['cmd'] = cmd
+            return _Proc()
+
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.object(orch, '_SCRIPT_DIR', Path(tmp)), \
+                mock.patch.object(orch.subprocess, 'Popen', fake_popen), \
+                mock.patch.dict(os.environ, env or {}, clear=False), \
+                mock.patch.dict(orch._instances, {}, clear=False):
+            os.environ.pop('SCYTHE_INSTANCE_BIND', None) if env is None else None
+            resp = orch.app.test_client().post('/api/scythe/instances/new', json={})
+            self.assertEqual(resp.status_code, 201, resp.get_data())
+            orch._instances.clear()
+        return captured['cmd']
+
+    def test_default_is_loopback(self):
+        cmd = self._spawn_command()
+        self.assertEqual(cmd[cmd.index('--host') + 1], '127.0.0.1')
+
+    def test_env_override_is_honoured(self):
+        cmd = self._spawn_command({'SCYTHE_INSTANCE_BIND': '10.1.2.3'})
+        self.assertEqual(cmd[cmd.index('--host') + 1], '10.1.2.3')
+
+    def test_blank_override_falls_back_to_loopback(self):
+        cmd = self._spawn_command({'SCYTHE_INSTANCE_BIND': '  '})
+        self.assertEqual(cmd[cmd.index('--host') + 1], '127.0.0.1')
 
 
 class _AppCase:

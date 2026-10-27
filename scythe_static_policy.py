@@ -22,7 +22,7 @@ PUBLIC_EXTENSIONS = frozenset({
 
 PRIVATE_DIRECTORIES = frozenset({
     '__pycache__', 'venv', '.venv', 'env', 'tests', 'secrets', 'private',
-    'instance', 'logs', 'deploy', 'tools',
+    'instance', 'instances', 'metrics_logs', 'logs', 'deploy', 'tools',
 })
 
 # Allowed extension, private by name: a .json/.txt next to the code is often
