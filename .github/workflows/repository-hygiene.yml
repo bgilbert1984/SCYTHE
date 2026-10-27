@@ -37,6 +37,10 @@ jobs:
       # Globbed on purpose. A hand-maintained list is how test_rf_signal_family,
       # test_graphops_rf_antenna and test_graphops_rf_tune all shipped without CI
       # coverage; a new test module now joins the run by existing.
+      # test_scythe_nginx_exposure.py runs the repo's nginx config against a leaky upstream;
+      # it skips when nginx is absent, which would silently drop the check.
+      - name: Install nginx for the static-exposure test
+        run: sudo apt-get install -y --no-install-recommends nginx-light
       - name: Run RF estimator, bridge, classifier and ledger tests
         # test_scythe_*.py joined the glob when scythe_invariant_ledger landed:
         # it is deliberately domain-agnostic, so it is not test_rf_*, and it

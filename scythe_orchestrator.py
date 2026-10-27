@@ -246,6 +246,8 @@ log = logging.getLogger('scythe_orchestrator')
 # ---------------------------------------------------------------------------
 # Flask App
 # ---------------------------------------------------------------------------
+from scythe_static_policy import is_public_static
+
 app = Flask(__name__, static_folder='.', static_url_path='/static')
 CORS(app)
 
@@ -948,7 +950,17 @@ def bootstrap_js(instance_id=None):
 @app.route('/<path:filename>')
 def serve_static(filename):
     """Serve static assets from the NerfEngine directory."""
+    if not is_public_static(filename):
+        abort(404)
     return send_from_directory(str(_SCRIPT_DIR), filename)
+
+
+@app.before_request
+def _guard_builtin_static():
+    """The built-in /static route serves the same directory; apply the same policy."""
+    if request.endpoint == 'static' and not is_public_static(
+            (request.view_args or {}).get('filename', '')):
+        abort(404)
 
 
 # ---------------------------------------------------------------------------
