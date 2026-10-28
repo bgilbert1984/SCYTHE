@@ -23,6 +23,7 @@ button { background: var(--panel); border: 1px solid var(--line); border-radius:
 button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
 button:disabled { opacity: .5; cursor: not-allowed; }
 :focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+select { max-width: 100%; }
 select, input[type=text] { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; }
 .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px; margin-bottom: 12px; }
 .home { max-width: 520px; margin: 8vh auto; text-align: center; }
@@ -36,11 +37,13 @@ select, input[type=text] { background: var(--panel); border: 1px solid var(--lin
 .msg { min-height: 1.5em; margin-bottom: 8px; }
 .msg.err { color: var(--bad); } .msg.ok { color: var(--good); }
 .grid { display: grid; grid-template-columns: 1fr; gap: 12px; }
-@media (min-width: 900px) { .grid { grid-template-columns: 300px 1fr 1.2fr; align-items: start; } }
+@media (min-width: 900px) { .grid { grid-template-columns: 280px minmax(0, 1fr) minmax(0, 1.2fr); align-items: start; } }
+.grid > * { min-width: 0; }
 ul.plain { list-style: none; padding: 0; margin: 0; }
-.ev { display: flex; gap: 8px; align-items: center; width: 100%; text-align: left; margin-bottom: 4px; }
+.ev { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; width: 100%; text-align: left; margin-bottom: 4px; }
+.ev .title { flex: 1 1 11em; min-width: 0; }
 .ev.sel { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
-.tag { font-size: .75rem; border: 1px solid var(--line); border-radius: 4px; padding: 0 5px; color: var(--muted); text-transform: uppercase; }
+.tag { white-space: nowrap; font-size: .75rem; border: 1px solid var(--line); border-radius: 4px; padding: 0 5px; color: var(--muted); text-transform: uppercase; }
 .hyp.rejected { opacity: .55; }
 .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 6px 0; }
 .note { border-left: 3px solid var(--accent); padding-left: 8px; margin: 6px 0; }
@@ -49,3 +52,8 @@ ul.plain { list-style: none; padding: 0; margin: 0; }
 table { border-collapse: collapse; width: 100%; }
 th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); }
 .visually-hidden { position: absolute; left: -9999px; }
+
+.linkish { border: 0; background: none; padding: 0 2px; color: var(--accent); text-decoration: underline; }
+dl.prov { display: grid; grid-template-columns: max-content 1fr; gap: 2px 12px; margin: 8px 0; }
+dl.prov dt { color: var(--muted); }
+dl.prov dd { margin: 0; }

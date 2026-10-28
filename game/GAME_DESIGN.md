@@ -89,6 +89,20 @@ With ~14 evidence items the player cannot inspect everything, so ordering is a r
 | Reject hypothesis (free) | Removes it; restoring costs 1. |
 | Commit finding (free) | Ends the investigation. Unspent budget is not rewarded beyond the minor efficiency term. |
 
+**Workbench rules (as implemented).**
+
+- *Compare* reports whether two items lean toward the same hypothesis (**agree**), different ones
+  (**conflict**), or whether either is neutral (**unclear**). A neutral item leans toward nothing, so it
+  corroborates nothing. It also reveals whether the two share an upstream source.
+- *Independent agreement* for an item is the number of items the player has compared with it that agree
+  and do not share an upstream source. It only reflects what the player has actually learned.
+- Known shared-upstream pairs are shown as a "not independent" tag, in the item's provenance, and as a
+  warning in the commit panel, where the two count as one citation.
+- *Corroborate* on an item with nothing to check still costs budget and returns **unresolved**, so a dead
+  end is not revealed for free.
+- The case board lists, per hypothesis, the evidence the player has linked as supports, contradicts, or
+  neutral. The commit panel pre-selects the items linked as supporting the chosen hypothesis.
+
 Tests may return **no match**, and the engine distinguishes *no-match* (inference found
 nothing) from *resolution failure* (couldn't evaluate). This mirrors open issue #214 and is
 a gameplay-visible distinction: "nothing found" is itself weak evidence; "couldn't tell" is not.

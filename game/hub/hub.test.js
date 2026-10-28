@@ -85,3 +85,10 @@ test('the page offers New Investigation, Continue, and Career, and no operator l
   for (const t of ['New Investigation', 'Continue Investigation', 'Career']) assert.ok(html.includes(t), t);
   assert.ok(!/mission[ _-]?hub|operator (hub|dashboard)/i.test(html), 'player page must not reference the operator Hub');
 });
+
+test('the workbench surfaces provenance, independence, and the case board', () => {
+  const html = build();
+  for (const t of ['Independent agreement', 'not independent', 'Reliability', 'No evidence linked yet', 'share an upstream source']) {
+    assert.ok(html.includes(t), t);
+  }
+});

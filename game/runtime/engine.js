@@ -41,8 +41,17 @@ const reject = (code, message) => {
 
 const isId = (v) => typeof v === 'string' && v.length > 0;
 
+const LEAN_RATIO = 1.25;
+
+/** Hypotheses an item actually leans toward. A neutral item leans toward none, so it corroborates nothing. */
 function favoredSet(e) {
-  return new Set(Object.entries(e.likelihood).filter(([, v]) => v >= 0.5).map(([h]) => h));
+  const entries = Object.entries(e.likelihood);
+  return new Set(entries
+    .filter(([h, v]) => {
+      const others = entries.filter(([o]) => o !== h).map(([, x]) => x);
+      return v >= 0.5 && v >= LEAN_RATIO * (others.reduce((a, b) => a + b, 0) / others.length);
+    })
+    .map(([h]) => h));
 }
 
 function sharesUpstream(a, b) {
@@ -65,6 +74,7 @@ class Game {
     this._budget = caseData.budget;
     this._inspected = new Set();
     this._compared = new Set();
+    this._comparisons = []; // { a, b, agreement, shared_upstream } as revealed to the player
     this._corroborated = {}; // evidenceId -> outcome index
     this._reevaluated = {}; // evidenceId -> variantId (only where a reevaluation exists)
     this._reevalTried = new Set(); // "evidenceId|variantId"
@@ -154,13 +164,10 @@ class Game {
     this._compared.add(key);
     const fa = favoredSet(ea);
     const fb = favoredSet(eb);
-    const overlap = [...fa].some((h) => fb.has(h));
-    const result = {
-      a: ea.id,
-      b: eb.id,
-      shared_upstream: sharesUpstream(ea, eb),
-      agreement: overlap ? 'agree' : 'conflict',
-    };
+    let agreement = 'unclear';
+    if (fa.size && fb.size) agreement = [...fa].some((h) => fb.has(h)) ? 'agree' : 'conflict';
+    const result = { a: ea.id, b: eb.id, shared_upstream: sharesUpstream(ea, eb), agreement };
+    this._comparisons.push(result);
     this._note(ea.id, { kind: 'compare', with: eb.id, ...result });
     this._note(eb.id, { kind: 'compare', with: ea.id, ...result });
     return result;
@@ -168,8 +175,14 @@ class Game {
 
   _do_corroborate({ evidence }) {
     const e = this._inspectedEv(evidence);
-    if (!e.corroboration) reject('NOT_CORROBORATABLE', `${e.id} cannot be corroborated.`);
     if (e.id in this._corroborated) reject('ALREADY_CORROBORATED', `${e.id} is already corroborated.`);
+    if (!e.corroboration) {
+      // Asking costs budget and returns nothing, so a dead end is not revealed for free.
+      this._corroborated[e.id] = -1;
+      const note = 'No independent source could be found to check this item.';
+      this._note(e.id, { kind: 'corroboration', result_kind: 'unresolved', note });
+      return { evidence: e.id, kind: 'unresolved', note };
+    }
     const r = draw(this._case.case_id, this._seed, this._log.length);
     let acc = 0;
     let idx = e.corroboration.outcomes.length - 1;
@@ -296,7 +309,22 @@ class Game {
       limits: e.limits,
       source: { label: s.label, reliability: s.reliability, limits: s.limits },
       notes: (this._notes[e.id] || []).map((n) => ({ ...n })),
+      shares_upstream_with: this._sharedWith(e.id),
+      independent_agreement: this._independentAgreement(e.id),
     };
+  }
+
+  /** Items this one is known to share an upstream source with, from the player's own comparisons. */
+  _sharedWith(id) {
+    return this._comparisons
+      .filter((c) => c.shared_upstream && (c.a === id || c.b === id))
+      .map((c) => (c.a === id ? c.b : c.a))
+      .sort();
+  }
+
+  /** Compared items that agree with this one and are independent of it. Counts only what the player has learned. */
+  _independentAgreement(id) {
+    return this._comparisons.filter((c) => (c.a === id || c.b === id) && c.agreement === 'agree' && !c.shared_upstream).length;
   }
 
   /** Everything the player may see. Never includes likelihoods, truth, or unrevealed outcomes. */
@@ -318,6 +346,7 @@ class Game {
       })),
       evidence: c.evidence.map((e) => this._evidenceView(e)),
       links: JSON.parse(JSON.stringify(this._links)),
+      known_dependencies: this._comparisons.filter((c) => c.shared_upstream).map((c) => [c.a, c.b].sort()),
       outcome: this._outcome ? JSON.parse(JSON.stringify(this._outcome)) : null,
     };
   }
