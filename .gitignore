@@ -60,3 +60,8 @@ solvers/itm/build/
 # `git add -A docs/` that swept up whatever was sitting beside the contract.
 docs/*.pdf
 game/hub/dist/
+
+game/desktop/node_modules/
+game/desktop/out/
+game/desktop/.stage/
+game/desktop/.stage-profile/
