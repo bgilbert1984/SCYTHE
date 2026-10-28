@@ -87,6 +87,10 @@ class Game {
     this._outcome = null;
   }
 
+  get seed() {
+    return this._seed;
+  }
+
   get finished() {
     return this._outcome !== null;
   }

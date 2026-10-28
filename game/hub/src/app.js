@@ -1,7 +1,7 @@
 /* app.js — Player Hub UI. Runs in the browser; engine and case come from the bundle (window.__game). */
 (function () {
   'use strict';
-  const { createGame, replay, createStore, caseData, COSTS } = window.__game;
+  const { createGame, createSave, serialize, loadSave, createStore, caseData, COSTS } = window.__game;
 
   let storage = null;
   try { storage = window.localStorage; } catch (e) { storage = null; }
@@ -10,7 +10,7 @@
   const root = document.getElementById('app');
   const state = {
     screen: 'home', game: null, seed: 0, selected: null, message: null, focus: null, commitOpen: false,
-    notice: null, commit: null,
+    notice: null, commit: null, imported: false,
   };
 
   function h(tag, attrs, ...kids) {
@@ -33,7 +33,39 @@
   const label = (list, id, field) => (list.find((x) => x.id === id) || {})[field] || id;
 
   function persist() {
-    store.saveInProgress({ case_id: caseData.case_id, seed: state.seed, actions: state.game.actionLog });
+    store.saveInProgress(state.game, caseData);
+  }
+
+  function exportSave() {
+    const url = URL.createObjectURL(new Blob([serialize(createSave(state.game, caseData))], { type: 'application/json' }));
+    const a = h('a', { href: url, download: `signal-ghost-${state.seed}.json` });
+    document.body.append(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 0);
+    state.message = { kind: 'ok', text: 'Save file exported.' };
+    render();
+  }
+
+  function importSave(text) {
+    const r = loadSave(caseData, text);
+    if (r.error) {
+      state.notice = { text: `That file could not be opened. ${r.error.message}` };
+      return render();
+    }
+    if (!r.game.finished && store.hasInProgress() && !window.confirm('Opening this save replaces your saved investigation. Continue?')) return;
+    state.game = r.game; state.seed = r.save.seed; state.selected = null; state.commitOpen = false; state.commit = null;
+    state.notice = null; state.focus = null;
+    if (r.game.finished) {
+      state.imported = r.verified;
+      state.screen = 'debrief';
+    } else {
+      state.imported = false;
+      persist();
+      state.message = { kind: 'ok', text: 'Save opened.' };
+      state.screen = 'play'; state.focus = 'briefing';
+    }
+    render();
   }
 
   function act(action, focusKey) {
@@ -87,7 +119,7 @@
     if (store.hasInProgress() && !window.confirm('Starting a new investigation discards your saved one. Continue?')) return;
     state.seed = Math.floor(Math.random() * 2147483647);
     state.game = createGame(caseData, { seed: state.seed });
-    state.selected = null; state.message = null; state.commitOpen = false; state.commit = null; state.notice = null;
+    state.selected = null; state.message = null; state.commitOpen = false; state.commit = null; state.notice = null; state.imported = false;
     persist();
     state.screen = 'play';
     state.focus = 'briefing';
@@ -95,17 +127,12 @@
   }
 
   function continueInvestigation() {
-    const loaded = store.loadInProgress(caseData.case_id);
-    if (loaded.error || !loaded.save) {
-      state.notice = { text: `${loaded.error || 'Nothing to continue.'} It cannot be restored.`, discard: true };
+    const r = store.loadInProgress(caseData);
+    if (!r.game) {
+      state.notice = { text: `${r.error ? r.error.message : 'Nothing to continue.'} It cannot be restored.`, discard: true };
       return render();
     }
-    const { game, error } = replay(caseData, loaded.save.seed, loaded.save.actions);
-    if (error) {
-      state.notice = { text: `The saved investigation could not be restored (${error.code}).`, discard: true };
-      return render();
-    }
-    state.seed = loaded.save.seed; state.game = game;
+    state.seed = r.save.seed; state.game = r.game; state.imported = false;
     state.selected = null; state.message = { kind: 'ok', text: 'Investigation restored.' };
     state.commitOpen = false; state.commit = null; state.notice = null;
     state.screen = 'play'; state.focus = 'briefing';
@@ -127,7 +154,12 @@
       h('nav', { class: 'menu', 'aria-label': 'Main menu' },
         h('button', { class: 'primary', 'data-key': 'new', onclick: newInvestigation }, 'New Investigation'),
         h('button', { 'data-key': 'continue', disabled: !resumable, onclick: continueInvestigation }, 'Continue Investigation'),
+        h('button', { 'data-key': 'import', onclick: () => document.getElementById('import-file').click() }, 'Open Save File'),
         h('button', { 'data-key': 'career', onclick: () => go('career') }, 'Career')),
+      h('input', {
+        id: 'import-file', type: 'file', accept: '.json,application/json', class: 'visually-hidden', tabindex: '-1', 'aria-label': 'Open a save file',
+        onchange: async (e) => { const f = e.target.files[0]; e.target.value = ''; if (f) importSave(await f.text()); },
+      }),
       h('p', { class: 'muted' }, 'Everything in this game is fictional. It runs entirely on this device.'));
   }
 
@@ -298,7 +330,9 @@
     const v = state.game.view();
     return h('main', null,
       h('div', { class: 'topbar' }, h('h1', null, v.title), budgetMeter(v),
-        h('button', { 'data-key': 'menu', onclick: () => go('home') }, 'Save and exit to menu')),
+        h('div', { class: 'row' },
+          h('button', { 'data-key': 'export', onclick: exportSave }, 'Export save file'),
+          h('button', { 'data-key': 'menu', onclick: () => go('home') }, 'Save and exit to menu'))),
       h('p', { id: 'briefing', tabindex: '-1', 'data-key': 'briefing' }, v.briefing),
       h('div', { class: `msg ${state.message ? state.message.kind : ''}`, role: 'status', 'aria-live': 'polite' }, state.message ? state.message.text : ''),
       h('div', { class: 'grid' }, hypothesisPanel(v), evidenceList(v), h('div', null, detail(v), commitPanel(v))));
@@ -319,7 +353,11 @@
     const ref = o.reference_posterior;
     const COMPONENTS = [['correctness', 'Correct conclusion'], ['calibration', 'Calibration'], ['citation', 'Quality of citations'], ['efficiency', 'Efficiency']];
     return h('main', null,
-      h('div', { class: 'topbar' }, h('h1', null, 'Debrief'), h('button', { 'data-key': 'home', onclick: () => go('home') }, 'Back to menu')),
+      h('div', { class: 'topbar' }, h('h1', null, 'Debrief'),
+        h('div', { class: 'row' },
+          h('button', { 'data-key': 'export', onclick: exportSave }, 'Export save file'),
+          h('button', { 'data-key': 'home', onclick: () => go('home') }, 'Back to menu'))),
+      state.imported && h('div', { class: 'note', role: 'status' }, 'Replay verified: the saved actions reproduce this exact result.'),
       h('section', { class: 'panel', 'aria-labelledby': 'h-out' },
         h('h2', { id: 'h-out', tabindex: '-1', 'data-key': 'debrief' }, sc.outcome_text),
         h('p', null, `You committed ${o.committed_hypothesis} at ${pct(o.stated_confidence)}. ${sc.calibration_text}: the evidence you gathered supported it at about ${pct(ref[o.committed_hypothesis])}.`),

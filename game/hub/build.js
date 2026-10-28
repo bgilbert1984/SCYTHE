@@ -17,9 +17,11 @@ const read = (p) => fs.readFileSync(path.join(GAME, p), 'utf8');
 // Modules bundled for the browser. Keys are paths relative to game/.
 const MODULES = [
   'runtime/rng.js',
+  'runtime/hash.js',
   'cases/lib/posterior.js',
   'runtime/scoring.js',
   'runtime/engine.js',
+  'runtime/save.js',
   'hub/src/store.js',
 ];
 const CASE_PATH = 'cases/signal_ghost/case.json';
@@ -55,8 +57,10 @@ function build() {
   defs.push(`__defs[${JSON.stringify(CASE_PATH)}] = function (module) { module.exports = ${JSON.stringify(JSON.parse(read(CASE_PATH)))}; };`);
   const bundle = `${SHIM}\n${defs.join('\n')}
 var __engine = __req('')('runtime/engine.js');
+var __save = __req('')('runtime/save.js');
 window.__game = {
   createGame: __engine.createGame, replay: __engine.replay, COSTS: __engine.COSTS,
+  createSave: __save.createSave, serialize: __save.serialize, loadSave: __save.load,
   createStore: __req('')('hub/src/store.js').createStore,
   caseData: __req('')(${JSON.stringify(CASE_PATH)})
 };`;
