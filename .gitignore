@@ -59,3 +59,4 @@ solvers/itm/build/
 # Tracked once by accident, in the Amendment D proposal commit 8f9e8c9, by a
 # `git add -A docs/` that swept up whatever was sitting beside the contract.
 docs/*.pdf
+game/hub/dist/

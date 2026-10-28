@@ -12,7 +12,8 @@ const FORBIDDEN_MODULES = [
   'net', 'http', 'https', 'http2', 'dgram', 'dns', 'tls', 'child_process',
   'worker_threads', 'cluster', 'vm', 'os', 'fs', 'readline',
 ];
-// Only the launcher may touch the filesystem and stdin/stdout.
+// Only the launcher and the Hub build script may touch the filesystem and stdin/stdout.
+const TOOLS = new Set(['cli.js', 'build.js']);
 const LAUNCHER_ONLY = new Set(['fs', 'path', 'readline']);
 const FORBIDDEN_PATTERNS = [
   /process\.env/, /\bfetch\s*\(/, /XMLHttpRequest/, /WebSocket/, /\beval\s*\(/, /new Function\s*\(/,
@@ -34,12 +35,12 @@ function requires(src) {
 const files = sourceFiles(GAME_ROOT);
 
 test('there are runtime sources to check', () => {
-  assert.ok(files.length >= 4);
+  assert.ok(files.length >= 7);
 });
 
 test('every require stays inside game/ or is a permitted builtin', () => {
   for (const f of files) {
-    const isLauncher = path.basename(f) === 'cli.js';
+    const isLauncher = TOOLS.has(path.basename(f));
     for (const dep of requires(fs.readFileSync(f, 'utf8'))) {
       const name = dep.replace(/^node:/, '');
       if (dep.startsWith('.')) {
@@ -62,10 +63,18 @@ test('no network, environment, or service references in runtime sources', () => 
   }
 });
 
-test('only the launcher performs I/O', () => {
+test('only the launcher and build script perform I/O', () => {
   for (const f of files) {
-    if (path.basename(f) === 'cli.js') continue;
+    if (TOOLS.has(path.basename(f))) continue;
     const deps = requires(fs.readFileSync(f, 'utf8')).map((d) => d.replace(/^node:/, ''));
     for (const d of deps) assert.ok(d.startsWith('.'), `${f} is not pure: requires ${d}`);
   }
+});
+
+test('the built Hub page is self-contained and blocks the network', () => {
+  const html = require('../hub/build').build();
+  assert.match(html, /Content-Security-Policy/);
+  assert.match(html, /default-src 'none'/);
+  assert.ok(!/https?:\/\//i.test(html), 'built page must not reference any URL');
+  assert.ok(!/<script[^>]+src=/i.test(html), 'built page must not load external scripts');
 });
