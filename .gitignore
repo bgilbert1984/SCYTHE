@@ -26,6 +26,7 @@ logs/
 tmp/
 temp/
 runtime/
+!game/runtime/
 instances/
 metrics_logs/
 
