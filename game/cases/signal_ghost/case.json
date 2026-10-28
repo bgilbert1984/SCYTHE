@@ -1,0 +1,225 @@
+{
+  "contract_version": "game_case_0.1.0",
+  "case_id": "signal_ghost",
+  "env_id": "port_merrin_01",
+  "title": "SIGNAL GHOST",
+  "briefing": "For three days, a transmitter on Channel A has appeared and vanished along the Port Merrin waterfront. Three receivers heard it at different places and times. Establish what is actually transmitting, and where. Everything here is fictional.",
+  "budget": 12,
+  "prior": { "H1": 0.3333333333333333, "H2": 0.3333333333333333, "H3": 0.3333333333333334 },
+  "variants": [
+    { "variant_id": "clear_day", "label": "Clear day", "day": 1, "summary": "Clear, stable air. Propagation is short-range." },
+    { "variant_id": "fog_morning", "label": "Fog, morning", "day": 2, "summary": "Fog with a temperature inversion. Signals can travel unusually far along the coast." },
+    { "variant_id": "post_rain_evening", "label": "After rain, evening", "day": 3, "summary": "Cooling air over warm water after rain. Ducting is possible over the harbour." }
+  ],
+  "locations": [
+    { "id": "loc_breakwater_light", "label": "Breakwater light", "enu_m": [1800, 400] },
+    { "id": "loc_calder_head", "label": "Calder Head", "enu_m": [-4200, 1800] },
+    { "id": "loc_ferry_quay", "label": "Ferry quay", "enu_m": [0, 0] },
+    { "id": "loc_marlow_hotel", "label": "Marlow Hotel roof", "enu_m": [-900, -600] }
+  ],
+  "hypotheses": [
+    { "id": "H1", "claim": "A single mobile transmitter is moving along the waterfront.", "is_truth": false },
+    { "id": "H2", "claim": "Two fixed transmitters, one at the harbour and one on the headland, are alternating.", "is_truth": false },
+    { "id": "H3", "claim": "A single fixed transmitter at the harbour light is audible only when atmospheric conditions allow.", "is_truth": true }
+  ],
+  "sources": [
+    { "id": "src_ferry_ops", "label": "Merrin Ferry Operations", "reliability": "strong", "limits": "Authoritative for the ferry only. Says nothing about radio.", "failure_modes": [] },
+    { "id": "src_ferry_tracker", "label": "Ferry position tracker", "reliability": "strong", "limits": "Tracks the ferry only, not other vessels.", "failure_modes": [] },
+    { "id": "src_harbour_authority", "label": "Harbour Authority", "reliability": "moderate", "limits": "Interference log is compiled from the Quay receiver feed, not independent measurement.", "failure_modes": ["derived from rx_quay"] },
+    { "id": "src_license_registry", "label": "Spectrum licence registry", "reliability": "weak", "limits": "Last updated in 2023. Known to lag field changes.", "failure_modes": ["stale"] },
+    { "id": "src_met", "label": "Port Merrin weather station", "reliability": "strong", "limits": "Point readings at the quay. Conditions on the headland may differ.", "failure_modes": [] },
+    { "id": "src_municipal_monitor", "label": "Municipal monitoring station", "reliability": "moderate", "limits": "Reports are summaries of the Quay receiver feed.", "failure_modes": ["derived from rx_quay"] },
+    { "id": "src_rf_analysis", "label": "Carrier fingerprint analysis", "reliability": "strong", "limits": "Shows the same hardware, not the same place.", "failure_modes": [] },
+    { "id": "src_rx_headland", "label": "Calder Head receiver", "reliability": "moderate", "limits": "Single omni antenna, no direction finding.", "failure_modes": [] },
+    { "id": "src_rx_hotel", "label": "Marlow Hotel receiver", "reliability": "moderate", "limits": "Uncalibrated gain. Absolute levels are approximate.", "failure_modes": ["uncalibrated"] },
+    { "id": "src_rx_quay", "label": "Ferry quay receiver", "reliability": "moderate", "limits": "Single omni antenna, no direction finding.", "failure_modes": [] },
+    { "id": "src_tech_records", "label": "Harbour maintenance records", "reliability": "strong", "limits": "Records work done, not what the equipment transmits.", "failure_modes": [] },
+    { "id": "src_witness_angler", "label": "Night angler, Calder Head", "reliability": "weak", "limits": "Saw a light, not a transmitter. Cannot say what it was.", "failure_modes": ["misattribution"] },
+    { "id": "src_witness_deckhand", "label": "Ferry deckhand", "reliability": "weak", "limits": "Confident, but the watch he times events by runs fast.", "failure_modes": ["timing bias"] }
+  ],
+  "evidence": [
+    {
+      "id": "E01", "type": "sdr", "title": "Quay receiver: Channel A pulse train, day 1 07:10",
+      "source": "src_rx_quay", "variant": "clear_day", "time": "day1 07:10",
+      "reading": "Channel A pulse train at 07:10, 1.2 s pulses, -91 dBm. Nothing heard at the Calder Head or Hotel receivers.",
+      "limits": "One receiver. No bearing.",
+      "likelihood": { "H1": 0.6, "H2": 0.6, "H3": 0.6 }
+    },
+    {
+      "id": "E02", "type": "sdr", "title": "Calder Head receiver: strong Channel A, day 2 07:40",
+      "source": "src_rx_headland", "variant": "fog_morning", "time": "day2 07:40",
+      "reading": "Channel A pulse train at 07:40, 1.2 s pulses, -62 dBm. Far stronger than anything the Quay receiver has logged.",
+      "limits": "One receiver. No bearing.",
+      "likelihood": { "H1": 0.7, "H2": 0.7, "H3": 0.15 },
+      "reevaluations": {
+        "fog_morning": {
+          "note": "In fog with an inversion, a fixed source 4.6 km away is expected to reach Calder Head at roughly this level. The strong reading no longer implies the source is close.",
+          "likelihood": { "H1": 0.4, "H2": 0.4, "H3": 0.8 }
+        }
+      }
+    },
+    {
+      "id": "E03", "type": "sdr", "title": "Hotel receiver: strong Channel A, day 3 19:10",
+      "source": "src_rx_hotel", "variant": "post_rain_evening", "time": "day3 19:10",
+      "reading": "Channel A pulse train at 19:10, 1.2 s pulses, -65 dBm. Not heard at the Hotel receiver on day 1.",
+      "limits": "Uncalibrated gain. Levels are approximate.",
+      "likelihood": { "H1": 0.7, "H2": 0.3, "H3": 0.15 },
+      "reevaluations": {
+        "post_rain_evening": {
+          "note": "After rain, cooling air over warm water produces a duct over the harbour. A fixed source at the breakwater light is expected to be strong here this evening.",
+          "likelihood": { "H1": 0.4, "H2": 0.3, "H3": 0.8 }
+        }
+      }
+    },
+    {
+      "id": "E04", "type": "sdr", "title": "Quay receiver: Channel A pulse train, day 1 12:40",
+      "source": "src_rx_quay", "variant": "clear_day", "time": "day1 12:40",
+      "reading": "Channel A pulse train at 12:40, 1.2 s pulses, -90 dBm. Essentially the same level as 07:10.",
+      "limits": "One receiver. No bearing.",
+      "likelihood": { "H1": 0.4, "H2": 0.6, "H3": 0.8 }
+    },
+    {
+      "id": "E05", "type": "sdr", "title": "Calder Head receiver: nothing at 12:40, day 1",
+      "source": "src_rx_headland", "variant": "clear_day", "time": "day1 12:40",
+      "reading": "No Channel A detection at 12:40. Noise floor -110 dBm.",
+      "limits": "A no-match: the receiver found nothing. It could not hear anything this weak at that range in clear air.",
+      "result_kind": "no_match",
+      "likelihood": { "H1": 0.7, "H2": 0.6, "H3": 0.85 }
+    },
+    {
+      "id": "E06", "type": "log", "title": "Ferry operator timetable",
+      "source": "src_ferry_ops", "variant": "clear_day", "time": "daily",
+      "reading": "Departures from the ferry quay at 07:10, 12:40 and 18:05 daily.",
+      "limits": "A timetable. It says nothing about radio.",
+      "likelihood": { "H1": 0.65, "H2": 0.5, "H3": 0.5 },
+      "corroboration": {
+        "outcomes": [
+          {
+            "weight": 0.8, "kind": "result",
+            "note": "The Quay receiver feed shows the same pulse train at every :10 and :40 all day. Only two of the three ferry departures line up, and the 18:05 departure has no signal. The ferry correlation is coincidence.",
+            "likelihood": { "H1": 0.25, "H2": 0.5, "H3": 0.6 }
+          },
+          { "weight": 0.2, "kind": "no_match", "note": "No further data was returned for the ferry correlation." }
+        ]
+      }
+    },
+    {
+      "id": "E07", "type": "log", "title": "Weather station log, days 1 to 3",
+      "source": "src_met", "variant": "clear_day", "time": "days 1-3",
+      "reading": "Day 1 clear and stable. Day 2 fog with an inversion layer, 06:00 to 09:30. Day 3 rain 14:00 to 16:00, then rapid cooling in the evening.",
+      "limits": "Readings at the quay only.",
+      "unlocks_reevaluation": ["fog_morning", "post_rain_evening"],
+      "likelihood": { "H1": 0.5, "H2": 0.5, "H3": 0.5 }
+    },
+    {
+      "id": "E08", "type": "sdr", "title": "Municipal monitoring report: emitter near the ferry terminal",
+      "source": "src_municipal_monitor", "variant": "clear_day", "time": "day1",
+      "reading": "Emitter active near the ferry terminal at 07:10 and 12:40, coinciding with ferry departures.",
+      "limits": "A summary of the Quay receiver feed. It is not a second measurement.",
+      "derived_from": ["E01", "E04"],
+      "likelihood": { "H1": 0.75, "H2": 0.5, "H3": 0.55 }
+    },
+    {
+      "id": "E09", "type": "log", "title": "Harbour Authority interference log",
+      "source": "src_harbour_authority", "variant": "clear_day", "time": "day1",
+      "reading": "Channel A interference logged at the ferry quay at 07:10 and 12:40, coinciding with ferry departures.",
+      "limits": "Compiled from the Quay receiver feed. It is not independent of E01 and E04.",
+      "derived_from": ["E01", "E04"],
+      "likelihood": { "H1": 0.75, "H2": 0.5, "H3": 0.55 }
+    },
+    {
+      "id": "E10", "type": "device", "title": "Spectrum registry: breakwater beacon decommissioned",
+      "source": "src_license_registry", "variant": "clear_day", "time": "registry 2023",
+      "reading": "The breakwater light beacon is listed as decommissioned in 2023. No active licence on Channel A at that site.",
+      "limits": "Registry last updated in 2023. Field changes since then would not appear.",
+      "likelihood": { "H1": 0.55, "H2": 0.5, "H3": 0.2 }
+    },
+    {
+      "id": "E11", "type": "device", "title": "Maintenance work order: unit replaced on the breakwater light",
+      "source": "src_tech_records", "variant": "clear_day", "time": "21 days before day 1",
+      "reading": "Beacon timer unit on the breakwater light replaced 21 days ago. The new unit was never entered in the spectrum registry.",
+      "limits": "Records the work done. It does not state what the unit transmits.",
+      "likelihood": { "H1": 0.3, "H2": 0.4, "H3": 0.85 }
+    },
+    {
+      "id": "E12", "type": "device", "title": "Ferry position track, days 1 to 3",
+      "source": "src_ferry_tracker", "variant": "clear_day", "time": "days 1-3",
+      "reading": "At 07:40 on day 2 the ferry was moored at the quay. At 19:10 on day 3 it was in service on the far side of the bay. It was never within 3 km of Calder Head when the headland receiver heard Channel A.",
+      "limits": "Tracks the ferry only. Other vessels are not covered.",
+      "likelihood": { "H1": 0.35, "H2": 0.5, "H3": 0.55 }
+    },
+    {
+      "id": "E13", "type": "device", "title": "Carrier fingerprint comparison, E01 / E02 / E03",
+      "source": "src_rf_analysis", "variant": "clear_day", "time": "days 1-3",
+      "reading": "Carrier offset +2.1 kHz and pulse shape match across the Quay, Calder Head and Hotel captures to within 20 Hz. This is the same hardware.",
+      "limits": "Shows the same hardware, not the same location.",
+      "likelihood": { "H1": 0.7, "H2": 0.1, "H3": 0.75 }
+    },
+    {
+      "id": "E14", "type": "sdr", "title": "Quay receiver: same pulse, day 2 07:40",
+      "source": "src_rx_quay", "variant": "fog_morning", "time": "day2 07:40",
+      "reading": "Channel A pulse train at 07:40, -91 dBm. This is the same pulse the Calder Head receiver logged at -62 dBm. The Quay level is unchanged from day 1.",
+      "limits": "One receiver. No bearing.",
+      "likelihood": { "H1": 0.15, "H2": 0.15, "H3": 0.9 }
+    },
+    {
+      "id": "W1", "type": "witness", "title": "Ferry deckhand: \"it starts the moment we cast off\"",
+      "source": "src_witness_deckhand", "variant": "clear_day", "time": "days 1-3",
+      "reading": "Says the signal cuts in right as the ferry casts off, every day, and is convinced the ferry is carrying it.",
+      "limits": "Confident, but his watch runs fast.",
+      "likelihood": { "H1": 0.75, "H2": 0.4, "H3": 0.4 },
+      "corroboration": {
+        "outcomes": [
+          {
+            "weight": 0.75, "kind": "result",
+            "note": "His watch runs 14 minutes fast. With the correction, his \"cast off\" times line up with the signal on two of three days.",
+            "likelihood": { "H1": 0.45, "H2": 0.4, "H3": 0.45 }
+          },
+          { "weight": 0.25, "kind": "no_match", "note": "The deckhand's watch could not be checked." }
+        ]
+      }
+    },
+    {
+      "id": "W2", "type": "witness", "title": "Night angler: a moving light on the water",
+      "source": "src_witness_angler", "variant": "post_rain_evening", "time": "day3 19:00",
+      "reading": "Saw a light moving across the water off Calder Head at about the time his radio crackled.",
+      "limits": "A light is not a transmitter. He could not say what it was.",
+      "likelihood": { "H1": 0.65, "H2": 0.45, "H3": 0.5 },
+      "corroboration": {
+        "outcomes": [
+          {
+            "weight": 0.5, "kind": "result",
+            "note": "The light matches a small fishing boat's running lights. No transmitter was aboard.",
+            "likelihood": { "H1": 0.45, "H2": 0.45, "H3": 0.5 }
+          },
+          { "weight": 0.5, "kind": "no_match", "note": "No vessel record matches what the angler saw." }
+        ]
+      }
+    }
+  ],
+  "decision_points": [
+    { "id": "D01", "prompt": "Triage: which three items to inspect first." },
+    { "id": "D02", "prompt": "Whether to spend budget corroborating the ferry-schedule correlation." },
+    { "id": "D03", "prompt": "Whether to compare the two \"independent\" captures that share a receiver." },
+    { "id": "D04", "prompt": "How to weigh the confident witness report against the device records." },
+    { "id": "D05", "prompt": "Whether to re-evaluate under fog_morning." },
+    { "id": "D06", "prompt": "Whether to re-evaluate under post_rain_evening." },
+    { "id": "D07", "prompt": "Which hypothesis to reject first, and when." },
+    { "id": "D08", "prompt": "How to read a corroboration that returns no-match versus one that could not be evaluated." },
+    { "id": "D09", "prompt": "Whether to commit now or spend remaining budget." },
+    { "id": "D10", "prompt": "What confidence to commit at." }
+  ],
+  "debrief": {
+    "truth": "A single fixed beacon on the breakwater light, recently replaced and never re-registered, transmits on a fixed 30-minute cycle. Fog and post-rain ducting carry it far past its normal range, so it appears at different receivers on different days.",
+    "misleading_clues": [
+      { "evidence": ["E06", "E08", "E09", "W1"], "why": "The ferry correlation is coincidence. The pulse repeats every half hour all day, and only some ferry departures line up." },
+      { "evidence": ["E08", "E09"], "why": "These are summaries of the Quay receiver feed. Counting them alongside E01 and E04 counts the same data three times." },
+      { "evidence": ["E02", "E03"], "why": "Strong readings at distant receivers look like a nearby source, but ducting makes a distant fixed source strong there." },
+      { "evidence": ["E10"], "why": "The registry is stale. The maintenance record shows the beacon was replaced and never re-registered." },
+      { "evidence": ["W2"], "why": "A moving light is not a moving transmitter." }
+    ],
+    "key_evidence": ["E14", "E11"],
+    "pivotal_decision": "D05",
+    "pivotal_explanation": "E14 shows the same pulse at the Quay receiver at the same unchanged level while Calder Head heard it at -62 dBm. A mobile source cannot do that, and a fixed source with ducting can."
+  }
+}
