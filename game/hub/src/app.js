@@ -10,7 +10,7 @@
   const root = document.getElementById('app');
   const state = {
     screen: 'home', game: null, seed: 0, selected: null, message: null, focus: null, commitOpen: false,
-    notice: null,
+    notice: null, commit: null,
   };
 
   function h(tag, attrs, ...kids) {
@@ -22,7 +22,7 @@
       else if (k === 'disabled' || k === 'checked' || k === 'selected') el[k] = Boolean(v);
       else el.setAttribute(k, v === true ? '' : String(v));
     }
-    for (const kid of kids.flat()) {
+    for (const kid of kids.flat(Infinity)) {
       if (kid === null || kid === undefined || kid === false) continue;
       el.append(kid.nodeType ? kid : document.createTextNode(String(kid)));
     }
@@ -53,7 +53,7 @@
   function describe(action, result) {
     switch (action.type) {
       case 'inspect': return `Inspected ${result.id}.`;
-      case 'compare': return `${result.a} and ${result.b}: ${result.agreement === 'agree' ? 'they can agree' : 'they conflict'}${result.shared_upstream ? '; they share an upstream source, so they are not independent' : '; independent sources'}.`;
+      case 'compare': return `${result.a} and ${result.b}: ${result.agreement === 'agree' ? 'they agree' : result.agreement === 'conflict' ? 'they conflict' : 'neither leans clearly'}${result.shared_upstream ? '; they share an upstream source, so they are not independent' : '; independent sources'}.`;
       case 'corroborate': return corroborationText(result.kind, result.note);
       case 'reevaluate': return result.note;
       case 'commit': return 'Finding committed.';
@@ -87,7 +87,7 @@
     if (store.hasInProgress() && !window.confirm('Starting a new investigation discards your saved one. Continue?')) return;
     state.seed = Math.floor(Math.random() * 2147483647);
     state.game = createGame(caseData, { seed: state.seed });
-    state.selected = null; state.message = null; state.commitOpen = false; state.notice = null;
+    state.selected = null; state.message = null; state.commitOpen = false; state.commit = null; state.notice = null;
     persist();
     state.screen = 'play';
     state.focus = 'briefing';
@@ -107,7 +107,7 @@
     }
     state.seed = loaded.save.seed; state.game = game;
     state.selected = null; state.message = { kind: 'ok', text: 'Investigation restored.' };
-    state.commitOpen = false; state.notice = null;
+    state.commitOpen = false; state.commit = null; state.notice = null;
     state.screen = 'play'; state.focus = 'briefing';
     render();
   }
@@ -156,6 +156,16 @@
       h('span', { class: 'muted', style: 'margin-left:8px' }, `${v.budget_remaining}/${v.budget} action points`));
   }
 
+  /** Evidence the player has linked to a hypothesis, grouped by relation. */
+  function board(v, hypId) {
+    const groups = { supports: [], contradicts: [], neutral: [] };
+    for (const [evId, rels] of Object.entries(v.links)) if (rels[hypId]) groups[rels[hypId]].push(evId);
+    const parts = Object.entries(groups).filter(([, ids]) => ids.length);
+    if (!parts.length) return h('p', { class: 'muted' }, 'No evidence linked yet.');
+    return h('ul', { class: 'plain muted' }, parts.map(([rel, ids]) => h('li', null, `${rel[0].toUpperCase()}${rel.slice(1)}: `,
+      ids.sort().map((id, i) => [i > 0 && ', ', h('button', { class: 'linkish', 'data-key': `board-${hypId}-${id}`, onclick: () => { state.selected = id; state.focus = `ev-${id}`; render(); } }, id)]))));
+  }
+
   function hypothesisPanel(v) {
     return h('section', { class: 'panel', 'aria-labelledby': 'h-hyp' },
       h('h2', { id: 'h-hyp' }, 'Hypotheses'),
@@ -169,6 +179,7 @@
             onchange: (e) => act({ type: 'set_confidence', hypothesis: hy.id, value: Number(e.target.value) / 100 }, `conf-${hy.id}`),
           })),
         h('div', { class: 'row' },
+          board(v, hy.id),
           hy.rejected
             ? h('button', { 'data-key': `restore-${hy.id}`, onclick: () => act({ type: 'restore', hypothesis: hy.id }, `restore-${hy.id}`) }, `Restore (${COSTS.restore})`)
             : h('button', { 'data-key': `reject-${hy.id}`, onclick: () => act({ type: 'reject', hypothesis: hy.id }, `reject-${hy.id}`) }, 'Reject'))))),
@@ -186,7 +197,9 @@
             h('button', {
               class: `ev${state.selected === e.id ? ' sel' : ''}`, 'data-key': `ev-${e.id}`, 'aria-pressed': String(state.selected === e.id),
               onclick: () => { state.selected = e.id; state.focus = `ev-${e.id}`; render(); },
-            }, h('span', { class: 'tag' }, e.id), e.title, e.inspected && h('span', { class: 'tag' }, 'read'))))));
+            }, h('span', { class: 'tag' }, e.id), h('span', { class: 'title' }, e.title),
+              e.inspected && h('span', { class: 'tag' }, e.source.reliability),
+              e.inspected && e.shares_upstream_with.length > 0 && h('span', { class: 'tag', title: `Shares an upstream source with ${e.shares_upstream_with.join(', ')}` }, 'not independent'))))));
       }));
   }
 
@@ -209,11 +222,17 @@
     return h('section', { class: 'panel', 'aria-labelledby': 'h-det' },
       h('h2', { id: 'h-det' }, `${e.id}: ${e.title}`),
       h('p', null, e.reading),
-      h('p', { class: 'muted' }, `Limits: ${e.limits}`),
-      h('p', { class: 'muted' }, `Source: ${e.source.label} (${e.source.reliability}). ${e.source.limits}`),
-      h('p', { class: 'muted' }, `Conditions: ${e.conditions}. ${e.time}.`),
+      h('dl', { class: 'prov' },
+        h('dt', null, 'Source'), h('dd', null, e.source.label),
+        h('dt', null, 'Reliability'), h('dd', null, `${e.source.reliability}. ${e.source.limits}`),
+        h('dt', null, 'Collected'), h('dd', null, `${e.time}, under ${e.conditions.toLowerCase()}`),
+        h('dt', null, 'Limits of this item'), h('dd', null, e.limits),
+        h('dt', null, 'Independence'), h('dd', null, e.shares_upstream_with.length
+          ? `Not independent of ${e.shares_upstream_with.join(', ')}: they share an upstream source, so they count once.`
+          : 'No shared source found. Compare it with other items to check.'),
+        h('dt', null, 'Independent agreement'), h('dd', null, `${e.independent_agreement} compared item${e.independent_agreement === 1 ? '' : 's'}`)),
       e.notes.map((n) => h('div', { class: 'note' },
-        n.kind === 'compare' ? `Compared with ${n.with}: ${n.agreement}${n.shared_upstream ? ', shares an upstream source' : ''}.`
+        n.kind === 'compare' ? `Compared with ${n.with}: ${n.agreement === 'agree' ? 'they agree' : n.agreement === 'conflict' ? 'they conflict' : 'neither leans clearly'}${n.shared_upstream ? '; shares an upstream source' : ''}.`
           : n.kind === 'reevaluation' ? `Re-evaluated under ${n.variant}: ${n.note}`
             : corroborationText(n.result_kind, n.note))),
       h('div', { class: 'row' },
@@ -238,12 +257,17 @@
         `${rel} ${hy}`, h('button', { 'data-key': `unlink-${hy}`, onclick: () => act({ type: 'unlink', evidence: e.id, hypothesis: hy }, `unlink-${hy}`) }, 'Unlink')))));
   }
 
+  const supportsLinked = (v, hypId) => Object.entries(v.links).filter(([, r]) => r[hypId] === 'supports').map(([id]) => id);
+
   function commitPanel(v) {
     const live = v.hypotheses.filter((x) => !x.rejected);
     const read = v.evidence.filter((x) => x.inspected);
-    let hyp = live[0].id;
-    let conf = 50;
-    const cited = new Set();
+    if (state.commitOpen && !state.commit) {
+      state.commit = { hyp: live[0].id, conf: 50, cited: new Set(supportsLinked(v, live[0].id)) };
+    }
+    if (state.commit && !live.some((x) => x.id === state.commit.hyp)) state.commit.hyp = live[0].id;
+    const cm = state.commit;
+    const dependent = cm ? v.known_dependencies.filter(([a, b]) => cm.cited.has(a) && cm.cited.has(b)) : [];
     return h('section', { class: 'panel', 'aria-labelledby': 'h-com' },
       h('h2', { id: 'h-com' }, 'Commit a finding'),
       !state.commitOpen
@@ -251,16 +275,23 @@
         : h('div', null,
           h('p', { class: 'muted' }, 'This ends the investigation. You cannot change it afterwards.'),
           h('div', { class: 'row' }, h('label', { for: 'commit-hyp' }, 'Hypothesis'),
-            h('select', { id: 'commit-hyp', 'data-key': 'commit-hyp', onchange: (x) => { hyp = x.target.value; } }, live.map((x) => h('option', { value: x.id }, `${x.id}: ${x.claim}`)))),
-          h('div', { class: 'row' }, h('label', { for: 'commit-conf' }, 'Confidence ', h('span', { id: 'commit-confv' }, '50%')),
-            h('input', { id: 'commit-conf', type: 'range', min: 0, max: 100, step: 5, value: 50, oninput: (x) => { conf = Number(x.target.value); document.getElementById('commit-confv').textContent = `${conf}%`; } })),
+            h('select', {
+              id: 'commit-hyp', 'data-key': 'commit-hyp',
+              onchange: (x) => { cm.hyp = x.target.value; cm.cited = new Set(supportsLinked(v, cm.hyp)); state.focus = 'commit-hyp'; render(); },
+            }, live.map((x) => h('option', { value: x.id, selected: x.id === cm.hyp }, `${x.id}: ${x.claim}`)))),
+          h('div', { class: 'row' }, h('label', { for: 'commit-conf' }, 'Confidence ', h('span', { id: 'commit-confv' }, `${cm.conf}%`)),
+            h('input', { id: 'commit-conf', type: 'range', min: 0, max: 100, step: 5, value: cm.conf, oninput: (x) => { cm.conf = Number(x.target.value); document.getElementById('commit-confv').textContent = `${cm.conf}%`; } })),
           h('fieldset', null, h('legend', null, 'Cite the evidence behind this finding'),
             read.length === 0 ? h('p', { class: 'muted' }, 'Read some evidence first.')
               : read.map((x) => h('label', { style: 'display:block' },
-                h('input', { type: 'checkbox', value: x.id, onchange: (c) => { c.target.checked ? cited.add(x.id) : cited.delete(x.id); } }), ` ${x.id}: ${x.title}`))),
+                h('input', {
+                  type: 'checkbox', value: x.id, checked: cm.cited.has(x.id), 'data-key': `cite-${x.id}`,
+                  onchange: (c) => { c.target.checked ? cm.cited.add(x.id) : cm.cited.delete(x.id); state.focus = `cite-${x.id}`; render(); },
+                }), ` ${x.id}: ${x.title}`))),
+          h('div', { class: 'note', role: 'status' }, dependent.map(([a, b]) => h('p', null, `${a} and ${b} share an upstream source, so they count as one citation.`))),
           h('div', { class: 'row' },
-            h('button', { class: 'primary', 'data-key': 'commit', onclick: () => act({ type: 'commit', hypothesis: hyp, confidence: conf / 100, citations: [...cited] }, 'commit') }, 'Commit finding'),
-            h('button', { onclick: () => { state.commitOpen = false; state.focus = 'commit-open'; render(); } }, 'Cancel'))));
+            h('button', { class: 'primary', 'data-key': 'commit', onclick: () => act({ type: 'commit', hypothesis: cm.hyp, confidence: cm.conf / 100, citations: [...cm.cited] }, 'commit') }, 'Commit finding'),
+            h('button', { onclick: () => { state.commitOpen = false; state.commit = null; state.focus = 'commit-open'; render(); } }, 'Cancel'))));
   }
 
   function play() {

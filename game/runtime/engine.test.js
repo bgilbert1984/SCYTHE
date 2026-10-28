@@ -112,13 +112,63 @@ test('corroboration is seeded and deterministic', () => {
   assert.deepStrictEqual([...kinds].sort(), ['no_match', 'result']);
 });
 
-test('items without corroboration cannot be corroborated; each only once', () => {
+test('asking to corroborate an item with nothing to check costs budget and reveals nothing for free', () => {
   const g = fresh();
   ok(g, { type: 'inspect', evidence: 'E01' });
-  assert.strictEqual(code(g, { type: 'corroborate', evidence: 'E01' }), 'NOT_CORROBORATABLE');
+  const before = g.view().budget_remaining;
+  const r = ok(g, { type: 'corroborate', evidence: 'E01' });
+  assert.strictEqual(r.result.kind, 'unresolved');
+  assert.strictEqual(g.view().budget_remaining, before - COSTS.corroborate);
+  assert.strictEqual(code(g, { type: 'corroborate', evidence: 'E01' }), 'ALREADY_CORROBORATED');
+});
+
+test('a dead-end corroboration does not change the reference posterior', () => {
+  const run = (corroborate) => {
+    const g = fresh();
+    ok(g, { type: 'inspect', evidence: 'E01' });
+    if (corroborate) ok(g, { type: 'corroborate', evidence: 'E01' });
+    return ok(g, { type: 'commit', hypothesis: 'H3', confidence: 0.5, citations: ['E01'] }).result.reference_posterior;
+  };
+  assert.deepStrictEqual(run(true), run(false));
+});
+
+test('each corroboratable item can be corroborated once', () => {
+  const g = fresh();
   ok(g, { type: 'inspect', evidence: 'E06' });
   ok(g, { type: 'corroborate', evidence: 'E06' });
   assert.strictEqual(code(g, { type: 'corroborate', evidence: 'E06' }), 'ALREADY_CORROBORATED');
+});
+
+test('a neutral item agrees with nothing, so it cannot corroborate', () => {
+  const g = fresh();
+  for (const id of ['E01', 'E14']) ok(g, { type: 'inspect', evidence: id });
+  assert.strictEqual(ok(g, { type: 'compare', a: 'E01', b: 'E14' }).result.agreement, 'unclear');
+  assert.strictEqual(g.view().evidence.find((e) => e.id === 'E14').independent_agreement, 0);
+});
+
+test('independent agreement counts only compared, independent, agreeing items', () => {
+  const g = fresh();
+  for (const id of ['E14', 'E11', 'E13', 'E04', 'E08', 'E01']) ok(g, { type: 'inspect', evidence: id });
+  const n = (id) => g.view().evidence.find((e) => e.id === id).independent_agreement;
+  assert.strictEqual(n('E14'), 0, 'nothing compared yet');
+  assert.strictEqual(ok(g, { type: 'compare', a: 'E14', b: 'E11' }).result.agreement, 'agree');
+  assert.strictEqual(n('E14'), 1);
+  assert.strictEqual(n('E11'), 1);
+  // E08 is a summary of E04: they agree but are not independent, so neither gains corroboration.
+  ok(g, { type: 'compare', a: 'E08', b: 'E04' });
+  assert.strictEqual(n('E08'), 0);
+  assert.strictEqual(n('E04'), 0);
+});
+
+test('known dependencies come only from the player\'s own comparisons', () => {
+  const g = fresh();
+  for (const id of ['E01', 'E08']) ok(g, { type: 'inspect', evidence: id });
+  assert.deepStrictEqual(g.view().known_dependencies, []);
+  assert.deepStrictEqual(g.view().evidence.find((e) => e.id === 'E08').shares_upstream_with, []);
+  ok(g, { type: 'compare', a: 'E08', b: 'E01' });
+  assert.deepStrictEqual(g.view().known_dependencies, [['E01', 'E08']]);
+  assert.deepStrictEqual(g.view().evidence.find((e) => e.id === 'E08').shares_upstream_with, ['E01']);
+  assert.deepStrictEqual(g.view().evidence.find((e) => e.id === 'E01').shares_upstream_with, ['E08']);
 });
 
 test('hypotheses: reject, restore, and never reject the last one', () => {
