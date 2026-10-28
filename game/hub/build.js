@@ -18,6 +18,7 @@ const read = (p) => fs.readFileSync(path.join(GAME, p), 'utf8');
 const MODULES = [
   'runtime/rng.js',
   'cases/lib/posterior.js',
+  'runtime/scoring.js',
   'runtime/engine.js',
   'hub/src/store.js',
 ];

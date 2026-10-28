@@ -54,11 +54,17 @@
     switch (action.type) {
       case 'inspect': return `Inspected ${result.id}.`;
       case 'compare': return `${result.a} and ${result.b}: ${result.agreement === 'agree' ? 'they can agree' : 'they conflict'}${result.shared_upstream ? '; they share an upstream source, so they are not independent' : '; independent sources'}.`;
-      case 'corroborate': return result.kind === 'result' ? `Corroboration: ${result.note}` : `No result: ${result.note}`;
+      case 'corroborate': return corroborationText(result.kind, result.note);
       case 'reevaluate': return result.note;
       case 'commit': return 'Finding committed.';
       default: return 'Done.';
     }
+  }
+
+  function corroborationText(kind, note) {
+    if (kind === 'result') return `Corroboration: ${note}`;
+    if (kind === 'no_match') return `Nothing found: ${note}`;
+    return `Could not tell: ${note} This says nothing either way.`;
   }
 
   function finish(outcome) {
@@ -67,6 +73,8 @@
       seed: state.seed,
       hypothesis: outcome.committed_hypothesis,
       correct: outcome.is_correct,
+      outcome: outcome.score.outcome_text,
+      score: outcome.score.total,
       stated_confidence: outcome.stated_confidence,
       reference_confidence: outcome.reference_posterior[outcome.committed_hypothesis],
       finished_at: new Date().toISOString(),
@@ -131,11 +139,12 @@
         rows.length === 0
           ? h('p', { class: 'muted' }, 'No completed investigations yet.')
           : h('table', null,
-            h('thead', null, h('tr', null, ['Finished', 'Committed', 'Result', 'Your confidence', 'Reference'].map((t) => h('th', { scope: 'col' }, t)))),
+            h('thead', null, h('tr', null, ['Finished', 'Committed', 'Outcome', 'Score', 'Your confidence', 'Reference'].map((t) => h('th', { scope: 'col' }, t)))),
             h('tbody', null, rows.map((r) => h('tr', null,
               h('td', null, r.finished_at.slice(0, 10)),
               h('td', null, r.hypothesis),
-              h('td', null, r.correct ? 'Correct' : 'Incorrect'),
+              h('td', null, r.outcome || (r.correct ? 'Correct' : 'Incorrect')),
+              h('td', null, r.score === undefined ? '-' : r.score),
               h('td', null, pct(r.stated_confidence)),
               h('td', null, pct(r.reference_confidence))))))));
   }
@@ -206,7 +215,7 @@
       e.notes.map((n) => h('div', { class: 'note' },
         n.kind === 'compare' ? `Compared with ${n.with}: ${n.agreement}${n.shared_upstream ? ', shares an upstream source' : ''}.`
           : n.kind === 'reevaluation' ? `Re-evaluated under ${n.variant}: ${n.note}`
-            : `Corroboration (${n.result_kind}): ${n.note}`)),
+            : corroborationText(n.result_kind, n.note))),
       h('div', { class: 'row' },
         h('label', { for: 'cmp' }, 'Compare with'),
         h('select', { id: 'cmp', disabled: others.length === 0, onchange: (x) => { compareWith = x.target.value; } },
@@ -264,25 +273,46 @@
       h('div', { class: 'grid' }, hypothesisPanel(v), evidenceList(v), h('div', null, detail(v), commitPanel(v))));
   }
 
+  const CITATION_TEXT = {
+    supports: 'supports your finding',
+    against: 'argues against your finding',
+    not_diagnostic: 'does not help tell the explanations apart',
+    double_counted: 'repeats evidence you already cited',
+  };
+
   function debrief() {
     const o = state.game.view().outcome;
+    const sc = o.score;
     const c = caseData;
     const byId = Object.fromEntries(c.evidence.map((e) => [e.id, e]));
     const ref = o.reference_posterior;
+    const COMPONENTS = [['correctness', 'Correct conclusion'], ['calibration', 'Calibration'], ['citation', 'Quality of citations'], ['efficiency', 'Efficiency']];
     return h('main', null,
       h('div', { class: 'topbar' }, h('h1', null, 'Debrief'), h('button', { 'data-key': 'home', onclick: () => go('home') }, 'Back to menu')),
       h('section', { class: 'panel', 'aria-labelledby': 'h-out' },
-        h('h2', { id: 'h-out', tabindex: '-1', 'data-key': 'debrief' }, o.is_correct ? 'Your finding was correct.' : 'Your finding was not correct.'),
-        h('p', null, `You committed ${o.committed_hypothesis} at ${pct(o.stated_confidence)}, citing ${o.citations.join(', ')}.`),
-        h('p', null, `The evidence you gathered supported ${o.committed_hypothesis} at about ${pct(ref[o.committed_hypothesis])}.`),
-        c.hypotheses.map((hy) => h('div', null, h('p', { class: 'muted' }, `${hy.id}: ${pct(ref[hy.id])}`), h('div', { class: 'bar' }, h('span', { style: `width:${Math.round(ref[hy.id] * 100)}%` }))))),
+        h('h2', { id: 'h-out', tabindex: '-1', 'data-key': 'debrief' }, sc.outcome_text),
+        h('p', null, `You committed ${o.committed_hypothesis} at ${pct(o.stated_confidence)}. ${sc.calibration_text}: the evidence you gathered supported it at about ${pct(ref[o.committed_hypothesis])}.`),
+        h('p', null, h('strong', null, `Score ${sc.total} / 100`)),
+        h('details', null, h('summary', null, 'Score breakdown'),
+          h('table', null,
+            h('thead', null, h('tr', null, ['Part', 'Points', 'Weight'].map((t) => h('th', { scope: 'col' }, t)))),
+            h('tbody', null, COMPONENTS.map(([k, name]) => h('tr', null, h('td', null, name), h('td', null, `${sc.components[k]} / 100`), h('td', null, pct(sc.weights[k])))))),
+          h('p', { class: 'muted' }, `Brier score for your stated confidence: ${sc.brier.toFixed(2)} (lower is better).`))),
+      h('section', { class: 'panel' }, h('h2', null, 'What the evidence supported'),
+        c.hypotheses.map((hy) => {
+          const mine = o.player_confidence[hy.id];
+          return h('div', { style: 'margin-bottom:8px' },
+            h('p', { class: 'muted' }, `${hy.id}: evidence supported ${pct(ref[hy.id])}${mine === null || mine === undefined ? '' : `; you rated it ${pct(mine)}`}`),
+            h('div', { class: 'bar' }, h('span', { style: `width:${Math.round(ref[hy.id] * 100)}%` })));
+        })),
+      h('section', { class: 'panel' }, h('h2', null, 'Your citations'),
+        h('ul', null, sc.citations.map((x) => h('li', null, `${x.id} (${byId[x.id].title}) ${CITATION_TEXT[x.status]}.`)))),
       h('section', { class: 'panel' }, h('h2', null, 'What actually happened'), h('p', null, o.debrief.truth)),
       h('section', { class: 'panel' }, h('h2', null, 'Misleading clues'),
         h('ul', null, o.debrief.misleading_clues.map((m) => h('li', null, `${m.evidence.join(', ')}: ${m.why}`)))),
       h('section', { class: 'panel' }, h('h2', null, 'The key moment'),
         h('p', null, o.debrief.pivotal_explanation),
-        h('p', { class: 'muted' }, `Key evidence: ${o.debrief.key_evidence.map((id) => `${id} (${byId[id].title})`).join('; ')}`)),
-      h('p', { class: 'muted' }, 'Detailed scoring is not available yet.'));
+        h('p', { class: 'muted' }, `Key evidence: ${o.debrief.key_evidence.map((id) => `${id} (${byId[id].title})`).join('; ')}`)));
   }
 
   function render() {

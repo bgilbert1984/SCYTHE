@@ -99,7 +99,7 @@
             "note": "The Quay receiver feed shows the same pulse train at every :10 and :40 all day. Only two of the three ferry departures line up, and the 18:05 departure has no signal. The ferry correlation is coincidence.",
             "likelihood": { "H1": 0.25, "H2": 0.5, "H3": 0.6 }
           },
-          { "weight": 0.2, "kind": "no_match", "note": "No further data was returned for the ferry correlation." }
+          { "weight": 0.2, "kind": "unresolved", "note": "The data needed to check the ferry correlation could not be retrieved." }
         ]
       }
     },
@@ -175,7 +175,7 @@
             "note": "His watch runs 14 minutes fast. With the correction, his \"cast off\" times line up with the signal on two of three days.",
             "likelihood": { "H1": 0.45, "H2": 0.4, "H3": 0.45 }
           },
-          { "weight": 0.25, "kind": "no_match", "note": "The deckhand's watch could not be checked." }
+          { "weight": 0.25, "kind": "unresolved", "note": "The deckhand's watch could not be checked." }
         ]
       }
     },
@@ -192,7 +192,11 @@
             "note": "The light matches a small fishing boat's running lights. No transmitter was aboard.",
             "likelihood": { "H1": 0.45, "H2": 0.45, "H3": 0.5 }
           },
-          { "weight": 0.5, "kind": "no_match", "note": "No vessel record matches what the angler saw." }
+          {
+            "weight": 0.5, "kind": "no_match",
+            "note": "No vessel record matches what the angler saw. That is weak evidence at most: small boats often go unrecorded.",
+            "likelihood": { "H1": 0.6, "H2": 0.45, "H3": 0.5 }
+          }
         ]
       }
     }
