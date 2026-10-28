@@ -6,6 +6,7 @@
  */
 
 const { app } = require('electron');
+const fs = require('fs');
 
 const CHECKS = `(async () => {
   const q = (s) => document.querySelector(s);
@@ -51,7 +52,11 @@ async function run(win, ses) {
   report.externalRequestsAttempted = external.length;
   report.electron = process.versions.electron;
   report.packaged = app.isPackaged;
-  process.stdout.write(`SMOKE ${JSON.stringify(report)}\n`);
+  const line = `SMOKE ${JSON.stringify(report)}\n`;
+  // Windows GUI apps do not reliably write to a pipe, so the runner can ask for a file instead.
+  const target = process.argv.find((a) => a.startsWith('--smoke-report='));
+  if (target) fs.writeFileSync(target.slice('--smoke-report='.length), line);
+  process.stdout.write(line);
   app.quit();
 }
 

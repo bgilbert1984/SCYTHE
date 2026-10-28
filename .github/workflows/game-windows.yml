@@ -1,0 +1,68 @@
+name: game-windows
+
+# Builds and verifies the Windows x64 standalone edition of SIGNAL GHOST (SCYTHE: GAME) on a real
+# Windows runner. Steam is not involved: this is the build players get from a zip.
+on:
+  pull_request:
+    paths:
+      - "game/**"
+      - ".github/workflows/game-windows.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-portable:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: game/desktop/package-lock.json
+
+      - name: Repository checks for the game
+        run: node --test game/
+
+      - name: Install (also fetches the Electron binary)
+        working-directory: game/desktop
+        run: npm ci
+
+      - name: Package Windows x64
+        working-directory: game/desktop
+        run: npm run package:win
+
+      - name: Verify the zip against its checksum
+        working-directory: game/desktop/out
+        run: |
+          $want = (Get-Content SCYTHE-GAME-win-x64-portable.zip.sha256).Split(' ')[0]
+          $got = (Get-FileHash SCYTHE-GAME-win-x64-portable.zip -Algorithm SHA256).Hash.ToLower()
+          if ($want -ne $got) { throw "checksum mismatch: $want vs $got" }
+
+      - name: Extract the zip to a clean folder (what a tester does)
+        run: Expand-Archive game/desktop/out/SCYTHE-GAME-win-x64-portable.zip -DestinationPath "$env:RUNNER_TEMP/tester"
+
+      - name: Smoke test the extracted game (restart keeps the saved investigation)
+        working-directory: game/desktop
+        run: node scripts/smoke-run.js "$env:RUNNER_TEMP/tester/signal-ghost-win32-x64/signal-ghost.exe"
+
+      - name: Smoke test again with all outbound traffic blocked for the executable
+        working-directory: game/desktop
+        run: |
+          $exe = "$env:RUNNER_TEMP/tester/signal-ghost-win32-x64/signal-ghost.exe"
+          New-NetFirewallRule -DisplayName "block-signal-ghost" -Direction Outbound -Action Block -Program (Resolve-Path $exe).Path | Out-Null
+          node scripts/smoke-run.js $exe
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SCYTHE-GAME-win-x64-portable
+          path: |
+            game/desktop/out/SCYTHE-GAME-win-x64-portable.zip
+            game/desktop/out/SCYTHE-GAME-win-x64-portable.zip.sha256
+          if-no-files-found: error

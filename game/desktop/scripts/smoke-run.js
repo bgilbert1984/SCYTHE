@@ -2,15 +2,16 @@
 /**
  * smoke-run.js — Launch a packaged build and verify it, twice, on one profile.
  *
- *   node scripts/smoke-run.js [path/to/signal-ghost] [--offline]
+ *   node scripts/smoke-run.js [path/to/signal-ghost[.exe]] [--offline] [--display]
  *
  * Run 1 starts an investigation and spends an action point. Run 2 reopens the same
  * profile and must offer Continue and restore it. Both runs check the sandbox and that
  * network, popups, and navigation are blocked. With --offline the app runs in a network
  * namespace with no interfaces (Linux: unshare -Un), so it could not reach the network
- * even if it tried.
+ * even if it tried. On Windows there is no such switch; block the executable in the firewall instead.
  *
- * Headless flags are for machines with no display; pass --display to use a real one.
+ * Headless flags are for Linux machines with no display; pass --display to use a real one. Windows always
+ * uses the real desktop session.
  */
 
 const fs = require('fs');
@@ -20,9 +21,13 @@ const { spawnSync } = require('child_process');
 
 const args = process.argv.slice(2);
 const offline = args.includes('--offline');
-const display = args.includes('--display');
+const display = args.includes('--display') || process.platform !== 'linux';
 const bin = path.resolve(args.find((a) => !a.startsWith('--')) || path.join(__dirname, '..', 'out', 'signal-ghost-linux-x64', 'signal-ghost'));
 
+if (offline && process.platform !== 'linux') {
+  process.stderr.write('--offline needs Linux network namespaces; on Windows block the executable in the firewall.\n');
+  process.exit(2);
+}
 if (!fs.existsSync(bin)) {
   process.stderr.write(`not found: ${bin}\n`);
   process.exit(2);
@@ -31,13 +36,15 @@ if (!fs.existsSync(bin)) {
 const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'signal-ghost-smoke-'));
 
 function launch() {
-  const flags = [`--user-data-dir=${profile}`, ...(display ? [] : ['--ozone-platform=headless'])];
+  const reportFile = path.join(profile, `report-${Date.now()}.txt`);
+  const flags = [`--user-data-dir=${profile}`, `--smoke-report=${reportFile}`, ...(display ? [] : ['--ozone-platform=headless'])];
   // Own uid inside the namespace: Chromium refuses to run its sandbox as root.
   const [cmd, argv] = offline
     ? ['unshare', ['-Un', `--map-user=${process.getuid()}`, `--map-group=${process.getgid()}`, bin, ...flags]]
     : [bin, flags];
   const r = spawnSync(cmd, argv, { env: { ...process.env, SIGNAL_GHOST_SMOKE: '1' }, encoding: 'utf8', timeout: 90000 });
-  const line = (r.stdout || '').split('\n').find((l) => l.startsWith('SMOKE '));
+  const text = fs.existsSync(reportFile) ? fs.readFileSync(reportFile, 'utf8') : r.stdout || '';
+  const line = text.split('\n').find((l) => l.startsWith('SMOKE '));
   return { status: r.status, signal: r.signal, report: line ? JSON.parse(line.slice(6)) : null, stderr: r.stderr };
 }
 
