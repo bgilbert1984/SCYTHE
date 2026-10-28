@@ -5,13 +5,18 @@
  * Proves the game starts and plays offline with no SCYTHE services. The only I/O
  * is reading the case file and stdin/stdout. Usage:
  *
- *   node game/runtime/cli.js [--seed N] [--case path/to/case.json]
+ *   node game/runtime/cli.js [--seed N] [--case path/to/case.json] [--save file]
+ *   node game/runtime/cli.js --replay file [--case path/to/case.json]
+ *
+ * --save writes a save file when the game ends or you quit. --replay verifies a save by
+ * replaying it and reports the result; it exits non-zero if the save cannot be replayed.
  */
 
 const fs = require('fs');
 const path = require('path');
 const readline = require('readline');
 const { createGame, COSTS } = require('./engine');
+const { createSave, serialize, load } = require('./save');
 
 const HELP = `Commands:
   status                              show budget, hypotheses, and evidence
@@ -31,6 +36,8 @@ function parseArgs(argv) {
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--seed') out.seed = Number(argv[++i]);
     else if (argv[i] === '--case') out.casePath = path.resolve(argv[++i]);
+    else if (argv[i] === '--save') out.savePath = path.resolve(argv[++i]);
+    else if (argv[i] === '--replay') out.replayPath = path.resolve(argv[++i]);
   }
   if (!Number.isFinite(out.seed)) throw new Error('--seed must be a number');
   return out;
@@ -96,10 +103,38 @@ function run(game, input, output) {
   return new Promise((resolve) => rl.on('close', resolve));
 }
 
+/** Replay a save file and describe it. Returns { ok, lines }. */
+function replaySave(caseData, text) {
+  const r = load(caseData, text);
+  if (r.error) return { ok: false, lines: [`Cannot replay (${r.error.code}): ${r.error.message}`] };
+  const v = r.game.view();
+  const lines = [`Replayed ${r.save.actions.length} actions (seed ${r.save.seed}). Budget left ${v.budget_remaining}/${v.budget}.`];
+  if (v.outcome) {
+    const o = v.outcome;
+    lines.push(`Committed ${o.committed_hypothesis} at ${o.stated_confidence}: ${o.score.outcome_text}. Score ${o.score.total}.`);
+    lines.push(r.verified ? 'Recorded result reproduced exactly.' : 'No recorded result to verify against.');
+  } else {
+    lines.push('Investigation in progress.');
+  }
+  return { ok: true, lines };
+}
+
 if (require.main === module) {
   const args = parseArgs(process.argv.slice(2));
   const caseData = JSON.parse(fs.readFileSync(args.casePath, 'utf8'));
-  run(createGame(caseData, { seed: args.seed }), process.stdin, process.stdout);
+  if (args.replayPath) {
+    const r = replaySave(caseData, fs.readFileSync(args.replayPath, 'utf8'));
+    process.stdout.write(`${r.lines.join('\n')}\n`);
+    process.exitCode = r.ok ? 0 : 1;
+  } else {
+    const game = createGame(caseData, { seed: args.seed });
+    run(game, process.stdin, process.stdout).then(() => {
+      if (args.savePath) {
+        fs.writeFileSync(args.savePath, serialize(createSave(game, caseData)));
+        process.stdout.write(`Saved to ${args.savePath}\n`);
+      }
+    });
+  }
 }
 
-module.exports = { run, toAction, parseArgs };
+module.exports = { run, toAction, parseArgs, replaySave };

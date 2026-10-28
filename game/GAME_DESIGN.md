@@ -269,6 +269,18 @@ A save is: `case_id`, `contract_version`, `seed`, ordered **action log**, and de
 player state (confidence, links, rejected set). State is always reconstructible from
 `case + seed + action log`; the derived copy is a cache.
 
+**File format** (`game/runtime/save.js`, `format: "scythe-game-save"`, `version: 1`): `contract_version`,
+`case_id`, `case_hash` (SHA-256 of the canonical case JSON), `seed`, `actions`, an optional `result`
+for finished games (hypothesis, confidence, citations, score, outcome), and a `checksum` over everything
+else. Keys are sorted, so the same game always serialises to the same text. The checksum catches
+corruption and hand edits; it is not tamper-proof, since anyone can recompute it.
+
+Loading checks, in order: readable JSON, right format, version, required fields, checksum, contract
+version, case id, case hash, then replays every action and verifies any recorded result. Each failure has
+its own code (`MALFORMED`, `NOT_A_SAVE`, `UNSUPPORTED_VERSION`, `CORRUPT`, `CONTRACT_MISMATCH`,
+`WRONG_CASE`, `CASE_CHANGED`, `REPLAY_FAILED`, `RESULT_MISMATCH`) and a plain-language message. A save
+made against an edited case is refused rather than replayed against rules it was not played under.
+
 Replay re-executes the action log and must reproduce the final score exactly.
 Saves are versioned and rejected with a clear message on contract mismatch.
 
