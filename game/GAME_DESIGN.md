@@ -1,10 +1,11 @@
 # SCYTHE: GAME — Design Document
 
-**Status:** DRAFT v0.1 — vertical slice scope only
+**Status:** DRAFT v0.2 — vertical slice scope only
 **Milestone:** SCYTHE: GAME — Vertical Slice
 **Related:** `docs/niantic_scythe.md` (evidence/variant data contract inspiration, not an implementation commitment)
 
-Items marked **[OPEN]** are undecided and need an owner before implementation.
+Open questions from v0.1 were resolved in v0.2; see §10 for the decisions and rationale.
+Values marked *initial* are playtest-tunable defaults, not commitments.
 
 ---
 
@@ -75,17 +76,18 @@ tracks this explicitly so double-counted evidence is detectable.
 
 ### 3.3 Player actions
 
-Actions cost **budget** (time-on-case, a fixed integer; **[OPEN]** exact value after playtest).
+Actions cost **budget**: a fixed number of action points (*initial*: 12). Costs are listed below.
+With ~14 evidence items the player cannot inspect everything, so ordering is a real decision.
 
 | Action | Effect |
 |---|---|
-| Inspect | Reveals provenance and limits of one evidence item. |
-| Compare | Reveals agreement/conflict between two items. |
-| Corroborate | Requests independent confirmation; may return nothing. |
-| Re-evaluate under conditions | Re-reads existing evidence under a different environment variant (see §5). |
-| Link / Unlink | Records the player's reading of evidence against a hypothesis. |
-| Reject hypothesis | Removes it; irreversible but revisable by restoring (costs budget). |
-| Commit finding | Ends the investigation. |
+| Inspect (1) | Reveals provenance and limits of one evidence item. |
+| Compare (1) | Reveals agreement/conflict between two items. |
+| Corroborate (2) | Requests independent confirmation; may return nothing. |
+| Re-evaluate under conditions (2) | Re-reads existing evidence under a different environment variant (see §5). |
+| Link / Unlink (free) | Records the player's reading of evidence against a hypothesis. |
+| Reject hypothesis (free) | Removes it; restoring costs 1. |
+| Commit finding (free) | Ends the investigation. Unspent budget is not rewarded beyond the minor efficiency term. |
 
 Tests may return **no match**, and the engine distinguishes *no-match* (inference found
 nothing) from *resolution failure* (couldn't evaluate). This mirrors open issue #214 and is
@@ -109,7 +111,11 @@ Score rewards being right *and* appropriately sure.
   double-counted citations lose points.
 - **Efficiency:** minor weight; must never reward guessing early.
 
-**[OPEN]** Weighting across the four terms; to be tuned in playtests.
+*Initial* weights: correctness 35%, calibration 35%, citation quality 20%, efficiency 10%.
+
+The Brier score is computed internally but shown to the player as a label
+(*well calibrated / overconfident / underconfident*) plus a one-line explanation. The raw
+number appears only in the debrief detail view.
 
 ### 3.6 Win and end states
 
@@ -127,13 +133,13 @@ establish what actually happened.
 **Evidence set (synthetic, fixed).** ~12–16 items across four types:
 SDR observation summaries, timestamp logs, device records, witness reports.
 
-**Competing hypotheses** (final wording **[OPEN]**; structure fixed):
+**Competing hypotheses**:
 
 | ID | Claim | Intended trap |
 |---|---|---|
-| H1 | One mobile transmitter moving along the waterfront | Matches timestamps; fits the loudest clue |
-| H2 | Two fixed transmitters alternating | Fits the device records; contradicted by one witness |
-| H3 | One fixed transmitter whose apparent strength and presence change with atmospheric conditions | Truth; only visible after re-evaluating under variants |
+| H1 | A single mobile transmitter is moving along the waterfront | Matches timestamps; fits the loudest clue |
+| H2 | Two fixed transmitters, one at the harbour and one on the headland, are alternating | Fits the device records; contradicted by one witness |
+| H3 | A single fixed transmitter at the harbour light is audible only when atmospheric conditions allow | Truth; only visible after re-evaluating under variants |
 
 **Designed misleading correlations**
 
@@ -141,9 +147,18 @@ SDR observation summaries, timestamp logs, device records, witness reports.
 - A witness report that is confident but from a source with a known timing bias.
 - Two "independent" captures that share an upstream receiver (double-counted evidence).
 
-**Decision points** (6–10; draft list **[OPEN]**): which items to inspect first, whether to
-spend budget corroborating the ferry correlation, whether to re-evaluate under fog/rain,
-which hypothesis to reject and when, and what confidence to commit at.
+**Decision points** (ten):
+
+1. Triage: which three items to inspect first.
+2. Whether to spend budget corroborating the ferry-schedule correlation.
+3. Whether to compare the two "independent" captures (revealing the shared receiver).
+4. How to weigh the confident witness report against the device records.
+5. Whether to re-evaluate under `fog_morning`.
+6. Whether to re-evaluate under `post_rain_evening`.
+7. Which hypothesis to reject first, and when.
+8. How to read a corroboration that returns no-match versus one that could not be evaluated.
+9. Whether to commit now or spend remaining budget.
+10. What confidence to commit at.
 
 **Debrief.** Shows ground truth, which clues were misleading and why, the player's
 calibration against `p*`, and the single decision that mattered most.
@@ -205,9 +220,10 @@ read-only at runtime.
 - **Isolated game runtime.** Game state and simulated evidence never share a process,
   credentials, or storage with live RF acquisition, production services, or hardware controls.
 - **No heavyweight dependencies for players.** No DuckDB, FusionAuth, SDR hardware, or
-  orchestrator needed to play. **[OPEN]** runtime choice (embedded web view vs. native engine).
-- **Reuse where cheap:** Mission, Evidence, Graph, and Timeline concepts. Cesium only if it
-  can be bundled offline; otherwise a 2D map is acceptable for the slice.
+  orchestrator needed to play. Runtime: Electron (see §10).
+- **Reuse where cheap:** Mission, Evidence, Graph, and Timeline concepts, and the existing JS
+  modules `ImmutableEventLog`, `ReplayEngine`, and `EpistemicConfidenceGraph` (to be evaluated
+  for fit in the runtime issue). The slice uses a 2D map, not Cesium (see §10).
 - **Player-facing Mission Hub** is a separate entrypoint (New Investigation, Continue, Career)
   from the operator dashboard. The operator Hub is unchanged.
 - **Actions go through explicit, validated mutation paths** (cf. #217, #218, #270). The
@@ -260,11 +276,18 @@ Engine issues that affect the game (not blocked on, but relevant): #214, #216, #
 
 ---
 
-## 10. Open questions
+## 10. Decisions
 
-1. Runtime choice: embedded web view or native engine?
-2. Budget model: fixed action count or in-fiction time?
-3. Is the Brier-style scoring legible to non-technical players, or does it need a simpler presentation?
-4. Cesium offline bundling feasibility versus a 2D map.
-5. Does the game track live in this repo under `game/` or in a separate one? (Drafted here under `game/`.)
-6. Licensing and attribution for any adopted third-party scene tooling, once it matters (post-slice).
+| # | Question | Decision | Rationale |
+|---|---|---|---|
+| 1 | Runtime | **Electron** embedded web view | The repo's evidence, replay, and epistemic modules are JavaScript, so they can be reused directly. Node is available here; no Rust toolchain is installed, which rules out Tauri for now. `steamworks.js` supports Electron for the later Steam work. Risk: Steam overlay behaviour under Electron; re-check at the P2 Steamworks issue. |
+| 2 | Budget model | **Fixed action points**, initial 12 | Easier to explain and to test than in-fiction time, and deterministic. Tuned in playtest. |
+| 3 | Scoring presentation | Brier internally, **labels in the UI**, number only in debrief detail | Keeps calibration rigorous without requiring players to understand it. Playtest question 3 tests this. |
+| 4 | Cesium vs 2D map | **2D map** for the slice | A fictional single-city scene needs no globe, and offline Cesium bundling adds risk with no gameplay benefit. Revisit for real-place missions post-slice. |
+| 5 | Repo location | **This repo, `game/`** | Already merged here. Revisit if commercial separation, licensing, or CI isolation requires a split. |
+| 6 | Third-party scene tooling licensing | **Deferred** | Not used in the slice; handle when a reconstruction pipeline is actually adopted. |
+| 7 | Hypothesis wording, decision list | **Fixed in §4** | Structure and trap design unchanged. |
+| 8 | Scoring weights, budget value | **Initial values in §3**, playtest-tunable | Cannot be set responsibly before observing players. |
+
+**Still to verify during implementation** (not blocking #354): whether the existing JS modules
+fit the game's determinism rule (§5.3); target platforms for the desktop prototype (#362).
