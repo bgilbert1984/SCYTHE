@@ -28,7 +28,7 @@ jobs:
           cache-dependency-path: game/desktop/package-lock.json
 
       - name: Repository checks for the game
-        run: node --test game/
+        run: node --test "game/**/*.test.js"
 
       - name: Install (also fetches the Electron binary)
         working-directory: game/desktop
