@@ -20,10 +20,14 @@ const FORBIDDEN_PATTERNS = [
   /localhost|127\.0\.0\.1/, /duckdb|fusionauth|orchestrator/i,
 ];
 
+// Build output and installed dependencies are not source. The desktop shell has its own rules
+// (desktop/desktop.test.js), since it legitimately needs Electron.
+const SKIP_DIRS = new Set(['node_modules', 'out', '.stage', '.stage-profile', 'dist', 'desktop']);
+
 function sourceFiles(dir) {
   return fs.readdirSync(dir, { withFileTypes: true }).flatMap((d) => {
     const p = path.join(dir, d.name);
-    if (d.isDirectory()) return sourceFiles(p);
+    if (d.isDirectory()) return SKIP_DIRS.has(d.name) ? [] : sourceFiles(p);
     return d.name.endsWith('.js') && !d.name.endsWith('.test.js') ? [p] : [];
   });
 }
