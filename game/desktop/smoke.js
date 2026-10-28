@@ -26,6 +26,8 @@ const CHECKS = `(async () => {
   out.budgetBefore = before;
   out.budgetAfter = q('[role=img]').getAttribute('aria-label');
   out.restored = /restored/i.test(q('.msg').textContent);
+  out.bridge = Object.keys(window.scythePlatform || {}).sort().join();
+  out.platform = window.scythePlatform ? await window.scythePlatform.status() : null;
   out.nodeLeaked = [typeof require, typeof process, typeof module].filter((t) => t !== 'undefined');
   try { out.fetchBlocked = await fetch('https://example.com/').then(() => false, () => true); } catch (e) { out.fetchBlocked = true; }
   try { out.xhrBlocked = await new Promise((res) => { const x = new XMLHttpRequest(); x.onerror = () => res(true); x.onload = () => res(false); x.open('GET', 'https://example.com/'); x.send(); }); } catch (e) { out.xhrBlocked = true; }

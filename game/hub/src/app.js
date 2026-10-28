@@ -10,7 +10,7 @@
   const root = document.getElementById('app');
   const state = {
     screen: 'home', game: null, seed: 0, selected: null, message: null, focus: null, commitOpen: false,
-    notice: null, commit: null, imported: false,
+    notice: null, commit: null, imported: false, platformNote: null,
   };
 
   function h(tag, attrs, ...kids) {
@@ -32,8 +32,48 @@
   const pct = (x) => `${Math.round(x * 100)}%`;
   const label = (list, id, field) => (list.find((x) => x.id === id) || {})[field] || id;
 
+  // Present only inside the desktop app (preload.js). Every call is best effort: play never waits on it.
+  const platform = window.scythePlatform || null;
+
+  function notifyPlatform() {
+    if (!platform) return;
+    try {
+      platform.saved(serialize(createSave(state.game, caseData))).then((r) => {
+        if (r && r.unlocked && r.unlocked.length) {
+          state.platformNote = `Achievement${r.unlocked.length > 1 ? 's' : ''} unlocked: ${r.unlocked.map((a) => a.name).join(', ')}.`;
+          render();
+        }
+      }, () => {});
+    } catch (e) { /* the platform is optional */ }
+  }
+
   function persist() {
     store.saveInProgress(state.game, caseData);
+    notifyPlatform();
+  }
+
+  // On start: reconcile this device's save with the storefront's cloud copy.
+  async function syncAtStart() {
+    if (!platform) return;
+    try {
+      const local = store.loadInProgress(caseData);
+      const localText = local.game ? serialize(local.save) : null;
+      const r = await platform.start(localText);
+      let adopt = null;
+      if (r.action === 'pull') adopt = r.text;
+      if (r.action === 'conflict') {
+        const msg = `The cloud save (${r.cloud.actions} actions) differs from the one on this device (${r.local.actions} actions). OK uses the cloud save; Cancel keeps this device's.`;
+        if (window.confirm(msg)) adopt = r.cloudText;
+        else platform.saved(r.localText).catch(() => {});
+      }
+      if (adopt) {
+        const loaded = loadSave(caseData, adopt);
+        if (loaded.error || loaded.game.finished) return;
+        store.saveInProgress(loaded.game, caseData);
+        state.platformNote = 'Restored your investigation from the cloud.';
+        render();
+      }
+    } catch (e) { /* offline or unavailable: keep the local save */ }
   }
 
   function exportSave() {
@@ -113,6 +153,7 @@
     });
     store.clearInProgress();
     state.screen = 'debrief';
+    notifyPlatform();
   }
 
   function newInvestigation() {
@@ -139,7 +180,7 @@
     render();
   }
 
-  function go(screen) { state.screen = screen; state.notice = null; state.focus = null; render(); }
+  function go(screen) { state.platformNote = null; state.screen = screen; state.notice = null; state.focus = null; render(); }
 
   /* ---------- screens ---------- */
 
@@ -147,6 +188,7 @@
     const resumable = store.hasInProgress();
     return h('main', { class: 'home' },
       h('h1', null, caseData.title),
+      state.platformNote && h('div', { class: 'note', role: 'status' }, state.platformNote),
       h('p', { class: 'muted' }, 'An intelligence-analysis game. Weigh the evidence, test your ideas, and commit to a finding.'),
       !store.persistent && h('div', { class: 'banner', role: 'status' }, 'Progress cannot be saved in this browser session. Continue will not be available after you close the page.'),
       state.notice && h('div', { class: 'banner', role: 'alert' }, state.notice.text, ' ',
@@ -335,6 +377,7 @@
           h('button', { 'data-key': 'menu', onclick: () => go('home') }, 'Save and exit to menu'))),
       h('p', { id: 'briefing', tabindex: '-1', 'data-key': 'briefing' }, v.briefing),
       h('div', { class: `msg ${state.message ? state.message.kind : ''}`, role: 'status', 'aria-live': 'polite' }, state.message ? state.message.text : ''),
+      state.platformNote && h('div', { class: 'note', role: 'status' }, state.platformNote),
       h('div', { class: 'grid' }, hypothesisPanel(v), evidenceList(v), h('div', null, detail(v), commitPanel(v))));
   }
 
@@ -357,6 +400,7 @@
         h('div', { class: 'row' },
           h('button', { 'data-key': 'export', onclick: exportSave }, 'Export save file'),
           h('button', { 'data-key': 'home', onclick: () => go('home') }, 'Back to menu'))),
+      state.platformNote && h('div', { class: 'note', role: 'status' }, state.platformNote),
       state.imported && h('div', { class: 'note', role: 'status' }, 'Replay verified: the saved actions reproduce this exact result.'),
       h('section', { class: 'panel', 'aria-labelledby': 'h-out' },
         h('h2', { id: 'h-out', tabindex: '-1', 'data-key': 'debrief' }, sc.outcome_text),
@@ -396,4 +440,5 @@
 
   window.__hub = { state, render };
   render();
+  syncAtStart();
 })();

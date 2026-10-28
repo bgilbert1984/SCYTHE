@@ -58,6 +58,8 @@ runs.forEach((r, i) => {
   expect(p.popupBlocked && p.navigationBlocked, `${n}: popup or navigation not blocked`);
   expect(p.storage, `${n}: localStorage unavailable`);
   // The page's CSP stops these before they reach the request layer, so none should get that far.
+  expect(p.bridge === 'saved,start,status', `${n}: the platform bridge is ${JSON.stringify(p.bridge)}`);
+  expect(p.platform && p.platform.name === 'none' && p.platform.available === false, `${n}: expected no storefront in the smoke run, got ${JSON.stringify(p.platform)}`);
   expect(p.externalRequestsAttempted === 0, `${n}: ${p.externalRequestsAttempted} external requests reached the network layer`);
 });
 if (runs[0].report && runs[1].report) {

@@ -1,7 +1,7 @@
 # Desktop prototype
 
-An Electron shell around the built player Hub. The shipped app contains four files (the Hub page,
-the shell, a smoke check, and a minimal `package.json`): no repository, no `node_modules`, no SCYTHE
+An Electron shell around the built player Hub. The shipped app contains the Hub page, the shell, a smoke check, a small preload bridge, and the engine
+code needed to verify saves: no repository, no `node_modules`, no SCYTHE
 service code, no hardware access. It runs sandboxed with no Node access and refuses every network
 request, popup, navigation, and permission prompt.
 
@@ -48,4 +48,4 @@ Verify the download with `sha256sum -c signal-ghost-linux-x64.tar.gz.sha256`.
   Hosts that disable them (some hardened distributions) will refuse to start it. It does not fall
   back to `--no-sandbox` silently.
 - **Size:** about 274 MB unpacked, 124 MB compressed, almost all Electron itself.
-- **Steam** overlay, achievements, and cloud saves are separate work (#363).
+- **Steam** is integrated but untested against Steam itself; see [STEAM.md](STEAM.md).
