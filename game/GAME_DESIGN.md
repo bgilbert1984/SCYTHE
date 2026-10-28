@@ -113,6 +113,24 @@ Score rewards being right *and* appropriately sure.
 
 *Initial* weights: correctness 35%, calibration 35%, citation quality 20%, efficiency 10%.
 
+**As implemented** (`game/runtime/scoring.js`, all constants *initial*):
+
+- **Calibration** compares the stated confidence `f` to the reference posterior `p*` for the committed
+  hypothesis, not to the single true/false outcome, so a misleading case does not punish a player who
+  reasoned correctly. The gap is `1.5 * (f - p*)` when too sure and `p* - f` when too unsure, and the
+  score is `100 * max(0, 1 - gap^2 / 0.25)`. The raw Brier score against the true outcome is reported
+  in the debrief. "Well calibrated" means within 0.15 of `p*`.
+- **Support.** A finding is *supported* when `p*` for it leads every rival by at least 0.05. A tie
+  between hypotheses supports nothing, so a guess after reading one neutral item is Unsupported.
+- **Citations.** Each cited item is classed as *supports* (favours the claim by at least 1.5x over the
+  rivals' average likelihood), *against*, *not diagnostic*, or *double counted* (a summary of evidence
+  also cited). Three supporting citations give full credit; each other citation costs 0.2.
+- **Efficiency** is `remaining budget / budget * p*`, and zero unless the finding is supported.
+- **Outcome labels:** Unsupported if not supported; else Sound but wrong if wrong; else Correct but
+  overconfident if over the calibration tolerance; else Sound and correct.
+- **Corroboration kinds.** `result` informs. `no_match` informs only if the case authors weak
+  likelihoods for it. `unresolved` (the check could not be made) never informs (cf. #214).
+
 The Brier score is computed internally but shown to the player as a label
 (*well calibrated / overconfident / underconfident*) plus a one-line explanation. The raw
 number appears only in the debrief detail view.

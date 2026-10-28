@@ -12,6 +12,7 @@
 
 const { draw } = require('./rng');
 const { referencePosterior } = require('../cases/lib/posterior');
+const { scoreFinding } = require('./scoring');
 
 const COSTS = {
   inspect: 1,
@@ -253,13 +254,22 @@ class Game {
       if (!this._inspected.has(id)) reject('UNINSPECTED_CITATION', `Cannot cite ${id}: it has not been inspected.`);
     }
     const unique = [...new Set(citations)].sort();
-    const posterior = referencePosterior(this._case, this._posteriorState());
+    const state = this._posteriorState();
+    const posterior = referencePosterior(this._case, state);
+    const score = scoreFinding(
+      this._case,
+      { hypothesis: h.id, confidence, citations: unique, budgetRemaining: this._budget },
+      state,
+      posterior,
+    );
     this._outcome = {
       committed_hypothesis: h.id,
       stated_confidence: confidence,
       citations: unique,
       is_correct: Boolean(h.is_truth),
       reference_posterior: posterior,
+      player_confidence: { ...this._confidence },
+      score,
       budget_remaining: this._budget,
       debrief: this._case.debrief,
     };

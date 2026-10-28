@@ -38,7 +38,9 @@ function effectiveLikelihood(e, state) {
   const idx = (state.corroborated || {})[e.id];
   if (idx !== undefined && e.corroboration) {
     const o = e.corroboration.outcomes[idx];
-    if (o && o.kind === 'result') return o.likelihood;
+    // A result always informs. A no-match informs only if authored as weak evidence;
+    // an unresolved outcome (the check could not be made) never does (cf. #214).
+    if (o && (o.kind === 'result' || (o.kind === 'no_match' && o.likelihood))) return o.likelihood;
   }
   return e.likelihood;
 }
@@ -56,4 +58,4 @@ function referencePosterior(c, state) {
   return post;
 }
 
-module.exports = { referencePosterior, countedEvidence };
+module.exports = { referencePosterior, countedEvidence, effectiveLikelihood };

@@ -92,6 +92,8 @@ function validateCase(c) {
         if (!OUTCOME_KINDS.includes(o.kind)) err(`${w}: bad outcome kind ${o.kind}`);
         if (!o.note) err(`${w}: outcome missing note`);
         if (o.kind === 'result') checkLikelihood(`${w} outcome`, o.likelihood);
+        if (o.kind === 'no_match' && o.likelihood) checkLikelihood(`${w} outcome`, o.likelihood);
+        if (o.kind === 'unresolved' && o.likelihood) err(`${w}: an unresolved outcome must not carry a likelihood`);
       }
     }
   }
