@@ -332,6 +332,9 @@ Engine issues that affect the game (not blocked on, but relevant): #214, #216, #
 | 6 | Third-party scene tooling licensing | **Deferred** | Not used in the slice; handle when a reconstruction pipeline is actually adopted. |
 | 7 | Hypothesis wording, decision list | **Fixed in §4** | Structure and trap design unchanged. |
 | 8 | Scoring weights, budget value | **Initial values in §3**, playtest-tunable | Cannot be set responsibly before observing players. |
+| 9 | Steam integration shape | **Provider behind a storefront-agnostic service** (`platform/`), Steam adapter in `desktop/steam.js` | Achievements and cloud saves are derived from a save that is replayed and verified first, so the page cannot award itself anything. Without Steam the game is unchanged. |
+| 10 | Cloud saves | **Only the investigation in progress**; compared by action log, conflicts go to the player | A save is case + seed + actions, so one history is either a prefix of the other or they diverged. Divergence is never merged or overwritten silently. Finished games leave the cloud slot; career history stays local for now. |
+| 11 | Achievements | **Eight, all derived from play** (`platform/achievements.js`) | Each is checkable from the replayed game. None needs cross-game statistics, so none needs a Steam stats API. |
 
 **Still to verify during implementation** (not blocking #354): whether the existing JS modules
 fit the game's determinism rule (§5.3); target platforms for the desktop prototype (#362).

@@ -4,6 +4,7 @@
  *
  *   node scripts/package.js linux     -> out/signal-ghost-linux-x64/ and .tar.gz
  *   node scripts/package.js win32     -> out/signal-ghost-win32-x64/
+ *   ... --steam --app-id N            -> the same, with steamworks.js bundled and Steam features on for app N
  *
  * Needs Node >= 22.12 (Electron's installer and @electron/packager require it).
  */
@@ -18,6 +19,18 @@ const ROOT = path.resolve(__dirname, '..');
 const OUT = path.join(ROOT, 'out');
 const PLATFORMS = ['linux', 'win32'];
 
+const optionValue = (flag) => {
+  const i = process.argv.indexOf(flag);
+  return i > 0 ? process.argv[i + 1] : undefined;
+};
+
+/** Bundle steamworks.js into the staged app and point the shell at the Steam app id. */
+function addSteam(appDir, appId) {
+  const r = spawnSync('npm', ['install', '--omit=dev', '--ignore-scripts', '--no-audit', '--no-fund', 'steamworks.js@0.4.0'], { cwd: appDir, stdio: 'inherit' });
+  if (r.status !== 0) process.exit(r.status || 1);
+  fs.writeFileSync(path.join(appDir, 'steam.config.json'), `${JSON.stringify({ appId })}\n`);
+}
+
 async function main() {
   const platform = process.argv[2];
   if (!PLATFORMS.includes(platform)) {
@@ -29,10 +42,17 @@ async function main() {
     process.stderr.write(`Node >= 22.12 is required (this is ${process.versions.node}).\n`);
     process.exit(2);
   }
+  const withSteam = process.argv.includes('--steam');
+  const appId = Number(optionValue('--app-id') || 0);
+  if (withSteam && !(Number.isInteger(appId) && appId > 0)) {
+    process.stderr.write('--steam needs --app-id <Steam app id> (480 is Valve\'s public test app).\n');
+    process.exit(2);
+  }
   const { packager } = require('@electron/packager');
   const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
 
   const appDir = stage();
+  if (withSteam) addSteam(appDir, appId);
   const [dir] = await packager({
     dir: appDir,
     out: OUT,
@@ -41,7 +61,8 @@ async function main() {
     platform,
     arch: 'x64',
     appVersion: pkg.version,
-    asar: true,
+    // Native Steam libraries cannot be loaded from inside an asar archive.
+    asar: withSteam ? { unpack: '**/steamworks.js/dist/**' } : true,
     overwrite: true,
     prune: false,
     quiet: true,

@@ -12,6 +12,8 @@ const read = (f) => fs.readFileSync(path.join(ROOT, f), 'utf8');
 const pkg = JSON.parse(read('package.json'));
 const main = read('main.js');
 const smoke = read('smoke.js');
+const preload = read('preload.js');
+const steamSrc = read('steam.js');
 
 const requires = (src) => [...src.matchAll(/require\(\s*['"]([^'"]+)['"]\s*\)/g)].map((m) => m[1]);
 
@@ -36,7 +38,7 @@ test('the shell only loads the built Hub, sandboxed, with no Node access', () =>
   assert.match(main, /webSecurity:\s*true/);
   assert.ok(!/nodeIntegration:\s*true|sandbox:\s*false|contextIsolation:\s*false|webSecurity:\s*false/.test(main));
   assert.ok(!/--no-sandbox|no-sandbox/.test(main + smoke), 'the sandbox must stay on');
-  assert.ok(!/preload/.test(main), 'the page needs no preload bridge');
+  assert.match(main, /preload:\s*path\.join\(__dirname, 'preload\.js'\)/);
 });
 
 test('the shell refuses network, popups, navigation, and permissions', () => {
@@ -49,22 +51,49 @@ test('the shell refuses network, popups, navigation, and permissions', () => {
 });
 
 test('the shell requires only electron and small builtins, and uses no network or process APIs', () => {
-  assert.deepStrictEqual(requires(main).sort(), ['./smoke', 'electron', 'path', 'url']);
+  assert.deepStrictEqual(requires(main).sort(), ['./smoke', './steam', './steam.config.json', 'electron', 'fs', 'path', 'url']);
   assert.deepStrictEqual(requires(smoke), ['electron']);
-  for (const src of [main, smoke]) {
+  assert.deepStrictEqual(requires(preload), ['electron']);
+  assert.deepStrictEqual(requires(steamSrc), ['steamworks.js'], 'Steam is the only optional native dependency');
+  for (const src of [main, smoke, preload, steamSrc]) {
     assert.ok(!/child_process|\bnet\b|https?:\/\/(?!example\.com)/.test(src.replace(/\/\*[\s\S]*?\*\//g, '')), 'no network or process modules');
   }
 });
 
-test('the only environment variable the shell reads is the smoke-test switch', () => {
-  const vars = [...(main + smoke).matchAll(/process\.env\.(\w+)/g)].map((m) => m[1]);
-  assert.deepStrictEqual([...new Set(vars)], ['SIGNAL_GHOST_SMOKE']);
+test('the only environment variables the shell reads are the smoke switch and the Steam app id', () => {
+  const vars = [...(main + smoke + preload + steamSrc).matchAll(/process\.env\.(\w+)/g)].map((m) => m[1]);
+  assert.deepStrictEqual([...new Set(vars)].sort(), ['SIGNAL_GHOST_SMOKE', 'SIGNAL_GHOST_STEAM_APPID']);
+});
+
+test('the page-to-main bridge is three data-only calls and exposes nothing else', () => {
+  const exposed = [...preload.matchAll(/^\s+(\w+): \(/gm)].map((m) => m[1]);
+  assert.deepStrictEqual(exposed, ['status', 'saved', 'start']);
+  assert.strictEqual((preload.match(/exposeInMainWorld/g) || []).length, 1);
+  assert.ok([...preload.matchAll(/ipcRenderer(.?)/g)].slice(1).every((m) => m[1] === '.'), 'ipcRenderer is only ever called, never exposed');
+  assert.ok(!/ipcRenderer\.(on|send|once)/.test(preload), 'the page cannot subscribe to or send raw messages');
+});
+
+test('every IPC handler refuses callers other than the game page', () => {
+  const handlers = [...main.matchAll(/ipcMain\.handle\('([^']+)', (\w+)\(/g)];
+  assert.deepStrictEqual(handlers.map((m) => m[1]), ['platform:status', 'platform:saved', 'platform:start']);
+  assert.ok(handlers.every((m) => m[2] === 'only'), 'each handler is wrapped in the sender check');
+  assert.match(main, /e\.senderFrame\.url !== PAGE_URL/);
+});
+
+test('Steam features are off by default and ship no app id', () => {
+  assert.deepStrictEqual(JSON.parse(read('steam.config.json')), { appId: 0 });
 });
 
 test('staging produces exactly the files that ship, and nothing from the repo', () => {
   const { stage } = require('./scripts/stage');
   const dir = stage();
-  assert.deepStrictEqual(fs.readdirSync(dir).sort(), ['index.html', 'main.js', 'package.json', 'smoke.js']);
+  assert.deepStrictEqual(fs.readdirSync(dir).sort(), ['game', 'index.html', 'main.js', 'package.json', 'preload.js', 'smoke.js', 'steam.config.json', 'steam.js']);
+  const shipped = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? shipped(path.join(d, e.name)) : [path.join(d, e.name)]));
+  const files = shipped(path.join(dir, 'game')).map((f) => path.relative(dir, f));
+  assert.ok(files.every((f) => !f.endsWith('.test.js') && !f.endsWith('cli.js')), 'no tests or CLI ship');
+  for (const f of ['game/runtime/engine.js', 'game/runtime/save.js', 'game/platform/service.js', 'game/cases/signal_ghost/case.json']) {
+    assert.ok(files.includes(f), f);
+  }
   const staged = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8'));
   assert.strictEqual(staged.main, 'main.js');
   assert.strictEqual(staged.devDependencies, undefined);
@@ -106,4 +135,22 @@ test('install script runs against a fake build and cleans up after itself', () =
   assert.ok(!fs.existsSync(launcher));
   assert.strictEqual(sh('--bogus').status, 2);
   fs.rmSync(tmp, { recursive: true });
+});
+
+test('Steam depot files are generated from validated ids and never invent an app id', () => {
+  const { vdf } = require('./scripts/steam-build');
+  const r = vdf({ appId: 480, depots: { linux: 481, win32: 482 }, contentBase: '/b', description: 'say "hi"' });
+  assert.deepStrictEqual(Object.keys(r.files).sort(), ['app_build.vdf', 'depot_build_481.vdf', 'depot_build_482.vdf']);
+  assert.match(r.files['app_build.vdf'], /"AppID" "480"/);
+  assert.match(r.files['app_build.vdf'], /"Desc" "say \\"hi\\""/);
+  assert.match(r.files['depot_build_481.vdf'], /"ContentRoot" "\/b\/signal-ghost-linux-x64"/);
+  for (const bad of [{ appId: 0 }, { appId: 'x' }, { appId: 480, depots: {} }, { appId: 480, depots: { linux: 0 } }, { appId: 480, depots: { linux: 5, win32: 5 } }]) {
+    assert.ok(vdf({ depots: { linux: 1 }, contentBase: '/b', description: '', ...bad }).error, JSON.stringify(bad));
+  }
+});
+
+test('a Steam build needs an explicit app id, and the plain build ships without steamworks', () => {
+  assert.match(read('scripts/package.js'), /--steam needs --app-id/);
+  assert.match(read('scripts/package.js'), /unpack: '\*\*\/steamworks\.js\/dist\/\*\*'/);
+  assert.ok(!('steamworks.js' in { ...pkg.dependencies, ...pkg.devDependencies }), 'steamworks.js is added only for --steam builds');
 });
