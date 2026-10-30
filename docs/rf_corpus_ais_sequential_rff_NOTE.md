@@ -76,8 +76,8 @@ parameters, no regularization).
   statement; MMSIs in their data are anonymized. The only license shown is the
   CC BY 4.0 badge on the paper page (the paper, not data). Nothing to put
   through the corpus intake gate.
-- Other references: [12], [17], [33], [34] read in full; [3] known from its
-  abstract record only; [2] and [4] unread (see the sections below).
+- Other references: [4], [12], [17], [33], [34] read in full; [3] known from
+  its abstract record only; [2] unread (see the sections below).
 - Last ~29.6k characters of the v1 page were read; no figures or the PDF were
   inspected.
 
@@ -182,7 +182,7 @@ arXiv 2509.22154 (2025), 9 pages.
   legitimate receiver.
 - **Release:** no code or data link found in the text.
 
-### [3], [2], [4]
+### [3] and [2] (not read in full)
 
 - **[3]** Li et al., Ocean Engineering 366:127784 (2026), doi
   10.1016/j.oceaneng.2026.127784. Known from the TRID abstract record only:
@@ -191,17 +191,48 @@ arXiv 2509.22154 (2025), 9 pages.
   "USRP-10". Code: github.com/xmuLdz/FedAMN holds trainers only; GitHub
   reports no license and no dataset is included; no data links in the record;
   (c) Elsevier. No usable AIS corpus.
-- **[2]** Deng et al., IEEE TIFS 18:2303–2317 (2023): no arXiv version found;
-  unread.
-- **[4]** Chen, Li, Sun, Frontiers in Marine Science 13 (2026): search found
-  nothing; unread.
+- **[2]** Deng et al., IEEE TIFS 18:2303–2317 (2023): no arXiv or open version
+  found, paywalled; unread. Secondhand (a 2026 paper, unverified): GLFormer, a
+  lightweight transformer, 96.3% (transient) / 89.4% (steady-state) over 50
+  vessels at a Xiamen wharf. AIS paper v1 says it has no public code.
+
+### [4] Chen, Li, Sun — vessel identity verification from AIS physical features
+
+Frontiers in Marine Science 13 (2026), doi 10.3389/fmars.2026.1858626; open
+access (CC BY); read in full from the PDF.
+
+- **Method:** AIS baseband IQ segments, feature fusion, metric-constrained
+  embedding (center loss + consistency constraint); hybrid open-set rule =
+  distance to class centers + softmax confidence gating; no unknown-class
+  training samples.
+- **Data:** about 6 h from one RTL-SDR and one antenna setup near Yangshan
+  Port, Shanghai; 20-minute sessions; 21 MMSI classes; 8:1:1 stratified split.
+  Independent hold-out collected later: 12 vessels (10 known, 2 unknown),
+  used only for final cross-acquisition evaluation.
+- **Results:** closed-set accuracy 0.9747; abstract: rejection of unknown
+  vessels above 90%. Open-set (Table 10): softmax-threshold AUROC 0.8549 /
+  FPR@95TPR 0.7218; distance-threshold 0.9022 / 0.4516; hybrid **0.9434 /
+  0.2298**, TPR@FPR 5% = 0.7213. Ablations: without center loss AUROC 0.8351;
+  without consistency 0.9030. Under cross-acquisition shift the main loss is
+  conservative rejection of known vessels, not confusion among known classes.
+- **Authors' limits:** future work on real sea areas, larger MMSI/device sets,
+  domain adaptation, uncertainty calibration; threshold reliability and
+  feature stability under channel/device-state change dominate open-set
+  performance.
+- **Release:** "The raw data… will be made available by the authors, without
+  undue reservation": on request, no URL, no license. Fails the intake gate.
+- **vs 2610.19115:** same task at much smaller scale (6 h / 21 classes vs 13
+  days / 67 vessels); a single later hold-out, not a ≥10-day window; no
+  insider-spoof test. Its 0.9434 AUROC is unknown-vessel rejection only.
 
 ### Takeaways
 
+- [4] is a second independent study supporting physical-feature AIS identity
+  verification, but its numbers are not comparable to the sequential paper's.
 - The AIS paper's insider test uses a real enrolled transmitter, so its 0.991
   does not cover a synthesized or replayed fingerprint. [33] (real hardware,
   high success) and [34] (simulation only) show that attacker class is
   feasible; record it as an untested threat in any deployment plan.
 - [33] points to phase-derivative features as a more robust choice; [33]'s BLE
   data is the only potential corpus here and is unverified.
-- None of [2]–[4] provides a usable AIS IQ corpus.
+- None of [2]–[4] provides a usable AIS IQ corpus ([4] data on request only).
