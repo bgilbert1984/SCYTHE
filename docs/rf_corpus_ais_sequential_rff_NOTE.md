@@ -82,30 +82,68 @@ parameters, no regularization).
 - Last ~29.6k characters of the v1 page were read; no figures or the PDF were
   inspected.
 
-## References [12] and [17] (looked up 2026-10-30; search summaries only)
+## References [12] and [17] (read in full 2026-10-30)
 
-Titles, authors and venues match the v1 bibliography. Papers not read in full;
-datasets, licenses and data releases not checked, so neither is an intake
-candidate.
+Full text read from the arXiv PDFs (2005.00954, 2305.05285); titles, authors
+and venues match the v1 bibliography. Neither is an intake candidate.
 
-- **[12]** Hanna, Karunaratne, Cabric, "Open set wireless transmitter
-  authorization: Deep learning approaches and dataset considerations," IEEE
-  TCCN 7(1):59–72, 2021 (venue per the v1 bibliography; not confirmed by the
-  search). arXiv 2005.00954; earlier SPAWC 2020 version arXiv 2002.07777.
-  Adapts open-set recognition and anomaly detection to reject unseen
-  transmitters and studies scaling with the number of authorized devices. WiFi
-  testbed, 10 authorized + 50 known unauthorized: outlier detection 98%
-  same-day, 80% different-day. Data augmentation helps most when the
-  authorized set is small. Same group as WiSig.
-- **[17]** AlHazbi, Sciancalepore, Oligeri, "The Day-After-Tomorrow: On the
-  Performance of Radio Fingerprinting over Time," ACSAC 2023, pp. 439–450,
-  doi 10.1145/3627106.3627192; arXiv 2305.05285. Names the DAT effect:
-  accuracy falls when training and test days differ. Attributes it mainly to
-  channel variability and partly to the radio itself (the drop persists across
-  a power cycle, including over a wired link). Follow-up, Irfan et al., arXiv
-  2408.09179: fingerprints also change when a new FPGA image is loaded.
-- **Takeaways:** a single-day split cannot show the DAT effect (consistent
-  with the WiSig SingleDay intake limit); the fingerprint schema should record
-  power-cycle and firmware state, not only capture date.
-- Last ~29.6k characters of the v1 page were read; no figures or the PDF were
-  inspected.
+### [12] Hanna, Karunaratne, Cabric — open-set transmitter authorization
+
+IEEE TCCN 7(1):59–72, 2021 (venue per the v1 bibliography); arXiv 2005.00954;
+earlier SPAWC 2020 version arXiv 2002.07777.
+
+- **Data:** WiFi preambles from the ORBIT testbed grid; 163 Atheros
+  5212/9220/9280 transmitters; one USRP N210 receiver; channel 11 (2462 MHz),
+  25 Msps, 1 s captures, >300,000 packets; first 256 IQ samples, unit
+  average magnitude. Five captures on five days; the first was two months
+  earlier with fewer transmitters; the last day is held out for testing.
+- **Methods:** OvA, OpMx, DClass (open-set); Disc, AutoEnc (anomaly detection).
+- **Headline:** 98% same-day / 80% different-day outlier-detection accuracy is
+  for **OvA** with 10 authorized + 50 known unauthorized transmitters, not a
+  generic result.
+- **Day shift:** about 15% drop in AUC/accuracy for all methods; OvA/OpMx lose
+  about 15% accuracy, AutoEnc about 5%. The drop comes from authorized
+  signals being rejected, not missed outliers. Mitigation offered: collect
+  authorized-transmitter data over several days; the paper says further
+  approaches are needed to close the gap.
+- **Split discipline:** transmitters randomly partitioned into authorized /
+  known-unauthorized / unseen sets (10 realizations, same for all methods);
+  70% of authorized + all known-unauthorized for train/val (80/20), remaining
+  30% of authorized + unseen for the same-day test; the different-day test
+  uses the held-out last day only (a true day-level holdout).
+- **Release:** no code link, license, or data statement found in the text.
+
+### [17] AlHazbi, Sciancalepore, Oligeri — Day-After-Tomorrow
+
+ACSAC 2023, pp. 439–450, doi 10.1145/3627106.3627192; arXiv 2305.05285.
+
+- **Setup:** USRP X310 radios, ResNet50, BPSK, six transmitters, fixed
+  receiver. DS1: wired, power-cycled between measurements (78 measurements,
+  13 runs, 3 days). DS2: wired, six non-stop 3-day measurements (18 days, 0.256
+  Msps), no power cycling. DS3: wireless, 900 MHz, 10 m non-line-of-sight
+  indoors with people moving (72 measurements, 4 days, three runs per day,
+  power-cycled between measurements).
+- **Findings:** power cycling the radios between training and testing cuts
+  accuracy to about 0.5 (DS1 wired: 0.3–0.6, variance about 0.3); without power
+  cycling it is about 1 in the controlled case. So the effect is not only
+  channel variability.
+- **Mitigation:** converting IQ samples to images before classification takes
+  wireless accuracy from about 0.45 to 0.85 and roughly halves variance.
+- **Limitations (authors):** only USRP X310 tested; cites other work seeing
+  the same effect on N210, B210 and LoRa. The image-based approach shares the
+  known weakness to an attacker injecting a small number of samples (exact
+  bound garbled in the text extraction; check the PDF before quoting it).
+- **Release:** "available on request" by email to the authors; no license.
+  Informal permission only, so it fails the intake gate (same as NetSTAR).
+
+### Takeaways for SCYTHE
+
+- Record **receiver and transmitter power-cycle and firmware state** per
+  capture, not only the date; [17] shows power cycling is a primary driver of
+  cross-day collapse, alongside the channel.
+- WiSig spans several days; whether radios were power-cycled between its
+  captures is unknown, so do not read its cross-day drop as pure channel effect.
+- [12]'s day-level holdout is the model for leakage checks; a packet-level
+  split (or separating the paired equalized copies in WiSig SingleDay) leaks.
+- Both support the AIS paper's point that same-session accuracy overstates
+  deployed performance.
