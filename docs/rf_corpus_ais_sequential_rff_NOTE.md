@@ -76,9 +76,8 @@ parameters, no regularization).
   statement; MMSIs in their data are anonymized. The only license shown is the
   CC BY 4.0 badge on the paper page (the paper, not data). Nothing to put
   through the corpus intake gate.
-- Worth reading next (references as listed in v1): AIS-specific [2]–[4];
-  impersonation [33], [34] (contents unverified). [12] and [17] are looked up
-  below.
+- Other references: [12], [17], [33], [34] read in full; [3] known from its
+  abstract record only; [2] and [4] unread (see the sections below).
 - Last ~29.6k characters of the v1 page were read; no figures or the PDF were
   inspected.
 
@@ -147,3 +146,62 @@ ACSAC 2023, pp. 439–450, doi 10.1145/3627106.3627192; arXiv 2305.05285.
   split (or separating the paired equalized copies in WiSig SingleDay) leaks.
 - Both support the AIS paper's point that same-session accuracy overstates
   deployed performance.
+
+## References [33], [34] (read in full) and [2]–[4] (2026-10-30)
+
+### [33] Albousayri & Hamdaoui — "Replicating the Signature"
+
+arXiv 2607.05549 (2026), 10 pages.
+
+- **Attack:** synthesizes signals replicating a target device's hardware
+  impairments, sent from a different transceiver, via unsupervised impairment
+  estimation plus signal-processing-based generation; payload is controllable.
+  Three access models (full, partial, none); needs no knowledge of the victim
+  classifier.
+- **Results:** BLE testbed, USRP B210 receivers, over the air (LoS and NLoS).
+  Targeted attack success above 97% across all three access models; the paper
+  claims over 80% better than baselines. At 31 enrolled devices the minimum
+  success falls to 39.6–50.3% (still easy for untargeted impersonation).
+- **Defense lead:** phase-derivative features were the most robust against
+  this attack; recurrent networks were most sensitive to low SNR.
+- **Release:** states BLE datasets (31 IoT devices, varied environments,
+  receivers, channels) are "made publicly available"; no URL or license in the
+  text, so unverified. Would need the license-first intake gate.
+
+### [34] Xu, Li, Peng, Hu — "Collusion-Driven Impersonation Attack"
+
+arXiv 2509.22154 (2025), 9 pages.
+
+- **Attack:** attacker synchronizes with a colluding receiver to match the
+  legitimate transmitter's centralized log power spectrum (CLPS); a VAE-based
+  generator with a multi-objective loss produces the spoofed signals.
+- **Results:** over 95% success across channel conditions (SNR, K-factor), in
+  **simulation only**: 10 simulated devices distinguished by I/Q imbalance,
+  55,000 train + 5,500 test samples. No over-the-air evidence.
+- **Future work (authors):** adversarial training and active defenses at the
+  legitimate receiver.
+- **Release:** no code or data link found in the text.
+
+### [3], [2], [4]
+
+- **[3]** Li et al., Ocean Engineering 366:127784 (2026), doi
+  10.1016/j.oceaneng.2026.127784. Known from the TRID abstract record only:
+  FedAMN, federated learning for AIS transmitter identification without
+  sharing raw IQ; 99.75% on "AIS-10" (15 samples/class, 10 clients), 99.89% on
+  "USRP-10". Code: github.com/xmuLdz/FedAMN holds trainers only; GitHub
+  reports no license and no dataset is included; no data links in the record;
+  (c) Elsevier. No usable AIS corpus.
+- **[2]** Deng et al., IEEE TIFS 18:2303–2317 (2023): no arXiv version found;
+  unread.
+- **[4]** Chen, Li, Sun, Frontiers in Marine Science 13 (2026): search found
+  nothing; unread.
+
+### Takeaways
+
+- The AIS paper's insider test uses a real enrolled transmitter, so its 0.991
+  does not cover a synthesized or replayed fingerprint. [33] (real hardware,
+  high success) and [34] (simulation only) show that attacker class is
+  feasible; record it as an untested threat in any deployment plan.
+- [33] points to phase-derivative features as a more robust choice; [33]'s BLE
+  data is the only potential corpus here and is unverified.
+- None of [2]–[4] provides a usable AIS IQ corpus.
