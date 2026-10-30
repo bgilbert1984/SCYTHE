@@ -76,9 +76,36 @@ parameters, no regularization).
   statement; MMSIs in their data are anonymized. The only license shown is the
   CC BY 4.0 badge on the paper page (the paper, not data). Nothing to put
   through the corpus intake gate.
-- Worth reading next (references as listed in v1, contents unverified): Hanna
-  et al. [12] (dataset considerations for open-set authorization), Alhazbi
-  et al. [17] (fingerprint performance over time); AIS-specific [2]–[4];
-  impersonation [33], [34].
+- Worth reading next (references as listed in v1): AIS-specific [2]–[4];
+  impersonation [33], [34] (contents unverified). [12] and [17] are looked up
+  below.
+- Last ~29.6k characters of the v1 page were read; no figures or the PDF were
+  inspected.
+
+## References [12] and [17] (looked up 2026-10-30; search summaries only)
+
+Titles, authors and venues match the v1 bibliography. Papers not read in full;
+datasets, licenses and data releases not checked, so neither is an intake
+candidate.
+
+- **[12]** Hanna, Karunaratne, Cabric, "Open set wireless transmitter
+  authorization: Deep learning approaches and dataset considerations," IEEE
+  TCCN 7(1):59–72, 2021 (venue per the v1 bibliography; not confirmed by the
+  search). arXiv 2005.00954; earlier SPAWC 2020 version arXiv 2002.07777.
+  Adapts open-set recognition and anomaly detection to reject unseen
+  transmitters and studies scaling with the number of authorized devices. WiFi
+  testbed, 10 authorized + 50 known unauthorized: outlier detection 98%
+  same-day, 80% different-day. Data augmentation helps most when the
+  authorized set is small. Same group as WiSig.
+- **[17]** AlHazbi, Sciancalepore, Oligeri, "The Day-After-Tomorrow: On the
+  Performance of Radio Fingerprinting over Time," ACSAC 2023, pp. 439–450,
+  doi 10.1145/3627106.3627192; arXiv 2305.05285. Names the DAT effect:
+  accuracy falls when training and test days differ. Attributes it mainly to
+  channel variability and partly to the radio itself (the drop persists across
+  a power cycle, including over a wired link). Follow-up, Irfan et al., arXiv
+  2408.09179: fingerprints also change when a new FPGA image is loaded.
+- **Takeaways:** a single-day split cannot show the DAT effect (consistent
+  with the WiSig SingleDay intake limit); the fingerprint schema should record
+  power-cycle and firmware state, not only capture date.
 - Last ~29.6k characters of the v1 page were read; no figures or the PDF were
   inspected.
