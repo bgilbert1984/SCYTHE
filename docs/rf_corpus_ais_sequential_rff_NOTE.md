@@ -130,8 +130,12 @@ ACSAC 2023, pp. 439–450, doi 10.1145/3627106.3627192; arXiv 2305.05285.
   wireless accuracy from about 0.45 to 0.85 and roughly halves variance.
 - **Limitations (authors):** only USRP X310 tested; cites other work seeing
   the same effect on N210, B210 and LoRa. The image-based approach shares the
-  known weakness to an attacker injecting a small number of samples (exact
-  bound garbled in the text extraction; check the PDF before quoting it).
+  known weakness to an attacker injecting samples: citing [24] (PAST-AI),
+  they say an attacker can defeat RF fingerprinting (raw IQ or images) by
+  injecting fewer than N/2 samples, N being the IQ samples used to build an
+  image; with N = 100,000 that is about 50,000 samples (verified from the
+  rendered PDF, p. 11). They treat this as orthogonal to their findings and
+  do not close it.
 - **Release:** "available on request" by email to the authors; no license.
   Informal permission only, so it fails the intake gate (same as NetSTAR).
 
