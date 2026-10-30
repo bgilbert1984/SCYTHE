@@ -25,3 +25,22 @@ metrics 1 and 2.
 
 Negative control: alirezaaminzadeh/radioml-2018-samples is synthetic, so the battery should report
 "no receiver chain" or recover its documented synthesis artifacts. Either validates the definitions.
+
+## Proposed addition: out-of-band shape and spurs (metric 10, not yet in v1)
+
+Source: Scholl, arXiv:2610.15494 (RTTY generators separated by DSP residue; CC BY-NC-ND, cite only).
+There, a 3 kHz observation reached ~90% (fusion, >= 30 dB SNR) and a 400 Hz matched passband fell to
+~70% with no fusion gain. The signature sits substantially out of band, so a matched-bandwidth
+capture cannot see it.
+
+| # | Metric | Measures | State |
+|---|---|---|---|
+| 10 | Out-of-band shape and spurs | filter skirt shape, discrete spurious lines, transition overshoot/ringing outside the signal passband | to define |
+
+- Capture type: signal-bearing, with excess bandwidth beyond the occupied signal.
+- "Not measurable" is the expected result for any corpus captured at matched bandwidth. Record it as
+  such; it does not mean "absent".
+- Report the observation bandwidth next to the result, since the metric depends on it.
+- Adding it makes the freeze a ten-metric freeze. Agree that before corpus #2 runs.
+- Receiver and transmitter contributions both land here. See the transmit-side dimension in
+  `trust_dimensions.md`; metric 9 must not absorb them.
