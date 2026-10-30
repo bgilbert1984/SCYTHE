@@ -18,6 +18,7 @@ interface to a guess.
 |---|---|
 | [`trust_dimensions.md`](trust_dimensions.md) | what a trust report says, and why it is not one number |
 | [`fingerprint_schema.md`](fingerprint_schema.md) | the nine v1 metrics, a proposed tenth, and the freeze rule |
+| [`corpus_provenance_notes.md`](corpus_provenance_notes.md) | sourced notes on RadioML-family corpus quality, with how far each was checked |
 | [`quarantine_policy.md`](quarantine_policy.md) | EXTERNAL / INADMISSIBLE, and what that forbids |
 | [`detector_interface.md`](detector_interface.md) | what a detector must expose to be benchmarked |
 
