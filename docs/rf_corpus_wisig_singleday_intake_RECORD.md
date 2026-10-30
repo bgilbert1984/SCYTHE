@@ -91,9 +91,12 @@ only (`wisig_leakage.py`, `wisig_leakage2.py`; not in the repo).
   explains the index-matched test: correlation of a CFO proxy averages 0.036
   (shuffled ≈ 0), 29 of 280 pairs |corr| > 0.3 (e.g. `14-10`→`20-1` at
   −0.829). Net: the copies share source packets even where indices differ, so
-  keep both copies of a pair on the same side of any split. How the subset
-  scripts pick the 800 signals per pair (random or first-N) is not stated in
-  the paper and not checked in `wisig-subset-creation`.
+  keep both copies of a pair on the same side of any split. Empirical status:
+  a shift-search of the CFO proxy (±60, then ±500 packets) found no consistent
+  index relationship between the two copies (best-shift correlation mean
+  0.15 / 0.23; the strong hits sit at scattered shifts, as expected from
+  maximizing over many shifts), so the shared-packet claim rests on the paper
+  alone; the proxy may not survive equalization.
 - **Temporal structure:** packet order carries slow drift. Lag-1
   autocorrelation over packet index averages 0.38 for the CFO proxy (max 0.96)
   and 0.105 for log-power (max 0.82). Cause (paper §III): each capture is
@@ -128,6 +131,29 @@ unequalized copies of a pair on the same side; treat a TX and an RX sharing an
 ID (`14-7`) as one site, not as independent groups; a receiver-disjoint split
 still shares transmission events.
 
+## Subset construction (`wisig-subset-creation`, code read 2026-10-30)
+
+BSD-3-Clause repo; code read, not run.
+
+- **Selection is first-N, not random:** `create_dataset_impl` uses
+  `slc = slice(None, max_sig)`, taking the first `max_sig` signals (800 for
+  SingleDay) in file order for each (day, receiver, transmitter,
+  equalization) cell. So SingleDay holds the first 800 packets of each
+  0.512 s capture in capture order, consistent with the measured temporal
+  drift.
+- **Copies cut separately:** the non-equalized and equalized sets come from
+  separate Full WiSig files, each cut to its own first 800. If the equalized
+  file lost packets to preamble misdetection, its first 800 reach further into
+  the capture than the other copy's; they overlap heavily at the start but are
+  not guaranteed to match.
+- **Missing cells** are filled with `np.zeros((0,256,2))`; SingleDay was built
+  with satisfaction rate 1.0, so all 280 pairs have 800 signals.
+- **The library's default split is random and packet-level:** `prepare_dataset`
+  → `parse_nodes` concatenates all transmitters and shuffles with
+  `np.random.seed(0)`, then `split_set3` cuts 80/10/10 train/val/test. Reported
+  accuracies from that loader are same-capture recognition; do not reuse that
+  split here.
+
 ## Capture facts (WiSig paper)
 
 - Testbed: ORBIT grid (20×20, ~1 m spacing). Transmitters: Atheros 5212,
@@ -159,8 +185,9 @@ still shares transmission events.
 
 - Sample rate (25 Msps) and center frequency (2462 MHz) are now taken from
   the paper; no further format metadata outstanding.
-- Check how the subset scripts select the 800 signals per pair; explain the
-  five high-correlation cross-receiver combos.
+- Establish the equalized-vs-unequalized packet relationship empirically
+  (needs the equalization steps, not a proxy); explain the five
+  high-correlation cross-receiver combos.
 - Run split-level leakage checks (contiguous-block splits) once a split and
   detector exist.
 - Rights for redistribution and model artifacts stay `unverified` until
