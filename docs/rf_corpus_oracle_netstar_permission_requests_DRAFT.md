@@ -1,4 +1,4 @@
-# ORACLE / NetSTAR LoRa permission-clarification requests — DRAFT (not sent)
+# ORACLE / NetSTAR (LoRa, BLE) permission-clarification requests — DRAFT (not sent)
 
 **Status:** drafts only. Nothing contacted, downloaded, or filed.
 **Context:** intake worklist P1/P2. WiSig (CC BY-NC-SA 4.0) is the only
@@ -27,6 +27,23 @@ would let them through — they do not weaken the gate.
   for research", with a request to cite the IEEE Access paper. No named
   license, no redistribution, commercial-use, or model terms.
 - Hosted at `research.engr.oregonstate.edu/hamdaoui/datasets`.
+
+**NetSTAR BLE** (Albousayri & Hamdaoui; same lab, same datasets page)
+- "Bluetooth RFFP (collected after hardware warm-up period)": 31 Seeed XIAO
+  ESP32-C3 devices, two USRP B210 receivers, three scenarios (outdoors wireless
+  across locations; indoors wired across channels; indoors wired across
+  receivers). Release note `release_note_datasets_ble_august2025_v1.pdf`
+  (4 Aug 2025); data on Oregon State Box (shared link; contents and any terms
+  file inside it not readable from an automated fetch).
+- Second set on the same page: "Bluetooth RFFP with device temperature as
+  feature" (Box folder, no release note).
+- The release note's only condition: "Please cite our work in case the
+  datasets were used" (ICML ML4Wireless 2025; IEEE CNS 2025). No license,
+  no research/commercial/redistribution/model terms. Code repo
+  `H-Albousayri/BLE-RF-Fingerprint-CNN-classifier` has no license either.
+- Cited as the dataset behind arXiv 2607.05549 ("Replicating the Signature"),
+  which says the BLE data is "publicly available"; whether that paper's
+  over-the-air attack captures are in these releases is unconfirmed.
 - Contact `hamdaoui@oregonstate.edu` appeared in a web-search summary only;
   confirm it on the lab site before use.
 
@@ -65,20 +82,24 @@ A license line on the download page or repository record would settle it for
 everyone. I will cite exactly as you specify. No urgency, and I won't use the
 data until I hear back.
 
-## Draft request — NetSTAR LoRa
+## Draft request — NetSTAR (LoRa and BLE datasets)
 
-**Subject:** Terms of use for the LoRa device-fingerprinting datasets
+**Subject:** Terms of use for the LoRa and Bluetooth device-fingerprinting datasets
 
 Hello — I'm building a research program that fingerprints public RF datasets
 (metrics and reports; I do not redistribute corpora). Your LoRa datasets
 ("LoRa Device Fingerprinting in the Wild") are a good fit for cross-day
-evaluation.
+evaluation, and your Bluetooth datasets (31 XIAO ESP32-C3 devices; across
+locations, channels and receivers) for receiver and channel shift.
 
-The release notes say the data "can be downloaded and used for research" and
-ask for citation of the IEEE Access paper, which is clear for that purpose.
-Because my registry needs an explicit rights statement per corpus, could you
-confirm, ideally as a named license (e.g. a Creative Commons license) or a
-short written statement:
+The LoRa release notes say the data "can be downloaded and used for research"
+and ask for citation of the IEEE Access paper, which is clear for that
+purpose. The Bluetooth release note asks for citation of your ICML ML4Wireless
+and IEEE CNS 2025 papers but states no terms. Because my registry needs an
+explicit rights statement per corpus, could you confirm, for the LoRa datasets
+and the Bluetooth datasets (including the device-temperature set), ideally as
+a named license (e.g. a Creative Commons license) or a short written
+statement:
 
 1. **Research use:** non-commercial research use, as in the release notes.
 2. **Commercial use:** whether use in a commercial product or service is
@@ -88,10 +109,15 @@ short written statement:
 4. **Trained models:** whether models trained on the data, and derived
    fingerprint assets, may be released, and under what terms.
 
-A license note on the datasets page would settle it. I'll cite as you
-specify, and I won't use the data until I hear back.
+A license note on the datasets page, or in each release note, would settle it
+for everyone. I'll cite as you specify, and I won't use the data until I
+hear back.
 
 ## Notes
+
+- The NetSTAR request now covers LoRa **and** BLE in one message to the same
+  lab. If answers differ per dataset, record each separately in its own
+  `rights_assessment`.
 
 - Keep each message to licensing only. No complaints about missing metadata,
   broken links, or format; those read as grievances next to a rights ask.
