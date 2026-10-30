@@ -121,8 +121,9 @@ only (`wisig_leakage.py`, `wisig_leakage2.py`; not in the repo).
   `14-7` as TX and as RX is one grid location hosting both a WiFi module and a
   USRP. This explains why the `14-7`→`14-7` array holds real data (mean
   magnitude 0.0447, the highest of any receiver for that transmitter) — the
-  closest link. Coverage varies: the paper notes "No data from Rx 14-7" for at
-  least one transmitter in Fig. 15.
+  closest link; the hardware table confirms the node hosts both (see
+  Hardware in SingleDay). Coverage varies: the paper notes "No data from Rx
+  14-7" for at least one transmitter in Fig. 15.
 - **Single day:** cannot test cross-day shift; that needs the larger subsets.
 
 **Implications for any split:** hold out contiguous packet blocks and accept
@@ -166,6 +167,30 @@ BSD-3-Clause repo; code read, not run.
   is the fourth day.
 - The paper states a download link and no license; the license evidence is the
   provider page only.
+- Window length: 256 samples at 25 Msps is 10.24 µs per signal (arithmetic,
+  not from the paper). The paper gives no receiver gain, antenna, or other
+  per-receiver settings; those would need the `wisig-capture-commands` repo
+  (not read).
+
+## Hardware in SingleDay (`orbit_hardware.pkl`, `wisig-examples`)
+
+Plain-dict pickle loaded with a restricted unpickler that allows no imports;
+from the examples repo (BSD-3-Clause), not confirmed to match the dataset
+version exactly. Chipset grouping differs from the paper's list (the pickle
+groups AR5212_AR5213, AR928X, AR9580).
+
+- **Receivers:** all 10 are USRP **N210** (`1-1`, `13-13`, `14-7`, `2-1`,
+  `2-20`, `20-1`, `7-14`, `7-7`, `8-13`, `8-8`): ten units of one model, no
+  cross-model receiver variation in this subset. (Whole-testbed table: 70
+  USRP nodes — 36 X310, 26 N210, 8 B210.)
+- **Transmitters:** 27 of 28 are Atheros AR5212/AR5213; one, node `20-7`, is
+  Atheros AR9580. A classifier could separate `20-7` by chipset instead of
+  per-device fingerprint (one of 28 classes, so a small effect; worth noting
+  in any per-class results).
+- **Nodes hosting both a WiFi module and a USRP among the transmitters:**
+  `14-7`, `2-19`, `20-19` (all N210); only `14-7` is also a receiver in this
+  subset. This confirms `14-7` as one grid site (AR5212/AR5213 transmitter +
+  N210 receiver).
 
 ## Intake checklist
 
