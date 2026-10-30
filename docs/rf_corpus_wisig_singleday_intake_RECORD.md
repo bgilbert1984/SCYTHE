@@ -159,7 +159,8 @@ BSD-3-Clause repo; code read, not run.
 
 - Testbed: ORBIT grid (20×20, ~1 m spacing). Transmitters: Atheros 5212,
   9220, 9280, 9580 WiFi modules; receivers: USRP B210, X310, N210.
-- WiFi channel 13 (2462 MHz, 20 MHz), 25 Msps, 0.512 s captures, mostly
+- WiFi channel 11 (2462 MHz, 20 MHz; the paper says "channel 13", but 2462 MHz
+  is channel 11 and the AP command sets channel 11 — see Capture commands), 25 Msps, 0.512 s captures, mostly
   line of sight, SNR > 10 dB; random-byte UDP payload, all transmitters
   configured with the same spoofed MAC and IP address.
 - Capture days: 1, 8, 15, 23 March 2021. SingleDay (28 TX, 10 RX, 800 signals,
@@ -168,9 +169,34 @@ BSD-3-Clause repo; code read, not run.
 - The paper states a download link and no license; the license evidence is the
   provider page only.
 - Window length: 256 samples at 25 Msps is 10.24 µs per signal (arithmetic,
-  not from the paper). The paper gives no receiver gain, antenna, or other
-  per-receiver settings; those would need the `wisig-capture-commands` repo
-  (not read).
+  not from the paper).
+
+## Capture commands (`wisig-capture-commands`, read 2026-10-30)
+
+BSD-3-Clause repo; commands read, not run. Receiver tooling: GNU Radio 3.7
+with UHD.
+
+- **Receiver:** center frequency 2462 MHz, 25 Msps, 0.512 s, LO offset 10 MHz,
+  `fc32` samples, one channel. Normalized gain **0.5** on every receiver; that
+  maps to different dB per USRP model, so it is consistent within SingleDay
+  (all N210) but not across the full dataset. The first 2 s of each recording
+  are skipped before the 0.512 s are written.
+- **Receiver-side corrections are on:** the script enables
+  `set_auto_dc_offset(True)` and `set_auto_iq_balance(True)`, so UHD corrects
+  DC offset and IQ imbalance before the data reaches the file. The stored
+  samples therefore do not show the raw receiver imbalance; relevant to any
+  receiver-uniqueness claim.
+- **Transmitters and AP:** each transmitter joins a WiFi AP (Ubuntu 18.04,
+  `wifi-ap` snap, UDP `netcat` listener) with one cloned MAC address and shared
+  SSID/IP settings, pings briefly, then runs `cat /dev/urandom | netcat -u` to
+  send random bytes over UDP. This matches the paper's random-payload,
+  identical-identity description.
+- **Channel discrepancy:** the AP is set to WiFi channel 11 and the receiver
+  tunes to 2462 MHz, which is channel 11; the paper's "channel 13" is a
+  mislabel (corrected above).
+- **Not in the repo:** per-receiver differences, antennas, transmit power. The
+  repo's AP commands contain a plaintext test-network passphrase; not copied
+  here.
 
 ## Hardware in SingleDay (`orbit_hardware.pkl`, `wisig-examples`)
 
