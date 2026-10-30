@@ -1,7 +1,8 @@
 # WiSig SingleDay — intake record
 
 **Status:** admitted for non-commercial research validation only. Not admitted
-for commercial use. Format validated; leakage checks not yet run.
+for commercial use. Format validated; data-level leakage checks run (see below), split-level
+leakage checks still open.
 **Verified:** 2026-10-30. Docs only: no frozen-registry or schema-v1 change.
 Rights are recorded in the provisional `rights_assessment` sidecar below
 (`unverified` = fail-closed).
@@ -68,13 +69,43 @@ fingerprint assets get a separate rights assessment before any release.
 - All 560 arrays finite (no NaN/inf); first array mean |x| ≈ 0.016, max ≈ 0.060.
 - Not in the pickle: sample rate, center frequency (take from the paper).
 
-## Leakage notes (inputs to the checks, not results)
+## Leakage checks (data-level, run 2026-10-30)
 
-- Each TX/RX pair appears twice (equalized 0/1) with the **same packets**:
-  keep both copies in one split, or a packet-level split leaks.
-- `14-7` is in both `tx_list` and `rx_list`. Meaning of node IDs unconfirmed;
-  check the paper's naming before using IDs as split groups.
-- One day only: cannot test cross-day shift; that needs the larger subsets.
+Run on the restricted-unpickler load; archive SHA-256 re-verified before the
+run. These test the data, not a specific split: no detector or split exists
+yet, so the checklist item below stays open. Scripts were session-scratchpad
+only (`wisig_leakage.py`, `wisig_leakage2.py`; not in the repo).
+
+- **Exact duplicates:** none. All 448,000 packets are unique when hashed
+  byte-for-byte (within arrays, across equalized/unequalized copies, across
+  receivers and transmitters).
+- **Equalized vs unequalized copies:** the earlier claim that the two copies
+  of a TX/RX pair hold the *same packets* is **not supported**. Index-matched
+  correlation of a CFO proxy averages 0.036 (shuffled ≈ 0); log-power 0.067 vs
+  0.003. 29 of 280 pairs show |corr| > 0.3 (e.g. `14-10`→`20-1` at −0.829),
+  most show none. Equalization may destroy these proxies, so this neither
+  proves the copies differ nor that they match. Unresolved; settle it from the
+  WiSig paper's description of the equalized set or a direct equalization test.
+- **Temporal structure:** packet order carries slow drift. Lag-1
+  autocorrelation over packet index averages 0.38 for the CFO proxy (max 0.96)
+  and 0.105 for log-power (max 0.82). A random packet-level split puts
+  near-neighbors on both sides and inflates accuracy; **split by contiguous
+  packet blocks**.
+- **Cross-receiver alignment:** rare. 5 of 1,260 (TX × RX-pair) combinations
+  show index-matched CFO correlation > 0.5 (max 0.924, `6-15` between `14-7`
+  and `8-13`); three of the five involve receiver `14-7`. No evidence of a
+  systematic same-transmission-seen-by-several-receivers layout; the five are
+  unexplained.
+- **Node `14-7`:** appears in both `tx_list` and `rx_list`. The
+  `14-7`→`14-7` array holds real data (mean magnitude 0.0447, the highest of
+  any receiver for that transmitter), not zeros: consistent with a co-located
+  or same-node link, but ID semantics are unconfirmed against the paper.
+- **Single day:** cannot test cross-day shift; that needs the larger subsets.
+
+**Implications for any split:** hold out contiguous packet blocks; keep the
+equalized and unequalized copies of a pair on the same side until their
+relationship is settled; treat `14-7` carefully (not as a split group key, and
+not on both sides of a receiver-disjoint split) until its meaning is known.
 
 ## Intake checklist
 
@@ -84,13 +115,18 @@ fingerprint assets get a separate rights assessment before any release.
 - [~] Sample format and metadata validated — shapes/dtypes/finiteness yes;
       sample rate, center frequency, ID semantics outstanding
 - [~] SHA-256 and provenance recorded — recorded here; hash is first-observation
-- [ ] Receiver, transmitter and capture-session leakage checks pass — not run
+- [~] Receiver, transmitter and capture-session leakage checks pass —
+      data-level checks run (no duplicates; temporal drift and unresolved
+      equalized-copy and `14-7` questions found); no split to test yet
 
 ## Open items
 
 - Resolve node-ID semantics (`14-7`) and take sample rate / center frequency
   from the paper.
-- Run leakage checks once a split and detector exist.
+- Settle the equalized-vs-unequalized relationship (WiSig paper or a direct
+  equalization test); explain the five high-correlation cross-receiver combos.
+- Run split-level leakage checks (contiguous-block splits) once a split and
+  detector exist.
 - Rights for redistribution and model artifacts stay `unverified` until
   assessed separately.
 - Separate: ORACLE rights field unread (Northeastern repository 403);
