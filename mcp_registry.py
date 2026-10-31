@@ -518,11 +518,10 @@ def _run_tak_ml(engine, params):
     flow_id = params.get("flow_id", "")
     if not flow_id:
         raise ValueError("flow_id required")
-    # Stub: assumes engine.run_ml_inference(flow_id) returns {ops_committed, edges_added}
-    if hasattr(engine, "run_ml_inference"):
-        result = engine.run_ml_inference(flow_id)
-        return {"ops_committed": result.get("ops", 0), "edges_added": result.get("edges", 0)}
-    return {"ops_committed": 0, "edges_added": 0}
+    # engine.run_ml_inference(flow_id) returns {ops, edges}.  No engine in the repo implements it,
+    # so this is unsupported rather than "0 operations committed" (#217).
+    result = _require(engine, "run_ml_inference", "ml_inference", "run_tak_ml")(flow_id)
+    return {"ops_committed": result.get("ops", 0), "edges_added": result.get("edges", 0)}
 
 
 def _reinforce_edge(engine, params):
@@ -573,11 +572,9 @@ def _export_graph_snapshot(engine, params):
 def _query_hot_entities(engine, params):
     """Get top N entities by degree centrality."""
     limit = params.get("limit", 10)
-    if not hasattr(engine, "degree"):
-        return {"entities": []}
-    degree_dict = engine.degree
+    degree_dict = getattr(engine, "degree", None)
     if not isinstance(degree_dict, dict):
-        return {"entities": []}
+        raise CapabilityUnsupported("degree_centrality", "query_hot_entities", "engine.degree is not a dict")
     items = sorted(degree_dict.items(), key=lambda x: -x[1])[:limit]
     return {"entities": [{"id": k, "degree": v} for k, v in items]}
 
@@ -586,10 +583,9 @@ def _query_recent_edges(engine, params):
     """Get edges added/modified since timestamp, optionally filtered by weight."""
     since = params.get("since", 0)  # Unix timestamp
     min_weight = params.get("min_weight", 0)
-    if hasattr(engine, "query_edges_since"):
-        edges = engine.query_edges_since(since=since, min_weight=min_weight)
-        return {"edges": edges, "count": len(edges)}
-    return {"edges": [], "count": 0}
+    edges = _require(engine, "query_edges_since", "recent_edge_query", "query_recent_edges")(
+        since=since, min_weight=min_weight)
+    return {"edges": edges, "count": len(edges)}
 
 
 def _query_scope_stats(engine, params):
@@ -597,10 +593,7 @@ def _query_scope_stats(engine, params):
     scope_id = params.get("scope_id", "")
     if not scope_id:
         raise ValueError("scope_id required")
-    if hasattr(engine, "get_scope_stats"):
-        stats = engine.get_scope_stats(scope_id)
-        return stats
-    return {"scope_id": scope_id, "node_count": 0, "edge_count": 0}
+    return _require(engine, "get_scope_stats", "scope_stats", "query_scope_stats")(scope_id)
 
 
 def _get_entity_neighbors(engine, params):
@@ -618,10 +611,8 @@ def _get_edge_by_id(engine, params):
     edge_id = params.get("edge_id", "")
     if not edge_id:
         raise ValueError("edge_id required")
-    if hasattr(engine, "get_edge"):
-        edge = engine.get_edge(edge_id)
-        return edge or {"ok": False, "error": "edge not found"}
-    return {"ok": False, "error": "get_edge not supported"}
+    edge = _require(engine, "get_edge", "edge_lookup", "get_edge_by_id")(edge_id)
+    return edge or {"ok": False, "error": "edge not found"}   # supported, nothing matched
 
 
 # ============================================================================
