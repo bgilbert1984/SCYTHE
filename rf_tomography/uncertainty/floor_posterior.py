@@ -22,12 +22,8 @@ class CandidateGrid:
 
     @staticmethod
     def for_building(b: Building, xy_spacing_m: float = 2.0) -> "CandidateGrid":
-        nx, ny = int(b.width // xy_spacing_m), int(b.depth // xy_spacing_m)
-        xs = b.cx - b.width / 2 + (np.arange(nx) + 0.5) * b.width / nx
-        ys = b.cy - b.depth / 2 + (np.arange(ny) + 0.5) * b.depth / ny
+        xy = b.grid_xy(xy_spacing_m)
         zs = b.floor_centers_z()
-        X, Y = np.meshgrid(xs, ys, indexing="ij")
-        xy = np.stack([X.ravel(), Y.ravel()], 1)
         pts = np.concatenate(
             [np.repeat(xy, len(zs), 0), np.tile(zs, len(xy))[:, None]], 1)
         return CandidateGrid(pts, len(xy), len(zs))

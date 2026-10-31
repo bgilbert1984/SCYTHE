@@ -16,26 +16,31 @@ from pathlib import Path
 
 import numpy as np
 
+from ..geometry.real import midtown_scene, real_sites, target_buildings
 from ..geometry.scene import synthetic_manhattan_block
 from ..placement.sites import candidate_sites
 from ..propagation.sionna_scene import load_block, trace_paths
 
 
-def sample_emitters(scene, per_building: int, seed: int):
+def sample_emitters(scene, per_building: int, seed: int, hosts=None):
+    """Emitters in `hosts` (default: every building), uniform in the footprint inset by 1 m,
+    random floor, +-0.5 m height jitter."""
     rng = np.random.default_rng(seed)
     pts, owner = [], []
-    for b in scene.buildings:
-        lo, hi = b.box
+    for b in (hosts if hosts is not None else scene.buildings):
         for _ in range(per_building):
             k = int(rng.integers(b.n_floors))
-            pts.append([rng.uniform(lo[0] + 1, hi[0] - 1), rng.uniform(lo[1] + 1, hi[1] - 1),
-                        b.floor_centers_z()[k] + rng.uniform(-0.5, 0.5)])
+            x, y = b.sample_xy(rng, 1.0)
+            pts.append([x, y, b.floor_centers_z()[k] + rng.uniform(-0.5, 0.5)])
             owner.append(b.name)
     return np.array(pts), owner
 
 
 def main(argv=None):
     ap = argparse.ArgumentParser()
+    ap.add_argument("--scene", default="synthetic", choices=["synthetic", "midtown"])
+    ap.add_argument("--policy", default="mixed", choices=["mixed", "concrete", "glass_solid"],
+                    help="midtown facade policy (windows are meshed per floor for 'mixed')")
     ap.add_argument("--emitters-per-building", type=int, default=60)
     ap.add_argument("--frequency", type=float, default=915e6)
     ap.add_argument("--facade", default="concrete", choices=["concrete", "glass"])
@@ -45,28 +50,37 @@ def main(argv=None):
     ap.add_argument("--scattering", type=float, default=0.0,
                     help="diffuse fraction of reflected power (enables diffuse reflection if > 0)")
     ap.add_argument("--max-depth", type=int, default=3)
+    ap.add_argument("--no-diffraction", action="store_true")
     ap.add_argument("--seed", type=int, default=21)
     ap.add_argument("--tx-batch", type=int, default=6)
     ap.add_argument("--name", default=None)
     ap.add_argument("--out", default=str(Path(__file__).parent / "results" / "rt"))
     a = ap.parse_args(argv)
 
-    scene = synthetic_manhattan_block()
-    sites = candidate_sites(scene)
+    if a.scene == "midtown":
+        scene = midtown_scene(a.policy)
+        sites = real_sites(scene)
+        tx, owner = sample_emitters(scene, a.emitters_per_building, a.seed, target_buildings(scene))
+        sc = load_block(scene, a.frequency, scattering=a.scattering)
+    else:
+        scene = synthetic_manhattan_block()
+        sites = candidate_sites(scene)
+        tx, owner = sample_emitters(scene, a.emitters_per_building, a.seed)
+        sc = load_block(scene, a.frequency, facade=a.facade, scattering=a.scattering)
     rx = np.array([s.pos for s in sites], float)
-    tx, owner = sample_emitters(scene, a.emitters_per_building, a.seed)
-    sc = load_block(scene, a.frequency, facade=a.facade, scattering=a.scattering)
     t0 = time.time()
 
     def prog(done, total):
         print(f"  traced {done}/{total} emitters, {time.time() - t0:.0f}s", flush=True)
 
     T = trace_paths(sc, tx, rx, tx_batch=a.tx_batch, samples_per_src=a.samples,
-                    max_depth=a.max_depth, diffuse=a.scattering > 0,
+                    max_depth=a.max_depth, diffraction=not a.no_diffraction, diffuse=a.scattering > 0,
                     keep_top=a.keep_top or (200 if a.scattering > 0 else None), seed=a.seed, progress=prog)
-    T.meta.update(dict(facade=a.facade, scattering=a.scattering, owner=owner, sites=[s.name for s in sites],
+    T.meta.update(dict(scene=a.scene, policy=a.policy if a.scene == 'midtown' else None,
+                       facade=a.facade if a.scene == 'synthetic' else a.policy, scattering=a.scattering, owner=owner, sites=[s.name for s in sites],
                        seconds=round(time.time() - t0), seed=a.seed))
-    name = a.name or (f"block_{int(a.frequency / 1e6)}MHz_{a.facade}"
+    stem = "midtown" if a.scene == "midtown" else "block"
+    name = a.name or (f"{stem}_{int(a.frequency / 1e6)}MHz_{a.policy if a.scene == 'midtown' else a.facade}"
                       + (f"_diffuse{int(round(a.scattering * 100))}" if a.scattering > 0 else ""))
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)

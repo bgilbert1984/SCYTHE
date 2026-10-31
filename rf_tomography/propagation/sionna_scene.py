@@ -67,11 +67,50 @@ def scene_xml(scene: Scene, frequency_hz: float,
     return ('<scene version="2.1.0">\n' + "\n".join(bsdfs) + "\n" + "\n".join(shapes) + "\n</scene>\n")
 
 
+def write_obj(path: Path, verts: np.ndarray, faces: np.ndarray) -> None:
+    with open(path, "w") as fh:
+        fh.writelines(f"v {x:.5f} {y:.5f} {z:.5f}\n" for x, y, z in verts)
+        fh.writelines(f"f {a + 1} {b + 1} {c + 1}\n" for a, b, c in faces)
+
+
+def polygon_scene_xml(scene: Scene, frequency_hz: float, out_dir: Path, ground: str = "medium_dry_ground",
+                      ground_half_size_m: float = 600.0, scattering: float = 0.0,
+                      spandrel_material: str = "concrete") -> str:
+    """Extruded real footprints with per-floor window bands (geometry/mesh.py), one OBJ mesh per
+    material (merged over buildings), plus a ground plane."""
+    from ..geometry.mesh import scene_meshes
+    meshes = scene_meshes(scene)
+    mat_of = {"concrete": spandrel_material, "glass": "glass"}
+    used = {mat_of[m] for m in meshes} | {ground}
+    bsdfs = []
+    for m in sorted(used):
+        eps, sig, th = material_params(m, frequency_hz)
+        bsdfs.append(f'  <bsdf type="radio-material" id="mat-sc_{m}">'
+                     f'<float name="relative_permittivity" value="{eps}"/>'
+                     f'<float name="conductivity" value="{sig}"/>'
+                     f'<float name="thickness" value="{th}"/>'
+                     f'<float name="scattering_coefficient" value="{scattering}"/></bsdf>')
+    shapes = []
+    for m, (v, f) in meshes.items():
+        write_obj(out_dir / f"{m}.obj", v, f)
+        shapes.append(f'  <shape type="obj" id="mesh_{m}"><string name="filename" value="{m}.obj"/>'
+                      f'<boolean name="face_normals" value="true"/><ref id="mat-sc_{mat_of[m]}" name="bsdf"/></shape>')
+    shapes.append(f'  <shape type="rectangle" id="ground_plane"><transform name="to_world">'
+                  f'<scale x="{ground_half_size_m}" y="{ground_half_size_m}" z="1"/></transform>'
+                  f'<ref id="mat-sc_{ground}" name="bsdf"/></shape>')
+    return '<scene version="2.1.0">\n' + "\n".join(bsdfs) + "\n" + "\n".join(shapes) + "\n</scene>\n"
+
+
 def load_block(scene: Scene, frequency_hz: float, **kw):
-    """Load the Scene into Sionna RT with isotropic, vertically polarised antennas."""
+    """Load the Scene into Sionna RT with isotropic, vertically polarised antennas.
+    Box scenes use cubes; scenes containing PolygonBuildings use extruded meshes with windows."""
     from sionna.rt import PlanarArray, load_scene
-    path = Path(tempfile.mkdtemp(prefix="rf_tomography_")) / "block.xml"
-    path.write_text(scene_xml(scene, frequency_hz, **kw))
+    folder = Path(tempfile.mkdtemp(prefix="rf_tomography_"))
+    path = folder / "block.xml"
+    if any(not getattr(b, "is_box", True) for b in scene.buildings):
+        path.write_text(polygon_scene_xml(scene, frequency_hz, folder, **kw))
+    else:
+        path.write_text(scene_xml(scene, frequency_hz, **kw))
     sc = load_scene(str(path), merge_shapes=False)
     sc.frequency = frequency_hz
     sc.tx_array = PlanarArray(num_rows=1, num_cols=1, pattern="iso", polarization="V")

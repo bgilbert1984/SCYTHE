@@ -510,6 +510,63 @@ solvers: default, calibrated, and calibrated with floors x3. Coverage / mean set
   inflate, test out of sample) is what this establishes; the fitted numbers are properties of this
   idealised tracer.
 
+## Real footprints, mixed facades, windows (Midtown)
+
+**Status: infrastructure and validation are done and committed; the Midtown ray-tracing runs,
+calibration and solver evaluation are NOT in this commit** (they were running when it was made).
+Nothing below reports a Midtown result.
+
+- **Footprints** (`geometry/real.py`): NYC Building Footprints (public domain, OTI dataset
+  `5zhs-2jue`), a trimmed extract around 5th Ave / 42nd St committed in `geometry/data/`
+  (`--fetch` re-downloads it; the repo's root `.gitignore` ignores `data/`, so the package
+  `.gitignore` un-ignores this file). 183 records -> 138 buildings within 260 m, median 47 m,
+  40 with 20+ floors, tallest 281 m. Heights are roof heights in feet; ground is flat, courtyard
+  holes are ignored, setbacks and rooftop structures are **not** modelled (each building is one
+  prism of its roof height).
+- **Polygon buildings** (`geometry/scene.py`): `PolygonBuilding` has the same interface as the box
+  `Building` (segment blocking, truth sampling, candidate grids), so solvers and benchmarks need
+  no special cases. Tested: a rectangular polygon blocks exactly like a box on 6,000 random
+  segments; an L-shaped footprint handles the notch, arms, roof and ground correctly. All
+  earlier synthetic results are bit-identical after the refactor (24 configurations compared).
+- **Windows and mixed facades** (`geometry/mesh.py`): ear-clipping triangulation for concave
+  footprints, outward-facing wall quads, and per-floor window bands (spandrel / glass /
+  spandrel) with a glazing ratio per style: concrete 0, masonry 0.25, curtain wall 0.60, glass
+  curtain 0.80, all-glass 1.0. Windows are continuous ribbons with the same glazed *area* as
+  punched windows. "mixed" assigns styles by construction year and height (**a heuristic, not
+  measured**: pre-1945 masonry; 1945+ curtain wall if >= 60 m else masonry; 2000+ glass curtain):
+  118 masonry / 8 curtain / 12 glass-curtain in this extract. "concrete" and "glass_solid"
+  reuse the same footprints as uniform baselines. The windowed scene is ~81k triangles
+  (the solid ones ~2k).
+- **Sionna scene** (`propagation/sionna_scene.py`): scenes with polygon buildings are written as
+  per-material OBJ meshes. Tracing costs about 0.6 s/emitter at depth 3 and 1-3 s at depth 5
+  with 100-400k rays (under 1 GB at depth 5). In this dense block, deep street links need many
+  interactions: the fraction of links with no path at all was 43% at depth 3, 21% at depth 5
+  and 11% at depth 7 (400k rays; 6 emitters x 54 sites), so depth matters and links without any path are treated as "no measurement".
+- **Window physics, tested against prediction** (emitter at the centre of a 30 m x 30 m tower,
+  receiver 60 m away at the same height so the ray crosses the wall horizontally): a curtain-wall tower leaks -69.1 dB at
+  glass height, identical to an all-glass tower (-69.1 dB), and -77.0 dB at spandrel height,
+  identical to a solid concrete tower (-77.4 dB): windows are worth about 8 dB and the spandrel
+  behaves like concrete. A second building in the path costs > 10 dB and the solver's geometric
+  test agrees with the tracer about which link is blocked. (A first version of that test was wrong:
+  a sloped ray crosses the wall at a different height than the emitter's own. Worth remembering
+  when reasoning about floor-dependent leakage.)
+- **Tooling:** `rt_trace --scene midtown --policy {mixed,concrete,glass_solid}` (12 tallest
+  buildings x N emitters, 54 sites: 40 street + 14 rooftop); `rt_calibration` and `rt_eval`
+  rebuild the scene from the table metadata (`benchmarks/scenes.py`), use adaptive grid spacing
+  for large footprints, and `rt_eval` takes `--aoa`, `--solvers`, `--emitter-stride`.
+
+    source ~/.venvs/sionna-rt/env.sh
+    PYTHONPATH=. ~/.venvs/sionna-rt/bin/python -m rf_tomography.benchmarks.rt_trace --scene midtown --policy mixed \
+        --emitters-per-building 40 --max-depth 5 --samples 200000 --tx-batch 2      # ~20 min
+    .venv/bin/python -m rf_tomography.benchmarks.rt_calibration
+    OMP_NUM_THREADS=1 .venv/bin/python -m rf_tomography.benchmarks.rt_eval --tables <midtown tables> \
+        --solvers gaussian robust --emitter-stride 2 --out-name rt_eval_midtown
+
+**Limits of the scene itself.** Prisms without setbacks; flat ground; emitters inside *empty*
+buildings (no interior walls or furniture); ribbon windows; facade styles from a heuristic; no
+foliage, vehicles, street furniture or scattering by default; receiver sites chosen by me
+(farthest-point street points, rooftops of the 14 tallest buildings); depth-limited NLOS.
+
 ## Next
 
 0. Make `identifiability`, `placement`, `impairments`, `robust`, `correlated`, `placement_mc` and
@@ -517,10 +574,11 @@ solvers: default, calibrated, and calibrated with floors x3. Coverage / mean set
 1. Measured-data calibration: the fit-and-inflate procedure is in place
    (`rt_solver_calibration.calibrate`), but the right inflation depends on real clutter. Needs real
    observed-vs-direct-path residuals (or a clutter model validated against measurements).
-2. More scene realism: real city geometry (OSM footprints), mixed glass/concrete facades, windows
-   so interior-to-exterior paths are physical, other frequencies (433 MHz, 2.4 GHz), coherent
-   path phases for AoA, and feeding RT reflection statistics back into the correlated generator
-   (its refl_mild/refl_strong are 2-15x the rates measured here).
+2. Finish the Midtown evaluation (traces, calibration, solver eval; see the section above), then
+   the rest of the realism list: setbacks and rooftop structures, interior walls, other
+   frequencies (433 MHz, 2.4 GHz), coherent path phases for AoA, and feeding RT reflection
+   statistics back into the correlated generator (its refl_mild/refl_strong are 2-15x the rates
+   measured on the synthetic block).
 3. Joint reflection + calibration-offset model, and a vertical-bias check that does not rely on
    posterior width alone (placement cannot fix the residual 1-2 floor downward bias).
 4. Placement that is robust to the facade material (the street-array layout is not).

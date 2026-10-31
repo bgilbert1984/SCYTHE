@@ -58,10 +58,9 @@ def simulate_observation(scene: Scene, building: Building, receivers, emitter: E
                          rng: np.random.Generator, imp: ImpairmentModel) -> Observation:
     """One synthetic emitter + the observation every receiver would produce (truth side)."""
     F = building.n_floors
-    lo, hi = building.box
     k = int(rng.integers(F))
-    truth = np.array([rng.uniform(lo[0] + 1, hi[0] - 1), rng.uniform(lo[1] + 1, hi[1] - 1),
-                      building.floor_centers_z()[k] + rng.uniform(-Z_JITTER_M, Z_JITTER_M)])
+    x, y_ = building.sample_xy(rng, 1.0)
+    truth = np.array([x, y_, building.floor_centers_z()[k] + rng.uniform(-Z_JITTER_M, Z_JITTER_M)])
     world = perturb_scene(scene, imp.geometry_sigma_m, rng) if imp.geometry_sigma_m else scene
     world_los = [not world.segment_blocked(truth, r.pos, exclude=(building.name, r.host_building))
                  for r in receivers]

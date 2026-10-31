@@ -5,6 +5,7 @@
 """
 import math
 import unittest
+from dataclasses import replace
 
 import numpy as np
 
@@ -15,7 +16,7 @@ try:
 except Exception:  # sionna / mitsuba / drjit not importable here
     HAVE = False
 
-from rf_tomography.geometry.scene import synthetic_manhattan_block
+from rf_tomography.geometry.scene import PolygonBuilding, Scene, synthetic_manhattan_block
 from rf_tomography.localization.forward import mean_measurements
 from rf_tomography.measurements.impairments import _facade_images
 from rf_tomography.measurements.models import Receiver
@@ -107,6 +108,49 @@ class RayTracerAgainstPhysics(unittest.TestCase):
         rss_in = link_observables(ins).rss_db[0, 0]
         extra = (-rss_in - fs(d_in)) - (-rss_out - fs(d_out))
         self.assertGreater(extra, 3.0)   # some excess loss from facade penetration / blockage
+
+
+@unittest.skipUnless(HAVE, "sionna-rt not available in this interpreter")
+class WindowsAndPolygonScenes(unittest.TestCase):
+    """Per-floor window bands must change what leaves a building, by physics we can predict."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.base = PolygonBuilding("W", ((-15, -15), (15, -15), (15, 15), (-15, 15)), 37.0, 10, "concrete")
+
+    def rss(self, facade, z, rx=None):
+        # default: receiver at the emitter's height so the direct ray crosses the wall horizontally
+        # (a sloped ray would cross at a different height than the emitter's own)
+        rx = (60.0, 0.0, z) if rx is None else rx
+        sc = load_block(Scene((replace(self.base, facade=facade),)), F)
+        T = trace_paths(sc, np.array([[0.0, 0.0, z]]), np.array([rx]), tx_batch=1, max_depth=2)
+        return float(link_observables(T).rss_db[0, 0])
+
+    def test_glass_band_leaks_far_more_than_spandrel_and_solid_concrete(self):
+        fh, rho = 3.7, 0.60
+        z_glass = 3 * fh + 0.6 * (1 - rho) * fh + 0.5 * rho * fh        # middle of a glazing band
+        z_span = 3 * fh + 0.3 * (1 - rho) * fh                          # inside the lower spandrel
+        glass, span = self.rss("curtain", z_glass), self.rss("curtain", z_span)
+        concrete, all_glass = self.rss("concrete", z_glass), self.rss("glass_solid", z_glass)
+        self.assertGreater(glass - span, 5.0)           # window vs opaque spandrel, same facade
+        self.assertGreater(glass - concrete, 5.0)       # windowed tower vs solid concrete tower
+        self.assertAlmostEqual(span, concrete, delta=3.0)   # spandrel behaves like the concrete wall
+        self.assertGreaterEqual(all_glass, glass - 1.0)     # an all-glass wall is at least as leaky
+
+    def test_a_second_building_in_the_way_costs_power_and_the_solver_geometry_agrees(self):
+        blocker = PolygonBuilding("X", ((25, -15), (55, -15), (55, 15), (25, 15)), 37.0, 10, "concrete")
+        scene = Scene((self.base, blocker))
+        z = 20.0
+        sc = load_block(scene, F)
+        T = trace_paths(sc, np.array([[0.0, 0.0, z]]), np.array([[90.0, 0.0, z], [0.0, 90.0, z]]),
+                        tx_batch=1, max_depth=3)
+        behind, clear = link_observables(T).rss_db[0]
+        # same 90 m distance, same exit wall; the blocked one also crosses two concrete walls of X
+        self.assertGreater(clear - behind, 10.0)
+        # the solver's own geometric test calls exactly these two links
+        emitter = (0.0, 0.0, z)
+        self.assertTrue(scene.segment_blocked(emitter, (90.0, 0.0, z), exclude=("W",)))
+        self.assertFalse(scene.segment_blocked(emitter, (0.0, 90.0, z), exclude=("W",)))
 
 
 if __name__ == "__main__":

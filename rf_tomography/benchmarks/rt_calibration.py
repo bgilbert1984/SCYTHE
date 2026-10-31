@@ -20,10 +20,9 @@ from pathlib import Path
 
 import numpy as np
 
-from ..geometry.scene import synthetic_manhattan_block
 from ..measurements.raytraced import (DIFFRACTION, REFRACTION, SPECULAR, PathTable, beamformed_aoa,
                                       link_observables)
-from ..placement.sites import candidate_sites
+from .scenes import scene_and_sites
 
 wrap = lambda x: (x + np.pi) % (2 * np.pi) - np.pi
 deg = np.degrees
@@ -161,11 +160,11 @@ def main(argv=None):
     ap.add_argument("--table", nargs="+", default=None)
     ap.add_argument("--dir", default=str(Path(__file__).parent / "results"))
     a = ap.parse_args(argv)
-    scene = synthetic_manhattan_block()
-    sites = candidate_sites(scene)
-    tables = a.table or sorted(str(p) for p in Path(a.dir, "rt").glob("block_*.npz"))
+    tables = a.table or sorted(str(p) for pat in ("block_*.npz", "midtown_*.npz")
+                               for p in Path(a.dir, "rt").glob(pat))
     for tp in tables:
         T = PathTable.load(tp)
+        scene, sites, _ = scene_and_sites(table_meta(T))
         owner = table_meta(T)["owner"]
         bf = beam_arrays(T)
         res = analyse(T, scene, owner, sites, 20.0, bf)

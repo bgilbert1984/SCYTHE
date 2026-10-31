@@ -38,17 +38,16 @@ class Probe:
 
 
 def make_probes(scene: Scene, floors_per_building: int = 8, xy_per_floor: int = 3,
-                seed: int = 11) -> List[Probe]:
+                seed: int = 11, buildings=None) -> List[Probe]:
+    """Probe emitters for the analytic objective, in `buildings` (default: every building)."""
     rng = np.random.default_rng(seed)
     probes = []
-    for b in scene.buildings:
+    for b in (scene.buildings if buildings is None else buildings):
         floors = np.unique(np.round(np.linspace(1, b.n_floors, floors_per_building)).astype(int))
-        lo, hi = b.box
         for f in floors:
             for _ in range(xy_per_floor):
-                probes.append(Probe(b.name, int(f), np.array(
-                    [rng.uniform(lo[0] + 3, hi[0] - 3), rng.uniform(lo[1] + 3, hi[1] - 3),
-                     b.floor_center_z(int(f))])))
+                x, y = b.sample_xy(rng, inset=3.0)
+                probes.append(Probe(b.name, int(f), np.array([x, y, b.floor_center_z(int(f))])))
     return probes
 
 
@@ -57,7 +56,8 @@ class PlacementObjective:
                  emitter: EmitterClass, sensing: SensingParams, prop: PropagationParams,
                  robust: bool = False):
         self.cands, self.probes, self.prop = list(candidates), list(probes), prop
-        self.fh = scene.buildings[0].floor_height
+        fhs = {b.floor_height for b in scene.buildings}
+        self.fh = fhs.pop() if len(fhs) == 1 else float(np.mean([b.floor_height for b in scene.buildings]))
         C, P = len(self.cands), len(self.probes)
         self.A = {k: np.zeros((C, P, 3, 3)) for k in ("rss", "toa", "ang")}
         self.b = {k: np.zeros((C, P, 3)) for k in ("rss", "toa")}

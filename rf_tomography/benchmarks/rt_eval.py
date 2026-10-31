@@ -30,6 +30,7 @@ from ..measurements.raytraced import PathTable, beamformed_aoa, link_observables
 from ..placement.objective import PlacementObjective, make_probes
 from ..placement.optimizer import optimise, random_layouts
 from ..placement.sites import all_candidates
+from .scenes import candidates_from, grid_spacing, scene_and_sites, spread_street_arrays, table_meta
 from ..propagation.model import PropagationParams
 from ..uncertainty.floor_posterior import CandidateGrid, credible_set_size, floor_posterior, in_credible_set
 from ..uncertainty.robust_posterior import RobustConfig, robust_floor_posterior
@@ -40,28 +41,34 @@ EST = SensingParams(multipath_range_sigma_m=0.0, multipath_angle_sigma_deg=0.0) 
 RSS_EST_DB = 0.5
 
 
-def make_layouts(scene, cands, em, prop, seed):
-    an = PlacementObjective(scene, cands, make_probes(scene), em, SensingParams(), prop)
+def make_layouts(scene, cands, em, prop, seed, hosts=None):
+    """analytic@14/20 (Gaussian CRLB objective), a random median layout, and 5 street arrays.
+    `hosts`: buildings that contain emitters (probes are placed there; default all)."""
+    an = PlacementObjective(scene, cands, make_probes(scene, buildings=hosts), em, SensingParams(), prop)
     label = {c.label: i for i, c in enumerate(cands)}
     out = {f"analytic@{B}": optimise(an, B) for B in (14, 20)}
     rnd = random_layouts(an, 14, 200, seed)
     sc = [an.score(r) for r in rnd]
     out["random_median@14"] = rnd[int(np.argsort(sc)[len(sc) // 2])]
-    out["street_arrays(5)"] = [label[f"{n}:array"] for n in ("Sx0", "Sx80", "Sx-80", "Sy80", "Sy-80")]
+    legacy = [f"{n}:array" for n in ("Sx0", "Sx80", "Sx-80", "Sy80", "Sy-80")]
+    out["street_arrays(5)"] = ([label[n] for n in legacy] if all(n in label for n in legacy)
+                               else spread_street_arrays(cands, 5))
     return out
 
 
-def run(T, scene, owner, em, prop, cands, layouts, seed, solvers, aoa="strongest"):
+def run(T, scene, owner, em, prop, cands, layouts, seed, solvers, aoa="strongest", stride=1,
+        grid_spacing_adapt=False):
     """aoa: 'strongest' = AoA of the strongest path (idealised); 'beamformed' = peak of the
     aperture's power-weighted beam response (1 m / 3 m horizontal, 3 m vertical tiers)."""
     o = link_observables(T, 20.0)
     bf = ({"el": beamformed_aoa(T, 3.0, "el"), 1.0: beamformed_aoa(T, 1.0, "az"),
            3.0: beamformed_aoa(T, 3.0, "az")} if aoa == "beamformed" else None)
     site_idx = {s: j for j, s in enumerate(ast.literal_eval(T.meta["repr"])["sites"])}
-    grids = {b.name: CandidateGrid.for_building(b) for b in scene.buildings}
+    grids = {n: CandidateGrid.for_building(scene.by_name(n), grid_spacing(scene.by_name(n)) if grid_spacing_adapt else 2.0)
+             for n in set(owner)}
     rng = np.random.default_rng(seed)
     rows = {(l, s): [] for l in layouts for s in solvers}
-    for e in range(len(T.tx)):
+    for e in range(0, len(T.tx), stride):
         b = scene.by_name(owner[e])
         k = int(T.tx[e, 2] // b.floor_height)
         p0, t0 = rng.normal(0, 10.0), rng.normal(0, 200.0)   # nuisance offsets, shared by all receivers
@@ -112,19 +119,30 @@ def main(argv=None):
     ap.add_argument("--tables", nargs="+", default=None)
     ap.add_argument("--emitter", default="lora_915M_200k")
     ap.add_argument("--seed", type=int, default=7)
+    ap.add_argument("--aoa", nargs="+", default=None, choices=["strongest", "beamformed"])
+    ap.add_argument("--solvers", nargs="+", default=list(SOLVERS))
+    ap.add_argument("--emitter-stride", type=int, default=1, help="use every n-th emitter")
+    ap.add_argument("--out-name", default="rt_eval")
     ap.add_argument("--dir", default=str(Path(__file__).parent / "results"))
     a = ap.parse_args(argv)
-    scene, prop = synthetic_manhattan_block(), PropagationParams()
+    prop = PropagationParams()
     em = next(e for e in EMITTERS if e.name == a.emitter)
-    cands = all_candidates(scene)
-    layouts = make_layouts(scene, cands, em, prop, a.seed)
     tables = a.tables or sorted(str(p) for p in Path(a.dir, "rt").glob("block_*.npz"))
-    md, js = [], {}
+    solvers = {k: v for k, v in SOLVERS.items() if k in a.solvers}
+    md, js, cache = [], {}, {}
     for tp in tables:
         T = PathTable.load(tp)
-        meta = ast.literal_eval(T.meta["repr"])
-        for aoa in ("strongest", "beamformed"):
-            res = run(T, scene, meta["owner"], em, prop, cands, layouts, a.seed, SOLVERS, aoa)
+        meta = table_meta(T)
+        scene, sites, hosts = scene_and_sites(meta)
+        real = meta.get("scene") == "midtown"
+        key = "midtown" if real else "block"
+        if key not in cache:
+            cands = candidates_from(sites) if real else all_candidates(scene)
+            cache[key] = (cands, make_layouts(scene, cands, em, prop, a.seed, hosts if real else None))
+        cands, layouts = cache[key]
+        for aoa in (a.aoa or (("beamformed",) if real else ("strongest", "beamformed"))):
+            res = run(T, scene, meta["owner"], em, prop, cands, layouts, a.seed, solvers, aoa,
+                      a.emitter_stride, real)
             js[f"{Path(tp).stem}|{aoa}"] = res
             md += [f"### {Path(tp).stem}: {meta['facade']} facades, scattering {meta.get('scattering', 0.0)}, "
                    f"{len(T.tx)} ray-traced emitters, AoA = {aoa}\n",
@@ -134,8 +152,8 @@ def main(argv=None):
                 md.append(f"| {r['layout']} | {r['solver']} | {r['top1']:.2f} | {r['top3']:.2f} | {r['cov90']:.2f} | "
                           f"{r['set90']:.1f} | {r['p_truth']:.2f} | {r['floor_bias']:+.2f} | {r['floor_mae']:.2f} |")
             md.append("")
-    Path(a.dir, "rt_eval.json").write_text(json.dumps(js, indent=2))
-    Path(a.dir, "rt_eval.md").write_text("\n".join(md))
+    Path(a.dir, f"{a.out_name}.json").write_text(json.dumps(js, indent=2))
+    Path(a.dir, f"{a.out_name}.md").write_text("\n".join(md))
     print("\n".join(md))
 
 

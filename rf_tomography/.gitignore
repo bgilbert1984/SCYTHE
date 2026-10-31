@@ -1,1 +1,4 @@
 benchmarks/results/rt/*.npz
+# the root .gitignore ignores data/; the committed footprint extract must be tracked
+!geometry/data/
+!geometry/data/*.json
