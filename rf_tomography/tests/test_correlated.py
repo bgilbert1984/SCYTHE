@@ -44,16 +44,34 @@ class Geometry(unittest.TestCase):
         self.assertEqual(y[k["rss"]], self.y0[k["rss"]])              # RSS untouched
 
     def test_facade_images_are_valid_single_bounce_geometry(self):
-        imgs = _facade_images(self.truth, self.rx[0], self.s, "A")
+        truth = np.array([-5.0, -45.0, 20.0])
+        rx = Receiver("r", (-5.0, -20.0, 1.5), None, 1.0, 1.0, None)
+        imgs = _facade_images(truth, rx, self.s, "none")
         self.assertGreater(len(imgs), 0)
         for img in imgs:
             # image differs from truth only along one horizontal axis, same height
-            self.assertEqual(img[2], self.truth[2])
-            self.assertEqual(int(img[0] != self.truth[0]) + int(img[1] != self.truth[1]), 1)
-        # emitter sits in A (x,y in [-65,-15]); its own faces would give x or y in {-90, 10}
-        for img in imgs:
-            self.assertFalse(img[1] == -40.0 and img[0] in (-90.0, 10.0))
-            self.assertFalse(img[0] == -40.0 and img[1] in (-90.0, 10.0))
+            self.assertEqual(img[2], truth[2])
+            self.assertEqual(int(img[0] != truth[0]) + int(img[1] != truth[1]), 1)
+        # a receiver hosted on the reflecting building cannot use its faces
+        host = Receiver("h", (15.0, -20.0, 50.0), "B", 1.0, 1.0, None)
+        self.assertTrue(all(abs(i[0] - 35.0) > 1e-9 for i in _facade_images(truth, host, self.s, "none")))
+        # the emitter's own building is never a reflector
+        own = _facade_images(np.array([-40.0, -40.0, 60.0]), self.rx[0], self.s, "A")
+        for i in own:
+            self.assertFalse(i[1] == -40.0 and i[0] in (-90.0, 10.0))
+            self.assertFalse(i[0] == -40.0 and i[1] in (-90.0, 10.0))
+
+    def test_facade_images_require_unobstructed_legs(self):
+        # Regression (found by ray tracing): both emitter and receiver sit in the x=0 corridor,
+        # so the far faces of A (x=-65) and B (x=65) would need the ray to cross the building
+        # it bounces off. Only the two corridor-facing faces (x=-15, x=15) are physical.
+        truth = np.array([-5.0, -45.0, 20.0])
+        rx = Receiver("r", (-5.0, -20.0, 1.5), None, 1.0, 1.0, None)
+        imgs = _facade_images(truth, rx, self.s, "none")
+        self.assertEqual(sorted(round(float(i[0])) for i in imgs), [-25, 35])
+        for i in imgs:
+            self.assertEqual(i[1], truth[1])
+            self.assertEqual(i[2], truth[2])
 
     def test_reflection_is_off_when_probability_zero_and_deterministic(self):
         y, n = apply_reflections(self.y0, self.cols, self.rx, self.truth, [True],

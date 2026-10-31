@@ -208,14 +208,15 @@ design target is reachable, not a field result.
 ## Correlated / coherent multipath test (errors the robust solver was not built for)
 
 The robust solver assumes independent heavy-tailed column errors. `measurements/impairments.py`
-now also generates coherent errors (all off by default; earlier results unchanged, checked):
+also generates coherent errors (all off by default; earlier results unchanged, checked):
 
 - **Single-bounce reflections** (`reflect_prob`): a receiver's az/el/TOA are replaced by those
-  of the mirror-image emitter in the ground plane or in a neighbouring facade (valid-geometry
-  checked). Columns stay mutually consistent, delay excess is the exact one-sided path-length
-  difference, RSS untouched. A ground bounce flips the elevation sign, so it makes the
-  emitter look *lower*. Models a direct path suppressed by clutter the building-level LOS
-  test cannot see.
+  of the mirror-image emitter in the ground plane or in a neighbouring facade. Columns stay
+  mutually consistent, delay excess is the exact one-sided path-length difference, RSS
+  untouched. A ground bounce flips the elevation sign, so it makes the emitter look *lower*.
+  Facade images need a face hit within its extent, emitter and receiver on the same side, and
+  **both legs unobstructed** (this last check was missing in the first version; ray tracing
+  exposed it, see "Sionna RT" below; all results in this section were regenerated afterwards).
 - **Common elevation bias** (`el_bias_common_deg`): one calibration/tilt offset shared by every
   array. Averaging over receivers cannot remove it.
 - **Common delay** (`common_delay_mean_m`): positive control. It is the clock offset, so both
@@ -229,36 +230,37 @@ per solver. Severities are assumptions (refl_mild 15% / refl_strong 35% per LOS 
 
 | layout | scenario | gaussian | robust | robust, paranoid beliefs |
 |---|---|---|---|---|
-| roofs | refl_mild | 0.44 / 0.57 | 0.74 / 0.96 | 0.73 / 0.98 |
-| roofs | refl_strong | 0.21 / 0.25 | 0.59 / 0.91 | 0.57 / 0.92 |
-| optimised@20 | refl_strong | 0.17 / 0.23 | 0.49 / 0.90 | 0.48 / 0.91 |
-| optimised@14 | refl_strong | 0.16 / 0.29 | 0.34 / 0.83 | 0.33 / 0.84 |
-| random median@14 | refl_strong | 0.17 / 0.46 | 0.33 / 0.89 | 0.32 / 0.89 |
+| roofs | refl_mild | 0.43 / 0.49 | 0.84 / 0.99 | 0.81 / 0.99 |
+| roofs | refl_strong | 0.13 / 0.14 | 0.66 / 0.94 | 0.62 / 0.93 |
+| optimised@20 | refl_strong | 0.14 / 0.18 | 0.53 / 0.88 | 0.54 / 0.88 |
+| optimised@14 | refl_strong | 0.23 / 0.34 | 0.53 / 0.87 | 0.54 / 0.88 |
+| random median@14 | refl_strong | 0.24 / 0.52 | 0.33 / 0.85 | 0.35 / 0.86 |
 | roofs | ground bounce only | 0.09 / 0.09 | 0.51 / 0.89 | |
-| roofs | facade bounce only | 0.42 / 0.60 | 0.65 / 0.96 | |
+| roofs | facade bounce only | 0.66 / 0.77 | 0.76 / 0.98 | |
 | roofs | common delay only | 0.72 / 0.98 | 0.71 / 0.98 | |
 | roofs | el bias 1 deg | 0.76 / 0.91 | 0.73 / 0.93 | |
 | roofs | el bias 2 deg | 0.59 / 0.78 | 0.57 / 0.81 | |
 | optimised@20 | el bias 2 deg | 0.51 / 0.83 | 0.50 / 0.88 | |
 
-- **The Gaussian solver collapses under reflections** (coverage 0.09-0.60) with a large
-  *downward* floor bias (-3 to -11 floors for ground bounces).
-- **The robust solver largely survives**: coverage 0.83-0.98 although its independent-outlier
+- **The Gaussian solver collapses under reflections** (coverage 0.09-0.77) with a large
+  *downward* floor bias (up to -11 floors for ground bounces).
+- **The robust solver largely survives**: coverage 0.85-0.99 although its independent-outlier
   model does not describe reflections. A reflected receiver is inconsistent with the other
-  receivers' direct paths, so the per-receiver NLOS state flags it (31-97% of reflected
-  receivers depending on layout; facade bounces are caught best, ground bounces worst).
-- **Not fully fixed.** A residual downward bias of 1-2.6 floors remains for ground bounces and
-  strong reflections, hidden by wider sets (4-10 floors for the weaker layouts). The robust
-  solver is honest about it, not accurate. Coverage dips below target for the cost-14 layout
-  (0.83) and ground-bounce-only on optimised@20 (0.88).
+  receivers' direct paths, so the per-receiver NLOS state flags it (24-98% of reflected
+  receivers depending on layout and reflector; facade bounces are caught best, ground bounces
+  and weak layouts worst).
+- **Not fully fixed.** A residual downward bias of 1.0-2.6 floors remains for ground bounces and
+  strong reflections, hidden by wider sets (3.4-8.5 floors under strong reflections). The robust
+  solver is honest about it, not accurate. Coverage dips below target for the cost-14/20 layouts
+  under strong reflections (0.87-0.88) and ground-bounce-only on optimised@20 (0.88).
 - **Common delay is harmless**, as designed. A 1 deg common elevation bias is harmless (below the
   assumed 2 deg angular floor); 2-3 deg breaks coverage for *both* solvers (0.66-0.88), because
   a systematic bias is not an outlier and robust likelihoods do not help.
 - **Mitigation tried and rejected as a default:** `RobustConfig.el_offset_sigma_deg` treats a
   common elevation offset as a marginalised nuisance (like Tx power and clock offset). It
   restores coverage for the pure calibration case (0.81 -> 0.96 roofs, 0.88 -> 0.95 optimised@20)
-  but (a) costs 0.02-0.10 top-1 even with no impairment, (b) cuts reflection-only
-  coverage from 0.90-0.91 to 0.68-0.77 (median estimator) or to 0.39-0.40 (weighted mean,
+  but (a) costs about 0.02-0.10 top-1 even with no impairment, (b) cuts reflection-only
+  coverage from 0.87-0.94 to 0.57-0.79 (median estimator) or to 0.26-0.57 (weighted mean,
   which reflected receivers contaminate). It stays off by default. The right fix is probably
   physical (calibrate array tilt) or a joint reflection + offset model.
 - Not covered: temporally persistent multipath (the same reflection across snapshots, where
@@ -271,59 +273,55 @@ The analytic objective assumes Gaussian noise, so it cannot score layouts under 
 solver and impairments. `placement/mc_objective.py` runs the real solver instead, made cheap
 by common random numbers: for each fixed simulated emitter the full observation vector is
 generated once as if *every* candidate receiver were deployed (same generator as the other
-benchmarks, via the new `simulate_observation`), a layout is a column subset with its
-sub-covariance, and mean measurements are cached per candidate. About 0.5 s per layout
-instead of seconds. Checked against the independent `run_cell` path on fresh draws: agreement
-within ~0.03 on p(true floor), top-1 and coverage. The refactor that exposed
-`simulate_observation` is bit-identical to before (24 configurations compared).
+benchmarks, via `simulate_observation`), a layout is a column subset with its sub-covariance,
+and mean measurements are cached per candidate. About 0.5 s per layout. Checked against the
+independent `run_cell` path on fresh draws: agreement within ~0.03 on p(true floor), top-1 and
+coverage. The refactor that exposed `simulate_observation` is bit-identical to before.
 
 Search: greedy by gain per cost, then first-improvement swap/add over the 60 best single
 receivers, started from both the greedy result and the analytic layout. Design scenarios:
 moderate (independent) and refl_mild (coherent); 96 trials each. Score = mean p(true floor).
 
-    OMP_NUM_THREADS=1 .venv/bin/python -m rf_tomography.benchmarks.placement_mc --budget 14   # ~5 min
-    OMP_NUM_THREADS=1 .venv/bin/python -m rf_tomography.benchmarks.placement_mc --budget 20   # ~9 min
-    OMP_NUM_THREADS=1 .venv/bin/python -m rf_tomography.benchmarks.placement_mc_paired        # ~2 min
+    OMP_NUM_THREADS=1 .venv/bin/python -m rf_tomography.benchmarks.placement_mc --budget 14   # ~6 min
+    OMP_NUM_THREADS=1 .venv/bin/python -m rf_tomography.benchmarks.placement_mc --budget 20   # ~10 min
+    OMP_NUM_THREADS=1 .venv/bin/python -m rf_tomography.benchmarks.placement_mc_paired        # ~3 min
 
-Mean probability assigned to the true floor, 400 fresh trials per scenario, robust solver
-(paired differences; standard errors in parentheses). Full tables in `results/placement_mc_*.md`.
+Mean probability assigned to the true floor on 400 fresh trials per scenario, robust solver,
+paired differences with standard errors (`results/placement_mc_paired.md`):
 
 | budget | scenario | MC-optimised | analytic-optimised | random median | MC - analytic | MC - random |
 |---|---|---|---|---|---|---|
-| 14 | none | 0.50 | 0.49 | 0.31 | +0.009 (0.006) | +0.185 |
-| 14 | refl_mild | 0.45 | 0.43 | 0.26 | +0.015 (0.006) | +0.186 |
-| 14 | severe* | 0.34 | 0.33 | 0.20 | +0.013 (0.007) | +0.142 |
-| 14 | combined* | 0.36 | 0.35 | 0.25 | +0.017 (0.007) | +0.117 |
-| 20 | none | 0.63 | 0.60 | 0.40 | +0.024 (0.012) | +0.225 |
-| 20 | refl_mild | 0.56 | 0.55 | 0.35 | +0.015 (0.012) | +0.213 |
-| 20 | severe* | 0.46 | 0.42 | 0.27 | +0.040 (0.014) | +0.193 |
-| 20 | refl_strong* | 0.45 | 0.45 | 0.27 | -0.003 (0.013) | +0.180 |
+| 14 | none | 0.51 | 0.49 | 0.31 | +0.019 (0.015) | +0.195 |
+| 14 | moderate | 0.43 | 0.45 | 0.28 | -0.024 (0.016) | +0.146 |
+| 14 | refl_mild | 0.42 | 0.45 | 0.29 | -0.030 (0.016) | +0.125 |
+| 14 | refl_strong* | 0.35 | 0.31 | 0.24 | +0.033 (0.017) | +0.103 |
+| 20 | none | 0.59 | 0.60 | 0.40 | -0.011 (0.016) | +0.190 |
+| 20 | refl_mild | 0.54 | 0.58 | 0.36 | -0.042 (0.014) | +0.173 |
+| 20 | severe* | 0.41 | 0.42 | 0.29 | -0.011 (0.016) | +0.127 |
+| 20 | combined* | 0.43 | 0.45 | 0.31 | -0.021 (0.015) | +0.118 |
 
 (* not a design scenario.)
 
-- **The Monte Carlo search finds a small, real improvement, not a large one.** The paired
-  difference over the analytic layout is positive in 11 of 12 budget-by-scenario cells,
-  +0.006 to +0.04 in p(true floor), typically 1-3 standard errors; relative gain ~2-9%.
-  In-sample the gain looked about twice as large (design score 0.495 vs 0.464 at cost 14,
-  0.621 vs 0.582 at cost 20): roughly half of it was selection on the design draws.
-  The smaller 80-trial `run_cell` held-out runs in `placement_mc_B*.md` cannot resolve a
-  difference this small (top-1 is a tie within +-0.03).
-- **The analytic objective was already close to right for the robust solver.** The layouts
-  share a core in all four cases: roof of tower C near the intersection (`RC+-:tdoa`), roof of
-  B (`RB-+:array`) and a street array at x=+20 (`Sx20:array`). MC swaps the cheap street
-  RSS/azimuth receivers for more street arrays (e.g. `Sy+-40:array`) and drops a second roof.
-  Many different layouts perform about equally, a flat optimum.
-- **Layout still matters a lot.** Both optimised layouts beat the median random layout by
-  0.12-0.23 in p(true floor), and by 0.10-0.25 in top-1 under severe, strong-reflection and
-  combined scenarios, with tighter sets (cost 14, refl_strong: 5.3-6.6 floors vs 8.8) and
-  better coverage at cost 20 (0.89 vs 0.78).
-- **Placement does not remove the reflection bias.** Optimised layouts still sit 1.4-2.4 floors
-  low under strong reflections, and coverage there is 0.85-0.89, below target.
-- Cost: 732 and 1166 Monte Carlo layout evaluations (4.4 and 9 min). Worth it as a check; the
-  analytic search (4 s) gets within a few percent.
+- **Monte Carlo search does not beat the analytic layout.** Differences have mixed sign
+  (-0.042 to +0.033), mostly within one or two standard errors; at budget 20 they lean negative.
+  In-sample the MC layout looks better (design score 0.471 vs 0.455 at cost 14, 0.590 vs 0.566 at
+  cost 20), so the search is fitting the 96 design draws. **An earlier version of this section
+  reported a small consistent MC gain (+0.006 to +0.04). That did not replicate:** it came from the
+  first, over-permissive facade-reflection generator plus selection on the design draws, and
+  was retracted after the generator was fixed (see "Sionna RT") and the searches re-run.
+- **The analytic (Gaussian CRLB) search, 4 s, is as good as the 10-minute one** for the robust
+  solver in this scene. Use it.
+- **The optimum is flat and unstable.** The layouts found by the two searches share little (e.g.
+  at cost 14 the MC layout is `FBxH:array, Sx0:array, RC--:tdoa, Sx-20:rss_az`, the analytic one
+  `Sx20:array, RC+-:tdoa, RB-+:array, Sy-60/60:rss_az`) and rerunning after the generator fix
+  changed the MC layouts. Many different layouts perform about equally.
+- **Layout still matters a lot.** Both beat the median random layout by 0.10-0.20 in p(true
+  floor), with tighter sets (cost 14, refl_strong: 5.7-5.9 floors vs 8.7) and better coverage
+  at cost 20 under strong reflections (0.89-0.92 vs 0.82).
+- **Placement does not remove the reflection bias.** Optimised layouts still sit 1.0-3.1 floors
+  low under strong reflections, and coverage there is 0.84-0.92.
 - Caveats: costs and tiers are assumptions; one emitter class, one scene; the fresh-bank
-  comparison shares the generator, the 3 m grid and the solver with the search (the draws
-  are new). Design used truth positions anywhere in the footprint but a coarser 3 m grid.
+  comparison shares the generator, the 3 m grid and the solver with the search (the draws are new).
 
 ## Next
 

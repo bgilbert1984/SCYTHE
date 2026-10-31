@@ -120,7 +120,8 @@ def corrupt_measurements(y: np.ndarray, cols: Sequence[Tuple[int, str]],
 # ---------------------------------------------------------------------------
 
 def _facade_images(truth, receiver, scene: Scene, emitter_building: str):
-    """Image sources for valid single-bounce facade reflections emitter -> face -> receiver."""
+    """Image sources for valid single-bounce facade reflections emitter -> face -> receiver
+    (bounce on the face, same side, and both legs unobstructed)."""
     out = []
     for b in scene.buildings:
         if b.name in (emitter_building, receiver.host_building):
@@ -136,8 +137,15 @@ def _facade_images(truth, receiver, scene: Scene, emitter_building: str):
                 rx = np.asarray(receiver.pos, float)
                 t = (c - img[axis]) / (rx[axis] - img[axis])
                 pt = img + t * (rx - img)
-                if 0 < t < 1 and lo[other] <= pt[other] <= hi[other] and 0 <= pt[2] <= hi[2]:
-                    out.append(img)
+                if not (0 < t < 1 and lo[other] <= pt[other] <= hi[other] and 0 <= pt[2] <= hi[2]):
+                    continue
+                # Both legs must be clear of buildings (found by ray-tracing validation: without
+                # this, far-face "reflections" through the reflecting building itself passed).
+                # The emitter's own building is crossed by leg 1; the receiver's host by leg 2.
+                if (scene.segment_blocked(np.asarray(truth, float), pt, exclude=(emitter_building,))
+                        or scene.segment_blocked(pt, rx, exclude=(receiver.host_building,))):
+                    continue
+                out.append(img)
     return out
 
 
