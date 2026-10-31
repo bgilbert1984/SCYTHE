@@ -156,7 +156,6 @@ solver unaware of the impairments:
 2. Robust solver (the obvious next test): outlier-mixture or Student-t likelihood plus NLOS
    rejection, evaluated on `benchmarks/impairments.py`; success = cov90 back near 0.90.
    Then re-run placement under the robust solver, since optimal layouts will likely change.
-3. Receiver-placement optimiser: maximise top-3 accuracy over candidate layouts.
-4. Add GLocFM-style learned scoring and RF-3DGS fields only if they beat this baseline.
+3. Add GLocFM-style learned scoring and RF-3DGS fields only if they beat this baseline.
    (Both papers report indoor/Wi-Fi results: RF-3DGS ~2 ms render after ~3 min training;
    GLocFM -49.5%/-48.8% mean 3D error on its synthetic and NeRF2 sets. Neither is outdoor.)
