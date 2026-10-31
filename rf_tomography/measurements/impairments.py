@@ -79,10 +79,12 @@ def classify_los(world_los: Sequence[bool], imp: ImpairmentModel,
 
 def corrupt_measurements(y: np.ndarray, cols: Sequence[Tuple[int, str]],
                          world_los: Sequence[bool], imp: ImpairmentModel,
-                         rng: np.random.Generator) -> Tuple[np.ndarray, int, int]:
+                         rng: np.random.Generator,
+                         bad_out: set | None = None) -> Tuple[np.ndarray, int, int]:
     """Add NLOS corruption and heavy-tailed multipath to AoA/TOA columns of y (copy).
 
-    Returns (y, n_nlos_corrupted_receivers, n_outlier_columns).
+    Returns (y, n_nlos_corrupted_receivers, n_outlier_columns). If bad_out is a set, the
+    indices of the NLOS-corrupted receivers are added to it (for auditing a solver).
     """
     y = y.copy()
     bad_rx, n_out = set(), 0
@@ -101,4 +103,6 @@ def corrupt_measurements(y: np.ndarray, cols: Sequence[Tuple[int, str]],
                 y[j] += rng.exponential(imp.toa_excess_mean_m)
             else:
                 y[j] += rng.normal(0, math.radians(imp.angle_outlier_deg))
+    if bad_out is not None:
+        bad_out.update(bad_rx)
     return y, len(bad_rx), n_out

@@ -28,6 +28,7 @@ from ..measurements.impairments import (ImpairmentModel, classify_los,
                                         corrupt_measurements, perturb_scene)
 from ..measurements.models import EMITTERS, EmitterClass, SensingParams
 from ..propagation.model import PropagationParams, snr_db_at
+from ..uncertainty.robust_posterior import RobustConfig, robust_floor_posterior
 from ..uncertainty.floor_posterior import (CandidateGrid, credible_set_size,
                                            floor_posterior, in_credible_set)
 from .layouts import layouts
@@ -39,7 +40,7 @@ Z_JITTER_M = 0.5    # truth z jitter around floor centre
 def run_cell(scene: Scene, building: Building, receivers, emitter: EmitterClass,
              sensing: SensingParams, prop: PropagationParams, n_trials: int,
              rng: np.random.Generator, grid: CandidateGrid,
-             imp: ImpairmentModel | None = None):
+             imp: ImpairmentModel | None = None, solver: RobustConfig | None = None):
     imp = imp or ImpairmentModel()
     rows = []
     F = building.n_floors
@@ -66,9 +67,16 @@ def run_cell(scene: Scene, building: Building, receivers, emitter: EmitterClass,
             for j, (i, kind) in enumerate(cols):
                 y[j] += rb[i] if kind == "toa" else ab[i] if kind in ("az", "el") else 0.0
         n_bad = n_out = 0
+        bad_set: set = set()
         if imp.active:
-            y, n_bad, n_out = corrupt_measurements(y, cols, world_los, imp, rng)
-        p = floor_posterior(y, grid, receivers, cols, cov, prop)
+            y, n_bad, n_out = corrupt_measurements(y, cols, world_los, imp, rng, bad_set)
+        flags = {}
+        if solver is None:
+            p = floor_posterior(y, grid, receivers, cols, cov, prop)
+        else:
+            p, flags = robust_floor_posterior(y, grid, receivers, cols, cov, prop, solver)
+        part = {i for i, kd in cols if kd != "rss"}
+        flagged = {i for i, v in flags.items() if v > 0.5}
         order = np.argsort(-p)
         rank = int(np.where(order == k)[0][0])
         third = lambda idx: min(2, idx * 3 // F)
@@ -79,7 +87,9 @@ def run_cell(scene: Scene, building: Building, receivers, emitter: EmitterClass,
                          band=int(np.argmax(band_p)) == third(k),
                          crlb_sigma_z=zs, n_los=int(sum(world_los)),
                          n_cols=len(cols), conf=float(p.max()),
-                         n_nlos_trusted=n_bad, n_outliers=n_out))
+                         n_nlos_trusted=n_bad, n_outliers=n_out,
+                         nlos_tp=len(flagged & bad_set), nlos_fp=len(flagged - bad_set),
+                         nlos_bad=len(bad_set), nlos_clean=len(part - bad_set)))
     return rows
 
 
@@ -92,6 +102,9 @@ def aggregate(rows, n_floors_mean: float):
                mean_los_receivers=f("n_los"), mean_confidence=f("conf"),
                mean_nlos_trusted=f("n_nlos_trusted"), mean_outlier_cols=f("n_outliers"),
                random_top1=1.0 / n_floors_mean, random_top3=min(1.0, 3.0 / n_floors_mean))
+    sm = lambda key: float(sum(r[key] for r in rows))
+    out["nlos_recall"] = sm("nlos_tp") / sm("nlos_bad") if sm("nlos_bad") else None
+    out["nlos_false_flag_rate"] = sm("nlos_fp") / sm("nlos_clean") if sm("nlos_clean") else None
     t1, t3, bd = out["top1"], out["top3"], out["band_acc"]
     out["verdict"] = ("floor_resolved" if t1 >= 0.70 else
                       "floor_ranked_top3" if t3 >= 0.90 else

@@ -18,7 +18,7 @@ an exact grid posterior `P(floor | m, G)` with x,y marginalised.
 Layout: `geometry/` scene + LOS · `propagation/` log-distance baseline ·
 `measurements/` receivers/emitters · `localization/` forward model + CRLB ·
 `uncertainty/` floor posterior · `benchmarks/` layouts + runner ·
-`placement/` receiver-placement optimiser · `measurements/impairments.py` NLOS/multipath truth generator · `correlation/` (empty: Phase C).
+`placement/` receiver-placement optimiser · `measurements/impairments.py` NLOS/multipath truth generator · `uncertainty/robust_posterior.py` robust solver · `correlation/` (empty: Phase C).
 
 ### Results (40 trials x 4 buildings per cell, nominal assumptions)
 
@@ -148,14 +148,73 @@ solver unaware of the impairments:
 - Layouts optimised for nominal conditions are not optimal here, but the optimised and
   hand-built layouts still beat random ones at moderate severity.
 
+## Robust solver (outlier mixture / Student-t + soft NLOS rejection)
+
+`uncertainty/robust_posterior.py` keeps the grid, prior and Gaussian RSS block, and changes
+the AoA/TOA likelihood: per-column `mixture` (inlier + wide outlier component) or `student`
+(nu=3), plus a per-receiver latent NLOS state whose columns all come from a wide component
+(prior 0.15), summed out so rejection is soft. The TOA clock offset is profiled with the
+median residual. The posterior NLOS probability at the MAP candidate is returned so
+rejection can be audited. Solver beliefs are fixed (eps 0.15, outlier 15 deg / 30 m, NLOS
+30 deg / 60 m) and not tuned to the truth presets; outlier components are symmetric
+although true excess delay is one-sided, so the solver is deliberately misspecified.
+
+    .venv/bin/python -m unittest rf_tomography.tests.test_robust
+    .venv/bin/python -m rf_tomography.benchmarks.robust    # ~3 min -> results/robust.{json,md}
+
+All solvers see identical simulated observations (paired). 160 trials per cell, top-1
+standard error about +-0.04. Table: top-1 / 90%-set coverage (target ~0.90).
+
+| layout | preset | gaussian (old) | mixture | mixture+NLOS |
+|---|---|---|---|---|
+| hand: street + roof arrays | none | 0.78 / 0.98 | 0.78 / 0.99 | 0.78 / 0.99 |
+| | moderate | 0.54 / 0.81 | 0.71 / 0.97 | 0.72 / 0.97 |
+| | severe | 0.30 / 0.44 | 0.61 / 0.92 | 0.63 / 0.94 |
+| optimised, cost 20 | none | 0.75 / 0.97 | 0.72 / 0.99 | 0.72 / 0.99 |
+| | moderate | 0.60 / 0.84 | 0.72 / 0.98 | 0.71 / 0.98 |
+| | severe | 0.28 / 0.48 | 0.46 / 0.89 | 0.43 / 0.89 |
+| optimised, cost 14 | severe | 0.37 / 0.66 | 0.49 / 0.89 | 0.46 / 0.89 |
+| random median, cost 14 | severe | 0.24 / 0.62 | 0.29 / 0.91 | 0.29 / 0.93 |
+
+- **Calibration is restored.** Coverage returns to 0.89-0.94 at severe and is slightly
+  conservative (0.95-0.99) at moderate and on clean data. Overconfidence goes from
+  +0.25..+0.50 to about 0. This meets the "90% intervals contain the truth" target.
+- **The price is honest width, not accuracy.** Mean 90% set size grows (e.g. 1.7 -> 2.8
+  floors for the roof layout, 2.9 -> 4.6 for optimised@14, 4.1 -> 6.7 for random at severe).
+  Top-1 recovers most of the lost ground at moderate (0.54 -> 0.72 against 0.78 clean).
+  At severe it stays well below clean (information is genuinely destroyed), but top-3
+  and band accuracy stay usable for the better layouts (roof layout top-3 0.93).
+- **Column-level robustness does most of the work.** Explicit NLOS rejection adds little on
+  top of it: mixture alone is as accurate (differences are within noise) and
+  mixture+NLOS flags 44-93% of trusted-NLOS receivers with 0-6% false flags at the
+  default. `nlos_only` (Gaussian columns + NLOS state) recovers about half the damage and
+  at severe falsely flags 29-36% of clean receivers because it cannot explain isolated
+  outliers. Student-t and mixture are indistinguishable at this sample size.
+- **No meaningful cost on clean data** for the roof layout; the optimised layouts give up
+  about 0.03 top-1 (within noise) and gain wider sets.
+- **Rank reversal disappears.** With the robust solver richer layouts are no longer hurt
+  more under impairments (severe: roof layout 0.63 vs optimised@14 0.46).
+- **Wrong beliefs: be paranoid, not trusting.** Setting eps and pi to 0.40 costs only
+  width (sets 3.5-4.1 floors at severe) and stays calibrated. Setting them to 0.02 holds
+  up on the roof layout but undercovers on optimised@20 at severe (cov90 0.79 vs 0.89).
+  Tripling the outlier scales is harmless. Beliefs 4x too low on outlier rate are the
+  expensive error.
+
+Limitations: the truth generator and these solver families share the same idea of what
+an outlier looks like, severities are assumptions, and real multipath is correlated across
+columns and receivers in ways neither models. Treat these as an existence proof that the
+design target is reachable, not a field result.
+
 ## Next
 
-0. Make `identifiability` and `placement` read their sensing assumptions from one
-   calibrated config once real receiver data exist.
+0. Make `identifiability`, `placement`, `impairments` and `robust` read their assumptions
+   from one calibrated config once real receiver data exist.
 1. Replace the log-distance model with Sionna RT scenes (same Scene/Receiver API).
-2. Robust solver (the obvious next test): outlier-mixture or Student-t likelihood plus NLOS
-   rejection, evaluated on `benchmarks/impairments.py`; success = cov90 back near 0.90.
-   Then re-run placement under the robust solver, since optimal layouts will likely change.
-3. Add GLocFM-style learned scoring and RF-3DGS fields only if they beat this baseline.
+2. Re-run placement under the robust solver. The analytic CRLB objective assumes Gaussian
+   noise, so this needs a Monte-Carlo-in-the-loop (or outlier-aware Fisher) objective; the
+   optimal layouts may well change.
+3. Test the robust solver against correlated multipath and one-sided delay outliers it was
+   not designed around, and against emitters in more than one building (Phase C).
+4. Add GLocFM-style learned scoring and RF-3DGS fields only if they beat this baseline.
    (Both papers report indoor/Wi-Fi results: RF-3DGS ~2 ms render after ~3 min training;
    GLocFM -49.5%/-48.8% mean 3D error on its synthetic and NeRF2 sets. Neither is outdoor.)
