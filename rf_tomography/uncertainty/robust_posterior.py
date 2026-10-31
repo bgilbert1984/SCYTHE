@@ -67,10 +67,15 @@ def _log_col(x, s, kind: str, cfg: RobustConfig):
 
 
 def robust_floor_posterior(y: np.ndarray, grid: CandidateGrid, receivers: Sequence, cols,
-                           cov: np.ndarray, prop, cfg: RobustConfig
+                           cov: np.ndarray, prop, cfg: RobustConfig, H: np.ndarray | None = None
                            ) -> Tuple[np.ndarray, Dict[int, float]]:
-    """Returns (per-floor probabilities, {receiver index: P(NLOS) at the MAP candidate})."""
-    H = mean_measurements(grid.points, receivers, cols, prop)
+    """Returns (per-floor probabilities, {receiver index: P(NLOS) at the MAP candidate}).
+
+    H optionally supplies precomputed mean measurements (N candidates x M columns) so a
+    search loop does not recompute them for every layout.
+    """
+    if H is None:
+        H = mean_measurements(grid.points, receivers, cols, prop)
     R = y[None, :] - H
     azc = az_columns(cols)
     if azc:

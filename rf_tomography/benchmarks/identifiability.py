@@ -15,7 +15,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import numpy as np
@@ -37,6 +37,62 @@ XY_JITTER_M = 1.0   # truth xy jitter within a 2 m cell
 Z_JITTER_M = 0.5    # truth z jitter around floor centre
 
 
+@dataclass
+class Observation:
+    k: int                 # true floor index (0-based)
+    truth: np.ndarray
+    world_los: list
+    los: list              # what the solver believes
+    cols: list
+    y: np.ndarray
+    cov: np.ndarray        # solver's covariance (built from believed LOS)
+    cov_world: np.ndarray  # sampling covariance (built from true LOS)
+    n_bad: int
+    n_out: int
+    bad_set: set
+    refl_set: set
+
+
+def simulate_observation(scene: Scene, building: Building, receivers, emitter: EmitterClass,
+                         sensing: SensingParams, prop: PropagationParams,
+                         rng: np.random.Generator, imp: ImpairmentModel) -> Observation:
+    """One synthetic emitter + the observation every receiver would produce (truth side)."""
+    F = building.n_floors
+    lo, hi = building.box
+    k = int(rng.integers(F))
+    truth = np.array([rng.uniform(lo[0] + 1, hi[0] - 1), rng.uniform(lo[1] + 1, hi[1] - 1),
+                      building.floor_centers_z()[k] + rng.uniform(-Z_JITTER_M, Z_JITTER_M)])
+    world = perturb_scene(scene, imp.geometry_sigma_m, rng) if imp.geometry_sigma_m else scene
+    world_los = [not world.segment_blocked(truth, r.pos, exclude=(building.name, r.host_building))
+                 for r in receivers]
+    # What the solver believes. With impairments off this is the truth and no RNG is used.
+    los = classify_los(world_los, imp, rng) if imp.active else world_los
+    dists = [float(np.linalg.norm(truth - np.asarray(r.pos))) for r in receivers]
+    cols = plan_columns(receivers, los)
+    cov = noise_covariance(cols, receivers, los, dists, emitter, sensing, prop)
+    cov_world = (noise_covariance(cols, receivers, world_los, dists, emitter, sensing, prop)
+                 if world_los != los else cov)
+    mu = mean_measurements(truth, receivers, cols, prop)[0]
+    y = mu + np.linalg.cholesky(cov_world) @ rng.standard_normal(len(cols))
+    if sensing.unmodelled_range_bias_m or sensing.unmodelled_angle_bias_deg:
+        rb = rng.normal(0, sensing.unmodelled_range_bias_m, len(receivers))
+        ab = rng.normal(0, math.radians(sensing.unmodelled_angle_bias_deg), len(receivers))
+        for j, (i, kind) in enumerate(cols):
+            y[j] += rb[i] if kind == "toa" else ab[i] if kind in ("az", "el") else 0.0
+    n_bad = n_out = 0
+    bad_set: set = set()
+    if imp.active:
+        y, n_bad, n_out = corrupt_measurements(y, cols, world_los, imp, rng, bad_set)
+    refl_set: set = set()
+    if imp.reflect_prob > 0:
+        y, _ = apply_reflections(y, cols, receivers, truth, world_los, imp, rng, prop,
+                                 world, building.name, refl_set)
+    if imp.el_bias_common_deg > 0 or imp.common_delay_mean_m > 0:
+        y = apply_common_biases(y, cols, imp, rng)
+    return Observation(k, truth, world_los, los, cols, y, cov, cov_world, n_bad, n_out,
+                       bad_set, refl_set)
+
+
 def run_cell(scene: Scene, building: Building, receivers, emitter: EmitterClass,
              sensing: SensingParams, prop: PropagationParams, n_trials: int,
              rng: np.random.Generator, grid: CandidateGrid,
@@ -44,38 +100,10 @@ def run_cell(scene: Scene, building: Building, receivers, emitter: EmitterClass,
     imp = imp or ImpairmentModel()
     rows = []
     F = building.n_floors
-    lo, hi = building.box
     for _ in range(n_trials):
-        k = int(rng.integers(F))
-        truth = np.array([rng.uniform(lo[0] + 1, hi[0] - 1), rng.uniform(lo[1] + 1, hi[1] - 1),
-                          building.floor_centers_z()[k] + rng.uniform(-Z_JITTER_M, Z_JITTER_M)])
-        world = perturb_scene(scene, imp.geometry_sigma_m, rng) if imp.geometry_sigma_m else scene
-        world_los = [not world.segment_blocked(truth, r.pos, exclude=(building.name, r.host_building))
-                     for r in receivers]
-        # What the solver believes. With impairments off this is the truth and no RNG is used.
-        los = classify_los(world_los, imp, rng) if imp.active else world_los
-        dists = [float(np.linalg.norm(truth - np.asarray(r.pos))) for r in receivers]
-        cols = plan_columns(receivers, los)
-        cov = noise_covariance(cols, receivers, los, dists, emitter, sensing, prop)
-        cov_world = (noise_covariance(cols, receivers, world_los, dists, emitter, sensing, prop)
-                     if world_los != los else cov)
-        mu = mean_measurements(truth, receivers, cols, prop)[0]
-        y = mu + np.linalg.cholesky(cov_world) @ rng.standard_normal(len(cols))
-        if sensing.unmodelled_range_bias_m or sensing.unmodelled_angle_bias_deg:
-            rb = rng.normal(0, sensing.unmodelled_range_bias_m, len(receivers))
-            ab = rng.normal(0, math.radians(sensing.unmodelled_angle_bias_deg), len(receivers))
-            for j, (i, kind) in enumerate(cols):
-                y[j] += rb[i] if kind == "toa" else ab[i] if kind in ("az", "el") else 0.0
-        n_bad = n_out = 0
-        bad_set: set = set()
-        if imp.active:
-            y, n_bad, n_out = corrupt_measurements(y, cols, world_los, imp, rng, bad_set)
-        refl_set: set = set()
-        if imp.reflect_prob > 0:
-            y, _ = apply_reflections(y, cols, receivers, truth, world_los, imp, rng, prop,
-                                     world, building.name, refl_set)
-        if imp.el_bias_common_deg > 0 or imp.common_delay_mean_m > 0:
-            y = apply_common_biases(y, cols, imp, rng)
+        ob = simulate_observation(scene, building, receivers, emitter, sensing, prop, rng, imp)
+        k, truth, world_los, cols, y, cov = ob.k, ob.truth, ob.world_los, ob.cols, ob.y, ob.cov
+        n_bad, n_out, bad_set, refl_set = ob.n_bad, ob.n_out, ob.bad_set, ob.refl_set
         flags = {}
         if solver is None:
             p = floor_posterior(y, grid, receivers, cols, cov, prop)

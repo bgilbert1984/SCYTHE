@@ -18,7 +18,7 @@ an exact grid posterior `P(floor | m, G)` with x,y marginalised.
 Layout: `geometry/` scene + LOS · `propagation/` log-distance baseline ·
 `measurements/` receivers/emitters · `localization/` forward model + CRLB ·
 `uncertainty/` floor posterior · `benchmarks/` layouts + runner ·
-`placement/` receiver-placement optimiser · `measurements/impairments.py` NLOS/multipath truth generator · `uncertainty/robust_posterior.py` robust solver · `correlation/` (empty: Phase C).
+`placement/` receiver-placement optimiser · `measurements/impairments.py` NLOS/multipath truth generator · `uncertainty/robust_posterior.py` robust solver · `placement/mc_objective.py` Monte-Carlo placement objective · `correlation/` (empty: Phase C).
 
 ### Results (40 trials x 4 buildings per cell, nominal assumptions)
 
@@ -265,19 +265,75 @@ per solver. Severities are assumptions (refl_mild 15% / refl_strong 35% per LOS 
   averaging does not help), reflectors other than ground and building faces, and reflections
   that also affect RSS.
 
+## Placement under the robust solver (Monte Carlo in the search loop)
+
+The analytic objective assumes Gaussian noise, so it cannot score layouts under the robust
+solver and impairments. `placement/mc_objective.py` runs the real solver instead, made cheap
+by common random numbers: for each fixed simulated emitter the full observation vector is
+generated once as if *every* candidate receiver were deployed (same generator as the other
+benchmarks, via the new `simulate_observation`), a layout is a column subset with its
+sub-covariance, and mean measurements are cached per candidate. About 0.5 s per layout
+instead of seconds. Checked against the independent `run_cell` path on fresh draws: agreement
+within ~0.03 on p(true floor), top-1 and coverage. The refactor that exposed
+`simulate_observation` is bit-identical to before (24 configurations compared).
+
+Search: greedy by gain per cost, then first-improvement swap/add over the 60 best single
+receivers, started from both the greedy result and the analytic layout. Design scenarios:
+moderate (independent) and refl_mild (coherent); 96 trials each. Score = mean p(true floor).
+
+    OMP_NUM_THREADS=1 .venv/bin/python -m rf_tomography.benchmarks.placement_mc --budget 14   # ~5 min
+    OMP_NUM_THREADS=1 .venv/bin/python -m rf_tomography.benchmarks.placement_mc --budget 20   # ~9 min
+    OMP_NUM_THREADS=1 .venv/bin/python -m rf_tomography.benchmarks.placement_mc_paired        # ~2 min
+
+Mean probability assigned to the true floor, 400 fresh trials per scenario, robust solver
+(paired differences; standard errors in parentheses). Full tables in `results/placement_mc_*.md`.
+
+| budget | scenario | MC-optimised | analytic-optimised | random median | MC - analytic | MC - random |
+|---|---|---|---|---|---|---|
+| 14 | none | 0.50 | 0.49 | 0.31 | +0.009 (0.006) | +0.185 |
+| 14 | refl_mild | 0.45 | 0.43 | 0.26 | +0.015 (0.006) | +0.186 |
+| 14 | severe* | 0.34 | 0.33 | 0.20 | +0.013 (0.007) | +0.142 |
+| 14 | combined* | 0.36 | 0.35 | 0.25 | +0.017 (0.007) | +0.117 |
+| 20 | none | 0.63 | 0.60 | 0.40 | +0.024 (0.012) | +0.225 |
+| 20 | refl_mild | 0.56 | 0.55 | 0.35 | +0.015 (0.012) | +0.213 |
+| 20 | severe* | 0.46 | 0.42 | 0.27 | +0.040 (0.014) | +0.193 |
+| 20 | refl_strong* | 0.45 | 0.45 | 0.27 | -0.003 (0.013) | +0.180 |
+
+(* not a design scenario.)
+
+- **The Monte Carlo search finds a small, real improvement, not a large one.** The paired
+  difference over the analytic layout is positive in 11 of 12 budget-by-scenario cells,
+  +0.006 to +0.04 in p(true floor), typically 1-3 standard errors; relative gain ~2-9%.
+  In-sample the gain looked about twice as large (design score 0.495 vs 0.464 at cost 14,
+  0.621 vs 0.582 at cost 20): roughly half of it was selection on the design draws.
+  The smaller 80-trial `run_cell` held-out runs in `placement_mc_B*.md` cannot resolve a
+  difference this small (top-1 is a tie within +-0.03).
+- **The analytic objective was already close to right for the robust solver.** The layouts
+  share a core in all four cases: roof of tower C near the intersection (`RC+-:tdoa`), roof of
+  B (`RB-+:array`) and a street array at x=+20 (`Sx20:array`). MC swaps the cheap street
+  RSS/azimuth receivers for more street arrays (e.g. `Sy+-40:array`) and drops a second roof.
+  Many different layouts perform about equally, a flat optimum.
+- **Layout still matters a lot.** Both optimised layouts beat the median random layout by
+  0.12-0.23 in p(true floor), and by 0.10-0.25 in top-1 under severe, strong-reflection and
+  combined scenarios, with tighter sets (cost 14, refl_strong: 5.3-6.6 floors vs 8.8) and
+  better coverage at cost 20 (0.89 vs 0.78).
+- **Placement does not remove the reflection bias.** Optimised layouts still sit 1.4-2.4 floors
+  low under strong reflections, and coverage there is 0.85-0.89, below target.
+- Cost: 732 and 1166 Monte Carlo layout evaluations (4.4 and 9 min). Worth it as a check; the
+  analytic search (4 s) gets within a few percent.
+- Caveats: costs and tiers are assumptions; one emitter class, one scene; the fresh-bank
+  comparison shares the generator, the 3 m grid and the solver with the search (the draws
+  are new). Design used truth positions anywhere in the footprint but a coarser 3 m grid.
+
 ## Next
 
-0. Make `identifiability`, `placement`, `impairments`, `robust` and `correlated` read their
-   assumptions from one calibrated config once real receiver data exist.
-1. Replace the log-distance model with Sionna RT scenes (same Scene/Receiver API); this is also
-   where real reflection geometry and delay spread would come from.
-2. Re-run placement under the robust solver. The analytic CRLB objective assumes Gaussian
-   noise, so this needs a Monte-Carlo-in-the-loop (or outlier-aware Fisher) objective. The
-   robust solver widens sets most for weaker layouts (random: 9.7 floors under strong
-   reflections), so placement quality matters more, not less.
-3. Joint reflection + calibration-offset model, and a vertical-bias check that does not
-   rely on the posterior width alone (the downward bias is invisible in coverage).
-4. Emitters in more than one building (Phase C cross-building correlation).
-5. Add GLocFM-style learned scoring and RF-3DGS fields only if they beat this baseline.
+0. Make `identifiability`, `placement`, `impairments`, `robust`, `correlated` and `placement_mc`
+   read their assumptions from one calibrated config once real receiver data exist.
+1. Replace the log-distance model with Sionna RT scenes (same Scene/Receiver API); also the
+   source of real reflection geometry and delay spread.
+2. Joint reflection + calibration-offset model, and a vertical-bias check that does not rely
+   on posterior width alone (placement cannot fix the residual 1-2 floor downward bias).
+3. Emitters in more than one building (Phase C cross-building correlation).
+4. Add GLocFM-style learned scoring and RF-3DGS fields only if they beat this baseline.
    (Both papers report indoor/Wi-Fi results: RF-3DGS ~2 ms render after ~3 min training;
    GLocFM -49.5%/-48.8% mean 3D error on its synthetic and NeRF2 sets. Neither is outdoor.)

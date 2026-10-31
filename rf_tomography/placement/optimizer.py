@@ -32,7 +32,10 @@ def greedy(obj: PlacementObjective, budget: float) -> List[int]:
 
 
 def swap_search(obj: PlacementObjective, chosen: Sequence[int], budget: float,
-                max_rounds: int = 20) -> List[int]:
+                max_rounds: int = 20, pool: Sequence[int] | None = None) -> List[int]:
+    """First-improvement swap/add search. `pool` limits the candidate indices tried
+    (useful when each score is expensive); default is every candidate."""
+    allowed = set(range(len(obj.cands))) if pool is None else set(pool)
     chosen = list(chosen)
     cur = obj.score(chosen)
     for _ in range(max_rounds):
@@ -42,7 +45,7 @@ def swap_search(obj: PlacementObjective, chosen: Sequence[int], budget: float,
             rest = chosen[:pos] + chosen[pos + 1:]
             room = budget - obj.cost(rest)
             for i, c in enumerate(obj.cands):
-                if i in rest or i == chosen[pos] or c.cost > room:
+                if i not in allowed or i in rest or i == chosen[pos] or c.cost > room:
                     continue
                 s = obj.score(rest + [i])
                 if s > cur + 1e-9:
@@ -53,7 +56,7 @@ def swap_search(obj: PlacementObjective, chosen: Sequence[int], budget: float,
         # also try pure additions that now fit (swap may free budget)
         spent = obj.cost(chosen)
         for i, c in enumerate(obj.cands):
-            if i not in chosen and spent + c.cost <= budget:
+            if i in allowed and i not in chosen and spent + c.cost <= budget:
                 s = obj.score(chosen + [i])
                 if s > cur + 1e-9:
                     chosen, cur, improved = chosen + [i], s, True
