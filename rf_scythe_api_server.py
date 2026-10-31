@@ -17025,6 +17025,9 @@ if FLASK_AVAILABLE:
             logger.error(f"Error updating operator profile: {e}")
             return jsonify({'status': 'error', 'message': str(e)}), 500
 
+    from totp_gate import install_totp_gate
+    install_totp_gate(app)
+
     @app.route('/api/operator/totp/setup', methods=['POST'])
     def setup_totp():
         """Generate TOTP secret for user setup"""
