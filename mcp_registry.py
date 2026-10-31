@@ -43,6 +43,36 @@ def _require(engine, method: str, capability: str, tool: str):
     return fn
 
 
+# tool name -> ((engine method, capability), ...) the tool needs from the engine.  Drives capability-aware
+# discovery (tools/list, #217); the handlers enforce the same requirements through _require, and
+# test_mcp_capability_discovery pins the two together.  Availability is not authorization: a tool that
+# policy blocks is still available.  Attribute-based reads (query_hot_entities, get_tak_ml_status) are
+# not listed because their requirement is a data attribute, not a callable.
+TOOL_REQUIRES = {
+    "get_edge_by_id": (("get_edge", "edge_lookup"),),
+    "get_entity_neighbors": (("get_neighbors", "neighbor_lookup"),),
+    "query_recent_edges": (("query_edges_since", "recent_edge_query"),),
+    "query_scope_stats": (("get_scope_stats", "scope_stats"),),
+    "run_tak_ml": (("run_ml_inference", "ml_inference"),),
+    "ingest_pcap": (("ingest_pcap", "pcap_ingest"),),
+    "reinforce_edge": (("reinforce_edge", "edge_reinforcement"),),
+    "prune_below_weight": (("prune_below_weight", "edge_pruning"),),
+    "set_decay_lambda": (("set_decay_lambda", "decay_configuration"),),
+    "reload_rules": (("reload_rules", "rule_reload"),),
+    "subscribe_scope": (("create_scope", "scope_management"),),
+    "unsubscribe_scope": (("destroy_scope", "scope_management"),),
+    "list_active_scopes": (("list_scopes", "scope_management"),),
+    "scrub_scope_time": (("scrub_scope_before_time", "scope_management"),),
+    "set_scope_filter": (("set_scope_filter", "scope_management"),),
+    "clear_scope_cache": (("clear_scope_cache", "scope_management"),),
+}
+
+
+def missing_capabilities(engine, requires) -> list:
+    """Capabilities in ``requires`` that ``engine`` does not implement, sorted and de-duplicated."""
+    return sorted({cap for method, cap in requires if not callable(getattr(engine, method, None))})
+
+
 class Tool:
     """Production MCP tool definition with schema contracts and operational metadata."""
 
@@ -65,6 +95,7 @@ class Tool:
         # ADR 0006 Decision 7: declared in code by the tool's author, checked by validate_tool_contract,
         # and never settable from deployment configuration.
         self.halts = bool(halts)
+        self.requires = ()        # set from TOOL_REQUIRES by build_registry
         self.description = description
         self.parameters = parameters  # JSON Schema for input validation
         self.returns = returns  # JSON Schema for return validation
@@ -1262,6 +1293,10 @@ def build_registry(engine) -> Dict[str, Any]:
     for tool in reg._tools.values():
         tool.parameters.setdefault("additionalProperties", False)
 
+    for name, requires in TOOL_REQUIRES.items():
+        if name in reg._tools:
+            reg._tools[name].requires = requires
+
     # Compatibility: wrap tools as ToolDef-compatible objects for mcp_server
     tools_map = {}
     for name, tool in reg._tools.items():
@@ -1276,6 +1311,9 @@ def build_registry(engine) -> Dict[str, Any]:
 
                 def to_mcp(self):
                     return self.tool.to_mcp()
+
+                def missing_capabilities(self):
+                    return missing_capabilities(engine, self.tool.requires)
 
                 def fn(self, **arguments):
                     return self.tool.run(engine=engine, params=arguments or {})
