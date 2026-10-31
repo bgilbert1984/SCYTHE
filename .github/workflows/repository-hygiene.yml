@@ -109,6 +109,7 @@ jobs:
       - name: Run platform tests
         run: |
           python tools/ci_run_explicit_tests.py \
+            test_admin_bootstrap \
             test_eve_graph_ingest \
             test_eve_grpc_retry \
             test_graph_event_fields \

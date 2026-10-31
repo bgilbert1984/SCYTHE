@@ -98,6 +98,17 @@ class OperatorRole(Enum):
     ADMIN = "admin"                 # Full system access
 
 
+class AdminBootstrapError(Exception):
+    """The first administrator could not be created."""
+
+
+class AdminAlreadyExists(AdminBootstrapError):
+    """An administrator already exists, so bootstrapping is closed."""
+
+
+MIN_BOOTSTRAP_PASSWORD_LENGTH = 12
+
+
 class EntityEventType(Enum):
     """Entity event types for SSE/WebSocket streaming"""
     PREEXISTING = "PREEXISTING"     # Initial state sync
@@ -471,6 +482,17 @@ class OperatorSessionManager:
             )
         ''')
 
+        # Administrator audit log: who gained administrator authority and how (never a password)
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS admin_audit_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                event TEXT NOT NULL,
+                operator_id TEXT,
+                callsign TEXT,
+                timestamp TEXT NOT NULL
+            )
+        ''')
+
         # Entity audit log
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS entity_audit_log (
@@ -533,25 +555,8 @@ class OperatorSessionManager:
         conn.commit()
         conn.close()
 
-        # Create default admin if no operators exist
-        self._ensure_default_admin()
-
-    def _ensure_default_admin(self):
-        """Create default admin operator if none exist"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        cursor.execute("SELECT COUNT(*) FROM operators")
-        count = cursor.fetchone()[0]
-        conn.close()
-
-        if count == 0:
-            self.register_operator(
-                callsign="ADMIN",
-                email="admin@command-ops.local",
-                password="admin123",  # Should be changed immediately
-                role=OperatorRole.ADMIN
-            )
-            print("[OperatorManager] Created default admin operator (callsign: ADMIN)")
+        # No administrator is created here. The first one is made on the host by `tools/scythe_admin.py bootstrap-admin`
+        # (see `bootstrap_admin`), never by starting the server and never over HTTP.
 
     def _load_operators(self):
         """Load operators from database into memory"""
@@ -886,6 +891,41 @@ class OperatorSessionManager:
             return None
         finally:
             conn.close()
+
+    def bootstrap_admin(self, callsign: str, email: str, password: str) -> Operator:
+        """Create the first administrator, once.
+
+        Refuses when any administrator exists, and never changes an existing account (it only creates a new one). The check and the insert are one
+        transaction, so two callers at once cannot both succeed. Meant to be called from the host (`tools/scythe_admin.py`), not from a route.
+        """
+        callsign, email = (callsign or "").strip(), (email or "").strip()
+        if not callsign or not email:
+            raise AdminBootstrapError("a callsign and an email are required")
+        if not isinstance(password, str) or len(password) < MIN_BOOTSTRAP_PASSWORD_LENGTH:
+            raise AdminBootstrapError(f"the password must be at least {MIN_BOOTSTRAP_PASSWORD_LENGTH} characters")
+        operator_id = str(uuid.uuid4())
+        created_at = datetime.utcnow().isoformat() + "Z"
+        conn = sqlite3.connect(self.db_path, isolation_level=None, timeout=30)   # explicit transaction control
+        try:
+            conn.execute("BEGIN IMMEDIATE")   # takes the write lock before the check
+            if conn.execute("SELECT COUNT(*) FROM operators WHERE role = ?", (OperatorRole.ADMIN.value,)).fetchone()[0]:
+                raise AdminAlreadyExists("an administrator already exists")
+            conn.execute('''
+                INSERT INTO operators (operator_id, callsign, email, password_hash, role, team_id, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            ''', (operator_id, callsign, email, self._hash_password(password), OperatorRole.ADMIN.value, None, created_at))
+            conn.execute('INSERT INTO admin_audit_log (event, operator_id, callsign, timestamp) VALUES (?, ?, ?, ?)',
+                         ("bootstrap_admin_created", operator_id, callsign, created_at))
+            conn.execute("COMMIT")
+        except sqlite3.IntegrityError as e:
+            conn.execute("ROLLBACK")
+            raise AdminBootstrapError("that callsign or email is already in use") from e
+        finally:
+            conn.close()   # an open transaction (the administrator already exists, or an error) is discarded with the connection
+        operator = Operator(operator_id=operator_id, callsign=callsign, email=email, role=OperatorRole.ADMIN, team_id=None, created_at=created_at)
+        self.operators[operator_id] = operator
+        print(f"[OperatorManager] Bootstrapped administrator: {callsign}")
+        return operator
 
     def authenticate(self, callsign: str, password: str) -> Optional[OperatorSession]:
         """Authenticate operator and create session"""
