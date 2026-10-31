@@ -42,6 +42,11 @@ class RobustConfig:
     pi_nlos: float = 0.15
     sigma_nlos_angle_deg: float = 30.0
     sigma_nlos_toa_m: float = 60.0
+    # Common elevation offset shared by every array (calibration/tilt error), treated as a
+    # nuisance with a zero-mean Gaussian prior of this sigma and marginalised (profile) per
+    # candidate. 0 disables it. Costs some vertical information; see benchmarks/correlated.py.
+    el_offset_sigma_deg: float = 0.0
+    el_offset_estimator: str = "median"  # median (robust to reflected receivers) | mean
 
 
 def _log_normal(x, s):
@@ -86,6 +91,18 @@ def robust_floor_posterior(y: np.ndarray, grid: CandidateGrid, receivers: Sequen
     sig = np.sqrt(np.maximum(np.diag(cov), 1e-18))
     for j in toa:
         sig[j] = math.sqrt(max(cov[j, j] - CLOCK_OFFSET_SIGMA_M ** 2, 1e-12))
+
+    if cfg.el_offset_sigma_deg > 0:
+        el = [j for j, (_, k) in enumerate(cols) if k == "el"]
+        if el:
+            so = math.radians(cfg.el_offset_sigma_deg)
+            w = 1.0 / sig[el] ** 2
+            if cfg.el_offset_estimator == "mean":
+                o = (R[:, el] @ w) / (w.sum() + 1.0 / so ** 2)
+            else:  # median, shrunk toward the zero-mean prior like the weighted mean is
+                o = np.median(R[:, el], axis=1) * w.sum() / (w.sum() + 1.0 / so ** 2)
+            R[:, el] = R[:, el] - o[:, None]
+            ll += -0.5 * (o / so) ** 2
 
     by_rx: Dict[int, list] = {}
     for j, (i, k) in enumerate(cols):

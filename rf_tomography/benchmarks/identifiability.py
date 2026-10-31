@@ -24,8 +24,8 @@ from ..geometry.scene import Building, Scene, synthetic_manhattan_block
 from ..localization.crlb import position_crlb
 from ..localization.forward import (angular_columns, az_columns, mean_measurements,
                                     noise_covariance, plan_columns)
-from ..measurements.impairments import (ImpairmentModel, classify_los,
-                                        corrupt_measurements, perturb_scene)
+from ..measurements.impairments import (ImpairmentModel, apply_common_biases, apply_reflections,
+                                        classify_los, corrupt_measurements, perturb_scene)
 from ..measurements.models import EMITTERS, EmitterClass, SensingParams
 from ..propagation.model import PropagationParams, snr_db_at
 from ..uncertainty.robust_posterior import RobustConfig, robust_floor_posterior
@@ -70,6 +70,12 @@ def run_cell(scene: Scene, building: Building, receivers, emitter: EmitterClass,
         bad_set: set = set()
         if imp.active:
             y, n_bad, n_out = corrupt_measurements(y, cols, world_los, imp, rng, bad_set)
+        refl_set: set = set()
+        if imp.reflect_prob > 0:
+            y, _ = apply_reflections(y, cols, receivers, truth, world_los, imp, rng, prop,
+                                     world, building.name, refl_set)
+        if imp.el_bias_common_deg > 0 or imp.common_delay_mean_m > 0:
+            y = apply_common_biases(y, cols, imp, rng)
         flags = {}
         if solver is None:
             p = floor_posterior(y, grid, receivers, cols, cov, prop)
@@ -89,7 +95,9 @@ def run_cell(scene: Scene, building: Building, receivers, emitter: EmitterClass,
                          n_cols=len(cols), conf=float(p.max()),
                          n_nlos_trusted=n_bad, n_outliers=n_out,
                          nlos_tp=len(flagged & bad_set), nlos_fp=len(flagged - bad_set),
-                         nlos_bad=len(bad_set), nlos_clean=len(part - bad_set)))
+                         nlos_bad=len(bad_set), nlos_clean=len(part - bad_set),
+                         refl_n=len(refl_set), refl_tp=len(flagged & refl_set),
+                         floor_err=float(p @ np.arange(F)) - k))
     return rows
 
 
@@ -105,6 +113,10 @@ def aggregate(rows, n_floors_mean: float):
     sm = lambda key: float(sum(r[key] for r in rows))
     out["nlos_recall"] = sm("nlos_tp") / sm("nlos_bad") if sm("nlos_bad") else None
     out["nlos_false_flag_rate"] = sm("nlos_fp") / sm("nlos_clean") if sm("nlos_clean") else None
+    out["mean_floor_error"] = f("floor_err")
+    out["mean_abs_floor_error"] = float(np.mean([abs(r["floor_err"]) for r in rows]))
+    out["mean_reflected"] = sm("refl_n") / len(rows)
+    out["refl_recall"] = sm("refl_tp") / sm("refl_n") if sm("refl_n") else None
     t1, t3, bd = out["top1"], out["top3"], out["band_acc"]
     out["verdict"] = ("floor_resolved" if t1 >= 0.70 else
                       "floor_ranked_top3" if t3 >= 0.90 else

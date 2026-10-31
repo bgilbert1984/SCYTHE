@@ -205,16 +205,79 @@ an outlier looks like, severities are assumptions, and real multipath is correla
 columns and receivers in ways neither models. Treat these as an existence proof that the
 design target is reachable, not a field result.
 
+## Correlated / coherent multipath test (errors the robust solver was not built for)
+
+The robust solver assumes independent heavy-tailed column errors. `measurements/impairments.py`
+now also generates coherent errors (all off by default; earlier results unchanged, checked):
+
+- **Single-bounce reflections** (`reflect_prob`): a receiver's az/el/TOA are replaced by those
+  of the mirror-image emitter in the ground plane or in a neighbouring facade (valid-geometry
+  checked). Columns stay mutually consistent, delay excess is the exact one-sided path-length
+  difference, RSS untouched. A ground bounce flips the elevation sign, so it makes the
+  emitter look *lower*. Models a direct path suppressed by clutter the building-level LOS
+  test cannot see.
+- **Common elevation bias** (`el_bias_common_deg`): one calibration/tilt offset shared by every
+  array. Averaging over receivers cannot remove it.
+- **Common delay** (`common_delay_mean_m`): positive control. It is the clock offset, so both
+  solvers must be invariant (unit-tested exactly, and confirmed in the benchmark).
+
+    .venv/bin/python -m unittest rf_tomography.tests.test_correlated
+    .venv/bin/python -m rf_tomography.benchmarks.correlated   # ~6 min -> results/correlated.{json,md}
+
+Top-1 / 90%-set coverage, 160 trials per cell (top-1 SE about +-0.04), identical observations
+per solver. Severities are assumptions (refl_mild 15% / refl_strong 35% per LOS receiver).
+
+| layout | scenario | gaussian | robust | robust, paranoid beliefs |
+|---|---|---|---|---|
+| roofs | refl_mild | 0.44 / 0.57 | 0.74 / 0.96 | 0.73 / 0.98 |
+| roofs | refl_strong | 0.21 / 0.25 | 0.59 / 0.91 | 0.57 / 0.92 |
+| optimised@20 | refl_strong | 0.17 / 0.23 | 0.49 / 0.90 | 0.48 / 0.91 |
+| optimised@14 | refl_strong | 0.16 / 0.29 | 0.34 / 0.83 | 0.33 / 0.84 |
+| random median@14 | refl_strong | 0.17 / 0.46 | 0.33 / 0.89 | 0.32 / 0.89 |
+| roofs | ground bounce only | 0.09 / 0.09 | 0.51 / 0.89 | |
+| roofs | facade bounce only | 0.42 / 0.60 | 0.65 / 0.96 | |
+| roofs | common delay only | 0.72 / 0.98 | 0.71 / 0.98 | |
+| roofs | el bias 1 deg | 0.76 / 0.91 | 0.73 / 0.93 | |
+| roofs | el bias 2 deg | 0.59 / 0.78 | 0.57 / 0.81 | |
+| optimised@20 | el bias 2 deg | 0.51 / 0.83 | 0.50 / 0.88 | |
+
+- **The Gaussian solver collapses under reflections** (coverage 0.09-0.60) with a large
+  *downward* floor bias (-3 to -11 floors for ground bounces).
+- **The robust solver largely survives**: coverage 0.83-0.98 although its independent-outlier
+  model does not describe reflections. A reflected receiver is inconsistent with the other
+  receivers' direct paths, so the per-receiver NLOS state flags it (31-97% of reflected
+  receivers depending on layout; facade bounces are caught best, ground bounces worst).
+- **Not fully fixed.** A residual downward bias of 1-2.6 floors remains for ground bounces and
+  strong reflections, hidden by wider sets (4-10 floors for the weaker layouts). The robust
+  solver is honest about it, not accurate. Coverage dips below target for the cost-14 layout
+  (0.83) and ground-bounce-only on optimised@20 (0.88).
+- **Common delay is harmless**, as designed. A 1 deg common elevation bias is harmless (below the
+  assumed 2 deg angular floor); 2-3 deg breaks coverage for *both* solvers (0.66-0.88), because
+  a systematic bias is not an outlier and robust likelihoods do not help.
+- **Mitigation tried and rejected as a default:** `RobustConfig.el_offset_sigma_deg` treats a
+  common elevation offset as a marginalised nuisance (like Tx power and clock offset). It
+  restores coverage for the pure calibration case (0.81 -> 0.96 roofs, 0.88 -> 0.95 optimised@20)
+  but (a) costs 0.02-0.10 top-1 even with no impairment, (b) cuts reflection-only
+  coverage from 0.90-0.91 to 0.68-0.77 (median estimator) or to 0.39-0.40 (weighted mean,
+  which reflected receivers contaminate). It stays off by default. The right fix is probably
+  physical (calibrate array tilt) or a joint reflection + offset model.
+- Not covered: temporally persistent multipath (the same reflection across snapshots, where
+  averaging does not help), reflectors other than ground and building faces, and reflections
+  that also affect RSS.
+
 ## Next
 
-0. Make `identifiability`, `placement`, `impairments` and `robust` read their assumptions
-   from one calibrated config once real receiver data exist.
-1. Replace the log-distance model with Sionna RT scenes (same Scene/Receiver API).
+0. Make `identifiability`, `placement`, `impairments`, `robust` and `correlated` read their
+   assumptions from one calibrated config once real receiver data exist.
+1. Replace the log-distance model with Sionna RT scenes (same Scene/Receiver API); this is also
+   where real reflection geometry and delay spread would come from.
 2. Re-run placement under the robust solver. The analytic CRLB objective assumes Gaussian
-   noise, so this needs a Monte-Carlo-in-the-loop (or outlier-aware Fisher) objective; the
-   optimal layouts may well change.
-3. Test the robust solver against correlated multipath and one-sided delay outliers it was
-   not designed around, and against emitters in more than one building (Phase C).
-4. Add GLocFM-style learned scoring and RF-3DGS fields only if they beat this baseline.
+   noise, so this needs a Monte-Carlo-in-the-loop (or outlier-aware Fisher) objective. The
+   robust solver widens sets most for weaker layouts (random: 9.7 floors under strong
+   reflections), so placement quality matters more, not less.
+3. Joint reflection + calibration-offset model, and a vertical-bias check that does not
+   rely on the posterior width alone (the downward bias is invisible in coverage).
+4. Emitters in more than one building (Phase C cross-building correlation).
+5. Add GLocFM-style learned scoring and RF-3DGS fields only if they beat this baseline.
    (Both papers report indoor/Wi-Fi results: RF-3DGS ~2 ms render after ~3 min training;
    GLocFM -49.5%/-48.8% mean 3D error on its synthetic and NeRF2 sets. Neither is outdoor.)
