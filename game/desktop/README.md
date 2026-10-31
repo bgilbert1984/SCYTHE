@@ -13,7 +13,7 @@ warns and the Electron binary is not downloaded.
     cd game/desktop
     npm install                  # also fetches the Electron binary (postinstall)
     npm run package:linux        # out/signal-ghost-linux-x64/ and .tar.gz (+ .sha256)
-    npm run package:win          # out/signal-ghost-win32-x64/
+    npm run package:win          # out/signal-ghost-win32-x64/ and SCYTHE-GAME-win-x64-portable.zip (+ .sha256)
 
 `npm start` runs the app from source in a window. Output is in `out/`, which is git-ignored.
 
@@ -41,8 +41,11 @@ Verify the download with `sha256sum -c signal-ghost-linux-x64.tar.gz.sha256`.
 
 ## Known limits
 
-- **Windows is built but not run.** `package:win` produces a Windows executable from Linux; nothing
-  here has launched it. Smoke-test it on Windows before trusting it.
+- **Windows is smoke-tested in CI, not yet by a person.** The `game-windows` workflow builds on a
+  Windows runner, extracts `SCYTHE-GAME-win-x64-portable.zip` to a clean folder, launches it twice on
+  one profile, and repeats with outbound traffic firewalled for the executable. That is not a clean
+  Windows 11 machine, a visual check, keyboard-only or screen-reader testing, or SmartScreen behaviour.
+  Saves live in `%APPDATA%\signal-ghost`.
 - **No installer yet** for either platform (AppImage/deb, NSIS/MSI), and no code signing.
 - **Linux sandbox.** The app keeps Chromium's sandbox on and relies on unprivileged user namespaces.
   Hosts that disable them (some hardened distributions) will refuse to start it. It does not fall

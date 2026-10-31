@@ -52,7 +52,7 @@ test('the shell refuses network, popups, navigation, and permissions', () => {
 
 test('the shell requires only electron and small builtins, and uses no network or process APIs', () => {
   assert.deepStrictEqual(requires(main).sort(), ['./smoke', './steam', './steam.config.json', 'electron', 'fs', 'path', 'url']);
-  assert.deepStrictEqual(requires(smoke), ['electron']);
+  assert.deepStrictEqual(requires(smoke), ['electron', 'fs']);
   assert.deepStrictEqual(requires(preload), ['electron']);
   assert.deepStrictEqual(requires(steamSrc), ['steamworks.js'], 'Steam is the only optional native dependency');
   for (const src of [main, smoke, preload, steamSrc]) {
@@ -89,7 +89,7 @@ test('staging produces exactly the files that ship, and nothing from the repo', 
   const dir = stage();
   assert.deepStrictEqual(fs.readdirSync(dir).sort(), ['game', 'index.html', 'main.js', 'package.json', 'preload.js', 'smoke.js', 'steam.config.json', 'steam.js']);
   const shipped = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? shipped(path.join(d, e.name)) : [path.join(d, e.name)]));
-  const files = shipped(path.join(dir, 'game')).map((f) => path.relative(dir, f));
+  const files = shipped(path.join(dir, 'game')).map((f) => path.relative(dir, f).split(path.sep).join('/'));
   assert.ok(files.every((f) => !f.endsWith('.test.js') && !f.endsWith('cli.js')), 'no tests or CLI ship');
   for (const f of ['game/runtime/engine.js', 'game/runtime/save.js', 'game/platform/service.js', 'game/cases/signal_ghost/case.json']) {
     assert.ok(files.includes(f), f);
@@ -112,7 +112,7 @@ test('the Linux install script is POSIX sh and handles install, uninstall, and b
   assert.ok(!/\bsudo\b/.test(sh), 'installs per user, no root');
 });
 
-test('install script runs against a fake build and cleans up after itself', () => {
+test('install script runs against a fake build and cleans up after itself', { skip: process.platform === 'win32' && 'POSIX sh script' }, () => {
   const os = require('os');
   const { spawnSync } = require('child_process');
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'sg-install-'));
@@ -141,9 +141,10 @@ test('Steam depot files are generated from validated ids and never invent an app
   const { vdf } = require('./scripts/steam-build');
   const r = vdf({ appId: 480, depots: { linux: 481, win32: 482 }, contentBase: '/b', description: 'say "hi"' });
   assert.deepStrictEqual(Object.keys(r.files).sort(), ['app_build.vdf', 'depot_build_481.vdf', 'depot_build_482.vdf']);
+  const slashes = (t) => t.replace(/\\+/g, '/'); // paths are platform-specific
   assert.match(r.files['app_build.vdf'], /"AppID" "480"/);
   assert.match(r.files['app_build.vdf'], /"Desc" "say \\"hi\\""/);
-  assert.match(r.files['depot_build_481.vdf'], /"ContentRoot" "\/b\/signal-ghost-linux-x64"/);
+  assert.match(slashes(r.files['depot_build_481.vdf']), /"ContentRoot" "\/b\/signal-ghost-linux-x64"/);
   for (const bad of [{ appId: 0 }, { appId: 'x' }, { appId: 480, depots: {} }, { appId: 480, depots: { linux: 0 } }, { appId: 480, depots: { linux: 5, win32: 5 } }]) {
     assert.ok(vdf({ depots: { linux: 1 }, contentBase: '/b', description: '', ...bad }).error, JSON.stringify(bad));
   }

@@ -44,7 +44,7 @@ The receiver uniqueness score is the one metric with no working definition;
 everything else is cheap spectral statistics or already proven (comb on
 TrevTron; DC offset already in the XTR baseline metric set).
 
-**Output:** per corpus — Fingerprint Report; trust table of the form
+Output: per corpus — Fingerprint Report; trust table of the form
 
 | Dataset | Fingerprint | Confidence | Trust |
 |---|---|---|---|
@@ -52,10 +52,10 @@ TrevTron; DC offset already in the XTR baseline metric set).
 | Dataset B | LO bleed | Medium | Receiver-dependent |
 | Dataset C | None | High | Preferred benchmark |
 
-**Corpus admission, first sweep (as of 2026-10-24):**
+Corpus admission, first sweep (as of 2026-10-24):
 - TrevTron/rtl-ml-dataset — public, already fingerprinted (comb). Reference corpus. First sweep runs the full nine-metric battery on it today.
 - Gated (access request required, user's call): Morty0311/starlink-d2c-x300-duplex-iq, alirezaaminzadeh/device-rf-fingerprint, sohelimi/cvnet-rf.
-- Synthetic negative controls — verified on the Hub 2026-10-24: **alirezaaminzadeh/radioml-2018-samples** (public, ungated, MIT; 550 windows, 50/class × 11 modulations, 1024 complex samples each, fields iq_i/iq_q/modulation/snr_db/label). GNU-Radio-synthesized, so the fingerprint battery should return "no receiver chain" — or recover whatever synthesis artifacts RadioML is known to carry (Panoradio notes documented flaws; official site marks it "erratic"). Either result validates the metric definitions.
+- Synthetic negative controls — verified on the Hub 2026-10-24: alirezaaminzadeh/radioml-2018-samples (public, ungated, MIT; 550 windows, 50/class × 11 modulations, 1024 complex samples each, fields iq_i/iq_q/modulation/snr_db/label). GNU-Radio-synthesized, so the fingerprint battery should return "no receiver chain" — or recover whatever synthesis artifacts RadioML is known to carry (Panoradio notes documented flaws; official site marks it "erratic"). Either result validates the metric definitions.
 - Excluded (wrong modality): RFUAV, Francesco/radio-signal (spectrogram images); nvidia/aerial-isac-srs-iq (tabular); Katherinezml/radar_jamming (single .rar, unverified provenance, likely synthetic).
 
 ---

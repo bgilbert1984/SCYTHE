@@ -23,7 +23,7 @@ function stage() {
   }
   // The main process verifies saves by replay, so it carries the engine, the case, and the platform layer.
   const GAME = path.resolve(ROOT, '..');
-  const notTest = (src) => !src.endsWith('.test.js') && !src.endsWith('/cli.js');
+  const notTest = (src) => !src.endsWith('.test.js') && path.basename(src) !== 'cli.js';
   for (const d of ['runtime', 'platform', 'cases/lib']) {
     fs.cpSync(path.join(GAME, d), path.join(STAGE, 'game', d), { recursive: true, filter: notTest });
   }
