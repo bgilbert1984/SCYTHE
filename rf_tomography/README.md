@@ -18,7 +18,7 @@ an exact grid posterior `P(floor | m, G)` with x,y marginalised.
 Layout: `geometry/` scene + LOS · `propagation/` log-distance baseline ·
 `measurements/` receivers/emitters · `localization/` forward model + CRLB ·
 `uncertainty/` floor posterior · `benchmarks/` layouts + runner ·
-`placement/` receiver-placement optimiser · `correlation/` (empty: Phase C).
+`placement/` receiver-placement optimiser · `measurements/impairments.py` NLOS/multipath truth generator · `correlation/` (empty: Phase C).
 
 ### Results (40 trials x 4 buildings per cell, nominal assumptions)
 
@@ -105,12 +105,57 @@ layout, so top-1 standard error is about +-0.045; differences below ~0.1 are noi
 - In-sample caveat: probes are one fixed set of 96 points, and the scene, noise
   floors and costs are all synthetic.
 
+## Impairment truth generator (NLOS, heavy-tailed multipath, geometry error)
+
+`measurements/impairments.py` corrupts the *world*, never the solver. Mechanisms:
+(1) a truly-NLOS receiver classified LOS has its AoA/TOA columns trusted although they
+carry exponential excess delay and a wide angle error; (2) a truly-LOS receiver
+classified NLOS loses its columns; (3) LOS AoA/TOA columns become reflected-path
+outliers with some probability; (4) world building footprints are offset from the model,
+so true LOS differs from the solver's. With impairments off the RNG stream is untouched:
+all earlier results are bit-identical (checked). Severities in `PRESETS` are
+**assumptions** (moderate: 10% outliers, 10% false-LOS, 5% false-NLOS, 1.5 m geometry;
+severe: 25% / 25% / 10% / 4 m).
+
+    .venv/bin/python -m unittest rf_tomography.tests.test_impairments
+    .venv/bin/python -m rf_tomography.benchmarks.impairments   # ~45 s -> results/impairments.{json,md}
+
+915 MHz emitter, 160 trials per cell (top-1 standard error about +-0.04), nominal Gaussian
+solver unaware of the impairments:
+
+| layout | none top-1 / cov90 | moderate | severe |
+|---|---|---|---|
+| hand: 5 street arrays + 2 roof arrays | 0.78 / 0.98 | 0.54 / 0.81 | 0.30 / 0.44 |
+| optimised, cost 20 | 0.75 / 0.97 | 0.60 / 0.84 | 0.28 / 0.48 |
+| optimised, cost 14 | 0.64 / 0.96 | 0.50 / 0.87 | 0.37 / 0.66 |
+| random median, cost 14 | 0.51 / 0.94 | 0.32 / 0.84 | 0.24 / 0.62 |
+
+(cov90 is the fraction of trials whose 90% credible floor set contains the truth.)
+
+- **The failure is overconfidence, not just lower accuracy.** Under severe impairments the
+  90% sets contain the truth only 44-66% of the time. The posterior stays sharp (set
+  sizes barely change) while being wrong, which is exactly what the design doc says
+  SCYTHE must not do.
+- **Heavy-tailed multipath outliers do most of the damage**, then trusted-NLOS receivers.
+  Classifying a LOS receiver as NLOS and the 1.5 m geometry error barely matter
+  (the ablation table is in `results/impairments.md`). Geometry insensitivity is partly
+  a property of this scene: 30 m street gaps mean small footprint shifts rarely flip LOS.
+- **More angle/TOA columns can mean more exposure.** Under severe impairments the
+  smaller optimised@14 layout (0.37 top-1) beats the richer layouts (0.28-0.30). This is
+  about two standard errors, so treat it as suggestive, not established. A Gaussian
+  likelihood gives every trusted column full weight, so one outlier on a high-weight
+  column can dominate.
+- Layouts optimised for nominal conditions are not optimal here, but the optimised and
+  hand-built layouts still beat random ones at moderate severity.
+
 ## Next
 
 0. Make `identifiability` and `placement` read their sensing assumptions from one
    calibrated config once real receiver data exist.
 1. Replace the log-distance model with Sionna RT scenes (same Scene/Receiver API).
-2. Add NLOS classification error and non-Gaussian multipath to the truth generator.
+2. Robust solver (the obvious next test): outlier-mixture or Student-t likelihood plus NLOS
+   rejection, evaluated on `benchmarks/impairments.py`; success = cov90 back near 0.90.
+   Then re-run placement under the robust solver, since optimal layouts will likely change.
 3. Receiver-placement optimiser: maximise top-3 accuracy over candidate layouts.
 4. Add GLocFM-style learned scoring and RF-3DGS fields only if they beat this baseline.
    (Both papers report indoor/Wi-Fi results: RF-3DGS ~2 ms render after ~3 min training;

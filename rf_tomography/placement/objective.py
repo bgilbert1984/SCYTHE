@@ -114,3 +114,14 @@ class PlacementObjective:
 
     def cost(self, idx: Sequence[int]) -> float:
         return float(sum(self.cands[i].cost for i in idx))
+
+
+def restricted(obj: PlacementObjective, n: int) -> PlacementObjective:
+    """View of obj that exposes only its first n candidates (for searching a subset)."""
+    v = object.__new__(PlacementObjective)
+    v.__dict__.update(obj.__dict__)
+    v.cands = obj.cands[:n]
+    for k in ("A", "b", "S"):
+        setattr(v, k, {kk: vv[:n] for kk, vv in getattr(obj, k).items()})
+    v.los = obj.los[:n]
+    return v

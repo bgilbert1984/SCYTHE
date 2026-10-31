@@ -28,6 +28,9 @@
       "mean_set90": 28.63125,
       "median_crlb_sigma_z_m": 99.05370059185319,
       "mean_los_receivers": 3.4,
+      "mean_confidence": 0.043489983352885446,
+      "mean_nlos_trusted": 0.0,
+      "mean_outlier_cols": 0.0,
       "random_top1": 0.02857142857142857,
       "random_top3": 0.08571428571428572,
       "verdict": "unidentifiable"
@@ -44,6 +47,9 @@
       "mean_set90": 28.575,
       "median_crlb_sigma_z_m": 108.91518761335053,
       "mean_los_receivers": 3.49375,
+      "mean_confidence": 0.043907870046733195,
+      "mean_nlos_trusted": 0.0,
+      "mean_outlier_cols": 0.0,
       "random_top1": 0.02857142857142857,
       "random_top3": 0.08571428571428572,
       "verdict": "unidentifiable"
@@ -60,6 +66,9 @@
       "mean_set90": 28.44375,
       "median_crlb_sigma_z_m": 104.09196030743433,
       "mean_los_receivers": 3.5125,
+      "mean_confidence": 0.044035718918405506,
+      "mean_nlos_trusted": 0.0,
+      "mean_outlier_cols": 0.0,
       "random_top1": 0.02857142857142857,
       "random_top3": 0.08571428571428572,
       "verdict": "unidentifiable"
@@ -76,6 +85,9 @@
       "mean_set90": 28.39375,
       "median_crlb_sigma_z_m": 105.61665318434052,
       "mean_los_receivers": 3.4875,
+      "mean_confidence": 0.044241107020128026,
+      "mean_nlos_trusted": 0.0,
+      "mean_outlier_cols": 0.0,
       "random_top1": 0.02857142857142857,
       "random_top3": 0.08571428571428572,
       "verdict": "unidentifiable"
@@ -92,6 +104,9 @@
       "mean_set90": 21.29375,
       "median_crlb_sigma_z_m": 44.77924147872423,
       "mean_los_receivers": 3.50625,
+      "mean_confidence": 0.0692914610304212,
+      "mean_nlos_trusted": 0.0,
+      "mean_outlier_cols": 0.0,
       "random_top1": 0.02857142857142857,
       "random_top3": 0.08571428571428572,
       "verdict": "unidentifiable"
@@ -108,6 +123,9 @@
       "mean_set90": 19.075,
       "median_crlb_sigma_z_m": 39.496838448589266,
       "mean_los_receivers": 3.4375,
+      "mean_confidence": 0.07965736260770624,
+      "mean_nlos_trusted": 0.0,
+      "mean_outlier_cols": 0.0,
       "random_top1": 0.02857142857142857,
       "random_top3": 0.08571428571428572,
       "verdict": "unidentifiable"
@@ -124,6 +142,9 @@
       "mean_set90": 18.025,
       "median_crlb_sigma_z_m": 31.169451067879898,
       "mean_los_receivers": 3.5875,
+      "mean_confidence": 0.08370858510696359,
+      "mean_nlos_trusted": 0.0,
+      "mean_outlier_cols": 0.0,
       "random_top1": 0.02857142857142857,
       "random_top3": 0.08571428571428572,
       "verdict": "unidentifiable"
@@ -140,6 +161,9 @@
       "mean_set90": 18.5,
       "median_crlb_sigma_z_m": 30.734811123545065,
       "mean_los_receivers": 3.5625,
+      "mean_confidence": 0.08574662669937407,
+      "mean_nlos_trusted": 0.0,
+      "mean_outlier_cols": 0.0,
       "random_top1": 0.02857142857142857,
       "random_top3": 0.08571428571428572,
       "verdict": "unidentifiable"
@@ -156,6 +180,9 @@
       "mean_set90": 2.81875,
       "median_crlb_sigma_z_m": 2.2732988149465116,
       "mean_los_receivers": 3.5125,
+      "mean_confidence": 0.5975194069728378,
+      "mean_nlos_trusted": 0.0,
+      "mean_outlier_cols": 0.0,
       "random_top1": 0.02857142857142857,
       "random_top3": 0.08571428571428572,
       "verdict": "floor_ranked_top3"
@@ -172,6 +199,9 @@
       "mean_set90": 2.83125,
       "median_crlb_sigma_z_m": 2.437779894218129,
       "mean_los_receivers": 3.53125,
+      "mean_confidence": 0.5941474557173498,
+      "mean_nlos_trusted": 0.0,
+      "mean_outlier_cols": 0.0,
       "random_top1": 0.02857142857142857,
       "random_top3": 0.08571428571428572,
       "verdict": "floor_ranked_top3"
@@ -188,6 +218,9 @@
       "mean_set90": 3.05625,
       "median_crlb_sigma_z_m": 2.6737276053170524,
       "mean_los_receivers": 3.4625,
+      "mean_confidence": 0.5440274621563119,
+      "mean_nlos_trusted": 0.0,
+      "mean_outlier_cols": 0.0,
       "random_top1": 0.02857142857142857,
       "random_top3": 0.08571428571428572,
       "verdict": "floor_ranked_top3"
@@ -204,6 +237,9 @@
       "mean_set90": 2.925,
       "median_crlb_sigma_z_m": 2.6590624634990228,
       "mean_los_receivers": 3.45625,
+      "mean_confidence": 0.574313296496826,
+      "mean_nlos_trusted": 0.0,
+      "mean_outlier_cols": 0.0,
       "random_top1": 0.02857142857142857,
       "random_top3": 0.08571428571428572,
       "verdict": "floor_ranked_top3"
@@ -220,6 +256,9 @@
       "mean_set90": 1.6875,
       "median_crlb_sigma_z_m": 1.4149601666854354,
       "mean_los_receivers": 5.5,
+      "mean_confidence": 0.8137538452482509,
+      "mean_nlos_trusted": 0.0,
+      "mean_outlier_cols": 0.0,
       "random_top1": 0.02857142857142857,
       "random_top3": 0.08571428571428572,
       "verdict": "floor_resolved"
@@ -236,6 +275,9 @@
       "mean_set90": 1.6375,
       "median_crlb_sigma_z_m": 1.37244752106976,
       "mean_los_receivers": 5.54375,
+      "mean_confidence": 0.8136914328655622,
+      "mean_nlos_trusted": 0.0,
+      "mean_outlier_cols": 0.0,
       "random_top1": 0.02857142857142857,
       "random_top3": 0.08571428571428572,
       "verdict": "floor_resolved"
@@ -252,6 +294,9 @@
       "mean_set90": 1.6375,
       "median_crlb_sigma_z_m": 1.4197500775725507,
       "mean_los_receivers": 5.48125,
+      "mean_confidence": 0.818223588623394,
+      "mean_nlos_trusted": 0.0,
+      "mean_outlier_cols": 0.0,
       "random_top1": 0.02857142857142857,
       "random_top3": 0.08571428571428572,
       "verdict": "floor_resolved"
@@ -268,6 +313,9 @@
       "mean_set90": 1.5875,
       "median_crlb_sigma_z_m": 1.3813600752082085,
       "mean_los_receivers": 5.4625,
+      "mean_confidence": 0.8245071253892983,
+      "mean_nlos_trusted": 0.0,
+      "mean_outlier_cols": 0.0,
       "random_top1": 0.02857142857142857,
       "random_top3": 0.08571428571428572,
       "verdict": "floor_resolved"
@@ -286,6 +334,9 @@
       "mean_set90": 28.8625,
       "median_crlb_sigma_z_m": 103.33900161668551,
       "mean_los_receivers": 3.4125,
+      "mean_confidence": 0.04273776724764946,
+      "mean_nlos_trusted": 0.0,
+      "mean_outlier_cols": 0.0,
       "random_top1": 0.02857142857142857,
       "random_top3": 0.08571428571428572,
       "verdict": "unidentifiable"
@@ -302,6 +353,9 @@
       "mean_set90": 28.55,
       "median_crlb_sigma_z_m": 93.74016673602273,
       "mean_los_receivers": 3.55,
+      "mean_confidence": 0.04408927437750835,
+      "mean_nlos_trusted": 0.0,
+      "mean_outlier_cols": 0.0,
       "random_top1": 0.02857142857142857,
       "random_top3": 0.08571428571428572,
       "verdict": "unidentifiable"
@@ -318,6 +372,9 @@
       "mean_set90": 28.4375,
       "median_crlb_sigma_z_m": 103.21753373531612,
       "mean_los_receivers": 3.475,
+      "mean_confidence": 0.04520102729694979,
+      "mean_nlos_trusted": 0.0,
+      "mean_outlier_cols": 0.0,
       "random_top1": 0.02857142857142857,
       "random_top3": 0.08571428571428572,
       "verdict": "unidentifiable"
@@ -334,6 +391,9 @@
       "mean_set90": 28.5875,
       "median_crlb_sigma_z_m": 106.98837572828259,
       "mean_los_receivers": 3.50625,
+      "mean_confidence": 0.04327906372530819,
+      "mean_nlos_trusted": 0.0,
+      "mean_outlier_cols": 0.0,
       "random_top1": 0.02857142857142857,
       "random_top3": 0.08571428571428572,
       "verdict": "unidentifiable"
@@ -350,6 +410,9 @@
       "mean_set90": 21.175,
       "median_crlb_sigma_z_m": 53.90633140889072,
       "mean_los_receivers": 3.45625,
+      "mean_confidence": 0.06921786285848056,
+      "mean_nlos_trusted": 0.0,
+      "mean_outlier_cols": 0.0,
       "random_top1": 0.02857142857142857,
       "random_top3": 0.08571428571428572,
       "verdict": "unidentifiable"
@@ -366,6 +429,9 @@
       "mean_set90": 19.26875,
       "median_crlb_sigma_z_m": 36.52538960804598,
       "mean_los_receivers": 3.4625,
+      "mean_confidence": 0.08606304251316232,
+      "mean_nlos_trusted": 0.0,
+      "mean_outlier_cols": 0.0,
       "random_top1": 0.02857142857142857,
       "random_top3": 0.08571428571428572,
       "verdict": "unidentifiable"
@@ -382,6 +448,9 @@
       "mean_set90": 18.15625,
       "median_crlb_sigma_z_m": 38.51444377239625,
       "mean_los_receivers": 3.5125,
+      "mean_confidence": 0.08621766706844185,
+      "mean_nlos_trusted": 0.0,
+      "mean_outlier_cols": 0.0,
       "random_top1": 0.02857142857142857,
       "random_top3": 0.08571428571428572,
       "verdict": "unidentifiable"
@@ -398,6 +467,9 @@
       "mean_set90": 17.8625,
       "median_crlb_sigma_z_m": 34.00424447574028,
       "mean_los_receivers": 3.51875,
+      "mean_confidence": 0.09102002026921913,
+      "mean_nlos_trusted": 0.0,
+      "mean_outlier_cols": 0.0,
       "random_top1": 0.02857142857142857,
       "random_top3": 0.08571428571428572,
       "verdict": "unidentifiable"
@@ -414,6 +486,9 @@
       "mean_set90": 2.9625,
       "median_crlb_sigma_z_m": 2.5535542824878323,
       "mean_los_receivers": 3.475,
+      "mean_confidence": 0.5577765557392989,
+      "mean_nlos_trusted": 0.0,
+      "mean_outlier_cols": 0.0,
       "random_top1": 0.02857142857142857,
       "random_top3": 0.08571428571428572,
       "verdict": "band_only"
@@ -430,6 +505,9 @@
       "mean_set90": 3.0875,
       "median_crlb_sigma_z_m": 2.614822021568239,
       "mean_los_receivers": 3.45625,
+      "mean_confidence": 0.5484137166857153,
+      "mean_nlos_trusted": 0.0,
+      "mean_outlier_cols": 0.0,
       "random_top1": 0.02857142857142857,
       "random_top3": 0.08571428571428572,
       "verdict": "band_only"
@@ -446,6 +524,9 @@
       "mean_set90": 2.85,
       "median_crlb_sigma_z_m": 2.522923120979151,
       "mean_los_receivers": 3.475,
+      "mean_confidence": 0.5873754394881905,
+      "mean_nlos_trusted": 0.0,
+      "mean_outlier_cols": 0.0,
       "random_top1": 0.02857142857142857,
       "random_top3": 0.08571428571428572,
       "verdict": "band_only"
@@ -462,6 +543,9 @@
       "mean_set90": 2.91875,
       "median_crlb_sigma_z_m": 2.509162250545206,
       "mean_los_receivers": 3.425,
+      "mean_confidence": 0.5708450307533689,
+      "mean_nlos_trusted": 0.0,
+      "mean_outlier_cols": 0.0,
       "random_top1": 0.02857142857142857,
       "random_top3": 0.08571428571428572,
       "verdict": "band_only"
@@ -478,6 +562,9 @@
       "mean_set90": 1.675,
       "median_crlb_sigma_z_m": 1.4339830821102946,
       "mean_los_receivers": 5.46875,
+      "mean_confidence": 0.786678895260372,
+      "mean_nlos_trusted": 0.0,
+      "mean_outlier_cols": 0.0,
       "random_top1": 0.02857142857142857,
       "random_top3": 0.08571428571428572,
       "verdict": "floor_ranked_top3"
@@ -494,6 +581,9 @@
       "mean_set90": 1.7,
       "median_crlb_sigma_z_m": 1.364018150027344,
       "mean_los_receivers": 5.46875,
+      "mean_confidence": 0.8024846062025942,
+      "mean_nlos_trusted": 0.0,
+      "mean_outlier_cols": 0.0,
       "random_top1": 0.02857142857142857,
       "random_top3": 0.08571428571428572,
       "verdict": "floor_ranked_top3"
@@ -510,6 +600,9 @@
       "mean_set90": 1.7,
       "median_crlb_sigma_z_m": 1.3938564984297184,
       "mean_los_receivers": 5.48125,
+      "mean_confidence": 0.8024725171007685,
+      "mean_nlos_trusted": 0.0,
+      "mean_outlier_cols": 0.0,
       "random_top1": 0.02857142857142857,
       "random_top3": 0.08571428571428572,
       "verdict": "floor_ranked_top3"
@@ -526,6 +619,9 @@
       "mean_set90": 1.66875,
       "median_crlb_sigma_z_m": 1.4044007028892247,
       "mean_los_receivers": 5.45,
+      "mean_confidence": 0.803493550081893,
+      "mean_nlos_trusted": 0.0,
+      "mean_outlier_cols": 0.0,
       "random_top1": 0.02857142857142857,
       "random_top3": 0.08571428571428572,
       "verdict": "floor_ranked_top3"

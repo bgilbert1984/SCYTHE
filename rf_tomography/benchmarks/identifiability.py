@@ -24,6 +24,8 @@ from ..geometry.scene import Building, Scene, synthetic_manhattan_block
 from ..localization.crlb import position_crlb
 from ..localization.forward import (angular_columns, az_columns, mean_measurements,
                                     noise_covariance, plan_columns)
+from ..measurements.impairments import (ImpairmentModel, classify_los,
+                                        corrupt_measurements, perturb_scene)
 from ..measurements.models import EMITTERS, EmitterClass, SensingParams
 from ..propagation.model import PropagationParams, snr_db_at
 from ..uncertainty.floor_posterior import (CandidateGrid, credible_set_size,
@@ -36,7 +38,9 @@ Z_JITTER_M = 0.5    # truth z jitter around floor centre
 
 def run_cell(scene: Scene, building: Building, receivers, emitter: EmitterClass,
              sensing: SensingParams, prop: PropagationParams, n_trials: int,
-             rng: np.random.Generator, grid: CandidateGrid):
+             rng: np.random.Generator, grid: CandidateGrid,
+             imp: ImpairmentModel | None = None):
+    imp = imp or ImpairmentModel()
     rows = []
     F = building.n_floors
     lo, hi = building.box
@@ -44,18 +48,26 @@ def run_cell(scene: Scene, building: Building, receivers, emitter: EmitterClass,
         k = int(rng.integers(F))
         truth = np.array([rng.uniform(lo[0] + 1, hi[0] - 1), rng.uniform(lo[1] + 1, hi[1] - 1),
                           building.floor_centers_z()[k] + rng.uniform(-Z_JITTER_M, Z_JITTER_M)])
-        los = [not scene.segment_blocked(truth, r.pos, exclude=(building.name, r.host_building))
-               for r in receivers]
+        world = perturb_scene(scene, imp.geometry_sigma_m, rng) if imp.geometry_sigma_m else scene
+        world_los = [not world.segment_blocked(truth, r.pos, exclude=(building.name, r.host_building))
+                     for r in receivers]
+        # What the solver believes. With impairments off this is the truth and no RNG is used.
+        los = classify_los(world_los, imp, rng) if imp.active else world_los
         dists = [float(np.linalg.norm(truth - np.asarray(r.pos))) for r in receivers]
         cols = plan_columns(receivers, los)
         cov = noise_covariance(cols, receivers, los, dists, emitter, sensing, prop)
+        cov_world = (noise_covariance(cols, receivers, world_los, dists, emitter, sensing, prop)
+                     if world_los != los else cov)
         mu = mean_measurements(truth, receivers, cols, prop)[0]
-        y = mu + np.linalg.cholesky(cov) @ rng.standard_normal(len(cols))
+        y = mu + np.linalg.cholesky(cov_world) @ rng.standard_normal(len(cols))
         if sensing.unmodelled_range_bias_m or sensing.unmodelled_angle_bias_deg:
             rb = rng.normal(0, sensing.unmodelled_range_bias_m, len(receivers))
             ab = rng.normal(0, math.radians(sensing.unmodelled_angle_bias_deg), len(receivers))
             for j, (i, kind) in enumerate(cols):
                 y[j] += rb[i] if kind == "toa" else ab[i] if kind in ("az", "el") else 0.0
+        n_bad = n_out = 0
+        if imp.active:
+            y, n_bad, n_out = corrupt_measurements(y, cols, world_los, imp, rng)
         p = floor_posterior(y, grid, receivers, cols, cov, prop)
         order = np.argsort(-p)
         rank = int(np.where(order == k)[0][0])
@@ -65,8 +77,9 @@ def run_cell(scene: Scene, building: Building, receivers, emitter: EmitterClass,
         rows.append(dict(top1=rank == 0, top3=rank < 3, p_truth=float(p[k]),
                          cov90=in_credible_set(p, k), set90=credible_set_size(p),
                          band=int(np.argmax(band_p)) == third(k),
-                         crlb_sigma_z=zs, n_los=int(sum(los)),
-                         n_cols=len(cols)))
+                         crlb_sigma_z=zs, n_los=int(sum(world_los)),
+                         n_cols=len(cols), conf=float(p.max()),
+                         n_nlos_trusted=n_bad, n_outliers=n_out))
     return rows
 
 
@@ -76,7 +89,8 @@ def aggregate(rows, n_floors_mean: float):
     out = dict(n=len(rows), top1=f("top1"), top3=f("top3"), band_acc=f("band"),
                mean_p_truth=f("p_truth"), cov90=f("cov90"), mean_set90=f("set90"),
                median_crlb_sigma_z_m=float(np.median(zs)) if zs else None,
-               mean_los_receivers=f("n_los"),
+               mean_los_receivers=f("n_los"), mean_confidence=f("conf"),
+               mean_nlos_trusted=f("n_nlos_trusted"), mean_outlier_cols=f("n_outliers"),
                random_top1=1.0 / n_floors_mean, random_top3=min(1.0, 3.0 / n_floors_mean))
     t1, t3, bd = out["top1"], out["top3"], out["band_acc"]
     out["verdict"] = ("floor_resolved" if t1 >= 0.70 else
