@@ -1888,6 +1888,9 @@ def orchestrator_user_update():
 # =========================================================================
 # TOTP TWO-FACTOR AUTHENTICATION
 # =========================================================================
+from totp_gate import install_totp_gate
+install_totp_gate(app)
+
 
 @app.route('/api/operator/totp/setup', methods=['POST'])
 def orchestrator_totp_setup():
