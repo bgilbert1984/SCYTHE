@@ -17,7 +17,7 @@ import os
 import threading
 from collections import defaultdict
 from contextlib import nullcontext
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from mcp_registry import CapabilityUnsupported
 
@@ -137,7 +137,7 @@ class MCPHandler:
             if method == "initialize":
                 return self._rpc_ok(req_id, self._handle_initialize(params))
             elif method == "tools/list":
-                return self._rpc_ok(req_id, self._handle_tools_list())
+                return self._rpc_ok(req_id, self._handle_tools_list(params))
             elif method == "tools/schema":
                 return self._rpc_ok(req_id, self._handle_tools_schema())
             elif method == "tools/metrics":
@@ -187,8 +187,25 @@ class MCPHandler:
             "serverInfo": {"name": MCP_SERVER_NAME, "version": MCP_SERVER_VERSION},
         }
 
-    def _handle_tools_list(self):
-        return {"tools": [t.to_mcp() for t in self._tools.values()]}
+    def _handle_tools_list(self, params: Optional[Dict[str, Any]] = None):
+        """Tools the engine can actually run.  A registered tool whose engine capability is missing is not
+        advertised as executable (#217); ``include_unavailable`` lists it too, with the reason.  The
+        registry keeps every tool, so validation and audit are unchanged, and tools/call still answers an
+        unavailable tool with the unsupported-capability error.  Availability is not authorization.
+        """
+        include = bool((params or {}).get("include_unavailable"))
+        tools = []
+        for t in self._tools.values():
+            probe = getattr(t, "missing_capabilities", None)
+            missing = probe() if callable(probe) else []
+            if missing and not include:
+                continue
+            entry = t.to_mcp()
+            if include:
+                entry = dict(entry, _meta={"scythe/availability": {
+                    "available": not missing, "missing_capabilities": missing}})
+            tools.append(entry)
+        return {"tools": tools}
 
     def _handle_tools_schema(self):
         """Return full schema for all tools (for LLM introspection)."""
