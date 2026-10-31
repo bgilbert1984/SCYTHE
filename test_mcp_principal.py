@@ -5,6 +5,12 @@ from unittest import mock
 
 from flask import Flask
 
+# rf_scythe_api_server calls eventlet.monkey_patch() at import. Import it at
+# module load, before any test builds an rf_bridge singleton: a bridge created
+# with unpatched threading primitives fails later in stop() with "cannot
+# notify on un-acquired lock" (#231).
+import rf_scythe_api_server as rf
+
 from hypergraph_engine import HypergraphEngine
 from mcp_effects import LOCAL_STATE
 from mcp_principal import (
@@ -121,7 +127,6 @@ class ServerBoundaryTest(unittest.TestCase):
     def setUpClass(cls):
         import logging
         logging.disable(logging.CRITICAL)
-        import rf_scythe_api_server as rf
         cls.rf = rf
 
     @classmethod
