@@ -441,7 +441,7 @@ async def shutdown_event():
 def main():
     """Run the FastAPI application with Uvicorn"""
     logger.info("Starting RF Voxel Processor server")
-    uvicorn.run(app, host="0.0.0.0", port=8766)  # Using port 8766 to avoid conflict with the tracking server
+    uvicorn.run(app, host="127.0.0.1", port=8766)  # Using port 8766 to avoid conflict with the tracking server
 
 if __name__ == "__main__":
     main()
