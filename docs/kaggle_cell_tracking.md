@@ -1,3 +1,8 @@
+> **Archived 2026-10-11.** BioHub CellOps was built for the Kaggle "Biohub - Cell Tracking During
+> Development" competition, which has ended. The code (`biohub_cellops/`, `kaggle/`) was removed from
+> `main`; the last tree that contains it is the git tag `archive/biohub-kaggle-2026`. This document is
+> kept as a historical record. Paths, routes and commands below no longer exist on `main`.
+
 How could https://github.com/bgilbert1984/SCYTHE be used to tackle https://www.kaggle.com/competitions/biohub-cell-tracking-during-development?utm_medium=email&utm_source=gamma&utm_campaign=comp-biohub-2026
 
 I’ll map the Kaggle task to SCYTHE’s existing graph/streaming/visualization pieces, then outline a concrete adaptation path: data ingest, tracking model, hypergraph lineage, scoring loop, and a submission pipeline.
