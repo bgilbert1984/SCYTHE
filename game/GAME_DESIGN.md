@@ -313,7 +313,7 @@ declared done.
 | P1 | Uncertainty and scoring | §3.4–3.5 |
 | P1 | Save games and deterministic replay | §5.3, §7 |
 | P1 | Desktop prototype | §6 |
-| P2 | Steamworks, Workshop, challenges, multiplayer | out of slice |
+| P2 | Steamworks, Workshop, challenges, multiplayer | out of slice; Workshop/challenges/co-op scoped in [COMMUNITY_SCOPE.md](COMMUNITY_SCOPE.md) |
 
 Engine issues that affect the game (not blocked on, but relevant): #214, #216, #217,
 #218, #270.
