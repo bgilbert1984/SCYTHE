@@ -24,7 +24,17 @@ R = "rf_corpus_reconstruction.py"
 ACCEPTED_IN_SCOPE = ()
 ACCEPTED_DEFERRED = {}
 
-EARNED_IDS = frozenset("S%d" % n for n in range(1, 22))
+# S33 and S34 RETIRED after run 3 at edf2c41a, which measured them at n=196
+# with failing sets EQUAL to S18's -- the reviewer refuses equal sets under
+# any allowance, and it is right to: the three mutations each drop one key
+# from the reconstruction authority list, and every rebuild in the suite then
+# refuses with RECONSTRUCTION_FIELD_NO_AUTHORITY whichever key it was. That is
+# one regime measured three times, not three properties. S18 stays as the
+# measurement of the regime; the entry-17 derived keys are covered by it, and
+# their direct witnesses (the two re-derivation tests in test_rf_eligible_set)
+# remain in the suite as tests, not as controls. The inventory gate refuses
+# either ID if it reappears.
+EARNED_IDS = frozenset("S%d" % n for n in range(1, 36)) - {"S33", "S34"}
 
 # S1 is declared broad BEFORE launch, with the witness that must keep firing.
 # A tolerance that is never applied matches every slope to its nearest
@@ -55,6 +65,18 @@ BROAD_DECLARED = {
                   "every plan carries a catalogue and every entry carries "
                   "its slope record",
         "witness": "test_the_plan_rebuilds_to_the_exact_nominal_object",
+    },
+    # Entry 17's intrinsically broad control, declared before run 3. S28
+    # moves every catalogued product off its RF position, so every reference
+    # entry in the fixture mismatches its comb, every fixture catalogue
+    # refuses, and every plan built on one refuses with it. Run 3 measured
+    # it at n=376 with the witness present.
+    "S28": {
+        "reason": "the RF position ignores the anchor, so every reference "
+                  "entry sits megahertz off its harmonic; the fixture "
+                  "catalogue refuses at the comb and every plan built on it "
+                  "refuses with it",
+        "witness": "test_the_rf_position_is_the_anchor_plus_the_intercept",
     },
 }
 SUBSUMED = {}
@@ -103,6 +125,30 @@ WITNESS = {
             "test_the_fit_uses_every_observation"),
     "S20": ("test_rf_promotion_envelope.py",
             "test_an_integer_slope_is_measured_and_matched"),
+    "S22": ("test_rf_promotion_envelope.py",
+            "test_a_reference_entry_declares_its_harmonic"),
+    "S23": ("test_rf_promotion_envelope.py",
+            "test_a_harmonic_on_any_other_class_is_refused"),
+    "S24": ("test_rf_promotion_envelope.py",
+            "test_a_reference_entry_above_the_harmonic_cap_refuses"),
+    "S25": ("test_rf_promotion_envelope.py",
+            "test_a_reference_entry_off_the_comb_refuses"),
+    "S26": ("test_rf_promotion_envelope.py",
+            "test_the_window_grows_with_the_harmonic"),
+    "S27": ("test_rf_promotion_envelope.py",
+            "test_at_the_window_is_inside_it"),
+    "S28": ("test_rf_promotion_envelope.py",
+            "test_the_rf_position_is_the_anchor_plus_the_intercept"),
+    "S29": ("test_rf_promotion_envelope.py",
+            "test_the_catalogue_calls_the_match_for_every_entry"),
+    "S30": ("test_rf_promotion_envelope.py",
+            "test_the_plan_and_the_catalogue_declare_one_reference"),
+    "S31": ("test_rf_promotion_envelope.py",
+            "test_an_entry_anchored_off_its_declared_tuning_refuses_at_the_plan"),
+    "S32": ("test_rf_promotion_envelope.py",
+            "test_an_entry_anchored_at_an_undeclared_tuning_refuses_at_the_plan"),
+    "S35": ("test_rf_promotion_envelope.py",
+            "test_a_slope_record_carries_a_positive_finite_anchor"),
     "S21": ("test_rf_promotion_envelope.py",
             "test_a_product_catalogued_at_an_undeclared_tuning_refuses"),
 }
@@ -194,6 +240,48 @@ CONTROLS = [
  # --- the catalogue's anchor: a tuning the plan does not declare ------------
  ("S21 a product at an undeclared tuning is placed anyway", [(E,
    "        if anchor is None:\n",
+   "        if False:\n")]),
+
+ # --- entry 17: the reference comb governs the reference class -------------
+ ("S22 a reference entry needs no harmonic", [(E,
+   "            if type(harmonic) is not int or harmonic < 1:\n",
+   "            if False:\n")]),
+ ("S23 a harmonic on any other class is accepted", [(E,
+   "        elif harmonic is not None:\n",
+   "        elif False:\n")]),
+ ("S24 the harmonic cap is not applied", [(E,
+   "        if harmonic > comb.harmonic_cap:\n",
+   "        if False:\n")]),
+ ("S25 the comb match is not applied", [(E,
+   "        if not comb.matches(rf_hz, harmonic):\n",
+   "        if False:\n")]),
+ ("S26 the match window does not grow with the harmonic", [(E,
+   "        return harmonic * self.reference_hz * self.reference_ppm * 1e-6\n",
+   "        return self.reference_hz * self.reference_ppm * 1e-6\n")]),
+ ("S27 at the window is outside it", [(E,
+   "        return distance <= window or math.isclose(distance, window, rel_tol=1e-9)\n",
+   "        return distance < window\n")]),
+ ("S28 the RF position ignores the anchor", [(E,
+   "        return self.anchor_center_frequency_hz + self.intercept_hz\n",
+   "        return self.intercept_hz\n")]),
+ ("S29 the catalogue matches no entry against its comb", [(E,
+   "        for spur in catalogue:\n"
+   "            spur.reference_match(self.reference)\n",
+   "        for spur in ():\n"
+   "            spur.reference_match(self.reference)\n")]),
+ ("S30 the plan accepts a catalogue matched against another reference", [(E,
+   "            if (comb.reference_hz, comb.reference_ppm) != (\n"
+   "                    self.reference_hz, self.reference_ppm):\n",
+   "            if False:\n")]),
+ ("S31 an anchor at another centre is the declared tuning", [(E,
+   "                if tuning.center_frequency_hz != spur.slope.anchor_center_frequency_hz:\n",
+   "                if False:\n")]),
+ ("S32 an anchor at an undeclared tuning passes the plan", [(E,
+   "                if tuning is None:\n",
+   "                if False:\n")]),
+ ("S35 an anchor need not be a frequency", [(E,
+   "        if (not _finite(self.anchor_center_frequency_hz)\n"
+   "                or self.anchor_center_frequency_hz <= 0):\n",
    "        if False:\n")]),
 ]
 

@@ -3,6 +3,7 @@
 import json
 import random
 import unittest
+from unittest import mock
 
 import test_scythe_verdict_vocabularies as vocab
 from rf_promotion_envelope import (
@@ -1997,17 +1998,30 @@ class ReferenceCombGovernsTheReferenceClassTests(unittest.TestCase):
         self.assertEqual(caught.exception.code, PLAN_REFERENCE_ABOVE_HARMONIC_CAP)
 
     def test_a_reference_entry_off_the_comb_refuses(self):
-        """One window plus one hertz away is outside it; one window away is
-        inside. The window is the harmonic's own, 460.8 Hz at 16."""
+        """One window plus one hertz away is outside it, a kilohertz away is
+        well outside it, and the neighbouring harmonic is megahertz away. The
+        window is the harmonic's own, 460.8 Hz at 16."""
         window = _COMB.match_window_hz(_REFERENCE_HARMONIC)
-        self._reference_entry(intercept=_REFERENCE_INTERCEPT_HZ + window).reference_match(_COMB)
-        with self.assertRaises(EnvelopeRefused) as caught:
-            self._reference_entry(
-                intercept=_REFERENCE_INTERCEPT_HZ + window + 1.0).reference_match(_COMB)
-        self.assertEqual(caught.exception.code, PLAN_REFERENCE_COMB_MISMATCH)
+        for intercept in (_REFERENCE_INTERCEPT_HZ + window + 1.0,
+                          _REFERENCE_INTERCEPT_HZ + 1_000.0,
+                          _REFERENCE_INTERCEPT_HZ - 1_000.0):
+            with self.assertRaises(EnvelopeRefused) as caught:
+                self._reference_entry(intercept=intercept).reference_match(_COMB)
+            self.assertEqual(caught.exception.code, PLAN_REFERENCE_COMB_MISMATCH)
         with self.assertRaises(EnvelopeRefused) as caught:
             self._reference_entry(harmonic=15).reference_match(_COMB)
         self.assertEqual(caught.exception.code, PLAN_REFERENCE_COMB_MISMATCH)
+
+    def test_a_reference_entry_at_the_window_is_on_the_comb(self):
+        """Exactly one window away, on either side, matches. Split from the
+        refusal cases so that a boundary that moved inward is caught by this
+        test alone and a match that stopped being applied by that one alone;
+        run 3 at edf2c41a measured them sharing a witness."""
+        window = _COMB.match_window_hz(_REFERENCE_HARMONIC)
+        for intercept in (_REFERENCE_INTERCEPT_HZ + window,
+                          _REFERENCE_INTERCEPT_HZ - window):
+            self.assertIsNone(
+                self._reference_entry(intercept=intercept).reference_match(_COMB))
 
     def test_the_match_is_against_a_comb_and_nothing_else(self):
         with self.assertRaises(EnvelopeRefused) as caught:
@@ -2049,6 +2063,27 @@ class ReferenceCombGovernsTheReferenceClassTests(unittest.TestCase):
                            selected_trials=good.selected_trials,
                            selection_seed=good.selection_seed)
         self.assertEqual(caught.exception.code, PLAN_ABSENT)
+
+    def test_the_catalogue_calls_the_match_for_every_entry(self):
+        """Whatever the match decides, the catalogue asks it of every entry
+        it holds. Checked by counting the calls rather than by a refusal,
+        because every refusal the match can raise is also raised by calling
+        it directly, and a catalogue that silently stopped asking would pass
+        every refusal test there is."""
+        good = _spur_allocation()
+        with mock.patch.object(CataloguedSpur, "reference_match",
+                               autospec=True) as asked:
+            SpurAllocation(reference=_COMB, catalogue=good.catalogue,
+                           epochs=good.epochs,
+                           per_stability_class=good.per_stability_class,
+                           eligible_trials=good.eligible_trials,
+                           selected_trials=good.selected_trials,
+                           selection_seed=good.selection_seed)
+        self.assertEqual(asked.call_count, len(good.catalogue))
+        self.assertEqual({call.args[0].spur_id for call in asked.call_args_list},
+                         {spur.spur_id for spur in good.catalogue})
+        for call in asked.call_args_list:
+            self.assertIs(call.args[1], _COMB)
 
     def test_an_uncalibrated_comb_refuses_the_catalogue_at_the_cap(self):
         good = _spur_allocation()
