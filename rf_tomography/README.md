@@ -323,15 +323,128 @@ paired differences with standard errors (`results/placement_mc_paired.md`):
 - Caveats: costs and tiers are assumptions; one emitter class, one scene; the fresh-bank
   comparison shares the generator, the 3 m grid and the solver with the search (the draws are new).
 
+## Sionna RT scenes (ray-traced physics instead of assumed errors)
+
+`propagation/sionna_scene.py` builds the *same* four-tower `Scene` in Sionna RT (cube buildings,
+ground plane, ITU-R P.2040 permittivity/conductivity evaluated at the scene frequency), traces
+many emitters to many receivers in batches, and returns a numpy `PathTable`
+(`measurements/raytraced.py`: per-path power, absolute delay, arrival angles, interaction
+bitmask). The core stays numpy-only; Sionna lives in its own venv.
+
+**Environment (CPU only, no root).** The system lacks `libatomic.so.1`, which Dr.Jit needs, so a
+private copy is extracted from the RHEL package; the LLVM backend needs `DRJIT_LIBLLVM_PATH`:
+
+    /usr/bin/python3.12 -m venv ~/.venvs/sionna-rt && ~/.venvs/sionna-rt/bin/pip install sionna-rt
+    cd /tmp && dnf download libatomic && rpm2cpio libatomic-*.x86_64.rpm | cpio -idm
+    mkdir -p ~/.venvs/sionna-rt/extlib && cp -P usr/lib64/libatomic.so.1* ~/.venvs/sionna-rt/extlib/
+    # ~/.venvs/sionna-rt/env.sh (source it):
+    export LD_LIBRARY_PATH="$HOME/.venvs/sionna-rt/extlib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+    export DRJIT_LIBLLVM_PATH=/lib64/libLLVM.so.21.1
+
+Tested with sionna-rt 2.2.0, mitsuba 3.9.1, drjit 1.5.0. Memory: path discovery converges by
+50k rays per emitter; diffuse tracing needs about 2 GB per process at 300k rays with 2 emitters
+per batch. 500k rays x 4 emitters used 4 GB and was OOM-killed on this 7.6 GB host, and the
+kernel also killed an unrelated benchmark running at the same time (silently; the failure looked
+like a stale result file). Do not run diffuse tracing next to other jobs.
+
+    source ~/.venvs/sionna-rt/env.sh
+    PYTHONPATH=. ~/.venvs/sionna-rt/bin/python -m unittest rf_tomography.tests.test_sionna   # physics validation
+    PYTHONPATH=. ~/.venvs/sionna-rt/bin/python -m rf_tomography.benchmarks.rt_trace --facade glass            # ~3 min, 400 emitters x 57 sites
+    PYTHONPATH=. ~/.venvs/sionna-rt/bin/python -m rf_tomography.benchmarks.rt_trace --facade concrete --scattering 0.3 --samples 300000 --tx-batch 2
+    .venv/bin/python -m rf_tomography.benchmarks.rt_calibration    # any venv, reads results/rt/*.npz (git-ignored, regenerate)
+    OMP_NUM_THREADS=1 .venv/bin/python -m rf_tomography.benchmarks.rt_eval   # ~8 min
+
+**Validation against hand-computable physics** (`tests/test_sionna.py`): LOS gain matches Friis to
+0.05 dB, delay to 1 mm (Sionna delays are float32), arrival angles to ~1e-4 rad and follow the
+convention "from the receiver toward the source"; the ground-bounce path exists at exactly the
+image-source delay and angles (elevation below the horizon); batching changes nothing.
+**The cross-check of my image-source reflection generator found a real bug**: it accepted
+facade reflections whose legs cross the reflecting building. Fixed, regression-tested, and
+all downstream results regenerated (see commit `607fc847`).
+
+**What the ray-traced city says about the error model** (400 emitters x 57 sites, 915 MHz;
+`results/rt_calibration_*.md`). "Solver-LOS" is the solver's own geometric belief.
+
+| quantity | assumed so far | concrete facades | glass facades |
+|---|---|---|---|
+| strongest path is direct, solver-LOS links | outliers 10-25% | 0.98 | 0.97 |
+| P(elevation error > 5 deg), solver-LOS | 0.01 Gaussian + outliers | 0.009 | 0.019 |
+| P(TOA excess > 10 m), solver-LOS | 0.10-0.25 outliers | 0.002 | 0.000 |
+| angle floor with a 3 m / 1 m aperture (beam peak, errors < 5 deg) | 2 deg | 0.4 / 0.5 deg | 0.7 / 0.8 deg |
+| strongest path is a reflection, street receivers | 15-35% (refl_mild/strong) | 0.02 | 0.08 |
+| path-loss exponent / RSS residual sigma, solver-LOS | 2.7 / 6 dB | 4.6 / 8.7 dB | 2.9 / 4.1 dB |
+| solver-NLOS: strongest path direct / first arrival direct | not trusted | 0.24 / 0.73 | 0.29 / 1.00 |
+| solver-NLOS: P(TOA excess > 10 m) | 0.20-0.25 | 0.20 | 0.00 |
+
+- **The assumed impairments are harsher than the tracer produces.** Angular and delay floors are
+  2.5-10x smaller than assumed (2 deg, 3 m), angle outlier rates 3-30x smaller (delay outliers
+  far more), reflection-dominated receivers 2-15x rarer. The 'moderate' and 'severe' presets should be read as stress tests, not as this city.
+- **Where it does bite:** street-level receivers under glass facades, where the ground bounce
+  dominates the strongest path 8% of the time. That is the physical version of the reflection
+  failure the correlated benchmark simulates.
+- **Facade material matters more than any noise parameter I assumed.** Concrete gives a path-loss
+  exponent of 4.6 (emitters inside a thick-walled box), far from the 2.7 the solver assumes; glass
+  is close. NLOS delay is untrustworthy behind concrete and nearly usable behind glass.
+- **NLOS angles are unusable** in both (median azimuth error 20-38 deg), consistent with the
+  solver ignoring them.
+- 30% diffuse scattering changes none of this noticeably (the strongest path stays direct), so
+  the first-order picture is not an artifact of a purely specular tracer.
+
+**The solvers on ray-traced observations** (`rt_eval.py`; 400 emitters, no synthetic multipath at
+all; RSS = total power, TOA = first arrival within 20 dB, AoA = strongest path or the beam
+peak; estimation noise and both nuisance offsets added; the solver is unchanged and knows
+nothing about the tracer). Top-1 / 90%-set coverage:
+
+| table | AoA | layout | gaussian | robust |
+|---|---|---|---|---|
+| concrete | strongest path | analytic@20 | 0.86 / 0.92 | 0.92 / 0.99 |
+| concrete | strongest path | 5 street arrays | 0.99 / 1.00 | 0.97 / 1.00 |
+| concrete | strongest path | random median@14 | 0.83 / 0.99 | 0.83 / 1.00 |
+| glass | strongest path | analytic@20 | 0.92 / 0.97 | 0.96 / 1.00 |
+| glass | strongest path | 5 street arrays | 0.83 / 0.87 | 0.93 / 0.98 |
+| glass | beam peak | analytic@20 | 0.86 / 0.94 | 0.94 / 1.00 |
+| glass | beam peak | 5 street arrays | 0.65 / 0.78 | 0.73 / 0.98 |
+| glass | beam peak | random median@14 | 0.70 / 0.94 | 0.73 / 0.99 |
+
+- **The robust solver is at least as good as the Gaussian one in every one of the 8 ray-traced
+  settings for the optimised layouts**, and it is the one that keeps 90% coverage where it matters:
+  5 street arrays under glass go from coverage 0.78-0.88 (Gaussian, floor bias -0.7 to -1.4) to
+  0.98-0.99 (robust, bias -0.2 to -0.5).
+- **Both solvers are conservative on this data**: coverage is ~1.0 and sets are 1.9-3 floors wide
+  while top-1 is 0.9+, because the solver's assumed floors (2 deg, 3 m) are several times larger
+  than what the tracer produces. Calibrating the floors to ray-traced statistics should sharpen
+  it; not done yet, and real clutter would push the truth back toward the assumed values.
+- **Layout ranking is not invariant to the physics.** The 5 street arrays are the best layout on
+  concrete (0.92-0.99) and the worst of the three structured layouts on glass with beam-peak
+  AoA (0.73 vs 0.91-0.94), because of the ground bounce. The analytic@20 layout (it includes
+  rooftop receivers) is the only one that stays at 0.92-0.96 across all 8 settings. A placement that relies on street-level
+  vertical arrays should not be trusted before the facade material is known.
+- Placement quality still matters: random median@14 is 0.70-0.84 top-1 with sets of 3.6-4.5
+  floors (7 for the paranoid solver) vs 0.88-0.96 (robust) and 1.9-2.5 floors for the
+  optimised layouts.
+
+**Limits of all of the above.** One synthetic scene, one frequency (915 MHz), concrete/glass
+extrapolated below 1 GHz from P.2040, emitters inside *closed* boxes (no windows; wall
+penetration is a thin-slab model), no foliage, vehicles or indoor clutter, specular + 30%
+diffuse scattering only. Observables are my own simplified sensor models (AoA without path
+phases, a fixed first-arrival threshold). The scene is not real Manhattan geometry. These are
+physically-grounded cross-checks of the earlier assumptions, not field results.
+
 ## Next
 
-0. Make `identifiability`, `placement`, `impairments`, `robust`, `correlated` and `placement_mc`
-   read their assumptions from one calibrated config once real receiver data exist.
-1. Replace the log-distance model with Sionna RT scenes (same Scene/Receiver API); also the
-   source of real reflection geometry and delay spread.
-2. Joint reflection + calibration-offset model, and a vertical-bias check that does not rely
-   on posterior width alone (placement cannot fix the residual 1-2 floor downward bias).
-3. Emitters in more than one building (Phase C cross-building correlation).
-4. Add GLocFM-style learned scoring and RF-3DGS fields only if they beat this baseline.
+0. Make `identifiability`, `placement`, `impairments`, `robust`, `correlated`, `placement_mc` and
+   `rt_eval` read their assumptions from one calibrated config.
+1. Calibrate the solver's floors and outlier beliefs to ray-traced statistics (2 deg / 3 m / 6 dB
+   are several times too large for this tracer) and re-test whether sharper sets stay calibrated;
+   then add clutter (diffuse + foliage/vehicles) until the truth stops being easier than assumed.
+2. More scene realism: real city geometry (OSM footprints), mixed glass/concrete facades, windows
+   so interior-to-exterior paths are physical, other frequencies (433 MHz, 2.4 GHz), coherent
+   path phases for AoA, and feeding RT reflection statistics back into the correlated generator
+   (its refl_mild/refl_strong are 2-15x the rates measured here).
+3. Joint reflection + calibration-offset model, and a vertical-bias check that does not rely on
+   posterior width alone (placement cannot fix the residual 1-2 floor downward bias).
+4. Placement that is robust to the facade material (the street-array layout is not).
+5. Emitters in more than one building (Phase C cross-building correlation).
+6. Add GLocFM-style learned scoring and RF-3DGS fields only if they beat this baseline.
    (Both papers report indoor/Wi-Fi results: RF-3DGS ~2 ms render after ~3 min training;
    GLocFM -49.5%/-48.8% mean 3D error on its synthetic and NeRF2 sets. Neither is outdoor.)
