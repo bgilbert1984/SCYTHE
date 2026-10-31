@@ -430,13 +430,93 @@ diffuse scattering only. Observables are my own simplified sensor models (AoA wi
 phases, a fixed first-arrival threshold). The scene is not real Manhattan geometry. These are
 physically-grounded cross-checks of the earlier assumptions, not field results.
 
+## Calibrating the solver to the ray-traced statistics
+
+`benchmarks/rt_solver_calibration.py` fits the solver's beliefs to each facade table from the
+links the solver itself would trust (geometric LOS), then re-tests it. Fitted: angular floor and
+outlier rate (beam-peak AoA, 3 m / 1 m apertures pooled), delay floor and outlier rate, the
+receiver-level non-direct rate (-> NLOS prior), the NLOS angle/delay widths, and the log-distance
+RSS model (exponent, LOS sigma, NLOS offset+sigma). Outlier/NLOS beliefs are doubled (safety factor
+2); floors are clamped at 0.25 deg / 0.5 m so a clean table can never produce a "perfect" sensor
+(the 3 m / 10 ns hardware sync noise is separate and unchanged).
+
+    OMP_NUM_THREADS=1 .venv/bin/python -m rf_tomography.benchmarks.rt_solver_calibration   # ~4 min -> results/rt_solver_calibration.{json,md}
+
+Evaluation is out of sample for the emitters: fit on even-numbered emitters, test on the 200
+odd ones; and cross-table: fit on the *other* facade table. All variants see identical observations
+(beam-peak AoA, ray-traced RSS/TOA plus estimation noise). Fitted beliefs (even emitters):
+
+| belief | default | concrete | glass |
+|---|---|---|---|
+| angle floor (deg) | 2.0 | 0.40 | 0.63 |
+| delay floor (m) | 3.0 | 0.5 (clamped; measured ~0) | 0.5 (clamped) |
+| angle outlier rate | 0.10-0.25 | 0.020 | 0.036 |
+| delay outlier rate | 0.10-0.25 | 0.002 | 0.000 |
+| non-direct rate, solver-LOS | 0.10-0.25 | 0.023 | 0.036 |
+| path-loss exponent | 2.7 | 4.5 | 2.85 |
+| RSS sigma LOS / NLOS incl. offset (dB) | 6 / 8 | 8.8 / 8.2 | 4.1 / 5.7 |
+| robust eps / pi_nlos | 0.15 / 0.15 | 0.04 / 0.05 | 0.07 / 0.07 |
+
+On the odd (test) emitters, top-1 / 90%-set coverage / mean 90%-set size in floors:
+
+| table | layout | robust, default beliefs | robust, calibrated (own) | robust, calibrated (other table) | gaussian, calibrated (own) |
+|---|---|---|---|---|---|
+| concrete | analytic@14 | 0.90 / 1.00 / 2.4 | 0.98 / 1.00 / 1.1 | 0.97 / 1.00 / 1.1 | 0.89 / 0.89 / 1.0 |
+| concrete | analytic@20 | 0.94 / 1.00 / 1.9 | 0.99 / 0.99 / 1.0 | 0.98 / 1.00 / 1.0 | 0.89 / 0.89 / 1.0 |
+| concrete | 5 street arrays | 0.94 / 1.00 / 3.0 | 0.94 / 0.96 / 1.1 | 0.94 / 0.98 / 1.2 | 0.94 / 0.95 / 1.1 |
+| concrete | random median@14 | 0.80 / 1.00 / 4.5 | 0.89 / 0.97 / 1.8 | 0.89 / 0.97 / 2.0 | 0.84 / 0.96 / 1.4 |
+| glass | analytic@14 | 0.92 / 1.00 / 2.4 | 0.97 / 0.99 / 1.1 | 0.94 / 0.98 / 1.1 | 0.90 / 0.92 / 1.1 |
+| glass | analytic@20 | 0.94 / 1.00 / 1.9 | 0.97 / 0.99 / 1.0 | 0.96 / 0.97 / 1.1 | 0.88 / 0.89 / 1.1 |
+| glass | 5 street arrays | 0.77 / 0.98 / 3.5 | 0.81 / 0.93 / 1.6 | 0.83 / 0.90 / 1.4 | 0.69 / 0.73 / 1.3 |
+| glass | random median@14 | 0.73 / 1.00 / 4.7 | 0.80 / 0.96 / 2.2 | 0.77 / 0.91 / 2.1 | 0.73 / 0.86 / 1.7 |
+
+- **On a world that is as clean as the tracer, calibration works and transfers.** The robust solver
+  with fitted beliefs identifies the floor 97-99% of the time with credible sets of about one floor,
+  against 1.9-2.4 floors for the default beliefs, with coverage still 0.99-1.00 on the analytic layouts.
+  Beliefs fitted on the *other* facade material do almost as well on the analytic layouts
+  (top-1 0.94-0.98, coverage 0.97-1.00; weaker layouts 0.77-0.89 with coverage 0.90-0.98),
+  because what matters (angle/delay floors, outlier rates) is similar across the two; the very
+  different RSS exponent (4.5 vs 2.85) barely matters.
+- **The Gaussian solver cannot use the calibration.** With fitted floors it is sharp (1.0-1.1 floors)
+  but its coverage is 0.89-0.92 on the analytic layouts (0.73 on glass street arrays), with a
+  +0.25 to +0.29 floor bias on concrete, because the 2-4% outliers the tracer produces are not Gaussian.
+- **Street arrays under glass stay the weak case** (top-1 0.81-0.83, bias about -0.35 floors,
+  coverage 0.90-0.93): calibration sharpens the sets but cannot remove the ground-bounce bias.
+
+**Stress test: what if reality is dirtier than the tracer?** The tracer has no clutter, so fitting
+to it makes the solver sharp exactly where it may be wrong. Extra noise and heavy-tailed outliers
+were added on top of the ray-traced observations (mild: +1 deg, +2 m, 5% outliers; strong: +2 deg,
++4 m, 15% outliers; the severities are assumptions) and three belief sets compared, all robust
+solvers: default, calibrated, and calibrated with floors x3. Coverage / mean set size, analytic@20:
+
+| table | stress | default beliefs | calibrated | calibrated, floors x3 |
+|---|---|---|---|---|
+| concrete | none | 1.00 / 1.9 | 0.99 / 1.0 | 1.00 / 1.2 |
+| concrete | mild | 0.99 / 2.0 | 0.89 / 1.3 | 0.96 / 1.4 |
+| concrete | strong | 0.95 / 2.5 | 0.66 / 1.9 | 0.84 / 1.9 |
+| glass | none | 1.00 / 1.9 | 0.98 / 1.0 | 1.00 / 1.6 |
+| glass | mild | 0.99 / 2.0 | 0.94 / 1.3 | 0.98 / 1.7 |
+| glass | strong | 0.94 / 2.4 | 0.68 / 1.8 | 0.89 / 2.0 |
+
+- **Calibration to an ideal tracer is fragile.** With mild extra dirt coverage falls to 0.82-0.94
+  across layouts (default beliefs stay at 0.97-1.00); with strong dirt it falls to 0.58-0.78 and
+  top-1 is *worse* than the default's (concrete analytic@20: 0.41 vs 0.55), i.e. confidently wrong.
+- **Calibrated with floors x3 is the practical compromise**: 0.93-0.98 coverage under mild stress
+  with sets of 1.4-3.2 floors (default: 2.0-3.7), but 0.81-0.89 under strong stress, where only
+  the default's larger floors still cover (0.92-0.95). The Gaussian solver is overconfident under
+  any stress (coverage 0.40-0.75).
+- **So the right floors cannot be chosen from simulation alone.** They depend on how dirty the real
+  world is, which needs field data. The method (fit from observed vs. direct-path residuals,
+  inflate, test out of sample) is what this establishes; the fitted numbers are properties of this
+  idealised tracer.
+
 ## Next
 
 0. Make `identifiability`, `placement`, `impairments`, `robust`, `correlated`, `placement_mc` and
    `rt_eval` read their assumptions from one calibrated config.
-1. Calibrate the solver's floors and outlier beliefs to ray-traced statistics (2 deg / 3 m / 6 dB
-   are several times too large for this tracer) and re-test whether sharper sets stay calibrated;
-   then add clutter (diffuse + foliage/vehicles) until the truth stops being easier than assumed.
+1. Measured-data calibration: the fit-and-inflate procedure is in place
+   (`rt_solver_calibration.calibrate`), but the right inflation depends on real clutter. Needs real
+   observed-vs-direct-path residuals (or a clutter model validated against measurements).
 2. More scene realism: real city geometry (OSM footprints), mixed glass/concrete facades, windows
    so interior-to-exterior paths are physical, other frequencies (433 MHz, 2.4 GHz), coherent
    path phases for AoA, and feeding RT reflection statistics back into the correlated generator
