@@ -311,7 +311,7 @@ _SERVICE_LOCK = threading.Lock()
 _SERVICE_MAP = {
     'stream_relay': {
         'script': 'ws_ingest.py',
-        'args': lambda u: ['--host', '0.0.0.0', '--port', str(u.port or 8765)],
+        'args': lambda u: ['--host', '127.0.0.1', '--port', str(u.port or 8765)],
     },
     'mcp_ws': {
         'script': 'rf_voxel_processor.py',
