@@ -26,6 +26,9 @@ UNSUPPORTED = {
     "clear_scope_cache": {},
     "reinforce_edge": {"src": "a", "dst": "b"},
     "prune_below_weight": {"threshold": 0.2},
+    "run_tak_ml": {"flow_id": "f1"},
+    "query_recent_edges": {},
+    "query_scope_stats": {"scope_id": "s1"},
 }
 
 
@@ -40,7 +43,7 @@ NEEDS_JSONSCHEMA = unittest.skipUnless(importlib.util.find_spec("jsonschema"),
 class UnsupportedCapabilityTest(unittest.TestCase):
     def test_bare_engine_lacks_every_method_these_tests_rely_on(self):
         engine = HypergraphEngine()
-        for method in ("get_neighbors", "create_scope", "destroy_scope", "list_scopes", "set_decay_lambda",
+        for method in ("run_ml_inference", "query_edges_since", "get_scope_stats", "get_neighbors", "create_scope", "destroy_scope", "list_scopes", "set_decay_lambda",
                        "reload_rules", "clear_scope_cache", "reinforce_edge", "prune_below_weight",
                        "scrub_scope_before_time", "set_scope_filter"):
             self.assertFalse(hasattr(engine, method), method)
@@ -79,6 +82,39 @@ class UnsupportedCapabilityTest(unittest.TestCase):
         scope = reg.execute(engine, "subscribe_scope", {}, agent_mode="admin")["scope_id"]
         self.assertEqual(reg.execute(engine, "list_active_scopes", {})["scopes"], [scope])
         self.assertEqual(reg.execute(engine, "get_entity_neighbors", {"entity_id": "x"})["neighbors"], [])
+
+    def test_degree_and_edge_lookup_unsupported_only_when_absent(self):
+        class NoDegree:
+            pass
+
+        reg = _registry(NoDegree())
+        for name, params in (("query_hot_entities", {}), ("get_edge_by_id", {"edge_id": "e"})):
+            with self.subTest(tool=name), self.assertRaises(mcp_registry.CapabilityUnsupported):
+                reg.execute(NoDegree(), name, params)
+        engine = HypergraphEngine()      # supported, nothing matched: legitimate empty / not-found
+        reg = _registry(engine)
+        self.assertEqual(reg.execute(engine, "query_hot_entities", {})["entities"], [])
+        self.assertFalse(reg.execute(engine, "get_edge_by_id", {"edge_id": "nope"})["ok"])
+
+    def test_present_query_capabilities_execute(self):
+        class Engine:
+            degree = {"a": 2}
+
+            def run_ml_inference(self, flow_id):
+                return {"ops": 3, "edges": 1}
+
+            def query_edges_since(self, since, min_weight):
+                return []
+
+            def get_scope_stats(self, scope_id):
+                return {"scope_id": scope_id, "node_count": 1, "edge_count": 0}
+
+        engine = Engine()
+        reg = _registry(engine)
+        self.assertEqual(reg.execute(engine, "run_tak_ml", {"flow_id": "f"}, agent_mode="admin"),
+                         {"ops_committed": 3, "edges_added": 1})
+        self.assertEqual(reg.execute(engine, "query_recent_edges", {}), {"edges": [], "count": 0})
+        self.assertEqual(reg.execute(engine, "query_scope_stats", {"scope_id": "s"})["node_count"], 1)
 
     def test_unsupported_is_a_runtime_error_for_existing_callers(self):
         self.assertTrue(issubclass(mcp_registry.CapabilityUnsupported, RuntimeError))
