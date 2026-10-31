@@ -77,35 +77,66 @@ def wrap_pi(x: np.ndarray) -> np.ndarray:
     return (x + np.pi) % (2 * np.pi) - np.pi
 
 
+def column_sigma(kind: str, r: Receiver, los: bool, dist_m: float,
+                 emitter: EmitterClass, sensing: SensingParams,
+                 prop: PropagationParams, inflate_unmodelled: bool = False) -> float:
+    """Std-dev of one measurement column.
+
+    inflate_unmodelled adds the sensing.unmodelled_* biases in quadrature. It is for
+    *design* (robust placement) only; the benchmark inference keeps it False so that
+    mismatch runs measure what happens when the solver is unaware of the bias.
+    """
+    lam = wavelength(emitter.freq_hz)
+    n_snap = max(1.0, emitter.bandwidth_hz * sensing.t_obs_s)
+    snr = 10 ** (snr_db_at(emitter.ref_snr_db, dist_m, prop) / 10.0)
+    if kind == "rss":
+        return prop.shadow_sigma_db_los if los else prop.shadow_sigma_db_nlos
+    if kind in ("az", "el"):
+        ap = r.horizontal_aperture_m if kind == "az" else r.vertical_aperture_m
+        s_arr = lam / (2 * math.pi * ap * math.sqrt(2.0 * snr * n_snap))
+        s = math.hypot(s_arr, math.radians(sensing.multipath_angle_sigma_deg))
+        if inflate_unmodelled:
+            s = math.hypot(s, math.radians(sensing.unmodelled_angle_bias_deg))
+        return s
+    beta_rms = emitter.bandwidth_hz / math.sqrt(12.0)
+    s_crlb_t = 1.0 / (2 * math.pi * beta_rms * math.sqrt(2.0 * snr * n_snap))
+    s = math.hypot(math.hypot(C * r.sync_sigma_s, C * s_crlb_t),
+                   sensing.multipath_range_sigma_m)
+    if inflate_unmodelled:
+        s = math.hypot(s, sensing.unmodelled_range_bias_m)
+    return s
+
+
 def noise_covariance(cols: Sequence[Col], receivers: Sequence[Receiver],
                      los: Sequence[bool], dist_to_truth: Sequence[float],
                      emitter: EmitterClass, sensing: SensingParams,
-                     prop: PropagationParams) -> np.ndarray:
-    lam = wavelength(emitter.freq_hz)
-    n_snap = max(1.0, emitter.bandwidth_hz * sensing.t_obs_s)
-    beta_rms = emitter.bandwidth_hz / math.sqrt(12.0)
-    mp_ang = math.radians(sensing.multipath_angle_sigma_deg)
+                     prop: PropagationParams, inflate_unmodelled: bool = False) -> np.ndarray:
     M = len(cols)
     C_ = np.zeros((M, M))
     rss_idx, toa_idx = [], []
     for j, (i, kind) in enumerate(cols):
-        r = receivers[i]
-        snr = 10 ** (snr_db_at(emitter.ref_snr_db, dist_to_truth[i], prop) / 10.0)
-        if kind == "rss":
-            s = prop.shadow_sigma_db_los if los[i] else prop.shadow_sigma_db_nlos
-            rss_idx.append(j)
-        elif kind in ("az", "el"):
-            ap = r.horizontal_aperture_m if kind == "az" else r.vertical_aperture_m
-            s_arr = lam / (2 * math.pi * ap * math.sqrt(2.0 * snr * n_snap))
-            s = math.hypot(s_arr, mp_ang)
-        else:
-            s_crlb_t = 1.0 / (2 * math.pi * beta_rms * math.sqrt(2.0 * snr * n_snap))
-            s = math.hypot(math.hypot(C * r.sync_sigma_s, C * s_crlb_t),
-                           sensing.multipath_range_sigma_m)
-            toa_idx.append(j)
+        s = column_sigma(kind, receivers[i], los[i], dist_to_truth[i], emitter,
+                         sensing, prop, inflate_unmodelled)
+        (rss_idx if kind == "rss" else toa_idx if kind == "toa" else []).append(j)
         C_[j, j] = s * s
     if rss_idx:
         C_[np.ix_(rss_idx, rss_idx)] += prop.unknown_offset_sigma_db ** 2
     if toa_idx:
         C_[np.ix_(toa_idx, toa_idx)] += CLOCK_OFFSET_SIGMA_M ** 2
     return C_
+
+
+def analytic_jacobian(point, receiver_pos, kind: str, prop: PropagationParams) -> np.ndarray:
+    """d(measurement)/d(emitter position) for one receiver/kind, shape (3,)."""
+    d = np.asarray(point, float) - np.asarray(receiver_pos, float)
+    r = max(float(np.linalg.norm(d)), 1e-6)
+    if kind == "rss":
+        return -10.0 * prop.path_loss_exp / math.log(10.0) * d / (r * r)
+    if kind == "toa":
+        return d / r
+    if kind == "az":
+        q = max(d[0] ** 2 + d[1] ** 2, 1e-9)
+        return np.array([-d[1] / q, d[0] / q, 0.0])
+    u = np.clip(d[2] / r, -1 + 1e-9, 1 - 1e-9)  # el = asin(dz/r)
+    ez = np.array([0.0, 0.0, 1.0])
+    return (ez / r - d[2] * d / r ** 3) / math.sqrt(1 - u * u)

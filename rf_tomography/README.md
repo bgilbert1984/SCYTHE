@@ -18,7 +18,7 @@ an exact grid posterior `P(floor | m, G)` with x,y marginalised.
 Layout: `geometry/` scene + LOS · `propagation/` log-distance baseline ·
 `measurements/` receivers/emitters · `localization/` forward model + CRLB ·
 `uncertainty/` floor posterior · `benchmarks/` layouts + runner ·
-`correlation/` (empty: Phase C).
+`placement/` receiver-placement optimiser · `correlation/` (empty: Phase C).
 
 ### Results (40 trials x 4 buildings per cell, nominal assumptions)
 
@@ -62,8 +62,53 @@ Sensitivity to the assumed angular multipath floor (915 MHz emitter, ad hoc run)
   contain truth ~90%) are applied as verdict thresholds; they are engineering
   targets, not published figures.
 
+## Receiver-placement optimiser
+
+Chooses receivers from 57 candidate sites (street, rooftop corners, facade windows)
+x 3 capability tiers (`rss_az`, `tdoa`, `array`) under a cost budget. Costs are
+**assumptions**: tier 1/2/4, plus access cost street 0 / roof 1 / facade 2.
+
+Search uses a fast analytic objective: per-probe expected floor-correct probability
+`erf(h / (2 sqrt2 sigma_z))` from the position CRLB, with per-receiver Fisher
+contributions precomputed (nuisance offsets via Woodbury). Greedy-by-gain-per-cost,
+then swap local search; deterministic, about 4 s per budget. The analytic Jacobian is
+unit-tested against the finite-difference CRLB (agreement within 0.2%).
+
+    .venv/bin/python -m unittest rf_tomography.tests.test_placement
+    .venv/bin/python -m rf_tomography.benchmarks.placement   # ~1 min -> results/placement.{json,md}
+
+Validation against the full grid-posterior Monte Carlo (915 MHz emitter, 120 trials per
+layout, so top-1 standard error is about +-0.045; differences below ~0.1 are noise):
+
+| layout | cost | MC top-1 | MC top-3 | top-1 / top-3 with unmodelled bias |
+|---|---|---|---|---|
+| optimised, 5 receivers | 14 | 0.66 | 0.97 | 0.48 / 0.90 |
+| optimised, 6 receivers | 20 | 0.78 | 1.00 | 0.52 / 0.95 |
+| hand-built: 5 street arrays | 20 | 0.54 | 0.92 | 0.32 / 0.73 |
+| hand-built: 5 street arrays + 2 roof arrays | 30 | 0.79 | 1.00 | 0.51 / 0.97 |
+| random, median of 200 | 14 | 0.51 | 0.86 | 0.32 / 0.71 |
+| random, best of 200 (by analytic score) | 14 | 0.57 | 1.00 | 0.44 / 0.91 |
+
+- The analytic score ranks all 19 evaluated layouts like Monte Carlo does
+  (Spearman 0.96 nominal, 0.94 for the robust objective vs. mismatch Monte Carlo).
+- Optimised layouts match the hand-built roof layout at about two thirds of the cost.
+  The recurring pattern: one street-level array next to the intersection, a rooftop
+  receiver on a tall tower, and cheap RSS/azimuth receivers for geometry diversity.
+- The optimiser is only modestly better than the best of 200 random layouts
+  (0.64 vs 0.63 analytic at cost 14). Most of the value is avoiding bad layouts.
+- Designing for the mismatch (`robust=True`, inflating variances by the unmodelled
+  bias) picks nearly the same layouts and does not help. Placement cannot fix a
+  model that is wrong: under unmodelled bias every layout loses ~0.15-0.25 top-1 and
+  90% credible sets cover only ~0.78. That needs the model-error handling in Next.
+- Weakest regions at cost 14: upper floors of the tallest tower (C:high 0.51) and
+  low floors of A and C (~0.58). Spend extra budget there.
+- In-sample caveat: probes are one fixed set of 96 points, and the scene, noise
+  floors and costs are all synthetic.
+
 ## Next
 
+0. Make `identifiability` and `placement` read their sensing assumptions from one
+   calibrated config once real receiver data exist.
 1. Replace the log-distance model with Sionna RT scenes (same Scene/Receiver API).
 2. Add NLOS classification error and non-Gaussian multipath to the truth generator.
 3. Receiver-placement optimiser: maximise top-3 accuracy over candidate layouts.
