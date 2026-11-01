@@ -86,5 +86,86 @@ class Meshes(unittest.TestCase):
                          ["masonry", "curtain", "glass_curtain"])
 
 
+
+class PunchedWindows(unittest.TestCase):
+    """Patterns differ only in the SHAPE of the glazing: area matched, walls tiled without overlap."""
+
+    @staticmethod
+    def tower(pattern, facade="curtain", n=12, h=44.4, seed_name="T"):
+        return PolygonBuilding(seed_name, ((0, 0), (31, 0), (31, 17), (0, 17)), h, n, facade, pattern=pattern)
+
+    def areas(self, b):
+        m = building_meshes(b)
+        return (triangle_areas(*m["glass"]).sum() if "glass" in m else 0.0,
+                triangle_areas(*m["concrete"]).sum() - abs(b.area))        # concrete minus the roof
+
+    def test_glazed_area_is_identical_for_every_pattern_and_equals_rho_times_wall_area(self):
+        for facade in ("masonry", "curtain", "glass_curtain"):
+            walls = 2 * (31 + 17) * 44.4
+            for pattern in ("ribbon", "grid", "staggered", "random"):
+                g, c = self.areas(self.tower(pattern, facade))
+                self.assertAlmostEqual(g, GLAZING[facade] * walls, places=6, msg=(facade, pattern))
+                self.assertAlmostEqual(g + c, walls, places=6, msg=(facade, pattern))     # no gaps, no overlap in area
+
+    def test_walls_are_tiled_exactly_once_by_point_sampling(self):
+        rng = np.random.default_rng(0)
+        for pattern in ("grid", "staggered", "random"):
+            b = self.tower(pattern)
+            m = building_meshes(b)
+            # south wall: y = 0, x in [0, 31], z in [0, H]: count the (axis-aligned) wall quads covering random points
+            quads = []
+            for mat in ("concrete", "glass"):
+                vv, ff = m[mat]
+                for tri in ff:
+                    p = vv[tri]
+                    if np.allclose(p[:, 1], 0.0):
+                        quads.append((p[:, 0].min(), p[:, 0].max(), p[:, 2].min(), p[:, 2].max(), mat))
+            # a quad = two triangles with identical bounding box: counted twice, so divide by two
+            for _ in range(1500):
+                x, z = rng.uniform(0.01, 30.99), rng.uniform(0.01, 44.39)
+                hit = sum(1 for x0, x1, z0, z1, _m in quads if x0 < x < x1 and z0 < z < z1)
+                self.assertEqual(hit, 2, (pattern, x, z))
+
+    def test_windows_stay_inside_their_wall_and_inside_their_floor(self):
+        for pattern in ("grid", "staggered", "random"):
+            b = self.tower(pattern)
+            v, f = building_meshes(b)["glass"]
+            south = np.isclose(v[:, 1], 0.0)
+            self.assertTrue(np.all(v[:, 0] >= -1e-9) and np.all(v[:, 0] <= 31 + 1e-9))
+            fh = b.floor_height
+            local = np.mod(v[:, 2], fh)
+            rho = GLAZING["curtain"]
+            sill = SPAN * (1 - math.sqrt(rho)) * fh
+            ok = np.isclose(local, sill, atol=1e-6) | np.isclose(local, sill + math.sqrt(rho) * fh, atol=1e-6)
+            self.assertTrue(ok.all())
+
+    def test_stagger_shifts_alternate_floors_and_random_is_seeded_and_jittered(self):
+        def starts(b, floor):
+            v, f = building_meshes(b)["glass"]
+            sel = np.isclose(v[:, 1], 0.0) & (np.floor(v[:, 2] / b.floor_height + 1e-6) == floor)
+            return np.unique(np.round(v[sel, 0], 6))
+        g = self.tower("grid")
+        s = self.tower("staggered")
+        self.assertTrue(np.allclose(starts(g, 2), starts(g, 3)))
+        self.assertFalse(np.allclose(starts(s, 2)[:3], starts(s, 3)[:3]))
+        r1, r2, r3 = self.tower("random"), self.tower("random"), self.tower("random", seed_name="U")
+        self.assertTrue(np.array_equal(starts(r1, 4), starts(r2, 4)))                    # deterministic
+        self.assertFalse(np.array_equal(starts(r1, 4), starts(r3, 4)))                   # depends on the building
+        self.assertFalse(np.allclose(starts(r1, 4), starts(g, 4)))                       # actually jittered
+
+    def test_solid_styles_ignore_the_pattern_and_with_pattern_only_changes_pattern(self):
+        from rf_tomography.geometry.mesh import with_pattern
+        a = building_meshes(self.tower("grid", "concrete"))
+        b = building_meshes(self.tower("ribbon", "concrete"))
+        self.assertEqual(len(a["concrete"][1]), len(b["concrete"][1]))
+        sc = with_pattern(Scene((self.tower("ribbon"),)), "staggered")
+        self.assertEqual((sc.buildings[0].pattern, sc.buildings[0].facade), ("staggered", "curtain"))
+        with self.assertRaises(ValueError):
+            with_pattern(sc, "diagonal")
+
+
+SPAN = 0.6   # SPANDREL_BELOW_FRAC (kept literal here so the test does not just mirror the implementation)
+
+
 if __name__ == "__main__":
     unittest.main()

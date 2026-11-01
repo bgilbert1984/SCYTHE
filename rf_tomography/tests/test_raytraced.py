@@ -130,5 +130,50 @@ class BeamformedAoA(unittest.TestCase):
         self.assertTrue(np.isnan(beamformed_aoa(t, 3.0, "az")[0, 0]))
 
 
+class PathComposition(unittest.TestCase):
+    def comp_table(self, best, direct):
+        """best / direct: lists of (types, mats) per link (one emitter, several receivers)."""
+        from rf_tomography.measurements.raytraced import PathTable
+        R, D = len(best), 3
+        t = PathTable(915e6, np.zeros((1, 3)), np.zeros((R, 3)), np.ones((1, R, 1)), np.ones((1, R, 1)) * 1e-7,
+                      np.zeros((1, R, 1)), np.zeros((1, R, 1)), np.zeros((1, R, 1), np.int8), np.zeros((1, R, 1), np.int8), {})
+        pad = lambda v: list(v) + [0] * (D - len(v))
+        t.best_types = np.array([[pad(b[0]) for b in best]], np.int8)
+        t.best_mats = np.array([[pad(b[1]) for b in best]], np.int8)
+        t.dir_types = np.array([[pad(d[0]) for d in direct]], np.int8)
+        t.dir_mats = np.array([[pad(d[1]) for d in direct]], np.int8)
+        t.dir_power = np.array([[1.0 if any(d[0]) or d == ([], []) else 0.0 for d in direct]], np.float32)
+        return t
+
+    def test_strongest_path_classes(self):
+        from rf_tomography.measurements.raytraced import (PC_CONCRETE_THRU, PC_FREE, PC_GLASS_ONLY, PC_REFLECT_CONCRETE,
+                                                         PC_REFLECT_GLASS, PC_REFLECT_GROUND, PC_DIFFRACT,
+                                                         REFRACTION, SPECULAR, DIFFRACTION, strongest_path_class)
+        best = [([], []),                                         # free
+                ([REFRACTION], [2]),                              # through glass only
+                ([REFRACTION, REFRACTION], [2, 1]),               # glass then concrete -> concrete involved
+                ([REFRACTION, SPECULAR], [2, 2]),                 # exits through glass, reflects off glass
+                ([REFRACTION, SPECULAR], [2, 1]),                 # exits through glass, reflects off concrete
+                ([REFRACTION, SPECULAR], [2, 3]),                 # ... off the ground
+                ([REFRACTION, DIFFRACTION], [2, 1])]
+        t = self.comp_table(best, [([], [])] * len(best))
+        got = strongest_path_class(t)[0].tolist()
+        self.assertEqual(got, [PC_FREE, PC_GLASS_ONLY, PC_CONCRETE_THRU, PC_REFLECT_GLASS,
+                               PC_REFLECT_CONCRETE, PC_REFLECT_GROUND, PC_DIFFRACT])
+
+    def test_reflection_class_uses_the_reflecting_material_not_the_wall_it_exited_through(self):
+        from rf_tomography.measurements.raytraced import PC_REFLECT_GLASS, REFRACTION, SPECULAR, strongest_path_class
+        # exits through CONCRETE (refraction, material 1) then bounces off GLASS: a glass reflection
+        t = self.comp_table([([REFRACTION, SPECULAR], [1, 2])], [([], [])])
+        self.assertEqual(strongest_path_class(t)[0, 0], PC_REFLECT_GLASS)
+
+    def test_direct_crossing_classes(self):
+        from rf_tomography.measurements.raytraced import (DC_CONCRETE, DC_FREE, DC_GLASS, DC_NONE,
+                                                         REFRACTION, direct_crossing_class)
+        t = self.comp_table([([], [])] * 4, [([], []), ([REFRACTION], [2]), ([REFRACTION, REFRACTION], [2, 1]), ([0], [0])])
+        t.dir_power[0, 3] = 0.0
+        self.assertEqual(direct_crossing_class(t)[0].tolist(), [DC_FREE, DC_GLASS, DC_CONCRETE, DC_NONE])
+
+
 if __name__ == "__main__":
     unittest.main()

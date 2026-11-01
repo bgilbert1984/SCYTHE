@@ -6,6 +6,7 @@ from typing import List, Tuple
 
 import numpy as np
 
+from ..geometry.mesh import with_pattern
 from ..geometry.real import midtown_scene, real_sites, target_buildings
 from ..geometry.scene import synthetic_manhattan_block
 from ..measurements.raytraced import PathTable
@@ -19,7 +20,7 @@ def table_meta(T: PathTable) -> dict:
 def scene_and_sites(meta: dict):
     """(scene, sites, hosts): hosts are the buildings emitters were placed in."""
     if meta.get("scene") == "midtown":
-        scene = midtown_scene(meta.get("policy") or "mixed")
+        scene = with_pattern(midtown_scene(meta.get("policy") or "mixed"), meta.get("pattern") or "ribbon")
         return scene, real_sites(scene), target_buildings(scene)
     scene = synthetic_manhattan_block()
     return scene, candidate_sites(scene), list(scene.buildings)

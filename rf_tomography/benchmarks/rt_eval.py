@@ -57,9 +57,14 @@ def make_layouts(scene, cands, em, prop, seed, hosts=None):
 
 
 def run(T, scene, owner, em, prop, cands, layouts, seed, solvers, aoa="strongest", stride=1,
-        grid_spacing_adapt=False):
+        grid_spacing_adapt=False, paired_noise=False, return_trials=False, rss_mode="model"):
     """aoa: 'strongest' = AoA of the strongest path (idealised); 'beamformed' = peak of the
-    aperture's power-weighted beam response (1 m / 3 m horizontal, 3 m vertical tiers)."""
+    aperture's power-weighted beam response (1 m / 3 m horizontal, 3 m vertical tiers);
+    'oracle' = the geometrically exact direct-path bearings and range (a diagnostic: it removes
+    the angle and delay multipath errors but keeps RSS, geometry and solver). With
+    return_trials=True the per-emitter records are returned too. rss_mode: 'model' = ray-traced
+    total power (default); 'drop' = no RSS columns at all; 'oracle' = the solver's own
+    log-distance model evaluated at the exact range (removes RSS model mismatch)."""
     o = link_observables(T, 20.0)
     bf = ({"el": beamformed_aoa(T, 3.0, "el"), 1.0: beamformed_aoa(T, 1.0, "az"),
            3.0: beamformed_aoa(T, 3.0, "az")} if aoa == "beamformed" else None)
@@ -68,16 +73,24 @@ def run(T, scene, owner, em, prop, cands, layouts, seed, solvers, aoa="strongest
              for n in set(owner)}
     rng = np.random.default_rng(seed)
     rows = {(l, s): [] for l in layouts for s in solvers}
+    orig = table_meta(T).get("emitter_index") or list(range(len(T.tx)))   # emitter ids in the sampled set
+    KC = {"rss": 0, "toa": 1, "az": 2, "el": 3}
     for e in range(0, len(T.tx), stride):
         b = scene.by_name(owner[e])
         k = int(T.tx[e, 2] // b.floor_height)
-        p0, t0 = rng.normal(0, 10.0), rng.normal(0, 200.0)   # nuisance offsets, shared by all receivers
+        if paired_noise:   # noise is a pure function of (seed, emitter, link, kind): identical across tables
+            re_ = np.random.default_rng([seed, orig[e]])
+            p0, t0 = re_.normal(0, 10.0), re_.normal(0, 200.0)
+            nz = lambda jj, kind, sd: np.random.default_rng([seed, orig[e], jj, KC[kind]]).normal(0, sd)
+        else:
+            p0, t0 = rng.normal(0, 10.0), rng.normal(0, 200.0)   # nuisance offsets, shared by all receivers
+            nz = lambda jj, kind, sd: rng.normal(0, sd)
         for lname, idx in layouts.items():
             rx = [cands[i].receiver() for i in idx]
             j = [site_idx[cands[i].site.name] for i in idx]
             los = [not scene.segment_blocked(T.tx[e], np.array(r.pos), exclude=(owner[e], r.host_building)) for r in rx]
             alive = [bool(o.n_paths[e, jj] > 0) for jj in j]
-            cols = [c for c in plan_columns(rx, los) if alive[c[0]]]
+            cols = [c for c in plan_columns(rx, los) if alive[c[0]] and not (rss_mode == "drop" and c[1] == "rss")]
             if not cols:
                 continue
             dist = [float(o.dist_m[e, jj]) for jj in j]
@@ -85,15 +98,19 @@ def run(T, scene, owner, em, prop, cands, layouts, seed, solvers, aoa="strongest
             for q, (i, kind) in enumerate(cols):
                 jj = j[i]
                 if kind == "rss":
-                    y[q] = o.rss_db[e, jj] + p0 + rng.normal(0, RSS_EST_DB)
+                    rss0 = (-10.0 * prop.path_loss_exp * np.log10(o.dist_m[e, jj])) if rss_mode == "oracle" else o.rss_db[e, jj]
+                    y[q] = rss0 + p0 + nz(jj, "rss", RSS_EST_DB)
                 elif kind == "toa":
-                    y[q] = o.toa_m[e, jj] + t0 + rng.normal(0, column_sigma("toa", rx[i], True, dist[i], em, EST, prop))
+                    toa = o.dist_m[e, jj] if aoa == "oracle" else o.toa_m[e, jj]
+                    y[q] = toa + t0 + nz(jj, "toa", column_sigma("toa", rx[i], True, dist[i], em, EST, prop))
                 else:
-                    if bf is None:
+                    if aoa == "oracle":
+                        base = o.az_geo[e, jj] if kind == "az" else o.el_geo[e, jj]
+                    elif bf is None:
                         base = o.az[e, jj] if kind == "az" else o.el[e, jj]
                     else:
                         base = bf[rx[i].horizontal_aperture_m][e, jj] if kind == "az" else bf["el"][e, jj]
-                    y[q] = base + rng.normal(0, column_sigma(kind, rx[i], True, dist[i], em, EST, prop))
+                    y[q] = base + nz(jj, kind, column_sigma(kind, rx[i], True, dist[i], em, EST, prop))
             cov = noise_covariance(cols, rx, los, dist, em, SensingParams(), prop)
             for sname, cfg in solvers.items():
                 if cfg is None:
@@ -102,9 +119,19 @@ def run(T, scene, owner, em, prop, cands, layouts, seed, solvers, aoa="strongest
                     pr, _ = robust_floor_posterior(y, grids[b.name], rx, cols, cov, prop, cfg)
                 order = np.argsort(-pr)
                 rank = int(np.where(order == k)[0][0])
-                rows[(lname, sname)].append(dict(top1=rank == 0, top3=rank < 3, p=float(pr[k]),
-                                                 cov=in_credible_set(pr, k), size=credible_set_size(pr),
-                                                 err=float(pr @ np.arange(len(pr))) - k))
+                used = [j[i] for i, _ in {(c[0], 0) for c in cols}]
+                rec = dict(top1=rank == 0, top3=rank < 3, p=float(pr[k]),
+                           cov=in_credible_set(pr, k), size=credible_set_size(pr),
+                           err=float(pr @ np.arange(len(pr))) - k)
+                if return_trials:
+                    los_used = [j[i] for i in {c[0] for c in cols if c[1] != "rss"}]
+                    rec.update(e=int(e), owner=owner[e], k=k, nf=len(pr), mode_err=int(order[0]) - k,
+                               frac_direct=float(np.mean([o.strongest_direct[e, jj] for jj in los_used])) if los_used else float("nan"),
+                               mean_dist=float(np.mean([o.dist_m[e, jj] for jj in used])),
+                               n_los=len(los_used), z=float(T.tx[e, 2]))
+                rows[(lname, sname)].append(rec)
+    if return_trials:
+        return rows
     out = []
     for (lname, sname), r in rows.items():
         m = lambda key: float(np.mean([x[key] for x in r]))
@@ -123,6 +150,8 @@ def main(argv=None):
     ap.add_argument("--solvers", nargs="+", default=list(SOLVERS))
     ap.add_argument("--emitter-stride", type=int, default=1, help="use every n-th emitter")
     ap.add_argument("--out-name", default="rt_eval")
+    ap.add_argument("--paired-noise", action="store_true",
+                    help="deterministic per-link noise keyed on the original emitter id (tables become paired)")
     ap.add_argument("--dir", default=str(Path(__file__).parent / "results"))
     a = ap.parse_args(argv)
     prop = PropagationParams()
@@ -142,7 +171,7 @@ def main(argv=None):
         cands, layouts = cache[key]
         for aoa in (a.aoa or (("beamformed",) if real else ("strongest", "beamformed"))):
             res = run(T, scene, meta["owner"], em, prop, cands, layouts, a.seed, solvers, aoa,
-                      a.emitter_stride, real)
+                      a.emitter_stride, real, a.paired_noise)
             js[f"{Path(tp).stem}|{aoa}"] = res
             md += [f"### {Path(tp).stem}: {meta['facade']} facades, scattering {meta.get('scattering', 0.0)}, "
                    f"{len(T.tx)} ray-traced emitters, AoA = {aoa}\n",

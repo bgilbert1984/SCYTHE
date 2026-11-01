@@ -3,14 +3,24 @@
 numpy only. The Sionna side (propagation/sionna_scene.py) writes these to OBJ files. Material
 tags: "concrete" (roofs, spandrels, solid walls) and "glass" (windows).
 
-Facade styles (glazing ratio = fraction of each floor's height that is glass, as a continuous
-horizontal ribbon: a simplification of punched windows with the same glazed area):
+Facade styles set the glazing ratio rho = glazed area / wall area:
 
     concrete       0.00  solid concrete wall (the earlier closed-box model)
     masonry        0.25  punched-window masonry (pre-war)
     curtain        0.60  curtain-wall office tower
     glass_curtain  0.80  modern glass tower
     glass_solid    1.00  all glass (the earlier glass closed-box model)
+
+Window patterns (same rho, same glass and opaque materials, so only the shape of the glazing
+differs; the glazed area is matched exactly):
+
+    ribbon     continuous horizontal band, height rho * floor height (the original model)
+    grid       punched windows, one per BAY_M-wide bay, aligned on every floor
+    staggered  as grid, alternate floors shifted by half a bay (half windows at the wall ends)
+    random     as grid, each window's position jittered randomly inside its bay (seeded)
+
+A punched window is sqrt(rho) of the bay width and sqrt(rho) of the floor height. Walls are tiled
+into non-overlapping quads (no coplanar faces): floor bands, piers and windows.
 
 `assign_facades(scene, policy)` sets each building's style: "concrete" / "glass_solid" for the
 uniform baselines, or "mixed", a heuristic from construction year and height (ASSUMPTION, not
@@ -19,6 +29,8 @@ glass curtain; unknown year by height.
 """
 from __future__ import annotations
 
+import math
+import zlib
 from dataclasses import replace
 from typing import Dict, List, Tuple
 
@@ -26,6 +38,7 @@ import numpy as np
 
 from .scene import PolygonBuilding, Scene
 
+BAY_M = 3.0                    # horizontal module of punched windows
 GLAZING = {"concrete": 0.0, "masonry": 0.25, "curtain": 0.60, "glass_curtain": 0.80, "glass_solid": 1.0}
 SPANDREL_BELOW_FRAC = 0.6      # share of the opaque part of a floor that lies below the glazing
 
@@ -39,6 +52,16 @@ def style_for(b: PolygonBuilding) -> str:
     if y < 2000:
         return "curtain" if b.height >= 60 else "masonry"
     return "glass_curtain"
+
+
+PATTERNS = ("ribbon", "grid", "staggered", "random")
+
+
+def with_pattern(scene: Scene, pattern: str) -> Scene:
+    """Same footprints and styles, different window pattern (only affects glazed styles)."""
+    if pattern not in PATTERNS:
+        raise ValueError(f"unknown window pattern {pattern!r}")
+    return Scene(tuple(replace(b, pattern=pattern) for b in scene.buildings))
 
 
 def assign_facades(scene: Scene, policy: str) -> Scene:
@@ -94,6 +117,47 @@ def _quad(mesh, p0, p1, z0, z1):
     f.extend([(base, base + 1, base + 2), (base, base + 2, base + 3)])
 
 
+def _hrect(mesh, p0, ux, x0, x1, z0, z1):
+    """Quad on a wall: horizontal span [x0, x1] along edge direction ux from p0, heights [z0, z1]."""
+    if x1 - x0 < 1e-9 or z1 - z0 < 1e-9:
+        return
+    _quad(mesh, p0 + ux * x0, p0 + ux * x1, z0, z1)
+
+
+def _punched_wall(parts, p0, p1, b: PolygonBuilding, rho: float, wall_index: int) -> None:
+    L = float(np.hypot(*(p1 - p0)))
+    ux = (p1 - p0) / L
+    n = max(1, int(round(L / BAY_M)))
+    bay = L / n
+    fh = b.floor_height
+    wf = hf = math.sqrt(rho)
+    w, h = wf * bay, hf * fh
+    below = SPANDREL_BELOW_FRAC * (1.0 - hf) * fh
+    rng = np.random.default_rng([zlib.crc32(b.name.encode()), wall_index])
+    conc, glass = parts["concrete"], parts["glass"]
+    prev_head = 0.0
+    for k in range(b.n_floors):
+        sill = k * fh + below
+        head = sill + h
+        _hrect(conc, p0, ux, 0.0, L, prev_head, sill)               # band between floors
+        prev_head = head
+        if b.pattern == "staggered" and k % 2 == 1:
+            spans = [(0.0, w / 2)] + [(i * bay - w / 2, i * bay + w / 2) for i in range(1, n)] + [(L - w / 2, L)]
+        elif b.pattern == "random":
+            slack = bay - w
+            spans = [(i * bay + (slack * rng.random()), i * bay + (slack * rng.random()) + w) for i in range(n)]
+            spans = [(a, a + w) for a, _ in spans]
+        else:                                                       # grid (and even floors of staggered)
+            spans = [(i * bay + (bay - w) / 2, i * bay + (bay + w) / 2) for i in range(n)]
+        x = 0.0
+        for a, e in spans:
+            _hrect(conc, p0, ux, x, a, sill, head)                  # pier
+            _hrect(glass, p0, ux, a, e, sill, head)                 # window
+            x = e
+        _hrect(conc, p0, ux, x, L, sill, head)
+    _hrect(conc, p0, ux, 0.0, L, prev_head, b.height)               # top band
+
+
 def building_meshes(b: PolygonBuilding) -> Dict[str, Tuple[np.ndarray, np.ndarray]]:
     """material -> (vertices (V,3), faces (F,3)) for one building."""
     rho = GLAZING[b.facade]
@@ -108,6 +172,8 @@ def building_meshes(b: PolygonBuilding) -> Dict[str, Tuple[np.ndarray, np.ndarra
             _quad(parts["concrete"], p0, p1, 0.0, H)
         elif rho >= 1.0:
             _quad(parts["glass"], p0, p1, 0.0, H)
+        elif b.pattern != "ribbon":
+            _punched_wall(parts, p0, p1, b, rho, i)
         else:
             solid = (1.0 - rho) * fh
             below, above = SPANDREL_BELOW_FRAC * solid, (1.0 - SPANDREL_BELOW_FRAC) * solid

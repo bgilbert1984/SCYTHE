@@ -578,10 +578,10 @@ links the solver trusts; only 40% of Midtown links are solver-LOS):*
 | solver-NLOS: strongest path direct | 0.24 / 0.29 | 0.28 | 0.33 | 0.25 |
 
 - **Windows make the real city much dirtier than either solid-wall baseline on identical
-  footprints**: direct path strongest 0.76 vs 0.92 / 0.87, angle outliers 3-5x. A plausible
-  mechanism (not separately verified): the direct ray crosses opaque spandrel while a bounce
-  leaves through a glass band, so the strongest path often is not the direct one. Mixed
-  glass-and-opaque is worse than either extreme.
+  footprints**: direct path strongest 0.76 vs 0.92 / 0.87, angle outliers 3-5x. The mechanism
+  was verified directly in the punched-window study below: when the direct ray crosses opaque
+  spandrel/pier the strongest path is a different one in ~33% of links, versus ~4% when it
+  crosses only glass. Mixed glass-and-opaque is worse than either extreme.
 - **Midtown is dirtier than the synthetic block even with solid walls** (denser, more bounces).
   The first-pass finding "the ray-traced city is cleaner than assumed" was a property of the
   synthetic block. On Midtown with windows the angular statistics (floor ~1.2 deg, 10-13% outliers)
@@ -606,13 +606,15 @@ links the solver trusts; only 40% of Midtown links are solver-LOS):*
   (0.92-0.96 on the block), top-3 0.77-0.83, 90% sets of 8-9 floors, floor error about 2 floors
   (7-9 m). It is still ~20x chance, and the sets are honest (coverage 0.93-0.97). Part of the
   drop is simply taller buildings (46 floors on average vs 27-44), part the denser NLOS, part the
-  windows (-0.08 to -0.11 top-1 vs the solid baselines).
+  windows (-0.08 to -0.11 top-1 vs the solid baselines with beam-peak angles; only about -0.04 to
+  -0.05 with strongest-path angles, see below: this number depends on the angle observable).
 - **The robust solver matters more here**: with windows the Gaussian solver covers only 0.76-0.77
   (robust 0.93-0.96) and loses 0.05-0.12 top-3 across the analytic layouts.
 - **Placement matters a lot**: layouts with rooftop receivers (analytic) reach 0.43-0.54; five
   street-level arrays reach 0.09-0.29 with ~21-floor sets, close to a random layout.
 - **A positive floor bias of +0.3 to +1.2 floors** for the analytic layouts (the synthetic block
-  had a negative one). I have not diagnosed it.
+  had a negative one). Diagnosed below: it is concentrated in the lowest floors and is mostly a
+  property of poorly observed emitters and the posterior mean, not a measurement or convention error.
 - Caveats: one seed, 240 emitters (top-1 SE about 0.03), default (uncalibrated) beliefs, the
   analytic layouts were chosen under the Gaussian CRLB objective, links with no path within 5
   interactions are dropped, and the window model is a continuous ribbon (an assumption that may
@@ -624,6 +626,112 @@ buildings (no interior walls or furniture); ribbon windows; facade styles from a
 foliage, vehicles, street furniture or scattering by default; receiver sites chosen by me
 (farthest-point street points, rooftops of the 14 tallest buildings); depth-limited NLOS.
 
+## Punched windows at matched glazed area, and the floor bias
+
+Two questions from the Midtown results: is the windows penalty an artifact of continuous glass
+ribbons, and where does the positive floor bias come from? Both studies use the same 240 emitters
+(every other emitter of the sampled set), the same 54 sites, the same footprints, facade styles,
+glass/concrete properties, paired noise (a pure function of emitter, link and kind) and paired
+emitter-level bootstrap intervals (links within an emitter are strongly correlated).
+
+**Facade variants** (`geometry/mesh.py`, `PolygonBuilding.pattern`): `ribbon` (continuous band),
+`grid` (one punched window per 3 m bay, aligned every floor), `staggered` (alternate floors
+shifted half a bay), `random` (window position jittered within its bay, seeded). Glazed area is
+exactly identical in all four (419,721 m2 of 1,150,957 m2 of wall; tested per building), walls are
+tiled without overlap (tested by point sampling), punched meshes are ~430k triangles vs 81k.
+The tracer now records, per link, the interaction types and materials of the strongest path and
+of the strongest direct-like path (`PathTable.best_*`, `dir_*`), validated by physics tests
+(an emitter at glass height is classified "through glass only", at spandrel height "through
+concrete").
+
+    PYTHONPATH=. ~/.venvs/sionna-rt/bin/python -m rf_tomography.benchmarks.rt_trace --scene midtown --policy mixed \
+        --pattern grid --emitters-per-building 40 --emitter-stride 2 --max-depth 5 --samples 200000 --tx-batch 2
+    OMP_NUM_THREADS=1 .venv/bin/python -m rf_tomography.benchmarks.rt_patterns                       # ~40 min
+    OMP_NUM_THREADS=1 .venv/bin/python -m rf_tomography.benchmarks.rt_patterns --aoa strongest --no-links \
+        --out-name rt_patterns_midtown_strongest
+    OMP_NUM_THREADS=1 .venv/bin/python -m rf_tomography.benchmarks.rt_bias [--rss-matrix]
+
+*Link level (solver-LOS links; mean [95% paired bootstrap CI]):*
+
+| facade | strongest path direct | P(el err > 5 deg) | P(az err > 5 deg) | P(beam-peak el err > 5 deg) |
+|---|---|---|---|---|
+| solid concrete | 0.924 [0.913, 0.935] | 0.018 | 0.047 | 0.037 |
+| solid glass | 0.868 [0.855, 0.882] | 0.030 | 0.087 | 0.068 |
+| mixed, ribbon | 0.748 [0.730, 0.764] | 0.100 | 0.132 | 0.124 |
+| mixed, grid | 0.726 [0.707, 0.744] | 0.083 | 0.154 | **0.222** |
+| mixed, staggered | 0.726 [0.710, 0.743] | 0.089 | 0.151 | **0.242** |
+| mixed, random | 0.720 [0.702, 0.738] | 0.088 | 0.165 | **0.257** |
+
+*Mechanism test* (P(strongest path is not the direct-like path | what the direct-like path crosses)):
+
+| facade | direct crosses glass only | direct crosses concrete (spandrel/pier/roof) |
+|---|---|---|
+| ribbon | 0.038 [0.025, 0.052], n=1187 | 0.326 [0.303, 0.349], n=2624 |
+| grid | 0.037 [0.025, 0.049] | 0.348 [0.324, 0.371] |
+| staggered | 0.033 [0.022, 0.044] | 0.353 [0.330, 0.375] |
+| random | 0.036 [0.023, 0.049] | 0.348 [0.325, 0.370] |
+
+*Solver, analytic@20, robust (top-1 / 90%-set coverage), same emitters:*
+
+| facade | beam-peak AoA | strongest-path AoA |
+|---|---|---|
+| solid concrete | 0.53 / 0.97 | 0.54 / 0.97 |
+| solid glass | 0.47 / 0.96 | 0.55 / 0.97 |
+| mixed, ribbon | 0.46 / 0.94 | 0.50 / 0.95 |
+| mixed, grid | 0.35 / 0.91 | 0.46 / 0.95 |
+| mixed, staggered | 0.35 / 0.89 | 0.46 / 0.95 |
+| mixed, random | 0.30 / 0.88 | 0.48 / 0.95 |
+
+- **The spandrel/glass mechanism is real in the simulation and independent of window shape.** The
+  direct path loses to another path ~9x more often when it crosses concrete (33-35%) than when it
+  crosses only glass (3-4%), identically for all four patterns; the median power gap of the
+  winning path over the direct one is only ~4 dB, so many of these are near-ties.
+- **The windows penalty is not a ribbon artifact at the link level**, but its size at the solver
+  level **depends on how the angle is extracted**. With strongest-path angles, ribbon vs punched
+  differs by -0.02 to -0.04 top-1 (all CIs include zero) and windows vs solid by only
+  -0.04 to -0.05. With the non-coherent beam peak, punched windows are much worse than the ribbon
+  (-0.11 to -0.16 top-1, CIs exclude zero; robust coverage 0.88-0.91; 5 street arrays 0.72-0.81
+  coverage, i.e. confidently wrong), because many comparable specular paths from punched facets
+  fall inside one beamwidth and drag the peak (beam-peak elevation outliers nearly double).
+  **Whether real arrays behave like this is not established**: the beam model sums path powers
+  non-coherently and ignores phases and fading. A coherent array model is needed before trusting
+  the beam-peak penalty.
+- Gaussian solver coverage with windows is 0.65-0.82 in every variant; robust stays near target
+  except for weak layouts under the beam-peak observable.
+- Composition (solver-LOS links, ribbon / grid): strongest path through glass only 0.29 / 0.29,
+  through concrete 0.45 / 0.43, reflection off glass 0.15 / 0.17, off concrete 0.06 / 0.08, off
+  ground 0.04 / 0.03.
+
+**Floor bias** (posterior-mean floor minus true floor, analytic@20, robust, default beliefs):
+
+| bearings + range | RSS | mixed: all / low third | concrete: all / low third | glass: all / low third | MAE (mixed) | top-1 (mixed) |
+|---|---|---|---|---|---|---|
+| traced | traced | +0.41 / +3.70 | +0.92 / +5.14 | +0.68 / +3.75 | 2.28 | 0.47 |
+| traced | dropped | +0.31 / +2.39 | +0.29 / +2.05 | +0.42 / +2.24 | 1.57 | 0.50 |
+| exact | traced | +0.81 / +3.89 | +1.09 / +5.20 | +0.73 / +3.61 | 1.66 | 0.57 |
+| exact | solver's own model, exact | +0.86 / +3.51 | +0.87 / +3.52 | +0.96 / +3.83 | 1.43 | 0.61 |
+| exact | dropped | +0.41 / +1.98 | +0.42 / +1.98 | +0.41 / +1.98 | 1.01 | 0.60 |
+
+- **It is not a coordinate, sign or floor-offset error.** With exact bearings and range the mid and
+  high thirds are close to unbiased (-0.04 to -0.68 and -0.07 to -0.20 across the exact-bearing variants), and from floor 10 upward the
+  bias is +0.17, 0.00, -0.06 (floors 10-19, 20-39, 40+).
+- **It is not caused by angle multipath or by the facade.** It persists with exact bearings, and
+  with exact bearings and no RSS it is +1.98 floors in the low third for all three facade tables
+  (identical, because those observations are then identical).
+- **It is concentrated in poorly observed emitters**: trials with <= 2 receivers in line of sight
+  have +4.0 to +5.5 floors (3-4 receivers: -0.4 to -0.8); wide-set trials (17-19 floors) +1.6 to
+  +2.9, narrow-set trials about 0.
+- **It is a heavy one-sided tail, not a shift of the typical estimate**: for true floors 2-4 the
+  mean bias is +4.9 but the median +0.4 (floors 5-9: +2.6 vs +0.3), consistent with a posterior
+  that can only spread upward from floor 0. (Only 9 and 18 emitters in those two bins; indicative.)
+  The posterior mean is a poor point estimate here; report the median or mode.
+- **The RSS term hurts**: dropping RSS lowers MAE by 30-40% (2.28 -> 1.57 with traced angles;
+  1.66 -> 1.01 with exact ones). Even RSS generated from the solver's own model at the exact
+  range (no mismatch at all) is no better than dropping it (MAE 1.43 vs 1.01), which I cannot yet
+  explain. The default RSS sigma (6/8 dB) is also far below the traced 10-20 dB.
+- Not done: a clean test of the boundary-truncation explanation with a truncation-free prior, and
+  a re-test of the RSS term with calibrated sigmas.
+
 ## Next
 
 0. Make `identifiability`, `placement`, `impairments`, `robust`, `correlated`, `placement_mc` and
@@ -631,9 +739,10 @@ foliage, vehicles, street furniture or scattering by default; receiver sites cho
 1. Measured-data calibration: the fit-and-inflate procedure is in place
    (`rt_solver_calibration.calibrate`), but the right inflation depends on real clutter. Needs real
    observed-vs-direct-path residuals (or a clutter model validated against measurements).
-2. Midtown follow-ups: calibrate the solver's beliefs on the Midtown tables (default beliefs are
-   only partly matched: angles yes, delay and RSS no), diagnose the +1 floor bias, test whether
-   punched windows (instead of ribbons) change the dirtiness, then the rest of the realism list: setbacks and rooftop structures, interior walls, other
+2. Midtown follow-ups: a coherent array model (phases, fading) to settle the beam-peak penalty;
+   understand why even exact-model RSS hurts, then calibrate the solver's beliefs on the Midtown
+   tables (building-level held-out split; the facade geometry is now settled enough to do so);
+   report median/mode floor estimates; then the rest of the realism list: setbacks and rooftop structures, interior walls, other
    frequencies (433 MHz, 2.4 GHz), coherent path phases for AoA, and feeding RT reflection
    statistics back into the correlated generator (its refl_mild/refl_strong are 2-15x the rates
    measured on the synthetic block).

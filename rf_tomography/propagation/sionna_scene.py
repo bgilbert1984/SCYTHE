@@ -20,7 +20,7 @@ from typing import Dict, Optional, Sequence
 import numpy as np
 
 from ..geometry.scene import Scene
-from ..measurements.raytraced import PathTable
+from ..measurements.raytraced import DIFFRACTION, DIFFUSE, SPECULAR, PathTable
 
 # name -> (a, b, c, d, thickness_m)
 P2040 = {
@@ -118,10 +118,45 @@ def load_block(scene: Scene, frequency_hz: float, **kw):
     return sc
 
 
+def _material_lut(sn_scene) -> np.ndarray:
+    """object_id -> material code (1 concrete, 2 glass, 3 ground, 0 unknown); invalid id -> 0."""
+    code = {"mesh_concrete": 1, "mesh_glass": 2, "ground_plane": 3}
+    n = max(o.object_id for o in sn_scene.objects.values()) + 2
+    lut = np.zeros(n, np.int8)
+    for name, o in sn_scene.objects.items():
+        # box scenes name their shapes building_X; those are concrete/glass walls by their material
+        lut[int(o.object_id)] = code.get(name, 2 if "glass" in name else 1 if name.startswith("building_") else 0)
+    return lut
+
+
+def _composition(P, ok, ctype, inter, objs, lut):
+    """Interaction types/materials of the strongest path and of the strongest direct-like path.
+    P, ok, ctype are (T, R, K); inter, objs are (D, R, T, K); returns int8 (T, R, D) arrays."""
+    T, R, K = P.shape
+    Pm = np.where(ok, P, 0.0)
+    dl = ok & ((ctype & (SPECULAR | DIFFUSE | DIFFRACTION)) == 0)
+    Pd = np.where(dl, P, 0.0)
+    ib, idd = np.argmax(Pm, -1), np.argmax(Pd, -1)
+    I = np.asarray(inter).transpose(2, 1, 3, 0)                         # (T, R, K, D)
+    O = np.asarray(objs).transpose(2, 1, 3, 0)
+    codes = np.where(O == 0xFFFFFFFF, 0, lut[np.minimum(O, len(lut) - 1)]).astype(np.int8)
+
+    def take(a, idx):
+        return np.take_along_axis(a, idx[:, :, None, None], axis=2)[:, :, 0, :]
+
+    has_d = Pd.max(-1) > 0
+    dty = np.where(has_d[..., None], take(I, idd), 0).astype(np.int8)
+    dma = np.where(has_d[..., None], take(codes, idd), 0).astype(np.int8)
+    has_b = Pm.max(-1) > 0
+    bty = np.where(has_b[..., None], take(I, ib), 0).astype(np.int8)
+    bma = np.where(has_b[..., None], take(codes, ib), 0).astype(np.int8)
+    return bty, bma, dty, dma, Pd.max(-1).astype(np.float32)
+
+
 def trace_paths(sn_scene, tx: np.ndarray, rx: np.ndarray, *, tx_batch: int = 8,
                 samples_per_src: int = 100_000, max_depth: int = 3, diffraction: bool = True,
                 refraction: bool = True, diffuse: bool = False, keep_top: int | None = None,
-                seed: int = 1, progress=None) -> PathTable:
+                seed: int = 1, progress=None, record_composition: bool = True) -> PathTable:
     """All emitter x receiver links. Emitters are traced in batches to bound memory
     (the solver shoots `samples_per_src` rays per emitter)."""
     from sionna.rt import PathSolver, Receiver, Transmitter
@@ -129,7 +164,8 @@ def trace_paths(sn_scene, tx: np.ndarray, rx: np.ndarray, *, tx_batch: int = 8,
     for j, p in enumerate(rx):
         sn_scene.add(Receiver(name=f"rx{j}", position=[float(v) for v in p]))
     solver = PathSolver()
-    chunks, totals = [], []
+    chunks, totals, comp = [], [], []
+    lut = _material_lut(sn_scene) if record_composition else None
     for s in range(0, len(tx), tx_batch):
         batch = tx[s:s + tx_batch]
         for i, p in enumerate(batch):
@@ -149,6 +185,8 @@ def trace_paths(sn_scene, tx: np.ndarray, rx: np.ndarray, *, tx_batch: int = 8,
         depth = (inter > 0).sum(0).transpose(1, 0, 2).astype(np.int8)
         ok = (P > 0) & (tau >= 0)
         tot = np.where(ok, P, 0.0).sum(-1)                                  # (T, R) all paths
+        if record_composition:
+            comp.append(_composition(P, ok, ctype, inter, np.asarray(paths.objects), lut))
         if keep_top is not None and P.shape[-1] > keep_top:                 # diffuse tracing: huge K
             sel = np.argpartition(-np.where(ok, P, 0.0), keep_top - 1, axis=-1)[..., :keep_top]
             g = lambda x: np.take_along_axis(x, sel, -1)
@@ -172,4 +210,6 @@ def trace_paths(sn_scene, tx: np.ndarray, rx: np.ndarray, *, tx_batch: int = 8,
                      dict(max_depth=max_depth, samples_per_src=samples_per_src,
                           diffraction=diffraction, refraction=refraction, diffuse=diffuse,
                           keep_top=keep_top),
-                     np.concatenate(totals, 0) if keep_top is not None else None)
+                     np.concatenate(totals, 0) if keep_top is not None else None,
+                     *([np.concatenate([c[i] for c in comp], 0) for i in range(5)]
+                       if record_composition else [None] * 5))

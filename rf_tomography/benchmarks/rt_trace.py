@@ -16,6 +16,7 @@ from pathlib import Path
 
 import numpy as np
 
+from ..geometry.mesh import with_pattern
 from ..geometry.real import midtown_scene, real_sites, target_buildings
 from ..geometry.scene import synthetic_manhattan_block
 from ..placement.sites import candidate_sites
@@ -41,6 +42,10 @@ def main(argv=None):
     ap.add_argument("--scene", default="synthetic", choices=["synthetic", "midtown"])
     ap.add_argument("--policy", default="mixed", choices=["mixed", "concrete", "glass_solid"],
                     help="midtown facade policy (windows are meshed per floor for 'mixed')")
+    ap.add_argument("--pattern", default="ribbon", choices=["ribbon", "grid", "staggered", "random"],
+                    help="window pattern for glazed styles (same glazed area for all)")
+    ap.add_argument("--emitter-stride", type=int, default=1,
+                    help="trace every n-th emitter of the sampled set (original indices are kept in the metadata)")
     ap.add_argument("--emitters-per-building", type=int, default=60)
     ap.add_argument("--frequency", type=float, default=915e6)
     ap.add_argument("--facade", default="concrete", choices=["concrete", "glass"])
@@ -58,7 +63,7 @@ def main(argv=None):
     a = ap.parse_args(argv)
 
     if a.scene == "midtown":
-        scene = midtown_scene(a.policy)
+        scene = with_pattern(midtown_scene(a.policy), a.pattern)
         sites = real_sites(scene)
         tx, owner = sample_emitters(scene, a.emitters_per_building, a.seed, target_buildings(scene))
         sc = load_block(scene, a.frequency, scattering=a.scattering)
@@ -67,6 +72,8 @@ def main(argv=None):
         sites = candidate_sites(scene)
         tx, owner = sample_emitters(scene, a.emitters_per_building, a.seed)
         sc = load_block(scene, a.frequency, facade=a.facade, scattering=a.scattering)
+    keep = np.arange(len(tx))[::a.emitter_stride]
+    tx, owner = tx[keep], [owner[i] for i in keep]
     rx = np.array([s.pos for s in sites], float)
     t0 = time.time()
 
@@ -77,10 +84,13 @@ def main(argv=None):
                     max_depth=a.max_depth, diffraction=not a.no_diffraction, diffuse=a.scattering > 0,
                     keep_top=a.keep_top or (200 if a.scattering > 0 else None), seed=a.seed, progress=prog)
     T.meta.update(dict(scene=a.scene, policy=a.policy if a.scene == 'midtown' else None,
+                       pattern=a.pattern if a.scene == 'midtown' else None, emitter_index=[int(i) for i in keep],
                        facade=a.facade if a.scene == 'synthetic' else a.policy, scattering=a.scattering, owner=owner, sites=[s.name for s in sites],
                        seconds=round(time.time() - t0), seed=a.seed))
     stem = "midtown" if a.scene == "midtown" else "block"
-    name = a.name or (f"{stem}_{int(a.frequency / 1e6)}MHz_{a.policy if a.scene == 'midtown' else a.facade}"
+    suffix = ((f"_{a.pattern}" if a.scene == "midtown" and a.policy == "mixed" else "")
+              + (f"_s{a.emitter_stride}" if a.emitter_stride > 1 else ""))
+    name = a.name or (f"{stem}_{int(a.frequency / 1e6)}MHz_{a.policy if a.scene == 'midtown' else a.facade}{suffix}"
                       + (f"_diffuse{int(round(a.scattering * 100))}" if a.scattering > 0 else ""))
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)

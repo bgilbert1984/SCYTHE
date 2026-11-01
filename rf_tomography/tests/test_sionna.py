@@ -137,6 +137,21 @@ class WindowsAndPolygonScenes(unittest.TestCase):
         self.assertAlmostEqual(span, concrete, delta=3.0)   # spandrel behaves like the concrete wall
         self.assertGreaterEqual(all_glass, glass - 1.0)     # an all-glass wall is at least as leaky
 
+    def test_composition_names_glass_vs_concrete_for_the_strongest_path(self):
+        from rf_tomography.measurements.raytraced import (PC_CONCRETE_THRU, PC_GLASS_ONLY, direct_crossing_class,
+                                                          strongest_path_class, DC_CONCRETE, DC_GLASS)
+        fh, rho = 3.7, 0.60
+        z_glass = 3 * fh + 0.6 * (1 - rho) * fh + 0.5 * rho * fh
+        z_span = 3 * fh + 0.3 * (1 - rho) * fh
+
+        def classes(facade, z):
+            sc = load_block(Scene((replace(self.base, facade=facade),)), F)
+            T = trace_paths(sc, np.array([[0.0, 0.0, z]]), np.array([[60.0, 0.0, z]]), tx_batch=1, max_depth=2)
+            return strongest_path_class(T)[0, 0], direct_crossing_class(T)[0, 0]
+        self.assertEqual(classes("curtain", z_glass), (PC_GLASS_ONLY, DC_GLASS))
+        self.assertEqual(classes("curtain", z_span), (PC_CONCRETE_THRU, DC_CONCRETE))
+        self.assertEqual(classes("concrete", z_glass), (PC_CONCRETE_THRU, DC_CONCRETE))
+
     def test_a_second_building_in_the_way_costs_power_and_the_solver_geometry_agrees(self):
         blocker = PolygonBuilding("X", ((25, -15), (55, -15), (55, 15), (25, 15)), 37.0, 10, "concrete")
         scene = Scene((self.base, blocker))

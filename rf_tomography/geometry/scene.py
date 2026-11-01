@@ -108,6 +108,7 @@ class PolygonBuilding:
     facade: str = "concrete"
     year: Optional[int] = None
     height_known: bool = True
+    pattern: str = "ribbon"      # window pattern: ribbon | grid | staggered | random (geometry/mesh.py)
 
     is_box = False
 

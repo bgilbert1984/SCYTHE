@@ -19,6 +19,8 @@ from typing import Dict
 import numpy as np
 
 SPECULAR, DIFFUSE, REFRACTION, DIFFRACTION = 1, 2, 4, 8
+MAT_NONE, MAT_CONCRETE, MAT_GLASS, MAT_GROUND = 0, 1, 2, 3
+COMPOSITION_FIELDS = ("best_types", "best_mats", "dir_types", "dir_mats", "dir_power")
 C = 299_792_458.0
 
 
@@ -35,6 +37,14 @@ class PathTable:
     depth: np.ndarray     # (N, R, K) int8 number of interactions
     meta: Dict[str, object] = None
     total_power: np.ndarray = None  # (N, R) sum over ALL paths, set when the table keeps only the top-K
+    # path composition (optional): interaction types and material codes per depth for the strongest
+    # path and for the strongest direct-like path, plus the latter's power. Material codes:
+    # 0 none, 1 concrete (walls, spandrels, roofs), 2 glass, 3 ground.
+    best_types: np.ndarray = None   # (N, R, D) int8
+    best_mats: np.ndarray = None    # (N, R, D) int8
+    dir_types: np.ndarray = None    # (N, R, D) int8
+    dir_mats: np.ndarray = None     # (N, R, D) int8
+    dir_power: np.ndarray = None    # (N, R) float32, 0 if no direct-like path
 
     def save(self, path) -> None:
         np.savez_compressed(path, frequency_hz=self.frequency_hz, tx=self.tx, rx=self.rx,
@@ -43,7 +53,9 @@ class PathTable:
                             phi_r=self.phi_r.astype(np.float32), ctype=self.ctype,
                             depth=self.depth, meta=np.array(repr(self.meta)),
                             total_power=(self.total_power if self.total_power is not None
-                                         else np.array([])))
+                                         else np.array([])),
+                            **{k: (getattr(self, k) if getattr(self, k) is not None else np.array([]))
+                               for k in COMPOSITION_FIELDS})
 
     @staticmethod
     def load(path) -> "PathTable":
@@ -51,7 +63,8 @@ class PathTable:
         return PathTable(float(z["frequency_hz"]), z["tx"], z["rx"], z["power"].astype(float),
                          z["tau_s"], z["theta_r"].astype(float), z["phi_r"].astype(float),
                          z["ctype"], z["depth"], {"repr": str(z["meta"])},
-                         z["total_power"] if "total_power" in z.files and z["total_power"].size else None)
+                         z["total_power"] if "total_power" in z.files and z["total_power"].size else None,
+                         *[(z[k] if k in z.files and z[k].size else None) for k in COMPOSITION_FIELDS])
 
 
 def direct_like(ctype: np.ndarray) -> np.ndarray:
@@ -141,3 +154,56 @@ def beamformed_aoa(t: PathTable, aperture_m: float, axis: str, half_width_deg: f
     if axis == "az":
         out = (out + np.pi) % (2 * np.pi) - np.pi
     return out
+
+
+# ---------------------------------------------------------------------------
+# Path composition
+# ---------------------------------------------------------------------------
+# strongest-path classes
+(PC_NONE, PC_FREE, PC_GLASS_ONLY, PC_CONCRETE_THRU, PC_REFLECT_GLASS, PC_REFLECT_CONCRETE,
+ PC_REFLECT_GROUND, PC_DIFFRACT, PC_OTHER) = range(9)
+PC_NAMES = ("no path", "free line of sight", "through glass only", "through concrete (spandrel/pier/roof)",
+            "reflection off glass", "reflection off concrete", "reflection off ground", "diffracted",
+            "other multi-interaction")
+# direct-like path crossing classes
+(DC_NONE, DC_FREE, DC_GLASS, DC_CONCRETE) = range(4)
+DC_NAMES = ("no direct-like path", "free", "glass only", "crosses concrete")
+
+
+def _any_mat(mats, code):
+    return (mats == code).any(-1)
+
+
+def strongest_path_class(t: PathTable) -> np.ndarray:
+    """(N, R) class of each link's strongest path from its interaction history."""
+    ty, ma = t.best_types, t.best_mats
+    has = (t.power > 0).any(-1)
+    spec = ((ty & SPECULAR) > 0).any(-1)
+    refr = ((ty & REFRACTION) > 0).any(-1)
+    diff = ((ty & DIFFRACTION) > 0).any(-1)
+    none_i = (ty == 0).all(-1)
+    cls = np.full(has.shape, PC_OTHER, int)
+    cls[diff] = PC_DIFFRACT
+    only_refr = refr & ~spec & ~diff
+    cls[only_refr & _any_mat(ma, MAT_CONCRETE)] = PC_CONCRETE_THRU
+    cls[only_refr & ~_any_mat(ma, MAT_CONCRETE)] = PC_GLASS_ONLY
+    # reflections: classify by the material of the reflecting interaction(s); ground wins if present
+    refl = spec & ~diff
+    mat_at_spec = np.where((ty & SPECULAR) > 0, ma, MAT_NONE)
+    cls[refl & _any_mat(mat_at_spec, MAT_GLASS)] = PC_REFLECT_GLASS
+    cls[refl & _any_mat(mat_at_spec, MAT_CONCRETE)] = PC_REFLECT_CONCRETE
+    cls[refl & _any_mat(mat_at_spec, MAT_GROUND)] = PC_REFLECT_GROUND
+    cls[none_i] = PC_FREE
+    cls[~has] = PC_NONE
+    return cls
+
+
+def direct_crossing_class(t: PathTable) -> np.ndarray:
+    """(N, R) what the strongest direct-like path (no reflection/diffraction) passes through."""
+    ma = t.dir_mats
+    has = t.dir_power > 0
+    cls = np.full(has.shape, DC_GLASS, int)
+    cls[_any_mat(ma, MAT_CONCRETE)] = DC_CONCRETE
+    cls[(ma == 0).all(-1)] = DC_FREE
+    cls[~has] = DC_NONE
+    return cls
