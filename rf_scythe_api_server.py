@@ -16876,6 +16876,8 @@ if FLASK_AVAILABLE:
                 claims = jwt.decode(token, internal_secret, algorithms=["HS256"], audience="scythe-instance")
                 if claims.get("instance_id") != instance_id:
                     return jsonify({'status': 'error', 'message': 'Instance ID mismatch'}), 403
+                # The hub identifies the operator by id only; give it a record here so lookups (and the socket) work.
+                operator_manager.ensure_operator(claims["sub"], claims.get("preferred_username"))
                 session = operator_manager._create_session(claims["sub"])
             elif hasattr(operator_manager, 'exchange_bootstrap_token'):
                 session = operator_manager.exchange_bootstrap_token(token, instance_id)
@@ -18335,6 +18337,7 @@ if FLASK_AVAILABLE:
                 _emit_adsb_snapshot()  # Safari: positioned tracks to the new client
                 return True
 
+            logger.warning("[WebSocket] Valid session but no operator record for %s - rejecting", session.operator_id)
             disconnect()
             return False
 

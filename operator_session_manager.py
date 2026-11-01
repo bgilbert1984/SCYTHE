@@ -941,6 +941,52 @@ class OperatorSessionManager:
         finally:
             conn.close()
 
+    def ensure_operator(self, operator_id: str, callsign: Optional[str] = None) -> Optional[Operator]:
+        """Make sure an operator record exists on this instance for an identity that signed in elsewhere (the hub).
+
+        The hub's session carries only an operator id. Without a record here the session validates but nothing can look the operator up
+        (the socket handler drops it, the page shows no callsign). An existing record is returned unchanged, whatever its role. A new one
+        is always `operator`: the role never comes from the caller, and there is no password (nothing can log in to it directly).
+        A taken callsign gets a short id suffix, and an existing account is never adopted: the record is keyed by the id alone.
+        """
+        if not isinstance(operator_id, str) or not operator_id.strip() or len(operator_id) > 128:
+            return None
+        known = self.operators.get(operator_id)
+        if known:
+            return known
+        name = "".join(ch for ch in (callsign or "") if ch.isprintable()).strip()[:48]
+        suffix = operator_id.replace("-", "")[:6]
+        email = f"{operator_id}@hub.scythe.invalid"
+        created_at = datetime.utcnow().isoformat() + "Z"
+        columns = "callsign, email, role, team_id, created_at"
+        conn = sqlite3.connect(self.db_path)
+        try:
+            row = conn.execute(f"SELECT {columns} FROM operators WHERE operator_id = ?", (operator_id,)).fetchone()
+            if not row:
+                candidates = ([name] if name else []) + [f"{name}-{suffix}" if name else f"hub-{suffix}", f"hub-{operator_id}"]
+                for candidate in candidates:
+                    try:
+                        conn.execute(
+                            "INSERT INTO operators (operator_id, callsign, email, password_hash, role, team_id, created_at)"
+                            " VALUES (?, ?, ?, ?, ?, ?, ?)",
+                            (operator_id, candidate, email, "", OperatorRole.OPERATOR.value, None, created_at))
+                        conn.commit()
+                        print(f"[OperatorManager] Provisioned operator for hub identity: {candidate}")
+                        break
+                    except sqlite3.IntegrityError:
+                        conn.rollback()
+                        if conn.execute("SELECT 1 FROM operators WHERE operator_id = ?", (operator_id,)).fetchone():
+                            break   # another request created it first
+                row = conn.execute(f"SELECT {columns} FROM operators WHERE operator_id = ?", (operator_id,)).fetchone()
+            if not row:
+                return None
+            operator = Operator(operator_id=operator_id, callsign=row[0], email=row[1], role=OperatorRole(row[2]),
+                                team_id=row[3], created_at=row[4])
+        finally:
+            conn.close()
+        self.operators[operator_id] = operator
+        return operator
+
     def bootstrap_admin(self, callsign: str, email: str, password: str) -> Operator:
         """Create the first administrator, once.
 

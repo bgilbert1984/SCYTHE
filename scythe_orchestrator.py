@@ -1788,6 +1788,8 @@ def orchestrator_issue_bootstrap():
             "iat": now,
             "exp": now + 300,
             "scope": "bootstrap",
+            # A display name only: the instance never takes a role from this token.
+            "preferred_username": jwt_data.get('firstName') or None,
         }
         bootstrap_token = jwt.encode(payload, _INTERNAL_TOKEN, algorithm="HS256")
 
