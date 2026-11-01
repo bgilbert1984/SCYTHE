@@ -56,6 +56,11 @@ class PolicyTests(unittest.TestCase):
                      'tools/a.js', 'logs/a.txt', 'Venv/a.js', 'TESTS/a.js']:
             self.assertFalse(is_public_static(name), name)
 
+    def test_trailing_slash_does_not_change_the_answer(self):
+        for name in ('operator_sessions.db', 'scythe_orchestrator.py', '.env'):
+            self.assertFalse(is_public_static(name + '/'), name)
+            self.assertFalse(is_public_static(name + '//'), name)
+
     def test_extension_is_case_insensitive(self):
         self.assertFalse(is_public_static('a.DB'))
         self.assertTrue(is_public_static('a.JS'))
