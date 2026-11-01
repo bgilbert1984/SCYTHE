@@ -294,7 +294,7 @@ except ImportError:
 
 # Check for Flask availability
 try:
-    from flask import Flask, request, jsonify, send_from_directory, Response, make_response, has_request_context, redirect
+    from flask import Flask, request, jsonify, send_from_directory, Response, make_response, has_request_context, redirect, abort
     from flask_cors import CORS
     FLASK_AVAILABLE = True
 except ImportError:
@@ -3658,6 +3658,8 @@ except ImportError:
 
 if FLASK_AVAILABLE:
     # Create Flask app
+    from scythe_static_policy import is_public_static
+
     app = Flask(__name__, static_folder='.')
     CORS(app)  # Enable CORS for all routes
 
@@ -3669,6 +3671,13 @@ if FLASK_AVAILABLE:
     # Orchestrator<->instance calls carrying X-Internal-Token are exempt so
     # health checks, registration and internal wiring keep working.
     _SAFARI_SAFE_METHODS = frozenset({'GET', 'HEAD', 'OPTIONS'})
+
+    @app.before_request
+    def _guard_builtin_static():
+        # Flask's built-in /static route serves the same directory.
+        if request.endpoint == 'static' and not is_public_static(
+                (request.view_args or {}).get('filename', '')):
+            abort(404)
 
     @app.before_request
     def _safari_gate():
@@ -20664,6 +20673,8 @@ if FLASK_AVAILABLE:
     @app.route('/<path:filename>')
     def serve_static(filename):
         """Serve static files"""
+        if not is_public_static(filename):
+            abort(404)
         return send_from_directory('.', filename)
 
 

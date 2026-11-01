@@ -246,6 +246,8 @@ log = logging.getLogger('scythe_orchestrator')
 # ---------------------------------------------------------------------------
 # Flask App
 # ---------------------------------------------------------------------------
+from scythe_static_policy import is_public_static
+
 app = Flask(__name__, static_folder='.', static_url_path='/static')
 CORS(app)
 
@@ -948,7 +950,17 @@ def bootstrap_js(instance_id=None):
 @app.route('/<path:filename>')
 def serve_static(filename):
     """Serve static assets from the NerfEngine directory."""
+    if not is_public_static(filename):
+        abort(404)
     return send_from_directory(str(_SCRIPT_DIR), filename)
+
+
+@app.before_request
+def _guard_builtin_static():
+    """The built-in /static route serves the same directory; apply the same policy."""
+    if request.endpoint == 'static' and not is_public_static(
+            (request.view_args or {}).get('filename', '')):
+        abort(404)
 
 
 # ---------------------------------------------------------------------------
@@ -980,6 +992,16 @@ def list_instances():
     })
 
 
+def _instance_bind_host():
+    """Interface a spawned instance listens on.
+
+    The orchestrator and nginx reach instances over loopback (/scythe/i/<id>/), and an
+    instance serves files from this directory, so it must not be reachable directly from
+    the network by default. SCYTHE_INSTANCE_BIND overrides it for a deliberate LAN setup.
+    """
+    return os.environ.get('SCYTHE_INSTANCE_BIND', '').strip() or '127.0.0.1'
+
+
 @app.route('/api/scythe/instances/new', methods=['POST'])
 def spawn_instance():
     """Spawn a new isolated SCYTHE server instance."""
@@ -1006,6 +1028,7 @@ def spawn_instance():
     cmd = [
         sys.executable,
         str(_API_SERVER),
+        '--host', _instance_bind_host(),
         '--port', str(port),
         '--instance-id', instance_id,
         '--orchestrator-url', orchestrator_url,
