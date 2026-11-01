@@ -732,6 +732,68 @@ concrete").
 - Not done: a clean test of the boundary-truncation explanation with a truncation-free prior, and
   a re-test of the RSS term with calibrated sigmas.
 
+## Coherent array model: is the punched-window penalty real?
+
+The earlier beam-peak result (punched windows cost 0.11-0.16 top-1 against ribbon) used a
+non-coherent beam (power-weighted `sinc^2`, no phases). `measurements/raytraced.coherent_aoa`
+replaces it with the array's complex response: half-wavelength elements over the tier's aperture
+(3 m vertical, 1 m / 3 m horizontal), element signal = sum over paths of
+`sqrt(P) exp(j phi) exp(j 2 pi s u / lambda)`, estimate = Bartlett peak of the sample covariance
+over `n` snapshots. Path phases are not in the tables and at 915 MHz they are set by
+sub-wavelength geometry no survey knows, so each snapshot draws them i.i.d. uniform (seeded by
+emitter, so tables stay paired). `n = 1` is one static realisation (worst case: paths inside a
+beamwidth interfere); `n = 4` averages four independent fading realisations; `n = inf` is the
+expected power, i.e. the non-coherent model with an array factor in place of the `sinc`.
+Same 240 paired emitters, 54 sites, layouts and noise as the pattern comparison
+(`rt_patterns --aoa coherent --snaps N --no-links`;
+`results/rt_patterns_midtown_coherent_s{1,0,4}.md`; `--snaps 0` means infinite).
+
+Validation: the `n = inf` run reproduces the earlier non-coherent run within 0.00-0.03 top-1 in
+every analytic@20 cell (e.g. robust 0.53 / 0.47 / 0.46 / 0.35 / 0.37 / 0.32 against 0.53 / 0.47 /
+0.46 / 0.35 / 0.35 / 0.30 for concrete / glass / ribbon / grid / staggered / random), and six unit
+tests pin the model (single path exact, infinite-snapshot limit, interference spread shrinking with
+averaging, azimuth axis, determinism).
+
+Best layout (analytic@20), robust solver, top-1 [90%-set coverage]:
+
+| AoA model | solid concrete | solid glass | ribbon | grid | staggered | random |
+|---|---|---|---|---|---|---|
+| non-coherent beam (earlier) | 0.53 [.97] | 0.47 [.96] | 0.46 [.94] | 0.35 [.91] | 0.35 [.89] | 0.30 [.88] |
+| coherent, n = inf | 0.53 [.97] | 0.47 [.96] | 0.46 [.95] | 0.35 [.91] | 0.37 [.89] | 0.32 [.87] |
+| coherent, n = 4 | 0.51 [.97] | 0.46 [.95] | 0.47 [.95] | 0.35 [.89] | 0.35 [.88] | 0.32 [.89] |
+| coherent, n = 1 | 0.48 [.96] | 0.43 [.95] | 0.44 [.94] | 0.33 [.89] | 0.32 [.87] | 0.33 [.89] |
+
+Paired difference of punched against ribbon in top-1 (95% bootstrap CIs over emitters, robust,
+analytic@20): n = 1 grid -0.105 [-0.171, -0.037], staggered -0.121 [-0.192, -0.054], random -0.109
+[-0.183, -0.037]; n = 4 -0.121 / -0.121 / -0.155; n = inf -0.109 / -0.088 / -0.138. All nine
+intervals exclude zero. The Gaussian solver shows the same ordering (n = 1: -0.10 / -0.08 / -0.13)
+and covers only 0.63-0.72 on punched facades (ribbon 0.73-0.77).
+
+What this says:
+
+- **The penalty is real, not an artifact of ignoring phases.** Coherent interference costs a
+  single snapshot about 0.00-0.05 top-1 at the best layout (largest on solid concrete and
+  staggered; no CI computed for that comparison, so treat the size as indicative) and the
+  punched-vs-ribbon gap stays at about -0.09 to -0.16 under every model. Four snapshots are
+  already close to the infinite limit.
+- **The cause is the path mix, not the interference.** The spandrel/glass mechanism changes
+  which paths arrive; interference changes where they sum. The first is the larger effect here.
+- **Robust coverage on punched facades is a little short of nominal:** 0.87-0.91 against the 0.90
+  target, with the worst cells (staggered at one snapshot, random at infinity) at 0.87. Ribbon and solid facades are at
+  0.94-0.97. The Gaussian solver is far worse (0.63-0.72).
+- **Street arrays on punched facades are essentially chance:** robust top-1 0.03-0.10 with 22-floor
+  sets, coverage 0.71-0.83 in the coherent runs, so the 90% set misses the truth 17-29% of
+  the time. Ribbon sits at 0.15-0.19.
+- Windows against solid walls (ribbon vs concrete) is only about -0.04 to -0.07 top-1; what hurts
+  is the *discrete* spandrel/glass structure of punched windows.
+
+Limits: phases are i.i.d. uniform (no correlation between paths that share an interaction, no
+Doppler or motion model); the number of independent snapshots a real receiver gets is unknown
+(it depends on emitter modulation and integration time); the beam is noise-free before the
+calibrated estimation noise is added, as for the other observables; no array calibration error,
+mutual coupling or polarisation; one frequency (915 MHz); seeds fixed (one phase draw per emitter
+per run, so n = 4 vs n = inf differences of about 0.02 are within noise). Simulation only.
+
 ## Next
 
 0. Make `identifiability`, `placement`, `impairments`, `robust`, `correlated`, `placement_mc` and
@@ -739,11 +801,10 @@ concrete").
 1. Measured-data calibration: the fit-and-inflate procedure is in place
    (`rt_solver_calibration.calibrate`), but the right inflation depends on real clutter. Needs real
    observed-vs-direct-path residuals (or a clutter model validated against measurements).
-2. Midtown follow-ups: a coherent array model (phases, fading) to settle the beam-peak penalty;
-   understand why even exact-model RSS hurts, then calibrate the solver's beliefs on the Midtown
+2. Midtown follow-ups: (the coherent array model is done; the penalty stands) understand why even exact-model RSS hurts, then calibrate the solver's beliefs on the Midtown
    tables (building-level held-out split; the facade geometry is now settled enough to do so);
    report median/mode floor estimates; then the rest of the realism list: setbacks and rooftop structures, interior walls, other
-   frequencies (433 MHz, 2.4 GHz), coherent path phases for AoA, and feeding RT reflection
+   frequencies (433 MHz, 2.4 GHz), traced (rather than random) path phases, and feeding RT reflection
    statistics back into the correlated generator (its refl_mild/refl_strong are 2-15x the rates
    measured on the synthetic block).
 3. Joint reflection + calibration-offset model, and a vertical-bias check that does not rely on
