@@ -26,7 +26,7 @@ import numpy as np
 from ..geometry.scene import synthetic_manhattan_block
 from ..localization.forward import column_sigma, noise_covariance, plan_columns
 from ..measurements.models import EMITTERS, SensingParams
-from ..measurements.raytraced import PathTable, beamformed_aoa, link_observables
+from ..measurements.raytraced import PathTable, beamformed_aoa, coherent_aoa, link_observables
 from ..placement.objective import PlacementObjective, make_probes
 from ..placement.optimizer import optimise, random_layouts
 from ..placement.sites import all_candidates
@@ -57,23 +57,28 @@ def make_layouts(scene, cands, em, prop, seed, hosts=None):
 
 
 def run(T, scene, owner, em, prop, cands, layouts, seed, solvers, aoa="strongest", stride=1,
-        grid_spacing_adapt=False, paired_noise=False, return_trials=False, rss_mode="model"):
+        grid_spacing_adapt=False, paired_noise=False, return_trials=False, rss_mode="model", snaps=1):
     """aoa: 'strongest' = AoA of the strongest path (idealised); 'beamformed' = peak of the
     aperture's power-weighted beam response (1 m / 3 m horizontal, 3 m vertical tiers);
     'oracle' = the geometrically exact direct-path bearings and range (a diagnostic: it removes
     the angle and delay multipath errors but keeps RSS, geometry and solver). With
     return_trials=True the per-emitter records are returned too. rss_mode: 'model' = ray-traced
     total power (default); 'drop' = no RSS columns at all; 'oracle' = the solver's own
-    log-distance model evaluated at the exact range (removes RSS model mismatch)."""
+    log-distance model evaluated at the exact range (removes RSS model mismatch). 'coherent' = the
+    same apertures as 'beamformed' but from the complex sum of the paths with random phases
+    (measurements.raytraced.coherent_aoa), averaged over `snaps` independent fading snapshots
+    (None = the infinite-snapshot limit)."""
     o = link_observables(T, 20.0)
+    orig = table_meta(T).get("emitter_index") or list(range(len(T.tx)))   # emitter ids in the sampled set
     bf = ({"el": beamformed_aoa(T, 3.0, "el"), 1.0: beamformed_aoa(T, 1.0, "az"),
-           3.0: beamformed_aoa(T, 3.0, "az")} if aoa == "beamformed" else None)
+           3.0: beamformed_aoa(T, 3.0, "az")} if aoa == "beamformed" else
+          {"el": coherent_aoa(T, 3.0, "el", snaps, seed, orig), 1.0: coherent_aoa(T, 1.0, "az", snaps, seed, orig),
+           3.0: coherent_aoa(T, 3.0, "az", snaps, seed, orig)} if aoa == "coherent" else None)
     site_idx = {s: j for j, s in enumerate(ast.literal_eval(T.meta["repr"])["sites"])}
     grids = {n: CandidateGrid.for_building(scene.by_name(n), grid_spacing(scene.by_name(n)) if grid_spacing_adapt else 2.0)
              for n in set(owner)}
     rng = np.random.default_rng(seed)
     rows = {(l, s): [] for l in layouts for s in solvers}
-    orig = table_meta(T).get("emitter_index") or list(range(len(T.tx)))   # emitter ids in the sampled set
     KC = {"rss": 0, "toa": 1, "az": 2, "el": 3}
     for e in range(0, len(T.tx), stride):
         b = scene.by_name(owner[e])

@@ -156,6 +156,60 @@ def beamformed_aoa(t: PathTable, aperture_m: float, axis: str, half_width_deg: f
     return out
 
 
+def coherent_aoa(t: PathTable, aperture_m: float, axis: str, n_snap: int | None = 1, seed: int = 0,
+                 emitter_ids=None, half_width_deg: float = 25.0, step_deg: float = 0.25) -> np.ndarray:
+    """AoA a finite uniform array reports from the COMPLEX sum of the arriving paths.
+
+    The array has half-wavelength elements spanning `aperture_m`. Per snapshot the element signals
+    are y_m = sum_k sqrt(P_k) exp(j phi_k) exp(j 2 pi s_m u_k / lambda), u_k = sin(el_k) for a
+    vertical array and sin(az_k - az_strongest) for a horizontal one. The estimate is the Bartlett
+    peak of the sample covariance over `n_snap` snapshots, noise-free (estimation noise is added by
+    the caller, as for the other observables). Path phases are NOT in the tables, and at 915 MHz
+    they are decided by sub-wavelength geometry that no field survey knows, so each snapshot draws
+    them i.i.d. uniform (deterministic in (seed, emitter id)). Interaction phase shifts are
+    therefore irrelevant. n_snap=1 is the worst case (one static realisation: paths inside a
+    beamwidth interfere and can move the peak anywhere); n_snap=N averages N independent fading
+    realisations; n_snap=None is the N -> infinity limit, the expected power, which is the
+    non-coherent model of `beamformed_aoa` with a Dirichlet instead of a sinc beam.
+    Returns (N, R) angles [rad], nan for links without paths.
+    """
+    lam = C / t.frequency_hz
+    M = int(math.ceil(2 * aperture_m / lam)) + 1
+    N, R, K = t.power.shape
+    ids = np.arange(N) if emitter_ids is None else np.asarray(emitter_ids)
+    grid = np.radians(np.arange(-half_width_deg, half_width_deg + step_deg / 2, step_deg))
+    out = np.full((N, R), np.nan)
+
+    def dirichlet(x):   # normalised array factor; x = (element spacing / lambda) * (u - u_k)
+        den = M * np.sin(np.pi * x)
+        near = np.abs(den) < 1e-9
+        return np.where(near, 1.0, np.sin(M * np.pi * x) / np.where(near, 1.0, den))
+
+    for e in range(N):
+        P = t.power[e]
+        has = P.sum(-1) > 0
+        if not has.any():
+            continue
+        ang = (math.pi / 2 - t.theta_r[e]) if axis == "el" else t.phi_r[e]
+        strongest = np.take_along_axis(ang, np.argmax(P, -1)[:, None], -1)[:, 0]
+        a = strongest[:, None] + grid[None, :]                                  # (R, G)
+        if axis == "el":
+            du = np.sin(a)[:, :, None] - np.sin(ang)[:, None, :]
+        else:
+            du = np.sin(a[:, :, None] - ang[:, None, :])
+        D = dirichlet(0.5 * du)                                                # (R, G, K)
+        if n_snap is None:
+            S = np.einsum("rk,rgk->rg", P, D ** 2)
+        else:
+            ph = np.random.default_rng([seed, int(ids[e])]).uniform(0, 2 * np.pi, (n_snap, R, K))
+            amp = np.sqrt(P)[None] * np.exp(1j * ph)                           # (S, R, K)
+            S = (np.abs(np.einsum("srk,rgk->srg", amp, D)) ** 2).mean(0)
+        out[e] = np.where(has, a[np.arange(R), np.argmax(S, -1)], np.nan)
+    if axis == "az":
+        out = (out + np.pi) % (2 * np.pi) - np.pi
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Path composition
 # ---------------------------------------------------------------------------

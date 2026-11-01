@@ -79,7 +79,8 @@ def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--seed", type=int, default=7)
     ap.add_argument("--boot", type=int, default=1000)
-    ap.add_argument("--aoa", default="beamformed", choices=["beamformed", "strongest", "oracle"])
+    ap.add_argument("--aoa", default="beamformed", choices=["beamformed", "strongest", "oracle", "coherent"])
+    ap.add_argument("--snaps", type=int, default=1, help="coherent AoA: independent fading snapshots averaged (0 = infinite)")
     ap.add_argument("--no-links", action="store_true", help="skip link statistics / beam arrays (solver part only)")
     ap.add_argument("--layouts", nargs="+", default=list(LAYOUTS))
     ap.add_argument("--out-name", default="rt_patterns_midtown")
@@ -113,7 +114,8 @@ def main(argv=None):
             beams = beam_arrays(T)
             stats[lab], comps[lab] = link_stats(T, sc, table_meta(T)["owner"], sites, beams)
         trials[lab] = run(T, sc, table_meta(T)["owner"], em, prop, cands, layouts, a.seed,
-                          {k: SOLVERS[k] for k in ("gaussian", "robust")}, a.aoa, 1, True, True, True)
+                          {k: SOLVERS[k] for k in ("gaussian", "robust")}, a.aoa, 1, True, True, True,
+                          snaps=a.snaps or None)
         print("done", lab, flush=True)
 
     def ci(vals_fn):
@@ -163,7 +165,7 @@ def main(argv=None):
             md.append(f"| {lab} | {g[0]:.3f} [{g[1]:.3f}, {g[2]:.3f}] (n={int(c['direct crosses glass: links'].sum())}) | "
                       f"{k[0]:.3f} [{k[1]:.3f}, {k[2]:.3f}] (n={int(c['direct crosses concrete: links'].sum())}) | {np.nanmedian(dfc):.1f} |")
             js[lab]["mechanism"] = dict(glass=g, concrete=k)
-    md += ["", f"### Solver performance (240 emitters, AoA = {a.aoa}, default beliefs, paired noise)\n",
+    md += ["", f"### Solver performance (240 emitters, AoA = {a.aoa}{f' x{a.snaps} snapshots' if a.aoa == 'coherent' else ''}, default beliefs, paired noise)\n",
            "Differences are vs `%s`, same emitters (95%% bootstrap CI over emitters).\n" % REF,
            "| layout | solver | facade | top-1 | top-3 | cov90 | set | d top-1 vs ribbon | d p(truth) vs ribbon |", "|---|---|---|---|---|---|---|---|---|"]
     for lay_name in layouts:
