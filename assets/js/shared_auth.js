@@ -217,6 +217,25 @@ const SCYTHE_AUTH = (function() {
                     role: payload.role || (payload.roles && payload.roles[0]) || 'operator'
                 };
 
+                // A session issued by an instance carries only ids, so the token cannot name the operator.
+                // Ask the server who it is; a failure leaves the token-derived values in place.
+                if (!operator.callsign) {
+                    try {
+                        const who = await ScytheTransport.fetch('/api/operator/session', {
+                            headers: { 'X-Session-Token': token }
+                        });
+                        if (who.ok) {
+                            const known = (await who.json()).operator;
+                            if (known && known.callsign) {
+                                operator.callsign = known.callsign;
+                                operator.operator_id = known.operator_id || operator.operator_id;
+                                operator.email = known.email || operator.email;
+                                operator.role = known.role || operator.role;
+                            }
+                        }
+                    } catch (e) { /* keep the token-derived operator */ }
+                }
+
                 // Cache decoded claims for reuse and expose globally for other modules
                 currentClaims = payload;
                 try { window.__SCYTHE_CLAIMS__ = payload; } catch (e) { /* noop */ }

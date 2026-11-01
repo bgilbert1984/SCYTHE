@@ -147,6 +147,18 @@ def validate_jwt(token: str):
         log.debug(f"FusionAuth JWT validation path failed: {e}")
 
     return None
+def _operator_display_name(jwt_data):
+    """A display name for the instance to label a new operator record, or None. Never used for roles."""
+    for key in ('preferred_username', 'username', 'firstName'):
+        value = jwt_data.get(key)
+        if isinstance(value, str) and value.strip() and value.strip() != 'Operator':   # 'Operator' is the placeholder
+            return value.strip()[:48]
+    email = jwt_data.get('email')
+    if isinstance(email, str) and '@' in email:
+        return email.split('@')[0].strip()[:48] or None
+    return None
+
+
 def get_user_wallet_balance(user_id):
     """Fetch wallet balance from FusionAuth or legacy operator manager."""
     # 1. Try FusionAuth
@@ -1816,7 +1828,7 @@ def orchestrator_issue_bootstrap():
             "exp": now + 300,
             "scope": "bootstrap",
             # A display name only: the instance never takes a role from this token.
-            "preferred_username": jwt_data.get('firstName') or None,
+            "preferred_username": _operator_display_name(jwt_data),
         }
         bootstrap_token = jwt.encode(payload, _INTERNAL_TOKEN, algorithm="HS256")
 
