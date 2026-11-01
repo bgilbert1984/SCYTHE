@@ -3075,6 +3075,7 @@ class CesiumHypergraphGlobe {
       if (reason === 'io server disconnect') {
         console.warn('[Globe] Server-initiated disconnect — clearing cached token');
         localStorage.removeItem('scythe_session_token');
+        this._rejectedToken = this._streamToken;
         this._streamToken = null;
       }
       this._scheduleStreamReconnect();
@@ -3105,41 +3106,17 @@ class CesiumHypergraphGlobe {
   }
 
   async _reAuth() {
-    const TOKEN_KEY    = 'scythe_session_token';
-    const CALLSIGN_KEY = 'scythe_callsign';
-    try {
-      let callsign = localStorage.getItem(CALLSIGN_KEY);
-      if (!callsign) {
-        const rnd = Math.random().toString(36).slice(2, 7).toUpperCase();
-        callsign = `SCYTHE-${rnd}`;
-        localStorage.setItem(CALLSIGN_KEY, callsign);
-      }
-      const password = `auto-${callsign.toLowerCase()}`;
-
-      // register (idempotent) then login
-      await fetch(`${this._apiBase}/api/operator/register`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ callsign, email: `${callsign}@scythe.local`, password, role: 'operator' })
-      }).catch(() => {});
-
-      const r = await fetch(`${this._apiBase}/api/operator/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ callsign, password })
-      });
-      if (r.ok) {
-        const d = await r.json();
-        const token = d?.session?.session_token;
-        if (token) {
-          localStorage.setItem(TOKEN_KEY, token);
-          this._streamToken = token;
-          console.log('[Globe] 🔑 Re-auth successful for', callsign);
-        }
-      }
-    } catch (err) {
-      console.warn('[Globe] Re-auth failed, will connect anonymously:', err.message);
+    // The globe never creates or signs in an account of its own. After the server
+    // rejects a token, use the operator's current session if it is a different one;
+    // otherwise connect without a token and let the server decide.
+    try { localStorage.removeItem('scythe_callsign'); } catch (_) { /* storage blocked */ }
+    let current = null;
+    try { current = window.SCYTHE_AUTH ? SCYTHE_AUTH.restoreSession() : null; } catch (_) { current = null; }
+    if (current && current !== this._rejectedToken) {
+      this._streamToken = current;
+      return;
     }
+    console.warn('[Globe] No usable operator session for the stream; connecting without one');
   }
 
   _startStreamHeartbeat() {

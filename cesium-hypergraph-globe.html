@@ -1054,22 +1054,21 @@ globe._loadGeoData(API_BASE);
 // Flow:
 //   1. If localStorage has a token, validate it locally using JWT claims.
 //      On success → connectStream(token).
-//   2. If no token or token is expired → auto-register a guest operator derived
-//      from the browser's fingerprint, then login to get a fresh token.
+//   2. If no token or token is expired → use the operator's current session
+//      (SCYTHE_AUTH); never create an account.
 //   3. If operator_manager is unavailable (server returns 503/404) → connect
 //      anonymously; server's dev-mode path will accept it.
 (async function _authBootstrap() {
   const TOKEN_KEY = 'scythe_session_token';
-  const CALLSIGN_KEY = 'scythe_callsign';
 
   async function tryValidate(token) {
     try {
       if (!token || !window.SCYTHE_AUTH) return null;
-      
+
       // Use local JWT-native validation
       const { valid } = await window.SCYTHE_AUTH.validateSession(token);
       if (valid) return token;
-      
+
       return null;
     } catch (e) {
       console.warn('[Globe Auth] Validation error:', e);
@@ -1077,60 +1076,12 @@ globe._loadGeoData(API_BASE);
     }
   }
 
-  async function autoLogin(callsign, password) {
-    try {
-      const r = await fetch(`${API_BASE}/api/operator/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ callsign, password })
-      });
-      if (r.ok) {
-        const d = await r.json();
-        return d?.session?.session_token || null;
-      }
-    } catch (_) {}
-    return null;
-  }
-
-  async function autoRegister(callsign, password) {
-    try {
-      const r = await fetch(`${API_BASE}/api/operator/register`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          callsign, email: `${callsign}@scythe.local`, password, role: 'operator'
-        })
-      });
-      // 409 = already exists, which is fine — just fall through to login
-      if (r.ok || r.status === 409) return true;
-    } catch (_) {}
-    return false;
-  }
-
-  let token = localStorage.getItem(TOKEN_KEY);
-  if (token) token = await tryValidate(token);
-
-  if (!token) {
-    // Derive a stable guest callsign from hostname + browser entropy
-    let callsign = localStorage.getItem(CALLSIGN_KEY);
-    if (!callsign) {
-      const rnd = Math.random().toString(36).slice(2, 7).toUpperCase();
-      callsign = `SCYTHE-${rnd}`;
-      localStorage.setItem(CALLSIGN_KEY, callsign);
-    }
-    const password = `auto-${callsign.toLowerCase()}`;
-
-    // Try register (idempotent) then login
-    await autoRegister(callsign, password);
-    token = await autoLogin(callsign, password);
-
-    if (token) {
-      localStorage.setItem(TOKEN_KEY, token);
-      console.log('[Globe] 🔑 Session established for', callsign);
-    } else {
-      console.warn('[Globe] Auth unavailable — connecting anonymously (dev mode)');
-    }
-  }
+  // The page uses the signed-in operator's session and never creates an account.
+  // Without one it connects without a token and the server decides.
+  try { localStorage.removeItem('scythe_callsign'); } catch (_) { /* storage blocked */ }
+  let token = await tryValidate(localStorage.getItem(TOKEN_KEY));
+  if (!token) token = await tryValidate(window.SCYTHE_AUTH ? SCYTHE_AUTH.restoreSession() : null);
+  if (!token) console.warn('[Globe Auth] No operator session - connecting without one');
 
   globe.connectStream(WS_URL, API_BASE, token || null);
 })();
