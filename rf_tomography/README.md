@@ -512,9 +512,7 @@ solvers: default, calibrated, and calibrated with floors x3. Coverage / mean set
 
 ## Real footprints, mixed facades, windows (Midtown)
 
-**Status: infrastructure and validation are done and committed; the Midtown ray-tracing runs,
-calibration and solver evaluation are NOT in this commit** (they were running when it was made).
-Nothing below reports a Midtown result.
+**Status: scene, validation, ray-traced calibration and solver evaluation are done (results below).**
 
 - **Footprints** (`geometry/real.py`): NYC Building Footprints (public domain, OTI dataset
   `5zhs-2jue`), a trimmed extract around 5th Ave / 42nd St committed in `geometry/data/`
@@ -562,6 +560,65 @@ Nothing below reports a Midtown result.
     OMP_NUM_THREADS=1 .venv/bin/python -m rf_tomography.benchmarks.rt_eval --tables <midtown tables> \
         --solvers gaussian robust --emitter-stride 2 --out-name rt_eval_midtown
 
+**Results on Midtown** (480 emitters in the 12 tallest buildings, mean 46.6 floors so chance is 2%
+top-1 / 6% top-3; 54 sites = 40 street + 14 rooftop; 915 MHz; depth 5; no scattering). Tables:
+`results/rt_calibration_midtown_*.md`, `results/rt_eval_midtown.md`.
+
+*Ray-traced observables vs the same links on the synthetic block (solver-LOS links, i.e. the
+links the solver trusts; only 40% of Midtown links are solver-LOS):*
+
+| quantity | synthetic block (concrete / glass) | Midtown solid concrete | Midtown solid glass | Midtown mixed with windows |
+|---|---|---|---|---|
+| strongest path is direct | 0.98 / 0.97 | 0.92 | 0.87 | **0.76** |
+| P(elevation error > 5 deg) | 0.009 / 0.019 | 0.017 | 0.030 | **0.095** |
+| P(azimuth error > 5 deg) | 0.020 / 0.033 | 0.047 | 0.088 | **0.128** |
+| angle floor, 3 m vertical beam peak (deg) | 0.38 / 0.69 | 0.70 | 1.21 | 1.18 |
+| P(TOA excess > 10 m) | 0.002 / 0.000 | 0.021 | 0.009 | 0.019 |
+| path-loss exponent / RSS sigma (dB) | 4.6 / 8.7 ; 2.9 / 4.1 | 3.0 / 11.7 | 2.4 / 8.3 | 2.6 / 10.1 |
+| solver-NLOS: strongest path direct | 0.24 / 0.29 | 0.28 | 0.33 | 0.25 |
+
+- **Windows make the real city much dirtier than either solid-wall baseline on identical
+  footprints**: direct path strongest 0.76 vs 0.92 / 0.87, angle outliers 3-5x. A plausible
+  mechanism (not separately verified): the direct ray crosses opaque spandrel while a bounce
+  leaves through a glass band, so the strongest path often is not the direct one. Mixed
+  glass-and-opaque is worse than either extreme.
+- **Midtown is dirtier than the synthetic block even with solid walls** (denser, more bounces).
+  The first-pass finding "the ray-traced city is cleaner than assumed" was a property of the
+  synthetic block. On Midtown with windows the angular statistics (floor ~1.2 deg, 10-13% outliers)
+  are close to my original 'moderate' assumptions for angles; delay outliers (2%) and RSS sigma
+  (10 dB vs 6) are not.
+- Street and rooftop receivers are about equally affected (street: direct 0.78, P(el>5) 0.11;
+  roof: 0.74, 0.084). The synthetic block's street-glass ground-bounce effect is a smaller part
+  of the story here.
+
+*Solver evaluation* (240 emitters per table, default beliefs, beam-peak AoA; top-1 / top-3 /
+90%-set coverage / mean set size in floors), robust solver unless noted:
+
+| layout | mixed with windows | solid concrete | solid glass |
+|---|---|---|---|
+| analytic@20 (incl. rooftops) | 0.43 / 0.77 / 0.96 / 8.7 | 0.54 / 0.83 / 0.95 / 8.3 | 0.51 / 0.82 / 0.97 / 8.2 |
+| analytic@20, Gaussian solver | 0.36 / 0.65 / **0.77** / 6.7 | 0.47 / 0.74 / 0.87 / 6.9 | 0.46 / 0.73 / 0.90 / 6.9 |
+| analytic@14 | 0.41 / 0.67 / 0.93 / 11.9 | 0.46 / 0.68 / 0.95 / 11.4 | 0.39 / 0.69 / 0.95 / 10.9 |
+| 5 street arrays | 0.15 / 0.42 / 0.94 / 21.4 | 0.29 / 0.53 / 0.97 / 21.2 | 0.09 / 0.40 / 0.98 / 21.2 |
+| random median@14 | 0.06 / 0.23 / 0.96 / 26.6 | 0.16 / 0.38 / 0.97 / 25.6 | 0.07 / 0.21 / 0.97 / 25.7 |
+
+- **The problem is much harder here than on the synthetic block**: best layout top-1 0.43-0.54
+  (0.92-0.96 on the block), top-3 0.77-0.83, 90% sets of 8-9 floors, floor error about 2 floors
+  (7-9 m). It is still ~20x chance, and the sets are honest (coverage 0.93-0.97). Part of the
+  drop is simply taller buildings (46 floors on average vs 27-44), part the denser NLOS, part the
+  windows (-0.08 to -0.11 top-1 vs the solid baselines).
+- **The robust solver matters more here**: with windows the Gaussian solver covers only 0.76-0.77
+  (robust 0.93-0.96) and loses 0.05-0.12 top-3 across the analytic layouts.
+- **Placement matters a lot**: layouts with rooftop receivers (analytic) reach 0.43-0.54; five
+  street-level arrays reach 0.09-0.29 with ~21-floor sets, close to a random layout.
+- **A positive floor bias of +0.3 to +1.2 floors** for the analytic layouts (the synthetic block
+  had a negative one). I have not diagnosed it.
+- Caveats: one seed, 240 emitters (top-1 SE about 0.03), default (uncalibrated) beliefs, the
+  analytic layouts were chosen under the Gaussian CRLB objective, links with no path within 5
+  interactions are dropped, and the window model is a continuous ribbon (an assumption that may
+  exaggerate leakage geometry). `rt_solver_calibration` has not yet been generalised to this
+  scene, so calibrated beliefs for Midtown are not evaluated.
+
 **Limits of the scene itself.** Prisms without setbacks; flat ground; emitters inside *empty*
 buildings (no interior walls or furniture); ribbon windows; facade styles from a heuristic; no
 foliage, vehicles, street furniture or scattering by default; receiver sites chosen by me
@@ -574,8 +631,9 @@ foliage, vehicles, street furniture or scattering by default; receiver sites cho
 1. Measured-data calibration: the fit-and-inflate procedure is in place
    (`rt_solver_calibration.calibrate`), but the right inflation depends on real clutter. Needs real
    observed-vs-direct-path residuals (or a clutter model validated against measurements).
-2. Finish the Midtown evaluation (traces, calibration, solver eval; see the section above), then
-   the rest of the realism list: setbacks and rooftop structures, interior walls, other
+2. Midtown follow-ups: calibrate the solver's beliefs on the Midtown tables (default beliefs are
+   only partly matched: angles yes, delay and RSS no), diagnose the +1 floor bias, test whether
+   punched windows (instead of ribbons) change the dirtiness, then the rest of the realism list: setbacks and rooftop structures, interior walls, other
    frequencies (433 MHz, 2.4 GHz), coherent path phases for AoA, and feeding RT reflection
    statistics back into the correlated generator (its refl_mild/refl_strong are 2-15x the rates
    measured on the synthetic block).
