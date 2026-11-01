@@ -22,7 +22,9 @@ from dataclasses import dataclass, field, asdict
 from typing import Dict, List, Optional, Set, Callable, Any, Tuple, Union
 from enum import Enum
 import sqlite3
+import base64
 import hashlib
+import re
 import secrets
 import os
 import socket
@@ -89,6 +91,20 @@ except Exception:
     _PyJWKClient = None
     JWT_AVAILABLE = False
 
+
+
+PASSWORD_HASH_PREFIX = "pbkdf2_sha256"
+PASSWORD_HASH_ITERATIONS = 600_000      # OWASP 2023 minimum for PBKDF2-HMAC-SHA256
+PASSWORD_HASH_MAX_ITERATIONS = 10_000_000   # a stored value above this is treated as corrupt, not computed
+PASSWORD_SALT_BYTES = 16
+LEGACY_PASSWORD_SALT = "command-ops-salt"   # the old fixed salt; kept only to recognise old rows
+_LEGACY_HASH = re.compile(r"[0-9a-f]{64}")
+
+
+def _encode_password_hash(password: str, salt: bytes, iterations: int) -> str:
+    digest = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, iterations)
+    return "$".join((PASSWORD_HASH_PREFIX, str(iterations),
+                     base64.b64encode(salt).decode(), base64.b64encode(digest).decode()))
 
 class OperatorRole(Enum):
     """Operator roles with different permission levels"""
@@ -846,9 +862,42 @@ class OperatorSessionManager:
         thread.start()
 
     def _hash_password(self, password: str) -> str:
-        """Hash password with salt"""
-        salt = "command-ops-salt"  # In production, use unique salt per user
-        return hashlib.sha256(f"{salt}{password}".encode()).hexdigest()
+        """Hash a password: PBKDF2-HMAC-SHA256, random per-hash salt, self-describing string."""
+        salt = secrets.token_bytes(PASSWORD_SALT_BYTES)
+        return _encode_password_hash(password, salt, PASSWORD_HASH_ITERATIONS)
+
+    def _unknown_callsign_hash(self) -> str:
+        """A hash nobody knows the password of, made once, to spend the same time on an unknown callsign."""
+        if getattr(self, "_decoy_hash", None) is None:
+            self._decoy_hash = self._hash_password(secrets.token_hex(16))
+        return self._decoy_hash
+
+    def _verify_password(self, password: str, stored: Optional[str]) -> Tuple[bool, bool]:
+        """Check a password against a stored hash -> (matches, stored hash should be replaced).
+
+        Accepts the current format and the legacy unsalted-in-effect SHA-256 hex digest (to be
+        replaced on the next successful check). An empty or unreadable stored value never matches.
+        """
+        if not stored or not isinstance(password, str):
+            return False, False
+        if stored.startswith(PASSWORD_HASH_PREFIX + "$"):
+            parts = stored.split("$")
+            try:
+                iterations = int(parts[1])
+                salt = base64.b64decode(parts[2], validate=True)
+                expected = base64.b64decode(parts[3], validate=True)
+            except (IndexError, ValueError):
+                return False, False
+            if len(parts) != 4 or not 1 <= iterations <= PASSWORD_HASH_MAX_ITERATIONS or not salt or not expected:
+                return False, False
+            actual = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, iterations, dklen=len(expected))
+            matches = hmac.compare_digest(actual, expected)
+            return matches, matches and iterations < PASSWORD_HASH_ITERATIONS
+        if _LEGACY_HASH.fullmatch(stored):
+            legacy = hashlib.sha256(f"{LEGACY_PASSWORD_SALT}{password}".encode()).hexdigest()
+            matches = hmac.compare_digest(legacy, stored)
+            return matches, matches
+        return False, False
 
     def register_operator(
         self,
@@ -1000,22 +1049,22 @@ class OperatorSessionManager:
                 print(f"[OperatorManager] FusionAuth login error: {e}")
 
         # Legacy local credential check
-        password_hash = self._hash_password(password)
-
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
-        cursor.execute('''
-            SELECT operator_id FROM operators
-            WHERE callsign = ? AND password_hash = ?
-        ''', (callsign, password_hash))
-
+        cursor.execute('SELECT operator_id, password_hash FROM operators WHERE callsign = ?', (callsign,))
         result = cursor.fetchone()
-        conn.close()
-
-        if not result:
+        # An unknown callsign costs the same hashing work as a wrong password, so timing does not tell them apart.
+        matches, replace = self._verify_password(password, result[1] if result else self._unknown_callsign_hash())
+        if not result or not matches:
+            conn.close()
             return None
 
         operator_id = result[0]
+        if replace:
+            cursor.execute('UPDATE operators SET password_hash = ? WHERE operator_id = ?',
+                           (self._hash_password(password), operator_id))
+            conn.commit()
+        conn.close()
         return self._create_session(operator_id)
 
     def _create_session(self, operator_id: str, session_token_override: Optional[str] = None, expires_at_override: Optional[datetime] = None) -> OperatorSession:
@@ -1884,8 +1933,13 @@ class OperatorSessionManager:
 
         # Check password for private rooms
         if room.is_private and room.password_hash:
-            if not password or self._hash_password(password) != room.password_hash:
+            matches, replace = self._verify_password(password, room.password_hash) if password else (False, False)
+            if not matches:
                 return False, "Invalid password"
+            if replace:
+                room.password_hash = self._hash_password(password)
+                with sqlite3.connect(self.db_path) as conn:
+                    conn.execute('UPDATE rooms SET password_hash = ? WHERE room_id = ?', (room.password_hash, room_id))
 
         # Get session and operator
         session = self.sessions.get(session_id)
