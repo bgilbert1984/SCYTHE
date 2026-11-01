@@ -645,6 +645,25 @@ def scythe_instance_http_proxy(instance_id, subpath):
     return _proxy_http_to_instance(instance_id, subpath)
 
 
+from flask import Response as _FlaskResponse
+
+
+class _WebSocketDone(_FlaskResponse):
+    """Returned after a WebSocket has ended on the socket: the socket is no longer HTTP, so nothing may be written.
+
+    An empty body is not enough (the development server then writes a status line and headers, or a 500 when
+    start_response was never called); a ConnectionError makes it drop the connection quietly instead.
+    """
+    def __call__(self, environ, start_response):
+        sock = environ.get('werkzeug.socket')   # the development server hands the raw socket to the WebSocket
+        if sock is not None:
+            try: sock.shutdown(socket.SHUT_RDWR)
+            except OSError: pass
+            try: sock.close()
+            except OSError: pass
+        raise ConnectionAbortedError("websocket finished")
+
+
 def _ws_proxy_session_token():
     """The session a WebSocket caller presents: ?token= (browsers), or the usual headers."""
     bearer = request.headers.get('Authorization', '')
@@ -683,11 +702,10 @@ def generic_ws_proxy(port, subpath):
     if not auth or not auth.get('valid'):
         abort(401, description="A valid session is required for the WebSocket proxy.")
 
-    ws_server = WSServer(request.environ)
-
-    # Connect to local backend. The public route reserves `/ws` as the proxy
-    # marker; when no extra subpath is supplied, preserve the common backend
-    # `/ws` endpoint instead of forwarding to `/`.
+    # Connect to the local backend first: if it is down, the browser still gets a plain HTTP 502 (once the
+    # handshake is done, an HTTP response can no longer be sent on this socket). The public route reserves `/ws`
+    # as the proxy marker; when no extra subpath is supplied, preserve the common backend `/ws` endpoint
+    # instead of forwarding to `/`.
     backend_path = '/' + subpath.lstrip('/') if subpath else '/ws'
     backend_url = f'ws://127.0.0.1:{port}{backend_path}'
     forwarded = [(k, v) for k, v in request.args.items(multi=True) if k != 'token']
@@ -696,44 +714,60 @@ def generic_ws_proxy(port, subpath):
 
     try:
         remote_ws = ws_client.create_connection(backend_url, timeout=5)
-
-        def relay_to_client():
-            try:
-                while True:
-                    data = remote_ws.recv()
-                    ws_server.send(data)
-            except Exception:
-                pass
-            finally:
-                try: ws_server.close()
-                except: pass
-
-        def relay_to_backend():
-            try:
-                while True:
-                    data = ws_server.receive()
-                    remote_ws.send(data)
-            except Exception:
-                pass
-            finally:
-                try: remote_ws.close()
-                except: pass
-
-        # Launch relay threads
-        t1 = threading.Thread(target=relay_to_client, daemon=True)
-        t2 = threading.Thread(target=relay_to_backend, daemon=True)
-        t1.start()
-        t2.start()
-
-        # Wait for threads to finish (request stays alive)
-        while t1.is_alive() or t2.is_alive():
-            time.sleep(0.5)
-
+        remote_ws.settimeout(None)   # the 5 s above is for connecting; an idle stream must stay open
     except Exception as e:
         log.warning(f'[ws-proxy] Failed to connect to {backend_url}: {e}')
         abort(502, description=f"Upstream WS at {port} unreachable")
 
-    return '', 101
+    try:
+        ws_server = WSServer(request.environ)
+    except Exception:
+        try: remote_ws.close()
+        except Exception: pass
+        raise
+
+    def relay_to_client():
+        try:
+            while True:
+                opcode, data = remote_ws.recv_data()
+                if opcode == ws_client.ABNF.OPCODE_CLOSE:
+                    break
+                if opcode == ws_client.ABNF.OPCODE_TEXT:
+                    ws_server.send(data.decode('utf-8', 'replace'))
+                elif opcode == ws_client.ABNF.OPCODE_BINARY:
+                    ws_server.send(data)
+        except Exception:
+            pass
+        finally:
+            try: ws_server.close()
+            except Exception: pass
+
+    def relay_to_backend():
+        try:
+            while True:
+                data = ws_server.receive()
+                if isinstance(data, (bytes, bytearray)):
+                    remote_ws.send_binary(bytes(data))   # send() would turn it into a text frame
+                else:
+                    remote_ws.send(data)
+        except Exception:
+            pass
+        finally:
+            try: remote_ws.close()
+            except Exception: pass
+
+    t1 = threading.Thread(target=relay_to_client, daemon=True)
+    t2 = threading.Thread(target=relay_to_backend, daemon=True)
+    t1.start()
+    t2.start()
+
+    # Wait for threads to finish (request stays alive)
+    while t1.is_alive() or t2.is_alive():
+        time.sleep(0.5)
+
+    # The WebSocket has already ended on the socket. Anything written now (a normal Response writes
+    # "HTTP/1.1 101 ...") reaches the browser as a corrupt frame, so send nothing more.
+    return _WebSocketDone()
 
 
 app.add_url_rule('/proxy/<int:port>/ws', endpoint='generic_ws_proxy_upgrade', view_func=generic_ws_proxy,
