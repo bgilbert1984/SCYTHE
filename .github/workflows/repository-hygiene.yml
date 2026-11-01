@@ -142,6 +142,7 @@ jobs:
             test_mcp_restart_policy \
             test_password_hashing \
             test_hub_operator_provisioning \
+            test_ws_proxy_upgrade \
             test_mcp_approval_audit \
             test_mcp_approval_policy \
             test_mcp_halting_action \

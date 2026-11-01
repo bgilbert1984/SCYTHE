@@ -43,7 +43,7 @@ import jwt
 import requests
 from datetime import datetime, timezone
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlencode
 
 # Add FusionAuth client to sys path
 _FA_CLIENT_PATH = Path(__file__).resolve().parent / "assets" / "fusionauth-python-client-develop" / "src" / "main" / "python"
@@ -645,6 +645,18 @@ def scythe_instance_http_proxy(instance_id, subpath):
     return _proxy_http_to_instance(instance_id, subpath)
 
 
+def _ws_proxy_session_token():
+    """The session a WebSocket caller presents: ?token= (browsers), or the usual headers."""
+    bearer = request.headers.get('Authorization', '')
+    if bearer.lower().startswith('bearer '):
+        bearer = bearer[7:].strip()
+    else:
+        bearer = ''
+    return request.args.get('token') or request.headers.get('X-Session-Token') or bearer or None
+
+
+# Werkzeug routes a request carrying `Connection: Upgrade` + `Upgrade: websocket` only to rules declared with
+# websocket=True; a plain rule answers it with 400 before the view runs. The plain rules stay for the HTTP fallback.
 @app.route('/proxy/<int:port>/ws', defaults={'subpath': ''})
 @app.route('/proxy/<int:port>/ws/<path:subpath>')
 def generic_ws_proxy(port, subpath):
@@ -663,6 +675,14 @@ def generic_ws_proxy(port, subpath):
         # If not a WS upgrade, fall back to standard HTTP proxy (handles gRPC-Web POSTs)
         return generic_port_proxy(port, subpath)
 
+    # The services behind these ports accept any client, so the tunnel is the only place a caller is checked.
+    # The browser sends its session as ?token= (it cannot set headers on a WebSocket); that is checked here and
+    # not passed on, so it does not end up in a backend's logs.
+    session_token = _ws_proxy_session_token()
+    auth = validate_jwt(session_token) if session_token else None
+    if not auth or not auth.get('valid'):
+        abort(401, description="A valid session is required for the WebSocket proxy.")
+
     ws_server = WSServer(request.environ)
 
     # Connect to local backend. The public route reserves `/ws` as the proxy
@@ -670,8 +690,9 @@ def generic_ws_proxy(port, subpath):
     # `/ws` endpoint instead of forwarding to `/`.
     backend_path = '/' + subpath.lstrip('/') if subpath else '/ws'
     backend_url = f'ws://127.0.0.1:{port}{backend_path}'
-    if request.query_string:
-        backend_url += '?' + request.query_string.decode('latin1')
+    forwarded = [(k, v) for k, v in request.args.items(multi=True) if k != 'token']
+    if forwarded:
+        backend_url += '?' + urlencode(forwarded)
 
     try:
         remote_ws = ws_client.create_connection(backend_url, timeout=5)
@@ -713,6 +734,12 @@ def generic_ws_proxy(port, subpath):
         abort(502, description=f"Upstream WS at {port} unreachable")
 
     return '', 101
+
+
+app.add_url_rule('/proxy/<int:port>/ws', endpoint='generic_ws_proxy_upgrade', view_func=generic_ws_proxy,
+                 defaults={'subpath': ''}, websocket=True)
+app.add_url_rule('/proxy/<int:port>/ws/<path:subpath>', endpoint='generic_ws_proxy_upgrade_sub', view_func=generic_ws_proxy,
+                 websocket=True)
 
 
 @app.route('/proxy/<int:port>', defaults={'subpath': ''}, methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'HEAD', 'OPTIONS'])
