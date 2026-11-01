@@ -28,7 +28,9 @@ class Tunnel(unittest.TestCase):
     def setUp(self):
         REACHED.clear()
         self.client = orch.app.test_client()
-        for target, value in (("HAS_SIMPLE_WS", True), ("HAS_WS_CLIENT", True),
+        # The backend connection is made before the handshake, so it is stubbed too: these tests must never open a real socket.
+        no_backend_needed = mock.Mock(create_connection=lambda url, timeout=None: _Remote([]))
+        for target, value in (("HAS_SIMPLE_WS", True), ("HAS_WS_CLIENT", True), ("ws_client", no_backend_needed),
                               ("WSServer", _Handshake), ("validate_jwt", _good_only)):
             patcher = mock.patch.object(orch, target, value, create=True)
             patcher.start()
