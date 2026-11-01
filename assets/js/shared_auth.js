@@ -116,6 +116,9 @@ const SCYTHE_AUTH = (function() {
             localStorage.removeItem(TOKEN_KEY);
             clearCookie(COOKIE_NAME);
         }
+        // The globe and command-ops pages keep a second copy under an unprefixed key
+        // (shared by every instance on this origin); signing out here must remove it too.
+        try { localStorage.removeItem('scythe_session_token'); } catch (e) { /* storage blocked */ }
         ScytheTransport.clearSessionToken();
         window.dispatchEvent(new Event('scythe:auth-changed'));
     }
