@@ -3643,6 +3643,9 @@ except ImportError:
     POI_MANAGER_AVAILABLE = False
     logger.warning("POI Manager not available - POI features disabled")
 
+# Which role a self-registering caller may get (needs nothing else)
+from registration_policy import RegistrationRoleError, public_registration_role
+
 # Import Operator Session Manager
 try:
     from operator_session_manager import (
@@ -16714,20 +16717,16 @@ if FLASK_AVAILABLE:
             callsign = data.get('callsign')
             email = data.get('email')
             password = data.get('password')
-            role = data.get('role', 'operator')
             team_id = data.get('team_id')
 
             if not all([callsign, email, password]):
                 return jsonify({'status': 'error', 'message': 'Missing required fields: callsign, email, password'}), 400
 
-            # Map role string to enum
-            role_map = {
-                'observer': OperatorRole.OBSERVER,
-                'operator': OperatorRole.OPERATOR,
-                'supervisor': OperatorRole.SUPERVISOR,
-                'admin': OperatorRole.ADMIN
-            }
-            operator_role = role_map.get(role, OperatorRole.OPERATOR)
+            # The caller never chooses their own authority (registration_policy.py).
+            try:
+                operator_role = OperatorRole(public_registration_role(data.get('role')))
+            except RegistrationRoleError as e:
+                return jsonify({'status': 'error', 'message': str(e)}), 400
 
             operator = operator_manager.register_operator(
                 callsign=callsign,
