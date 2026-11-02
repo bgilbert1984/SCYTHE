@@ -102,6 +102,7 @@ Stop here if any control shows a response of comparable size to the expected sig
 - [ ] Every run saves: raw DAQ files, the Arduino serial log (with `V 1`), run metadata JSON (run ID, UTC start/end, fc, f_m, duty, drive, attenuator step, filter, gain, antenna state, firmware commit, operator). For Stage 4 the copy shared with the analyst omits fc (see section 7b).
 - [ ] The decision rule file is committed before the first DUT run and not edited after (the evaluator refuses a result if its hash differs from `PREREG_FREEZE.json`).
 - [ ] Raw captures are stored off the host `/tmp` (size: roughly 4 MB/s per capture stream).
+- [ ] Copying captures off scythe-1 needs the tailnet MTU fix (`scripts/experiment_e/fix_tailscale_mtu.sh`, applied 2026-11-02: `TS_DEBUG_MTU=1200`); without it SSH, scp and Taildrop stall after ~1 KB. Uplink-limited to about 0.6 MB/s, so 1.7 GB takes about 50 minutes. After any copy, compare SHA-256 with the capture `MANIFEST.json`. Known side effect: scythe-1's tailnet IPv6 address does not work.
 
 ## 9. Stop criteria
 
