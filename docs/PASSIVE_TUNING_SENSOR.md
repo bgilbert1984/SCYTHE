@@ -232,3 +232,4 @@ Experiments A-D are passive. This one adds a controlled stimulus.
 | Data-dependent USB emissions leak in-band energy (8.1) | Plausible, unverified |
 | Clock-harmonic sidebands carry tuning (8.2) | Plausible, unverified |
 | Retune events observable (8.3) | Plausible, unverified |
+| Output-byte toggle rates track in-band power at fixed tuning (Stage 0B, ambient) | Observed, weak; not an emission result |
