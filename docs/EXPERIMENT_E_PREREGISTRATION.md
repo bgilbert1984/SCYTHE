@@ -2,11 +2,15 @@
 
 Companion to `EXPERIMENT_E_BENCH_PLAN.md` and `EXPERIMENT_E_STAGE1_CHECKLIST.md`. Machine-readable rule: `scripts/experiment_e/prereg/prereg_v1.json`. Evaluator: `prereg.py`. Blinding tools: `blind.py`. Simulation: `simulate.py`. Option sets: `profiles.py`. Tests: `test_prereg.py` (36).
 
-**Status: not frozen.** Every threshold below is a *proposal* for the owner to approve or change before the first DUT run. Freezing is the owner's act:
+**Status: FROZEN, `standard` profile, rule SHA-256 `aac6849eb039cb288f63a85d267deec588fd6372f36bd42299bbde4f28b28d0c`, frozen 2026-11-02T21:41:18Z by `bgilbert1984`** (`scripts/experiment_e/prereg/PREREG_FREEZE.json`). No DUT data existed at the time. The thresholds below are the frozen values of `prereg_v1.json`; the options tables further down describe what was available and what each cost, for the record and for any future `prereg_v2.json`.
+
+Not part of the frozen rule, because they are recorded when they happen: the control run lengths (sized from the Stage 1 noise floor; about 8 h per control at the default), the Stage 4 blinding mode and who plays the second operator (written into the commitment), and the first DUT centre frequency within the frozen set.
+
+The freeze command used was:
 
 ```
-python3 scripts/experiment_e/prereg/prereg.py freeze --owner "<name>"     # writes PREREG_FREEZE.json (sha256 of the rule)
-git add scripts/experiment_e/prereg/PREREG_FREEZE.json && git commit      # BEFORE the first DUT run
+python3 scripts/experiment_e/prereg/profiles.py build standard --out prereg_v1.json
+python3 scripts/experiment_e/prereg/prereg.py freeze --owner "bgilbert1984"
 ```
 
 The evaluator refuses to produce a result unless the rule's SHA-256 matches the freeze record. After the freeze the rule is never edited: a change is a new `prereg_v2.json` with its own freeze, and anything run under v1 stays v1. Anything done differently from the rule is reported as a deviation.

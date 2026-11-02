@@ -6,7 +6,7 @@ Status: draft, nothing run. Companion to `EXPERIMENT_E_BENCH_PLAN.md` (Stage 1, 
 
 - [ ] Owner authorization recorded for enabling the generator output (conducted only, no antenna on the DUT input). Date and scope: ______
 - [ ] XTR contact clearance confirmed (host env file says it is not cleared for catalogue/corpus contact; see the `scythe-rf-device-contact-order` note). Date: ______
-- [ ] Decision rule frozen before any DUT run: owner approves the open decisions in `EXPERIMENT_E_PREREGISTRATION.md`, runs `scripts/experiment_e/prereg/prereg.py freeze --owner NAME`, and commits `PREREG_FREEZE.json`. Frozen on: ______ ; rule sha256: ______
+- [ ] Decision rule frozen before any DUT run: owner approves the open decisions in `EXPERIMENT_E_PREREGISTRATION.md`, runs `scripts/experiment_e/prereg/prereg.py freeze --owner NAME`, and commits `PREREG_FREEZE.json`. Frozen on: 2026-11-02T21:41:18Z by bgilbert1984, `standard` profile ; rule sha256: aac6849eb039cb288f63a85d267deec588fd6372f36bd42299bbde4f28b28d0c
 - [ ] Run log file created (see section 8). Run ID: ______
 
 ## 1. Equipment
