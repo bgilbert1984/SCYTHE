@@ -21,6 +21,9 @@ Scenarios (each yields uint8 I and Q arrays shaped [windows, samples]):
   gain_step       iid_gain with an abrupt gain change (AGC/gain-register confound).
   crosstalk       I branch picks up a fraction of the Q analog value.
   usb_burst       host activity flips I-byte LSBs, independent of power. NEG CTRL.
+  quadrature_colored  I/Q are quadrature parts of ONE coloured complex signal (what the RTL2832U digital mixer
+                  produces in direct sampling), operating point matched to the Stage 0B re-capture (sd 2.37 LSB,
+                  lag-1 autocorrelation about -0.7). NULL.
   leak_positive   POSITIVE CONTROL: repeated I samples driven by a hidden emission envelope,
                   with the analog input power held constant.
 
@@ -29,7 +32,13 @@ at constant power while the independent reference (commanded stimulus) is varied
 A byte-statistic-vs-own-power regression cannot separate iid_gain from leak_positive;
 the held-input design can.
 
+Spectral surrogate (real data, no model): --surrogate FILE.u8 keeps each real window's exact complex power
+spectrum (including I/Q quadrature structure and the DC bin), randomises the phases, re-quantises to bytes and
+compares the byte statistics with the real ones. If a statistic follows from the per-window spectrum plus
+quantisation alone, the surrogate reproduces it and the statistic carries no evidence of anything else.
+
 usage: confound_suite.py [--seeds 20] [--json out.json] | --selftest
+       confound_suite.py --surrogate CAPTURE.u8 [--samples 204800]
 """
 import sys, json, argparse
 import numpy as np
@@ -67,7 +76,8 @@ def detr(x):
 def shift_test(x, y, rng, nperm=500):
     """Circular-shift null in multiples of 50 windows (5 s), as in Stage 0B."""
     n = len(x); r = spearman(x, y)
-    ks = rng.integers(2, n // 50 - 1, nperm) * 50
+    step = 50 if n >= 300 else max(2, n // 10)          # 50 windows = 5 s as in Stage 0B; shorter series scale down
+    ks = rng.integers(2, n // step - 1, nperm) * step
     null = np.array([abs(spearman(x, np.roll(y, int(k)))) for k in ks])
     return r, (1 + (null >= abs(r)).sum()) / (nperm + 1)
 
@@ -95,6 +105,18 @@ def _lowpass(g, rho):
     return out
 
 
+def _edge_psd(w, target_lag1=-0.7):
+    """Edge-heavy PSD S(u)=eps+|u|^p on u in [-1,1) (u=2f/fs) with p chosen so the real part has lag-1
+    autocorrelation near target (the Stage 0B re-capture at 1.0 MHz measured -0.71)."""
+    u = np.fft.fftfreq(w) * 2
+    grid = np.linspace(-1, 1, 4001); best = None
+    for p in (2, 4, 6, 8, 12, 16, 24, 32, 48):
+        sg = 0.002 + np.abs(grid) ** p
+        r = float((sg * np.cos(np.pi * grid)).sum() / sg.sum())
+        if best is None or abs(r - target_lag1) < abs(best[1] - target_lag1): best = (p, r)
+    return 0.002 + np.abs(u) ** best[0]
+
+
 def gen(name, rng, n=None, w=None, power_range=1.95):
     n = n or N_WIN; w = w or W_SAMP
     env = _envelope(rng, n, power_range)
@@ -118,6 +140,14 @@ def gen(name, rng, n=None, w=None, power_range=1.95):
         Qa = sd * g; I_noise = 0.8 * gi + 0.12 * Qa
     elif name == "usb_burst":
         Qa = BASE_SD * g
+    elif name == "quadrature_colored":
+        from scipy import fft as sfft
+        sdq = 2.37 * np.sqrt(env / env.mean())[:, None]
+        amp = np.sqrt(_edge_psd(w)); Qa = np.empty((n, w)); I_noise = np.empty((n, w))
+        for k in range(n):                                # one window at a time: whole-array complex FFTs ran out of memory
+            zk = sfft.ifft(sfft.fft(g[k] + 1j * gi[k], workers=4) * amp, workers=4)
+            Qa[k], I_noise[k] = zk.real, zk.imag
+        s0 = Qa.std(); Qa *= sdq / s0; I_noise *= sdq / s0
     elif name == "leak_positive":
         Qa = BASE_SD * g                                  # input power constant
     else:
@@ -136,9 +166,9 @@ def gen(name, rng, n=None, w=None, power_range=1.95):
 
 
 SCEN = ["iid_gain", "spectral_fixed", "spectral_coupled", "clipping",
-        "gain_step", "crosstalk", "usb_burst", "leak_positive"]
+        "gain_step", "crosstalk", "usb_burst", "quadrature_colored", "leak_positive"]
 ROLE = dict(iid_gain="null", spectral_fixed="neg_ctrl", spectral_coupled="null",
-            clipping="null", gain_step="null", crosstalk="null",
+            clipping="null", gain_step="null", crosstalk="null", quadrature_colored="null",
             usb_burst="neg_ctrl", leak_positive="positive")
 
 
@@ -196,17 +226,57 @@ def run(seeds=20, log=print):
 
 def table(res):
     L = ["Stage 0B-style analysis (toggle rate vs OWN log power; flag = p<=0.01 and |r|>=0.2)",
-         f"{'scenario':17s}{'role':9s}{'tog_qi r (med)':>16s}{'flag':>6s}{'tog_ii r (med)':>16s}{'flag':>6s}{'hw r (med)':>12s}{'flag':>6s}"]
+         f"{'scenario':19s}{'role':9s}{'tog_qi r (med)':>16s}{'flag':>6s}{'tog_ii r (med)':>16s}{'flag':>6s}{'hw r (med)':>12s}{'flag':>6s}"]
     for sc, v in res["stage0b_style"].items():
-        L.append(f"{sc:17s}{v['role']:9s}" + "".join(
+        L.append(f"{sc:19s}{v['role']:9s}" + "".join(
             f"{v[s]['median_r']:>+16.2f}{v[s]['flag_rate']:>6.2f}" if s != "hw" else
             f"{v[s]['median_r']:>+12.2f}{v[s]['flag_rate']:>6.2f}" for s in ("tog_qi", "tog_ii", "hw")))
     L += ["", "Held-input design (analog power constant; reference = commanded stimulus)",
-          f"{'scenario':17s}{'role':9s}{'tog_qi r (med)':>16s}{'flag':>6s}{'tog_ii r (med)':>16s}{'flag':>6s}"]
+          f"{'scenario':19s}{'role':9s}{'tog_qi r (med)':>16s}{'flag':>6s}{'tog_ii r (med)':>16s}{'flag':>6s}"]
     for sc, v in res["held_input"].items():
-        L.append(f"{sc:17s}{v['role']:9s}" + "".join(
+        L.append(f"{sc:19s}{v['role']:9s}" + "".join(
             f"{v[s]['median_r']:>+16.2f}{v[s]['flag_rate']:>6.2f}" for s in ("tog_qi", "tog_ii")))
     return "\n".join(L)
+
+
+# ---------------- spectral surrogate (works on real captures) ----------------
+def spectral_surrogate(I, Q, rng, mean=MEAN_BYTE):
+    """Per window: keep |FFT| of z=I+jQ (so the complex power spectrum, hence I/Q structure) and the DC bin,
+    randomise every other phase, round to bytes. Rounding adds ~1/12 LSB^2 of noise and removes the ADC's own
+    code structure, so levels differ slightly from the real data; slopes and window-to-window tracking are
+    the meaningful outputs."""
+    from scipy import fft as sfft
+    oi, oq = np.empty_like(I), np.empty_like(Q)
+    for k in range(len(I)):
+        z = (I[k].astype(np.float64) - mean) + 1j * (Q[k].astype(np.float64) - mean)
+        Z = sfft.fft(z, workers=4); ph = rng.uniform(0, 2 * np.pi, len(Z)); ph[0] = np.angle(Z[0])
+        zs = sfft.ifft(np.abs(Z) * np.exp(1j * ph), workers=4)
+        oi[k] = _to_u8(zs.real + mean); oq[k] = _to_u8(zs.imag + mean)
+    return oi, oq
+
+
+def load_capture(path, w):
+    a = np.fromfile(path, dtype=np.uint8); n = len(a) // (2 * w)
+    a = a[:n * 2 * w].reshape(n, w, 2); return a[:, :, 0], a[:, :, 1]
+
+
+def surrogate_compare(I, Q, seed=11, log=print):
+    rng = np.random.default_rng(seed); Is, Qs = spectral_surrogate(I, Q, rng)
+    fr, fs = feats(I, Q), feats(Is, Qs); out = {"provenance": "recorded-vs-surrogate", "n_windows": int(len(I)),
+        "logP_corr": float(np.corrcoef(fr["logP"], fs["logP"])[0, 1]), "stats": {}}
+    for k in ("hw", "tog_qi", "tog_ii"):
+        r1, _ = shift_test(detr(fr["logP"]), detr(fr[k]), np.random.default_rng(3))
+        r2, _ = shift_test(detr(fs["logP"]), detr(fs[k]), np.random.default_rng(3))
+        out["stats"][k] = dict(real_r=r1, real_slope=float(np.polyfit(fr["logP"], fr[k], 1)[0]), surr_r=r2,
+                               surr_slope=float(np.polyfit(fs["logP"], fs[k], 1)[0]),
+                               window_corr=float(np.corrcoef(detr(fr[k]), detr(fs[k]))[0, 1]),
+                               level_real=float(fr[k].mean()), level_surr=float(fs[k].mean()))
+    log(f"windows {out['n_windows']}; logP real-vs-surrogate corr {out['logP_corr']:.4f}")
+    log(f"{'stat':7s}{'real r':>8s}{'real slope':>11s}{'surr r':>8s}{'surr slope':>11s}{'win corr':>9s}{'level real/surr':>18s}")
+    for k, v in out["stats"].items():
+        log(f"{k:7s}{v['real_r']:>+8.2f}{v['real_slope']:>+11.3f}{v['surr_r']:>+8.2f}{v['surr_slope']:>+11.3f}{v['window_corr']:>+9.2f}"
+            f"{v['level_real']:>9.4f}/{v['level_surr']:.4f}")
+    return out
 
 
 def selftest():
@@ -220,6 +290,16 @@ def selftest():
     # ... and must not flag a clean receiver under that design
     assert h["iid_gain"]["tog_qi"]["flag_rate"] <= 0.34, h["iid_gain"]
     assert h["iid_gain"]["tog_ii"]["flag_rate"] <= 0.34, h["iid_gain"]
+    # the coloured-quadrature scenario hits its operating point
+    rng = np.random.default_rng(5); I, Q, _, _ = gen("quadrature_colored", rng, n=20, w=16384, power_range=1.5)
+    ac = float(np.corrcoef(I.ravel()[:-1].astype(float), I.ravel()[1:].astype(float))[0, 1])
+    assert -0.8 < ac < -0.55, ac
+    assert abs(I.astype(float).std() - 2.37) < 0.4 and abs(float(np.corrcoef(I.ravel().astype(float), Q.ravel().astype(float))[0, 1])) < 0.05
+    # the surrogate keeps each window's power and, for a spectrum-determined statistic, tracks window by window
+    rng = np.random.default_rng(6); I, Q, _, _ = gen("quadrature_colored", rng, n=60, w=65536, power_range=2.0)
+    sc = surrogate_compare(I, Q, log=lambda *_: None)
+    assert sc["logP_corr"] > 0.99, sc["logP_corr"]
+    assert sc["stats"]["tog_ii"]["window_corr"] > 0.6, sc["stats"]["tog_ii"]
     print("selftest ok"); return r
 
 
@@ -227,7 +307,13 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser(); ap.add_argument("--seeds", type=int, default=20)
     ap.add_argument("--json"); ap.add_argument("--selftest", action="store_true")
     ap.add_argument("--windows", type=int); ap.add_argument("--samples", type=int)
+    ap.add_argument("--surrogate", metavar="CAPTURE.u8")
     a = ap.parse_args()
+    if a.surrogate:
+        Wd = a.samples or 204800; I_, Q_ = load_capture(a.surrogate, Wd)
+        out = surrogate_compare(I_, Q_)
+        if a.json: json.dump(out, open(a.json, "w"), indent=1)
+        sys.exit(0)
     if a.windows: N_WIN = a.windows
     if a.samples: W_SAMP = a.samples
     res = selftest() if a.selftest else run(a.seeds)
