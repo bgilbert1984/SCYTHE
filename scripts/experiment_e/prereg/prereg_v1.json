@@ -38,6 +38,7 @@
   "power_tolerance_db": 1.0,
   "reference_drift_db": 1.5
  },
+ "fc_set": "A",
  "gates": {
   "C3_controls": "each Stage 2 control is PASS if the upper CI bound of its mean corrected power < control_max_fraction_of_signal * mean_p(IN) at the matching fc; FAIL if the lower CI bound >= that threshold; otherwise UNRESOLVED (the control is too noisy to show the response is small). UNRESOLVED never counts as a pass",
   "C4_sham": "sham gate (applies only where a response was detected): PASS if the lower CI bound of power at f_m_sham > 0 AND the upper CI bound of power at f_m < control_max_fraction_of_signal * power at f_m_sham; FAIL if the lower CI bound of power at f_m >= that threshold; otherwise UNRESOLVED",
@@ -50,6 +51,8 @@
   "detection_alpha_total": 0.01,
   "f_m_sham_hz": 11.0
  },
+ "profile": "standard",
+ "profile_use": "Confirmatory-grade default.",
  "rng_seed": 20261103,
  "schema": "exp_e_prereg/1",
  "sensitivity": {

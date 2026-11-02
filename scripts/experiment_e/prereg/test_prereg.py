@@ -173,7 +173,7 @@ class Profiles(unittest.TestCase):
     def test_standard_profile_is_the_default_rule(self):
         import profiles as pf
         b = pf.build("standard"); ref = json.load(open(PATH))
-        for k in ("profile", "profile_use", "fc_set"): b.pop(k)
+        for k in ("profile", "profile_use", "fc_set"): b.pop(k); ref.pop(k, None)     # the frozen file carries the stamp
         self.assertEqual(json.dumps(b, sort_keys=True), json.dumps(ref, sort_keys=True))
 
     def test_all_profiles_valid_and_ordered_by_strictness(self):
