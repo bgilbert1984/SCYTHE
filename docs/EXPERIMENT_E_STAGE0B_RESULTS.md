@@ -2,6 +2,8 @@
 
 Date: 2026-11-02. Companion to `EXPERIMENT_E_BENCH_PLAN.md` (Stage 0B) and `PASSIVE_TUNING_SENSOR.md` §8.1.
 
+> **Correction (2026-11-02, later the same day): the raw captures behind this note were lost.** The files described under "Data and reproduction" were not at `/tmp/exp_e_stage0b/` on scythe-1 when we went to archive them, and a filesystem-wide search found nothing. We do not know whether they were deleted or never saved there. **The numbers in this note therefore cannot be reproduced from stored data and should be treated as unconfirmed.** A re-capture was taken (see "Re-capture" below); it has not been analysed yet and is not a replication of these numbers.
+
 **Status: precondition partly met, weak evidence.** At a fixed tuning word, two output-byte toggle-rate statistics track in-band power. Nothing here shows an external emission, and no controlled stimulus was used.
 
 ## Setup
@@ -36,16 +38,40 @@ Date: 2026-11-02. Companion to `EXPERIMENT_E_BENCH_PLAN.md` (Stage 0B) and `PASS
 
 ## Gate decision
 
-By the Stage 0B semantics the output-byte proxy was demonstrated (toggle rates only), at weak strength. Stage 1 may proceed, but it needs a controlled keyed source with a wide power range, and the first Stage 1 question is whether an external emission follows the byte-level dependence.
+By the Stage 0B semantics the output-byte proxy was demonstrated (toggle rates only), at weak strength. Stage 1 may proceed, but this decision rests on numbers that cannot currently be reproduced (see the correction at the top); re-analyse the re-capture before relying on it. Stage 1 needs a controlled keyed source with a wide power range, and the first Stage 1 question is whether an external emission follows the byte-level dependence.
 
 ## Data and reproduction
 
-Captures are raw u8 I/Q on scythe-1 under `/tmp/exp_e_stage0b/` (`q1`, `q2`, `am`, `hf7`, `hf5`, `am584`; about 1.7 GB), not in the repo.
+**Original captures: lost.** The raw u8 I/Q files (`q1`, `q2`, `am`, `hf7`, `hf5`, `am584`; about 1.7 GB) were written to `/tmp/exp_e_stage0b/` on scythe-1 and are not there. Nothing in this note was archived with a hash, so it cannot be checked against them.
+
+## Re-capture (2026-11-02)
+
+Taken on the owner's direction with `scripts/experiment_e/stage0b_recapture.py`, which writes straight to a durable directory, hashes the stream while recording, and logs the run. Location (scythe-1 only so far; no off-host copy yet):
+
+`/home/spectrcyde/exp_e_evidence/stage0b_recapture_20261102/` (read-only), `MANIFEST.json` sha256 `18e157ceaa515dee2dcb0ec4c5a4aa4e87529432f546dd51b3950d589cf3859c`.
+
+| Capture | Centre | Length | sha256 (first 12) |
+|---|---|---|---|
+| q1 | 12.5 MHz | 60 s | 8b1dcdbcb0bd |
+| am | 1.0 MHz | 60 s | 7f567f5dd12c |
+| hf7 | 7.074 MHz | 60 s | 80c134236202 |
+| hf5 | 5.0 MHz | 60 s | 54ed285a8572 |
+| q2 | 12.5 MHz | 60 s | 5f24b2d2e201 |
+| am_120s | 1.0 MHz | 120 s | 5b56e5b996ff |
+
+Same settings as above: 2.048 MS/s, `rtl_tcp` default gain, direct sampling on the Q-branch. The hash taken while streaming equals the hash read back from disk for all six files. The tuner was restored (direct sampling off, 100 MHz) afterwards.
+
+Differences from the original run that matter for comparison:
+- **The antenna or terminator was not verified.** Software cannot see it, so `capture_log.json` records it as "NOT VERIFIED". If it differs from the 320 mm / 584 mm dipole used originally, the results will differ for that reason alone.
+- `am_120s` stands in for `am584`; there is no separate terminated-input capture.
+- The original `stage0b_capture.py` is unchanged and still writes to `/tmp`. Use `stage0b_recapture.py <dir>` instead.
+
+The re-capture has not been run through `stage0_stats.py` or the regression scripts. Until it is, none of the findings above are re-established.
 
 Scripts in `scripts/experiment_e/` (run on scythe-1 with `~/SCYTHE/.venv/bin/python -` fed on stdin over ssh, since they need numpy and a localhost `rtl_tcp` client; do not stream the raw captures back through the ssh session, which stalled at 8 MB):
 
 - `direct_sampling_check.py`: 2 s captures per setting, PSD summary (finding 1).
-- `stage0b_capture.py`: the five 60 s captures (finding 2). Then `python3 -I stage0_stats.py --rate 2048000 --block-s 5 q1=... ` on the files.
+- `stage0b_capture.py`: the five 60 s captures (finding 2). Superseded by `stage0b_recapture.py`, which does not use `/tmp`. Then `python3 -I stage0_stats.py --rate 2048000 --block-s 5 q1=... ` on the files.
 - `stage0b_dccheck.py`: DC offset and Hamming-weight check (finding 3).
 - `stage0b_regress.py`: captures `am584` and runs the fixed-tuning regression (finding 4). It writes to `/tmp/exp_e_stage0b/` and restores direct sampling off / 100 MHz in a `finally` block.
 - `stage0b_partial.py`: the covariate-removal rerun, including the degenerate variant.
