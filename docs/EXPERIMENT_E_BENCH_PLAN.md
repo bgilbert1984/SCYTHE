@@ -23,13 +23,42 @@ Does a keyed probe tone inside a direct-sampling receiver's DDC passband produce
 
 | Element | Choice |
 |---|---|
-| DUT | RTL-SDR with HF direct-sampling mode (v3/v5 class). The Nooelec XTR v5 on scythe-1 (E4000, confirmed by rtl_test) is not expected to support this mode. |
-| DUT config | Direct sampling Q-branch, fixed sample rate (2.4 MS/s), fixed gain, fixed center frequency f_c. Host runs `rtl_sdr` to `/dev/null` so no host-side processing varies with the data. |
+| DUT | Nooelec SMArt XTR v5 on scythe-1 (E4000). Direct sampling on the Q-branch was verified 2026-11-02 (see `EXPERIMENT_E_STAGE0B_RESULTS.md`); the I-branch carries nothing. Any other RTL-SDR with HF direct sampling also works. Contact clearance for the XTR is still to be confirmed. |
+| DUT config | Direct sampling Q-branch, fixed sample rate (2.048 MS/s, as served by `rtl_tcp`), fixed gain, fixed center frequency f_c. Host runs `rtl_sdr` to `/dev/null` so no host-side processing varies with the data. |
 | Stimulus | Signal generator, CW, gated on/off at f_m by an external square wave. Then step attenuator, then DUT input through shielded coax. Use f_m ~ 7 Hz to avoid 50/60 Hz and harmonics. |
 | Probe A (conducted) | Low-noise shunt or current probe on USB VBUS, amplified, into a DAQ or scope. |
 | Probe B (near-field) | H-field probe on the USB cable and board, into a spectrum analyzer or reference SDR logging band-power envelopes around the 28.8 MHz harmonics and the USB harmonics. |
 | Lock-in | Software. Mix the probe envelope with a reference at f_m, low-pass, record amplitude and phase. Reference comes from the same gating square wave. |
 | Reference clock | Lock generator, DAQ and gating source to one 10 MHz reference if available. |
+
+## Stage 1 keyed source (design, not built)
+
+Candidate: Si5351 clock generator controlled by an Arduino (PU2CLR/SI5351 hardware recipe; the repo's sketch is a manual encoder/OLED generator, so the firmware below is new). Notes are in `Si5351.md`.
+
+**Firmware (new, ~100 lines).** Serial commands: set frequency, output enable, key rate and duty, sweep (start, stop, step, dwell). Use the Etherkit calls `set_freq`, `output_enable`, `drive_strength`, `set_correction`.
+- Key at f_m ~ 7 Hz by toggling `output_enable` from a timer interrupt. An I2C write takes on the order of 100 microseconds, small against a half-period of about 70 ms.
+- The same interrupt drives an Arduino pin used as the lock-in reference, so gate and reference share one timebase.
+- Calibrate the XO with `set_correction`. Frequency accuracy is not critical for this experiment.
+
+**Signal chain.** Si5351 CLK output -> low-pass filter -> step attenuator (wide range, 10+ steps) -> DC block -> shielded coax -> DUT input. Conducted only; no antenna. The CMOS square wave is far too strong for the ADC, and `drive_strength` offers only a few dB, so the attenuator provides the power sweep.
+
+**Aliasing plan (my arithmetic, assuming a 28.8 MHz sample clock; verify on the bench).** The ADC has no anti-alias filter, so square-wave harmonics fold into the HF band.
+
+| Probe | Odd harmonics, folded | Inside a 2.048 MHz passband centered at 7.074 MHz? |
+|---|---|---|
+| 7.074 MHz | 3rd 7.578, 5th 6.57, 7th 8.082 MHz | Yes, all of them |
+| 12.5 MHz | 3rd 8.7, 5th 4.9, 7th 1.1, 9th 2.7 MHz | No, but only by chance; other centers differ |
+
+- The low-pass filter is required. Otherwise the "out-of-band" probe is not clean and the "in-band" power includes harmonics.
+- Characterize the filtered output on a spectrum analyzer or the reference SDR before any DUT run, and record residual harmonic levels.
+- Re-derive the fold table for every probe and center frequency used.
+
+**Contamination controls (add to Stage 2).**
+- The Arduino and Si5351 are digital noise sources switching at f_m. Keep them away from the DUT and the emission probes, on a separate supply or isolated USB.
+- Run with the generator keyed but disconnected from the DUT, and with the DUT input terminated, to check for direct coupling at f_m.
+- Measure the actual output level at the attenuator output with a calibrated receiver, not from the nominal drive setting.
+
+**Scope.** Conducted only. Whether enabling the generator output falls under the hardware-control authorization used elsewhere in SCYTHE is the owner's decision.
 
 ## Procedure
 
