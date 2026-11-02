@@ -36,8 +36,9 @@ Does a keyed probe tone inside a direct-sampling receiver's DDC passband produce
 Candidate: Si5351 clock generator controlled by an Arduino (PU2CLR/SI5351 hardware recipe; the repo's sketch is a manual encoder/OLED generator, so the firmware below is new). Notes are in `Si5351.md`.
 
 **Firmware (new, ~100 lines).** Serial commands: set frequency, output enable, key rate and duty, sweep (start, stop, step, dwell). Use the Etherkit calls `set_freq`, `output_enable`, `drive_strength`, `set_correction`.
-- Key at f_m ~ 7 Hz by toggling `output_enable` from a timer interrupt. An I2C write takes on the order of 100 microseconds, small against a half-period of about 70 ms.
-- The same interrupt drives an Arduino pin used as the lock-in reference, so gate and reference share one timebase.
+- Key at f_m ~ 7 Hz from a hardware timer, but do NOT call `output_enable` (I2C) inside the interrupt: Wire is interrupt driven and the ISR can stall or corrupt a transaction. The timer ISR only records a pending edge and toggles the reference pin; `loop()` performs the I2C write. (`scripts/experiment_e/keyed_source/keyed_source.ino`, host-tested with `host_test/run.sh`.)
+- Three moments are logged separately: `gate_requested` (ISR, PIN_REF, D8), `i2c_command_completed` (after the write, PIN_MON, D9) and `rf_gate_observed`. The last cannot be inferred from a successful write; it needs an external RF detector or reference-receiver envelope on the DAQ. The lock-in reference should be PIN_REF only as a proxy; phase of the real gate comes from the observed edge.
+- An I2C write is nominally ~100 microseconds, but `set_freq` is milliseconds. Sweep retunes are deferred near a gate edge. Treat `ring_ovf` > 0 or a large `max_lat_us` in the status line as an invalid run.
 - Calibrate the XO with `set_correction`. Frequency accuracy is not critical for this experiment.
 
 **Signal chain.** Si5351 CLK output -> low-pass filter -> step attenuator (wide range, 10+ steps) -> DC block -> shielded coax -> DUT input. Conducted only; no antenna. The CMOS square wave is far too strong for the ADC, and `drive_strength` offers only a few dB, so the attenuator provides the power sweep.
