@@ -27,6 +27,10 @@ Status: draft, nothing run. Companion to `EXPERIMENT_E_BENCH_PLAN.md` (Stage 1, 
 - [ ] With a scope on CLK0 into 50 ohm: no output while unarmed, after `F`, after `D`, after `E 1` (must reply `ERR not armed`).
 - [ ] `ARM 1`, `E 1`: output appears. `X`: output stops, `armed=0`.
 - [ ] Dead-man: arm, enable output, send nothing for 30 s: `DEADMAN off` printed and output off.
+- [ ] Independent hardware kill (power relay or output-enable line) that works with the Arduino hung or the I2C bus stuck; tested with the RF detector, not the serial reply. The firmware's own `X`/dead-man cannot help if the Si5351 write fails: serial only shows what the firmware believes. Cut time measured: ______
+- [ ] Unattended worst case measured: host process killed mid-keying, time until RF detector shows off (simulation predicts about the 30 s dead-man). Value: ______ . If that is too long, lower `DEADMAN_MS` and the compiler's ping interval together.
+- [ ] The firmware has no notion of approval; anyone with the serial port can `ARM`. Port access restricted to the supervisor (`replay/lifecycle.py`) during runs; note how: ______
+- [ ] Supervisor kill latencies measured against the RF detector (operator kill, revoke, expiry, tamper); simulation bounds are about 5 ms and 130 ms. Values: ______
 - [ ] Frequency clamp: `F 50000` and `F 40000000` both return `ERR`.
 - [ ] Keying: `K 7000 50`. Scope REF (D8) vs MON (D9) vs CLK0: measure the REF-to-MON delay, period error and edge jitter over 60 s. Record: ______
 - [ ] Sweep: `S 1000000 1100000 100000 500` steps and finishes with `SWEEP DONE`.
@@ -54,7 +58,9 @@ Status: draft, nothing run. Companion to `EXPERIMENT_E_BENCH_PLAN.md` (Stage 1, 
 
 - [ ] Probe A (VBUS) noise floor recorded with the DUT streaming and the generator disarmed.
 - [ ] Mains pickup check: spectrum of the probe signal shows no line at the keying frequency; f_m ~ 7 Hz chosen to avoid 50/60 Hz and harmonics (confirm 7.000 Hz is clean here).
-- [ ] DAQ clock and Arduino clock relation known; lock-in reference taken from REF (D8) and the actual gate from MON (D9).
+- [ ] DAQ clock and Arduino clock relation known; lock-in reference taken from REF (D8) and the I2C-complete time from MON (D9). Neither is the RF gate: record an RF detector or reference-receiver envelope as `rf_gate_observed`.
+- [ ] Gate timing measured on the scope/DAQ: PIN_REF to PIN_MON latency (compare with the firmware `lat=` log), PIN_MON to RF envelope edge, idle and during a sweep. Values: ______
+- [ ] Status line after each run shows `ring_ovf=0` and `log_drop=0`; `max_lat_us` recorded: ______
 - [ ] Optional near-field probe B placed and fixed in position; photo taken.
 
 ## 6. Controls first (Stage 2), each with a full lock-in run

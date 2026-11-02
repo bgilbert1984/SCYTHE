@@ -1,0 +1,5 @@
+# Experiment E example replay: 10 s carrier, 20 s keyed 7 Hz, 5 s keyed at another frequency.
+t_s,dur_s,freq_hz,modulation,key_mhz,duty_pct
+1.0,10,7074000,cw,,
+12.0,20.05,7074000,ook,7000,50
+33.5,5.05,12500000,ook,7000,50
