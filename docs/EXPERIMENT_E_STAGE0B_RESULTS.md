@@ -2,7 +2,7 @@
 
 Date: 2026-11-02. Companion to `EXPERIMENT_E_BENCH_PLAN.md` (Stage 0B) and `PASSIVE_TUNING_SENSOR.md` §8.1.
 
-> **Correction (2026-11-02, later the same day): the raw captures behind this note were lost.** The files described under "Data and reproduction" were not at `/tmp/exp_e_stage0b/` on scythe-1 when we went to archive them, and a filesystem-wide search found nothing. We do not know whether they were deleted or never saved there. **The numbers in this note therefore cannot be reproduced from stored data and should be treated as unconfirmed.** A re-capture was taken (see "Re-capture" below); it has not been analysed yet and is not a replication of these numbers.
+> **Correction (2026-11-02, later the same day): the raw captures behind this note were lost.** The files described under "Data and reproduction" were not at `/tmp/exp_e_stage0b/` on scythe-1 when we went to archive them, and a filesystem-wide search found nothing. We do not know whether they were deleted or never saved there. **The numbers in this note therefore cannot be reproduced from stored data and should be treated as unconfirmed.** A re-capture was taken and analysed (see "Re-capture" and "Re-capture analysis" below); it is not an exact replication, and its conclusions differ from this note's reading.
 
 **Status: precondition partly met, weak evidence.** At a fixed tuning word, two output-byte toggle-rate statistics track in-band power. Nothing here shows an external emission, and no controlled stimulus was used.
 
@@ -38,7 +38,7 @@ Date: 2026-11-02. Companion to `EXPERIMENT_E_BENCH_PLAN.md` (Stage 0B) and `PASS
 
 ## Gate decision
 
-By the Stage 0B semantics the output-byte proxy was demonstrated (toggle rates only), at weak strength. Stage 1 may proceed, but this decision rests on numbers that cannot currently be reproduced (see the correction at the top); re-analyse the re-capture before relying on it. Stage 1 needs a controlled keyed source with a wide power range, and the first Stage 1 question is whether an external emission follows the byte-level dependence.
+By the Stage 0B semantics the output-byte proxy was demonstrated (toggle rates only), at weak strength. The re-capture reproduces the signs of the toggle correlations but also shows they follow from each window's spectrum plus quantisation ("Re-capture analysis"), so the proxy is not demonstrated as a leakage statistic. Stage 1 may proceed because it tests the real question; it needs a controlled keyed source with a wide power range, and the first Stage 1 question is whether an external emission follows the byte-level dependence.
 
 ## Data and reproduction
 
@@ -66,13 +66,44 @@ Differences from the original run that matter for comparison:
 - `am_120s` stands in for `am584`; there is no separate terminated-input capture.
 - The original `stage0b_capture.py` is unchanged and still writes to `/tmp`. Use `stage0b_recapture.py <dir>` instead.
 
-The re-capture has not been run through `stage0_stats.py` or the regression scripts. Until it is, none of the findings above are re-established.
+## Re-capture analysis (2026-11-02)
+
+Run on the hash-verified off-host copy. Scripts: `stage0_stats.py`, `stage0b_reanalyze.py`, `confound_suite.py --surrogate`.
+
+**1. Cross-condition comparison (5 s blocks, `q1` baseline).** The same-tuning null `q2` vs `q1` (both 12.5 MHz) flags **all four** byte statistics (e.g. `tog_ii` d = -3.06). The original null flagged one of five. Between-capture drift exceeds the within-capture block spread, so this test is too liberal for comparing captures. `hf5` vs `q1` differences are the same size as that null drift and mean nothing. `am` and `hf7` differ from `q1` far more than the null does (d up to 62), but tuning, passband content and amplitude still change together, so the design cannot say which.
+
+**2. Fixed-tuning regression at 1.0 MHz (finding 4), against per-window log power.**
+
+| Statistic | Original, 320 mm / 584 mm | Re-capture `am` (60 s) | Re-capture `am_120s` |
+|---|---|---|---|
+| Q to next-I toggle rate | +0.39 / +0.23 | +0.66 | +0.59 |
+| I to next-I toggle rate | -0.31 / -0.17 | -0.92 | -0.90 |
+| Hamming weight | +0.005 / +0.003 | +0.32 | +0.28 |
+
+Same signs for the two toggle statistics, much larger magnitudes, and Hamming weight now clearly non-zero. All p = 0.001, the floor for 1000 shifts. Power varied only x1.16 and x1.11 (original x1.95 and x1.08), and the regressor is still the variance of the same bytes. Removing the window mean changes nothing.
+
+**3. Signal structure differs from the original description.** In every re-capture file I and Q have identical mean (127.37) and identical spread (1.1 to 2.4 LSB), with corr(I,Q) = 0: they behave as quadrature parts of one signal, which is consistent with the RTL2832U's digital mixer in direct sampling (an inference; not checked against the chip). The original note says the I-branch stayed at the terminated level (std 0.79) while Q carried the signal. At 1.0 MHz the samples are strongly coloured (lag-1 autocorrelation -0.71). Whether the receiver state differs from the original run, or the original description was incomplete, is unresolved; the antenna was not verified either.
+
+**4. What explains the toggle correlations.** An iid Gaussian receiver at the observed operating point (mean 127.37, sd 2.37) gives `tog_ii` slope +0.003 per decade against the real -0.93, and the opposite sign for Hamming weight: sample width alone does not explain it. A **spectral surrogate** does. Per real window it keeps the exact complex power spectrum (including I/Q structure) and the DC bin, randomises the phases and re-quantises to bytes (`confound_suite.py --surrogate`):
+
+| Statistic | Real slope | Surrogate slope | Window-by-window correlation, real vs surrogate |
+|---|---|---|---|
+| I to next-I toggle | -0.93 | -0.97 | 0.98 |
+| Q to next-I toggle | +0.22 | +0.24 | 0.69 |
+| Hamming weight | +0.28 | -0.10 | 0.68 |
+
+(`am`, 600 windows; `am_120s` agrees.) The I-to-next-I toggle rate is reproduced almost exactly by each window's power spectrum plus quantisation; the Q-to-next-I rate is reproduced in slope, with a window-by-window correlation of 0.69. The surrogate does **not** reproduce the dependence of Hamming weight on power. That is not evidence of a leak: the surrogate replaces the ADC's real code structure with rounded continuous values (its mean levels differ from the real ones by up to 8%), and Hamming weight is the statistic most sensitive to the distribution position at the 127/128 code boundary.
+
+The parametric no-leak scenario `quadrature_colored` in the suite (one coloured complex signal, sd 2.37, lag-1 autocorrelation -0.7, power range x1.95) agrees for the I-to-next-I toggle (r = -0.97, flagged in every seed, against -0.92 real) but not for the Q-to-next-I toggle (+0.09 against +0.66) or the sign of Hamming weight. It is a cruder model than the real-data surrogate, which is the better test.
+
+**Reading.** The toggle correlations in this note are what a receiver with no external emission produces, to first order, because both the regressor and the statistics are functions of each window's spectrum. They are not evidence of a frequency-selective external emission, and the original observation that Hamming weight did not respond to power is not replicated. Nothing in the existing data can discriminate a leak from receiver physics; that needs a controlled stimulus whose level is known independently of the receiver bytes.
 
 Scripts in `scripts/experiment_e/` (run on scythe-1 with `~/SCYTHE/.venv/bin/python -` fed on stdin over ssh, since they need numpy and a localhost `rtl_tcp` client; do not stream the raw captures back through the ssh session, which stalled at 8 MB):
 
 - `direct_sampling_check.py`: 2 s captures per setting, PSD summary (finding 1).
 - `stage0b_capture.py`: the five 60 s captures (finding 2). Superseded by `stage0b_recapture.py`, which does not use `/tmp`. Then `python3 -I stage0_stats.py --rate 2048000 --block-s 5 q1=... ` on the files.
 - `stage0b_dccheck.py`: DC offset and Hamming-weight check (finding 3).
+- `stage0b_recapture.py` (writes to a durable directory), `stage0b_reanalyze.py` (the regression on stored files), and `confound_suite.py` (`--selftest`, full suite, `--surrogate FILE`): added after the original captures were lost.
 - `stage0b_regress.py`: captures `am584` and runs the fixed-tuning regression (finding 4). It writes to `/tmp/exp_e_stage0b/` and restores direct sampling off / 100 MHz in a `finally` block.
 - `stage0b_partial.py`: the covariate-removal rerun, including the degenerate variant.
 
