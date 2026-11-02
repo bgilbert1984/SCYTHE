@@ -1,0 +1,118 @@
+{
+ "design": {
+  "ddc_passband_hz": 2048000,
+  "dwell_s": 60,
+  "f_m_hz": 7.0,
+  "fc_hz": [
+   3000000,
+   7500000,
+   12000000
+  ],
+  "randomised_order": true,
+  "reference_every_n_steps": 10,
+  "reference_note": "reference points are probe-OFF baseline dwells; drift is judged from the DUT stream RMS (dB, millions of samples, high SNR), never from a single lock-in amplitude",
+  "sweep_hz": [
+   200000,
+   14000000,
+   100000
+  ]
+ },
+ "estimators": {
+  "center_estimator": "c_hat = argmax_c [mean_p(|f-c| <= ddc_passband_hz/2) - mean_p(|f-c| > ddc_passband_hz/2)] over c on a 50 kHz grid with the whole passband inside the swept range (a matched boxcar; NOT the guard-banded C1 sets, whose flat top makes the argmax arbitrary within +-0.22 MHz)",
+  "corrected_power": "p = A_re^2 + A_im^2 - sigma2, sigma2 = mean lock-in power of 20 off-frequency bins (not mains, not harmonics of f_m)",
+  "selectivity_T": "T = mean_p(IN) - 10^(selectivity_db/10) * mean_p(OUT), per fc",
+  "stage4_center_grid_hz": 25000
+ },
+ "exclusions": {
+  "invalid_if": [
+   "ring_ovf > 0",
+   "clip_fraction >= 1e-4",
+   "alias verdict not allowed",
+   "dut power differs from the sweep median by more than power_tolerance_db",
+   "either bounding baseline dut_rms_db differs from the first baseline by more than reference_drift_db"
+  ],
+  "max_excluded_fraction": 0.1,
+  "min_valid_in": 8,
+  "min_valid_out": 30,
+  "policy": "alias-table exclusions are decided before any data, are reported, and do NOT count toward max_excluded_fraction; every other exclusion does. Excluded dwells are never replaced selectively. If more than max_excluded_fraction of the alias-eligible dwells at any fc are excluded, or an fc has fewer than min_valid_in valid in-band or min_valid_out valid out-of-band dwells, or fewer than 3 fc are complete, the verdict is INCONCLUSIVE_INCOMPLETE",
+  "power_tolerance_db": 1.0,
+  "reference_drift_db": 1.5
+ },
+ "gates": {
+  "C3_controls": "each Stage 2 control is PASS if the upper CI bound of its mean corrected power < control_max_fraction_of_signal * mean_p(IN) at the matching fc; FAIL if the lower CI bound >= that threshold; otherwise UNRESOLVED (the control is too noisy to show the response is small). UNRESOLVED never counts as a pass",
+  "C4_sham": "sham gate (applies only where a response was detected): PASS if the lower CI bound of power at f_m_sham > 0 AND the upper CI bound of power at f_m < control_max_fraction_of_signal * power at f_m_sham; FAIL if the lower CI bound of power at f_m >= that threshold; otherwise UNRESOLVED",
+  "H0b_rule": "H0b_NOT_SELECTIVE needs AFFIRMATIVE evidence: for every fc with a detected response, the one-sided bootstrap test that T = mean_p(IN) - 10^(selectivity_db/10)*mean_p(OUT) is below 0 has p <= detection_alpha_total / number_of_fc. If C1 or C2 fails without that evidence the verdict is INCONCLUSIVE (an underpowered selective channel must not be reported as non-selective)",
+  "c3_c4_note": "C3 strict form applies at an fc where the sweep detected a response; at an fc with no detection a control passes if it is itself not detected (lower CI bound <= 0). C4 applies only when a response was detected (otherwise vacuous)",
+  "control_budget_note": "resolving a 1% (-20 dB) response needs about (z_0.99 * mean sigma2 / (0.01 * mean_p(IN)))^2 control dwells at the sweep dwell length; longer control dwells divide that by the dwell-length ratio. Size the control runs from the Stage 1 noise floor before running them",
+  "control_ci_level": 0.99,
+  "control_max_fraction_of_signal": 0.01,
+  "detection": "for at least one fc, one-sided bootstrap of mean_p(IN) > 0 at alpha = detection_alpha_total / number_of_fc (Bonferroni)",
+  "detection_alpha_total": 0.01,
+  "f_m_sham_hz": 11.0
+ },
+ "rng_seed": 20261103,
+ "schema": "exp_e_prereg/1",
+ "sensitivity": {
+  "min_in_band_power_over_noise": 8.0,
+  "note": "s2 = mean corrected in-band power / mean sigma2 per 60 s dwell. Simulation (EXPERIMENT_E_PREREGISTRATION.md) gives about 95% detection of a 25 dB-selective channel at s2 = 8, about 27% at 4, near 0 at <= 2. The Stage 1 amplitude sweep (a calibration run whose data is NOT used in any confirmatory test) must find a probe level, below clipping (clip fraction < 1e-4), with s2 >= this value at the first fc; if none exists the experiment is not informative at this DUT/probe chain and stops. Every result reports its own s2 and detection limit; an H0a conclusion is only meaningful together with that limit."
+ },
+ "sets": {
+  "alias_note": "rows whose alias_table.py verdict is CONTAMINATED or MARGINAL for the MEASURED filter are excluded before any test",
+  "alias_verdicts_allowed": [
+   "IN_BAND",
+   "CLEAN_OUT"
+  ],
+  "guard_note": "dwells 0.8-1.6 MHz from fc are excluded from both sets (transition region and clock uncertainty)",
+  "in_band_halfwidth_hz": 800000,
+  "out_band_min_distance_hz": 1600000
+ },
+ "stage4": {
+  "blinding": "secret fc drawn by a second operator from os.urandom; SHA-256 commitment published before the first trial; analyst estimates frozen and hashed before the reveal",
+  "dwell_s": 30,
+  "fc_granularity_hz": 10000,
+  "fc_range_hz": [
+   2000000,
+   12000000
+  ],
+  "n_trials_min": 20,
+  "stage4_mae_floor_hz": 500000,
+  "stage4_within_fraction": 0.8,
+  "stage4_within_hz": 512000,
+  "sweep_hz": [
+   200000,
+   14000000,
+   250000
+  ]
+ },
+ "tests": {
+  "C1": "intersection-union over all fc: one-sided percentile bootstrap (resampling dwells within IN and OUT) of T > 0; p_C1 = max over fc",
+  "C2": "(a) for every fc, permutation p of max_c S(c) with S the matched boxcar above under shuffling corrected power across valid probe frequencies, p_C2 = max over fc; AND (b) for every pair of fc, |(c_hat_B - c_hat_A) - (fc_B - fc_A)| <= center_shift_tolerance_hz",
+  "C5": "(a) permutation p (shuffle truth against estimates) of mean absolute error, one-sided; AND (b) MAE <= stage4_mae_floor_hz; AND (c) fraction within stage4_within_hz >= stage4_within_fraction",
+  "bootstrap_B": 20000,
+  "center_shift_tolerance_hz": 250000,
+  "confirmatory": [
+   "C1_selectivity",
+   "C2_movement",
+   "C5_blind_estimation"
+  ],
+  "family_alpha": 0.01,
+  "holm_family_size": 3,
+  "holm_note": "family size is fixed at 3 (C1, C2, C5) whether or not Stage 4 has run; a missing C5 enters as p = 1, so rung-4 claims are judged conservatively",
+  "multiplicity": "Holm over the confirmatory family",
+  "permutation_B": 5000,
+  "selectivity_db": 10.0,
+  "stage4_permutation_B": 100000
+ },
+ "title": "Experiment E Stage 1-2 and 4: preregistered decision rules",
+ "verdict_order": [
+  "INCONCLUSIVE_PROTOCOL (schedule or file hash mismatch)",
+  "INCONCLUSIVE_INCOMPLETE (exclusions or missing fc)",
+  "CONTROLS_FAIL (a control FAILED: H0c or contamination; no inference about the DUT)",
+  "INCONCLUSIVE_CONTROLS (no control failed but at least one is UNRESOLVED: lengthen the controls)",
+  "H0a_NO_RESPONSE (no detection at any fc; report the detection limit)",
+  "H0b_NOT_SELECTIVE (detected, controls clean, C1 or C2 failed AND affirmative evidence that selectivity is below threshold at every detected fc)",
+  "H1_SUPPORTED_RUNG4 (C1 and C2 pass under Holm; physical emission depends on the digitally selected frequency)",
+  "H1_SUPPORTED_RUNG5 (as above and C5 passes: tuned frequency inferred under blinded conditions)",
+  "INCONCLUSIVE (anything else, including C1/C2 failing without affirmative non-selectivity)"
+ ]
+}

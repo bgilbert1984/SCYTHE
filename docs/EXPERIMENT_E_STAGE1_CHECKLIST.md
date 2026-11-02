@@ -6,7 +6,7 @@ Status: draft, nothing run. Companion to `EXPERIMENT_E_BENCH_PLAN.md` (Stage 1, 
 
 - [ ] Owner authorization recorded for enabling the generator output (conducted only, no antenna on the DUT input). Date and scope: ______
 - [ ] XTR contact clearance confirmed (host env file says it is not cleared for catalogue/corpus contact; see the `scythe-rf-device-contact-order` note). Date: ______
-- [ ] Decision rule frozen in writing before any DUT run: block length, confidence level, effect-size floor, in-band/out-of-band selectivity threshold (plan suggests >= 10 dB, a guess). Frozen on: ______
+- [ ] Decision rule frozen before any DUT run: owner approves the open decisions in `EXPERIMENT_E_PREREGISTRATION.md`, runs `scripts/experiment_e/prereg/prereg.py freeze --owner NAME`, and commits `PREREG_FREEZE.json`. Frozen on: ______ ; rule sha256: ______
 - [ ] Run log file created (see section 8). Run ID: ______
 
 ## 1. Equipment
@@ -65,6 +65,7 @@ Status: draft, nothing run. Companion to `EXPERIMENT_E_BENCH_PLAN.md` (Stage 1, 
 
 ## 6. Controls first (Stage 2), each with a full lock-in run
 
+- [ ] Control run lengths sized from the Stage 1 noise floor before running them (see the control budget table in `EXPERIMENT_E_PREREGISTRATION.md`; about 8-16 h per control at s2 4-8). An UNRESOLVED control is not a pass.
 - [ ] Generator keyed, disconnected from the DUT, DUT input terminated: no response at f_m.
 - [ ] Generator connected to the DUT but disarmed: no response.
 - [ ] DUT unplugged from USB, generator on: no response in the measurement chain.
@@ -77,16 +78,27 @@ Stop here if any control shows a response of comparable size to the expected sig
 ## 7. Stage 1 runs
 
 - [ ] Amplitude sweep at one in-band frequency (about -60 to -10 dBFS equivalent): response vs level, clipping onset marked. Mid-level chosen for the frequency sweep: ______
-- [ ] Frequency sweep 0.2 to 14 MHz in 100 kHz steps, 60 s dwell, randomized order (about 2.3 h per sweep), one reference point after every 10 steps.
+- [ ] Sensitivity precondition (calibration run, its data is NOT used in any confirmatory test): a level below clipping (clip fraction < 1e-4) where in-band corrected power / noise power >= 8 per 60 s dwell at the first fc. s2 measured: ______ . If none exists, stop: the experiment is not informative on this chain.
+- [ ] Frequency sweep 0.2 to 14 MHz in 100 kHz steps, 60 s dwell, in the order from `blind.py schedule --seed-text <freeze commit hash>` (about 2.3 h per sweep), a probe-off baseline after every 10 dwells. Schedule sha256: ______
 - [ ] Repeat the sweep with fc moved to two other values; the response curve must move with fc.
 - [ ] Same-power in-band vs out-of-band comparison repeated at least 3 times, interleaved.
 - [ ] Second DUT unit if available.
 - [ ] Optional Stage 3 preview: same sweep with probe B in free air, then shielded.
 
+## 7b. Stage 4 blind estimation (only after Stages 1-3 are done)
+
+- [ ] Blinding mode chosen and written here before the first trial: `human_second_operator` / `os_account_separation` / `self_with_external_commitment` / none (then Stage 4 cannot support the blinded verdict). Mode, and who/what plays the second operator: ______
+- [ ] Secret drawn with `blind.py commit --mode ...`; the commitment hash published where the analyst cannot change it (run log, public commit, or a third party) BEFORE trial 1. Hash and where: ______
+- [ ] The second operator tunes the DUT for each trial and keeps the secret file. The analyst receives lock-in outputs only: **run metadata given to the analyst omits `fc`**, and the operator keeps the sealed full copy. No DUT stream statistics (RMS, toggle rates) go into the estimator: they vary with tuning and could leak it.
+- [ ] Coarse sweeps as preregistered (250 kHz steps, 30 s dwells), one per trial, in schedule order. Trials run: ______ (at least the preregistered minimum)
+- [ ] Analyst writes `estimates.json` from the frozen estimator, records its SHA-256, and only then asks for the reveal. Hash: ______
+- [ ] `blind.py reveal ...` succeeds and writes `reveal_record.json`; `prereg.py evaluate ... --reveal-record ... --commitment ...` then checks the record against the files.
+- [ ] Any trial redone for hardware reasons is redone with a NEW secret draw and reported as a deviation; trials are never dropped after seeing their estimate.
+
 ## 8. Logging
 
-- [ ] Every run saves: raw DAQ files, the Arduino serial log (with `V 1`), run metadata JSON (run ID, UTC start/end, fc, f_m, duty, drive, attenuator step, filter, gain, antenna state, firmware commit, operator).
-- [ ] The decision rule file is committed before the first DUT run and not edited after.
+- [ ] Every run saves: raw DAQ files, the Arduino serial log (with `V 1`), run metadata JSON (run ID, UTC start/end, fc, f_m, duty, drive, attenuator step, filter, gain, antenna state, firmware commit, operator). For Stage 4 the copy shared with the analyst omits fc (see section 7b).
+- [ ] The decision rule file is committed before the first DUT run and not edited after (the evaluator refuses a result if its hash differs from `PREREG_FREEZE.json`).
 - [ ] Raw captures are stored off the host `/tmp` (size: roughly 4 MB/s per capture stream).
 
 ## 9. Stop criteria
