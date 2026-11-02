@@ -48,6 +48,8 @@ Status: draft, nothing run. Companion to `EXPERIMENT_E_BENCH_PLAN.md` (Stage 1, 
 ## 4. DUT and host setup (scythe-1)
 
 - [ ] Nothing else is consuming the `rtl_tcp` stream (`/proc/net/tcp` on port 04D2 shows only LISTEN). If the service and watchdog must be stopped, stop the watchdog timer first, then the service, and note the time: ______
+- [ ] No scheduled job on scythe-1 can take the dongle mid-run. In particular `scythe-adsb-refresh.timer` (the 1090 MHz ADS-B refresh; its script stops `scythe-rtl-tcp.service` every 20 minutes for a bounded capture) is inactive and disabled: `systemctl --user is-active scythe-adsb-refresh.timer` prints `inactive`, `is-enabled` prints `disabled`, and `systemctl --user list-timers --all` shows only `scythe-rtl-watchdog.timer` for the RTL service. It was inactive/disabled on 2026-11-02. Checked on: ______ ; result: ______
+  - `scythe-adsb-serve.service` (static HTTP on the tailnet IP :8123, serving old ADS-B tracks to the dedirock pull) does not touch the dongle and may stay running.
 - [ ] Sample rate 2.048 MS/s, fixed gain, fc chosen (first fc: ______ MHz), direct sampling Q-branch.
 - [ ] Antenna disconnected; DUT input terminated (50 ohm) until the probe chain is connected.
 - [ ] DUT warm-up of at least 30 minutes with the stream running. Interleave a reference point in every sweep to catch drift.
