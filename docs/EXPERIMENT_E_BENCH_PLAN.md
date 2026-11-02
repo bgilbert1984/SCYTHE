@@ -36,7 +36,7 @@ Does a keyed probe tone inside a direct-sampling receiver's DDC passband produce
 **Stage 0A: offline software validation (no DUT).**
 Run `scripts/experiment_e/stage0_stats.py` on external recordings (e.g. labeled HF noise captures, test vectors only) with synthetic CW injection, and on independently generated null vectors. Use these to validate the code and estimate null variability and false-positive rate. Freeze the decision rule (block length, confidence level, effect-size floor) before any DUT capture. Do not calibrate the final threshold on external data and assume it transfers to the DUT.
 
-**Stage 0B: DUT sample response (owned receiver, fixed config).**
+**Stage 0B: DUT sample response (owned receiver, fixed config).** First ambient run: [EXPERIMENT_E_STAGE0B_RESULTS.md](EXPERIMENT_E_STAGE0B_RESULTS.md).
 Capture the DUT's own sample stream with the probe off, in-band, and out-of-band. The script reports hw, I-to-Q, Q-to-I and I-to-I toggle rates and clipping, with block-based confidence intervals (windows are not independent).
 - *Detected response:* proceed to Stage 1 to test whether an external emission correlates with it.
 - *Not demonstrated:* this output-byte proxy showed no response at the tested sensitivity. Close this proxy branch only. Other leakage hypotheses (internal NCO/ADC activity, power-rail coupling, clock sidebands) were not measured and stay open.
