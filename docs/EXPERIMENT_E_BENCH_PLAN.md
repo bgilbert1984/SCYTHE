@@ -23,7 +23,7 @@ Does a keyed probe tone inside a direct-sampling receiver's DDC passband produce
 
 | Element | Choice |
 |---|---|
-| DUT | RTL-SDR with HF direct-sampling mode (v3/v5 class). The XTR/E4000 is not assumed to support this mode. |
+| DUT | RTL-SDR with HF direct-sampling mode (v3/v5 class). The Nooelec XTR v5 on scythe-1 (E4000, confirmed by rtl_test) is not expected to support this mode. |
 | DUT config | Direct sampling Q-branch, fixed sample rate (2.4 MS/s), fixed gain, fixed center frequency f_c. Host runs `rtl_sdr` to `/dev/null` so no host-side processing varies with the data. |
 | Stimulus | Signal generator, CW, gated on/off at f_m by an external square wave. Then step attenuator, then DUT input through shielded coax. Use f_m ~ 7 Hz to avoid 50/60 Hz and harmonics. |
 | Probe A (conducted) | Low-noise shunt or current probe on USB VBUS, amplified, into a DAQ or scope. |
@@ -33,9 +33,17 @@ Does a keyed probe tone inside a direct-sampling receiver's DDC passband produce
 
 ## Procedure
 
-**Stage 0: precondition, host-side bytes only (no emission measurement).**
-Capture the DUT's own sample stream with the probe on/off and in/out of band. Compute byte Hamming weight and toggle rate per window.
-- *Gate:* if toggle statistics do not depend on in-band probe power, the premise fails. Stop and record the negative result.
+**Stage 0A: offline software validation (no DUT).**
+Run `scripts/experiment_e/stage0_stats.py` on external recordings (e.g. labeled HF noise captures, test vectors only) with synthetic CW injection, and on independently generated null vectors. Use these to validate the code and estimate null variability and false-positive rate. Freeze the decision rule (block length, confidence level, effect-size floor) before any DUT capture. Do not calibrate the final threshold on external data and assume it transfers to the DUT.
+
+**Stage 0B: DUT sample response (owned receiver, fixed config).**
+Capture the DUT's own sample stream with the probe off, in-band, and out-of-band. The script reports hw, I-to-Q, Q-to-I and I-to-I toggle rates and clipping, with block-based confidence intervals (windows are not independent).
+- *Detected response:* proceed to Stage 1 to test whether an external emission correlates with it.
+- *Not demonstrated:* this output-byte proxy showed no response at the tested sensitivity. Close this proxy branch only. Other leakage hypotheses (internal NCO/ADC activity, power-rail coupling, clock sidebands) were not measured and stay open.
+- Ambient signals (e.g. FT8 near 7.074 MHz) are a receiver sanity check, not a controlled stimulus. Establish the real input path and frequency mapping for the DUT before interpreting in-band vs out-of-band.
+- Check saturation (clip fraction) before attributing a change to the stimulus.
+
+**Evidence ladder (each claim needs its own evidence):** RF detected in DUT samples; byte statistics depend on input; physical emission depends on receiver activity; physical emission depends specifically on the digitally selected frequency; tuned frequency inferred under blinded conditions.
 
 **Stage 1: conducted, VBUS.**
 1. Fix f_c. Pick a probe power sweep (e.g. -60 to -10 dBFS equivalent) at one in-band frequency to find the response vs amplitude and the clipping onset.
