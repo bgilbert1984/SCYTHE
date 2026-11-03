@@ -631,6 +631,14 @@ _AUTHORIZED_DECLARATION_PATH = os.path.join(
     os.path.dirname(os.path.abspath(__file__)),
     "docs", "521_AUTHORIZED_RUN_DECLARATION.json")
 
+# Further frozen authorizations, each bound to its own receiver. A run-time
+# declaration must match ONE of them exactly on the chain-defining fields.
+# The NESDR authorization above is unchanged; the XTR was added 2026-11-03.
+_ADDITIONAL_AUTHORIZED_DECLARATION_PATHS = (
+    os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                 "docs", "521_AUTHORIZED_RUN_DECLARATION_XTR.json"),
+)
+
 
 def _authorized_chain_subset(decl: Dict[str, Any]) -> Dict[str, Any]:
     """The chain-defining fields bound to the frozen authorization."""
@@ -656,23 +664,34 @@ def check_declaration_authorized(decl: Dict[str, Any]) -> None:
     epoch, site prose, rtl_tcp endpoint, output_dir) are the operator's launch
     choices and are not bound.
     """
-    with open(_AUTHORIZED_DECLARATION_PATH) as handle:
-        authorized = json.load(handle)
-    want = json.dumps(_authorized_chain_subset(authorized),
-                      sort_keys=True, separators=(",", ":"))
+    paths = (_AUTHORIZED_DECLARATION_PATH,
+             *_ADDITIONAL_AUTHORIZED_DECLARATION_PATHS)
     got = json.dumps(_authorized_chain_subset(decl),
                      sort_keys=True, separators=(",", ":"))
-    if hashlib.sha256(want.encode()).hexdigest() != \
-            hashlib.sha256(got.encode()).hexdigest():
-        a, b = (_authorized_chain_subset(authorized),
-                _authorized_chain_subset(decl))
-        diffs = [f"{k}: authorized {a[k]!r}, supplied {b[k]!r}"
-                 for k in a if a[k] != b[k]]
-        raise SequencerRefused(
-            "DECLARATION_NOT_AUTHORIZED",
-            "the run-time declaration does not match the frozen "
-            f"authorization ({_AUTHORIZED_DECLARATION_PATH}); "
-            + "; ".join(diffs))
+    candidates = []
+    for path in paths:
+        with open(path) as handle:
+            authorized = json.load(handle)
+        want = json.dumps(_authorized_chain_subset(authorized),
+                          sort_keys=True, separators=(",", ":"))
+        if hashlib.sha256(want.encode()).hexdigest() == \
+                hashlib.sha256(got.encode()).hexdigest():
+            return
+        candidates.append((path, authorized))
+    # No match: report against the authorization for the same receiver when
+    # there is one, else the first.
+    path, authorized = next(
+        ((p, a) for p, a in candidates
+         if a["receiver"]["sensor_id"] == decl["receiver"]["sensor_id"]),
+        candidates[0])
+    a, b = (_authorized_chain_subset(authorized),
+            _authorized_chain_subset(decl))
+    diffs = [f"{k}: authorized {a[k]!r}, supplied {b[k]!r}"
+             for k in a if a[k] != b[k]]
+    raise SequencerRefused(
+        "DECLARATION_NOT_AUTHORIZED",
+        "the run-time declaration does not match a frozen "
+        f"authorization ({path}); " + "; ".join(diffs))
 
 
 SPOOL_DIRNAME = "spool"

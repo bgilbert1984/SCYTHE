@@ -1,0 +1,34 @@
+{
+ "authorization": "5.21 catalogue run declaration for the Nooelec SMArt XTR SN 71874552; amends the receiver binding only. Owner statement in session 2026-11-03: XTR cleared for catalogue/corpus capture, termination fitted. The NESDR SMArt v5 authorization (521_AUTHORIZED_RUN_DECLARATION.json, frozen 2026-09-30) is unchanged. reference_ppm is the uncalibrated-receiver conservative bound; no physical identification of the XTR reference oscillator has been done.",
+ "bands": [
+  {
+   "band_id": "UHF_LOW",
+   "high_hz": 440000000,
+   "low_hz": 400000000
+  },
+  {
+   "band_id": "UHF_HIGH",
+   "high_hz": 470000000,
+   "low_hz": 440000000
+  }
+ ],
+ "epoch": 1,
+ "gain_db": 29.7,
+ "note": "Chain-defining fields. A run-time declaration must match the bound subset exactly; any mismatch is a pre-contact refusal (DECLARATION_NOT_AUTHORIZED). Bands are the frozen split UHF_LOW 400-440 MHz and UHF_HIGH 440-470 MHz (2026-09-30); band identity participates in tuning generation. Operational fields (run_id, epoch, site prose, rtl_tcp endpoint, output_dir) are the operator's launch choices and are not bound.",
+ "ppm_justification": "UNCALIBRATED_RECEIVER_CONSERVATIVE_BOUND. SN 71874552 is not frequency-calibrated or disciplined and has had no physical identification of its reference oscillator; per the accepted 5.21 procedure an uncalibrated dongle declares +/-100 ppm. Any datasheet TCXO figure is corroboration only, not consumed as the ReferenceComb tolerance.",
+ "receiver": {
+  "description": "Nooelec SMArt XTR, SN 71874552",
+  "sensor_id": "71874552"
+ },
+ "reference_hz": 28800000,
+ "reference_ppm": 100,
+ "run_id": "521-UHF-XTR-EPOCH1",
+ "seed": 7535194158483371716,
+ "site": "12502 Mukilteo Speedway, Mukilteo, WA 98275, no enclosure (no RF test enclosure; dongle in factory aluminum case)",
+ "termination": {
+  "connector": "SMA-male",
+  "fitted": true,
+  "note": "operator stated in session 2026-11-03 that a termination is fitted on the XTR input; connector type is the default carried from the 2026-09-29 load, unverified",
+  "part": "generic 50 ohm SMA termination load (part number verified)"
+ }
+}
