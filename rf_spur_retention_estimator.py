@@ -54,6 +54,7 @@ RETENTION_WINDOW_LENGTH_MISMATCH = "RETENTION_WINDOW_LENGTH_MISMATCH"
 RETENTION_SAMPLE_NOT_FINITE = "RETENTION_SAMPLE_NOT_FINITE"
 RETENTION_SAMPLE_RATE_NOT_POSITIVE = "RETENTION_SAMPLE_RATE_NOT_POSITIVE"
 RETENTION_FEATURE_OUT_OF_SPAN = "RETENTION_FEATURE_OUT_OF_SPAN"
+RETENTION_PREPARED_VISIT_MISMATCH = "RETENTION_PREPARED_VISIT_MISMATCH"
 
 
 class RetentionRefused(RuntimeError):
@@ -103,6 +104,11 @@ class PreparedVisit:
     validated or transformed until the first measurement, so a visit with no
     candidates behaves exactly as before, and the refusals (and their order
     relative to the other argument checks) are unchanged.
+
+    Lifecycle invariant: one PreparedVisit per visit, over repeats that are not
+    modified afterwards. The cache is bound to the `windows` object it was
+    built from (measure_persistence refuses any other), but in-place edits to
+    that object after the first measurement are NOT detected.
     """
 
     def __init__(self, windows: Sequence[Any]) -> None:
@@ -179,6 +185,11 @@ def measure_persistence(*, tuning_id: str,
             f"the feature is measured inside the span the repeats cover, "
             f"|f| <= {sample_rate_hz / 2:.0f} Hz; got {feature_baseband_hz!r}")
     feature_baseband_hz = float(feature_baseband_hz)
+    if prepared is not None and prepared._windows is not windows:
+        raise RetentionRefused(
+            RETENTION_PREPARED_VISIT_MISMATCH,
+            "the prepared spectra belong to a different visit's windows than "
+            "the windows passed; build a PreparedVisit over these windows")
     length, bins_list, medians = (
         prepared if prepared is not None else PreparedVisit(windows)).resolve()
     # The feature's bin in the fftshifted layout; the span check above keeps

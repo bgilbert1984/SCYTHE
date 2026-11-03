@@ -45,6 +45,22 @@ class PreparedVisitTests(unittest.TestCase):
                                       prepared=r.PreparedVisit(bad))
             self.assertEqual(e1.exception.code, e2.exception.code)
 
+    def test_prepared_is_bound_to_its_own_windows(self):
+        a, b = visit(seed=1), visit(seed=2); p = r.PreparedVisit(a)
+        with self.assertRaises(r.RetentionRefused) as e:
+            r.measure_persistence(tuning_id="t", windows=b, sample_rate_hz=FS, feature_baseband_hz=0.0, prepared=p)
+        self.assertEqual(e.exception.code, r.RETENTION_PREPARED_VISIT_MISMATCH)
+        # an equal-valued copy is a different object: also refused
+        with self.assertRaises(r.RetentionRefused):
+            r.measure_persistence(tuning_id="t", windows=list(a), sample_rate_hz=FS, feature_baseband_hz=0.0, prepared=p)
+
+    def test_boundary_frequencies(self):
+        w = visit(); p = r.PreparedVisit(w)
+        for f in (-FS / 2, FS / 2, 0.0):
+            a = r.measure_persistence(tuning_id="t", windows=w, sample_rate_hz=FS, feature_baseband_hz=f)
+            b = r.measure_persistence(tuning_id="t", windows=w, sample_rate_hz=FS, feature_baseband_hz=f, prepared=p)
+            self.assertEqual(a.repeat_excess_db, b.repeat_excess_db)
+
     def test_argument_checks_still_run_per_call(self):
         w = visit(); p = r.PreparedVisit(w)
         with self.assertRaises(r.RetentionRefused) as e:
