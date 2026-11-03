@@ -85,7 +85,7 @@ from rf_promotion_envelope import (
     SESSION_SCOPED,
     SPUR_CANDIDATE_UNRESOLVED,
 )
-from rf_spur_retention_estimator import measure_persistence
+from rf_spur_retention_estimator import PreparedVisit, measure_persistence
 
 
 SEQUENCER_REVISION = "seq-7.2-1-hann"
@@ -1024,11 +1024,12 @@ def _recompute_visit_data(output_dir: str, rec: Dict[str, Any]
     candidates = detect_candidates(windows)
     persistence: Dict[int, Any] = {}
     retained: List[int] = []
+    prepared = PreparedVisit(windows)  # per-repeat spectra, once per visit
     for idx, cand in enumerate(candidates):
         obs = measure_persistence(
             tuning_id=rec["tuning_id"], windows=windows,
             sample_rate_hz=SAMPLE_RATE_HZ,
-            feature_baseband_hz=cand.baseband_hz)
+            feature_baseband_hz=cand.baseband_hz, prepared=prepared)
         persistence[idx] = obs
         if obs.persistent():
             retained.append(idx)
@@ -1232,11 +1233,12 @@ def run_epoch(decl: Dict[str, Any], tuner: RtlTcpTuner,
         candidates = detect_candidates(acquired.windows)
         persistence = {}
         retained = []
+        prepared = PreparedVisit(acquired.windows)  # spectra once per visit
         for idx, cand in enumerate(candidates):
             obs = measure_persistence(
                 tuning_id=tuning.tuning_id, windows=acquired.windows,
                 sample_rate_hz=SAMPLE_RATE_HZ,
-                feature_baseband_hz=cand.baseband_hz)
+                feature_baseband_hz=cand.baseband_hz, prepared=prepared)
             persistence[idx] = obs
             if obs.persistent():
                 retained.append(idx)

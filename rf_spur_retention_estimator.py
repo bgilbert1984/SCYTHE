@@ -94,13 +94,70 @@ def _as_window(value: Any, index: int) -> np.ndarray:
     return arr
 
 
+class PreparedVisit:
+    """A visit's repeats, validated and transformed once.
+
+    Everything `measure_persistence` computes per repeat -- the Hann power
+    spectrum and its median -- is independent of the feature, so a visit with
+    N candidates need not recompute it N times. Resolution is lazy: nothing is
+    validated or transformed until the first measurement, so a visit with no
+    candidates behaves exactly as before, and the refusals (and their order
+    relative to the other argument checks) are unchanged.
+    """
+
+    def __init__(self, windows: Sequence[Any]) -> None:
+        self._windows = windows
+        self._resolved = None
+
+    def resolve(self):
+        if self._resolved is not None:
+            return self._resolved
+        windows = self._windows
+        if isinstance(windows, np.ndarray) and windows.ndim == 1:
+            raise RetentionRefused(
+                RETENTION_WINDOWS_NOT_DECLARED,
+                "one window is not a visit's repeats; pass the sequence of "
+                "repeat windows")
+        try:
+            repeats = tuple(windows)
+        except TypeError:
+            raise RetentionRefused(
+                RETENTION_WINDOWS_NOT_DECLARED,
+                f"a visit's repeats come as a sequence; got "
+                f"{type(windows).__name__}")
+        if not repeats:
+            raise RetentionRefused(
+                RETENTION_WINDOWS_NOT_DECLARED,
+                "a visit with no repeats retains no features")
+        measured = [_as_window(value, index) for index, value in enumerate(repeats)]
+        length = measured[0].size
+        for index, window in enumerate(measured[1:], start=1):
+            if window.size != length:
+                raise RetentionRefused(
+                    RETENTION_WINDOW_LENGTH_MISMATCH,
+                    f"repeat {index} has {window.size} samples against repeat "
+                    f"0's {length}. The repeats are the same window laid down "
+                    f"{len(measured)} times, not {len(measured)} different "
+                    f"windows")
+        bins_db = [_power_db(w) for w in measured]
+        medians = [float(np.median(b)) for b in bins_db]
+        self._resolved = (length, bins_db, medians)
+        return self._resolved
+
+
 def measure_persistence(*, tuning_id: str,
                         windows: Sequence[Any],
                         sample_rate_hz: float,
-                        feature_baseband_hz: float) -> SpurPersistenceObservation:
+                        feature_baseband_hz: float,
+                        prepared: "PreparedVisit | None" = None
+                        ) -> SpurPersistenceObservation:
     """Measure one feature's excess over the tuning-local median in each of
     the visit's repeats, and return the observation the catalogue entry is
-    built from."""
+    built from.
+
+    `prepared` (optional) is a PreparedVisit over the same `windows`; passing
+    it reuses the per-repeat spectra across a visit's candidates. The result
+    is bit-identical to omitting it."""
     if type(tuning_id) is not str or not tuning_id:
         raise RetentionRefused(
             RETENTION_TUNING_NOT_DECLARED,
@@ -122,41 +179,14 @@ def measure_persistence(*, tuning_id: str,
             f"the feature is measured inside the span the repeats cover, "
             f"|f| <= {sample_rate_hz / 2:.0f} Hz; got {feature_baseband_hz!r}")
     feature_baseband_hz = float(feature_baseband_hz)
-    if isinstance(windows, np.ndarray) and windows.ndim == 1:
-        raise RetentionRefused(
-            RETENTION_WINDOWS_NOT_DECLARED,
-            "one window is not a visit's repeats; pass the sequence of "
-            "repeat windows")
-    try:
-        repeats = tuple(windows)
-    except TypeError:
-        raise RetentionRefused(
-            RETENTION_WINDOWS_NOT_DECLARED,
-            f"a visit's repeats come as a sequence; got "
-            f"{type(windows).__name__}")
-    if not repeats:
-        raise RetentionRefused(
-            RETENTION_WINDOWS_NOT_DECLARED,
-            "a visit with no repeats retains no features")
-    measured = [_as_window(value, index) for index, value in enumerate(repeats)]
-    length = measured[0].size
-    for index, window in enumerate(measured[1:], start=1):
-        if window.size != length:
-            raise RetentionRefused(
-                RETENTION_WINDOW_LENGTH_MISMATCH,
-                f"repeat {index} has {window.size} samples against repeat "
-                f"0's {length}. The repeats are the same window laid down "
-                f"{len(measured)} times, not {len(measured)} different "
-                f"windows")
+    length, bins_list, medians = (
+        prepared if prepared is not None else PreparedVisit(windows)).resolve()
     # The feature's bin in the fftshifted layout; the span check above keeps
     # this inside the spectrum.
     feature_bin = int(round((feature_baseband_hz + sample_rate_hz / 2)
                             * length / sample_rate_hz))
     feature_bin = min(max(feature_bin, 0), length - 1)
-    excesses = []
-    for window in measured:
-        bins_db = _power_db(window)
-        median_db = float(np.median(bins_db))
-        excesses.append(float(bins_db[feature_bin] - median_db))
+    excesses = [float(bins_db[feature_bin] - median_db)
+                for bins_db, median_db in zip(bins_list, medians)]
     return SpurPersistenceObservation(tuning_id=tuning_id,
                                       repeat_excess_db=tuple(excesses))
