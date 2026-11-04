@@ -74,6 +74,21 @@ A feature can have high operational persistence and remain `SESSION_SCOPED`. Ope
 findings are a **new** finding type; they do not change the existing catalogue classification
 contract or its stability classes.
 
+### Exclusivity of stability classes
+
+`SESSION_SCOPED`, `RECONNECT_STABLE` and `POWER_CYCLE_STABLE` remain the product of the
+§5.21 catalogue classification and its prescribed lifecycle tests (protocol step 7: presence
+in one, two or three epochs, where the second and third follow a reconnect and a power
+cycle). Nothing else may emit them.
+
+- An operational finding, including one "verified within a named scope", never emits any of
+  the three classes, and no scope name may be chosen to imply one.
+- `RECONNECT_STABLE` and `POWER_CYCLE_STABLE` are valid only when the corresponding
+  lifecycle test was executed and passed under the conditions the protocol specifies for it.
+- Continuous operation of any duration does not promote a lower class to a higher one.
+  `SESSION_SCOPED` states that no cross-lifecycle evidence exists; it is not a weaker form
+  of the others and is not upgraded by time.
+
 ### Constraints the design must respect
 
 - Overlapping windows are not independent confirmation; corroboration counts independent
@@ -106,13 +121,32 @@ catalogue. No acquisition, hardware or new authorization is involved.
 
 | Requirement | Target |
 |---|---|
-| Final scientific result | exact parity with batch processing for equivalent inputs |
+| Final scientific result | parity with batch processing for equivalent inputs, as defined under "Parity definition" below |
 | Intermediate results | available before replay completes |
 | Restart recovery | no missing or duplicated committed observations |
 | Replay | identical outputs from pinned inputs and versions |
 | Configuration change | invalidates incompatible state |
 | Governance | no bypass of proposal, approval or execution checks |
 | Latency | measure p50/p95/p99 first; set thresholds after the baseline |
+
+### Parity definition
+
+The replay test requires parity with the batch result under a comparison frozen before any
+measurement run, not bit-identical floating-point results. Incremental and batch summation
+order differ, and IEEE-754 does not guarantee bitwise equality across them, so bit identity
+is neither required nor claimed.
+
+- **Discrete quantities** (classifications, stability classes, counts, indices, hashes,
+  identifiers) must match exactly.
+- **Floating-point quantities** must agree within a frozen tolerance. The comparison method
+  (absolute, relative or hybrid) and the tolerance are chosen per quantity before the first
+  measurement run. A starting proposal is a relative tolerance of 1e-9, with an absolute
+  floor suited to the magnitude of each quantity; the committed value, not this proposal, is
+  authoritative.
+- The method and tolerance are committed in the same change that lands the test, and changing
+  either afterwards requires a revision of this ADR.
+- The test fails if any compared quantity is outside its tolerance or any discrete quantity
+  differs.
 
 Phasing, if accepted: (A) an append-only observation journal with idempotent ingest, explicit
 gaps and configuration identity; (B) incremental feature extraction by sensor, signal chain
