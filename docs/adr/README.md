@@ -15,6 +15,7 @@ implemented — the repository states elsewhere what actually ships.
 | [0007](0007-mutation-boundary.md) | Every authoritative mutation has exactly one documented boundary | Proposed; not decided |
 | [0008](0008-mutation-replayability.md) | Every mutation owes a declared level of explainability | Proposed; not decided |
 | [0009](0009-partial-failure.md) | A partially applied mutation is represented, never silently discarded | Proposed; not decided |
+| [0010](0010-continuous-evidence-processing.md) | Intelligence is produced continuously from observations; epochs stay only where a contract needs them | Proposed; not decided |
 
 ## Where to look
 
