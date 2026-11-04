@@ -29,6 +29,6 @@
   "connector": "SMA-male",
   "fitted": true,
   "note": "operator stated in session 2026-11-03 that a termination is fitted on the XTR input; connector type is the default carried from the 2026-09-29 load, unverified",
-  "part": "generic 50 ohm SMA termination load (part number verified)"
+  "part": "generic 50 ohm SMA termination load (part number NOT verified)"
  }
 }
