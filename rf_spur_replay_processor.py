@@ -62,10 +62,10 @@ NOT_COMPARED = {
     "events": "live acquisition telemetry (attempt, elapsed time); catalogue.json does not carry it",
 }
 
-PROVISIONAL = "PROVISIONAL"
-TUNING_COMPLETE = "TUNING_COMPLETE"
-ACCEPTED = "ACCEPTED"
-DUPLICATE = "DUPLICATE"
+PROVISIONAL = "REPLAY_TUNING_PARTIAL"
+TUNING_COMPLETE = "REPLAY_TUNING_COMPLETE"
+ACCEPTED = "REPLAY_RECORD_TAKEN"
+DUPLICATE = "REPLAY_RECORD_REPEATED"
 
 
 class ReplayRefused(Exception):
