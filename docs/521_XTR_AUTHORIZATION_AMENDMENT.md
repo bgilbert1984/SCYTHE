@@ -30,7 +30,7 @@ termination record.
   datasheet. [`521_CATALOGUE_AUTHORIZATION_DECISION.md`: no declaration is made
   from the model specification alone.]
 - The termination part is recorded as "generic 50 ohm SMA termination load
-  (part number not re-verified)", connector SMA-male carried over from the
+  (part number NOT verified)", connector SMA-male carried over from the
   2026-09-29 load and unverified. The run-time declaration must repeat this
   string exactly; amend this file (a new freeze) if the real part differs.
 - Site prose is carried over from the NESDR declaration and must be corrected
