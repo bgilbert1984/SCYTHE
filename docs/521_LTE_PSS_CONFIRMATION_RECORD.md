@@ -10,7 +10,8 @@ Document: TS 36.211 V19.3.0 (Rel-19), 3GPP file 36211-j30.zip (4 .docx: cover, s
 URL:        https://www.3gpp.org/ftp/Specs/archive/36_series/36.211/36211-j30.zip
 downloaded: 2026-11-05 15:15 UTC
 SHA-256:    c1b132375361596e713dc51bfa20afbe4bf4c92bf1992c829a775f59a2ece5a1   (36211-j30.zip, 7,629,041 bytes)
-Reader 1 (name, date):  PENDING            Reader 2 (name, date): Claude (assistant), 2026-11-05
+Reader 1 (name, date):  PARTIAL - A4, A5, A6 (6.12, Table 6.12-1, 4.1) read by the repository owner and reported "all agree exact" on 2026-11-06 (reported in session, not yet signed here); A1-A3, A7 PENDING
+Reader 2 (name, date): Claude (assistant), 2026-11-05
 ```
 
 ## How the document was read (limits)
@@ -25,7 +26,7 @@ rendering. Reader 1 should open the clauses below and compare with the transcrip
 | A1 | 6.11.1.1 | d_u(n) = exp(-j pi u n(n+1)/63) for n = 0,1,...,30; exp(-j pi u (n+1)(n+2)/63) for n = 31,32,...,61 |
 | A2 | 6.11.1.1, Table 6.11.1.1-1 | header "N_ID^(2)"; rows 0 -> 25, 1 -> 29, 2 -> 34 (the pairing is read, no longer inferred from row order) |
 | A3 | 6.11.1.2 | a_{k,l} = d(n), n = 0..61, k = n - 31 + floor(N_RB^DL N_sc^RB / 2); frame structure type 1: last OFDM symbol of slots 0 and 10; elements with n = -5,-4,...,-1,62,63,...,66 are reserved and not used for the PSS |
-| A4 | 6.12 | s_l(t) = sum over k = -floor(N_RB N_sc/2)..-1 of a^(-)_{k,l} exp(j2 pi k df (t - N_CP,l T_s)) + sum over k = 1..ceil(N_RB N_sc/2) of a^(+)_{k,l} exp(j2 pi k df (t - N_CP,l T_s)); k^(-) = k + floor(N_RB N_sc/2), k^(+) = k + floor(N_RB N_sc/2) - 1. DC (k = 0) carries nothing |
+| A4 | 6.12 | s_l^(p)(t) (antenna port p) = sum over k = -floor(N_RB N_sc/2)..-1 of a^(p,-)_{k,l} exp(j2 pi k df (t - N_CP,l T_s)) + sum over k = 1..ceil(N_RB N_sc/2) of a^(p,+)_{k,l} exp(j2 pi k df (t - N_CP,l T_s)); the (p) superscript is carried on s and on both a terms (earlier draft of this record dropped it); k^(-) = k + floor(N_RB N_sc/2), k^(+) = k + floor(N_RB N_sc/2) - 1. DC (k = 0) carries nothing |
 | A5 | 6.12, Table 6.12-1 | N = 2048 for 15 kHz; normal CP N_CP,l = 160 for l = 0, 144 for l = 1..6 (T_s units). Clause 4: T_s = 1/(15000 x 2048) s (30.72 MS/s). Clause 4.1: T_slot = 15360 T_s = 0.5 ms |
 | A6 | 4.1 | frame structure type 1: T_f = 307200 T_s = 10 ms; subframe = 30720 T_s = 1 ms; subframe i = slots 2i and 2i+1, each T_slot = 15360 T_s = 0.5 ms. PSS in slots 0 and 10 (A3), i.e. 10 slots apart = 5 ms (derived, not stated as a number in 4.1) |
 | A7 | 6.11.1.2 | frame structure type 2: PSS in the **third** OFDM symbol of subframes 1 and 6 (differs from type 1); type 3 follows type 1 with exceptions. A TDD cell therefore has a different placement |
@@ -42,7 +43,7 @@ in this record; run section 3.3's snippet to cover that.
 ## Result
 ```
 A1 agree   A2 agree   A3 agree   A4 agree   A5 agree (CP 160/144, slot 15360 T_s = 960 samples)   A6 agree (5 ms)   A7 differs from type 1 as expected
-Check A result:  PASS for A1-A7 by Reader 2 (assistant); Reader 1 verification PENDING
+Check A result:  PASS for A1-A7 by Reader 2 (assistant); Reader 1 confirmed A4-A6 (2026-11-06); Reader 1 verification of A1-A3, A7 PENDING
 Recording: NOT DONE     Independent PCI: NOT DONE     Check B result: NOT DONE
 Nominal-frequency check (section 5) result: NOT DONE (TS 36.101 channel raster and 3GPP ppm figure still unconfirmed)
 Flag set to true in plan (hash): NO
