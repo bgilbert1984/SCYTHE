@@ -10,7 +10,7 @@ Document: TS 36.211 V19.3.0 (Rel-19), 3GPP file 36211-j30.zip (4 .docx: cover, s
 URL:        https://www.3gpp.org/ftp/Specs/archive/36_series/36.211/36211-j30.zip
 downloaded: 2026-11-05 15:15 UTC
 SHA-256:    c1b132375361596e713dc51bfa20afbe4bf4c92bf1992c829a775f59a2ece5a1   (36211-j30.zip, 7,629,041 bytes)
-Reader 1 (name, date):  PARTIAL - A4, A5, A6 (6.12, Table 6.12-1, 4.1) read by the repository owner and reported "all agree exact" on 2026-11-06 (reported in session, not yet signed here); A1-A3, A7 PENDING
+Reader 1 (name, date):  bgilbert1984, 2026-11-06 - SIGNED FOR A4, A5, A6 ONLY (6.12, Table 6.12-1, 4.1: "all agree exact"); A1-A3, A7 NOT YET READ by Reader 1
 Reader 2 (name, date): Claude (assistant), 2026-11-05
 ```
 
@@ -43,7 +43,7 @@ in this record; run section 3.3's snippet to cover that.
 ## Result
 ```
 A1 agree   A2 agree   A3 agree   A4 agree   A5 agree (CP 160/144, slot 15360 T_s = 960 samples)   A6 agree (5 ms)   A7 differs from type 1 as expected
-Check A result:  PASS for A1-A7 by Reader 2 (assistant); Reader 1 confirmed A4-A6 (2026-11-06); Reader 1 verification of A1-A3, A7 PENDING
+Check A result:  PASS for A1-A7 by Reader 2 (assistant); Reader 1 (bgilbert1984) signed A4-A6 (2026-11-06); Reader 1 verification of A1-A3, A7 PENDING
 Recording: NOT DONE     Independent PCI: NOT DONE     Check B result: NOT DONE
 Nominal-frequency check (section 5) result: NOT DONE (TS 36.101 channel raster and 3GPP ppm figure still unconfirmed)
 Flag set to true in plan (hash): NO
