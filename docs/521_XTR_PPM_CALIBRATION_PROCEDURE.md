@@ -138,9 +138,10 @@ and a fake rtl_tcp socket:
 | Site survey | same, `survey` | built; ranks candidate channels by in-channel power over floor; does not identify cells |
 | Plan freeze, fit, acceptance, combination, decision rule, manifest | `rf_ppm_calibration.py` | built |
 | Estimator and synthetic validation | same | **narrow-line (CW) estimator only**, usable for a GPSDO or an unmodulated pilot |
-| LTE / GSM estimator (what Tier A needs) | none | **not built** |
+| LTE estimator (what Tier A needs) | `rf_lte_carrier_estimator.py` | built as a draft: CP correlation for the fractional offset, differential PSS search for the integer subcarrier shift; synthetic data only; **PSS definition not confirmed against the normative text** (plan flag `pss_definition_confirmed` blocks any proposal) |
+| GSM (FCCH) estimator | none | not built |
 
-Tier A therefore cannot be carried out with this tooling yet. The reference accuracy figure carries a `confirmed` flag in the plan,
+Tier A can be carried out with this tooling only after the PSS definition is confirmed and the estimator has been checked on a recorded real LTE downlink; both are open. The reference accuracy figure carries a `confirmed` flag in the plan,
 and an unconfirmed figure (the 3GPP number above) blocks any proposal.
 
 ## 10. Risks and limits
