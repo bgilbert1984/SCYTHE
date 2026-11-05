@@ -1,6 +1,6 @@
 # §5.21 XTR reference calibration — non-invasive procedure (DRAFT)
 
-Status: DRAFT procedure. No measurement has been taken. No tooling exists yet (see "What must be built").
+Status: DRAFT procedure. No measurement has been taken. Draft tooling exists for sections 6-8 (see section 9); none of it has touched hardware.
 Receiver: Nooelec SMArt XTR, SN 71874552. Unit not opened and not to be opened.
 
 ## 1. Purpose and claim
@@ -129,7 +129,19 @@ retroactively; a catalogue under the tighter bound is a new run under the new au
 - The per-carrier frequency-offset estimator and its synthetic validation.
 - The fit/combination script implementing sections 7-8 and emitting the evidence manifest.
 - A site survey step (find and identify usable cells).
-None of these exist yet.
+None of these existed when this was written. Draft tooling now covers three of the four, and has run only on synthetic data
+and a fake rtl_tcp socket:
+
+| Item | Where | State |
+|---|---|---|
+| Capture script (spool, SHA-256, seeded order) | `rf_ppm_calibration_capture.py` | built; gates on a frozen plan, the owner's statement and an empty output directory |
+| Site survey | same, `survey` | built; ranks candidate channels by in-channel power over floor; does not identify cells |
+| Plan freeze, fit, acceptance, combination, decision rule, manifest | `rf_ppm_calibration.py` | built |
+| Estimator and synthetic validation | same | **narrow-line (CW) estimator only**, usable for a GPSDO or an unmodulated pilot |
+| LTE / GSM estimator (what Tier A needs) | none | **not built** |
+
+Tier A therefore cannot be carried out with this tooling yet. The reference accuracy figure carries a `confirmed` flag in the plan,
+and an unconfirmed figure (the 3GPP number above) blocks any proposal.
 
 ## 10. Risks and limits
 
