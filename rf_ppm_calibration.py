@@ -45,6 +45,8 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 import numpy as np
 
 SOURCE_PATH = os.path.abspath(__file__)
+LTE_SOURCE_PATH = os.path.join(os.path.dirname(SOURCE_PATH), "rf_lte_carrier_estimator.py")
+ESTIMATORS = ("narrow_line", "lte_cp_pss")
 
 
 class CalibrationRefused(Exception):
@@ -112,6 +114,21 @@ def check_plan(plan: Dict[str, Any]) -> None:
     if len({round((c["nominal_hz"] + c["feature_offset_hz"]) / 1e6) for c in carriers}) < 2:
         raise CalibrationRefused("PLAN_NO_FREQUENCY_SPREAD",
                                  "carriers must span frequency or a and b cannot separate")
+    est = plan["estimator"]
+    if est.get("name") not in ESTIMATORS:
+        raise CalibrationRefused("PLAN_ESTIMATOR_UNKNOWN", f"{est.get('name')!r} not in {ESTIMATORS}")
+    if est["name"] == "lte_cp_pss":
+        for k in ("min_cp_coeff", "min_pss_vote_share"):
+            if k not in est:
+                raise CalibrationRefused("PLAN_INCOMPLETE", f"estimator parameter {k!r} must be stated")
+        if not isinstance(est.get("pss_definition_confirmed"), bool):
+            raise CalibrationRefused("PLAN_INCOMPLETE", "estimator.pss_definition_confirmed(bool) is required")
+        for c in carriers:
+            if c["feature_offset_hz"] != 0:
+                raise CalibrationRefused("PLAN_CARRIER_INCOMPLETE",
+                                         f"{c['name']}: an LTE carrier is measured at its centre; feature_offset_hz must be 0")
+            if plan["n_windows"] != 8 or plan["sample_rate_hz"] != 2048000:
+                raise CalibrationRefused("PLAN_WINDOWS", "the LTE estimator needs 2.048 MS/s windows")
     ra = plan["reference_accuracy"]
     if not {"ppm", "source", "confirmed"} <= set(ra) or not isinstance(ra["confirmed"], bool):
         raise CalibrationRefused("PLAN_INCOMPLETE", "reference_accuracy needs ppm, source, confirmed(bool)")
@@ -125,8 +142,11 @@ def freeze_plan(plan: Dict[str, Any]) -> Dict[str, Any]:
     """Validate and hash. The hash covers the plan and the analysis source, so a plan cannot be
     paired with different code after data exists."""
     check_plan(plan)
-    body = {k: v for k, v in plan.items() if k not in ("plan_sha256", "analysis_source_sha256")}
+    body = {k: v for k, v in plan.items()
+            if k not in ("plan_sha256", "analysis_source_sha256", "estimator_source_sha256")}
     body["analysis_source_sha256"] = file_sha256(SOURCE_PATH)
+    body["estimator_source_sha256"] = (file_sha256(LTE_SOURCE_PATH)
+                                       if plan["estimator"]["name"] == "lte_cp_pss" else None)
     body["plan_sha256"] = sha256_text(canonical(body))
     return body
 
@@ -140,6 +160,10 @@ def verify_frozen_plan(plan: Dict[str, Any]) -> None:
     if plan.get("analysis_source_sha256") != file_sha256(SOURCE_PATH):
         raise CalibrationRefused("ANALYSIS_SOURCE_CHANGED",
                                  "this analysis code is not the code the plan was frozen against")
+    wanted = file_sha256(LTE_SOURCE_PATH) if plan["estimator"]["name"] == "lte_cp_pss" else None
+    if plan.get("estimator_source_sha256") != wanted:
+        raise CalibrationRefused("ANALYSIS_SOURCE_CHANGED",
+                                 "the estimator code is not the code the plan was frozen against")
 
 
 # --------------------------------------------------------------------- estimator
@@ -189,6 +213,19 @@ def estimate_line(window: np.ndarray, fs: float,
     crb_hz = math.sqrt(6.0 / (rho * n * (n * n - 1.0))) * fs / (2.0 * math.pi) if rho > 0 else float("inf")
     return {"baseband_hz": float(f_hz), "snr_db": 10.0 * math.log10(max(rho, 1e-30)),
             "crb_hz": float(crb_hz)}
+
+
+def estimate_carrier(plan: Dict[str, Any], window: np.ndarray, carrier: Dict[str, Any]) -> Dict[str, Any]:
+    """The plan's estimator, on one window. Refuses (never guesses) when the carrier is not found."""
+    fs = plan["sample_rate_hz"]
+    est = plan["estimator"]
+    if est["name"] == "narrow_line":
+        return estimate_line(window, fs, tuple(carrier["search_hz"]))
+    import rf_lte_carrier_estimator as lte
+    try:
+        return lte.estimate_lte_carrier(window, fs, tuple(carrier["search_hz"]), est)
+    except lte.LteNotDetected as exc:
+        raise CalibrationRefused("CARRIER_NOT_DETECTED", f"{carrier['name']}: {exc}") from exc
 
 
 # ----------------------------------------------------------------- session fit
@@ -270,6 +307,8 @@ def combine_sessions(sessions: Sequence[Dict[str, Any]], plan: Dict[str, Any]) -
     out.update({"mean_ppm": m, "u_stat_ppm": u_stat, "u_session_ppm": u_session, "u_ref_ppm": u_ref,
                 "expanded_uncertainty_ppm": U, "drift_allowance_ppm": d,
                 "session_b_ppm": [float(x) for x in b], "conditions_unsampled": unsampled})
+    if plan["estimator"]["name"] == "lte_cp_pss" and not plan["estimator"]["pss_definition_confirmed"]:
+        blockers.append("the LTE PSS definition is not confirmed against the normative 3GPP text")
     if not ra["confirmed"]:
         blockers.append("reference accuracy %.3g ppm is not confirmed against %s"
                         % (u_ref, ra["source"]))
@@ -310,6 +349,8 @@ def validate_estimator(plan: Dict[str, Any], n: int = 524288) -> Dict[str, Any]:
     limit in the plan (ppm at the lowest carrier). Run BEFORE any real data is analysed."""
     v = plan["validation"]
     fs = plan["sample_rate_hz"]
+    if plan["estimator"]["name"] == "lte_cp_pss":
+        return _validate_lte(plan)
     rng = np.random.default_rng(v["seed"])
     f_min = min(c["nominal_hz"] + c["feature_offset_hz"] for c in plan["carriers"])
     limit_hz = v["bias_limit_ppm"] * 1e-6 * f_min
@@ -332,6 +373,46 @@ def validate_estimator(plan: Dict[str, Any], n: int = 524288) -> Dict[str, Any]:
     return {"bias_limit_hz": limit_hz, "bias_limit_ppm": v["bias_limit_ppm"],
             "at_lowest_carrier_hz": f_min, "n_window_samples": n, "cells": cells,
             "passes": all(c["passes"] for c in cells)}
+
+
+def _validate_lte(plan: Dict[str, Any]) -> Dict[str, Any]:
+    """Bias of the LTE estimator on a synthetic 5 MHz LTE downlink with known carrier offset. The
+    'fading' cells add two-tap multipath and an 80 ppm receiver sample-clock error together, the
+    combination that produced the largest bias in development. Uses the same PSS definition as the
+    estimator, so it cannot detect an error in that definition (see rf_lte_carrier_estimator)."""
+    import rf_lte_carrier_estimator as lte
+    v = plan["validation"]
+    n = 524288
+    rng = np.random.default_rng(v["seed"])
+    f_min = min(c["nominal_hz"] for c in plan["carriers"])
+    limit_hz = v["bias_limit_ppm"] * 1e-6 * f_min
+    bound = max(abs(x) for c in plan["carriers"] for x in c["search_hz"])
+    cells = []
+    for snr in v["snr_db"]:
+        for hard in (False, True):
+            errs, crbs, refused = [], [], 0
+            for _ in range(v["trials"]):
+                true = rng.uniform(-0.8 * bound, 0.8 * bound)
+                clean = lte.synthetic_lte_clean(n, true, rng, multipath=hard,
+                                                sample_clock_ppm=80.0 if hard else 0.0)
+                try:
+                    r = estimate_carrier(plan, lte.add_noise(clean, snr, rng),
+                                         {"name": "validation", "search_hz": [-bound, bound]})
+                except CalibrationRefused:
+                    refused += 1
+                    continue
+                errs.append(r["baseband_hz"] - true); crbs.append(r["crb_hz"])
+            if len(errs) < 2:
+                cells.append({"snr_db": snr, "fading": hard, "refused": refused, "passes": False})
+                continue
+            errs = np.array(errs)
+            se_mean = float(errs.std(ddof=1) / math.sqrt(len(errs)))
+            cells.append({"snr_db": snr, "fading": hard, "bias_hz": float(errs.mean()),
+                          "bias_se_hz": se_mean, "rms_hz": float(np.sqrt((errs ** 2).mean())),
+                          "mean_crb_hz": float(np.mean(crbs)), "refused": refused,
+                          "passes": bool(refused == 0 and abs(errs.mean()) + 2 * se_mean < limit_hz)})
+    return {"bias_limit_hz": limit_hz, "bias_limit_ppm": v["bias_limit_ppm"], "at_lowest_carrier_hz": f_min,
+            "n_window_samples": n, "cells": cells, "passes": all(c["passes"] for c in cells)}
 
 
 # ---------------------------------------------------------------- manifest
@@ -374,7 +455,7 @@ def analyze_session(session_dir: str, plan: Dict[str, Any]) -> Dict[str, Any]:
         for i in range(plan["n_windows"]):
             u8 = np.frombuffer(raw[i * wb:(i + 1) * wb], np.uint8).astype(np.float64)
             iq = (u8[0::2] - 127.5) + 1j * (u8[1::2] - 127.5)
-            ests.append(estimate_line(iq, fs, tuple(c["search_hz"])))
+            ests.append(estimate_carrier(plan, iq, c))
         truth = c["nominal_hz"] + c["feature_offset_hz"]
         offs = np.array([visit["lo_hz"] + e["baseband_hz"] - truth for e in ests])
         n = len(offs)
