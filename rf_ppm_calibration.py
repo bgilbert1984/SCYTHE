@@ -47,6 +47,10 @@ import numpy as np
 SOURCE_PATH = os.path.abspath(__file__)
 LTE_SOURCE_PATH = os.path.join(os.path.dirname(SOURCE_PATH), "rf_lte_carrier_estimator.py")
 ESTIMATORS = ("narrow_line", "lte_cp_pss")
+# Duplex mode per E-UTRA operating band: TS 36.101 V20.1.0 (2026-09) Table 5.5-1, read 2026-11-06 by one reader.
+# Only bands actually read are listed; a band not listed is refused until the table is read for it and this is extended.
+LTE_BAND_DUPLEX = {**{b: "FDD" for b in (2, 3, 4, 5, 7, 12, 13, 14, 17, 20, 25, 26, 28, 66, 71)},
+                   **{b: "TDD" for b in (38, 40, 41)}}
 
 
 class CalibrationRefused(Exception):
@@ -123,6 +127,27 @@ def check_plan(plan: Dict[str, Any]) -> None:
                 raise CalibrationRefused("PLAN_INCOMPLETE", f"estimator parameter {k!r} must be stated")
         if not isinstance(est.get("pss_definition_confirmed"), bool):
             raise CalibrationRefused("PLAN_INCOMPLETE", "estimator.pss_definition_confirmed(bool) is required")
+        # The estimator does not refuse a TDD-position PSS or check the CP type (docs/521_ESTIMATOR_AND_NOMINAL_FREQUENCY_CHECKS.md);
+        # the plan must therefore name FDD / normal-CP carriers and the band's duplex mode is checked here.
+        for c in carriers:
+            for k in ("band", "duplex", "duplex_source", "cp", "cp_source"):
+                if c.get(k) in (None, ""):
+                    raise CalibrationRefused("PLAN_CARRIER_INCOMPLETE",
+                                             f"{c['name']}: LTE carriers need {k!r} (FDD normal-CP only)")
+            if isinstance(c["band"], bool) or not isinstance(c["band"], int) or c["band"] not in LTE_BAND_DUPLEX:
+                raise CalibrationRefused("PLAN_CARRIER_BAND_UNKNOWN",
+                                         f"{c['name']}: band {c['band']!r} is not in the TS 36.101 table this code has; "
+                                         f"read Table 5.5-1 for it and extend LTE_BAND_DUPLEX")
+            if c["duplex"] != LTE_BAND_DUPLEX[c["band"]]:
+                raise CalibrationRefused("PLAN_CARRIER_DUPLEX_MISMATCH",
+                                         f"{c['name']}: plan says {c['duplex']!r}, Table 5.5-1 says {LTE_BAND_DUPLEX[c['band']]!r} "
+                                         f"for band {c['band']}")
+            if LTE_BAND_DUPLEX[c["band"]] != "FDD":
+                raise CalibrationRefused("PLAN_CARRIER_NOT_FDD",
+                                         f"{c['name']}: band {c['band']} is {LTE_BAND_DUPLEX[c['band']]}; the estimator is FDD only")
+            if c["cp"] != "normal":
+                raise CalibrationRefused("PLAN_CARRIER_CP_NOT_NORMAL",
+                                         f"{c['name']}: cp {c['cp']!r}; the estimator is normal-CP only")
         for c in carriers:
             if c["feature_offset_hz"] != 0:
                 raise CalibrationRefused("PLAN_CARRIER_INCOMPLETE",
