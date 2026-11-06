@@ -5,6 +5,20 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>SCYTHE // NTIA ITM Regional RF Demo</title>
   <link rel="icon" href="data:,">
+  <!-- Prefixes /api/ fetches with the instance path (/scythe/i/<id>); without it they hit the hub, which has no /api/mcp routes. -->
+  <script src="../api/bootstrap.js" onerror="console.warn('[BOOTSTRAP] Not served from Flask')"></script>
+  <script>
+    // The orchestrator's bootstrap sets the instance prefix but does not rewrite fetches; this page's modules call "/api/..." absolutely.
+    (function () {
+      const prefix = window.__SCYTHE_BOOTSTRAP__ && window.__SCYTHE_BOOTSTRAP__.path_prefix;
+      if (!prefix) return;
+      const nativeFetch = window.fetch;
+      window.fetch = function (input, init) {
+        if (typeof input === "string" && input.startsWith("/api/")) input = prefix + input;
+        return nativeFetch.call(this, input, init);
+      };
+    })();
+  </script>
   <script src="https://cesium.com/downloads/cesiumjs/releases/1.114/Build/Cesium/Cesium.js"></script>
   <link rel="stylesheet" href="https://cesium.com/downloads/cesiumjs/releases/1.114/Build/Cesium/Widgets/widgets.css">
   <style>

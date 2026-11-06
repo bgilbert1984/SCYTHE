@@ -18,6 +18,8 @@ PUBLIC_EXTENSIONS = frozenset({
     '.woff', '.woff2', '.ttf', '.otf',
     '.glb', '.gltf', '.wasm', '.mp4', '.webm', '.wav', '.mp3',
     '.md', '.json', '.geojson', '.txt',
+    # Dataset payloads named by the manifests under datasets/ (the regional RF demo fetches the .u16le).
+    '.u16le', '.float64le',
 })
 
 PRIVATE_DIRECTORIES = frozenset({
