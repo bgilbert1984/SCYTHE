@@ -62,8 +62,11 @@ the estimator (which would change its source hash and require re-freezing any pl
 - The plan note (the plan's free-text field, or the evidence directory's README if the plan has none) states: "estimator scope FDD normal-CP;
   not enforced by the estimator; enforced by the carrier table; TDD behaviour untested". A session that includes a TDD or unknown-duplex
   carrier fails acceptance (section 7).
-- A code-level guard (a per-carrier `duplex` field the plan validator requires and checks against the band) is a possible follow-up. It
-  changes plan-validation code, not the estimator; it was not requested and is not done.
+- Code-level guard (added after the owner asked): `check_plan` in `rf_ppm_calibration.py` refuses an `lte_cp_pss` plan unless every carrier
+  states `band` (int), `duplex`, `duplex_source`, `cp` and `cp_source`. It refuses: a band not in `LTE_BAND_DUPLEX` (only the bands read
+  from TS 36.101 Table 5.5-1 are listed; extend it by reading the table), a `duplex` that disagrees with the band, any TDD band, and
+  any `cp` other than "normal". It checks the plan's own statements against the band; it cannot know that the operator's cell is
+  really normal-CP, which stays a documented claim. `narrow_line` plans are unaffected. The estimator is unchanged.
 
 Tier B, needs hardware not yet owned: a GPS-disciplined 10 MHz/CW source (GPSDO) into the XTR (through proper
 attenuation). Lower uncertainty; not required to proceed.
