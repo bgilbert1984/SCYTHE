@@ -1,0 +1,107 @@
+{
+ "carriers": [
+  {
+   "band": null,
+   "channel": null,
+   "cp": null,
+   "cp_source": null,
+   "duplex": null,
+   "duplex_source": null,
+   "feature_offset_hz": 0.0,
+   "name": null,
+   "nominal_hz": null,
+   "nominal_source": null,
+   "operator": null,
+   "search_hz": null
+  },
+  {
+   "band": null,
+   "channel": null,
+   "cp": null,
+   "cp_source": null,
+   "duplex": null,
+   "duplex_source": null,
+   "feature_offset_hz": 0.0,
+   "name": null,
+   "nominal_hz": null,
+   "nominal_source": null,
+   "operator": null,
+   "search_hz": null
+  },
+  {
+   "band": null,
+   "channel": null,
+   "cp": null,
+   "cp_source": null,
+   "duplex": null,
+   "duplex_source": null,
+   "feature_offset_hz": 0.0,
+   "name": null,
+   "nominal_hz": null,
+   "nominal_source": null,
+   "operator": null,
+   "search_hz": null
+  },
+  {
+   "band": null,
+   "channel": null,
+   "cp": null,
+   "cp_source": null,
+   "duplex": null,
+   "duplex_source": null,
+   "feature_offset_hz": 0.0,
+   "name": null,
+   "nominal_hz": null,
+   "nominal_source": null,
+   "operator": null,
+   "search_hz": null
+  }
+ ],
+ "catalogue_conditions": [
+  "warm",
+  "after_power_cycle"
+ ],
+ "estimator": {
+  "min_cp_coeff": 0.05,
+  "min_pss_vote_share": 0.5,
+  "name": "lte_cp_pss",
+  "pss_definition_confirmed": false,
+  "version": 1
+ },
+ "gain_db": null,
+ "n_windows": 8,
+ "plan_note": "estimator scope FDD normal-CP; not enforced by the estimator; enforced by the carrier table; TDD behaviour untested.",
+ "precision_ppm": null,
+ "receiver_serial": "71874552",
+ "reference_accuracy": {
+  "confirmed": false,
+  "ppm": 0.05,
+  "source": "TS 36.104 V19.2.0 clause 6.5.1, Table 6.5.1-1: Wide Area BS only (Medium Range/Local Area 0.1, Home 0.25); read by one reader (docs/521_ESTIMATOR_AND_NOMINAL_FREQUENCY_CHECKS.md), no second reader yet"
+ },
+ "sample_rate_hz": 2048000,
+ "schema": "scythe.ppm_calibration_plan.draft",
+ "sessions_min": 3,
+ "thresholds": {
+  "chi2_red_high": 3.0,
+  "chi2_red_low": 0.3,
+  "consistency_k": 3.0,
+  "max_carrier_se_ppm": 0.1,
+  "max_expanded_uncertainty_ppm": 5.0,
+  "min_carriers": 3,
+  "offset_abs_limit_hz": 500.0,
+  "offset_sigma_multiple": 5.0,
+  "se_floor_hz": 5.0
+ },
+ "validation": {
+  "bias_limit_ppm": 0.05,
+  "line_hz_range": [
+   0,
+   0
+  ],
+  "seed": null,
+  "snr_db": [
+   10.0
+  ],
+  "trials": 5
+ }
+}
