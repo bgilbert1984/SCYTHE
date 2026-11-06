@@ -161,6 +161,26 @@ class PlanIntegrationTests(unittest.TestCase):
         bad = lte_plan(); bad["carriers"][0]["feature_offset_hz"] = 50e3
         self.refuses("PLAN_CARRIER_INCOMPLETE", bad)
 
+    def test_the_draft_plan_skeleton_tracks_the_validator(self):
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "docs", "521_XTR_PPM_CALIBRATION_PLAN_DRAFT.json")
+        with open(path) as handle:
+            draft = json.load(handle)
+        with self.assertRaises(cal.CalibrationRefused):               # blank as shipped: not freezable
+            cal.freeze_plan(copy.deepcopy(draft))
+        self.assertIs(draft["estimator"]["pss_definition_confirmed"], False)
+        self.assertIs(draft["reference_accuracy"]["confirmed"], False)
+        filled = copy.deepcopy(draft)                                 # every blank filled with synthetic values
+        filled["gain_db"], filled["precision_ppm"], filled["validation"]["seed"] = 29.7, 1.0, 4
+        for i, (c, band, f) in enumerate(zip(filled["carriers"], (12, 5, 3, 2), (7.39e8, 8.8e8, 1.85e9, 1.95e9))):
+            c.update(name=f"c{i}", operator="synthetic", channel=str(i), nominal_hz=f, nominal_source="synthetic",
+                     search_hz=[-250e3, 250e3], band=band, duplex="FDD", duplex_source="synthetic", cp="normal",
+                     cp_source="synthetic")
+        cal.freeze_plan(filled)                                       # so a template change that breaks check_plan is caught here
+        for key in ("band", "duplex", "duplex_source", "cp", "cp_source"):
+            bad = copy.deepcopy(filled); bad["carriers"][0][key] = None
+            with self.assertRaises(cal.CalibrationRefused):
+                cal.freeze_plan(bad)
+
     def test_duplex_and_cp_guard(self):
         for k in ("band", "duplex", "duplex_source", "cp", "cp_source"):
             bad = lte_plan(); del bad["carriers"][1][k]
