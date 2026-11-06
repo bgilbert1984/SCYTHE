@@ -51,7 +51,7 @@ Transcribe each item from the document into the record **before** looking at the
 | A4 | 6.12 | how resource-grid index k maps to subcarrier frequency (negative half, positive half, DC) | negative frequencies -36..-1 and positive +1..+36 in units of 15 kHz for 6 RB; DC unused; so n = 0..30 -> -31..-1 and n = 31..61 -> +1..+31 |
 | A5 | 6.12, Table 6.12-1 | normal-CP lengths N_CP,0 and N_CP,l in T_s, with N = 2048 and slot = 15360 T_s | 160 and 144 -> 10 and 9 samples at 1.92 MS/s; slot 960 samples |
 | A6 | 4.1 | frame structure type 1: slot 0.5 ms, subframe 1 ms, PSS period | PSS every 5 ms |
-| A7 | 6.11.1.2 | time-division duplex placement (type 2) | not supported by the estimator; confirm it differs so that a TDD cell is refused, not mis-measured |
+| A7 | 6.11.1.2 | time-division duplex placement (type 2) | not supported by the estimator; confirm it differs so that a TDD cell is refused, not mis-measured (RESULT 2026-11-06: the code does not refuse it; owner accepted the limit, enforced by carrier selection: XTR calibration procedure section 4.1) |
 
 ### 3.3 Numerical comparison (independent of the code)
 From the transcribed A1 and A2, compute by hand or with a script that does **not import** `rf_lte_carrier_estimator`, at least

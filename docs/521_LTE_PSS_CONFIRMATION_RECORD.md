@@ -42,7 +42,7 @@ in this record; run section 3.3's snippet to cover that.
 
 ## Result
 ```
-A1 agree   A2 agree   A3 agree   A4 agree   A5 agree (CP 160/144, slot 15360 T_s = 960 samples)   A6 agree (5 ms)   A7 differs from type 1 as expected
+A1 agree   A2 agree   A3 agree   A4 agree   A5 agree (CP 160/144, slot 15360 T_s = 960 samples)   A6 agree (5 ms)   A7 differs from type 1 as expected (but the code does not refuse it: see docs/521_ESTIMATOR_AND_NOMINAL_FREQUENCY_CHECKS.md; owner accepted the limit 2026-11-06, enforced by carrier selection, docs/521_XTR_PPM_CALIBRATION_PROCEDURE.md section 4.1)
 Check A result:  PASS for A1-A7 by Reader 2 (assistant); Reader 1 (bgilbert1984) signed A4-A6 (2026-11-06); Reader 1 verification of A1-A3, A7 PENDING
 Recording: NOT DONE     Independent PCI: NOT DONE     Check B result: NOT DONE
 Nominal-frequency check (section 5) result: NOT DONE (TS 36.101 channel raster and 3GPP ppm figure still unconfirmed)

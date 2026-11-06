@@ -49,6 +49,22 @@ Tier A, no new hardware, receive-only, needs an antenna:
 - Feasibility step first: survey the site with the antenna connected, list candidate carriers and their SNR,
   and stop if fewer than 3 usable carriers exist.
 
+### 4.1 Estimator scope: FDD, normal CP only (accepted limit, decided 2026-11-06)
+The LTE estimator (`rf_lte_carrier_estimator.py`) is valid for **FDD, normal-CP** downlink carriers only, and it does **not** enforce
+that: it searches for the PSS in every symbol of the 5 ms block, so a TDD cell's PSS is not refused (shown on a synthetic signal in
+`docs/521_ESTIMATOR_AND_NOMINAL_FREQUENCY_CHECKS.md`; real TDD behaviour is untested). The owner accepted this limit rather than changing
+the estimator (which would change its source hash and require re-freezing any plan). The limit is therefore enforced by procedure:
+- Each row of the carrier table records the band, the EARFCN, the **duplex mode from TS 36.101 Table 5.5-1** (V20.1.0 read: bands 2, 3,
+  4, 5, 7, 12, 13, 14, 17, 20, 25, 26, 28, 66 and 71 are FDD; 38, 40 and 41 are TDD) and the clause/version it came from.
+- A carrier in a TDD band is **not used**, whatever the estimator returns for it. A carrier whose duplex mode is not recorded is not used.
+- Normal vs extended CP is not checked by the estimator either; only carriers whose operator/site documentation or the survey gives normal
+  CP are used, otherwise the carrier is recorded as unknown-CP and not used.
+- The plan note (the plan's free-text field, or the evidence directory's README if the plan has none) states: "estimator scope FDD normal-CP;
+  not enforced by the estimator; enforced by the carrier table; TDD behaviour untested". A session that includes a TDD or unknown-duplex
+  carrier fails acceptance (section 7).
+- A code-level guard (a per-carrier `duplex` field the plan validator requires and checks against the band) is a possible follow-up. It
+  changes plan-validation code, not the estimator; it was not requested and is not done.
+
 Tier B, needs hardware not yet owned: a GPS-disciplined 10 MHz/CW source (GPSDO) into the XTR (through proper
 attenuation). Lower uncertainty; not required to proceed.
 
@@ -90,6 +106,7 @@ residuals, and the per-carrier offsets in ppm.
 
 Accept a session only if ALL hold (thresholds fixed in the plan, defaults shown):
 - >= 3 carriers, each with SNR sufficient for the estimator's stated standard error <= 0.1 ppm;
+- every carrier is in an FDD band with the duplex mode recorded from TS 36.101 Table 5.5-1 (section 4.1); a TDD or unknown-duplex carrier fails the session;
 - residuals consistent with the standard errors (reduced chi-square within [0.3, 3]);
 - |a| <= 5 x u(a) AND <= the pre-set absolute limit (default 500 Hz): a pure-ppm model;
 - carriers are mutually consistent in ppm within their combined standard errors.
