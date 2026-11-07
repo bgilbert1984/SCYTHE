@@ -7,6 +7,8 @@
   <link rel="icon" href="data:,">
   <!-- Prefixes /api/ fetches with the instance path (/scythe/i/<id>); without it they hit the hub, which has no /api/mcp routes. -->
   <script src="../api/bootstrap.js" onerror="console.warn('[BOOTSTRAP] Not served from Flask')"></script>
+  <script src="../assets/js/scythe_transport.js"></script>
+  <script src="../assets/js/shared_auth.js"></script>
   <script>
     // Only /api/mcp/ is served by the instance (the hub has no such routes). Every other /api/ path this page calls
     // (graphops selection, infrastructure, rf-bridge, rf-antenna, rf-sparse, eve) is answered by the hub, and the
@@ -676,6 +678,8 @@
     });
     const liveGraphController = new LiveGraphController();
     const evidenceTicker = new SystemEvidenceTicker({root:document.getElementById("system-evidence-ticker")}).start();
+    // Opened with ?bootstrap_token= (from the hub): trade it for this instance's session before anything asks for one.
+    await window.SCYTHE_AUTH?.exchangeBootstrapFromUrl?.();
     const deepLinkContext = parseDeepLink(window.location.search);
     const missionGovernance = new MissionGovernancePanel({
       root: document.getElementById("mission-governance"),

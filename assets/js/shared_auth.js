@@ -109,6 +109,44 @@ const SCYTHE_AUTH = (function() {
         return null;
     }
 
+    // A page opened with ?bootstrap_token=... (minted by the hub for this instance) trades it for an instance
+    // session, the way command-ops does, so the globe and the regional demo work when opened from a link.
+    // Returns the session token, or null when there is no token to trade or the exchange failed.
+    async function exchangeBootstrapFromUrl() {
+        if (IS_BROKER) return null;
+        const instanceId = window.SCYTHE_RUNTIME.instanceId;
+        if (!instanceId || instanceId === 'unknown') return null;
+        let params;
+        try { params = new URLSearchParams(window.location.search); } catch (e) { return null; }
+        const bootstrapToken = params.get('bootstrap_token');
+        if (!bootstrapToken) return null;
+        try {
+            const resp = await ScytheTransport.fetch('/api/auth/exchange-bootstrap', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ bootstrap_token: bootstrapToken, instance_id: instanceId })
+            });
+            if (!resp.ok) {
+                console.warn('[Auth] Bootstrap exchange refused:', resp.status);
+                return null;
+            }
+            const token = (await resp.json())?.session?.session_token;
+            if (!token) return null;
+            persistSession(token);
+            return token;
+        } catch (e) {
+            console.warn('[Auth] Bootstrap exchange failed:', e);
+            return null;
+        } finally {
+            // The one-time token does not stay in the address bar, history or a copied link.
+            try {
+                params.delete('bootstrap_token');
+                const rest = params.toString();
+                window.history.replaceState({}, '', window.location.pathname + (rest ? '?' + rest : '') + (window.location.hash || ''));
+            } catch (e) { /* no history API */ }
+        }
+    }
+
     function logout() {
         if (IS_BROKER) {
             sessionStorage.removeItem(TOKEN_KEY);
@@ -447,6 +485,7 @@ const SCYTHE_AUTH = (function() {
         getApiBase,
         persistSession,
         restoreSession,
+        exchangeBootstrapFromUrl,
         validateSession,
         login,
         register,
