@@ -4,10 +4,14 @@ sidecar metadata ONLY. The six .iq files (491,520,000 bytes each) and the six
 .json sidecars are NOT in the repo. The sidecars contain a street address
 (`site` field) and were deliberately left out.
 
-Where the files were when hashed (this host, scratch):
-  /var/tmp/scythe-sweep/thermal_windows/
-/var/tmp can be cleaned. Until the files are copied somewhere durable, this
-record lets you check a copy; it cannot recover one.
+Where the files are (this host):
+  Hashed in place: /var/tmp/scythe-sweep/thermal_windows/ (scratch; can be
+  cleaned).
+  Copied 2026-11-07: ~/scythe-evidence/terminated-input-v5-2026-09-30/ (all
+  12 files, read-only, `sha256sum -c SHA256SUMS` passes). Same disk and same
+  host as the original: this guards against /var/tmp cleanup, not against
+  losing the host. No off-host copy exists yet.
+This record lets you check a copy; it cannot recover one.
 
 Check: place the 12 files in one directory, then `sha256sum -c SHA256SUMS`.
 SHA256SUMS covers both .iq and .json (first-observation SHA-256; the sidecars
