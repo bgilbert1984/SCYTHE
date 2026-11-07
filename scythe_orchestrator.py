@@ -1764,6 +1764,16 @@ def orchestrator_user_login():
                 fa_user = response.success_response.get('user', {})
                 token = response.success_response.get('token') # This is the JWT
 
+                # FusionAuth answers 242 (another 2xx, so was_successful() is true) when the user has two-factor
+                # enrolled: that response carries a twoFactorId and no token. It is not a login. The two-factor
+                # routes are switched off (totp_gate.py), so refuse it plainly rather than hand back a session
+                # with no token. Any success that carries no token is refused the same way.
+                if getattr(response, 'status', None) == 242 or not token:
+                    two_factor = getattr(response, 'status', None) == 242 or bool(response.success_response.get('twoFactorId'))
+                    message = ('This account requires two-factor authentication, which is not available here yet'
+                               if two_factor else 'Login did not return a session')
+                    return jsonify({'status': 'error', 'message': message, 'two_factor_required': two_factor}), 401
+
                 # Sync balance to local DB if needed (or just use FusionAuth data)
                 user_id = fa_user.get('id')
 
