@@ -8,13 +8,15 @@
   <!-- Prefixes /api/ fetches with the instance path (/scythe/i/<id>); without it they hit the hub, which has no /api/mcp routes. -->
   <script src="../api/bootstrap.js" onerror="console.warn('[BOOTSTRAP] Not served from Flask')"></script>
   <script>
-    // The orchestrator's bootstrap sets the instance prefix but does not rewrite fetches; this page's modules call "/api/..." absolutely.
+    // Only /api/mcp/ is served by the instance (the hub has no such routes). Every other /api/ path this page calls
+    // (graphops selection, infrastructure, rf-bridge, rf-antenna, rf-sparse, eve) is answered by the hub, and the
+    // instance either 404s or demands its own session for them, so those stay un-prefixed.
     (function () {
       const prefix = window.__SCYTHE_BOOTSTRAP__ && window.__SCYTHE_BOOTSTRAP__.path_prefix;
       if (!prefix) return;
       const nativeFetch = window.fetch;
       window.fetch = function (input, init) {
-        if (typeof input === "string" && input.startsWith("/api/")) input = prefix + input;
+        if (typeof input === "string" && input.startsWith("/api/mcp/")) input = prefix + input;
         return nativeFetch.call(this, input, init);
       };
     })();
