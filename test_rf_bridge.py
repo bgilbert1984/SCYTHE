@@ -596,3 +596,107 @@ class CaptureRateAuthorityTests(unittest.TestCase):
     def test_a_starvation_threshold_below_the_receive_wakeup_is_refused(self):
         with self.assertRaises(ValueError):
             RFBridgeConfig(starvation_threshold_ms=250.0).validated()
+
+
+class _GreetThenSilentHandler(socketserver.BaseRequestHandler):
+    """rtl_tcp's failure shape: the 12-byte greeting, then nothing, socket held open."""
+    accepts = 0
+    greeting = b"RTL0" + (5).to_bytes(4, "big") + (29).to_bytes(4, "big")
+
+    def handle(self):
+        self.__class__.accepts += 1
+        try:
+            self.request.sendall(self.greeting)
+            time.sleep(30)
+        except OSError:
+            return
+
+
+class SilentSocketReconnectTests(unittest.TestCase):
+    """A connection that greets and then delivers nothing must not be held forever."""
+
+    def _serve(self):
+        _GreetThenSilentHandler.accepts = 0
+        server = socketserver.ThreadingTCPServer(("127.0.0.1", 0), _GreetThenSilentHandler)
+        server.daemon_threads = True
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        self.addCleanup(thread.join, 2)
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        return server.server_address[1]
+
+    def _config(self, port, **over):
+        base = dict(iq_host="127.0.0.1", iq_port=port, sample_type="uint8", fft_size=256,
+                    max_bins=64, socket_timeout_s=0.5, reconnect_max_s=0.5,
+                    starvation_threshold_ms=1000.0, silence_reconnect_s=2.0)
+        base.update(over)
+        return RFBridgeConfig(**base).validated()
+
+    def test_a_silent_connection_is_dropped_and_reopened(self):
+        bridge = SDRPlusPlusBridge(self._config(self._serve()))
+        try:
+            # last_error is cleared by the successful reconnect, so the record of
+            # why the socket was dropped is the warning log.
+            with self.assertLogs(level="WARNING") as logs:
+                self.assertTrue(bridge.start())
+                deadline = time.monotonic() + 9.0
+                while time.monotonic() < deadline and _GreetThenSilentHandler.accepts < 2:
+                    time.sleep(0.1)
+            self.assertGreaterEqual(_GreetThenSilentHandler.accepts, 2,
+                                    "the bridge never gave up the silent connection")
+            self.assertTrue(any("no samples for" in line and "reconnecting" in line
+                                for line in logs.output))
+        finally:
+            bridge.stop()
+
+    def test_the_reconnect_does_not_storm_because_the_clock_restarts_per_socket(self):
+        bridge = SDRPlusPlusBridge(self._config(self._serve()))
+        try:
+            self.assertTrue(bridge.start())
+            time.sleep(7.0)
+            # ~2 s of silence per socket plus backoff: a handful, not one a second.
+            self.assertLessEqual(_GreetThenSilentHandler.accepts, 4)
+            self.assertGreaterEqual(_GreetThenSilentHandler.accepts, 2)
+        finally:
+            bridge.stop()
+
+    def test_silence_reconnect_zero_keeps_the_old_behaviour(self):
+        bridge = SDRPlusPlusBridge(self._config(self._serve(), silence_reconnect_s=0.0))
+        try:
+            self.assertTrue(bridge.start())
+            time.sleep(4.5)
+            self.assertEqual(_GreetThenSilentHandler.accepts, 1)
+        finally:
+            bridge.stop()
+
+    def test_silence_is_measured_from_the_later_of_last_sample_and_connect(self):
+        bridge = SDRPlusPlusBridge(RFBridgeConfig())
+        now = time.monotonic()
+        bridge._last_sample_monotonic = now - 100.0     # long ago, from an earlier socket
+        self.assertLess(bridge._silent_for(now - 1.0), 5.0,
+                        "a fresh socket must not inherit the old socket's silence")
+        bridge._last_sample_monotonic = now - 0.5
+        self.assertLess(bridge._silent_for(now - 50.0), 5.0)
+        bridge._last_sample_monotonic = None
+        self.assertGreaterEqual(bridge._silent_for(now - 10.0), 10.0)
+
+    def test_silence_reconnect_must_exceed_the_starvation_threshold_or_be_off(self):
+        with self.assertRaises(ValueError):
+            RFBridgeConfig(starvation_threshold_ms=5000.0, silence_reconnect_s=5.0).validated()
+        with self.assertRaises(ValueError):
+            RFBridgeConfig(silence_reconnect_s=-1.0).validated()
+        RFBridgeConfig(silence_reconnect_s=0.0).validated()
+        RFBridgeConfig().validated()
+
+    def test_keepalive_is_enabled_on_the_iq_socket(self):
+        import socket
+        from rf_bridge import _enable_keepalive
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            _enable_keepalive(sock)
+            self.assertEqual(sock.getsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE), 1)
+            if hasattr(socket, "TCP_KEEPIDLE"):
+                self.assertEqual(sock.getsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPIDLE), 10)
+        finally:
+            sock.close()

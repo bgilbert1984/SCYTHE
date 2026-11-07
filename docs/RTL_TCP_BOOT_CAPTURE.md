@@ -193,6 +193,31 @@ legitimate silence. The floor is 1000 ms because the receive loop wakes once a
 second and cannot resolve anything finer; a smaller value is refused at
 validation rather than accepted and quietly rounded.
 
+### A silent connection is dropped and reopened
+
+Starvation only *declares* that the source is silent; it does not touch the
+socket. Before this change a connection that greeted (rtl_tcp's 12 bytes) and
+then delivered nothing — a peer that vanished without a FIN reaching the bridge,
+or a path that carries small packets and drops full-size segments — was held for
+ever. Observed 2026-11-07: the orchestrator's IQ client sat ESTABLISHED for
+1h52m with 12 bytes received in total, against an rtl_tcp that had since been
+restarted.
+
+`silence_reconnect_s` (`SDRPP_SILENCE_RECONNECT_S`, default 30, `0` = off) closes
+the socket and reconnects when no sample has been decoded on that connection for
+that long. It is measured from the later of the last sample and the moment the
+socket opened, so a fresh socket does not inherit the old one's silence. It must
+exceed the starvation threshold (or be 0), so the incident is recorded before the
+connection that showed it is dropped. TCP keepalive (10 s idle, 5 s interval, 3
+probes) and `TCP_USER_TIMEOUT` (30 s) are also set, so a peer that is simply gone
+becomes an error in about 25 s. Keepalive does **not** catch the second shape
+(a peer that answers probes but whose data never arrives); the silence reconnect
+does. Reconnect invalidates the IQ ring (`RECONNECT`), as for any gap.
+
+This does not make a remote raw-IQ path viable: the stream needs about 4.1 MB/s
+and the tailnet path has measured far below that. It stops a dead socket from
+being held, and no more.
+
 ### What happens while starved
 
 * the IQ ring is invalidated once, for `SOURCE_STARVED`, on the **opening edge**
