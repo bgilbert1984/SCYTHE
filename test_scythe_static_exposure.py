@@ -70,6 +70,11 @@ class PolicyTests(unittest.TestCase):
                      'assets/a/b.png', 'cesium/Widgets/widgets.css', 'data/x.json']:
             self.assertTrue(is_public_static(name), name)
 
+    def test_dataset_payloads_named_by_manifests_are_served(self):
+        for name in ['datasets/ntia-itm-sf-bay-area-v1/path-loss.u16le',
+                     'datasets/ntia-itm-sf-bay-area-v1/path-loss.float64le']:
+            self.assertTrue(is_public_static(name), name)
+
     def test_allowlist_has_no_database_or_script_extension(self):
         for ext in ('.db', '.sqlite', '.sqlite3', '.log', '.env', '.py', '.sh',
                     '.pem', '.key', '.yml', '.yaml', '.sql', '.bak', '.pcap'):
