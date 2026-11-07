@@ -59,3 +59,17 @@ test("the phase explanation says why phase 0 may be fixed", () => {
   assert.match(phaseExplanation({phase: {value: 0}, remote_phase_control_enabled: true}), /may change it/);
   assert.equal(phaseExplanation({phase: {value: 2}}), "");
 });
+
+test("sessionToken: on an instance page the instance's own session wins over the hub's, which is the fallback", () => {
+  const before = globalThis.__SCYTHE_BOOTSTRAP__;
+  try {
+    globalThis.__SCYTHE_BOOTSTRAP__ = {instance_id: "scythe-abc", runtime_role: "instance"};
+    const both = store({"scythe:scythe-abc:operatorSession": JSON.stringify({sessionToken: "inst"}),
+      "scythe:orchestrator:brokerSession": JSON.stringify({sessionToken: "hub"})});
+    assert.equal(sessionToken(both), "inst");
+    assert.equal(sessionToken(store({"scythe:orchestrator:brokerSession": JSON.stringify({sessionToken: "hub"})})), "hub");
+    assert.equal(sessionToken(store({"scythe:other:operatorSession": JSON.stringify({sessionToken: "x"})})), null);
+    globalThis.__SCYTHE_BOOTSTRAP__ = {instance_id: "../evil", runtime_role: "instance"};   // never builds a key from an odd id
+    assert.equal(sessionToken(both), "hub");
+  } finally { globalThis.__SCYTHE_BOOTSTRAP__ = before; }
+});

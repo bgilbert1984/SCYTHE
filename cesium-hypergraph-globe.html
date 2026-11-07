@@ -14,6 +14,11 @@
   <!-- Three.js r149 -->
   <script src="https://unpkg.com/three@0.149.0/build/three.min.js"></script>
 
+  <!-- Instance bootstrap, transport and shared auth: the session for the stream -->
+  <script src="api/bootstrap.js" onerror="console.warn('[BOOTSTRAP] Not served from Flask')"></script>
+  <script src="assets/js/scythe_transport.js"></script>
+  <script src="assets/js/shared_auth.js"></script>
+
   <!-- Unified Render Scheduler — single loop for Cesium + Three.js globe -->
   <script src="unified-render-scheduler.js"></script>
 
@@ -1079,6 +1084,8 @@ globe._loadGeoData(API_BASE);
   // The page uses the signed-in operator's session and never creates an account.
   // Without one it connects without a token and the server decides.
   try { localStorage.removeItem('scythe_callsign'); } catch (_) { /* storage blocked */ }
+  // Opened with ?bootstrap_token= (from the hub): trade it for this instance's session first.
+  try { await window.SCYTHE_AUTH?.exchangeBootstrapFromUrl?.(); } catch (_) { /* fall through to a stored session */ }
   let token = await tryValidate(localStorage.getItem(TOKEN_KEY));
   if (!token) token = await tryValidate(window.SCYTHE_AUTH ? SCYTHE_AUTH.restoreSession() : null);
   if (!token) console.warn('[Globe Auth] No operator session - connecting without one');

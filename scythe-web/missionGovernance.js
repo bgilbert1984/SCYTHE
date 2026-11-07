@@ -2,12 +2,23 @@
 
 export const LIFECYCLE_STAGES = ["Proposal", "Pending approval", "Approved", "Executing", "Executed"];
 
-const SESSION_KEYS = ["scythe:orchestrator:brokerSession"];
+const BROKER_KEY = "scythe:orchestrator:brokerSession";
+
+/**
+ * Where shared_auth.js keeps the session: on an instance page the instance's own session (`scythe:<id>:operatorSession`), which
+ * is the only one an instance accepts; the hub's broker session is the fallback (and the only one on a hub page).
+ */
+function sessionKeys() {
+  const boot = globalThis.__SCYTHE_BOOTSTRAP__;
+  const id = boot?.instance_id;
+  return typeof id === "string" && /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(id) && boot.runtime_role !== "broker"
+    ? [`scythe:${id}:operatorSession`, BROKER_KEY] : [BROKER_KEY];
+}
 
 /** The operator session token the main console stored (shared_auth.js), or null. Never throws. */
 export function sessionToken(...storages) {
   for (const storage of storages) {
-    for (const key of SESSION_KEYS) {
+    for (const key of sessionKeys()) {
       try {
         const saved = storage?.getItem(key);
         const token = saved && (JSON.parse(saved).sessionToken || JSON.parse(saved).token);
