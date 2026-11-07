@@ -112,12 +112,26 @@ the sequencer changes.
 
 - The only recorded IQ at the sequencer's geometry that the repo's own evidence
   names is the **terminated-input set**: six 120 s captures, 50 Ω load, NESDR
-  SMArt v5, 100 / 101 / 100.5 MHz, 58 visits each, 348 in all. It is the real
-  noise-only false-positive reference. It also holds two usable cases: the
-  strong ~100.8 MHz feature (persistent in 58/58, a high-excess control) and the
-  +825 kHz line at 11–12 dB (34 vs 31 persistent visits across revisions, a real
-  marginal case). **The recordings are not in this repo; their location needs
-  confirming.**
+  SMArt v5 (serial 14530058), 100 / 101 / 100.5 MHz, 58 visits each, 348 in all.
+  It is the real noise-only false-positive reference. It also holds two usable
+  cases: the strong ~100.8 MHz feature (persistent in 58/58, a high-excess
+  control) and the +825 kHz line at 11–12 dB (34 vs 31 persistent visits across
+  revisions, a real marginal case).
+  **Location (confirmed 2026-11-07):** `/var/tmp/scythe-sweep/thermal_windows/`
+  on this host, not in the repo. Six `THERMAL_NO_INPUT_epoch{1..6}_20260930_*.iq`,
+  each 491,520,000 bytes (= 120 s × 2.048 MS/s × 2 B, uint8 IQ), with a `.json`
+  sidecar each (centre, receiver, termination, md5). Centres: epochs 1–4 at
+  100.0 MHz, epoch 5 at 101.0 MHz (retune), epoch 6 at 100.5 MHz. All six md5s
+  were re-computed and match their sidecars. Caveats: `/var/tmp` is scratch
+  (it can be cleaned), the files are in no repo and have no committed hash
+  record, and the sidecars say the gain was the rtl_tcp default (no `-g`), so
+  gain is undeclared.
+- **`docs/evidence/xtr-baseline-2026-10-11/` is not this set.** It is a different
+  receiver (Nooelec SMArt XTR, E4000, a different site), holds only derived
+  results (4096-point FFT spectra, 8 segments of capture/8, 500 Hz bins), and
+  its raw `.iq` captures are not in the repo. It cannot drive this detector,
+  whose geometry is 8 × 524,288 samples. It remains a useful separate control
+  for receiver-internal artifacts (its +2.5 kHz E4000 feature is tuning-dependent).
 - **RadioML and TrevTron do not fit this detector.** RadioML 2016.10a frames are
   128 samples (2018.01A: 1,024); the detector needs 8 windows of 524,288. TrevTron
   is not in this repo. So the earlier note that replication "needs no new data,
@@ -153,6 +167,14 @@ given). Check that against the sequencer before claiming it.
 1. `P_FAIL` and `Δ_MIN`; the hypothesis wording in §3.
 2. Whether §6 (the second estimator) is in scope, or the diagnostic stops at the
    failure map.
-3. Where the terminated-input recordings live.
+3. Whether to commit a hash record for the six terminated-input captures (and
+   copy them off `/var/tmp`) before any run; they live only there.
+   Related: whether to take a fresh terminated capture at a **declared gain**
+   (the existing sidecars say rtl_tcp default, no `-g`, so gain is undeclared).
+   scythe-1 has the terminator fitted; it is needed only for this, for extra
+   terminated visits beyond the 348, or for an optional tuning-dependent-artifact
+   check. It is not needed for the synthetic grid. Not verified: that scythe-1's
+   dongle is serial 14530058, the one used for the six captures. No hardware
+   touched.
 4. Whether to run on one host or two.
 5. Nothing runs until a go-ahead.
