@@ -1,0 +1,16 @@
+
+am: 600 windows, power range x1.16, corr(logP, log sd) 1.0000, mean byte 127.37, I sd 2.37, Q sd 2.37, corr(I,Q) +0.000, lag-1 autocorr I -0.70
+  hw      raw: r=+0.322 slope=+0.282/dec null95=0.059 p=0.001 | detrended: r=+0.322 slope=+0.282/dec null95=0.061 p=0.001
+  tog_iq  raw: r=+0.161 slope=+0.012/dec null95=0.102 p=0.001 | detrended: r=+0.160 slope=+0.012/dec null95=0.104 p=0.001
+  tog_qi  raw: r=+0.664 slope=+0.222/dec null95=0.119 p=0.001 | detrended: r=+0.662 slope=+0.222/dec null95=0.130 p=0.001
+  tog_ii  raw: r=-0.917 slope=-0.934/dec null95=0.127 p=0.001 | detrended: r=-0.917 slope=-0.934/dec null95=0.137 p=0.001
+  partial [trend only] tog_qi: r=+0.662 (null95 0.130, p=0.001) | tog_ii: r=-0.917 (null95 0.137, p=0.001)
+  partial [+mean,mean^2] tog_qi: r=+0.669 (null95 0.135, p=0.001) | tog_ii: r=-0.929 (null95 0.135, p=0.001)
+
+am_120s: 1200 windows, power range x1.11, corr(logP, log sd) 1.0000, mean byte 127.37, I sd 2.37, Q sd 2.37, corr(I,Q) -0.000, lag-1 autocorr I -0.72
+  hw      raw: r=+0.274 slope=+0.279/dec null95=0.037 p=0.001 | detrended: r=+0.276 slope=+0.279/dec null95=0.035 p=0.001
+  tog_iq  raw: r=+0.127 slope=+0.011/dec null95=0.063 p=0.001 | detrended: r=+0.126 slope=+0.011/dec null95=0.057 p=0.001
+  tog_qi  raw: r=+0.589 slope=+0.222/dec null95=0.063 p=0.001 | detrended: r=+0.594 slope=+0.222/dec null95=0.054 p=0.001
+  tog_ii  raw: r=-0.897 slope=-0.954/dec null95=0.107 p=0.001 | detrended: r=-0.898 slope=-0.954/dec null95=0.123 p=0.001
+  partial [trend only] tog_qi: r=+0.594 (null95 0.054, p=0.001) | tog_ii: r=-0.898 (null95 0.105, p=0.001)
+  partial [+mean,mean^2] tog_qi: r=+0.598 (null95 0.048, p=0.001) | tog_ii: r=-0.913 (null95 0.111, p=0.001)

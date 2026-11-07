@@ -1,0 +1,51 @@
+per-file basics (first 60 s):
+  old q1       mean 127.37 sdI 1.13 sdQ 1.13 lag1(I) +0.06
+  old am       mean 127.37 sdI 2.37 sdQ 2.37 lag1(I) -0.70
+  old hf7      mean 127.37 sdI 1.12 sdQ 1.12 lag1(I) +0.02
+  old hf5      mean 127.37 sdI 1.15 sdQ 1.15 lag1(I) +0.24
+  old q2       mean 127.37 sdI 1.12 sdQ 1.12 lag1(I) +0.07
+  old am_120s  mean 127.37 sdI 2.37 sdQ 2.37 lag1(I) -0.72
+  new q1       mean 127.35 sdI 1.11 sdQ 1.11 lag1(I) +0.04
+  new am       mean 127.37 sdI 2.30 sdQ 2.30 lag1(I) -0.74
+  new hf7      mean 127.36 sdI 1.29 sdQ 1.29 lag1(I) +0.02
+  new hf5      mean 127.36 sdI 1.21 sdQ 1.21 lag1(I) +0.13
+  new q2       mean 127.36 sdI 1.47 sdQ 1.47 lag1(I) +0.01
+  new am_120s  mean 127.37 sdI 2.33 sdQ 2.33 lag1(I) -0.73
+
+within-file (first 30 s vs last 30 s) -- drift floor:
+  old q1                                         level  +0.52 dB   shape rms  0.20 dB
+  old am                                         level  -0.01 dB   shape rms  0.30 dB
+  old hf7                                        level  -0.17 dB   shape rms  0.28 dB
+  old hf5                                        level  +0.46 dB   shape rms  0.29 dB
+  old q2                                         level  +0.18 dB   shape rms  0.15 dB
+  old am_120s                                    level  +0.00 dB   shape rms  0.22 dB
+  new q1                                         level  +0.19 dB   shape rms  0.10 dB
+  new am                                         level  -0.10 dB   shape rms  0.30 dB
+  new hf7                                        level  +0.01 dB   shape rms  0.12 dB
+  new hf5                                        level  -0.82 dB   shape rms  0.48 dB
+  new q2                                         level  +0.03 dB   shape rms  0.11 dB
+  new am_120s                                    level  -0.02 dB   shape rms  0.15 dB
+
+within-session same-tuning pairs:
+  old: q1 vs q2 (12.5 MHz)                       level  +0.12 dB   shape rms  0.45 dB
+  old: am vs am_120s first 60 s (1.0 MHz)        level  +0.14 dB   shape rms  0.56 dB
+  new: q1 vs q2 (12.5 MHz)                       level  -2.44 dB   shape rms  0.26 dB
+  new: am vs am_120s first 60 s (1.0 MHz)        level  -0.52 dB   shape rms  0.91 dB
+
+cross-session (new minus old), same tuning:
+  q1                                             level  -0.29 dB   shape rms  1.03 dB
+  am                                             level  -1.45 dB   shape rms  1.91 dB
+  hf7                                            level  +1.30 dB   shape rms  0.96 dB
+  hf5                                            level  +0.56 dB   shape rms  0.80 dB
+  q2                                             level  +2.27 dB   shape rms  1.35 dB
+  am_120s                                        level  -0.79 dB   shape rms  1.86 dB
+
+new q1/q2 vs old q1/q2 (all four combos, 12.5 MHz):
+  new q1 vs old q1                               level  -0.29 dB   shape rms  1.03 dB
+  new q1 vs old q2                               level  -0.17 dB   shape rms  1.22 dB
+  new q2 vs old q1                               level  +2.15 dB   shape rms  1.16 dB
+  new q2 vs old q2                               level  +2.27 dB   shape rms  1.35 dB
+
+new am vs old am_120s, new am_120s vs old am:
+  new am vs old am_120s                          level  -1.31 dB   shape rms  1.81 dB
+  new am_120s vs old am                          level  -0.93 dB   shape rms  1.94 dB

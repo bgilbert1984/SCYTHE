@@ -1,0 +1,5 @@
+Addendum written 2026-11-07 (after MANIFEST.sha256, which is unchanged).
+MANIFEST.sha256 was written 11:05:00 -0800; temp_rtl_tcp.stderr.log was modified 11:05:13 -0800 (13 s later).
+Cause: the temporary rtl_tcp (127.0.0.1:1234) was being shut down by the launching shell trap when the manifest was hashed; it wrote its exit text (ends with: bye!) after the hash. The MANIFEST.sha256 line for this file therefore no longer matches.
+Not verified: the log content as it was at hashing time (not kept). The six .u8 files and capture_log.json still match MANIFEST.sha256.
+Current hash of the log is in MANIFEST_ADDENDUM.sha256.

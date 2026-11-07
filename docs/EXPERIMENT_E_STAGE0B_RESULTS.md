@@ -108,3 +108,26 @@ Scripts in `scripts/experiment_e/` (run on scythe-1 with `~/SCYTHE/.venv/bin/pyt
 - `stage0b_partial.py`: the covariate-removal rerun, including the degenerate variant.
 
 These scripts hard-code `/tmp/exp_e_stage0b` and `127.0.0.1:1234`, and they change the live `rtl_tcp` tuner state while they run. Stop other `rtl_tcp` consumers first, and confirm the XTR is cleared for contact.
+
+## Dipole 584 mm session (2026-11-07)
+
+A third ambient capture of the same six-file sequence, with the antenna **owner-stated** (not verified by software) as a telescopic dipole at 584 mm on the magnetic base, 6' feedline, no enclosure beyond the case. Provenance, hashes and outputs: `docs/evidence/stage0b-dipole584-2026-11-07/`. The 2026-11-02 re-capture logged its antenna as "NOT VERIFIED" with no statement, so what was connected then is unknown. Times: 11-02 captures ran 07:32-07:39 PST, these ran 10:57-11:04 PST (both daytime, about 3.4 h apart; from the capture logs).
+
+**Fixed-tuning regression at 1.0 MHz, same script on both sessions** (`am` / `am_120s`; all p = 0.001, the floor for 1000 shifts):
+
+| Statistic vs log power | 11-02 r (slope/dec) | 11-07 dipole r (slope/dec) |
+|---|---|---|
+| Q to next-I toggle | +0.66 / +0.59 (+0.222 / +0.222) | +0.77 / +0.71 (+0.255 / +0.267) |
+| I to next-I toggle | -0.92 / -0.90 (-0.934 / -0.954) | -0.90 / -0.85 (-0.793 / -0.801) |
+| Hamming weight | +0.32 / +0.27 (+0.282 / +0.279) | +0.31 / +0.29 (+0.233 / +0.249) |
+| Power range | x1.16 / x1.11 | x1.21 / x1.31 |
+
+Same signs and pattern; slopes differ by about 12-20%. `corr(logP, log sd)` is 1.0000 in every file, so the regressor is the variance of the bytes the statistics are computed from (as in the re-capture analysis).
+
+**Input structure matches the 11-02 re-capture, not the original description.** At 1.0 MHz I and Q have equal spread (2.30 / 2.33 LSB, was 2.37), corr(I,Q) 0.000 and lag-1 autocorrelation -0.74 / -0.73 (was -0.70 / -0.72). The original note's 3.8-17.7 LSB with the dipole and an I-branch at the terminated level are not reproduced. This does not show the dipole is or is not connected.
+
+**Spectral surrogate on `am_120s`** (1200 windows, seed 11, one draw): window-by-window correlation real vs surrogate 0.99 (I to next-I), 0.89 (Q to next-I, was 0.69 on 11-02), 0.76 (Hamming weight); signs reproduced for both toggle rates, not for Hamming weight (surrogate -0.08 vs real +0.29, as before). Surrogate slopes are steeper than the real ones by about 17% (I to next-I) and 25% (Q to next-I); no tolerance was defined, so this is not interpreted. Reading unchanged: these correlations are what a receiver with no external emission produces from each window's spectrum plus quantisation. A leak needs a controlled stimulus.
+
+**Session comparison** (`scripts/experiment_e/compare_sessions.py`; 4096-point average spectra over 60 s, descriptive, no test): cross-session level differences -1.45 to +2.27 dB and shape (rms) 0.80-1.91 dB, largest at 1.0 MHz (1.91 / 1.86 dB). The 11-02 session's own same-tuning pairs differ by 0.12-0.14 dB level and 0.45-0.56 dB shape. The 11-07 session drifts more within itself: its 12.5 MHz pair `q1` vs `q2` differs by -2.44 dB and `q2` has a 30% larger spread (1.47 vs 1.13 LSB). Differences of 1-2 dB across sessions therefore cannot be attributed to the antenna, and time of day (07:3x vs 10:5x) is a confound. One run per session, no preregistered thresholds.
+
+**Not done:** no controlled stimulus (Stage 1 needs a driven source and its clearances); the 12.5 MHz and HF captures were not regressed; a same-hour repeat was not taken; no clean-machine restore test of the archive.

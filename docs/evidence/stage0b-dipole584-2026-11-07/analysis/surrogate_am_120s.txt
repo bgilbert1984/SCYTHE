@@ -1,0 +1,5 @@
+windows 1200; logP real-vs-surrogate corr 0.9999
+stat     real r real slope  surr r surr slope win corr   level real/surr
+hw        +0.29     +0.249   -0.08     -0.106    +0.76   4.0283/4.0779
+tog_qi    +0.71     +0.267   +0.59     +0.335    +0.89   0.3784/0.4136
+tog_ii    -0.85     -0.801   -0.81     -0.939    +0.99   0.7223/0.6804
