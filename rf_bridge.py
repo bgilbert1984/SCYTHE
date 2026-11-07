@@ -155,6 +155,15 @@ AVAILABILITY_BY_STATE = {
 # the bridge stops calling itself a source of samples, and it is published with
 # its authority attached so nobody reads it as a measured capability.
 DEFAULT_STARVATION_THRESHOLD_MS = 2500.0
+# How long a connection may deliver no samples before the bridge gives it up and
+# opens a new one. Starvation (above) only DECLARES that the source is silent;
+# it never touched the socket, so a half-open peer -- one that vanished without
+# a FIN reaching us, or a path that carries the 12-byte greeting but drops every
+# full-size segment after it -- was held forever with zero bytes arriving. 0
+# disables. Reconnecting is cheap and always safe for this client (rtl_tcp
+# serves it again from the next accept), which is why it is on by default; the
+# retention ring is invalidated on the reconnect exactly as for any other gap.
+DEFAULT_SILENCE_RECONNECT_S = 30.0
 # How often the recovery policy is stepped while the source is silent. Its
 # inputs move on the scale of seconds, and an audit history written once a
 # second would hold ninety seconds of history.
@@ -201,6 +210,7 @@ class RFBridgeConfig:
     socket_timeout_s: float = 2.0
     reconnect_max_s: float = 10.0
     starvation_threshold_ms: float = DEFAULT_STARVATION_THRESHOLD_MS
+    silence_reconnect_s: float = DEFAULT_SILENCE_RECONNECT_S
     auto_start: bool = False
     sensor_id: str = "SDRPP-EDGE-01"
     capture_owner: str = "orchestrator"
@@ -222,6 +232,8 @@ class RFBridgeConfig:
             reconnect_max_s=float(os.getenv("SDRPP_RECONNECT_MAX_S", "10")),
             starvation_threshold_ms=float(os.getenv(
                 "SDRPP_STARVATION_THRESHOLD_MS", str(DEFAULT_STARVATION_THRESHOLD_MS))),
+            silence_reconnect_s=float(os.getenv(
+                "SDRPP_SILENCE_RECONNECT_S", str(DEFAULT_SILENCE_RECONNECT_S))),
             auto_start=_env_bool("SDRPP_AUTO_START", False),
             sensor_id=os.getenv("SDRPP_SENSOR_ID", "SDRPP-EDGE-01"),
             capture_owner=os.getenv("SCYTHE_RF_CAPTURE_OWNER", "orchestrator").strip().lower(),
@@ -245,6 +257,15 @@ class RFBridgeConfig:
             raise ValueError(
                 "SDRPP_STARVATION_THRESHOLD_MS must be between 1000 and 60000; "
                 "the receive loop wakes once a second and cannot resolve less")
+        # 0 turns the silence reconnect off. Otherwise it must sit above the
+        # starvation threshold, so a source is declared starved (and the incident
+        # recorded) before the bridge drops the connection that showed it.
+        if not math.isfinite(self.silence_reconnect_s) or self.silence_reconnect_s < 0:
+            raise ValueError("SDRPP_SILENCE_RECONNECT_S must be 0 (off) or a positive number of seconds")
+        if self.silence_reconnect_s and self.silence_reconnect_s * 1000.0 <= self.starvation_threshold_ms:
+            raise ValueError(
+                "SDRPP_SILENCE_RECONNECT_S must exceed SDRPP_STARVATION_THRESHOLD_MS "
+                "(or be 0): starvation has to be declared before the connection is dropped")
         for name, port in (("SDRPP_IQ_PORT", self.iq_port), ("SDRPP_RIGCTL_PORT", self.rigctl_port)):
             if not 1 <= port <= 65535:
                 raise ValueError(f"{name} must be between 1 and 65535")
@@ -583,6 +604,27 @@ class IQFFTProcessor:
             return values
         edges = np.linspace(0, values.size, target + 1, dtype=np.int64)
         return np.array([np.max(values[edges[i] : edges[i + 1]]) for i in range(target)])
+
+
+def _enable_keepalive(sock: socket.socket) -> None:
+    """Make a dead peer an error instead of an eternal quiet socket.
+
+    Without this a connection whose far end vanished without a FIN or RST
+    (a restarted rtl_tcp across a lossy tunnel) stays ESTABLISHED here for
+    ever: nothing is sent, so nothing ever times out. Keepalive turns that into
+    ETIMEDOUT in about 25 s. It does NOT catch a path that still answers probes
+    but drops data segments; that is the silence reconnect in the receive loop.
+    Linux-only options are applied where they exist, and a refusal is not fatal.
+    """
+    try:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+        for name, value in (("TCP_KEEPIDLE", 10), ("TCP_KEEPINTVL", 5),
+                            ("TCP_KEEPCNT", 3), ("TCP_USER_TIMEOUT", 30_000)):
+            option = getattr(socket, name, None)
+            if option is not None:
+                sock.setsockopt(socket.IPPROTO_TCP, option, value)
+    except OSError:
+        LOG.debug("TCP keepalive options not applied", exc_info=True)
 
 
 class RigctlClient:
@@ -952,6 +994,19 @@ class SDRPlusPlusBridge:
             "native_bin_width_hz": self.config.sample_rate_hz / self.config.fft_size,
         }
 
+    def _silent_for(self, connected_monotonic: float) -> float:
+        """Seconds this connection has gone without a decoded sample.
+
+        Measured from the later of the last sample and the moment this socket
+        opened. The last-sample clock alone is not enough: it is deliberately
+        not re-armed per connection, so after one silent reconnect it would
+        still read as long silence and drop the new socket at once.
+        """
+        with self._lock:
+            last = self._last_sample_monotonic
+        reference = connected_monotonic if last is None else max(last, connected_monotonic)
+        return time.monotonic() - reference
+
     def _note_starvation(self) -> None:
         """Open a starvation incident once, not once per second of silence.
 
@@ -1157,6 +1212,8 @@ class SDRPlusPlusBridge:
                     self.config.socket_timeout_s,
                 )
                 sock.settimeout(1.0)
+                _enable_keepalive(sock)
+                connected_monotonic = time.monotonic()
                 with self._lock:
                     self._socket = sock
                     self._state = "streaming"
@@ -1185,6 +1242,11 @@ class SDRPlusPlusBridge:
                     # event is never written. Throttled internally, so running
                     # it on every chunk costs a compare.
                     self._evaluate_recovery()
+                    silent_s = self._silent_for(connected_monotonic)
+                    if self.config.silence_reconnect_s and silent_s >= self.config.silence_reconnect_s:
+                        raise ConnectionError(
+                            f"no samples for {silent_s:.0f} s on {self.config.iq_host}:"
+                            f"{self.config.iq_port}; reconnecting")
                     try:
                         chunk = sock.recv(65536)
                     except socket.timeout:
