@@ -4,18 +4,22 @@ sidecar metadata ONLY. The six .iq files (491,520,000 bytes each) and the six
 .json sidecars are NOT in the repo. The sidecars contain a street address
 (`site` field) and were deliberately left out.
 
-Where the files are (this host):
-  Hashed in place: /var/tmp/scythe-sweep/thermal_windows/ (scratch; can be
-  cleaned).
-  Copied 2026-11-07: ~/scythe-evidence/terminated-input-v5-2026-09-30/ (all
-  12 files, read-only, `sha256sum -c SHA256SUMS` passes). Same disk and same
-  host as the original: this guards against /var/tmp cleanup, not against
-  losing the host. No off-host copy exists yet.
+Where the files are (three copies, all verified 2026-11-07):
+  1. ORIGINALS, scythe-1: /home/spectrcyde/epoch1/ (where the capture scripts
+     wrote them). Re-hashed in place on 2026-11-07 against scythe-1's own
+     SHA256SUMS and SHA256SUMS_retune: all 12 files OK.
+  2. This host, scratch: /var/tmp/scythe-sweep/thermal_windows/ (can be
+     cleaned).
+  3. This host, kept: ~/scythe-evidence/terminated-input-v5-2026-09-30/
+     (read-only; `sha256sum -c SHA256SUMS` passes). Same disk as copy 2.
 This record lets you check a copy; it cannot recover one.
 
 Check: place the 12 files in one directory, then `sha256sum -c SHA256SUMS`.
-SHA256SUMS covers both .iq and .json (first-observation SHA-256; the sidecars
-themselves carry only md5, listed below and recomputed to match on 2026-11-07).
+SHA256SUMS covers both .iq and .json. The SHA-256 values are NOT first
+observed here: scythe-1 wrote them on 2026-09-30 (SHA256SUMS 18:45,
+SHA256SUMS_retune 23:52) and every value in this file's SHA256SUMS is
+identical. The sidecars themselves carry only md5, listed below and recomputed
+to match on 2026-11-07.
 
 Common to all six (from the sidecars): host scythe-1; receiver NESDR SMArt v5,
 serial 14530058, tuner_type 5; SMA-male 50 ohm terminator (DC-18GHz, 1W);
@@ -35,17 +39,35 @@ Notes:
   - Elapsed vs samples. Each file is exactly 120.000 s of samples at
     2.048 MS/s. Epochs 1-3 report 120.12-120.14 s elapsed (real time plus
     overhead). Epochs 4-6 report 118.08-118.40 s, i.e. an effective rate about
-    1.6% above nominal, which the dongle's sample clock cannot deliver. A
-    faster reader cannot explain it either. Cause NOT established. Hypotheses:
-    (a) the elapsed timer started after the stream was already flowing, so
-    ~1.7-1.9 s of samples were buffered before it began; (b) `elapsed_s`
-    measures something different in the newer capture script. The capture
-    script was not found in this repo.
+    1.6% above nominal, which the dongle's sample clock cannot deliver.
+    CAUSE (found 2026-11-07 in the scripts on scythe-1, ~/epoch1/):
+    capture_thermal.py (epochs 1-3) starts its timer right after connecting.
+    capture_retune.py (epochs 4-6) sends rtl_tcp set_freq, then runs
+    `time.sleep(2.0)  # PLL settle` BEFORE starting the timer, without reading
+    the socket. rtl_tcp keeps streaming into its buffers during the sleep and
+    the script then reads that backlog first. The file therefore holds a full
+    120 s of samples while the timer sees ~118 s; the missing 1.60-1.92 s is
+    the backlog (epoch 4: 1.74 s, 5: 1.92 s, 6: 1.60 s).
+    Consequences: (1) the intended 2 s PLL-settle was NOT discarded, so the
+    first ~2 s of epochs 4-6 are the settle period and the first visit in
+    each may carry a settle transient; (2) if rtl_tcp dropped buffers while
+    the script was not reading, there could be a gap, which the sidecar cannot
+    show; neither has been examined at fine resolution.
     Checked 2026-11-07: the first 3.5 s of epochs 5 and 6 show no stale
     pre-retune samples (strongest line at the expected offset throughout,
     -200 kHz at 101.0 MHz and +300 kHz at 100.5 MHz, the same absolute
-    frequency as epochs 1-4; per-0.125 s variance flat). The owner's
-    suggestion "we optimized" was examined and does not account for it.
+    frequency as epochs 1-4; per-0.125 s variance flat).
+    The suggestion that this was an optimization was examined and does not
+    account for it: the difference is where the timer starts.
+  - The receiver serial in every sidecar (14530058, "NESDR SMArt v5") is a
+    literal string in the capture scripts, not read from the device. The
+    claim that scythe-1's dongle is that serial rests on the script, not on a
+    query. Not independently verified.
+  - scythe-1:~/epoch1/ also holds files outside this record:
+    INVALIDATED_epoch3_attempt1_20260930_171655.iq (140,771,328 B, an aborted
+    epoch 3 attempt) and THERMAL_NO_INPUT_epoch7_20261001_112931.{iq,json}
+    (67,371,008 B, truncated: its capture log ends in ConnectionResetError).
+    They are NOT part of the six and are not hashed here.
   - The sidecars' `site` string differs between epochs 1, 2-3 and 4-6
     (consistent with the venue move in epoch 3 and "new site" in epoch 4);
     not copied here.

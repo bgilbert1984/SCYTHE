@@ -122,10 +122,13 @@ the sequencer changes.
   each 491,520,000 bytes (= 120 s × 2.048 MS/s × 2 B, uint8 IQ), with a `.json`
   sidecar each (centre, receiver, termination, md5). Centres: epochs 1–4 at
   100.0 MHz, epoch 5 at 101.0 MHz (retune), epoch 6 at 100.5 MHz. All six md5s
-  were re-computed and match their sidecars. Caveats: `/var/tmp` is scratch
-  (it can be cleaned), the files are in no repo and have no committed hash
-  record, and the sidecars say the gain was the rtl_tcp default (no `-g`), so
-  gain is undeclared.
+  were re-computed and match their sidecars. A hash record is committed at
+  `docs/evidence/terminated-input-v5-2026-09-30/` (PR #452); the originals are
+  on scythe-1 (`~/epoch1/`, re-hashed OK 2026-11-07) and copied to
+  `~/scythe-evidence/` on this host. Caveats: the files themselves are in no
+  repo, the sidecars say the gain was the rtl_tcp default (no `-g`), so gain
+  is undeclared, and epochs 4–6 include the ~2 s PLL-settle period (the
+  capture script slept before timing instead of discarding; see the README).
 - **`docs/evidence/xtr-baseline-2026-10-11/` is not this set.** It is a different
   receiver (Nooelec SMArt XTR, E4000, a different site), holds only derived
   results (4096-point FFT spectra, 8 segments of capture/8, 500 Hz bins), and
@@ -167,14 +170,17 @@ given). Check that against the sequencer before claiming it.
 1. `P_FAIL` and `Δ_MIN`; the hypothesis wording in §3.
 2. Whether §6 (the second estimator) is in scope, or the diagnostic stops at the
    failure map.
-3. Whether to commit a hash record for the six terminated-input captures (and
-   copy them off `/var/tmp`) before any run; they live only there.
+3. ~~Hash record / copy off `/var/tmp`~~ done (PR #452; originals on scythe-1).
+   Open: whether the first ~2 s of epochs 4–6 (PLL settle) should be excluded
+   or the first visit of each dropped before using them as the false-positive
+   reference.
    Related: whether to take a fresh terminated capture at a **declared gain**
    (the existing sidecars say rtl_tcp default, no `-g`, so gain is undeclared).
    scythe-1 has the terminator fitted; it is needed only for this, for extra
    terminated visits beyond the 348, or for an optional tuning-dependent-artifact
-   check. It is not needed for the synthetic grid. Not verified: that scythe-1's
-   dongle is serial 14530058, the one used for the six captures. No hardware
-   touched.
+   check. It is not needed for the synthetic grid. The captures were taken on
+   host scythe-1, but the serial 14530058 in the sidecars is a literal in the
+   capture scripts, not read from the device, so it is asserted, not
+   measured. No hardware touched.
 4. Whether to run on one host or two.
 5. Nothing runs until a go-ahead.
