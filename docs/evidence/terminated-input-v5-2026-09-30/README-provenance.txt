@@ -28,9 +28,20 @@ in service launch)").
   6      100.5 MHz  118.40     ee529430c464a83bf43af147e25e192a  retune
 
 Notes:
-  - Epochs 4-6 report ~118 s elapsed for the same byte count as epochs 1-3
-    (~120 s). Owner's explanation, 2026-11-07: "we optimized". Recorded as
-    stated; not verified here.
+  - Elapsed vs samples. Each file is exactly 120.000 s of samples at
+    2.048 MS/s. Epochs 1-3 report 120.12-120.14 s elapsed (real time plus
+    overhead). Epochs 4-6 report 118.08-118.40 s, i.e. an effective rate about
+    1.6% above nominal, which the dongle's sample clock cannot deliver. A
+    faster reader cannot explain it either. Cause NOT established. Hypotheses:
+    (a) the elapsed timer started after the stream was already flowing, so
+    ~1.7-1.9 s of samples were buffered before it began; (b) `elapsed_s`
+    measures something different in the newer capture script. The capture
+    script was not found in this repo.
+    Checked 2026-11-07: the first 3.5 s of epochs 5 and 6 show no stale
+    pre-retune samples (strongest line at the expected offset throughout,
+    -200 kHz at 101.0 MHz and +300 kHz at 100.5 MHz, the same absolute
+    frequency as epochs 1-4; per-0.125 s variance flat). The owner's
+    suggestion "we optimized" was examined and does not account for it.
   - The sidecars' `site` string differs between epochs 1, 2-3 and 4-6
     (consistent with the venue move in epoch 3 and "new site" in epoch 4);
     not copied here.
