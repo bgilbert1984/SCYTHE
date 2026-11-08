@@ -214,6 +214,16 @@ class RFBridgeConfig:
     auto_start: bool = False
     sensor_id: str = "SDRPP-EDGE-01"
     capture_owner: str = "orchestrator"
+    # Half-width of the band around the tuning centre that peak selection skips.
+    # Direct-conversion receivers (the RTL2832U/E4000 included) leave a DC /
+    # local-oscillator spike at the centre bin that stays ~20 dB over the median
+    # even with the mean removed. Left in, it is the strongest bin of nearly every
+    # frame and is admitted as an OBSERVED detection of a signal that is not there
+    # (measured on scythe-1 with a terminator fitted: the peak stayed at 0 Hz offset
+    # across 99.8/100.0/100.2/145/433.92 MHz). The bins are still displayed; they
+    # are only excluded from choosing the frame's peak. A real signal inside the
+    # guard is therefore not detected -- retune so it sits outside. 0 disables.
+    centre_guard_hz: float = 10_000.0
 
     @classmethod
     def from_env(cls) -> "RFBridgeConfig":
@@ -237,6 +247,7 @@ class RFBridgeConfig:
             auto_start=_env_bool("SDRPP_AUTO_START", False),
             sensor_id=os.getenv("SDRPP_SENSOR_ID", "SDRPP-EDGE-01"),
             capture_owner=os.getenv("SCYTHE_RF_CAPTURE_OWNER", "orchestrator").strip().lower(),
+            centre_guard_hz=float(os.getenv("SDRPP_CENTRE_GUARD_HZ", "10000")),
         ).validated()
 
     def validated(self) -> "RFBridgeConfig":
@@ -248,6 +259,12 @@ class RFBridgeConfig:
             raise ValueError("SDRPP_MAX_BINS must be between 16 and fft_size")
         if self.sample_rate_hz <= 0 or not math.isfinite(self.sample_rate_hz):
             raise ValueError("SDRPP_SAMPLE_RATE_HZ must be positive")
+        # A guard wider than an eighth of the span would blind a large part of the
+        # band to hide one spike, and at the extreme leave no bin to pick.
+        if (not math.isfinite(self.centre_guard_hz)
+                or not 0.0 <= self.centre_guard_hz <= self.sample_rate_hz / 8.0):
+            raise ValueError(
+                "SDRPP_CENTRE_GUARD_HZ must be between 0 and one eighth of the sample rate")
         if not 0.5 <= self.frames_per_second <= 60:
             raise ValueError("SDRPP_FPS must be between 0.5 and 60")
         # The receive loop wakes on a 1 s socket timeout, so that is the finest
@@ -581,8 +598,16 @@ class IQFFTProcessor:
         magnitude = np.abs(spectrum) / window_gain
         power_dbfs = 20.0 * np.log10(np.maximum(magnitude, 1e-12))
         bins = self._downsample_peak(power_dbfs, self.config.max_bins)
-        peak_index = int(np.argmax(power_dbfs))
         bin_width = self.config.sample_rate_hz / self.config.fft_size
+        # Peak selection skips the centre guard (see RFBridgeConfig.centre_guard_hz).
+        # Only the choice of peak changes: bins_dbfs and the median floor still
+        # include every bin, so the displayed spectrum is not edited.
+        offsets_hz = (np.arange(power_dbfs.size) - self.config.fft_size / 2.0) * bin_width
+        searchable = np.abs(offsets_hz) > self.config.centre_guard_hz
+        if self.config.centre_guard_hz > 0.0 and searchable.any():
+            peak_index = int(np.argmax(np.where(searchable, power_dbfs, -np.inf)))
+        else:
+            peak_index = int(np.argmax(power_dbfs))
         peak_offset_hz = (peak_index - self.config.fft_size / 2.0) * bin_width
         return {
             "timestamp": timestamp,
@@ -595,6 +620,7 @@ class IQFFTProcessor:
             "peak_frequency_hz": self.config.center_frequency_hz + peak_offset_hz,
             "peak_dbfs": round(float(power_dbfs[peak_index]), 2),
             "noise_floor_dbfs": round(float(np.median(power_dbfs)), 2),
+            "centre_guard_hz": self.config.centre_guard_hz,
             "bins_dbfs": np.round(bins, 2).tolist(),
         }
 

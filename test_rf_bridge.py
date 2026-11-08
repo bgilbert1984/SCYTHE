@@ -304,6 +304,111 @@ class RFBridgeTests(unittest.TestCase):
                 os.environ["SCYTHE_PROCESS_ROLE"] = previous_role
 
 
+def _two_tone_bytes(config, near_hz, near_amp, far_hz, far_amp):
+    n = np.arange(config.fft_size, dtype=np.float64)
+    tone = (near_amp * np.exp(2j * np.pi * near_hz * n / config.sample_rate_hz)
+            + far_amp * np.exp(2j * np.pi * far_hz * n / config.sample_rate_hz))
+    interleaved = np.empty(config.fft_size * 2, dtype="<i2")
+    interleaved[0::2] = np.round(np.real(tone) * 32767)
+    interleaved[1::2] = np.round(np.imag(tone) * 32767)
+    return interleaved.tobytes()
+
+
+def _noisy_tone_bytes(config, offset_hz, amplitude=0.1, spike_over_median_db=20.0, seed=7):
+    """Tone in complex Gaussian noise sized so the tone is ``spike_over_median_db``
+    over the median bin -- the ratio measured on scythe-1 (spike +20 dB over floor).
+    Per-bin noise power is sigma^2 * 1.5 / N for a Hann window and its median is
+    ln2 times the mean, which fixes sigma."""
+    n_fft = config.fft_size
+    sigma = amplitude / np.sqrt(10 ** (spike_over_median_db / 10) * np.log(2) * 1.5 / n_fft)
+    rng = np.random.default_rng(seed)
+    n = np.arange(n_fft, dtype=np.float64)
+    noise = (rng.normal(size=n_fft) + 1j * rng.normal(size=n_fft)) * (sigma / np.sqrt(2))
+    tone = amplitude * np.exp(2j * np.pi * offset_hz * n / config.sample_rate_hz) + noise
+    interleaved = np.empty(n_fft * 2, dtype="<i2")
+    interleaved[0::2] = np.round(np.real(tone) * 32767)
+    interleaved[1::2] = np.round(np.imag(tone) * 32767)
+    return interleaved.tobytes()
+
+
+class CentreGuardTests(unittest.TestCase):
+    """A DC / LO spike at the centre bin must not be chosen as the frame's peak."""
+
+    def _config(self, **overrides):
+        base = dict(sample_rate_hz=1_024_000, center_frequency_hz=100_000_000,
+                    fft_size=1024, max_bins=256, frames_per_second=60)
+        base.update(overrides)
+        return RFBridgeConfig(**base)
+
+    def _frame(self, config, payload):
+        frames = list(IQFFTProcessor(config).feed(payload, now=1.0))
+        self.assertEqual(len(frames), 1)
+        return frames[0]
+
+    def test_strong_centre_spike_does_not_hide_a_real_signal(self):
+        config = self._config()
+        payload = _two_tone_bytes(config, near_hz=3_000, near_amp=0.7, far_hz=200_000, far_amp=0.05)
+        frame = self._frame(config, payload)
+        self.assertAlmostEqual(frame["peak_frequency_hz"], 100_200_000, delta=1_100)
+
+    def test_guard_zero_restores_the_previous_behaviour(self):
+        config = self._config(centre_guard_hz=0.0)
+        payload = _two_tone_bytes(config, near_hz=3_000, near_amp=0.7, far_hz=200_000, far_amp=0.05)
+        frame = self._frame(config, payload)
+        self.assertAlmostEqual(frame["peak_frequency_hz"], 100_003_000, delta=1_100)
+
+    def test_the_displayed_spectrum_and_floor_are_not_edited(self):
+        payload_cfg = self._config()
+        payload = _two_tone_bytes(payload_cfg, 3_000, 0.7, 200_000, 0.05)
+        guarded = self._frame(payload_cfg, payload)
+        unguarded = self._frame(self._config(centre_guard_hz=0.0), payload)
+        self.assertEqual(guarded["bins_dbfs"], unguarded["bins_dbfs"])
+        self.assertEqual(guarded["noise_floor_dbfs"], unguarded["noise_floor_dbfs"])
+
+    def test_frame_declares_the_guard_it_was_made_with(self):
+        config = self._config(centre_guard_hz=5_000.0)
+        frame = self._frame(config, _tone_bytes(config, offset_hz=128_000))
+        self.assertEqual(frame["centre_guard_hz"], 5_000.0)
+
+    def test_a_signal_inside_the_guard_is_not_detected(self):
+        # The declared cost of the guard: a real narrowband signal within it is
+        # indistinguishable from the spike and is not admitted.
+        config = self._config()
+        frame = self._frame(config, _noisy_tone_bytes(config, offset_hz=3_000))
+        self.assertIsNone(RFObservationStore(min_snr_db=12.0).ingest_frame(
+            {**frame, "sensor_id": "s", "sequence": 1}))
+
+    def test_a_centre_spike_alone_is_not_admitted_as_an_observation(self):
+        config = self._config()
+        payload = _noisy_tone_bytes(config, offset_hz=3_000)
+        frame = self._frame(config, payload)
+        self.assertIsNone(RFObservationStore(min_snr_db=12.0).ingest_frame(
+            {**frame, "sensor_id": "s", "sequence": 1}))
+        unguarded = self._frame(self._config(centre_guard_hz=0.0), payload)
+        self.assertIsNotNone(RFObservationStore(min_snr_db=12.0).ingest_frame(
+            {**unguarded, "sensor_id": "s", "sequence": 1}))
+
+    def test_guard_width_is_validated(self):
+        with self.assertRaisesRegex(ValueError, "CENTRE_GUARD"):
+            self._config(centre_guard_hz=-1.0).validated()
+        with self.assertRaisesRegex(ValueError, "CENTRE_GUARD"):
+            self._config(centre_guard_hz=200_000.0).validated()   # > fs/8 = 128 kHz
+        with self.assertRaisesRegex(ValueError, "CENTRE_GUARD"):
+            self._config(centre_guard_hz=float("nan")).validated()
+        self.assertEqual(self._config(centre_guard_hz=0.0).validated().centre_guard_hz, 0.0)
+
+    def test_env_sets_the_guard(self):
+        old = os.environ.get("SDRPP_CENTRE_GUARD_HZ")
+        os.environ["SDRPP_CENTRE_GUARD_HZ"] = "2500"
+        try:
+            self.assertEqual(RFBridgeConfig.from_env().centre_guard_hz, 2500.0)
+        finally:
+            if old is None:
+                os.environ.pop("SDRPP_CENTRE_GUARD_HZ", None)
+            else:
+                os.environ["SDRPP_CENTRE_GUARD_HZ"] = old
+
+
 class Uint8IQDecodeTests(unittest.TestCase):
     """rtl_tcp forwards the RTL2832U's native offset-binary uint8 stream."""
 
