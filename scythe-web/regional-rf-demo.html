@@ -1308,8 +1308,29 @@
         } catch (error) {
           status.textContent = `GRAPHOPS // UNAVAILABLE // ${error.message}`;
         }
+        await appendSolverLineage(sample, rfSelection.entityId);
       },
     );
+    // Schema-v1 lineage (environment / variant / device / SolverRunHyperedge) for the pinned
+    // cell. Read-only projection; failure never affects the cell or the explanation.
+    async function appendSolverLineage(sample, entityId) {
+      const note = (text) => {
+        const el = document.getElementById("correlation-status");
+        if (!el || selections.items.every((item) => item.entityId !== entityId)) return;
+        el.textContent = `${el.textContent}\n\n${text}`; el.hidden = false; captureActiveTab();
+      };
+      try {
+        const response = await fetch("/api/graphops/rf-solver-lineage", {
+          method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sample }),
+        });
+        const body = await response.json();
+        if (!response.ok) throw new Error(body.error ?? `HTTP ${response.status}`);
+        note(body.summary);
+      } catch (error) {
+        note(`LINEAGE // UNAVAILABLE // ${error.message}`);
+      }
+    }
     document.getElementById("globe-root").addEventListener("scythe-web:graph-selection", async ({detail}) => {
       showDirective();
       const {entityType, ...typedSelection} = detail;

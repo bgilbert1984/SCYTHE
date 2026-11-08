@@ -1381,6 +1381,32 @@ def graphops_explain_coverage_cell():
         return jsonify({'error': str(exc)}), 400
 
 
+@app.route('/api/graphops/rf-solver-lineage', methods=['POST'])
+def graphops_rf_solver_lineage():
+    """Schema-v1 lineage (nodes + SolverRunHyperedge) for one solver sample.
+
+    Read-only projection: the sample is validated/recorded exactly as the
+    explain endpoint does, but nothing is written to the graph.  Observation
+    IDs are linked only when the caller supplies them.
+    """
+    if request.remote_addr not in {'127.0.0.1', '::1'}:
+        token = request.headers.get('Authorization', '').removeprefix('Bearer ').strip()
+        if not validate_jwt(token):
+            return jsonify({'error': 'Authentication required'}), 401
+    try:
+        from rf_solver_evidence import get_rf_solver_evidence_store
+        from scythe_hypergraph_schema import build_solver_run_lineage, summarize_lineage
+        payload = request.get_json(silent=True) or {}
+        evidence = get_rf_solver_evidence_store().ingest(payload.get('sample') or payload)
+        obs = payload.get('observation_ids') or []
+        if not isinstance(obs, list) or len(obs) > 64:
+            return jsonify({'error': 'observation_ids must be a list of at most 64 ids'}), 400
+        lineage = build_solver_run_lineage(evidence, observation_ids=[str(o) for o in obs])
+        return jsonify({'lineage': lineage, 'summary': summarize_lineage(lineage)})
+    except (TypeError, ValueError, KeyError) as exc:
+        return jsonify({'error': str(exc)}), 400
+
+
 def _graphops_directive_authorized():
     if request.remote_addr in {'127.0.0.1', '::1'}:
         return True
