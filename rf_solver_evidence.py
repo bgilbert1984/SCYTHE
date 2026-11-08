@@ -129,6 +129,11 @@ def explain_coverage_cell(evidence: Dict[str, Any]) -> Dict[str, Any]:
     threshold = float(evidence["coverage_threshold"])
     covered = bool(evidence["coverage"])
     relation = "at or below" if covered else "above"
+    try:
+        from scythe_hypergraph_schema import build_solver_run_lineage
+        lineage = build_solver_run_lineage(evidence)
+    except Exception as exc:  # lineage is additive; never block the explanation
+        lineage = {"error": f"{type(exc).__name__}: {exc}"}
     return {
         "directive": "Explain this coverage cell",
         "status": "SUPPORTED_BY_SOLVER_OUTPUT",
@@ -141,6 +146,7 @@ def explain_coverage_cell(evidence: Dict[str, Any]) -> Dict[str, Any]:
             f"the cell is therefore rendered as {'covered' if covered else 'a coverage gap'}."
         ),
         "provenance": dict(evidence["provenance"]),
+        "lineage": lineage,
         "authority_boundary": (
             "Modeled solver output, not a measurement. The browser visualization is "
             "non-authoritative and cannot independently justify an operational action."
