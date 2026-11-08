@@ -9,7 +9,7 @@ import numpy as np
 from dataclasses import replace
 
 from rf_bridge import (
-    IQFFTProcessor, RFBridgeConfig, RFObservationStore, RigctlClient,
+    DEFAULT_DETECTION_SNR_DB, IQFFTProcessor, RFBridgeConfig, RFObservationStore, RigctlClient,
     SDRPlusPlusBridge,
 )
 from rf_signal_family import METHOD_REGISTRY, POSITIVE_REASON_CODE
@@ -375,18 +375,37 @@ class CentreGuardTests(unittest.TestCase):
         # indistinguishable from the spike and is not admitted.
         config = self._config()
         frame = self._frame(config, _noisy_tone_bytes(config, offset_hz=3_000))
-        self.assertIsNone(RFObservationStore(min_snr_db=12.0).ingest_frame(
+        self.assertIsNone(RFObservationStore().ingest_frame(
             {**frame, "sensor_id": "s", "sequence": 1}))
 
     def test_a_centre_spike_alone_is_not_admitted_as_an_observation(self):
         config = self._config()
         payload = _noisy_tone_bytes(config, offset_hz=3_000)
         frame = self._frame(config, payload)
-        self.assertIsNone(RFObservationStore(min_snr_db=12.0).ingest_frame(
+        self.assertIsNone(RFObservationStore().ingest_frame(
             {**frame, "sensor_id": "s", "sequence": 1}))
         unguarded = self._frame(self._config(centre_guard_hz=0.0), payload)
-        self.assertIsNotNone(RFObservationStore(min_snr_db=12.0).ingest_frame(
+        self.assertIsNotNone(RFObservationStore().ingest_frame(
             {**unguarded, "sensor_id": "s", "sequence": 1}))
+
+    def test_default_admission_gate_is_14_db_and_overridable(self):
+        self.assertEqual(DEFAULT_DETECTION_SNR_DB, 14.0)
+        frame = {"timestamp": 1.0, "sequence": 1, "sensor_id": "s", "center_frequency_hz": 1e8,
+                 "peak_frequency_hz": 1.0001e8, "sample_rate_hz": 1e6,
+                 "peak_dbfs": -50.0, "noise_floor_dbfs": -63.0}      # 13 dB: noise-reachable
+        self.assertIsNone(RFObservationStore().ingest_frame(dict(frame)))
+        self.assertIsNotNone(RFObservationStore().ingest_frame({**frame, "peak_dbfs": -49.0}))  # 14 dB
+        old = os.environ.get("SDRPP_DETECTION_SNR_DB")
+        try:
+            os.environ.pop("SDRPP_DETECTION_SNR_DB", None)
+            self.assertIsNone(RFObservationStore.from_env().ingest_frame(dict(frame)))
+            os.environ["SDRPP_DETECTION_SNR_DB"] = "12"
+            self.assertIsNotNone(RFObservationStore.from_env().ingest_frame(dict(frame)))
+        finally:
+            if old is None:
+                os.environ.pop("SDRPP_DETECTION_SNR_DB", None)
+            else:
+                os.environ["SDRPP_DETECTION_SNR_DB"] = old
 
     def test_guard_width_is_validated(self):
         with self.assertRaisesRegex(ValueError, "CENTRE_GUARD"):

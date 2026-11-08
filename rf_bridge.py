@@ -344,10 +344,19 @@ class RFObservation:
         return asdict(self)
 
 
+# Peak-over-median admission gate for a detection. 12 dB passed pure noise in
+# ~3.3% of frames (simulated, FFT 2048, white noise, 4000 frames; 0.07% reached
+# 13 dB and none reached 14 dB), so a quiet or terminated input still filled the
+# store with OBSERVED "detections". 14 dB is the first whole-dB value with no
+# noise-only admission in that run. This is a simulation: a real front end's
+# noise is not white, so SDRPP_DETECTION_SNR_DB remains the operator's lever.
+DEFAULT_DETECTION_SNR_DB = 14.0
+
+
 class RFObservationStore:
     """Thread-safe, bounded store for significant spectral observations."""
 
-    def __init__(self, maxlen: int = 2048, min_snr_db: float = 12.0,
+    def __init__(self, maxlen: int = 2048, min_snr_db: float = DEFAULT_DETECTION_SNR_DB,
                  cooldown_s: float = 1.0, bucket_hz: float = 5_000.0,
                  method_registry=None):
         self._items: Deque[RFObservation] = deque(maxlen=max(16, int(maxlen)))
@@ -365,7 +374,7 @@ class RFObservationStore:
     def from_env(cls) -> "RFObservationStore":
         return cls(
             maxlen=int(os.getenv("SDRPP_OBSERVATION_MAX", "2048")),
-            min_snr_db=float(os.getenv("SDRPP_DETECTION_SNR_DB", "12")),
+            min_snr_db=float(os.getenv("SDRPP_DETECTION_SNR_DB", str(DEFAULT_DETECTION_SNR_DB))),
             cooldown_s=float(os.getenv("SDRPP_DETECTION_COOLDOWN_S", "1")),
             bucket_hz=float(os.getenv("SDRPP_DETECTION_BUCKET_HZ", "5000")),
         )
