@@ -137,6 +137,13 @@ class ObservationStoreWiringTests(unittest.TestCase):
         self.assertEqual(lin["violations"], [])
         self.assertIn("UNVERIFIED", summarize_lineage(lin))
 
+    def test_summary_lists_linked_observations_capped(self):
+        links = [(_obs(f"rf-{i}"), BASIS_FREQUENCY) for i in range(7)]
+        text = summarize_lineage(build_solver_run_lineage(self.ev, observation_links=links))
+        self.assertIn("  - rf-0 // 900.0100 MHz // SNR 20.0 dB // edge-a", text)
+        self.assertIn("… and 2 more", text)
+        self.assertNotIn("rf-6", text)
+
     def test_synthetic_observation_never_becomes_a_node(self):
         lin = build_solver_run_lineage(self.ev, observation_links=[
             (_obs("rf-s", source="operator_synthetic"), BASIS_EXPLICIT)])

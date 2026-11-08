@@ -367,6 +367,23 @@ def validate_lineage(lineage: Dict[str, Any]) -> List[str]:
     return problems
 
 
+def _observation_lines(lineage: Dict[str, Any], limit: int = 5) -> List[str]:
+    nodes = {n["node_id"]: n for n in lineage["nodes"]}
+    ids = [e["observation_id"] for e in lineage["hyperedges"]
+           if e["type"] == "ObservationSupportsEntity"]
+    lines = []
+    for oid in ids[:limit]:
+        n = nodes.get(oid, {})
+        mhz = n.get("peak_frequency_hz")
+        lines.append(f"  - {oid.split(':', 1)[1]}"
+                     + (f" // {mhz / 1e6:.4f} MHz" if isinstance(mhz, (int, float)) else "")
+                     + (f" // SNR {n['snr_db']:.1f} dB" if isinstance(n.get("snr_db"), (int, float)) else "")
+                     + (f" // {n['sensor_id']}" if n.get("sensor_id") else ""))
+    if len(ids) > limit:
+        lines.append(f"  … and {len(ids) - limit} more")
+    return lines
+
+
 def summarize_lineage(lineage: Dict[str, Any]) -> str:
     """One-screen, operator-readable lineage trace."""
     edge = next((e for e in lineage["hyperedges"] if e["type"] == "SolverRunHyperedge"), None)
@@ -386,6 +403,7 @@ def summarize_lineage(lineage: Dict[str, Any]) -> str:
            else "(" + ", ".join(sorted({e.get("basis", "?") for e in lineage["hyperedges"]
                                         if e["type"] == "ObservationSupportsEntity"}))
            + "; UNVERIFIED against the model value)"),
+        *_observation_lines(lineage),
         f"CONSTRAINTS // {'OK' if not lineage['violations'] else '; '.join(lineage['violations'])}",
     ]
     return "\n".join(lines)
