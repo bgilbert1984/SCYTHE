@@ -13,6 +13,13 @@ What this module deliberately does NOT do:
     emitted only for observation IDs the caller passes in.  Otherwise constraint
     C4 is satisfied by a *declared synthetic source*, which is stated plainly.
 
+Observation store wiring: measured ``RFObservation`` records (rf_bridge) become
+immutable ObservationNodes.  They carry no sensor location, so a link can only
+assert *frequency coincidence*, never that the measurement verifies the modelled
+value; every such edge says so (``basis`` / ``verified: false``).  Observations
+whose source is operator-synthetic are typed test input, not measurements, and
+are never linked.
+
 The output is pure data (dicts); nothing here mutates the live graph.
 """
 
@@ -96,6 +103,78 @@ def load_dataset_context(dataset_id: str, root: str = DATASETS_ROOT) -> Dict[str
 
 
 # --------------------------------------------------------------------------
+# Observation store wiring
+# --------------------------------------------------------------------------
+
+SYNTHETIC_OBSERVATION_SOURCES = frozenset({"operator_synthetic"})
+BASIS_EXPLICIT = "EXPLICIT_CALLER_LINK"
+BASIS_FREQUENCY = "FREQUENCY_COINCIDENT_ONLY"
+
+
+def is_measured_observation(obs: Dict[str, Any]) -> bool:
+    """True for evidence that came off a sensor rather than from an operator."""
+    return (str(obs.get("source", "")).lower() not in SYNTHETIC_OBSERVATION_SOURCES
+            and obs.get("evidence_class", "OBSERVED") == "OBSERVED")
+
+
+def observation_node(obs: Dict[str, Any]) -> Dict[str, Any]:
+    """Immutable ObservationNode for one stored RFObservation dict."""
+    nid = observation_id(obs["evidence_id"])
+    return {
+        "node_id": nid, "type": "ObservationNode", "immutable": True,
+        "observation_source": obs.get("source"),
+        "evidence_class": obs.get("evidence_class"),
+        "sensor_id": obs.get("sensor_id"),
+        "observed_at": obs.get("observed_at"),
+        "peak_frequency_hz": obs.get("peak_frequency_hz"),
+        "center_frequency_hz": obs.get("center_frequency_hz"),
+        "snr_db": obs.get("snr_db"),
+        "mission_id": obs.get("mission_id"),
+        "has_sensor_location": False,  # RFObservation carries none
+    }
+
+
+def resolve_observations(store: Any, evidence_ids: Iterable[str]) -> Dict[str, List[Any]]:
+    """Look explicit IDs up in an observation store.
+
+    Returns ``{"found": [obs...], "missing": [id...], "excluded": [id...]}``.
+    Unknown IDs are reported, never turned into bare nodes; synthetic ones are
+    excluded rather than treated as evidence.
+    """
+    wanted = [str(i).removeprefix("observation:") for i in evidence_ids]
+    by_id = {o["evidence_id"]: o for o in store.query(limit=500)}
+    found, missing, excluded = [], [], []
+    for eid in dict.fromkeys(wanted):
+        obs = by_id.get(eid)
+        if obs is None:
+            missing.append(eid)
+        elif not is_measured_observation(obs):
+            excluded.append(eid)
+        else:
+            found.append(obs)
+    return {"found": found, "missing": missing, "excluded": excluded}
+
+
+def discover_frequency_candidates(
+    store: Any, evidence: Dict[str, Any], *, window_s: float = 3600.0,
+    tolerance_hz: float = 25_000.0, limit: int = 20,
+) -> List[Dict[str, Any]]:
+    """Measured observations near the solver frequency and time.
+
+    Frequency (and optionally time) coincidence only; used with
+    ``basis=FREQUENCY_COINCIDENT_ONLY``.
+    """
+    freq = float(evidence["frequency_hz"])
+    at = evidence.get("sampled_at")
+    window_s = max(float(window_s), 0.0)
+    since = (float(at) - window_s) if (at is not None and window_s) else None
+    until = (float(at) + window_s) if (at is not None and window_s) else None
+    items = store.query(frequency_hz=freq, tolerance_hz=tolerance_hz,
+                        since=since, until=until, limit=max(1, min(int(limit), 100)) * 3)
+    return [o for o in items if is_measured_observation(o)][:max(1, min(int(limit), 100))]
+
+
+# --------------------------------------------------------------------------
 # Projection
 # --------------------------------------------------------------------------
 
@@ -103,6 +182,9 @@ def build_solver_run_lineage(
     evidence: Dict[str, Any],
     context: Optional[Dict[str, Any]] = None,
     observation_ids: Optional[Iterable[str]] = None,
+    observations: Optional[Iterable[Dict[str, Any]]] = None,
+    observation_basis: str = BASIS_EXPLICIT,
+    observation_links: Optional[Iterable[Any]] = None,
 ) -> Dict[str, Any]:
     """Project one solver evidence sample into schema-v1 nodes + hyperedges.
 
@@ -172,10 +254,22 @@ def build_solver_run_lineage(
                      "height_m": evidence.get("height_meters")},
     }
 
-    obs_ids = [observation_id(o) for o in (observation_ids or [])]
-    observations = [{
-        "node_id": o, "type": "ObservationNode", "immutable": True,
-    } for o in obs_ids]
+    obs_nodes: Dict[str, Dict[str, Any]] = {}
+    obs_basis: Dict[str, str] = {}
+
+    def _add(node: Dict[str, Any], basis: str) -> None:
+        if node["node_id"] not in obs_nodes:
+            obs_nodes[node["node_id"]] = node
+            obs_basis[node["node_id"]] = basis
+
+    for o, basis in list(observation_links or []) + [(o, observation_basis) for o in (observations or [])]:
+        if is_measured_observation(o):
+            _add(observation_node(o), basis)
+    for raw in (observation_ids or []):
+        nid = observation_id(raw)
+        _add({"node_id": nid, "type": "ObservationNode", "immutable": True}, observation_basis)
+    obs_ids = list(obs_nodes)
+    observation_list = list(obs_nodes.values())
 
     run_id = str(prov.get("runId", ""))
     source = {
@@ -213,9 +307,11 @@ def build_solver_run_lineage(
             "created_at": created_at,
             "observation_id": o,
             "entity_id": sig_nid,
+            "basis": obs_basis[o],
+            "verified": False,
         })
 
-    nodes = [env, variant, device, signal] + observations
+    nodes = [env, variant, device, signal] + observation_list
     for n in nodes:
         n.setdefault("schema_version", SCHEMA_VERSION)
         n.setdefault("created_at", created_at)
@@ -242,6 +338,13 @@ def validate_lineage(lineage: Dict[str, Any]) -> List[str]:
 
     for edge in lineage.get("hyperedges", []):
         eid = edge.get("edge_id", "?")
+        if edge.get("type") == "ObservationSupportsEntity":
+            if nodes.get(edge.get("observation_id"), {}).get("type") != "ObservationNode":
+                problems.append(f"C4: {eid} references a missing ObservationNode")
+            if edge.get("entity_id") not in nodes:
+                problems.append(f"C4: {eid} references a missing entity")
+            if edge.get("verified") is not False:
+                problems.append(f"C4: {eid} claims verification the schema cannot establish")
         if edge.get("type") != "SolverRunHyperedge":
             continue
         vid = edge.get("variant_id")
@@ -278,8 +381,11 @@ def summarize_lineage(lineage: Dict[str, Any]) -> str:
         f"GEOMETRY // {len(edge['geometry'])} faces // MODEL {edge['geometry_model']}",
         f"MATERIALS // {len(edge['materials'])} assigned // MODEL {edge['material_model']}",
         f"SOURCE // {src['kind']} // {src.get('solver')} {src.get('solver_version') or ''}".rstrip(),
-        f"OBSERVATION SUPPORT // {len(src['observation_ids'])} "
-        + ("(none: model output, not a measurement)" if not src["observation_ids"] else "linked"),
+        f"OBSERVATION LINKS // {len(src['observation_ids'])} "
+        + ("(none: model output, not a measurement)" if not src["observation_ids"]
+           else "(" + ", ".join(sorted({e.get("basis", "?") for e in lineage["hyperedges"]
+                                        if e["type"] == "ObservationSupportsEntity"}))
+           + "; UNVERIFIED against the model value)"),
         f"CONSTRAINTS // {'OK' if not lineage['violations'] else '; '.join(lineage['violations'])}",
     ]
     return "\n".join(lines)
