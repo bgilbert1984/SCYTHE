@@ -1322,7 +1322,9 @@
       try {
         const response = await fetch("/api/graphops/rf-solver-lineage", {
           method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ sample }),
+          // discover: measured observations coincident in frequency/time. Observations carry no
+          // sensor location, so the server labels each link FREQUENCY_COINCIDENT_ONLY / unverified.
+          body: JSON.stringify({ sample, discover: { window_s: 3600, tolerance_hz: 25000, limit: 20 } }),
         });
         const body = await response.json();
         if (!response.ok) throw new Error(body.error ?? `HTTP ${response.status}`);
