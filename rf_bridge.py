@@ -88,6 +88,9 @@ _TUNER_GAINS_TENTHS_DB = {
               280, 297, 328, 338, 364, 372, 386, 402, 421, 434, 439, 445, 480, 496),
     "R828D": (0, 9, 14, 27, 37, 77, 87, 125, 144, 157, 166, 197, 207, 229, 254,
               280, 297, 328, 338, 364, 372, 386, 402, 421, 434, 439, 445, 480, 496),
+    # librtlsdr e4k_gains. Its first step is negative (-1.0 dB), so the control
+    # value is sent as a two's-complement uint32 -- see _send_rtl_command.
+    "E4000": (-10, 15, 40, 65, 90, 115, 140, 165, 190, 215, 240, 290, 340, 420),
 }
 
 # rtl_tcp control opcodes, one command byte then a big-endian uint32.
@@ -195,6 +198,14 @@ def _env_bool(name: str, default: bool = False) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _env_optional_gain(name: str) -> Optional[float]:
+    """A gain in dB, or None when unset / empty / nan / auto (leave the tuner alone)."""
+    value = os.getenv(name)
+    if value is None or value.strip().lower() in {"", "nan", "auto", "none"}:
+        return None
+    return float(value)
+
+
 @dataclass(frozen=True)
 class RFBridgeConfig:
     iq_host: str = "127.0.0.1"
@@ -224,6 +235,15 @@ class RFBridgeConfig:
     # are only excluded from choosing the frame's peak. A real signal inside the
     # guard is therefore not detected -- retune so it sits outside. 0 disables.
     centre_guard_hz: float = 10_000.0
+    # Manual tuner gain to apply on EVERY rtl_tcp connection, or None to leave the
+    # tuner alone. rtl_tcp keeps whatever gain the last client set until a client
+    # sends another, so a gain set once by hand lasts only until the dongle or
+    # rtl_tcp restarts; this makes it a configured property of the bridge instead.
+    # It must be one of the tuner's own steps (see _TUNER_GAINS_TENTHS_DB); an
+    # unsupported value is logged and refused, never rounded. Needed because the
+    # tuner's automatic gain saturated the 8-bit ADC (27% of samples at the rails)
+    # on scythe-1 with an antenna fitted, which raised the noise floor ~14 dB.
+    tuner_gain_db: Optional[float] = None
 
     @classmethod
     def from_env(cls) -> "RFBridgeConfig":
@@ -248,6 +268,7 @@ class RFBridgeConfig:
             sensor_id=os.getenv("SDRPP_SENSOR_ID", "SDRPP-EDGE-01"),
             capture_owner=os.getenv("SCYTHE_RF_CAPTURE_OWNER", "orchestrator").strip().lower(),
             centre_guard_hz=float(os.getenv("SDRPP_CENTRE_GUARD_HZ", "10000")),
+            tuner_gain_db=_env_optional_gain("SDRPP_TUNER_GAIN_DB"),
         ).validated()
 
     def validated(self) -> "RFBridgeConfig":
@@ -265,6 +286,8 @@ class RFBridgeConfig:
                 or not 0.0 <= self.centre_guard_hz <= self.sample_rate_hz / 8.0):
             raise ValueError(
                 "SDRPP_CENTRE_GUARD_HZ must be between 0 and one eighth of the sample rate")
+        if self.tuner_gain_db is not None and not math.isfinite(self.tuner_gain_db):
+            raise ValueError("SDRPP_TUNER_GAIN_DB must be a finite number of dB, or unset")
         if not 0.5 <= self.frames_per_second <= 60:
             raise ValueError("SDRPP_FPS must be between 0.5 and 60")
         # The receive loop wakes on a 1 s socket timeout, so that is the finest
@@ -880,7 +903,9 @@ class SDRPlusPlusBridge:
             sock = self._socket
         if sock is None:
             raise ConnectionError("no IQ socket is open; cannot send a control command")
-        sock.sendall(bytes([opcode]) + int(value).to_bytes(4, "big", signed=False))
+        # rtl_tcp reads a big-endian uint32 and casts it to int, so a negative
+        # value (the E4000's -1.0 dB step) travels as two's complement.
+        sock.sendall(bytes([opcode]) + (int(value) & 0xFFFFFFFF).to_bytes(4, "big"))
 
     def set_gain(self, gain_db: Optional[float]) -> Dict:
         """Set manual gain to a supported value, or return to automatic on None.
@@ -1269,6 +1294,7 @@ class SDRPlusPlusBridge:
                 # from before the gap is not contiguous with what follows.
                 self.retention.invalidate("RECONNECT")
                 delay = 0.5
+                gain_applied = self.config.tuner_gain_db is None
                 while not self._stop.is_set():
                     # Once per iteration, not only on the timeout path. Stepping
                     # the policy only while the socket is silent means the one
@@ -1301,6 +1327,20 @@ class SDRPlusPlusBridge:
                             LOG.info("rtl_tcp device: %s tuner, %d gains",
                                      info["tuner_type"], info["tuner_gain_count"])
                     frames = processor.feed(chunk)
+                    if not gain_applied and processor.dongle_info is not None:
+                        # Once per connection, as soon as the header says which
+                        # tuner this is. Per connection, not per process: a
+                        # replugged dongle or restarted rtl_tcp has forgotten it.
+                        gain_applied = True
+                        with self._lock:
+                            self._dongle_info = processor.dongle_info
+                        try:
+                            self.set_gain(self.config.tuner_gain_db)
+                            LOG.info("tuner gain set to %.1f dB (manual) on connect",
+                                     self.config.tuner_gain_db)
+                        except Exception as gain_exc:   # never take the stream down
+                            LOG.warning("configured tuner gain %.1f dB NOT applied: %s",
+                                        self.config.tuner_gain_db, gain_exc)
                     if processor.samples_decoded > decoded:
                         # Samples arrived, so the source is delivering. Read
                         # after feed, not before: the counter this compares
