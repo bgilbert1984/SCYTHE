@@ -203,7 +203,12 @@ def _env_optional_gain(name: str) -> Optional[float]:
     value = os.getenv(name)
     if value is None or value.strip().lower() in {"", "nan", "auto", "none"}:
         return None
-    return float(value)
+    try:
+        return float(value)
+    except ValueError:
+        raise ValueError(
+            f"{name} must be a number of dB, or one of blank/nan/auto/none to leave the "
+            f"tuner alone; got {value!r}") from None
 
 
 @dataclass(frozen=True)
@@ -239,8 +244,9 @@ class RFBridgeConfig:
     # tuner alone. rtl_tcp keeps whatever gain the last client set until a client
     # sends another, so a gain set once by hand lasts only until the dongle or
     # rtl_tcp restarts; this makes it a configured property of the bridge instead.
-    # It must be one of the tuner's own steps (see _TUNER_GAINS_TENTHS_DB); an
-    # unsupported value is logged and refused, never rounded. Needed because the
+    # It must be one of the tuner's own steps (see _TUNER_GAINS_TENTHS_DB). The
+    # value is rounded to 0.1 dB, then logged and refused if it is not a step; a
+    # refused value never stops the stream. Needed because the
     # tuner's automatic gain saturated the 8-bit ADC (27% of samples at the rails)
     # on scythe-1 with an antenna fitted, which raised the noise floor ~14 dB.
     tuner_gain_db: Optional[float] = None
