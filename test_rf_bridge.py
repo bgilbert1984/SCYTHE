@@ -958,3 +958,13 @@ class ConfiguredTunerGainTests(unittest.TestCase):
             self.assertIsNone(RFBridgeConfig.from_env().tuner_gain_db)
         with self.assertRaises(ValueError):
             RFBridgeConfig(tuner_gain_db=float("inf")).validated()
+
+    def test_none_is_accepted_as_unset_and_a_typo_names_the_variable(self):
+        import os
+        with mock.patch.dict(os.environ, {"SDRPP_TUNER_GAIN_DB": " None "}):
+            self.assertIsNone(RFBridgeConfig.from_env().tuner_gain_db)
+        with mock.patch.dict(os.environ, {"SDRPP_TUNER_GAIN_DB": "abc"}):
+            with self.assertRaises(ValueError) as caught:
+                RFBridgeConfig.from_env()
+        self.assertIn("SDRPP_TUNER_GAIN_DB", str(caught.exception))
+        self.assertIn("'abc'", str(caught.exception))
