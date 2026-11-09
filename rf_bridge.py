@@ -250,6 +250,14 @@ class RFBridgeConfig:
     # tuner's automatic gain saturated the 8-bit ADC (27% of samples at the rails)
     # on scythe-1 with an antenna fitted, which raised the noise floor ~14 dB.
     tuner_gain_db: Optional[float] = None
+    # Samples that reach the product pipeline (frames, observations, IQ ring) only
+    # after this much stream time has passed since the gain command. rtl_tcp queues
+    # samples before it reads the command: on scythe-1 the level stepped down
+    # 246-271 ms of samples after the command, in three of three trials from
+    # automatic gain, so everything before that is at the wrong gain. 500 ms is
+    # about twice the measurement. Applies only when tuner_gain_db is set; 0 turns
+    # the hold-off off.
+    tuner_gain_settle_ms: float = 500.0
 
     @classmethod
     def from_env(cls) -> "RFBridgeConfig":
@@ -275,6 +283,7 @@ class RFBridgeConfig:
             capture_owner=os.getenv("SCYTHE_RF_CAPTURE_OWNER", "orchestrator").strip().lower(),
             centre_guard_hz=float(os.getenv("SDRPP_CENTRE_GUARD_HZ", "10000")),
             tuner_gain_db=_env_optional_gain("SDRPP_TUNER_GAIN_DB"),
+            tuner_gain_settle_ms=float(os.getenv("SDRPP_TUNER_GAIN_SETTLE_MS", "500")),
         ).validated()
 
     def validated(self) -> "RFBridgeConfig":
@@ -294,6 +303,9 @@ class RFBridgeConfig:
                 "SDRPP_CENTRE_GUARD_HZ must be between 0 and one eighth of the sample rate")
         if self.tuner_gain_db is not None and not math.isfinite(self.tuner_gain_db):
             raise ValueError("SDRPP_TUNER_GAIN_DB must be a finite number of dB, or unset")
+        if (not math.isfinite(self.tuner_gain_settle_ms)
+                or not 0.0 <= self.tuner_gain_settle_ms <= 10_000.0):
+            raise ValueError("SDRPP_TUNER_GAIN_SETTLE_MS must be between 0 and 10000")
         if not 0.5 <= self.frames_per_second <= 60:
             raise ValueError("SDRPP_FPS must be between 0.5 and 60")
         # The receive loop wakes on a 1 s socket timeout, so that is the finest
@@ -567,6 +579,11 @@ class IQFFTProcessor:
         return self._samples_decoded
 
     @property
+    def header_consumed(self) -> bool:
+        """True once the first bytes have been classified, with or without a header."""
+        return self._header_consumed
+
+    @property
     def dongle_info(self) -> Optional[Dict[str, Any]]:
         """What the device said about itself, or None if it said nothing."""
         return None if self._dongle_info is None else dict(self._dongle_info)
@@ -738,6 +755,64 @@ class RigctlClient:
     def get_mode(self) -> tuple[str, int]:
         mode, bandwidth = self.command("m", response_lines=2)
         return mode, int(bandwidth)
+
+
+class _GainSettleGate:
+    """Holds samples back from the pipeline until a gain command has taken effect.
+
+    One per connection. rtl_tcp has already queued samples when it reads the gain
+    command, and those are at the gain the dongle had before it. Until the command
+    has been sent every sample is dropped; after it, the next ``settle_samples``
+    are dropped too. Dropping happens at the retention sink and at frame
+    publication, so the IQ ring, the spectrum frames and the observation store
+    never see old-gain samples labelled as the configured gain.
+    """
+
+    WAITING, SETTLING, OPEN = "WAITING", "SETTLING", "OPEN"
+
+    def __init__(self, settle_samples: int, downstream, on_open=None):
+        self._remaining = max(0, int(settle_samples))
+        self._downstream = downstream
+        self._on_open = on_open
+        self.state = self.WAITING
+
+    @property
+    def is_open(self) -> bool:
+        return self.state == self.OPEN
+
+    def command_sent(self) -> None:
+        if self.state == self.WAITING:
+            self.state = self.SETTLING if self._remaining > 0 else self.OPEN
+            if self.state == self.OPEN:
+                self._opened()
+
+    def open_now(self) -> None:
+        """Nothing to wait for: the command was refused or never applicable."""
+        if self.state != self.OPEN:
+            self.state = self.OPEN
+            self._remaining = 0
+            self._opened()
+
+    def _opened(self) -> None:
+        if self._on_open is not None:
+            try:
+                self._on_open()
+            except Exception:
+                LOG.exception("gain settle gate on_open failed")
+
+    def sink(self, iq, now=None):
+        if self.state == self.OPEN:
+            return self._downstream(iq, now)
+        if self.state == self.WAITING:
+            return 0
+        if iq.size <= self._remaining:
+            self._remaining -= int(iq.size)
+            return 0
+        keep = iq[self._remaining:]
+        self._remaining = 0
+        self.state = self.OPEN
+        self._opened()
+        return self._downstream(keep, now)
 
 
 class SDRPlusPlusBridge:
@@ -1267,7 +1342,17 @@ class SDRPlusPlusBridge:
     def _run(self) -> None:
         delay = 0.5
         while not self._stop.is_set():
-            processor = IQFFTProcessor(self.config, sample_sink=self.retention.append)
+            gate = None
+            sink = self.retention.append
+            if self.config.tuner_gain_db is not None and self.config.tuner_gain_settle_ms > 0:
+                # A new connection is a new continuity claim: the clock restarts at
+                # the first sample the gate lets through.
+                gate = _GainSettleGate(
+                    int(self.config.sample_rate_hz * self.config.tuner_gain_settle_ms / 1000.0),
+                    self.retention.append,
+                    on_open=lambda: self.retention.invalidate("GAIN_CHANGE"))
+                sink = gate.sink
+            processor = IQFFTProcessor(self.config, sample_sink=sink)
             # Per-connection, like the processor it tracks.
             decoded = 0
             try:
@@ -1333,6 +1418,16 @@ class SDRPlusPlusBridge:
                             LOG.info("rtl_tcp device: %s tuner, %d gains",
                                      info["tuner_type"], info["tuner_gain_count"])
                     frames = processor.feed(chunk)
+                    if not gain_applied and processor.dongle_info is None \
+                            and processor.header_consumed:
+                        # The stream declared no tuner, so no gain table applies and
+                        # no command can be sent. Say so, and do not hold samples
+                        # back waiting for a command that will never go out.
+                        gain_applied = True
+                        LOG.warning("configured tuner gain %.1f dB NOT applied: the IQ stream "
+                                    "declared no tuner", self.config.tuner_gain_db)
+                        if gate is not None:
+                            gate.open_now()
                     if not gain_applied and processor.dongle_info is not None:
                         # Once per connection, as soon as the header says which
                         # tuner this is. Per connection, not per process: a
@@ -1344,9 +1439,13 @@ class SDRPlusPlusBridge:
                             self.set_gain(self.config.tuner_gain_db)
                             LOG.info("tuner gain set to %.1f dB (manual) on connect",
                                      self.config.tuner_gain_db)
+                            if gate is not None:
+                                gate.command_sent()
                         except Exception as gain_exc:   # never take the stream down
                             LOG.warning("configured tuner gain %.1f dB NOT applied: %s",
                                         self.config.tuner_gain_db, gain_exc)
+                            if gate is not None:
+                                gate.open_now()
                     if processor.samples_decoded > decoded:
                         # Samples arrived, so the source is delivering. Read
                         # after feed, not before: the counter this compares
@@ -1355,6 +1454,10 @@ class SDRPlusPlusBridge:
                         with self._lock:
                             self._last_sample_monotonic = time.monotonic()
                             self._starvation = None
+                    if gate is not None and not gate.is_open:
+                        # Built from samples at the old gain, or from the stretch
+                        # the dongle takes to change; not published, not ingested.
+                        frames = []
                     for frame in frames:
                         # Publish first, unconditionally. Channelization is
                         # analysis layered on top of the spectrum product; it

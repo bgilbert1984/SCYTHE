@@ -968,3 +968,164 @@ class ConfiguredTunerGainTests(unittest.TestCase):
                 RFBridgeConfig.from_env()
         self.assertIn("SDRPP_TUNER_GAIN_DB", str(caught.exception))
         self.assertIn("'abc'", str(caught.exception))
+
+
+class _StepHandler(socketserver.BaseRequestHandler):
+    """An rtl_tcp whose level steps down only after a queue of old-gain chunks.
+
+    It streams a loud tone, and keeps streaming it for ``inflight`` more chunks after
+    the gain command arrives (the samples rtl_tcp had already queued), then a quiet
+    one. ``header`` False sends no dongle_info, like a non-rtl_tcp IQ source.
+    """
+    inflight = 6
+    header = True
+    LOUD, QUIET = 0.9, 0.1
+
+    @staticmethod
+    def block(amp, n=4096, fs=256000.0):
+        t = np.arange(n) / fs
+        rng = np.random.default_rng(7)
+        z = amp * np.exp(2j * np.pi * 40e3 * t) + 0.01 * (
+            rng.standard_normal(n) + 1j * rng.standard_normal(n))
+        out = np.empty(2 * n, np.uint8)
+        out[0::2] = np.clip(127.5 + 127 * z.real, 0, 255)
+        out[1::2] = np.clip(127.5 + 127 * z.imag, 0, 255)
+        return out.tobytes()
+
+    def handle(self):
+        queued, gained = self.inflight, False
+        try:
+            if self.header:
+                self.request.sendall(b"RTL0" + (1).to_bytes(4, "big") + (14).to_bytes(4, "big"))
+            self.request.settimeout(0.01)
+            while True:
+                try:
+                    data = self.request.recv(5)
+                    if not data:
+                        return
+                    if data[0] == 0x04:
+                        gained = True
+                except socket.timeout:
+                    pass
+                amp = self.LOUD
+                if gained:
+                    if queued > 0:
+                        queued -= 1
+                    else:
+                        amp = self.QUIET
+                self.request.sendall(self.block(amp))
+                time.sleep(0.016)
+        except OSError:
+            return
+
+
+class GainSettleWindowTests(unittest.TestCase):
+    """Samples queued at the old gain must not reach frames, observations or the ring."""
+
+    def _serve(self, header=True):
+        handler = type("H", (_StepHandler,), {"header": header})
+        server = socketserver.ThreadingTCPServer(("127.0.0.1", 0), handler)
+        server.daemon_threads = True
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        self.addCleanup(thread.join, 2)
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        return server.server_address[1]
+
+    def _bridge(self, port, **over):
+        base = dict(iq_host="127.0.0.1", iq_port=port, sample_type="uint8",
+                    sample_rate_hz=256000.0, fft_size=256, max_bins=64, socket_timeout_s=0.5,
+                    reconnect_max_s=0.5, starvation_threshold_ms=1000.0,
+                    silence_reconnect_s=0.0, frames_per_second=60.0, tuner_gain_db=19.0)
+        base.update(over)
+        bridge = SDRPlusPlusBridge(RFBridgeConfig(**base).validated())
+        bridge.observations = RFObservationStore(cooldown_s=0.0, bucket_hz=1.0)
+        return bridge
+
+    def _levels(self, bridge):
+        return [o["peak_dbfs"] for o in bridge.observations.query(limit=2048)]
+
+    def test_without_a_settle_window_old_gain_observations_are_admitted(self):
+        """The control: the fake does leak, so the next test means something."""
+        bridge = self._bridge(self._serve(), tuner_gain_settle_ms=0.0)
+        try:
+            self.assertTrue(bridge.start())
+            time.sleep(2.0)
+        finally:
+            bridge.stop()
+        levels = self._levels(bridge)
+        self.assertTrue(any(v > -8 for v in levels), "no old-gain observation leaked")
+        self.assertTrue(any(v < -15 for v in levels), "the new gain never arrived")
+
+    def test_the_settle_window_keeps_old_gain_samples_out_of_everything(self):
+        bridge = self._bridge(self._serve(), tuner_gain_settle_ms=300.0)
+        try:
+            self.assertTrue(bridge.start())
+            time.sleep(2.0)
+            frame_levels = [f["peak_dbfs"] for f in list(bridge._frames)]
+        finally:
+            bridge.stop()
+        levels = self._levels(bridge)
+        self.assertTrue(levels, "nothing was admitted after the settle window")
+        self.assertFalse(any(v > -8 for v in levels), f"old-gain level admitted: {levels[:5]}")
+        self.assertFalse(any(v > -8 for v in frame_levels), "old-gain frame published")
+        self.assertTrue(frame_levels, "no frame was published after the settle window")
+
+    def test_an_unsupported_gain_does_not_hold_samples_back(self):
+        bridge = self._bridge(self._serve(), tuner_gain_db=20.0, tuner_gain_settle_ms=300.0)
+        try:
+            with self.assertLogs(level="WARNING") as logs:
+                self.assertTrue(bridge.start())
+                time.sleep(1.5)
+        finally:
+            bridge.stop()
+        self.assertTrue(any("NOT applied" in line for line in logs.output))
+        self.assertTrue(len(bridge._frames) > 0, "refused gain left the stream gated shut")
+
+    def test_a_stream_without_a_header_warns_and_is_not_gated(self):
+        bridge = self._bridge(self._serve(header=False), tuner_gain_settle_ms=300.0)
+        try:
+            with self.assertLogs(level="WARNING") as logs:
+                self.assertTrue(bridge.start())
+                time.sleep(1.5)
+        finally:
+            bridge.stop()
+        self.assertTrue(any("declared no tuner" in line for line in logs.output))
+        self.assertTrue(len(bridge._frames) > 0)
+
+    def test_the_gate_drops_before_the_command_then_the_quota_then_passes_the_tail(self):
+        from rf_bridge import _GainSettleGate
+        seen = []
+        opened = []
+        gate = _GainSettleGate(10, lambda iq, now=None: seen.append(iq.copy()) or int(iq.size),
+                               on_open=lambda: opened.append(True))
+        gate.sink(np.arange(5, dtype=np.complex64))          # before the command: dropped
+        self.assertEqual((seen, gate.state), ([], "WAITING"))
+        gate.command_sent()
+        gate.sink(np.arange(4, dtype=np.complex64))          # 4 of 10
+        gate.sink(np.arange(4, dtype=np.complex64))          # 8 of 10
+        self.assertEqual((seen, gate.state, opened), ([], "SETTLING", []))
+        gate.sink(np.arange(5, dtype=np.complex64) + 100)    # 2 more dropped, 3 kept
+        self.assertEqual(gate.state, "OPEN")
+        self.assertEqual(opened, [True])
+        self.assertEqual([list(a.real) for a in seen], [[102.0, 103.0, 104.0]])
+        gate.sink(np.arange(2, dtype=np.complex64))          # open: passes straight through
+        self.assertEqual(len(seen), 2)
+
+    def test_a_zero_window_opens_on_the_command_and_open_now_is_idempotent(self):
+        from rf_bridge import _GainSettleGate
+        opened = []
+        gate = _GainSettleGate(0, lambda iq, now=None: 0, on_open=lambda: opened.append(1))
+        gate.command_sent()
+        gate.open_now()
+        self.assertEqual((gate.state, opened), ("OPEN", [1]))
+
+    def test_config_and_env_validation(self):
+        import os
+        self.assertEqual(RFBridgeConfig().tuner_gain_settle_ms, 500.0)
+        for bad in (-1.0, 10_001.0, float("nan"), float("inf")):
+            with self.assertRaises(ValueError):
+                RFBridgeConfig(tuner_gain_settle_ms=bad).validated()
+        with mock.patch.dict(os.environ, {"SDRPP_TUNER_GAIN_SETTLE_MS": "750"}):
+            self.assertEqual(RFBridgeConfig.from_env().tuner_gain_settle_ms, 750.0)
