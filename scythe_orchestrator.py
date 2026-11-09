@@ -3540,6 +3540,14 @@ Examples:
                          args=(bootstrap_url, args.bootstrap_instance_name.strip()),
                          name='scythe-instance-bootstrap', daemon=True).start()
 
+    # Publish measured RF detections as Recon Entities (receiver-located, never emitter-located).
+    try:
+        from rf_bridge import get_rf_observation_store
+        from rf_recon_publisher import start_publisher
+        start_publisher(get_rf_observation_store(), _get_primary_instance_port, _proxy_post, log)
+    except Exception:
+        log.exception('RF recon publisher not started')
+
     # Register mDNS service so Android app can auto-discover this orchestrator
     _zc = register_mdns(args.port)
     if _zc is not None:
