@@ -1,8 +1,10 @@
 import os
+import socket
 import socketserver
 import threading
 import time
 import unittest
+from unittest import mock
 
 import numpy as np
 
@@ -824,3 +826,135 @@ class SilentSocketReconnectTests(unittest.TestCase):
                 self.assertEqual(sock.getsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPIDLE), 10)
         finally:
             sock.close()
+
+
+class _E4000Handler(socketserver.BaseRequestHandler):
+    """An rtl_tcp that greets as an E4000, streams samples and records commands."""
+    connections = []                 # one list of (opcode, value) per accepted socket
+    drop_first_after_s = 0.0
+
+    def handle(self):
+        record = []
+        self.__class__.connections.append(record)
+        first = len(self.__class__.connections) == 1
+        started = time.monotonic()
+        buffered = b""
+        try:
+            self.request.sendall(b"RTL0" + (1).to_bytes(4, "big") + (14).to_bytes(4, "big"))
+            self.request.settimeout(0.05)
+            while True:
+                try:
+                    chunk = self.request.recv(5)
+                    if not chunk:
+                        return
+                    buffered += chunk
+                    while len(buffered) >= 5:
+                        record.append((buffered[0], int.from_bytes(buffered[1:5], "big")))
+                        buffered = buffered[5:]
+                except socket.timeout:
+                    pass
+                self.request.sendall(bytes([127, 128] * 2048))
+                if first and self.__class__.drop_first_after_s and \
+                        time.monotonic() - started > self.__class__.drop_first_after_s:
+                    return
+        except OSError:
+            return
+
+
+class ConfiguredTunerGainTests(unittest.TestCase):
+    """A gain set once by hand lasts until rtl_tcp or the dongle restarts."""
+
+    def _serve(self, drop_first_after_s=0.0):
+        _E4000Handler.connections = []
+        _E4000Handler.drop_first_after_s = drop_first_after_s
+        server = socketserver.ThreadingTCPServer(("127.0.0.1", 0), _E4000Handler)
+        server.daemon_threads = True
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        self.addCleanup(thread.join, 2)
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        return server.server_address[1]
+
+    def _config(self, port, **over):
+        base = dict(iq_host="127.0.0.1", iq_port=port, sample_type="uint8", fft_size=256,
+                    max_bins=64, socket_timeout_s=0.5, reconnect_max_s=0.5,
+                    starvation_threshold_ms=1000.0, silence_reconnect_s=0.0)
+        base.update(over)
+        return RFBridgeConfig(**base).validated()
+
+    def _wait(self, predicate, timeout=8.0):
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline and not predicate():
+            time.sleep(0.05)
+        return predicate()
+
+    def test_the_e4000_catalogue_matches_the_devices_reported_count(self):
+        bridge = SDRPlusPlusBridge(RFBridgeConfig())
+        bridge._dongle_info = {"tuner_type": "E4000", "tuner_type_code": 1,
+                               "tuner_gain_count": 14, "device_authority": "DEVICE_DECLARED"}
+        catalogue = bridge.supported_gains_db()
+        self.assertTrue(catalogue["available"])
+        self.assertEqual(len(catalogue["gains_db"]), 14)
+        self.assertEqual(catalogue["gains_db"][0], -1.0)
+        self.assertIn(19.0, catalogue["gains_db"])
+        self.assertEqual(catalogue["gains_db"][-1], 42.0)
+
+    def test_a_negative_gain_travels_as_twos_complement(self):
+        bridge = SDRPlusPlusBridge(RFBridgeConfig())
+        sent = []
+
+        class _Sock:
+            def sendall(self, data):
+                sent.append(data)
+        bridge._socket = _Sock()
+        bridge._send_rtl_command(0x04, -10)
+        self.assertEqual(sent, [b"\x04\xff\xff\xff\xf6"])
+
+    def test_gain_is_applied_on_connect_and_again_after_a_reconnect(self):
+        port = self._serve(drop_first_after_s=1.0)
+        bridge = SDRPlusPlusBridge(self._config(port, tuner_gain_db=19.0))
+        try:
+            self.assertTrue(bridge.start())
+            self.assertTrue(self._wait(lambda: len(_E4000Handler.connections) >= 2
+                                       and len(_E4000Handler.connections[1]) >= 2),
+                            "the gain was not re-applied on the second connection")
+            for record in _E4000Handler.connections[:2]:
+                self.assertEqual(record[:2], [(0x03, 1), (0x04, 190)])
+        finally:
+            bridge.stop()
+
+    def test_no_configured_gain_sends_nothing(self):
+        port = self._serve()
+        bridge = SDRPlusPlusBridge(self._config(port))
+        try:
+            self.assertTrue(bridge.start())
+            self.assertTrue(self._wait(lambda: len(_E4000Handler.connections) >= 1))
+            time.sleep(1.0)
+            self.assertEqual(_E4000Handler.connections[0], [])
+        finally:
+            bridge.stop()
+
+    def test_an_unsupported_gain_is_logged_and_the_stream_keeps_running(self):
+        port = self._serve()
+        bridge = SDRPlusPlusBridge(self._config(port, tuner_gain_db=20.0))
+        try:
+            with self.assertLogs(level="WARNING") as logs:
+                self.assertTrue(bridge.start())
+                time.sleep(1.5)
+            self.assertTrue(any("NOT applied" in line for line in logs.output))
+            self.assertEqual(_E4000Handler.connections[0], [], "nothing may be sent")
+            self.assertEqual(bridge.status()["bridge_state"], "streaming")
+        finally:
+            bridge.stop()
+
+    def test_env_parsing(self):
+        import os
+        for raw, want in (("19", 19.0), ("-1", -1.0), ("nan", None), ("auto", None), ("", None)):
+            with mock.patch.dict(os.environ, {"SDRPP_TUNER_GAIN_DB": raw}):
+                self.assertEqual(RFBridgeConfig.from_env().tuner_gain_db, want, raw)
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("SDRPP_TUNER_GAIN_DB", None)
+            self.assertIsNone(RFBridgeConfig.from_env().tuner_gain_db)
+        with self.assertRaises(ValueError):
+            RFBridgeConfig(tuner_gain_db=float("inf")).validated()
