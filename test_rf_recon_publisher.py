@@ -118,6 +118,65 @@ class RunningCentreTests(unittest.TestCase):
         self.assertTrue(all("merged_into" not in b["meta"] for _, b in r.posts))
 
 
+class HDSidebandTests(unittest.TestCase):
+    # 512 bins x 4 kHz from 98.978 MHz; floor -58 dBFS
+    F0, BW, N = 98_978_000.0, 4000.0, 512
+
+    def _frame(self, seq, carrier_hz, lower_db=None, upper_db=None):
+        bins = [-58.0] * self.N
+        for i in range(self.N):
+            f = self.F0 + (i + 0.5) * self.BW
+            d = f - carrier_hz
+            if abs(d) <= 60_000: bins[i] = -26.0
+            elif lower_db is not None and -198_000 <= d <= -129_000: bins[i] = lower_db
+            elif upper_db is not None and 129_000 <= d <= 198_000: bins[i] = upper_db
+        return {"sequence": seq, "bins_dbfs": bins, "min_frequency_hz": self.F0, "sample_rate_hz": self.BW * self.N}
+
+    def _rig(self, **kw):
+        r = Rig()
+        self.seq = [0]
+        def src():
+            self.seq[0] += 1
+            return self._frame(self.seq[0], 99_900_000.0, **kw)
+        r.pub = RFReconPublisher(r.store, r._post, location=(47.8, -122.3), clock=lambda: r.now[0], frame_source=src)
+        r.store.add(1, 99_900_000.0)
+        for _ in range(160): r.pub.step()
+        r.now[0] += 10; r.pub.step()  # past the update throttle
+        return r
+
+    def _note(self, r):
+        return next(b for _, b in reversed(r.posts) if "hd_radio_sidebands" in b["meta"])["meta"]["hd_radio_sidebands"]
+
+    def test_both_sidebands_consistent_with_hd(self):
+        n = self._note(self._rig(lower_db=-45.0, upper_db=-44.0))
+        self.assertEqual(n["status"], "CONSISTENT_WITH_HYBRID_HD")
+        self.assertEqual(n["evidence_class"], "DERIVED_INFERENCE")
+        self.assertAlmostEqual(n["lower_dbc"], -19.0, delta=0.6)
+        self.assertGreaterEqual(n["lower_over_floor_db"], 6)
+
+    def test_no_sidebands_is_not_seen(self):
+        self.assertEqual(self._note(self._rig())["status"], "NOT_SEEN")
+
+    def test_one_sided(self):
+        self.assertEqual(self._note(self._rig(lower_db=-45.0))["status"], "ONE_SIDEBAND_ONLY")
+
+    def test_no_note_before_enough_frames(self):
+        r = Rig(); r.store.add(1, 99.9e6)
+        r.pub = RFReconPublisher(r.store, r._post, frame_source=lambda: self._frame(1, 99.9e6, -45.0, -45.0))
+        r.pub.step()
+        self.assertTrue(all("hd_radio_sidebands" not in b["meta"] for _, b in r.posts))
+
+    def test_station_near_band_edge_is_out_of_span_not_guessed(self):
+        r = Rig(); r.store.add(1, 99.05e6)
+        s = [0]
+        def src():
+            s[0] += 1; return self._frame(s[0], 99_050_000.0, -45.0, -45.0)
+        r.pub = RFReconPublisher(r.store, r._post, clock=lambda: r.now[0], frame_source=src)
+        for _ in range(160): r.pub.step()
+        r.now[0] += 10; r.pub.step()
+        self.assertEqual(self._note(r)["status"], "OUT_OF_SPAN")
+
+
 class LocationEnvTests(unittest.TestCase):
     def test_blank_is_none(self):
         self.assertIsNone(sensor_location_from_env({}))

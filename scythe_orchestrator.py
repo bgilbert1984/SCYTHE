@@ -3542,9 +3542,10 @@ Examples:
 
     # Publish measured RF detections as Recon Entities (receiver-located, never emitter-located).
     try:
-        from rf_bridge import get_rf_observation_store
+        from rf_bridge import get_rf_bridge, get_rf_observation_store
         from rf_recon_publisher import start_publisher
-        start_publisher(get_rf_observation_store(), _get_primary_instance_port, _proxy_post, log)
+        start_publisher(get_rf_observation_store(), _get_primary_instance_port, _proxy_post, log,
+                        frame_source=get_rf_bridge().latest_frame)
     except Exception:
         log.exception('RF recon publisher not started')
 

@@ -28,6 +28,13 @@ DEFAULT_MIN_UPDATE_S = 5.0
 DEFAULT_POLL_S = 2.0
 SOURCE = "rf_observation_publisher"
 
+# HD Radio hybrid sidebands: two ~70 kHz blocks 129-198 kHz either side of the analog FM
+# carrier. Presence is INFERRED from spectrum shape here; nothing is decoded.
+HD_SB_NEAR_HZ, HD_SB_FAR_HZ = 129_000.0, 198_000.0
+HD_SB_PRESENT_DB = 6.0       # a block this far over the floor proxy counts as present
+HD_MIN_FRAMES = 150          # frames averaged before any note is made
+HD_CARRIER_SEARCH_HZ = 60_000.0
+
 
 _DOTENV_KEYS = ("SDRPP_SENSOR_LAT", "SDRPP_SENSOR_LON", "SDRPP_RECON_PUBLISH", "SDRPP_RECON_CHANNEL_HZ")
 
@@ -83,7 +90,8 @@ class RFReconPublisher:
                  *, location: Optional[Tuple[float, float]] = None,
                  channel_hz: float = DEFAULT_CHANNEL_HZ,
                  min_update_s: float = DEFAULT_MIN_UPDATE_S,
-                 clock: Callable[[], float] = time.time):
+                 clock: Callable[[], float] = time.time,
+                 frame_source: Optional[Callable[[], Optional[dict]]] = None):
         if not channel_hz > 0:
             raise ValueError("channel_hz must be positive")
         self._store = store
@@ -96,6 +104,11 @@ class RFReconPublisher:
         self._seen_at_cursor: set = set()
         self._entities: List[Dict[str, Any]] = []
         self._lock = threading.Lock()
+        self._frame_source = frame_source
+        self._spec_sum = None        # running sum of linear per-bin power
+        self._spec_frames = 0
+        self._spec_seq = None
+        self._spec_axis = None       # (min_frequency_hz, bin_width_hz, bin_count)
         self.published = 0
         self.failed = 0
 
@@ -149,6 +162,68 @@ class RFReconPublisher:
             gone["merged_into"] = keep["entity_id"]
             gone["dirty"] = True
 
+    # -- HD Radio sideband inference ----------------------------------------
+    def _accumulate_frame(self) -> None:
+        if self._frame_source is None:
+            return
+        try:
+            frame = self._frame_source()
+        except Exception:
+            return
+        if not frame or not frame.get("bins_dbfs") or frame.get("sequence") == self._spec_seq:
+            return
+        bins = [float(b) for b in frame["bins_dbfs"]]
+        axis = (float(frame["min_frequency_hz"]), float(frame["sample_rate_hz"]) / len(bins), len(bins))
+        if self._spec_axis != axis:  # span or resolution changed: the sum is no longer comparable
+            self._spec_sum, self._spec_frames, self._spec_axis = [0.0] * len(bins), 0, axis
+        for i, b in enumerate(bins):
+            self._spec_sum[i] += 10.0 ** (b / 10.0)
+        self._spec_frames += 1
+        self._spec_seq = frame.get("sequence")
+
+    def _band_db(self, lo_hz: float, hi_hz: float) -> Optional[float]:
+        f0, bw, n = self._spec_axis
+        i0, i1 = int((lo_hz - f0) / bw), int((hi_hz - f0) / bw)
+        if i0 < 0 or i1 >= n or i1 < i0:
+            return None  # outside the captured span: no claim
+        mean = sum(self._spec_sum[i0:i1 + 1]) / (i1 - i0 + 1) / self._spec_frames
+        return 10.0 * math.log10(mean + 1e-30)
+
+    def _hd_note(self, ent: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        if self._spec_axis is None or self._spec_frames < HD_MIN_FRAMES:
+            return None
+        f0, bw, n = self._spec_axis
+        centre = self._centre(ent)
+        # the carrier is the power-weighted centre of the bins within 3 dB of the strongest one near
+        # the entity centre (the peak wanders, and a flat-topped FM plateau has no single top bin)
+        lo, hi = max(0, int((centre - HD_CARRIER_SEARCH_HZ - f0) / bw)), min(n - 1, int((centre + HD_CARRIER_SEARCH_HZ - f0) / bw))
+        if hi <= lo:
+            return {"status": "OUT_OF_SPAN"}
+        peak = max(self._spec_sum[lo:hi + 1])
+        near = [i for i in range(lo, hi + 1) if self._spec_sum[i] >= peak / 2.0]  # within 3 dB of the peak
+        carrier_hz = f0 + (sum(i * self._spec_sum[i] for i in near) / sum(self._spec_sum[i] for i in near) + 0.5) * bw
+        carrier = self._band_db(carrier_hz - 15_000.0, carrier_hz + 15_000.0)
+        lower = self._band_db(carrier_hz - HD_SB_FAR_HZ, carrier_hz - HD_SB_NEAR_HZ)
+        upper = self._band_db(carrier_hz + HD_SB_NEAR_HZ, carrier_hz + HD_SB_FAR_HZ)
+        if carrier is None or lower is None or upper is None:
+            return {"status": "OUT_OF_SPAN", "evidence_class": "DERIVED_INFERENCE"}
+        floor = 10.0 * math.log10(sorted(v / self._spec_frames for v in self._spec_sum)[n // 5] + 1e-30)
+        over = (lower - floor, upper - floor)
+        present = [o >= HD_SB_PRESENT_DB for o in over]
+        status = ("CONSISTENT_WITH_HYBRID_HD" if all(present)
+                  else "ONE_SIDEBAND_ONLY" if any(present) else "NOT_SEEN")
+        return {
+            "status": status, "evidence_class": "DERIVED_INFERENCE",
+            "carrier_hz": round(carrier_hz), "frames_averaged": self._spec_frames,
+            "lower_dbc": round(lower - carrier, 1), "upper_dbc": round(upper - carrier, 1),
+            "lower_over_floor_db": round(over[0], 1), "upper_over_floor_db": round(over[1], 1),
+            "present_threshold_db": HD_SB_PRESENT_DB,
+            "method": "time-averaged spectrum power in the 129-198 kHz blocks either side of the carrier, "
+                      "against the 20th-percentile bin power as floor proxy",
+            "note": "Inferred from spectrum shape only. No HD Radio decode was attempted, and bins are "
+                    "peak-downsampled so levels read a few dB high.",
+        }
+
     def _payload(self, ent: Dict[str, Any]) -> Dict[str, Any]:
         mhz = ent["frequency_hz"] / 1e6
         meta = {
@@ -177,6 +252,8 @@ class RFReconPublisher:
             "source": SOURCE,
             "meta": meta,
         }
+        if ent.get("hd_note"):
+            meta["hd_radio_sidebands"] = ent["hd_note"]
         if ent.get("merged_into"):
             meta["merged_into"] = ent["merged_into"]
             payload["name"] += " (merged into " + ent["merged_into"] + ")"
@@ -224,6 +301,17 @@ class RFReconPublisher:
             ent["modulation"] = row.get("modulation", "UNRESOLVED")
             ent["mission_id"] = row.get("mission_id")
         self._absorb_overlaps()
+        self._accumulate_frame()
+        for ent in self._entities:
+            if ent.get("merged_into"):
+                continue
+            note = self._hd_note(ent)
+            old = ent.get("hd_note")
+            # refresh when the verdict changes, or the averaged evidence has grown by 150 frames
+            if note and (old is None or old.get("status") != note.get("status")
+                         or note.get("frames_averaged", 0) >= old.get("frames_averaged", 0) + 150):
+                ent["hd_note"] = note
+                ent["dirty"] = True
         posts = 0
         now = self._clock()
         for ent in self._entities:
@@ -249,7 +337,7 @@ class RFReconPublisher:
 
 def start_publisher(store, port_fn: Callable[[], Optional[int]],
                     proxy_post: Callable[..., Optional[dict]], log=None,
-                    environ=None) -> Optional[RFReconPublisher]:
+                    environ=None, frame_source=None) -> Optional[RFReconPublisher]:
     """Start the daemon polling thread; None when disabled via SDRPP_RECON_PUBLISH=0."""
     env = dict(os.environ if environ is None else environ)
     if environ is None:
@@ -264,7 +352,7 @@ def start_publisher(store, port_fn: Callable[[], Optional[int]],
         port = port_fn()
         return None if port is None else proxy_post(port, path, body, timeout=5)
 
-    pub = RFReconPublisher(store, post, location=location, channel_hz=channel)
+    pub = RFReconPublisher(store, post, location=location, channel_hz=channel, frame_source=frame_source)
 
     def loop():
         while True:
