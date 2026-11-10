@@ -103,10 +103,51 @@ class RFReconPublisher:
     def _match(self, freq_hz: float) -> Optional[Dict[str, Any]]:
         best = None
         for ent in self._entities:
-            gap = abs(ent["match_hz"] - freq_hz)
-            if gap <= self._channel_hz and (best is None or gap < abs(best["match_hz"] - freq_hz)):
+            if ent.get("merged_into"):
+                continue
+            gap = abs(self._centre(ent) - freq_hz)
+            if gap <= self._channel_hz and (best is None or gap < abs(self._centre(best) - freq_hz)):
                 best = ent
         return best
+
+    @staticmethod
+    def _centre(ent: Dict[str, Any]) -> float:
+        # Mean of every hit's peak frequency. Matching against the FIRST hit instead left two
+        # entities 110 kHz apart unable to absorb one wandering station (live, 100.2-100.35 MHz).
+        return ent["freq_sum"] / ent["hits"]
+
+    def _absorb_overlaps(self) -> None:
+        """Merge entities whose centres have come within the channel radius.
+
+        The smaller one is folded into the larger and left published once more with
+        meta.merged_into (a graph entity cannot be deleted from here: that needs an
+        operator session), then it is never updated again.
+        """
+        while True:
+            live = [e for e in self._entities if not e.get("merged_into")]
+            pair = None
+            for i, a in enumerate(live):
+                for b in live[i + 1:]:
+                    if abs(self._centre(a) - self._centre(b)) <= self._channel_hz:
+                        pair = (a, b) if a["hits"] >= b["hits"] else (b, a)
+                        break
+                if pair:
+                    break
+            if pair is None:
+                return
+            keep, gone = pair
+            keep["hits"] += gone["hits"]
+            keep["freq_sum"] += gone["freq_sum"]
+            keep["best_snr_db"] = max(keep["best_snr_db"], gone["best_snr_db"])
+            keep["first_seen"] = min(keep["first_seen"], gone["first_seen"])
+            if gone["last_seen"] >= keep["last_seen"]:
+                for k in ("last_seen", "last_snr_db", "noise_floor_dbfs", "sensor_id"):
+                    keep[k] = gone[k]
+            if gone["peak_dbfs"] > keep["peak_dbfs"]:
+                keep["peak_dbfs"], keep["frequency_hz"] = gone["peak_dbfs"], gone["frequency_hz"]
+            keep["dirty"] = True
+            gone["merged_into"] = keep["entity_id"]
+            gone["dirty"] = True
 
     def _payload(self, ent: Dict[str, Any]) -> Dict[str, Any]:
         mhz = ent["frequency_hz"] / 1e6
@@ -136,6 +177,9 @@ class RFReconPublisher:
             "source": SOURCE,
             "meta": meta,
         }
+        if ent.get("merged_into"):
+            meta["merged_into"] = ent["merged_into"]
+            payload["name"] += " (merged into " + ent["merged_into"] + ")"
         if ent.get("mission_id"):
             payload["mission_id"] = ent["mission_id"]
         if self._location:
@@ -161,11 +205,12 @@ class RFReconPublisher:
             freq = float(row["peak_frequency_hz"])
             ent = self._match(freq)
             if ent is None:
-                ent = {"entity_id": f"RF-{int(round(freq / 1000.0)):06d}kHz", "frequency_hz": freq, "match_hz": freq,
+                ent = {"entity_id": f"RF-{int(round(freq / 1000.0)):06d}kHz", "frequency_hz": freq, "freq_sum": 0.0,
                        "peak_dbfs": row["peak_dbfs"], "hits": 0, "best_snr_db": row["snr_db"], "first_seen": row["observed_at"],
                        "last_posted": None, "dirty": True}
                 self._entities.append(ent)
             ent["hits"] += 1
+            ent["freq_sum"] += freq
             ent["dirty"] = True
             ent["best_snr_db"] = max(ent["best_snr_db"], row["snr_db"])
             ent["last_snr_db"] = row["snr_db"]
@@ -178,6 +223,7 @@ class RFReconPublisher:
             ent["signal_family"] = row.get("signal_family", "UNCLASSIFIED")
             ent["modulation"] = row.get("modulation", "UNRESOLVED")
             ent["mission_id"] = row.get("mission_id")
+        self._absorb_overlaps()
         posts = 0
         now = self._clock()
         for ent in self._entities:

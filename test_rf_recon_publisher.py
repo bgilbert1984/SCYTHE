@@ -86,6 +86,38 @@ class PublisherTests(unittest.TestCase):
         self.assertEqual(r.pub.step(), 1)
 
 
+class RunningCentreTests(unittest.TestCase):
+    def test_wandering_station_beyond_first_anchor_radius_merges(self):
+        r = Rig()
+        # two anchors 110 kHz apart (the live 100.233 / 100.343 case), then hits between them
+        r.store.add(1, 100_233_000.0); r.store.add(2, 100_343_000.0)
+        r.pub.step()
+        self.assertEqual(len({b["entity_id"] for _, b in r.posts}), 2)
+        for t_ in range(3, 40):
+            r.store.add(t_, 100_288_000.0)
+        r.now[0] += 10; r.pub.step()
+        last = {b["entity_id"]: b for _, b in r.posts}
+        merged = [b for b in last.values() if "merged_into" in b["meta"]]
+        live = [b for b in last.values() if "merged_into" not in b["meta"]]
+        self.assertEqual(len(merged), 1); self.assertEqual(len(live), 1)
+        self.assertEqual(live[0]["meta"]["hit_count"], 2 + 37)
+        self.assertIn("merged into", merged[0]["name"])
+
+    def test_absorbed_entity_is_not_updated_again(self):
+        r = Rig()
+        r.store.add(1, 100_233_000.0); r.store.add(2, 100_343_000.0)
+        for t_ in range(3, 10):
+            r.store.add(t_, 100_288_000.0)
+        r.pub.step(); r.posts.clear()
+        r.store.add(20, 100_288_000.0); r.now[0] += 10; r.pub.step()
+        self.assertTrue(all("merged_into" not in b["meta"] for _, b in r.posts))
+
+    def test_distinct_stations_not_merged(self):
+        r = Rig(); r.store.add(1, 99.9e6); r.store.add(2, 100.3e6); r.store.add(3, 99.9e6)
+        r.pub.step()
+        self.assertTrue(all("merged_into" not in b["meta"] for _, b in r.posts))
+
+
 class LocationEnvTests(unittest.TestCase):
     def test_blank_is_none(self):
         self.assertIsNone(sensor_location_from_env({}))
