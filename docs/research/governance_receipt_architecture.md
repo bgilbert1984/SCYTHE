@@ -244,7 +244,9 @@ Making the receipt mechanism's security boundary explicit, rather than leaving i
 - It does **not** replace Gate D authorization. A valid receipt means a declaration was approved
   for a specific request — it is not itself the bounded, explicit authorization to execute that
   this project's standing practice requires (see [`scythe-gate-authorization-strictness`] in
-  project memory, and the GATED3 request's own authorization-by-reference mechanism).
+  project memory, and the GATED3 request's own authorization-by-reference mechanism). Under the proposed Revision 6 channel
+  (§16 below; protocol §10.1) an `execute`-kind receipt, issued separately and after a fresh step-up, is
+  the explicit instruction to execute for requests that enable that channel. A `request`-kind receipt never is.
 - It does **not** prevent an operator from approving an incorrect or false declaration. The
   signature proves *who* approved it, not that what they approved was true. A compromised or
   careless operator identity can still approve a bad declaration; the receipt makes that act
@@ -269,6 +271,10 @@ documented explicitly so a later security review can check each one rather than 
 - The canonicalization algorithm is fixed to RFC 8785 (JCS); any verifier that canonicalizes
   differently will compute a different signature input and reject a legitimate receipt, or (worse,
   if implemented loosely) accept a tampered one.
+- **(Added with §16.)** The identity provider reports `auth_time` and `amr` honestly and the governance service verifies them
+  against the ID token's signature and the requested `max_age`; the governance service's clock and the verifier's clock agree to
+  within the stated freshness bound. Whether this FusionAuth tenant can enforce a re-authentication prompt and report these claims has
+  **not been verified**; §16.3 gives the fallback.
 - `oidc_jti` is actually checked for uniqueness by the Governance Service at issuance time, to make
   the stated replay-detection property real rather than aspirational.
 
@@ -284,6 +290,75 @@ by anything merged here.
 
 ## 15. Current status
 
-No code or protocol changes are implied by this document. This design discussion does not
+No code or protocol changes are implied by this document. **(Updated.)** §16 proposes a change to how a Gate D approval may be
+given (protocol Revision 6, §10.1); it is a proposal for owner review, is inactive until implemented, tested and enabled per request,
+and nothing in it is implemented today. This design discussion does not
 constitute, and should not be read as, a Gate D execution authorization for any attempt, including
 `GATED3-20261016T011954Z-7dc517`.
+
+## 16. Step-up approval in place of typed-digest confirmation (proposed; protocol Revision 6)
+
+**Status: proposal for owner review. Not implemented. Inactive until the governance service and verifier exist, the §16.5 tests pass,
+and the owner enables the channel for a named request.** The manual confirmation flow described in §1 remains valid and is the
+fallback at every point.
+
+### 16.1 What changes, and what does not
+Today the operator confirms by typing the exact digest, in the first person and present tense, and separately instructs execution
+(§1). This section lets a receipt, issued after a fresh FusionAuth step-up, stand in for the first two requirements:
+- **typed digest -> system binding.** The governance service computes the digests, the approval screen shows them, the signature
+  covers them. FusionAuth proves *who*; the binding proves *what*. Neither replaces the other.
+- **first person, present tense -> authenticated, statement-bound act.** The receipt records `statement_sha256`, the digest of the
+  exact text the operator saw when approving, so a deliberate, worded confirmation is still part of the record.
+- **separate instruction to execute -> unchanged.** It stays a distinct approval (§16.4).
+
+### 16.2 Receipt additions (`governance-receipt/2`, proposed)
+Adding required fields changes the wire format, so under §7 this is a new `receipt_schema`, not a silent extension of `/1`:
+```jsonc
+{
+  "receipt_schema": "governance-receipt/2",
+  "policy_version": "gate-d-rev6",
+  "approval_kind": "request" | "execute",
+  "declaration_sha256": "...", "request_sha256": "...",
+  "package_sha256": "...", "host": "...", "window_start": "...", "window_end": "...",
+  "statement_sha256": "...",     // digest of the exact approval text shown
+  "approved_by_sub": "...", "proposer_sub": "...",   // must differ
+  "auth_time": "...", "amr": ["..."],   // as reported by the identity provider
+  "step_up_max_age_s": 60,       // the bound that was enforced (value to be fixed by the owner)
+  "valid_not_before": "...", "valid_not_after": "...",   // meaningful for "execute"
+  "approval_id": "...", "oidc_jti": "...", "issued_at": "...", "kid": "..."
+}
+```
+`/1` receipts remain verifiable under their own `policy_version`; a verifier refuses a `/1` receipt for a request that requires `/2`.
+
+### 16.3 Step-up
+The approval screen starts a fresh authentication with the identity provider (OIDC `prompt=login` and a `max_age` no larger than
+the freshness bound, with an MFA requirement), and the governance service accepts the result only if the ID token's signature
+verifies, `auth_time` is within the bound at the moment of approval, and `amr` shows a second factor. A session token, however recent,
+is not step-up. **Unverified:** whether this FusionAuth tenant can enforce the re-prompt and report `auth_time`/`amr`. If it cannot,
+the fallback is for the governance service itself to require a fresh TOTP code (SCYTHE already has TOTP) and record the method; that
+is weaker (the second factor is checked by the governance service, not the provider) and must be stated in the receipt's `amr`.
+
+### 16.4 Two receipt kinds
+A `request` receipt says the operator approved this declaration for this exact request. An `execute` receipt says the operator
+instructs execution now. They are separate approvals with separate step-ups; an `execute` receipt requires an existing, verifying
+`request` receipt for the same pair of digests, is bounded by its validity period and the declared window, and is single-use. Issuing
+either executes nothing; execution remains Gate C then the protocol's §7 sequence.
+
+### 16.5 Negative cases the implementation must test (each must FAIL verification or issuance)
+stale `auth_time`; missing second factor in `amr`; approval from a session token with no step-up; `approved_by_sub` equal to
+`proposer_sub`; `request_sha256` or `declaration_sha256` not matching the frozen artifacts; `package_sha256`, host or window differing;
+replayed `oidc_jti` or `approval_id`; `execute` receipt expired, outside the window, or without a matching `request` receipt; a
+`request` receipt presented as `execute`; `statement_sha256` not matching the approved text; `policy_version` not accepted; unknown
+`kid`; a receipt re-used for another attempt label. The suite also needs one positive end-to-end case.
+
+### 16.6 Threat-model additions
+- **Session riding / cross-site request / script injection into the page.** Mitigated by requiring a per-approval step-up, which
+  injected script cannot complete; not mitigated against a fully compromised browser that the operator authenticates in.
+- **A token in the wrong hands.** The console currently places a session token in a query string (`/api/entities/stream?token=`),
+  which reaches access logs and can be pasted by accident. That token must never be sufficient to approve; step-up is what makes it
+  insufficient. Removing the token from URLs is a separate, advisable change.
+- **The assistant or another automated agent with the operator's session.** It cannot hold the step-up factor and cannot issue a
+  receipt; the proposer and approver must also differ.
+- **Operator misled by what the screen shows.** The binding is only as good as what the approval screen displays; the displayed
+  statement is hashed into the receipt so a later review can see exactly what was approved.
+- **Clock skew.** Freshness and validity checks depend on agreeing clocks (§13).

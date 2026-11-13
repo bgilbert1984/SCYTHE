@@ -56,6 +56,20 @@ blocking this merge. No change to §2, §3, §4, §6 (apart from one clarifying 
 > any frozen scientific tolerance, the r4.1 package, the comparison protocol, the Gate C
 > four-input transfer boundary, or any historical evidence. This revision does not authorize
 > anything, retroactively characterize any prior attempt, or itself permit any Dedirock connection.
+>
+> **Revision 6** (this text; **PROPOSED, design only, for owner review**) adds a second, optional
+> authorization channel, §10.1: a governance receipt (`governance_receipt_architecture.md`) issued
+> after a fresh FusionAuth step-up, which may satisfy the *typed-digest* and *first-person
+> present-tense* requirements that the chat-based channel imposes. It does **not** relax the
+> requirement for a separate explicit instruction to execute, the freshness of the operator
+> declaration, the §6 retrieval acknowledgement, or any other control. It is **inactive** until
+> the receipt mechanism is implemented, tested and enabled for a named request by the owner; until
+> then the manual channel in §10 is the only valid one. It applies prospectively: any attempt
+> already frozen, including `GATED3-20261016T011954Z-7dc517`, stays governed by the text it was
+> frozen under. No change to §2 through §9 apart from one new §8 stop condition; no change to any
+> frozen scientific tolerance, the r4.1 package, the comparison protocol, the Gate C four-input
+> transfer boundary, or any historical evidence. This revision does not authorize anything,
+> retroactively characterize any prior attempt, or itself permit any Dedirock connection.
 
 ## 1. What this is and is not
 
@@ -229,6 +243,7 @@ Steps run in this order; any deviation or unexpected output stops the gate here 
 - The monitor fails to confirm startup (§5.2) → `MONITOR_FAILURE: STARTUP`, recorded; default posture is an immediate documented manual stop of the harness, since an unmonitored run does not satisfy this gate.
 - The monitor (§5) observes available memory below the frozen 4 GB floor, an OOM-kill event, or records `OOM_OBSERVABILITY_UNAVAILABLE` → recorded; the harness is **not** automatically touched; a human decides whether to let it continue or to issue a documented manual stop (§5.6).
 - **The declared 4-hour window elapses before the job completes.** This is recorded as a `WINDOW_OVERRUN_OBSERVED` event at the moment the window closes (a timestamp comparison, not a judgment call). It does not, by itself, authorize either continuing or stopping — both require a human decision, made and recorded at that point. Continuing requires a **new, separately dated confirmation of continued availability from the same operator identity named in the declaration**, given through the same trusted out-of-band channel as the original declaration (the operator-declaration workflow of `metamorphic_r4_gate_c_preflight.md` §9.2: the operator creates and keeps the artifact; neither the tool nor an assistant creates one on the operator's behalf). This confirmation is its own new, separately timestamped artifact — never an edit to the frozen `CHECK_ONLY`/`RECHECK` records or to the original declaration file, which remain immutable. Absent that confirmation, the default is a documented manual stop once reasonably practicable; the overrun itself still does not trigger an automated kill.
+- **(New in Revision 6; applies only when the §10.1 channel is used.)** Receipt verification (receipt document §6, plus the §10.1 conditions) does not return PASS at the moment of connection, or the `execute` receipt is older than its stated validity → stop; no connection; no retry under this attempt label without a freshly issued receipt.
 - The SSH session drops, or the host becomes unreachable → documented `REPLAY_INTERRUPTED`; no automatic reconnection or resume (there is no resume capability, per the cross-host protocol §6 "Availability").
 - Any command output, file, or state not accounted for in steps 1–14 → stop immediately, document, no retrospective authorization.
 
@@ -259,6 +274,46 @@ request that says reference-by-label-and-digest is sufficient may be authorized 
 request that is silent on the question, or that states individual commands must be quoted
 verbatim, is held to that stricter requirement instead — the default remains verbatim quoting
 unless the request affirmatively says otherwise.
+
+
+### 10.1 Alternative authorization channel: step-up governance receipt (Revision 6, proposed)
+
+**Status: proposed; inactive.** Nothing in this subsection takes effect until all of the following are true: the governance service
+and receipt verifier described in `governance_receipt_architecture.md` exist and have been tested (including the negative cases in its
+§16.5); the owner has recorded, for a named Gate D request, that this channel is enabled for it; and the request's own text says so (the
+same rule §10 already applies to authorization by reference). Until then §10 above is the only valid channel, unchanged.
+
+**What the channel can replace, and what it cannot.** The chat-based channel asks the operator to type the exact digest back, in the
+first person and present tense, and to give a separate explicit instruction to execute. Those requirements guard three different things:
+
+| Requirement | Guards against | In the receipt channel |
+|---|---|---|
+| Exact digest typed back | approving something other than what was reviewed; stale or accidental confirmation | **Replaced** by system binding: the governance service computes the digests itself, the approval screen shows them, and the signed receipt covers them (`declaration_sha256`, `request_sha256`, the package digest, host, window, `policy_version`). The operator does not retype a digest; a receipt that does not match the frozen request fails verification. |
+| First person, present tense | the assistant, or anything other than the operator, inferring or supplying an approval from a conversation | **Replaced** by authentication: only a FusionAuth session that has just completed a step-up can create a receipt, and the receipt records the exact statement text the operator saw (`statement_sha256`). The principle is kept unchanged: an approval is never inferred, never supplied by the assistant, and never produced from a session token alone. |
+| Separate explicit instruction to execute | authorization and execution collapsing into one act | **Kept, not relaxed.** An `execute` receipt is a different `approval_kind` from the `request` receipt, needs its own step-up, and may be issued only after the `request` receipt exists. Issuing the `request` receipt executes nothing. |
+
+**Conditions (all required).**
+1. **Fresh step-up.** Each receipt is preceded by a fresh interactive factor (TOTP or WebAuthn) completed within a freshness bound at the
+   moment of approval (proposed: 60 seconds; the owner fixes the value). A session token, however recent, does not satisfy this. The
+   receipt records `auth_time` and the authentication method(s) (`amr`) the identity provider reports.
+2. **Binding, per the receipt document §4 and §16.** The receipt covers the declaration digest and the frozen request digest together,
+   plus the package digest, host, window and `policy_version`.
+3. **Proposer and approver differ.** An approval by the identity that proposed the request does not satisfy this channel (the ADR 0006
+   rule, retained).
+4. **Separate execute receipt, bounded in time.** The `execute` receipt carries a validity period (proposed: it must be verified no more
+   than a stated number of minutes before §7 step 3, and the declared window must be current; the owner fixes the value) and is
+   single-use (`oidc_jti`/`approval_id` replay detection).
+5. **No inference by the assistant, and no standing approval.** The assistant cannot hold the step-up factor and cannot issue a
+   receipt. A receipt is never reused for another attempt label, and nothing here converts general trust in the operator's availability
+   into an execute instruction.
+6. **Verification at the enforcement point.** Gate C (and the launcher) verify the receipt offline against the trust store (receipt
+   document §6, §8, §9) and refuse on anything but PASS. Gate C still never calls the identity provider.
+7. **Fallback preserved.** If the receipt cannot be verified for any reason, the manual channel of §10 remains available and unchanged;
+   there is no path where a receipt failure silently authorizes.
+
+**What this channel does not do.** It does not attest that the host is in the declared state, does not prove execution occurred (receipt
+document §12), and does not make an approver's mistake impossible, only attributable. A valid receipt is an approval artifact; execution
+still happens only after Gate C and the §7 sequence pass.
 
 ## 11. Preserved, not resolved
 
