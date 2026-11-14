@@ -1,0 +1,35 @@
+{
+ "authorization": "DRAFT - NOT FROZEN, NOT REGISTERED IN THE SEQUENCER. Proposed replacement 5.21 catalogue run declaration for the Nooelec SMArt XTR SN 71874552, tuner E4000. It replaces only the gain (29.7 dB, an R820T2 step the E4000 does not have, -> 29.0 dB, an E4000 step) and adds the tuner family to the receiver binding. It becomes an authorization only when the owner accepts it, the file is renamed without .DRAFT, and its path is added to _ADDITIONAL_AUTHORIZED_DECLARATION_PATHS in a reviewed change. docs/521_AUTHORIZED_RUN_DECLARATION_XTR.json (frozen 2026-11-03) and the NESDR authorization are unchanged by this file. See docs/521_XTR_REQUIREMENTS_REVAMP_AMENDMENT_DRAFT.md.",
+ "bands": [
+  {
+   "band_id": "UHF_LOW",
+   "high_hz": 440000000,
+   "low_hz": 400000000
+  },
+  {
+   "band_id": "UHF_HIGH",
+   "high_hz": 470000000,
+   "low_hz": 440000000
+  }
+ ],
+ "epoch": 1,
+ "gain_db": 29.0,
+ "note": "Chain-defining fields. A run-time declaration must match the bound subset exactly; any mismatch is a pre-contact refusal (DECLARATION_NOT_AUTHORIZED). Bands are the frozen split UHF_LOW 400-440 MHz and UHF_HIGH 440-470 MHz (2026-09-30); band identity participates in tuning generation. Operational fields (run_id, epoch, site prose, rtl_tcp endpoint, output_dir) are the operator's launch choices and are not bound. Tuner family (receiver.tuner) is a chain-defining field in this authorization: the sequencer reads the family back from rtl_tcp's dongle_info header and refuses a mismatch before any command.",
+ "ppm_justification": "UNCALIBRATED_RECEIVER_CONSERVATIVE_BOUND. reference_hz 28.8 MHz and reference_ppm 100 are a BOUND, not an identification of the XTR reference oscillator, which has not been inspected and is not to be (owner, 2026-10-12). SN 71874552 is not frequency-calibrated or disciplined; per the accepted 5.21 procedure an uncalibrated dongle declares +/-100 ppm. At 100 ppm the reference comb's harmonic cap is 3 (28.8, 57.6, 86.4 MHz), so it has no classification power in the authorized 400-470 MHz bands. Any datasheet TCXO figure, and any later comparison of observed spur spacing with a 28.8 MHz comb, is corroboration or commentary only and is never consumed as the ReferenceComb tolerance.",
+ "receiver": {
+  "description": "Nooelec SMArt XTR, SN 71874552, Elonics E4000 tuner",
+  "sensor_id": "71874552",
+  "tuner": "E4000"
+ },
+ "reference_hz": 28800000,
+ "reference_ppm": 100,
+ "run_id": "521-UHF-XTR-E4K-EPOCH1",
+ "seed": 7535194158483371716,
+ "site": "Operator states the venue at run time (operational field, not bound).",
+ "termination": {
+  "connector": "SMA-male",
+  "fitted": true,
+  "note": "operator stated in session 2026-11-03 that a termination is fitted on the XTR input; connector type is the default carried from the 2026-09-29 load, unverified",
+  "part": "generic 50 ohm SMA termination load (part number NOT verified)"
+ }
+}
