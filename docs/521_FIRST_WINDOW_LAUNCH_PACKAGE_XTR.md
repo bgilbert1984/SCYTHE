@@ -54,6 +54,11 @@ If the real load part differs from the frozen string, the run-time declaration c
 - [ ] rtl_tcp started by the operator for the run reports in its dongle_info header tuner type 1 and 14 gains; the sequencer refuses a mismatch before sending any command.
 - [ ] Port (default 1234) has **exactly one** client: the run's own sequencer. A second client means a port or dongle fight: stop and clear it.
 - [ ] No USB re-enumeration flaps in the preceding hour (a flap mid-window invalidates that window).
+- [ ] **Stream-liveness pre-run check** (the receiver must be delivering live samples, not a replayed buffer; see the 2026-11-13 wedged-device run). With rtl_tcp stopped and the load fitted,
+      read about 4 MiB directly and test one window:
+      `timeout 6 rtl_sdr -f 445915431 -s 2048000 -g 29 /tmp/liveness.u8; python3 -c "import sys,rf_spur_catalogue_sequencer as s; r=s.stream_liveness(open(sys.argv[1],'rb').read()[:1048576]); print(r); sys.exit(0 if r['live'] else 1)" /tmp/liveness.u8`
+      It must print `'live': True` with a best-lag match well under 0.99 (terminated noise is about 0.4). `live: False` is a NO-GO: `usbipd detach` then `attach --wsl --busid <id>`, then re-check.
+      The sequencer also enforces this on every visit and aborts the run with `STREAM_NOT_LIVE` before anything is spooled.
 
 ## 4. Declaration check (no tuner contact)
 - [ ] Build the run-time declaration from the frozen file plus the operational fields, then run, from the repository root:
@@ -72,7 +77,7 @@ If the real load part differs from the frozen string, the run-time declaration c
 |---|---|---|
 | Load (§1) | Identity recorded, or "not verified" stated truthfully | A verification claim without evidence |
 | Fitting (§2) | Antenna off, load seated, act recorded | Antenna attached / loose fit |
-| Receiver (§3) | SN 71874552, E4000, single client, no flaps | Wrong unit / second client / flapping |
+| Receiver (§3) | SN 71874552, E4000, single client, no flaps, liveness check `live: True` | Wrong unit / second client / flapping / `live: False` |
 | Declaration (§4) | `declaration OK` against the E4000 freeze | Any refusal |
 | Site (§5) | Location + enclosure declared by the owner | Assumed from hostname |
 
