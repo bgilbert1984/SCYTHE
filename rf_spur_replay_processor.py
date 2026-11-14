@@ -109,7 +109,7 @@ class ReplayProcessor:
         self.recompute = recompute
         with open(os.path.join(evidence_dir, "declaration.json")) as handle:
             self.decl = json.load(handle)
-        seq.check_declaration_authorized(self.decl)
+        seq.check_declaration_authorized(self.decl, historical=True)
         with open(os.path.join(evidence_dir, "schedule.json")) as handle:
             sched_doc = json.load(handle)
         self.tunings, self.schedule, self.schedule_digest = (

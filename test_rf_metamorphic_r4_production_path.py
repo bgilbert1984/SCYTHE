@@ -62,7 +62,7 @@ def run_epoch_with_tone(bin_, variant="production"):
     root = tempfile.mkdtemp(prefix="r4-prodpath-")
     patches = [mock.patch.object(seq, "generate_tunings", lambda **_k: TUNINGS),
                mock.patch.object(seq, "generate_visit_schedule", lambda **_k: SCHEDULE),
-               mock.patch.object(seq, "check_declaration_authorized", lambda decl: None),
+               mock.patch.object(seq, "check_declaration_authorized", lambda decl, **_k: None),
                mock.patch.object(seq, "admit_schedule", lambda *a, **k: "test-schedule-digest")]
     if edit is not None:
         fn = H.build_variant(edit)
