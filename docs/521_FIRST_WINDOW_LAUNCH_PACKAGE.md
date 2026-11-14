@@ -1,6 +1,7 @@
 # §5.21 First-Window Go/No-Go Launch Package
 
-**Status: DRAFT — prepared 2026-09-29, awaiting the 50 Ω load delivery**
+**Status: SUPERSEDED 2026-11-14 by `docs/521_FIRST_WINDOW_LAUNCH_PACKAGE_XTR.md` (the v5, SN 14530058, is permanently dead and its authorization is retired). Kept unchanged below as the 2026-09-29 record.**
+**Original status: DRAFT — prepared 2026-09-29, awaiting the 50 Ω load delivery**
 **Gate: Epoch 1 (initial session). No tuner operation for the catalogue run has occurred.**
 
 This package certifies the hardware and site preconditions for the first bounded
