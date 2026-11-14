@@ -12,9 +12,10 @@ class XtrAuthorization(unittest.TestCase):
         self.xtr = load("521_AUTHORIZED_RUN_DECLARATION_XTR.json")
         self.nesdr = load("521_AUTHORIZED_RUN_DECLARATION.json")
 
-    def test_both_authorizations_accept_themselves(self):
+    def test_xtr_accepts_itself_and_v5_validates_as_history(self):
         seq.check_declaration_authorized(self.xtr)
-        seq.check_declaration_authorized(self.nesdr)
+        # the v5 authorization is retired: a new run is refused, history still validates (test_rf_521_v5_retirement.py)
+        seq.check_declaration_authorized(self.nesdr, historical=True)
 
     def test_xtr_shares_the_schedule_fields(self):
         for k in ("bands", "gain_db", "seed", "reference_hz", "reference_ppm"):

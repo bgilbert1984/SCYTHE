@@ -184,14 +184,14 @@ class AuthorizationBindingTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             decl = _authorized_declaration(tmpdir)
             # should not raise
-            check_declaration_authorized(decl)
+            check_declaration_authorized(decl, historical=True)
 
     def test_wrong_gain_refused(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             decl = _authorized_declaration(tmpdir)
             decl["gain_db"] = 20.7  # the 2026-10-03 mistake
             with self.assertRaises(SequencerRefused) as ctx:
-                check_declaration_authorized(decl)
+                check_declaration_authorized(decl, historical=True)
             self.assertEqual(ctx.exception.code,
                              "DECLARATION_NOT_AUTHORIZED")
             self.assertIn("29.7", str(ctx.exception))
@@ -201,7 +201,7 @@ class AuthorizationBindingTests(unittest.TestCase):
             decl = _authorized_declaration(tmpdir)
             decl["seed"] = 375934030  # the 2026-10-03 mistake
             with self.assertRaises(SequencerRefused) as ctx:
-                check_declaration_authorized(decl)
+                check_declaration_authorized(decl, historical=True)
             self.assertEqual(ctx.exception.code,
                              "DECLARATION_NOT_AUTHORIZED")
 

@@ -720,17 +720,37 @@ def _authorized_chain_subset(decl: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def check_declaration_authorized(decl: Dict[str, Any]) -> None:
+# Receivers whose authorization is RETIRED: no new tuner contact is authorized for
+# them. Their frozen authorization files stay byte-identical and stay valid for
+# HISTORICAL checks only (replay and reanalysis of evidence already collected).
+_RETIRED_SENSOR_IDS = {
+    "14530058": "NESDR SMArt v5 SN 14530058 is permanently dead (owner, "
+                "2026-10-11); its 5.21 authorization was retired 2026-11-14 "
+                "(docs/521_V5_AUTHORIZATION_RETIREMENT.md)",
+}
+
+
+def check_declaration_authorized(decl: Dict[str, Any], *,
+                                 historical: bool = False) -> None:
     """Refuse before tuner contact unless the declaration matches the frozen
     authorization on every chain-defining field.
+
+    A declaration for a RETIRED receiver is refused (`RECEIVER_RETIRED`) unless
+    `historical=True`, which replay and reanalysis of already-collected
+    evidence pass: the v5's frozen authorization still validates its own
+    spooled runs, but cannot authorize a new run.
 
     20.7 dB against an authorized 29.7 dB becomes a pre-contact refusal here,
     not a post-hoc discovery after 192 visits. Operational fields (run_id,
     epoch, site prose, rtl_tcp endpoint, output_dir) are the operator's launch
     choices and are not bound.
     """
-    paths = (_AUTHORIZED_DECLARATION_PATH,
-             *_ADDITIONAL_AUTHORIZED_DECLARATION_PATHS)
+    retired = _RETIRED_SENSOR_IDS.get(decl["receiver"]["sensor_id"])
+    if retired is not None and not historical:
+        raise SequencerRefused("RECEIVER_RETIRED", retired)
+    paths = ((_AUTHORIZED_DECLARATION_PATH,
+              *_ADDITIONAL_AUTHORIZED_DECLARATION_PATHS) if historical
+             else tuple(_ADDITIONAL_AUTHORIZED_DECLARATION_PATHS))
     got = json.dumps(_authorized_chain_subset(decl),
                      sort_keys=True, separators=(",", ":"))
     candidates = []
@@ -1190,7 +1210,7 @@ def reanalyze_from_spool(output_dir: str) -> "Tuple[Dict[str, Any], Dict[str, An
     """
     with open(os.path.join(output_dir, "declaration.json")) as handle:
         decl = json.load(handle)
-    check_declaration_authorized(decl)
+    check_declaration_authorized(decl, historical=True)
     with open(os.path.join(output_dir, "schedule.json")) as handle:
         sched_doc = json.load(handle)
     tunings, schedule, digest = _verify_schedule_against_declaration(

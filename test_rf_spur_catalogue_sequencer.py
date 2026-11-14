@@ -393,7 +393,7 @@ class MiniRunTests(unittest.TestCase):
         seq.generate_visit_schedule = lambda **_k: schedule
         # synthetic 2-tuning schedule: authorization and the 64-tuning
         # admission invariant are covered by their own tests
-        seq.check_declaration_authorized = lambda decl: None
+        seq.check_declaration_authorized = lambda decl, **_k: None
         seq.admit_schedule = lambda *a, **k: "test-schedule-digest"
         try:
             with tempfile.TemporaryDirectory() as tmpdir:
