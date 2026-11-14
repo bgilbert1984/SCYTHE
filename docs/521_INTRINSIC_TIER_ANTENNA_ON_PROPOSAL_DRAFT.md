@@ -1,0 +1,66 @@
+# §5.21 proposal (DRAFT): intrinsic tier as pre-known, antenna-on observation runs
+
+Date: 2026-11-14. Status: PROPOSAL. Nothing here is frozen or in force; no declaration, code or test is changed by this file.
+It would need its own acceptance and a new freeze. It does not touch the prohibition on fabricated, inferred or result-selected
+references (`521_CATALOGUE_AUTHORIZATION_DECISION.md`), the 100 ppm reference bound, bands, seed or schedule.
+
+## 1. Problem
+Every catalogue run at a new venue currently needs the antenna removed and the 50 ohm load refitted, then R1 verifies the load
+(`521_TERMINATION_CONTROL.md`). The evidence we hold says that is poor value for the venue-independent part of the catalogue:
+- RERUN1/2/3 (3 valid terminated sessions, same schedule digest, different venues and gains): the near-DC cloud (~11k entries) is not
+  reproducible beyond a shuffled-tuning null; only a fixed baseband offset of +-256 kHz (fs/8) is. `rf_catalogue_tiers.py`
+  (merged, #475) returns exactly -255,996 / +255,996 Hz at occupancy 0.98 / 1.00 / 1.00 (`521_CATALOGUE_TIERS.md`).
+- Live antenna-on feasibility test (2026-11-14, `slope_feasibility_20261114`, archived and verified on dedirock; 8 tunings x 4 retune
+  positions, gain 29.0 dB E4000): the sequencer's own detector finds +-256 kHz in 64/64 capture-side cells (terminated control 64/64);
+  of the other candidates 27,021 stayed at fixed baseband offset, 189 moved with the retune (slope -1, real signals), 3,081 neither.
+
+## 2. What the code already does
+`classify_track` decides internal vs external from the retune slope alone: slope 0 -> `CONSISTENT_WITH_INTERNAL_MIXING`, slope -1
+with no declared-reference harmonic -> ingress finding (reference cap is 3 harmonics at 100 ppm, none inside 400-470 MHz).
+Termination enters only as the declared claim, the chain digest and the `required_confidence` string. So slope separation does not
+depend on the load; what the load buys is the claim that persistent entries are receiver-intrinsic with no ambient contribution.
+
+## 3. Proposal
+**P1. Intrinsic tier artifact.** Derive `intrinsic_tier.json` with `rf_catalogue_tiers.py` from >= 3 valid terminated sessions of
+one chain (tuner family, sample rate, schedule digest). It is hash-pinned and bound to that chain. The 3 existing sessions give the
+first artifact for the E4000/2.048 MS/s/schedule d35d706f chain; only +-256 kHz qualifies. All else stays `SESSION_SCOPED`.
+**P2. Antenna-on observation run (new mode, new authorization).** A declaration with `termination.mode = ANTENNA_ON_OBSERVATION`
+instead of a fitted load, plus the P1 artifact hash. The chain digest includes the mode and the tier hash, so an antenna-on run can
+never satisfy a terminated authorization or vice versa. R1 does not apply (it would correctly say NOT_TERMINATED); a saturation and
+input-level guard takes its place (P4).
+**P3. Classification in that mode.**
+- fixed offset on the tier list, slope 0 -> `INTRINSIC_KNOWN` (not newly catalogued);
+- slope 0 elsewhere -> `FIXED_OFFSET_UNCONFIRMED`, session-scoped, never reused as terminated evidence;
+- slope -1 -> ingress finding, as today;
+- ambiguous slope -> unresolved, as today.
+**P4. Guards.** Per visit: ADC saturation fraction and sample std against limits (a saturated front end can bury or create products);
+a visit above the limit is refused, not scored. Stream-liveness stays mandatory.
+**P5. Revalidation.** A new chain (gain family, rate, tuner, hardware) starts with no tier and needs 3 terminated sessions. A
+terminated session is also required after any hardware change (cable, XTR unit, case) and is recommended periodically; interval
+is an owner decision.
+
+## 4. Limits, stated plainly
+- The live test covered UHF 400-470 MHz at one quiet site (sample std 0.7-0.8 LSB, 0% saturation). Strong-signal bands (FM, cellular)
+  and any saturation behaviour are untested; P4's limits cannot be set from this data alone.
+- Only 189 moving candidates were seen, concentrated in a few tunings. That shows separation works there, not how it behaves when a
+  real signal sits on a spur offset or changes during the visit.
+- Antenna-on gave ~949 candidates per capture against ~2,366 per terminated visit; the cause is unexplained and should be understood
+  before relying on candidate counts.
+- Three terminated sessions only; low power in the dense near-DC cloud means a small reproducible subset could hide there.
+- Antenna-on evidence is observation, not a terminated catalogue: it must not feed back into the intrinsic tier.
+
+## 5. Not proposed
+Removing R1 for terminated runs, relaxing the load/antenna precondition for the existing terminated authorization, changing the
+reference bound, or any physical switch (an SPDT with built-in load remains an option if session-adjacent terminated windows prove
+necessary).
+
+## 6. Slices if adopted
+1. Freeze the intrinsic tier artifact for the E4000 chain. 2. Mode + chain-digest change + `INTRINSIC_KNOWN`/`FIXED_OFFSET_UNCONFIRMED`
+classes + tests (replay parity). 3. Saturation guard with limits set from a strong-signal antenna-on run. 4. New antenna-on authorization
+freeze. Each its own proposal, acceptance and PR.
+
+## 7. Questions for the owner
+- Is observation-only antenna-on evidence wanted, or only the tier (no antenna-on catalogue run at all)?
+- Which bands/venues should the saturation limits be set from (a strong-signal run is needed)?
+- Revalidation interval for the terminated tier.
+- Should the unexplained candidate-count gap be investigated first?
