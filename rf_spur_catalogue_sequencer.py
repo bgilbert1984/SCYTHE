@@ -315,6 +315,65 @@ class AcquiredVisit:
     attempt: int
 
 
+# ---------------------------------------------------------------------------
+# Stream-liveness guard (2026-11-14). A wedged USB/usbip layer once returned one
+# fixed 3,760-byte buffer on repeat for a whole 192-visit run (521-UHF-XTR-E4K-
+# EPOCH1): the sequencer called it COMPLETE with 108,160 "entries", the line
+# spectrum of the repeating pattern. Real terminated receiver noise is not exactly
+# periodic at any lag (best-lag exact-match fraction ~0.4); a replayed buffer is
+# exactly periodic (1.0). The guard refuses such a stream BEFORE it is spooled.
+# ---------------------------------------------------------------------------
+
+LIVENESS_PROBE_BYTES = 1 << 18     # autocorrelation is taken over this prefix
+LIVENESS_MAX_LAG_DIVISOR = 4       # lags up to probe/4 are searched
+STREAM_PERIODIC_MATCH_LIMIT = 0.99  # exact-match fraction at the best lag
+
+
+def stream_liveness(raw: bytes) -> Dict[str, Any]:
+    """Is this raw u8 IQ window a live sample stream, or a replayed pattern?
+
+    Returns the evidence either way: number of distinct byte values, the lag (in
+    bytes) at which the window best repeats, and the exact-match fraction at that
+    lag over the whole window. `live` is False for a constant stream or when the
+    window repeats exactly (>= STREAM_PERIODIC_MATCH_LIMIT) at some lag.
+    """
+    a = np.frombuffer(raw, dtype=np.uint8)
+    probe = a[:LIVENESS_PROBE_BYTES]
+    n_unique = int(np.unique(probe).size)
+    if n_unique < 2:
+        return {"live": False, "reason": "constant stream", "distinct_values": n_unique,
+                "best_lag_bytes": None, "match_fraction": 1.0}
+    x = probe.astype(np.float64)
+    x -= x.mean()
+    spectrum = np.fft.rfft(x, 2 * len(x))
+    ac = np.fft.irfft(spectrum * np.conj(spectrum))[:len(x)]
+    max_lag = len(x) // LIVENESS_MAX_LAG_DIVISOR
+    lag = int(np.argmax(ac[2:max_lag])) + 2
+    match = float(np.mean(a[:-lag] == a[lag:]))
+    live = match < STREAM_PERIODIC_MATCH_LIMIT
+    return {"live": live, "distinct_values": n_unique, "best_lag_bytes": lag,
+            "match_fraction": match,
+            "reason": None if live else
+            f"window repeats exactly every {lag} bytes (match {match:.4f})"}
+
+
+def check_visit_liveness(position: int, raw_windows: Sequence[bytes]) -> None:
+    """Refuse the whole run if a visit's windows are not a live stream."""
+    if len(set(raw_windows)) < len(raw_windows):
+        raise SequencerRefused(
+            "STREAM_NOT_LIVE",
+            f"visit {position}: two or more of its {len(raw_windows)} windows are "
+            "byte-identical; the receiver is replaying a buffer")
+    for index, raw in enumerate(raw_windows):
+        result = stream_liveness(raw)
+        if not result["live"]:
+            raise SequencerRefused(
+                "STREAM_NOT_LIVE",
+                f"visit {position} window {index}: {result['reason']}; the "
+                "receiver is not delivering live samples (re-attach the device "
+                "and run the pre-run liveness check)")
+
+
 def acquire_visit(tuner: RtlTcpTuner, position: int, tuning_id: str,
                   tuning_index: int, lo_hz: float,
                   retune_delta_hz: float) -> AcquiredVisit:
@@ -332,6 +391,7 @@ def acquire_visit(tuner: RtlTcpTuner, position: int, tuning_id: str,
             started = time.monotonic()
             raw_windows = [tuner.read_window_raw()
                            for _ in range(WINDOWS_PER_VISIT)]
+            check_visit_liveness(position, raw_windows)   # SequencerRefused aborts the run
             windows = [_decode_iq(raw) for raw in raw_windows]
             return AcquiredVisit(
                 position=position, tuning_index=tuning_index,
