@@ -1326,6 +1326,21 @@ def reanalyze_from_spool(output_dir: str) -> "Tuple[Dict[str, Any], Dict[str, An
     return document, decl
 
 
+def check_termination_control(decl: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Pre-contact check of the R1 termination control, if the declaration names one.
+
+    `decl["termination_control"] = {"path": ..., "sha256": ...}` (the file's SHA-256).
+    Returns the verified artifact, or None when the declaration names no control (the
+    run then rests on the operator's statement and the provenance says so). A named
+    control that does not verify refuses the run before any tuner contact.
+    """
+    named = decl.get("termination_control")
+    if named is None:
+        return None
+    import rf_termination_control as _control   # lazy: it imports this module
+    return _control.verify_artifact(named["path"], named["sha256"], decl)
+
+
 def run_epoch(decl: Dict[str, Any], tuner: RtlTcpTuner,
               progress=None) -> Dict[str, Any]:
     """Perform the epoch. Returns the catalogue document.
@@ -1338,6 +1353,7 @@ def run_epoch(decl: Dict[str, Any], tuner: RtlTcpTuner,
     """
     checked = check_declaration(decl)
     check_declaration_authorized(decl)
+    control = check_termination_control(decl)   # pre-contact; refuses on a bad control
     bands = checked["bands"]
     seed = decl["seed"]
     tunings = generate_tunings(seed=seed, bands=tuple(bands))
@@ -1348,6 +1364,9 @@ def run_epoch(decl: Dict[str, Any], tuner: RtlTcpTuner,
     output_dir = decl["output_dir"]
     _materialize_precontact(decl, tunings, schedule, schedule_digest,
                             output_dir)
+    if control is not None:    # keep the verified artifact with the evidence
+        _durably_write(os.path.join(output_dir, "termination_control.json"),
+                       (json.dumps(control, indent=1, sort_keys=True) + "\n").encode())
 
     # first tuner contact; refuses on a family or gain-count mismatch before
     # any command is sent
@@ -1516,6 +1535,11 @@ def write_artefacts(document: Dict[str, Any], decl: Dict[str, Any],
             f"Site and enclosure: {site}\n"
             f"Termination: {term_part} via {term_conn}; "
             f"fitted {term_fitted}\n"
+            + (f"Termination control: artifact {decl['termination_control']['sha256']} "
+               "verified before tuner contact (verdict TERMINATED).\n"
+               if decl.get("termination_control") else
+               "Termination control: NOT PROVIDED; the termination rests on the "
+               "operator's statement only.\n") +
             f"Reference: {ref_hz:.0f} Hz, {ref_ppm:g} ppm. "
             f"Justification: {ppm_just}\n"
             f"Gain: {gain_db} dB pinned for the whole run. "
