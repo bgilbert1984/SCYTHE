@@ -15,7 +15,6 @@ Receiver: NESDR SMArt v5, SN 14530058. Permanently dead (owner-stated 2026-10-11
 - The per-receiver `sensor_id` binding stays: it is what refuses a run on the wrong receiver.
 - The 259 v5 catalogue entries stay v5-labelled; they cannot satisfy anything for the XTR (different receiver, tuner and reference).
 
-## Deliberately NOT in this slice
-- The older XTR authorization (`521_AUTHORIZED_RUN_DECLARATION_XTR.json`, 29.7 dB, no tuner field) remains in the accepted set. On the real E4000 it
-  already refuses at first contact (tuner-family mismatch, PR #469). Retiring it belongs with registering the E4000 freeze, so the accepted set
-  is never empty by accident and the owner decides when the replacement takes effect.
+## Follow-up (2026-11-14)
+The older XTR authorization (`521_AUTHORIZED_RUN_DECLARATION_XTR.json`) was superseded by the E4000 freeze and made history-only the same way;
+see `docs/521_XTR_E4000_FREEZE_RECORD.md`.

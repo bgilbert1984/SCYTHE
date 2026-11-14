@@ -1,12 +1,12 @@
 """E4000 gain table, tuner-family binding, and the DRAFT XTR freeze (not registered in the sequencer)."""
 import copy, json, os, struct, unittest
-from unittest import mock
 
 import rf_bridge
 import rf_spur_catalogue_sequencer as seq
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-DRAFT = os.path.join(HERE, "docs", "521_AUTHORIZED_RUN_DECLARATION_XTR_E4000.DRAFT.json")
+FROZEN = os.path.join(HERE, "docs", "521_AUTHORIZED_RUN_DECLARATION_XTR_E4000.json")
+FROZEN_SHA256 = "cefa295d8905ea247281f4a5f0ecf647de470410ef1c8444db0bb79fad5078b2"
 
 
 def load(name):
@@ -88,21 +88,21 @@ class DeviceGate(unittest.TestCase):
         self.assertEqual(cm.exception.code, "TUNER_FAMILY_UNSUPPORTED")
 
 
-class DraftFreeze(unittest.TestCase):
+class FrozenE4000(unittest.TestCase):
     def setUp(self):
-        self.draft = load("521_AUTHORIZED_RUN_DECLARATION_XTR_E4000.DRAFT.json")
+        self.draft = load("521_AUTHORIZED_RUN_DECLARATION_XTR_E4000.json")
         self.old = load("521_AUTHORIZED_RUN_DECLARATION_XTR.json")
         self.run = {"rtl_tcp_host": "127.0.0.1", "rtl_tcp_port": 1234, "output_dir": "/x"}
 
-    def test_draft_is_not_registered_and_so_is_not_an_authorization(self):
-        with self.assertRaises(seq.SequencerRefused) as cm: seq.check_declaration_authorized(self.draft)
-        self.assertEqual(cm.exception.code, "DECLARATION_NOT_AUTHORIZED")
+    def test_frozen_file_is_unchanged(self):
+        import hashlib
+        with open(FROZEN, "rb") as h: self.assertEqual(hashlib.sha256(h.read()).hexdigest(), FROZEN_SHA256)
 
-    def test_draft_is_well_formed_and_accepted_once_registered(self):
+    def test_it_is_registered_for_new_runs_and_says_frozen_not_draft(self):
+        self.assertEqual(seq._ADDITIONAL_AUTHORIZED_DECLARATION_PATHS, (FROZEN,))
+        self.assertNotIn("DRAFT", self.draft["authorization"]); self.assertIn("FROZEN 2026-11-14", self.draft["authorization"])
         seq.check_declaration(self.draft | self.run)
-        with mock.patch.object(seq, "_ADDITIONAL_AUTHORIZED_DECLARATION_PATHS",
-                               seq._ADDITIONAL_AUTHORIZED_DECLARATION_PATHS + (DRAFT,)):
-            seq.check_declaration_authorized(self.draft)
+        seq.check_declaration_authorized(self.draft)
 
     def test_draft_changes_only_gain_and_receiver_binding_among_chain_fields(self):
         a, b = seq._authorized_chain_subset(self.old), seq._authorized_chain_subset(self.draft)
@@ -111,13 +111,11 @@ class DraftFreeze(unittest.TestCase):
         for k in ("bands", "seed", "reference_hz", "reference_ppm", "termination_part", "sensor_id"):
             self.assertEqual(a[k], b[k])
 
-    def test_chain_fields_are_bound_once_registered(self):
-        with mock.patch.object(seq, "_ADDITIONAL_AUTHORIZED_DECLARATION_PATHS",
-                               seq._ADDITIONAL_AUTHORIZED_DECLARATION_PATHS + (DRAFT,)):
-            for mutate in (lambda d: d.update(gain_db=34.0),
-                           lambda d: d["receiver"].update(tuner="R820T2")):
-                d = copy.deepcopy(self.draft); mutate(d)
-                with self.assertRaises(seq.SequencerRefused): seq.check_declaration_authorized(d)
+    def test_chain_fields_are_bound(self):
+        for mutate in (lambda d: d.update(gain_db=34.0),
+                       lambda d: d["receiver"].update(tuner="R820T2")):
+            d = copy.deepcopy(self.draft); mutate(d)
+            with self.assertRaises(seq.SequencerRefused): seq.check_declaration_authorized(d)
 
     def test_29_7_with_the_e4000_family_fails_well_formedness(self):
         d = copy.deepcopy(self.draft) | self.run; d["gain_db"] = 29.7

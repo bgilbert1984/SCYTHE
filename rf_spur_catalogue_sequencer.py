@@ -695,10 +695,19 @@ _AUTHORIZED_DECLARATION_PATH = os.path.join(
     os.path.dirname(os.path.abspath(__file__)),
     "docs", "521_AUTHORIZED_RUN_DECLARATION.json")
 
-# Further frozen authorizations, each bound to its own receiver. A run-time
-# declaration must match ONE of them exactly on the chain-defining fields.
-# The NESDR authorization above is unchanged; the XTR was added 2026-11-03.
+# Current frozen authorizations accepted for NEW runs. A run-time declaration
+# must match ONE of them exactly on the chain-defining fields. The XTR E4000
+# authorization (frozen 2026-11-14) replaced the 2026-11-03 XTR one, whose 29.7 dB
+# is not a step of the E4000 the unit carries.
 _ADDITIONAL_AUTHORIZED_DECLARATION_PATHS = (
+    os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                 "docs", "521_AUTHORIZED_RUN_DECLARATION_XTR_E4000.json"),
+)
+
+# Superseded frozen authorizations, valid for HISTORICAL replay/reanalysis only:
+# the evidence they authorized (the v5 spools, the RERUN2 XTR spool) was collected
+# under them and must stay reanalyzable. Their files are never edited or deleted.
+_SUPERSEDED_AUTHORIZED_DECLARATION_PATHS = (
     os.path.join(os.path.dirname(os.path.abspath(__file__)),
                  "docs", "521_AUTHORIZED_RUN_DECLARATION_XTR.json"),
 )
@@ -749,6 +758,7 @@ def check_declaration_authorized(decl: Dict[str, Any], *,
     if retired is not None and not historical:
         raise SequencerRefused("RECEIVER_RETIRED", retired)
     paths = ((_AUTHORIZED_DECLARATION_PATH,
+              *_SUPERSEDED_AUTHORIZED_DECLARATION_PATHS,
               *_ADDITIONAL_AUTHORIZED_DECLARATION_PATHS) if historical
              else tuple(_ADDITIONAL_AUTHORIZED_DECLARATION_PATHS))
     got = json.dumps(_authorized_chain_subset(decl),
@@ -766,7 +776,7 @@ def check_declaration_authorized(decl: Dict[str, Any], *,
     # No match: report against the authorization for the same receiver when
     # there is one, else the first.
     path, authorized = next(
-        ((p, a) for p, a in candidates
+        ((p, a) for p, a in reversed(candidates)   # newest authorization first
          if a["receiver"]["sensor_id"] == decl["receiver"]["sensor_id"]),
         candidates[0])
     a, b = (_authorized_chain_subset(authorized),
