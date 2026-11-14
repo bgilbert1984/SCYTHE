@@ -49,8 +49,8 @@ class V5Retirement(unittest.TestCase):
             self.assertEqual(cm.exception.code, "RECEIVER_RETIRED")
             self.assertEqual(fake.sent, []); self.assertFalse(os.path.exists(decl["output_dir"]))
 
-    def test_the_xtr_authorization_is_still_accepted_for_new_runs(self):
-        with open(os.path.join(HERE, "docs", "521_AUTHORIZED_RUN_DECLARATION_XTR.json")) as h:
+    def test_the_current_xtr_freeze_is_accepted_for_new_runs(self):
+        with open(os.path.join(HERE, "docs", "521_AUTHORIZED_RUN_DECLARATION_XTR_E4000.json")) as h:
             seq.check_declaration_authorized(json.load(h))
 
 

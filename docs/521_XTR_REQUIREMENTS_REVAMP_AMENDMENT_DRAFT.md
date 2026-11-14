@@ -1,4 +1,4 @@
-# §5.21 XTR catalogue-run requirements: revamp proposal (DRAFT, NOT ADOPTED)
+# §5.21 XTR catalogue-run requirements: revamp proposal (DRAFT; R2/R4 implemented, E4000 freeze registered 2026-11-14 - see 521_XTR_E4000_FREEZE_RECORD.md; R1/R3 open)
 
 Date: 2026-11-14 (drafted in a Claude Code session at the owner's request)
 Status: PROPOSAL. Nothing here is frozen or in force. No frozen declaration, no code and no test is changed by this file.
