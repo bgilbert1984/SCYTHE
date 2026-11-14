@@ -60,6 +60,12 @@ If the real load part differs from the frozen string, the run-time declaration c
       It must print `'live': True` with a best-lag match well under 0.99 (terminated noise is about 0.4). `live: False` is a NO-GO: `usbipd detach` then `attach --wsl --busid <id>`, then re-check.
       The sequencer also enforces this on every visit and aborts the run with `STREAM_NOT_LIVE` before anything is spooled.
 
+## 3b. Termination control (measured, `docs/521_TERMINATION_CONTROL.md`)
+- [ ] With the load fitted and rtl_tcp running: `python3 rf_termination_control.py --sensor-id 71874552 --family E4000 --gain 29.0 --out CONTROL.json` exits 0 and prints `verdict TERMINATED` and the file's SHA-256.
+      `NOT_TERMINATED` means the antenna (or a signal path) is still connected: stop and fix. `UNCALIBRATED` or `STREAM_NOT_LIVE` is also a NO-GO.
+- [ ] The declaration names it: `"termination_control": {"path": "CONTROL.json", "sha256": "<printed hash>"}`. The control must be under one hour old when the run starts. Limits are venue-scoped:
+      at a new venue, run it three times first and confirm `TERMINATED` before relying on it.
+
 ## 4. Declaration check (no tuner contact)
 - [ ] Build the run-time declaration from the frozen file plus the operational fields, then run, from the repository root:
       `python3 -c "import json,sys,rf_spur_catalogue_sequencer as s; d=json.load(open(sys.argv[1])); s.check_declaration(d); s.check_declaration_authorized(d); print('declaration OK (no tuner contact)')" DECLARATION.json`
@@ -78,6 +84,7 @@ If the real load part differs from the frozen string, the run-time declaration c
 | Load (§1) | Identity recorded, or "not verified" stated truthfully | A verification claim without evidence |
 | Fitting (§2) | Antenna off, load seated, act recorded | Antenna attached / loose fit |
 | Receiver (§3) | SN 71874552, E4000, single client, no flaps, liveness check `live: True` | Wrong unit / second client / flapping / `live: False` |
+| Termination control (§3b) | `verdict TERMINATED`, named in the declaration, under 1 h old | `NOT_TERMINATED` / `UNCALIBRATED` / stale / not run (the run may still start, but the termination then rests on the owner's statement only) |
 | Declaration (§4) | `declaration OK` against the E4000 freeze | Any refusal |
 | Site (§5) | Location + enclosure declared by the owner | Assumed from hostname |
 
@@ -88,8 +95,7 @@ If the real load part differs from the frozen string, the run-time declaration c
 Results are `SESSION_SCOPED`. The load stays fitted for the run and is verified, not refitted.
 
 ## Known limits (not gates)
-- **R1:** a measured termination control (antenna-on versus terminated capture) is proposed in `521_XTR_REQUIREMENTS_REVAMP_AMENDMENT_DRAFT.md` but is not implemented, so it is not a gate here.
-  Until it is, "the load is fitted" rests on the owner's statement and the recorded act.
+- **R1:** the measured termination control is implemented (§3b) but optional in the sequencer: without it the termination rests on the owner's statement and the recorded act. Making it mandatory would be a new freeze (owner's decision).
 - **Reference:** the 28.8 MHz / 100 ppm is a bound. At 100 ppm the comb's harmonic cap is 3 (up to 86.4 MHz), so it has no classification power in 400-470 MHz.
 - **Earlier XTR runs (RERUN2, RERUN3):** they declared **29.7 dB** (the 2026-11-03 file) on the E4000, which has no such step. The gain `rtl_tcp` actually applied for those runs is not established by their
   records, so their "gain 29.7" chain hash should not be read as the applied gain. The sequencer could not catch this until the tuner-family check (#469). This does not change their evidence; it
