@@ -112,13 +112,35 @@ _RTL_TCP_SET_GAIN_MODE = 0x03
 _RTL_TCP_SET_GAIN = 0x04
 _GAIN_MODE_MANUAL = 1
 
-# The R820T2 gain table rtl_tcp clamps to. The declared gain must be a member:
-# a clamped gain is a different chain wearing the declared chain's hash.
+# The gain tables rtl_tcp clamps to, one per tuner family. The declared gain must
+# be a member of the table for the tuner actually fitted: a clamped gain is a
+# different chain wearing the declared chain's hash. The family is declared
+# (receiver.tuner, default R820T2 for declarations frozen before 2026-11-14)
+# AND read back from rtl_tcp's dongle_info header, and the two must agree.
 _R820T2_GAINS_DB = (
     0.0, 0.9, 1.4, 2.7, 3.7, 7.7, 8.7, 12.5, 14.4, 15.7, 16.6, 19.7, 20.7,
     23.1, 25.0, 27.8, 29.7, 32.8, 33.8, 36.4, 37.2, 38.6, 40.2, 42.1, 43.4,
     43.9, 44.5, 48.0, 49.6,
 )
+# librtlsdr e4k_gains (14 steps), confirmed with `rtl_test -t` on the Nooelec
+# SMArt XTR SN 71874552 on 2026-11-14. The first step is negative, so the control
+# value travels as a two's-complement uint32 (see RtlTcpTuner._command).
+_E4000_GAINS_DB = (
+    -1.0, 1.5, 4.0, 6.5, 9.0, 11.5, 14.0, 16.5, 19.0, 21.5, 24.0, 29.0, 34.0,
+    42.0,
+)
+DEFAULT_TUNER_FAMILY = "R820T2"
+_GAIN_TABLES_DB = {"R820T2": _R820T2_GAINS_DB, "E4000": _E4000_GAINS_DB}
+# librtlsdr tuner type codes as rtl_tcp reports them. An R820T2 reports as
+# R820T (5); other codes (R828D, FC00xx, ...) have no table here and are refused
+# rather than guessed.
+_TUNER_FAMILY_BY_RTL_CODE = {1: "E4000", 5: "R820T2"}
+
+
+def declared_tuner_family(decl: Dict[str, Any]) -> str:
+    """The declared tuner family; declarations frozen before the field existed
+    are R820T2, which is what the sequencer assumed for all of them."""
+    return decl["receiver"].get("tuner", DEFAULT_TUNER_FAMILY)
 
 
 class SequencerRefused(Exception):
@@ -206,8 +228,10 @@ class RtlTcpTuner:
         if self._sock is None:
             raise SequencerRefused("TUNER_NOT_CONNECTED",
                                    "no IQ socket is open")
+        # rtl_tcp reads a big-endian uint32 and casts it to int, so a negative
+        # value (the E4000's -1.0 dB step) travels as two's complement.
         self._sock.sendall(
-            bytes([opcode]) + int(value).to_bytes(4, "big", signed=False))
+            bytes([opcode]) + (int(value) & 0xFFFFFFFF).to_bytes(4, "big"))
 
     def set_lo_hz(self, lo_hz: float) -> None:
         """Set the tuner frequency. The ring invalidates with RETUNE."""
@@ -216,12 +240,43 @@ class RtlTcpTuner:
                                    f"LO of {lo_hz!r} Hz is not a tuning")
         self._command(_RTL_TCP_SET_FREQ, int(round(lo_hz)))
 
-    def set_manual_gain_db(self, gain_db: float) -> None:
-        """Pin the gain for the whole run. One gain, one chain, one catalogue."""
-        if gain_db not in _R820T2_GAINS_DB:
+    def set_manual_gain_db(self, gain_db: float,
+                           declared_family: Optional[str] = None) -> None:
+        """Pin the gain for the whole run. One gain, one chain, one catalogue.
+
+        The tuner family is what the device reports in its dongle_info header
+        (tuner type and gain count). If the caller declares a family it must
+        match; a mismatch, an unsupported tuner, or a gain count that is not the
+        table's length refuses BEFORE any command is sent. Without a header
+        (tuner_type None) the declared family, else R820T2, is the table.
+        """
+        if self.tuner_type is None:
+            family = declared_family or DEFAULT_TUNER_FAMILY
+        else:
+            family = _TUNER_FAMILY_BY_RTL_CODE.get(self.tuner_type)
+            if family is None:
+                raise SequencerRefused(
+                    "TUNER_FAMILY_UNSUPPORTED",
+                    f"rtl_tcp reports tuner type {self.tuner_type}, which has "
+                    "no declared gain table here")
+            if declared_family is not None and declared_family != family:
+                raise SequencerRefused(
+                    "TUNER_FAMILY_MISMATCH",
+                    f"the declaration names a {declared_family} tuner but the "
+                    f"device reports {family}")
+        table = _GAIN_TABLES_DB.get(family)
+        if table is None:
+            raise SequencerRefused("TUNER_FAMILY_UNKNOWN",
+                                   f"no gain table for tuner family {family!r}")
+        if self.gain_count is not None and self.gain_count != len(table):
+            raise SequencerRefused(
+                "TUNER_GAIN_COUNT_MISMATCH",
+                f"the device reports {self.gain_count} gain steps; the "
+                f"{family} table has {len(table)}")
+        if gain_db not in table:
             raise SequencerRefused(
                 "GAIN_NOT_SUPPORTED",
-                f"{gain_db} dB is not in the R820T2 table; rtl_tcp would "
+                f"{gain_db} dB is not in the {family} table; rtl_tcp would "
                 "clamp it and the chain hash would describe a gain the "
                 "receiver is not at")
         self._command(_RTL_TCP_SET_GAIN_MODE, _GAIN_MODE_MANUAL)
@@ -601,16 +656,21 @@ def check_declaration(decl: Dict[str, Any]) -> Dict[str, Any]:
                                "the receiver names its sensor_id")
     bands = [Band(band_id=b["band_id"], low_hz=b["low_hz"],
                   high_hz=b["high_hz"]) for b in decl["bands"]]
-    if decl["gain_db"] not in _R820T2_GAINS_DB:
+    family = declared_tuner_family(decl)
+    table = _GAIN_TABLES_DB.get(family)
+    if table is None:
+        raise SequencerRefused("TUNER_FAMILY_UNKNOWN",
+                               f"no gain table for tuner family {family!r}")
+    if decl["gain_db"] not in table:
         raise SequencerRefused(
             "GAIN_NOT_SUPPORTED",
-            f"{decl['gain_db']} dB is not in the R820T2 table")
+            f"{decl['gain_db']} dB is not in the {family} table")
     return {"bands": bands}
 
 
 def _chain_digest(decl: Dict[str, Any]) -> str:
     """The terminated chain's identity, computed, never transcribed."""
-    canonical = json.dumps({
+    chain = {
         "sensor_id": decl["receiver"]["sensor_id"],
         "receiver": decl["receiver"].get("description", ""),
         "gain_db": decl["gain_db"],
@@ -618,7 +678,11 @@ def _chain_digest(decl: Dict[str, Any]) -> str:
         "termination_connector": decl["termination"]["connector"],
         "sample_rate_hz": SAMPLE_RATE_HZ,
         "sequencer_revision": SEQUENCER_REVISION,
-    }, sort_keys=True, separators=(",", ":"))
+    }
+    family = declared_tuner_family(decl)
+    if family != DEFAULT_TUNER_FAMILY:   # keeps digests of R820T2 chains unchanged
+        chain["tuner"] = family
+    canonical = json.dumps(chain, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode()).hexdigest()
 
 
@@ -644,6 +708,7 @@ def _authorized_chain_subset(decl: Dict[str, Any]) -> Dict[str, Any]:
     """The chain-defining fields bound to the frozen authorization."""
     return {
         "sensor_id": decl["receiver"]["sensor_id"],
+        "tuner": declared_tuner_family(decl),
         "gain_db": decl["gain_db"],
         "termination_part": decl["termination"]["part"],
         "termination_connector": decl["termination"]["connector"],
@@ -1194,7 +1259,10 @@ def run_epoch(decl: Dict[str, Any], tuner: RtlTcpTuner,
     _materialize_precontact(decl, tunings, schedule, schedule_digest,
                             output_dir)
 
-    tuner.set_manual_gain_db(decl["gain_db"])  # first tuner contact
+    # first tuner contact; refuses on a family or gain-count mismatch before
+    # any command is sent
+    tuner.set_manual_gain_db(decl["gain_db"],
+                             declared_family=declared_tuner_family(decl))
 
     by_tuning: Dict[int, List[TuningVisitData]] = {}
     refused_visits: List[Dict] = []
