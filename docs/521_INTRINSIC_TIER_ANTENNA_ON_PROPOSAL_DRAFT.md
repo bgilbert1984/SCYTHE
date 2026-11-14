@@ -14,6 +14,11 @@ Every catalogue run at a new venue currently needs the antenna removed and the 5
   positions, gain 29.0 dB E4000): the sequencer's own detector finds +-256 kHz in 64/64 capture-side cells (terminated control 64/64);
   of the other candidates 27,021 stayed at fixed baseband offset, 189 moved with the retune (slope -1, real signals), 3,081 neither.
 
+- Second live antenna-on capture at 13601 Hwy 99, Everett (2026-11-14, `slope_strong_20261114`, archived and verified on dedirock; same 8
+  tunings, positions and gain): sample std 0.82 / 1.03 / 2.81 LSB (min / median / max), clipping at most 0.0004% of samples, +-256 kHz
+  detected in 64/64 cells, and of the other candidates 15,594 fixed-offset, 1,376 moving (slope -1), 4,433 neither (~670 candidates per
+  capture). Same chain, quiet venue vs this one: moving candidates rose 189 -> 1,376 while the +-256 kHz spur stayed 64/64.
+
 ## 2. What the code already does
 `classify_track` decides internal vs external from the retune slope alone: slope 0 -> `CONSISTENT_WITH_INTERNAL_MIXING`, slope -1
 with no declared-reference harmonic -> ingress finding (reference cap is 3 harmonics at 100 ppm, none inside 400-470 MHz).
@@ -40,8 +45,9 @@ terminated session is also required after any hardware change (cable, XTR unit, 
 is an owner decision.
 
 ## 4. Limits, stated plainly
-- The live test covered UHF 400-470 MHz at one quiet site (sample std 0.7-0.8 LSB, 0% saturation). Strong-signal bands (FM, cellular)
-  and any saturation behaviour are untested; P4's limits cannot be set from this data alone.
+- The live tests covered UHF 400-470 MHz at two venues (sample std 0.7-0.8 LSB quiet; 0.82-2.81 LSB at 13601 Hwy 99, clipping <=0.0004%).
+  Neither came near saturation at gain 29.0 dB, so strong-signal bands (FM, cellular) and the saturation behaviour are still untested and
+  P4's limits cannot be set from this data. The std seen (<=2.81 LSB) only bounds the level a UHF visit reaches at this gain.
 - Only 189 moving candidates were seen, concentrated in a few tunings. That shows separation works there, not how it behaves when a
   real signal sits on a spur offset or changes during the visit.
 - Antenna-on gave ~949 candidates per capture against ~2,366 per terminated visit; the cause is unexplained and should be understood
