@@ -19,6 +19,14 @@ Every catalogue run at a new venue currently needs the antenna removed and the 5
   detected in 64/64 cells, and of the other candidates 15,594 fixed-offset, 1,376 moving (slope -1), 4,433 neither (~670 candidates per
   capture). Same chain, quiet venue vs this one: moving candidates rose 189 -> 1,376 while the +-256 kHz spur stayed 64/64.
 
+- Strong-band antenna-on capture (2026-11-14, `slope_saturation_20261114`, 13601 Hwy 99; FM 93.3/99/102 MHz and cellular 750/881 MHz at
+  gain 29.0 dB, plus 21.5 and 14.0 dB at 93.3 and 750 MHz; 4 retune positions each, 8 cells of +-256 kHz per row). +-256 kHz recovered /
+  clipping (max over the 4 captures) / sample std:
+  29.0 dB: 93.3 MHz 1/8, 45.4%, 102-103 LSB; 99.0 1/8, 16.1%, 65-82; 102.0 2/8, 37.2%, 96-97; 750 7/8, 2.2%, 27-37; 881 0/8, 3.1%, 17-39
+  (only 298 candidates per capture);
+  21.5 dB: 93.3 2/8, 0.79%, 58-62; 750 5/8, 0.015%, 13-22;  14.0 dB: 93.3 2/8, 0.000%, 25-26; 750 5/8, 0.000%, 5.5-10.
+  The weak-band runs above recovered 64/64 at clipping <= 0.0005% and std <= 2.81 LSB.
+
 ## 2. What the code already does
 `classify_track` decides internal vs external from the retune slope alone: slope 0 -> `CONSISTENT_WITH_INTERNAL_MIXING`, slope -1
 with no declared-reference harmonic -> ingress finding (reference cap is 3 harmonics at 100 ppm, none inside 400-470 MHz).
@@ -38,8 +46,13 @@ input-level guard takes its place (P4).
 - slope 0 elsewhere -> `FIXED_OFFSET_UNCONFIRMED`, session-scoped, never reused as terminated evidence;
 - slope -1 -> ingress finding, as today;
 - ambiguous slope -> unresolved, as today.
-**P4. Guards.** Per visit: ADC saturation fraction and sample std against limits (a saturated front end can bury or create products);
-a visit above the limit is refused, not scored. Stream-liveness stays mandatory.
+**P4. Guards (provisional, from the data above).** Per visit, refuse and do not score when ANY of:
+- clipped-sample fraction (0 or 255) > 0.001% (weak-band maximum seen 0.0005%; 0.015% already lost +-256 kHz in 3 of 8 cells);
+- sample std > 3.0 LSB (weak-band maximum 2.81 LSB; the lowest level that lost the spur was 5.5 LSB at 14.0 dB / 750 MHz with 0% clipping);
+- **canary:** an intrinsic-tier offset (+-256 kHz) is not detected in that visit. Clipping alone is not a sufficient guard: strong FM at 14.0 dB
+  clipped 0.000% yet recovered the spur in only 2/8 cells, so loss of the known spur is the direct evidence that scoring is unreliable.
+Stream-liveness stays mandatory. These limits bracket a gap: nothing was captured between std 2.81 and 5.5 LSB, so 3.0 is a bound set at
+the top of the observed good region, not a measured threshold, and needs an intermediate-gain run before freezing.
 **P5. Revalidation.** A new chain (gain family, rate, tuner, hardware) starts with no tier and needs 3 terminated sessions. A
 terminated session is also required after any hardware change (cable, XTR unit, case) and is recommended periodically; interval
 is an owner decision.
@@ -52,6 +65,9 @@ is an owner decision.
   real signal sits on a spur offset or changes during the visit.
 - Antenna-on gave ~949 candidates per capture against ~2,366 per terminated visit; the cause is unexplained and should be understood
   before relying on candidate counts.
+- Strong-band data: one venue, one session, 4 captures per row; 881 MHz yielded only ~298 candidates per capture at 3% clipping (the
+  detector behaves differently there; not understood). The device also dropped off WSL twice during the attempt (usbipd Shared); the
+  final 36 captures were all live and complete.
 - Three terminated sessions only; low power in the dense near-DC cloud means a small reproducible subset could hide there.
 - Antenna-on evidence is observation, not a terminated catalogue: it must not feed back into the intrinsic tier.
 
