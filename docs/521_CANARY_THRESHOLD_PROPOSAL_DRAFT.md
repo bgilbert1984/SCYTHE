@@ -1,6 +1,10 @@
 # §5.21 proposal (DRAFT): the canary threshold for antenna-on observation runs
 
-Date: 2026-11-15. Status: PROPOSAL. Nothing here is frozen or in force; no declaration, code or test is changed by this file.
+Date: 2026-11-15. Status: PARTLY ACCEPTED. On 2026-11-15 the owner accepted (1) the visit gate "both +-256 kHz sides detected AND min-side excess >= 11.0 dB" and
+(2) the tuning gate "every visit passes". Slices 1-2 (section 6) are implemented as pure functions in `rf_canary_gate.py`; the clipping
+guard is implemented as written in section 4.3 and the owner did not separately address it. Still open: a second intrinsic offset,
+observation-only vs tier-only, the tier revalidation interval, and slice 3 (wiring into the antenna-on mode with a new freeze).
+Nothing here is frozen or in force; no declaration, code or test is changed by this file.
 Follows `521_INTRINSIC_TIER_ANTENNA_ON_PROPOSAL_DRAFT.md` (P4: canary and clipping are the operative guards, no std limit).
 Analysis scripts and the per-visit table: `scripts/s521_canary_threshold/` (`extract.py` -> `visits.json`, `rates.py`, `thr.py`).
 
