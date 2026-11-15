@@ -27,6 +27,12 @@ Every catalogue run at a new venue currently needs the antenna removed and the 5
   21.5 dB: 93.3 2/8, 0.79%, 58-62; 750 5/8, 0.015%, 13-22;  14.0 dB: 93.3 2/8, 0.000%, 25-26; 750 5/8, 0.000%, 5.5-10.
   The weak-band runs above recovered 64/64 at clipping <= 0.0005% and std <= 2.81 LSB.
 
+- Intermediate-gain capture (2026-11-15, `slope_intermediate_20261115`, 12502 Mukilteo Speedway; antenna on; 4 retune positions per row,
+  8 cells of +-256 kHz per row, 0.000% clipping in every row). +-256 kHz recovered / sample std:
+  750 MHz: 14.0 dB 7/8, 2.5-3.6; 11.5 dB 4/8, 2.4-3.3; 9.0 dB 6/8, 2.0-2.7; 6.5 dB 8/8, 1.3-1.4; 4.0 dB 8/8, 1.1-1.5.
+  93.3 MHz: 14.0 dB 3/8, 2.5-2.65; 1.5 dB 8/8, 0.77-0.92; -1.0 dB 8/8, 0.73-0.74. The Mukilteo FM level at 14 dB (std ~2.5) is far
+  below Hwy 99 (std ~25), so levels are venue-dependent, and lost-spur rows sit at std values that elsewhere recovered 64/64.
+
 ## 2. What the code already does
 `classify_track` decides internal vs external from the retune slope alone: slope 0 -> `CONSISTENT_WITH_INTERNAL_MIXING`, slope -1
 with no declared-reference harmonic -> ingress finding (reference cap is 3 harmonics at 100 ppm, none inside 400-470 MHz).
@@ -46,13 +52,16 @@ input-level guard takes its place (P4).
 - slope 0 elsewhere -> `FIXED_OFFSET_UNCONFIRMED`, session-scoped, never reused as terminated evidence;
 - slope -1 -> ingress finding, as today;
 - ambiguous slope -> unresolved, as today.
-**P4. Guards (provisional, from the data above).** Per visit, refuse and do not score when ANY of:
-- clipped-sample fraction (0 or 255) > 0.001% (weak-band maximum seen 0.0005%; 0.015% already lost +-256 kHz in 3 of 8 cells);
-- sample std > 3.0 LSB (weak-band maximum 2.81 LSB; the lowest level that lost the spur was 5.5 LSB at 14.0 dB / 750 MHz with 0% clipping);
-- **canary:** an intrinsic-tier offset (+-256 kHz) is not detected in that visit. Clipping alone is not a sufficient guard: strong FM at 14.0 dB
-  clipped 0.000% yet recovered the spur in only 2/8 cells, so loss of the known spur is the direct evidence that scoring is unreliable.
-Stream-liveness stays mandatory. These limits bracket a gap: nothing was captured between std 2.81 and 5.5 LSB, so 3.0 is a bound set at
-the top of the observed good region, not a measured threshold, and needs an intermediate-gain run before freezing.
+**P4. Guards (revised after the intermediate-gain capture).** Per visit, refuse and do not score when EITHER:
+- clipped-sample fraction (0 or 255) > 0.001% (weak-band maximum 0.0005%; 0.015% already lost +-256 kHz in 3 of 8 cells);
+- **canary:** an intrinsic-tier offset (+-256 kHz) is not detected in that visit. This is the operative guard: the spur was lost with
+  0.000% clipping at every gain below that threshold where a strong in-band signal was present (section 1, intermediate-gain rows).
+A sample-std limit is NOT proposed. The intermediate-gain data (Mukilteo, 2026-11-15, `slope_intermediate_20261115`) lost the spur at
+std 2.4-3.6 LSB (93.3 MHz at 14 dB: 3/8, std 2.5-2.65; 750 MHz at 11.5 dB: 4/8, std 2.4-3.3), while the weak UHF runs recovered 64/64 up
+to 2.81 LSB, and 750 MHz at 6.5 dB recovered 8/8 at 1.3-1.4 LSB. Level alone does not predict detectability; what matters is strong
+narrowband content, which sample std does not separate from wideband noise. Std may be logged but gates nothing.
+Stream-liveness stays mandatory. The canary needs a per-visit threshold (both +-256 kHz detected is proposed); with 8 cells per row it is
+not yet characterised against false-pass risk, and that needs its own proposal before freezing.
 **P5. Revalidation.** A new chain (gain family, rate, tuner, hardware) starts with no tier and needs 3 terminated sessions. A
 terminated session is also required after any hardware change (cable, XTR unit, case) and is recommended periodically; interval
 is an owner decision.
@@ -60,7 +69,7 @@ is an owner decision.
 ## 4. Limits, stated plainly
 - The live tests covered UHF 400-470 MHz at two venues (sample std 0.7-0.8 LSB quiet; 0.82-2.81 LSB at 13601 Hwy 99, clipping <=0.0004%).
   Neither came near saturation at gain 29.0 dB, so strong-signal bands (FM, cellular) and the saturation behaviour are still untested and
-  P4's limits cannot be set from this data. The std seen (<=2.81 LSB) only bounds the level a UHF visit reaches at this gain.
+  the saturation (clipping) limit is therefore set from few points; no clipping-vs-spur curve exists between 0.0005% and 0.015%.
 - Only 189 moving candidates were seen, concentrated in a few tunings. That shows separation works there, not how it behaves when a
   real signal sits on a spur offset or changes during the visit.
 - Antenna-on gave ~949 candidates per capture against ~2,366 per terminated visit; the cause is unexplained and should be understood
