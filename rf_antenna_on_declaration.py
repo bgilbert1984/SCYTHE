@@ -65,10 +65,13 @@ def check_declaration(decl: Dict[str, Any], tier: Dict[str, Any]) -> Dict[str, A
             codes.append("AOD_TIER_OFFSETS_DIFFER")
         if tier.get("revision") != t.get("revision"):
             codes.append("AOD_TIER_REVISION_DIFFERS")
+        digests = {x.get("schedule_digest") for x in tier.get("sessions", [])}
+        if digests != {decl.get("schedule_digest")}:
+            codes.append("AOD_SCHEDULE_DIGEST_NOT_BOUND")
 
     r = decl.get("revalidation", {})
     months = r.get("interval_months")
-    if not isinstance(months, int) or not (MIN_REVALIDATION_MONTHS <= months <= MAX_REVALIDATION_MONTHS):
+    if not isinstance(months, int) or isinstance(months, bool) or not (MIN_REVALIDATION_MONTHS <= months <= MAX_REVALIDATION_MONTHS):
         codes.append("AOD_REVALIDATION_INTERVAL_INVALID")
     if not {"HARDWARE_CHANGE", "CANARY_FAILING_UNDER_QUIET_CONDITIONS"} <= set(r.get("triggers", [])):
         codes.append("AOD_REVALIDATION_TRIGGERS_MISSING")

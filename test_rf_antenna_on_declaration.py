@@ -30,6 +30,14 @@ class StagedDraft(unittest.TestCase):
         self.assertFalse(aod.check_declaration(d, TIER)["authorizes"])
 
 
+class DraftNeverAuthorizes(unittest.TestCase):
+    def test_draft_status_with_authorizes_true_does_not_authorize(self):
+        d = copy.deepcopy(DECL)
+        d["authorizes"] = True
+        self.assertEqual(d["status"], "DRAFT")
+        self.assertFalse(aod.check_declaration(d, TIER)["authorizes"])
+
+
 class Refusals(unittest.TestCase):
     def codes(self, mutate, tier=None):
         d = copy.deepcopy(DECL)
@@ -59,6 +67,13 @@ class Refusals(unittest.TestCase):
         self.assertIn("AOD_TIER_TIER_HASH_MISMATCH", self.codes(lambda d: None, tier=altered))
         unhashed = {k: v for k, v in TIER.items() if k != "content_sha256"}
         self.assertIn("AOD_TIER_TIER_UNHASHED", self.codes(lambda d: None, tier=unhashed))
+
+    def test_schedule_digest_must_match_the_tier_sessions(self):
+        self.assertIn("AOD_SCHEDULE_DIGEST_NOT_BOUND", self.codes(lambda d: d.update(schedule_digest="0" * 64)))
+        self.assertIn("AOD_SCHEDULE_DIGEST_NOT_BOUND", self.codes(lambda d: d.pop("schedule_digest")))
+
+    def test_a_json_boolean_is_not_a_revalidation_interval(self):
+        self.assertIn("AOD_REVALIDATION_INTERVAL_INVALID", self.codes(lambda d: d["revalidation"].update(interval_months=True)))
 
     def test_revalidation_is_bounded_and_keeps_its_triggers(self):
         self.assertIn("AOD_REVALIDATION_INTERVAL_INVALID", self.codes(lambda d: d["revalidation"].update(interval_months=24)))

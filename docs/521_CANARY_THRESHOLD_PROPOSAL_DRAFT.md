@@ -129,6 +129,6 @@ Load-fitted controls (2026-11-15, 50 ohm load fitted as stated by the owner and 
 authorization freeze together with the intrinsic tier hash. Each its own proposal, acceptance and PR.
 
 ## 7. Questions for the owner
-- Accept both-sides + 11.0 dB as the visit gate, or prefer the plain "both detected" rule (B)?
-- Tuning gate "every visit passes", or a looser rule (for example 2 of 3)?
-- Should a second intrinsic offset be sought first (needs more terminated sessions at another gain or rate)?
+- ANSWERED 2026-11-15: both-sides + 11.0 dB accepted as the visit gate (not the plain "both detected" rule B).
+- ANSWERED 2026-11-15: tuning gate "every visit passes" accepted.
+- ANSWERED 2026-11-16: no, a second intrinsic offset is not sought first (+-512 kHz recorded as a watch candidate; a proper second offset can enter later as a new tier version).

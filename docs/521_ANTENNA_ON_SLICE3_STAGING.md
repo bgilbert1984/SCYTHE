@@ -35,8 +35,10 @@ The freeze is a separate owner acceptance.
    this is the caveat on that choice.
 2. The draft names the offsets as the tier's 24 Hz-bin values (+-255,996 Hz); the canary matches them to a 60 Hz tolerance against the detector's candidates (fs/8 = 256,000 Hz).
 3. `run_id` is a placeholder (`...-ANTENNA-OBS-DRAFT`); run id, epoch and venue are operational fields, not bound.
-4. Antenna-on cost is about 1-3 dB against terminated at the venues tried, so the 11.0 dB floor leaves 1-4 dB of margin in 400-470 MHz (weakest antenna-on good visit 11.6 dB, weakest load-fitted visit in that band
-   about 14 dB). The gate refuses a venue-side floor rise correctly (11-15 repeat), and a venue that is marginal will refuse visits; that is the intended behaviour.
+4. The margin over the 11.0 dB floor is thin. In 400-470 MHz the weakest good antenna-on visit is 11.6 dB (Hwy 99, 11-14), which is 0.6 dB of margin. Other antenna-on sets: repeat 3 weakest 12.7 dB (1.7 dB),
+   Phinney weakest 13.4 dB (2.4 dB). Medians of the weaker side are 13.6 dB (Hwy 99, 11-14, 2.6 dB), 14.4 dB (repeat 3) and 14.8 dB (Phinney). Terminated and load-fitted visits in the band sit at 14.2 dB or more.
+   Antenna-on costs about 1-3 dB against terminated. A visit near the weakest observed value is within 1 dB of refusal, so a marginal venue will refuse some good visits; the 11-15 repeat shows the gate also refuses a
+   real floor rise. The freeze decision should weigh the 0.6 dB figure, since the 11.0 dB value was chosen 0.6 dB below that same visit.
 5. Clipping stays a hard limit as decided; 1 refusal in about 420 good visits.
 6. Hwy 99 is the only venue with a bad day in the evidence; Phinney, 520 128th St and Mukilteo (intermediate set) were each captured once.
 
