@@ -1,0 +1,77 @@
+{
+ "caveat": "low power inside the dense near-DC cloud: a small reproducible subset could hide there; three sessions only",
+ "content_sha256": "444a57aa6d8f3caedc39f7949fb0d8d9312e5e9f69a7b33c898a1424fb79e011",
+ "everything_else": "SESSION_SCOPED",
+ "intrinsic": [
+  {
+   "bin_hz": 24.0,
+   "excess_over_background": [
+    0.9844,
+    1.0,
+    1.0
+   ],
+   "occupancy": [
+    0.9844,
+    1.0,
+    1.0
+   ],
+   "offset_hz": -255996.0,
+   "tier": "INTRINSIC_REPRODUCIBLE"
+  },
+  {
+   "bin_hz": 24.0,
+   "excess_over_background": [
+    0.9844,
+    1.0,
+    1.0
+   ],
+   "occupancy": [
+    0.9844,
+    1.0,
+    1.0
+   ],
+   "offset_hz": 255996.0,
+   "tier": "INTRINSIC_REPRODUCIBLE"
+  }
+ ],
+ "revision": "tiers-1",
+ "rule": {
+  "background_half_width_bins": 10,
+  "bin_hz": 24.0,
+  "min_excess": 0.5,
+  "min_occupancy": 0.9,
+  "min_sessions": 3
+ },
+ "sessions": [
+  {
+   "chain_digest": "93dca6d1139e40beec91b2176ca9bdb3315df24da5602cc39eec7076bdf7fce0",
+   "label": "RERUN2_20261103",
+   "n_entries": 3350,
+   "n_tunings": 64,
+   "run_id": "521-UHF-XTR-EPOCH1-RERUN2",
+   "schedule_digest": "d35d706f926c740f2f211eaae34249cc739db4e611f377fa372433735ed73636",
+   "sha256": "e742e89feb99827563da0c09b0c89e9af63c30095aeaea6efe1ef6ef8e1e67bb",
+   "tuner_type": 1
+  },
+  {
+   "chain_digest": "93dca6d1139e40beec91b2176ca9bdb3315df24da5602cc39eec7076bdf7fce0",
+   "label": "RERUN3_20261111",
+   "n_entries": 11224,
+   "n_tunings": 64,
+   "run_id": "521-UHF-XTR-RERUN3",
+   "schedule_digest": "d35d706f926c740f2f211eaae34249cc739db4e611f377fa372433735ed73636",
+   "sha256": "4d0a60e80ff3b082eb112b8d7198f0b943c6a111d7e7d97196abcbb2a47f4b9a",
+   "tuner_type": 1
+  },
+  {
+   "chain_digest": "aa2bca953abcea78193aff295b266a5822c52eccf2ee1a6ececc7a2dafecba11",
+   "label": "RERUN1_20261114",
+   "n_entries": 11394,
+   "n_tunings": 64,
+   "run_id": "521-UHF-XTR-E4K-EPOCH1-RERUN1",
+   "schedule_digest": "d35d706f926c740f2f211eaae34249cc739db4e611f377fa372433735ed73636",
+   "sha256": "303c11b56316616b96a469df72798c41c2a772d243d1ac789d9920c051f0ff06",
+   "tuner_type": 1
+  }
+ ]
+}

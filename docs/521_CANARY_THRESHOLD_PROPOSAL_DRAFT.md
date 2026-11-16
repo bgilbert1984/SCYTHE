@@ -4,6 +4,9 @@ Date: 2026-11-15. Status: PARTLY ACCEPTED. On 2026-11-15 the owner accepted (1) 
 (2) the tuning gate "every visit passes". Slices 1-2 (section 6) are implemented as pure functions in `rf_canary_gate.py`; the clipping
 guard is implemented as written in section 4.3 and the owner did not separately address it. Still open: a second intrinsic offset,
 observation-only vs tier-only, the tier revalidation interval, and slice 3 (wiring into the antenna-on mode with a new freeze).
+On 2026-11-16 the owner also decided: keep the hard per-visit clipping limit; proceed with slice 3 scoped to UHF 400-470 MHz at 29.0 dB, observation-only, staged for review (the freeze is a separate acceptance;
+see `521_ANTENNA_ON_SLICE3_STAGING.md`); exclude 750 MHz, 881 MHz and FM; do not seek a second intrinsic offset first (+-512 kHz recorded as a watch candidate); revalidate the tier every 12 months plus
+the hardware-change and canary-failing-in-quiet triggers.
 Nothing here is frozen or in force; no declaration, code or test is changed by this file.
 Follows `521_INTRINSIC_TIER_ANTENNA_ON_PROPOSAL_DRAFT.md` (P4: canary and clipping are the operative guards, no std limit).
 Analysis scripts and the per-visit table: `scripts/s521_canary_threshold/` (`extract.py` -> `visits.json`, `rates.py`, `thr.py`).
@@ -126,6 +129,6 @@ Load-fitted controls (2026-11-15, 50 ohm load fitted as stated by the owner and 
 authorization freeze together with the intrinsic tier hash. Each its own proposal, acceptance and PR.
 
 ## 7. Questions for the owner
-- Accept both-sides + 11.0 dB as the visit gate, or prefer the plain "both detected" rule (B)?
-- Tuning gate "every visit passes", or a looser rule (for example 2 of 3)?
-- Should a second intrinsic offset be sought first (needs more terminated sessions at another gain or rate)?
+- ANSWERED 2026-11-15: both-sides + 11.0 dB accepted as the visit gate (not the plain "both detected" rule B).
+- ANSWERED 2026-11-15: tuning gate "every visit passes" accepted.
+- ANSWERED 2026-11-16: no, a second intrinsic offset is not sought first (+-512 kHz recorded as a watch candidate; a proper second offset can enter later as a new tier version).
