@@ -24,6 +24,7 @@ detector and the visit, not a claim about any physical cause.
 | antenna-on, Hwy 99, gain 29.0, UHF | 32 | 32 | 0.893-1.000 | 11.6 / 13.6 / 15.7 |
 | antenna-on, Phinney Ave N, gain 29.0, UHF (11-15, added after acceptance) | 32 | 32 | 0.893-1.000 | 13.4 / 14.8 / 16.0 |
 | antenna-on, Hwy 99 repeat (11-15, 3 days later, same 8 tunings, gain 29.0) | 32 | 12 | 0.229-0.547 | 11.7 / 13.8 / 15.3 (12 detected) |
+| Hwy 99, 50 ohm load fitted (11-15, after the repeat; floor-rise check) | 32 | 32 | 0.893-1.000 | 15.3 / 16.7 / 17.5 |
 | strong bands, Hwy 99 (FM, 750, 881 MHz; 29.0/21.5/14.0 dB) | 36 | 5 | 0.061-0.287 | 10.1 / 11.5 / 12.4 |
 | intermediate gains, Mukilteo (750, 93.3 MHz) | 32 | 21 | 0.483-0.796 | 10.8 / 15.7 / 17.1 |
 
@@ -52,6 +53,16 @@ in 400-435 MHz only is the kind of event the visit gate refuses. Per-visit table
 Archive `slope_hwy99_repeat_20261115`, tar.zst sha256 d5c98a2e860d7bf8761dfc03fea24220cb9d8cbf84103ca034a3dfbda1391a88, verified on dedirock.
 Consequence for the recommendation: the visit gate's false-pass rate on degraded data is unchanged, but this is the first same-venue case of a good tuning set
 turning bad within days, so a gate pass cannot be carried across sessions; each visit needs its own canary. It is not part of the pinned counts in `test_rf_canary_gate.py`.
+
+Hwy 99 antenna-off check (13601 Hwy 99, 2026-11-15, 50 ohm load fitted as stated by the owner and not verified here, same 8 tunings, retunes and gain 29.0 dB,
+run directly after the repeat): 32/32 pass the visit gate, weaker-side excess 15.3 / 16.7 / 17.5 dB (the terminated RERUN1 range is 14.2-17.6), sample std 0.72-0.80 LSB,
+no clipping, median 1,972 candidates per capture. Median floor of the five tunings that failed in the antenna-on repeat (401, 407, 416, 425, 435 MHz): about -10 to -11 dB with the
+load fitted, against -1.9 to 0.1 dB in the repeat and -6.6 to -7.9 dB in the 11-14 antenna-on set. Venue-scoped cause: the failure follows the antenna side. With the load fitted the same
+receiver at the same gain gives a flat low floor and clean +-256 kHz spurs, so the broadband rise in 401-435 MHz (about 10 dB above the terminated floor in the repeat, about 3.5 dB on 11-14)
+came in through the antenna at that venue and time; its source is not identified, and the earlier spectrum shows no narrowband carrier. This run does not rule out a transient receiver state
+during the repeat; it shows the receiver is healthy now. Consequence for slice 3: an antenna-on venue can fail the gate while the receiver is fine, and a failed visit says nothing against the
+receiver, which is the intended reading of the canary. Per-visit table `visits_hwy99_antoff.json`, spectrum numbers `spectrum_hwy99_antoff.json` (covers the 11-14, repeat and load-fitted sets).
+Archive `slope_hwy99_antoff_20261115`, tar.zst sha256 b5bef5031c331bc3016e3db300542a74df841fe727801fd96ce0ace96daebad8, verified on dedirock.
 
 ## 3. Options
 - **A. Either side detected.** Passes 51/68 degraded visits (75%); rejected: it barely gates.
