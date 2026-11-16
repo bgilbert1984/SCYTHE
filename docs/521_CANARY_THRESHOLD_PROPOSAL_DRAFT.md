@@ -27,6 +27,7 @@ detector and the visit, not a claim about any physical cause.
 | Hwy 99, 50 ohm load fitted (11-15, after the repeat; floor-rise check) | 32 | 32 | 0.893-1.000 | 15.3 / 16.7 / 17.5 |
 | 50 ohm load, strong-band plan control (11-15; FM, 750, 881 MHz; 29.0/21.5/14.0 dB) | 36 | 35 | 0.858-0.995 | 11.1 / 16.4 / 17.5 (35 detected) |
 | 50 ohm load, 8 tunings at 21.5 and 34.0 dB (11-15) | 64 | 64 | 0.943-1.000 | 15.8 / 16.9 / 17.8 |
+| antenna-on, Hwy 99 repeat 3 (11-16, same 8 tunings, gain 29.0; 31/32 pass the gate) | 32 | 32 | 0.893-1.000 | 12.7 / 14.4 / 15.9 |
 | strong bands, Hwy 99 (FM, 750, 881 MHz; 29.0/21.5/14.0 dB) | 36 | 5 | 0.061-0.287 | 10.1 / 11.5 / 12.4 |
 | intermediate gains, Mukilteo (750, 93.3 MHz) | 32 | 21 | 0.483-0.796 | 10.8 / 15.7 / 17.1 |
 
@@ -65,6 +66,17 @@ came in through the antenna at that venue and time; its source is not identified
 during the repeat; it shows the receiver is healthy now. Consequence for slice 3: an antenna-on venue can fail the gate while the receiver is fine, and a failed visit says nothing against the
 receiver, which is the intended reading of the canary. Per-visit table `visits_hwy99_antoff.json`, spectrum numbers `spectrum_hwy99_antoff.json` (covers the 11-14, repeat and load-fitted sets).
 Archive `slope_hwy99_antoff_20261115`, tar.zst sha256 b5bef5031c331bc3016e3db300542a74df841fe727801fd96ce0ace96daebad8, verified on dedirock.
+
+Hwy 99 repeat 3 (13601 Hwy 99, 2026-11-16, antenna on as stated by the owner, same 8 tunings, retunes and gain 29.0 dB as the 11-14 and 11-15 sets): 31/32 pass the merged visit gate;
+both +-256 kHz sides were detected in 32/32 visits (weaker-side excess 12.7 / 14.4 / 15.9 dB), sample std 0.83-1.48 LSB, median 743 candidates per capture. The 401-435 MHz floor
+rise of the 11-15 repeat is gone: the median floor of those five tunings is -7.9 to -9.2 dB, against -1.9 to 0.1 dB in the repeat, -6.6 to -7.9 dB on 11-14 and -10.2 to -11.2 dB with the load
+fitted, and the strong carrier near 445.04 MHz at 444 MHz is no longer there. So the floor rise was transient, which fits the antenna-side finding above. Per-visit table `visits_hwy99_repeat3.json`,
+spectrum numbers `spectrum_hwy99_repeat3.json` (covers the 11-14, 11-15 repeat, repeat 3 and load-fitted sets). Archive `slope_hwy99_repeat2_20261116` (the directory name keeps the label used on
+the day), tar.zst sha256 65f5574a22f58cc1c30aed6699efd09bd308d90032340c645cad10e7f3a906b9, verified on dedirock.
+The one failure is a clipping refusal, not a canary failure: `t056_d+0.u8` (457 MHz) clipped 84 of 8,388,608 samples (0.0010014%) against the 0.001% limit, with its canary at 14.7 / 14.3 dB. The limit trips
+at 84 samples, and 83 would have passed. The limit is the one guard of the visit gate that the owner has not separately addressed (section 4.3), and it is a hard per-visit threshold, so a healthy visit can be
+refused by one sample count at the edge. The gate is left as implemented; the options (keep, or a margin, or a rate over the whole tuning) are the owner's call and need a separate proposal.
+In the other 11-15 captures (Phinney, the Hwy 99 repeat, the antenna-off check and the load-fitted sets) clipping stayed at or below 0.00005% in every visit, so this is the only clipping refusal in those sets.
 
 Load-fitted controls (2026-11-15, 50 ohm load fitted as stated by the owner and not verified here; feasibility only, not catalogue runs; per-visit table
 `visits_load_fitted.json`, script `analyse_load_fitted.py`; archives `slope_load_strong_20261115` tar.zst sha256 db25e27b5640bcddc89dd36f8590eab171a5fa8cbba2f5cd161c15821a7fb95a and
