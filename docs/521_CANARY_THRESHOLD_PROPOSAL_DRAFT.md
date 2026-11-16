@@ -31,6 +31,7 @@ detector and the visit, not a claim about any physical cause.
 | 50 ohm load, strong-band plan control (11-15; FM, 750, 881 MHz; 29.0/21.5/14.0 dB) | 36 | 35 | 0.858-0.995 | 11.1 / 16.4 / 17.5 (35 detected) |
 | 50 ohm load, 8 tunings at 21.5 and 34.0 dB (11-15) | 64 | 64 | 0.943-1.000 | 15.8 / 16.9 / 17.8 |
 | antenna-on, Hwy 99 repeat 3 (11-16, same 8 tunings, gain 29.0; 31/32 pass the gate) | 32 | 32 | 0.893-1.000 | 12.7 / 14.4 / 15.9 |
+| antenna-on, Mukilteo Speedway, gain 29.0, UHF (11-16) | 32 | 32 | 0.893-1.000 | 14.4 / 15.4 / 16.5 |
 | strong bands, Hwy 99 (FM, 750, 881 MHz; 29.0/21.5/14.0 dB) | 36 | 5 | 0.061-0.287 | 10.1 / 11.5 / 12.4 |
 | intermediate gains, Mukilteo (750, 93.3 MHz) | 32 | 21 | 0.483-0.796 | 10.8 / 15.7 / 17.1 |
 
@@ -80,6 +81,12 @@ The one failure is a clipping refusal, not a canary failure: `t056_d+0.u8` (457 
 at 84 samples, and 83 would have passed. The limit is the one guard of the visit gate that the owner has not separately addressed (section 4.3), and it is a hard per-visit threshold, so a healthy visit can be
 refused by one sample count at the edge. The gate is left as implemented; the options (keep, or a margin, or a rate over the whole tuning) are the owner's call and need a separate proposal.
 In the other 11-15 captures (Phinney, the Hwy 99 repeat, the antenna-off check and the load-fitted sets) clipping stayed at or below 0.00005% in every visit, so this is the only clipping refusal in those sets.
+
+Mukilteo canary repeat (12502 Mukilteo Speedway, 2026-11-16, antenna on as stated by the owner, same 8 tunings, retunes and gain 29.0 dB): 32/32 pass the merged visit gate (4/4 at every tuning, 401-457 MHz),
+weaker-side excess 14.4 / 15.4 / 16.5 dB, sample std 0.76-0.88 LSB, no clipping, median 978 candidates per capture. Median floor -8.9 to -9.9 dB at every tuning, between the 11-14 Hwy 99 level and the
+load-fitted level (-10.2 to -11.3 dB), so no venue-side rise. This is the widest antenna-on margin so far in 400-470 MHz: the weakest visit is 14.4 dB, 3.4 dB over the 11.0 dB floor (Hwy 99 11-14: 11.6 dB, 0.6 dB;
+Hwy 99 11-16: 12.7 dB, 1.7 dB; Phinney: 13.4 dB, 2.4 dB). Per-visit table `visits_mukilteo.json`, spectrum numbers `spectrum_mukilteo.json` (covers the 11-14 Hwy 99, Mukilteo and load-fitted sets).
+Archive `slope_mukilteo_20261116`, tar.zst sha256 db632b2400dd5d7ade10469d5afda8a19b6dc73daefa607941831e349c599e4a, verified on dedirock. Not part of the pinned counts in `test_rf_canary_gate.py`.
 
 Load-fitted controls (2026-11-15, 50 ohm load fitted as stated by the owner and not verified here; feasibility only, not catalogue runs; per-visit table
 `visits_load_fitted.json`, script `analyse_load_fitted.py`; archives `slope_load_strong_20261115` tar.zst sha256 db25e27b5640bcddc89dd36f8590eab171a5fa8cbba2f5cd161c15821a7fb95a and
