@@ -23,6 +23,7 @@ detector and the visit, not a claim about any physical cause.
 | antenna-on, quiet venue (520 128th St) | 32 | 32 | 0.893-1.000 | 14.5 / 16.4 / 17.6 |
 | antenna-on, Hwy 99, gain 29.0, UHF | 32 | 32 | 0.893-1.000 | 11.6 / 13.6 / 15.7 |
 | antenna-on, Phinney Ave N, gain 29.0, UHF (11-15, added after acceptance) | 32 | 32 | 0.893-1.000 | 13.4 / 14.8 / 16.0 |
+| antenna-on, Hwy 99 repeat (11-15, 3 days later, same 8 tunings, gain 29.0) | 32 | 12 | 0.229-0.547 | 11.7 / 13.8 / 15.3 (12 detected) |
 | strong bands, Hwy 99 (FM, 750, 881 MHz; 29.0/21.5/14.0 dB) | 36 | 5 | 0.061-0.287 | 10.1 / 11.5 / 12.4 |
 | intermediate gains, Mukilteo (750, 93.3 MHz) | 32 | 21 | 0.483-0.796 | 10.8 / 15.7 / 17.1 |
 
@@ -37,6 +38,20 @@ E4000): 32/32 pass the merged visit gate (`rf_canary_gate.visit_gate`, both side
 data point and tests nothing about saturation. It is not part of the 224/224 and 24/68 counts above, which `test_rf_canary_gate.py` still pins.
 Per-visit table: `scripts/s521_canary_threshold/visits_phinney.json` (script `gate_eval_phinney.py`). Archive: `slope_phinney_20261115`,
 tar.zst sha256 001ff931f8e0f86b4509e53a17e70646c89cdedf3957cc0df918758deffa4a9a, verified on dedirock.
+
+Hwy 99 repeat (13601 Hwy 99, 2026-11-15, same 8 tunings, retunes and gain as the 11-14 set; venue owner-stated): 12/32 pass the merged visit gate
+against 32/32 three days earlier. The 12 passes are the three upper tunings (444, 449, 457 MHz, 4/4 each); the five lower tunings (401-434 MHz) are 0/4,
+all `CANARY_NOT_DETECTED` (neither side in 18 visits; the negative side only, at 10.4 and 11.5 dB, in 2). Clipping 0.0% in every visit. Sample std 1.7-2.3 LSB
+in the failing tunings against about 1.0 earlier; candidates per capture 56-177 against about 390-620. Spectrum check (`spectrum_hwy99_repeat.py`, 4096-point
+averaged PSD, d=0 captures, earlier set vs repeat): in the five failing tunings the median floor is 5.6-6.7 dB higher, total power 5.2-6.3 dB higher, the
+strongest peak is only 10.0-12.2 dB above the median (the DC bin) and one bin is more than 10 dB above the median (earlier set: 5-9). No strong narrowband
+carrier is present, so one does not explain the failure. The whole spectrum rose with a broadband floor, and the absolute level at +-256 kHz rose by about the same
+amount (about -6 dB to about -1 dB). The 444 MHz tuning, which passed, has strong carriers near 445.04 MHz (38 dB over its median, 149 bins above 10 dB) and
+std 3.3 LSB. The cause of the floor rise is not established from these files (a broadband emitter and a receiver-state difference both fit); a floor change of this size
+in 400-435 MHz only is the kind of event the visit gate refuses. Per-visit table `visits_hwy99_repeat.json`, spectrum numbers `spectrum_hwy99_repeat.json`.
+Archive `slope_hwy99_repeat_20261115`, tar.zst sha256 d5c98a2e860d7bf8761dfc03fea24220cb9d8cbf84103ca034a3dfbda1391a88, verified on dedirock.
+Consequence for the recommendation: the visit gate's false-pass rate on degraded data is unchanged, but this is the first same-venue case of a good tuning set
+turning bad within days, so a gate pass cannot be carried across sessions; each visit needs its own canary. It is not part of the pinned counts in `test_rf_canary_gate.py`.
 
 ## 3. Options
 - **A. Either side detected.** Passes 51/68 degraded visits (75%); rejected: it barely gates.
