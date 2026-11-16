@@ -22,6 +22,7 @@ detector and the visit, not a claim about any physical cause.
 | terminated RERUN1 (11-14) | 192 | 192 | 0.980-1.000 | 14.2 / 16.5 / 17.6 |
 | antenna-on, quiet venue (520 128th St) | 32 | 32 | 0.893-1.000 | 14.5 / 16.4 / 17.6 |
 | antenna-on, Hwy 99, gain 29.0, UHF | 32 | 32 | 0.893-1.000 | 11.6 / 13.6 / 15.7 |
+| antenna-on, Phinney Ave N, gain 29.0, UHF (11-15, added after acceptance) | 32 | 32 | 0.893-1.000 | 13.4 / 14.8 / 16.0 |
 | strong bands, Hwy 99 (FM, 750, 881 MHz; 29.0/21.5/14.0 dB) | 36 | 5 | 0.061-0.287 | 10.1 / 11.5 / 12.4 |
 | intermediate gains, Mukilteo (750, 93.3 MHz) | 32 | 21 | 0.483-0.796 | 10.8 / 15.7 / 17.1 |
 
@@ -29,6 +30,13 @@ Per row (4 visits each): 93.3 MHz at 29.0, 21.5 and 14.0 dB (Hwy 99): 0/4; 99 an
 29.0 / 21.5 / 14.0: 3/4, 1/4, 1/4; Mukilteo 93.3 MHz at 14.0: 0/4, at 1.5 and -1.0: 4/4; 750 MHz at 14.0 / 11.5 / 9.0 / 6.5 / 4.0: 3/4, 0/4,
 2/4, 4/4, 4/4. Clipping was 0.000% in every Mukilteo row.
 Zero false-fails in the 224 terminated and quiet visits (rule-of-three 95% upper bound 1.3% per visit).
+
+Phinney row (6015 Phinney Ave N, Seattle, venue owner-stated; same 8 tunings and retune positions as the quiet and Hwy 99 sets, gain 29.0 dB,
+E4000): 32/32 pass the merged visit gate (`rf_canary_gate.visit_gate`, both sides, >= 11.0 dB, clipping <= 0.001%). Sample std 0.82 / 0.89 / 1.64 LSB
+(min / median / max), worst clipping 0.00005%, median 1,372 candidates per capture. Its std range is low, so it adds a good-venue
+data point and tests nothing about saturation. It is not part of the 224/224 and 24/68 counts above, which `test_rf_canary_gate.py` still pins.
+Per-visit table: `scripts/s521_canary_threshold/visits_phinney.json` (script `gate_eval_phinney.py`). Archive: `slope_phinney_20261115`,
+tar.zst sha256 001ff931f8e0f86b4509e53a17e70646c89cdedf3957cc0df918758deffa4a9a, verified on dedirock.
 
 ## 3. Options
 - **A. Either side detected.** Passes 51/68 degraded visits (75%); rejected: it barely gates.
@@ -50,7 +58,7 @@ Zero false-fails in the 224 terminated and quiet visits (rule-of-three 95% upper
 ## 5. Limits, stated plainly
 - There is no ground truth for "this visit can detect weak spurs". The canary is a proxy tested by its own behaviour in good and
   degraded conditions; a passed visit is not proof of reliability (about 38% of degraded visits still pass the floor; ~35% at X = 11 dB).
-- 256 good visits across two chains of venues and times, and 68 degraded visits from two venues; the intermediate rows have 4 visits
+- 288 good visits across three venues plus the terminated chain (the 32 Phinney visits are outside the pinned counts), and 68 degraded visits from two venues; the intermediate rows have 4 visits
   each, so per-row rates are coarse.
 - Only +-256 kHz is in the tier. One canary offset means one detector path; a failure mode that kills only other offsets goes unseen.
 - The per-tuning independence estimate is an assumption. The visits within a tuning were not captured as separate sessions here.
