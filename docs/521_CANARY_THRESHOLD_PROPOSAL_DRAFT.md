@@ -25,6 +25,8 @@ detector and the visit, not a claim about any physical cause.
 | antenna-on, Phinney Ave N, gain 29.0, UHF (11-15, added after acceptance) | 32 | 32 | 0.893-1.000 | 13.4 / 14.8 / 16.0 |
 | antenna-on, Hwy 99 repeat (11-15, 3 days later, same 8 tunings, gain 29.0) | 32 | 12 | 0.229-0.547 | 11.7 / 13.8 / 15.3 (12 detected) |
 | Hwy 99, 50 ohm load fitted (11-15, after the repeat; floor-rise check) | 32 | 32 | 0.893-1.000 | 15.3 / 16.7 / 17.5 |
+| 50 ohm load, strong-band plan control (11-15; FM, 750, 881 MHz; 29.0/21.5/14.0 dB) | 36 | 35 | 0.858-0.995 | 11.1 / 16.4 / 17.5 (35 detected) |
+| 50 ohm load, 8 tunings at 21.5 and 34.0 dB (11-15) | 64 | 64 | 0.943-1.000 | 15.8 / 16.9 / 17.8 |
 | strong bands, Hwy 99 (FM, 750, 881 MHz; 29.0/21.5/14.0 dB) | 36 | 5 | 0.061-0.287 | 10.1 / 11.5 / 12.4 |
 | intermediate gains, Mukilteo (750, 93.3 MHz) | 32 | 21 | 0.483-0.796 | 10.8 / 15.7 / 17.1 |
 
@@ -63,6 +65,22 @@ came in through the antenna at that venue and time; its source is not identified
 during the repeat; it shows the receiver is healthy now. Consequence for slice 3: an antenna-on venue can fail the gate while the receiver is fine, and a failed visit says nothing against the
 receiver, which is the intended reading of the canary. Per-visit table `visits_hwy99_antoff.json`, spectrum numbers `spectrum_hwy99_antoff.json` (covers the 11-14, repeat and load-fitted sets).
 Archive `slope_hwy99_antoff_20261115`, tar.zst sha256 b5bef5031c331bc3016e3db300542a74df841fe727801fd96ce0ace96daebad8, verified on dedirock.
+
+Load-fitted controls (2026-11-15, 50 ohm load fitted as stated by the owner and not verified here; feasibility only, not catalogue runs; per-visit table
+`visits_load_fitted.json`, script `analyse_load_fitted.py`; archives `slope_load_strong_20261115` tar.zst sha256 db25e27b5640bcddc89dd36f8590eab171a5fa8cbba2f5cd161c15821a7fb95a and
+`slope_load_gains_20261115` tar.zst sha256 80e1b03ac628b169869940b24ad3226b874309c0a14d21b88f99ed4c799cfe9d, both verified on dedirock).
+- Strong-band control: the 11-14 strong-band plan (93.3, 99, 102, 750, 881 MHz at 29.0 dB; 93.3 and 750 MHz at 21.5 and 14.0 dB) with the load fitted passes 35/36, against
+  5/36 with the antenna on. FM rows (93.3, 99, 102 MHz at 29.0 dB): 4/4 each, excess 16.2-17.5 dB. 750 MHz at 21.5 and 14.0 dB: 4/4, 14.3-17.0 dB. So the FM-band, gain-29 failures
+  in the 11-14 set came in through the antenna. The 881 MHz row passes 4/4 but with a median of 1,011 candidates (146-298 antenna-on). Residue that is not antenna-side: with the load
+  fitted the 750 MHz row (29.0 dB) and the 881 MHz row still show sample std 1.2-1.5 LSB (about 0.75 elsewhere) and weaker-side excess 11.1-13.5 dB (about 16-17 elsewhere), and one 750 MHz
+  visit fails (`CANARY_NOT_DETECTED`, std 1.78). The cause is not identified (pickup around the load and a receiver response at those frequencies both fit). Clipping 0.0% in every visit.
+  Consequence: the visit gate's 11.0 dB floor sits only 0.1 dB below the weakest load-fitted visit in this row (11.1 dB); at 750 and 881 MHz it is close to false-failing a terminated visit, which
+  the 224 terminated visits of RERUN1 (all at about 14-18 dB) did not show because they did not include those bands.
+- Gains 21.5 and 34.0 dB, same 8 tunings and retunes: 64/64 pass, excess 16.2-17.8 dB (21.5) and 15.8-17.6 dB (34.0), std about 0.73, no clipping. So the canary holds at the other gains an antenna-on
+  venue is most likely to need. Fixed offsets (present in at least 90% of the 32 visits at each gain, excess at least 8 dB, ignoring |offset| under 20 kHz): +-256 kHz at 100% at both gains;
+  +-512 kHz (fs/4) at 94% at 21.5 dB and +512 kHz only at 94% at 34.0 dB. +-512 kHz is twice +-256 kHz, so it is probably the same mechanism, not an independent second offset, and it sits just above the
+  tier's 0.90 occupancy line. The filter is looser than the tier's rule and the sets are single sessions, so none of this enters the tier; a second offset still needs terminated sessions through the sequencer.
+  The near-DC region (a few hundred bins within +-12 kHz) also passes the loose filter and is the known session-scoped near-DC region, so it was ignored.
 
 ## 3. Options
 - **A. Either side detected.** Passes 51/68 degraded visits (75%); rejected: it barely gates.
