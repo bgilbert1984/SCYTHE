@@ -34,6 +34,7 @@ detector and the visit, not a claim about any physical cause.
 | antenna-on, Mukilteo Speedway, gain 29.0, UHF (11-16) | 32 | 32 | 0.893-1.000 | 14.4 / 15.4 / 16.5 |
 | antenna-on, Lynnwood, gain 29.0, UHF (11-16; 19/32 pass the gate) | 32 | 24 | 0.579-0.867 | 10.1 / 13.0 / 15.3 (24 detected) |
 | Lynnwood, 50 ohm load fitted (11-16, after the antenna-on set; floor-rise check) | 32 | 32 | 0.893-1.000 | 15.5 / 16.7 / 17.5 |
+| antenna-on, Mukilteo Speedway repeat (11-17), gain 29.0, UHF | 32 | 32 | 0.893-1.000 | 12.0 / 14.0 / 17.1 |
 | strong bands, Hwy 99 (FM, 750, 881 MHz; 29.0/21.5/14.0 dB) | 36 | 5 | 0.061-0.287 | 10.1 / 11.5 / 12.4 |
 | intermediate gains, Mukilteo (750, 93.3 MHz) | 32 | 21 | 0.483-0.796 | 10.8 / 15.7 / 17.1 |
 
@@ -107,6 +108,12 @@ but that is unconfirmed. (The antenna-on note above compared the lower five tuni
 One attempt before the capture failed on a stale USB/IP link (`rtl_tcp` exited after about 11 s on two tries, kernel `urb->status -104`); no data from those attempts exists, and the capture ran once on a clean re-attach.
 Per-visit table `visits_lynnwood_antoff.json`, spectrum numbers `spectrum_lynnwood_antoff.json` (covers the Lynnwood antenna-on, load-fitted and 11-14 Hwy 99 sets).
 Archive `slope_lynnwood_antoff_20261116`, tar.zst sha256 02e7d37263abb43c43a10e035d1cafd951ae027a9cf553fbb883e4b4de4b24a4, verified on dedirock. Not part of the pinned counts in `test_rf_canary_gate.py`.
+
+Mukilteo canary repeat 2 (12502 Mukilteo Speedway, 2026-11-17, antenna on as stated by the owner, same 8 tunings, retunes and gain 29.0 dB, one day after the 11-16 set): 32/32 pass the merged visit gate (4/4 at every
+tuning), weaker-side excess 12.0 / 14.0 / 17.1 dB, sample std 0.79-1.16 LSB, no clipping, median 657 candidates per capture (11-16: 978). The weakest visit is 12.0 dB, 1.0 dB over the 11.0 dB floor (11-16 weakest: 14.4 dB, 3.4 dB).
+Median floor 0.9-2.5 dB higher than 11-16 at seven of the eight tunings (-6.8 to -8.6 dB; the 457 MHz tuning is 0.2 dB lower), about the 11-14 Hwy 99 level: a small drift, not the band-confined rise seen at Hwy 99 on 11-15 and at Lynnwood.
+Per-visit table `visits_mukilteo2.json`, spectrum numbers `spectrum_mukilteo2.json` (covers the 11-14 Hwy 99, Mukilteo 11-16 and 11-17, and load-fitted sets). Archive `slope_mukilteo2_20261117`,
+tar.zst sha256 cf0a5937781a0fe7163af892507165f1162913da9ea03d65b9efea27c8ad5e84, verified on dedirock. Not part of the pinned counts in `test_rf_canary_gate.py`.
 
 Load-fitted controls (2026-11-15, 50 ohm load fitted as stated by the owner and not verified here; feasibility only, not catalogue runs; per-visit table
 `visits_load_fitted.json`, script `analyse_load_fitted.py`; archives `slope_load_strong_20261115` tar.zst sha256 db25e27b5640bcddc89dd36f8590eab171a5fa8cbba2f5cd161c15821a7fb95a and
