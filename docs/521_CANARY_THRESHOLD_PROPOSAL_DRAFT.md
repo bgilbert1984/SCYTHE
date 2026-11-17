@@ -32,6 +32,7 @@ detector and the visit, not a claim about any physical cause.
 | 50 ohm load, 8 tunings at 21.5 and 34.0 dB (11-15) | 64 | 64 | 0.943-1.000 | 15.8 / 16.9 / 17.8 |
 | antenna-on, Hwy 99 repeat 3 (11-16, same 8 tunings, gain 29.0; 31/32 pass the gate) | 32 | 32 | 0.893-1.000 | 12.7 / 14.4 / 15.9 |
 | antenna-on, Mukilteo Speedway, gain 29.0, UHF (11-16) | 32 | 32 | 0.893-1.000 | 14.4 / 15.4 / 16.5 |
+| antenna-on, Lynnwood, gain 29.0, UHF (11-16; 19/32 pass the gate) | 32 | 24 | 0.579-0.867 | 10.1 / 13.0 / 15.3 (24 detected) |
 | strong bands, Hwy 99 (FM, 750, 881 MHz; 29.0/21.5/14.0 dB) | 36 | 5 | 0.061-0.287 | 10.1 / 11.5 / 12.4 |
 | intermediate gains, Mukilteo (750, 93.3 MHz) | 32 | 21 | 0.483-0.796 | 10.8 / 15.7 / 17.1 |
 
@@ -87,6 +88,15 @@ weaker-side excess 14.4 / 15.4 / 16.5 dB, sample std 0.76-0.88 LSB, no clipping,
 load-fitted level (-10.2 to -11.3 dB), so no venue-side rise. This is the widest antenna-on margin so far in 400-470 MHz: the weakest visit is 14.4 dB, 3.4 dB over the 11.0 dB floor (Hwy 99 11-14: 11.6 dB, 0.6 dB;
 Hwy 99 11-16: 12.7 dB, 1.7 dB; Phinney: 13.4 dB, 2.4 dB). Per-visit table `visits_mukilteo.json`, spectrum numbers `spectrum_mukilteo.json` (covers the 11-14 Hwy 99, Mukilteo and load-fitted sets).
 Archive `slope_mukilteo_20261116`, tar.zst sha256 db632b2400dd5d7ade10469d5afda8a19b6dc73daefa607941831e349c599e4a, verified on dedirock. Not part of the pinned counts in `test_rf_canary_gate.py`.
+
+Lynnwood canary repeat (2608 196th St SW, 2026-11-16, antenna on as stated by the owner, same 8 tunings, retunes and gain 29.0 dB): 19/32 pass the merged visit gate; both +-256 kHz sides were detected in 24/32 visits
+(weaker-side excess 10.1 / 13.0 / 15.3 dB, and 5 of those 24 are below the 11.0 dB floor at 10.1-10.9 dB). The 13 refusals are 8 `CANARY_NOT_DETECTED` and 5 `CANARY_BELOW_MIN_EXCESS`; clipping 0.0% in every visit.
+Per tuning (4 visits each): 401 MHz 2/4, 406 MHz 3/4, 415 MHz 0/4, 425 MHz 2/4, 434 MHz 0/4, and 444, 449 and 457 MHz 4/4. Under the tuning gate 3 of 8 tunings would be scored, none of the five lower ones. Sample std in the five lower
+tunings 1.4-1.7 LSB (0.89-1.14 in the upper three); candidates per capture 168-792 in the lower five, 932-1,344 in the upper three. Median floor of the lower five: -3.9 to -5.6 dB, which is 2.0-3.3 dB above the 11-14 Hwy 99
+level (-6.6 to -7.9 dB) and 5.3-7.0 dB above the load-fitted level (-10.2 to -11.2 dB); the upper three are normal (-7.4, -8.4, -9.1 dB). No strong narrowband carrier explains it (strongest peak 14.1-19.8 dB over the median in the lower five).
+This is the second venue with a broadband floor rise confined to 401-435 MHz (the 11-15 Hwy 99 repeat was about 6 dB). Whether a recurring emitter or something else causes it is not established: no antenna-off check was run at Lynnwood,
+so the receiver is not separately cleared there (it was cleared at Hwy 99 on 11-15). The gate refused the degraded visits as intended. Per-visit table `visits_lynnwood.json`, spectrum numbers `spectrum_lynnwood.json`.
+Archive `slope_lynnwood_20261116`, tar.zst sha256 4de6c80be5b7f1471d6a7e835e2cd8c357d1a9c2045dcd87802d5e4f8470884f, verified on dedirock. Not part of the pinned counts in `test_rf_canary_gate.py`.
 
 Load-fitted controls (2026-11-15, 50 ohm load fitted as stated by the owner and not verified here; feasibility only, not catalogue runs; per-visit table
 `visits_load_fitted.json`, script `analyse_load_fitted.py`; archives `slope_load_strong_20261115` tar.zst sha256 db25e27b5640bcddc89dd36f8590eab171a5fa8cbba2f5cd161c15821a7fb95a and
