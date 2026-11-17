@@ -1,0 +1,76 @@
+{
+ "status": "FROZEN",
+ "authorizes": true,
+ "authorization": "FROZEN 2026-11-17 at the owner's acceptance. Declares an antenna-on, OBSERVATION-ONLY 5.21 run for the Nooelec SMArt XTR SN 71874552 (E4000), UHF 400-470 MHz, gain 29.0 dB. `authorizes: true` means this declaration is the registered, accepted scope for such a run; it is NOT a launch authorization. The sequencer does not read this file yet, wiring is a separate slice, and a run still needs its own launch authorization (docs/521_CATALOGUE_AUTHORIZATION_DECISION.md). See docs/521_ANTENNA_ON_FREEZE_RECORD.md.",
+ "bands": [
+  {
+   "band_id": "UHF_LOW",
+   "high_hz": 440000000,
+   "low_hz": 400000000
+  },
+  {
+   "band_id": "UHF_HIGH",
+   "high_hz": 470000000,
+   "low_hz": 440000000
+  }
+ ],
+ "excluded_bands": "750 MHz, 881 MHz and FM (88-108 MHz) are outside this scope. With the load fitted the canary barely holds at 750/881 MHz (weakest visit 11.1 dB, one visit not detected, std 1.2-1.5 LSB), so antenna-on visits there would sit below the 11.0 dB floor. They stay out until the residue is understood and an antenna-on set there passes the gate.",
+ "gain_db": 29.0,
+ "mode": "OBSERVATION_ONLY",
+ "mode_note": "Antenna-on visits are scored for the receiver-spur canary and observed; no catalogue entry from them is promoted, and none is treated as a termination-grade reference.",
+ "receiver": {
+  "description": "Nooelec SMArt XTR, SN 71874552, Elonics E4000 tuner",
+  "sensor_id": "71874552",
+  "tuner": "E4000"
+ },
+ "schedule_digest": "d35d706f926c740f2f211eaae34249cc739db4e611f377fa372433735ed73636",
+ "tunings": 64,
+ "visits_per_tuning": 3,
+ "termination": {
+  "fitted": false,
+  "note": "antenna on; the run makes no termination claim"
+ },
+ "gate": {
+  "revision": "canary-1",
+  "canary_min_excess_db": 11.0,
+  "canary_match_tol_hz": 60.0,
+  "clip_limit_pct": 0.001,
+  "clip_limit_note": "hard per-visit limit kept by the owner on 2026-11-16; revisit only with a measured clipping-vs-spur curve between 0.0005% and 0.015%",
+  "tuning_gate": "EVERY_VISIT"
+ },
+ "intrinsic_tier": {
+  "artifact": "docs/521_INTRINSIC_TIER_XTR_E4000.json",
+  "content_sha256": "444a57aa6d8f3caedc39f7949fb0d8d9312e5e9f69a7b33c898a1424fb79e011",
+  "revision": "tiers-1",
+  "offsets_hz": [
+   -255996.0,
+   255996.0
+  ],
+  "sessions": [
+   "RERUN2_20261103",
+   "RERUN3_20261111",
+   "RERUN1_20261114"
+  ]
+ },
+ "revalidation": {
+  "interval_months": 12,
+  "triggers": [
+   "HARDWARE_CHANGE",
+   "CANARY_FAILING_UNDER_QUIET_CONDITIONS"
+  ],
+  "method": "one terminated session re-checks the frozen tier; full three-session re-derivation only if it fails"
+ },
+ "run_id": "521-UHF-XTR-E4K-ANTENNA-OBS-DRAFT",
+ "site": "Operator states the venue at run time (operational field, not bound).",
+ "accepted_assumptions": [
+  "MARGIN: the 11.0 dB visit floor leaves 0.6 dB at the weakest good antenna-on visit observed (Hwy 99, 11-14); at a degraded venue the margin is effectively zero. It affects how many visits are scored, not the tier.",
+  "GAIN: two of the tier's three sessions (RERUN2 2026-11-03, RERUN3 2026-11-11) declared 29.7 dB, an R820T2 step the E4000 does not have; the receiver clamped it and the effective gain was not read back. RERUN1 (2026-11-14) declared 29.0 dB, a valid E4000 step, and shows both offsets at occupancy 1.0.",
+  "BANDS: 401-435 MHz was refused in part at 2 of 5 venues tried (Hwy 99 11-15, Lynnwood 11-16), both cleared as antenna-side by load-fitted checks; a run there should expect refused tunings at some sites."
+ ],
+ "frozen": {
+  "date": "2026-11-17",
+  "by": "owner acceptance",
+  "accepted_staged_declaration_sha256": "da92f287249ceb362c1e56599b11eac4b7a1973254ca23fc290dca7064bfec15",
+  "accepted_tier_artifact_sha256": "c46f56a6a29026c4c8baf7ce55e195d0e67b5018d95404e88f6ac1e183dd699a"
+ }
+}

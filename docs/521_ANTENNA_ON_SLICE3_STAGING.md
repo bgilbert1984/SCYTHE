@@ -1,7 +1,7 @@
 # §5.21 slice 3, staged for owner review (antenna-on observation-only declaration)
 
-Date: 2026-11-16. Status: STAGED. Nothing here is frozen, registered or in force. No sequencer behaviour changes; the sequencer does not read these files.
-The freeze is a separate owner acceptance.
+Date: 2026-11-16. Status: FROZEN 2026-11-17 at the owner's acceptance (see `521_ANTENNA_ON_FREEZE_RECORD.md`); the files below lost their `.DRAFT` names in the freeze. Before that this was STAGED for review (the text below is the review record).
+No sequencer behaviour changes; the sequencer does not read these files.
 
 ## Owner decisions recorded 2026-11-16
 - Clipping: keep the hard per-visit 0.001% limit. The 84-sample refusal (83 would pass; canary healthy at 14.7 / 14.3 dB) is the expected behaviour of a hard threshold: the line sits 2x above the
@@ -18,8 +18,8 @@ The freeze is a separate owner acceptance.
 ## What is staged
 | file | what |
 |---|---|
-| `docs/521_ANTENNA_ON_OBSERVATION_DECLARATION_XTR_E4000.DRAFT.json` | the draft declaration: scope, gate constants, tier binding, revalidation. `status` DRAFT, `authorizes` false. |
-| `docs/521_INTRINSIC_TIER_XTR_E4000.DRAFT.json` | the tier artifact built by `rf_catalogue_tiers.py` from the three terminated sessions (RERUN2 11-03, RERUN3 11-11, RERUN1 11-14); `content_sha256` 444a57aa6d8f3caedc39f7949fb0d8d9312e5e9f69a7b33c898a1424fb79e011; offsets -255,996 and +255,996 Hz. |
+| `docs/521_ANTENNA_ON_OBSERVATION_DECLARATION_XTR_E4000.json` | the draft declaration: scope, gate constants, tier binding, revalidation. `status` DRAFT, `authorizes` false. |
+| `docs/521_INTRINSIC_TIER_XTR_E4000.json` | the tier artifact built by `rf_catalogue_tiers.py` from the three terminated sessions (RERUN2 11-03, RERUN3 11-11, RERUN1 11-14); `content_sha256` 444a57aa6d8f3caedc39f7949fb0d8d9312e5e9f69a7b33c898a1424fb79e011; offsets -255,996 and +255,996 Hz. |
 | `rf_antenna_on_declaration.py` | pure checker: a declaration is accepted only if its mode, gain, tuner, bands, termination statement, gate constants, tier hash and offsets, and revalidation fields are consistent, and `authorizes` is true only for a FROZEN declaration that says so. |
 | `test_rf_antenna_on_declaration.py` | tests: the staged draft is consistent and authorizes nothing; out-of-scope bands (FM, 750, 881 MHz), gain, tuner, mode, constants, tier hash and revalidation are refused. |
 
