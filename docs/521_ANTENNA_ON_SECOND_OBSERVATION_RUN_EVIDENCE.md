@@ -42,8 +42,8 @@ The antenna side still has fewer candidates per visit than the load (about 1,060
 
 ## Evidence
 - Run directory (locked, 199-file manifest): archive `antenna_on_obs_20261118_mukilteo`, tar.zst sha256 `bf60f9c41013cac6b471b4e56bdd9b384d4cd513d955591946c68c2bf22c6d41`, tar sha256 `443a2902daef203b3ad925b6566e3d9e008b152bf5f64c3020ff601d4dc19764`,
-  1,610,886,455 bytes raw, 430,389,385 bytes compressed, verified on dedirock (see the PR for the far-side check).
+  1,610,886,455 bytes raw, 430,389,385 bytes compressed, verified on dedirock: zst hash, `zstd -t` and the decompressed tar hash all match the local files. The first `scp` was cut by a connection reset; the far-side file was truncated and was completed by appending the missing bytes, then re-verified.
 - Load-fitted set: archive `slope_mukilteo_antoff_20261118`, tar.zst sha256 `38bc38238cea801b12803cc10eafeac1006b8d9d606e46a9eff57fb6449fe362`, tar sha256 `f086e4e4b6e63ba7d4ddf8e72bf35176536d8f6aa3340d379375b2d9658ea120`,
-  268,470,731 bytes raw, 69,008,970 bytes compressed.
+  268,470,731 bytes raw, 69,008,970 bytes compressed, verified on dedirock (zst and tar hashes match).
 - In this repo (`scripts/s521_antenna_on_run/`): `observation_run_20261118_visits.json` (per-visit gate results, from `analyse_observation_run.py <run dir>`), `loadfitted_visits_20261118.json`,
   `loadfitted_gate_eval_20261118.py` and `loadfitted_spectrum_20261118.json`.
