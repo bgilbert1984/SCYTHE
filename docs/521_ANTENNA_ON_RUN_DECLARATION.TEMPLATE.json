@@ -1,0 +1,18 @@
+{
+ "run_id": "",
+ "site": "",
+ "output_dir": "",
+ "rtl_tcp_host": "127.0.0.1",
+ "rtl_tcp_port": 1234,
+ "receiver": {"description": "Nooelec SMArt XTR, SN 71874552, Elonics E4000 tuner", "sensor_id": "71874552", "tuner": "E4000"},
+ "gain_db": 29.0,
+ "bands": [
+  {"band_id": "UHF_LOW", "high_hz": 440000000, "low_hz": 400000000},
+  {"band_id": "UHF_HIGH", "high_hz": 470000000, "low_hz": 440000000}
+ ],
+ "seed": 7535194158483371716,
+ "mode": "OBSERVATION_ONLY",
+ "antenna": {"connected": true, "note": "operator states the antenna is connected, and where"},
+ "frozen_declaration_sha256": "94b86ebe99f88c4963d62553516d02af92703f2c4e33af36a56d9dfb032d795c",
+ "launch_authorization": {"path": "", "sha256": ""}
+}
