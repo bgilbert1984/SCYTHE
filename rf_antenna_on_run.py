@@ -12,7 +12,7 @@ Pre-contact (no tuner command is sent until every check passes):
   2. the run declaration matches the frozen scope (receiver, tuner, gain, bands, observation-only), states the
      antenna is connected (the operator's statement, not a measurement) and names the frozen declaration's hash;
   3. the declared seed regenerates exactly the frozen schedule digest and 3 visits per tuning;
-  4. a launch authorization verifies: status AUTHORIZED, window current, bound to the frozen declaration and to
+  4. a launch authorization verifies: status AUTHORIZED, time window current if it names one (optional), bound to the frozen declaration and to
      this exact run declaration's digest, with the operator's own confirmation naming that digest.
 The software cannot check that the operator's confirmation is genuine; it checks that it exists and names the digest.
 """
@@ -112,10 +112,11 @@ def verify_launch_authorization(run_decl: Dict[str, Any], *, now: Optional[_dt.d
     if run_digest not in str(auth.get("operator_confirmation", "")):
         raise RunRefused("AOR_LAUNCH_AUTHORIZATION_CONFIRMATION_MISSING",
                          "the operator's own confirmation must name the run declaration digest")
-    window = auth.get("window") or {}
-    current = now or _dt.datetime.now(_dt.timezone.utc)
-    if not (_parse_time(window.get("not_before")) <= current <= _parse_time(window.get("not_after"))):
-        raise RunRefused("AOR_LAUNCH_AUTHORIZATION_WINDOW_NOT_CURRENT")
+    window = auth.get("window")
+    if window:    # optional (owner, 2026-11-17: no time window is required); a window that is given is enforced
+        current = now or _dt.datetime.now(_dt.timezone.utc)
+        if not (_parse_time(window.get("not_before")) <= current <= _parse_time(window.get("not_after"))):
+            raise RunRefused("AOR_LAUNCH_AUTHORIZATION_WINDOW_NOT_CURRENT")
     if not auth.get("permitted_steps") or not auth.get("stop_conditions"):
         raise RunRefused("AOR_LAUNCH_AUTHORIZATION_STEPS_UNENUMERATED")
     return {"run_declaration_sha256": run_digest, "authorization_sha256": claimed, "window": window}
