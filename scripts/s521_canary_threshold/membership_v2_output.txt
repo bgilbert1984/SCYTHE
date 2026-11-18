@@ -1,0 +1,39 @@
+load 11-17 (ref) vs antenna-on 11-16 (other) ref/other median candidates outside cloud: {'ref_median': 499.0, 'other_median': 64.0}
+  tol_60_hz
+   ref_in_other_10_12       n=13767 paired [0.0782, 0.0634, 0.0937]  control [0.0802, 0.0733, 0.0889]  delta [-0.002, -0.0221, 0.0188]
+   ref_in_other_12_14       n= 1025 paired [0.2019, 0.1432, 0.2533]  control [0.2195, 0.205, 0.2349]  delta [-0.0176, -0.0682, 0.0319]
+   ref_in_other_14_17       n=   89 paired [0.7517, 0.6569, 0.8506]  control [0.361, 0.231, 0.4866]  delta [0.3907, 0.2149, 0.5476]
+   ref_in_other_17_inf      n=  113 paired [0.8932, 0.7578, 0.9896]  control [0.3411, 0.2263, 0.4479]  delta [0.5522, 0.4759, 0.6432]
+   ref_in_other_all         n=14994 paired [0.0848, 0.0718, 0.0996]  control [0.0795, 0.0722, 0.0891]  delta [0.0053, -0.0134, 0.0252]
+  tol_500_hz
+   ref_in_other_10_12       n=13767 paired [0.0959, 0.0793, 0.1129]  control [0.0965, 0.0843, 0.1129]  delta [-0.0005, -0.0217, 0.0215]
+   ref_in_other_12_14       n= 1025 paired [0.634, 0.5352, 0.7274]  control [0.6131, 0.5773, 0.6521]  delta [0.0209, -0.063, 0.1059]
+   ref_in_other_14_17       n=   89 paired [0.8544, 0.7758, 0.9306]  control [0.4566, 0.3272, 0.6235]  delta [0.3979, 0.2405, 0.5469]
+   ref_in_other_17_inf      n=  113 paired [0.8984, 0.7734, 0.9896]  control [0.3582, 0.2458, 0.4658]  delta [0.5403, 0.4561, 0.6342]
+   ref_in_other_all         n=14994 paired [0.1001, 0.0843, 0.1165]  control [0.0936, 0.0813, 0.1105]  delta [0.0066, -0.0107, 0.0273]
+load 11-17 (ref) vs antenna-on 11-17 same day (other) ref/other median candidates outside cloud: {'ref_median': 499.0, 'other_median': 49.5}
+  tol_60_hz
+   ref_in_other_10_12       n=13767 paired [0.033, 0.0141, 0.0614]  control [0.0342, 0.0286, 0.0393]  delta [-0.0012, -0.0249, 0.0328]
+   ref_in_other_12_14       n= 1025 paired [0.1217, 0.0672, 0.1954]  control [0.0955, 0.08, 0.1103]  delta [0.0262, -0.0403, 0.1147]
+   ref_in_other_14_17       n=   89 paired [0.7833, 0.5625, 0.9528]  control [0.3594, 0.2297, 0.4879]  delta [0.424, 0.2194, 0.596]
+   ref_in_other_17_inf      n=  113 paired [0.9297, 0.8307, 1.0]  control [0.3426, 0.2285, 0.4498]  delta [0.5871, 0.4256, 0.7383]
+   ref_in_other_all         n=14994 paired [0.045, 0.0272, 0.0714]  control [0.0367, 0.031, 0.0425]  delta [0.0083, -0.0125, 0.04]
+  tol_500_hz
+   ref_in_other_10_12       n=13767 paired [0.0405, 0.0182, 0.0755]  control [0.043, 0.034, 0.0526]  delta [-0.0025, -0.0322, 0.041]
+   ref_in_other_12_14       n= 1025 paired [0.2921, 0.1661, 0.4649]  control [0.2667, 0.2313, 0.2966]  delta [0.0254, -0.1279, 0.2363]
+   ref_in_other_14_17       n=   89 paired [0.8556, 0.631, 0.9922]  control [0.4153, 0.2894, 0.5653]  delta [0.4402, 0.2196, 0.6042]
+   ref_in_other_17_inf      n=  113 paired [0.9297, 0.8307, 1.0]  control [0.3575, 0.2369, 0.4714]  delta [0.5722, 0.4118, 0.725]
+   ref_in_other_all         n=14994 paired [0.0513, 0.0299, 0.0828]  control [0.0444, 0.0352, 0.0544]  delta [0.0069, -0.0187, 0.0454]
+antenna-on 11-16 (ref) vs antenna-on 11-17 (other) ref/other median candidates outside cloud: {'ref_median': 64.0, 'other_median': 49.5}
+  tol_60_hz
+   ref_in_other_10_12       n= 1691 paired [0.1148, 0.0547, 0.1809]  control [0.0698, 0.0592, 0.08]  delta [0.045, -0.0159, 0.1156]
+   ref_in_other_12_14       n=  251 paired [0.3292, 0.1932, 0.4842]  control [0.0271, 0.0107, 0.0504]  delta [0.3022, 0.1734, 0.444]
+   ref_in_other_14_17       n=  169 paired [0.7004, 0.632, 0.7796]  control [0.4376, 0.3462, 0.5317]  delta [0.2628, 0.1807, 0.3398]
+   ref_in_other_17_inf      n=  117 paired [0.7168, 0.5081, 0.8889]  control [0.0226, 0.0089, 0.0365]  delta [0.6942, 0.4743, 0.8784]
+   ref_in_other_all         n= 2228 paired [0.208, 0.1415, 0.2766]  control [0.0864, 0.0719, 0.1013]  delta [0.1217, 0.0565, 0.1857]
+  tol_500_hz
+   ref_in_other_10_12       n= 1691 paired [0.2999, 0.1773, 0.4522]  control [0.1964, 0.1622, 0.2288]  delta [0.1035, -0.0299, 0.2725]
+   ref_in_other_12_14       n=  251 paired [0.5884, 0.4668, 0.6867]  control [0.0727, 0.04, 0.1115]  delta [0.5156, 0.3981, 0.623]
+   ref_in_other_14_17       n=  169 paired [0.8094, 0.7182, 0.9096]  control [0.4516, 0.3543, 0.5537]  delta [0.3577, 0.209, 0.5112]
+   ref_in_other_17_inf      n=  117 paired [0.9504, 0.8897, 1.0]  control [0.0584, 0.0192, 0.11]  delta [0.892, 0.7987, 0.9763]
+   ref_in_other_all         n= 2228 paired [0.3938, 0.2808, 0.5133]  control [0.1856, 0.1516, 0.2216]  delta [0.2082, 0.0844, 0.3488]

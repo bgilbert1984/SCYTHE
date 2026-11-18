@@ -1,5 +1,9 @@
 # §5.21 candidate-count gap: margin-shift test (2026-11-17)
 
+> **Correction (2026-11-18).** The conclusion below that floor compression "accounts for the gap" holds for the *count* dominated by the near-DC cloud only. The candidate-level
+> membership check (`521_MEMBERSHIP_CHECK_MUKILTEO.md`) shows it fails outside the cloud: antenna-on has about 64 candidates per visit there against 499 load-fitted at 10 dB and about 40 at 12 dB, and the
+> weak (10-14 dB) candidates do not survive better than a cross-tuning control. The count match at 12 dB is therefore not evidence that a margin shift reproduces antenna-on membership. Kept as a record, not rescued.
+
 Evidence record. It changes no frozen file, test or behaviour. Script `scripts/s521_canary_threshold/margin_shift_test.py`, results
 `scripts/s521_canary_threshold/margin_shift_mukilteo.json`. The test was proposed in a staged analysis note of 2026-11-16 (not committed) and run here.
 
@@ -29,7 +33,7 @@ and its weaker-side canary excess was about 1.4 dB lower (median 15.4 against 16
 
 ## What it shows and what it does not
 - The count gap is reproduced by a margin shift of about 2 dB, so floor compression accounts for the gap in count at this venue and tunings. Total noise power (std) does not.
-- Only counts were compared. It is not shown that the same candidates survive in both cases, so "the whole story" is not claimed.
+- Only counts were compared. It is not shown that the same candidates survive in both cases, so "the whole story" is not claimed. (Tested afterwards: they largely do not outside the near-DC cloud; see the correction above.)
 - One venue, one pair of sets, taken on different days (11-16 antenna-on, 11-17 load-fitted); the floor of an antenna-on venue changes from day to day (see the Hwy 99 runs). The paired visits share tunings and retunes, not time.
 - The mechanism says nothing about what the surviving candidates are. The ~2,000 candidates of a terminated visit are not shown here to be noise excursions or spurs.
 - An earlier analysis (2026-11-11, not committed) found that lowering RERUN2's threshold by 2.4 dB reproduced RERUN3's entry counts at 15 and 20 dB margins but over-counted at 10 dB. That was a different comparison
