@@ -35,6 +35,7 @@ detector and the visit, not a claim about any physical cause.
 | antenna-on, Lynnwood, gain 29.0, UHF (11-16; 19/32 pass the gate) | 32 | 24 | 0.579-0.867 | 10.1 / 13.0 / 15.3 (24 detected) |
 | Lynnwood, 50 ohm load fitted (11-16, after the antenna-on set; floor-rise check) | 32 | 32 | 0.893-1.000 | 15.5 / 16.7 / 17.5 |
 | antenna-on, Mukilteo Speedway repeat (11-17), gain 29.0, UHF | 32 | 32 | 0.893-1.000 | 12.0 / 14.0 / 17.1 |
+| antenna-on, Hwy 99 repeat 4 (11-17, 14/32 pass the gate) | 32 | 16 | 0.336-0.664 | 10.2 / 13.2 / 14.6 (16 detected) |
 | strong bands, Hwy 99 (FM, 750, 881 MHz; 29.0/21.5/14.0 dB) | 36 | 5 | 0.061-0.287 | 10.1 / 11.5 / 12.4 |
 | intermediate gains, Mukilteo (750, 93.3 MHz) | 32 | 21 | 0.483-0.796 | 10.8 / 15.7 / 17.1 |
 
@@ -114,6 +115,23 @@ tuning), weaker-side excess 12.0 / 14.0 / 17.1 dB, sample std 0.79-1.16 LSB, no 
 Median floor 0.9-2.5 dB higher than 11-16 at seven of the eight tunings (-6.8 to -8.6 dB; the 457 MHz tuning is 0.2 dB lower), about the 11-14 Hwy 99 level: a small drift, not the band-confined rise seen at Hwy 99 on 11-15 and at Lynnwood.
 Per-visit table `visits_mukilteo2.json`, spectrum numbers `spectrum_mukilteo2.json` (covers the 11-14 Hwy 99, Mukilteo 11-16 and 11-17, and load-fitted sets). Archive `slope_mukilteo2_20261117`,
 tar.zst sha256 cf0a5937781a0fe7163af892507165f1162913da9ea03d65b9efea27c8ad5e84, verified on dedirock. Not part of the pinned counts in `test_rf_canary_gate.py`.
+
+Hwy 99 repeat 4 (13601 Hwy 99, 2026-11-17, antenna on as stated by the owner, same 8 tunings, retunes and gain 29.0 dB): 14/32 pass the merged visit gate; both +-256 kHz sides were detected in 16/32 visits (weaker-side excess
+10.2 / 13.2 / 14.6 dB), 16 `CANARY_NOT_DETECTED` and 2 `CANARY_BELOW_MIN_EXCESS` refusals, clipping at most 0.00007%. Per tuning (4 visits each): 401, 406, 415 and 425 MHz 0/4, 434 MHz 2/4, and 444, 449 and 457 MHz 4/4.
+Sample std 1.4-2.2 LSB in the lower five tunings and at 444 MHz, 1.0-1.1 at 449 and 457 MHz; median 276 candidates per capture (83-323 in the lower five). Spectrum check (`spectrum_hwy99_repeat4.py`, 4096-point averaged PSD of the
+d=0 captures; compared with the 11-14, 11-16 and Mukilteo load-fitted sets):
+- 401-425 MHz: broadband. The median floor is -1.4 to -3.4 dB, which is 7.4-9.0 dB above the load-fitted floor (-10.2 to -11.1 dB), 5.0-7.2 dB above the 11-16 repeat (-8.4 to -9.2 dB) and 3.4-5.5 dB above 11-14 (-6.6 to -7.9 dB). Total power is
+  6.0-7.5 dB above the load-fitted level. The strongest peak is 12.1-13.5 dB over the median (the DC bin or the LO image) with 1-3 bins over 10 dB (load-fitted: 21-30 bins), so no narrowband carrier explains it.
+- 434 MHz: floor -4.3 dB (6.9 dB above load-fitted) and a NEW narrowband signal at 433.919 MHz, 27.0 dB over the median with 20 bins over 10 dB. It is absent from the 11-14 and 11-16 sets. It is at a frequency used by licence-exempt devices;
+  it is not identified.
+- 444 MHz: a strong carrier at 445.05 MHz, 32.4 dB over the median, 70 bins over 10 dB, std 2.18 LSB, 2,095 candidates per capture. The same carrier appeared in every Hwy 99 set: 445.044 MHz at +15.9 dB (11-14), 445.043 MHz at +38.0 dB
+  (11-15 repeat, 149 bins), 444.98 MHz at +21.3 dB (11-16; the strongest bin is 60 kHz below the others and the second bin is 445.227 MHz, so that set may show a different or a wide signal), and 445.05 MHz at +32.4 dB today. It varies in strength by more than
+  20 dB from day to day (+15.9 to +38.0 dB) and looks like a recurring emitter at or near this venue; it is not identified. The 444 MHz tuning passes the gate in all four of those sets despite it, because the canary is not at 445 MHz.
+- 449 and 457 MHz: close to the 11-14 and 11-16 levels (-8.0 and -7.4 dB; the load-fitted floor is -11.1 and -11.2 dB).
+No load-fitted check was run at Hwy 99 today; the receiver is cleared by the Mukilteo load-fitted check from the same session (32/32, floor -10 to -11 dB, `slope_mukilteo_antoff_20261117`) and by the Hwy 99 check of 11-15, not by a check at this
+venue today. The lower-band rise here is larger than the 11-15 repeat's (about 6 dB) and the gate refused it as designed. This is the fourth antenna-on Hwy 99 canary repeat: 32/32 (11-14), 12/32 (11-15), 31/32 (11-16), 14/32 (11-17).
+Per-visit table `visits_hwy99_repeat4.json`, spectrum numbers `spectrum_hwy99_repeat4.json`. Archive `slope_hwy99_repeat4_20261117`, tar.zst sha256 c9922a8f29f22969b1c5befe7213f71d62ff124b1ab0db407c7dae48d4d23a03,
+verified on dedirock. Not part of the pinned counts in `test_rf_canary_gate.py`.
 
 Load-fitted controls (2026-11-15, 50 ohm load fitted as stated by the owner and not verified here; feasibility only, not catalogue runs; per-visit table
 `visits_load_fitted.json`, script `analyse_load_fitted.py`; archives `slope_load_strong_20261115` tar.zst sha256 db25e27b5640bcddc89dd36f8590eab171a5fa8cbba2f5cd161c15821a7fb95a and
