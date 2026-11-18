@@ -1,0 +1,20 @@
+{
+ "status": "DRAFT",
+ "frozen_declaration_sha256": "94b86ebe99f88c4963d62553516d02af92703f2c4e33af36a56d9dfb032d795c",
+ "run_declaration_sha256": "",
+ "window": {"not_before": "", "not_after": ""},
+ "permitted_steps": [
+  "verify the XTR (SN 71874552) is attached and rtl_tcp is the only consumer of the device",
+  "send the gain command (29.0 dB, E4000) and the retune commands of the frozen 192-visit schedule",
+  "acquire the 192 scheduled visits at the declared site with the antenna connected",
+  "spool every visit's byte-exact windows and journal each visit's gate result",
+  "apply the frozen visit gate and tuning gate, and write antenna_on_observation.json"
+ ],
+ "stop_conditions": [
+  "STREAM_NOT_LIVE from the sequencer's liveness guard",
+  "the device drops off the host or rtl_tcp exits (do not retry blindly; re-attach and start a new run)",
+  "a visit refused three times in a row",
+  "the declared site or antenna state changes during the run"
+ ],
+ "operator_confirmation": ""
+}
