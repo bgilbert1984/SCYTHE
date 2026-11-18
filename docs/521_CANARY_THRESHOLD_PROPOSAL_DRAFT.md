@@ -36,6 +36,7 @@ detector and the visit, not a claim about any physical cause.
 | Lynnwood, 50 ohm load fitted (11-16, after the antenna-on set; floor-rise check) | 32 | 32 | 0.893-1.000 | 15.5 / 16.7 / 17.5 |
 | antenna-on, Mukilteo Speedway repeat (11-17), gain 29.0, UHF | 32 | 32 | 0.893-1.000 | 12.0 / 14.0 / 17.1 |
 | antenna-on, Hwy 99 repeat 4 (11-17, 14/32 pass the gate) | 32 | 16 | 0.336-0.664 | 10.2 / 13.2 / 14.6 (16 detected) |
+| antenna-on, Hwy 99 repeat 5 (11-17, 17/32 pass the gate) | 32 | 19 | 0.423-0.745 | 10.2 / 13.6 / 15.1 (19 detected) |
 | strong bands, Hwy 99 (FM, 750, 881 MHz; 29.0/21.5/14.0 dB) | 36 | 5 | 0.061-0.287 | 10.1 / 11.5 / 12.4 |
 | intermediate gains, Mukilteo (750, 93.3 MHz) | 32 | 21 | 0.483-0.796 | 10.8 / 15.7 / 17.1 |
 
@@ -132,6 +133,20 @@ No load-fitted check was run at Hwy 99 today; the receiver is cleared by the Muk
 venue today. The lower-band rise here is larger than the 11-15 repeat's (about 6 dB) and the gate refused it as designed. This is the fourth antenna-on Hwy 99 canary repeat: 32/32 (11-14), 12/32 (11-15), 31/32 (11-16), 14/32 (11-17).
 Per-visit table `visits_hwy99_repeat4.json`, spectrum numbers `spectrum_hwy99_repeat4.json`. Archive `slope_hwy99_repeat4_20261117`, tar.zst sha256 c9922a8f29f22969b1c5befe7213f71d62ff124b1ab0db407c7dae48d4d23a03,
 verified on dedirock. Not part of the pinned counts in `test_rf_canary_gate.py`.
+
+Hwy 99 repeat 5 (13601 Hwy 99, 2026-11-17, antenna on as stated by the owner, same venue and session as repeat 4, same 8 tunings, retunes and gain 29.0 dB): 17/32 pass the merged visit gate; both +-256 kHz sides were detected in 19/32 visits
+(weaker-side excess 10.2 / 13.6 / 15.1 dB), 13 `CANARY_NOT_DETECTED` and 2 `CANARY_BELOW_MIN_EXCESS` refusals, clipping at most 0.0000238%. Per tuning (4 visits each): 401, 406 and 415 MHz 0/4, 425 MHz 1/4, and 434, 444, 449 and 457 MHz 4/4.
+Compared with repeat 4 the only change in the pass pattern is 434 MHz (2/4 then, 4/4 now) and 425 MHz (0/4 then, 1/4 now). Sample std 1.8-1.9 LSB at 401-415 MHz, 1.4 at 425 MHz; median 276 candidates per capture. Spectrum check
+(`spectrum_hwy99_repeat5.py`, 4096-point averaged PSD of the d=0 captures; repeat 4, 11-14, 11-16 and the load-fitted and antenna-off sets alongside):
+- 401-425 MHz: still broadband. Median floor -1.7, -1.9, -1.6 and -3.9 dB (repeat 4: -2.1, -2.3, -1.4 and -3.4), against -10.2 to -11.1 dB load-fitted, so 6.2-9.4 dB above it. 1-3 bins over 10 dB (load-fitted: 21-30). The floor did not move between the two
+  11-17 repeats by more than 0.8 dB, so repeat 5 does not show the rise fading within the session.
+- 434 MHz: floor -5.9 dB (repeat 4: -4.3). The 433.919 MHz signal seen in repeat 4 (+27.0 dB, 20 bins) is NOT present; the strongest peak is the DC bin, +16.6 dB, 4 bins over 10 dB. Whatever it was, it is not a persistent emitter at this venue.
+- 444 MHz: the 445.05 MHz carrier is present again, +29.0 dB over the median, 57 bins over 10 dB (repeat 4: +32.4 dB, 70 bins; the next two peaks are 445.050 and 445.006 MHz at +26.1 and +25.4 dB, as in repeat 4). Fifth Hwy 99 set in which
+  it appears. The 444 MHz tuning passes 4/4 again.
+- 449 and 457 MHz: -8.5 and -8.8 dB (repeat 4: -8.0 and -7.4); 450.002 MHz is the strongest peak at 449 MHz (+22.4 dB) as before.
+No load-fitted check was run at Hwy 99 in this session; the receiver is cleared as for repeat 4. This is the fifth antenna-on Hwy 99 canary repeat: 32/32 (11-14), 12/32 (11-15), 31/32 (11-16), 14/32 (11-17), 17/32 (11-17).
+Per-visit table `visits_hwy99_repeat5.json`, spectrum numbers `spectrum_hwy99_repeat5.json`. Archive `slope_hwy99_repeat5_20261117`, tar.zst sha256 7eb5165001ab8a768677ad5a01daaa043854dfcf1db3f536562433ddae9bca58,
+tar sha256 21264279ba4bbea9e618e69ecd9b64edc3e7e79a98ada1a371c1385dbcbc3781, verified on dedirock. Not part of the pinned counts in `test_rf_canary_gate.py`.
 
 Load-fitted controls (2026-11-15, 50 ohm load fitted as stated by the owner and not verified here; feasibility only, not catalogue runs; per-visit table
 `visits_load_fitted.json`, script `analyse_load_fitted.py`; archives `slope_load_strong_20261115` tar.zst sha256 db25e27b5640bcddc89dd36f8590eab171a5fa8cbba2f5cd161c15821a7fb95a and
