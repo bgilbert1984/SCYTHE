@@ -18,7 +18,7 @@ tier file sha256 `c46f56a6a29026c4c8baf7ce55e195d0e67b5018d95404e88f6ac1e183dd69
 2. The run declaration matches the frozen scope: receiver SN 71874552 / E4000, gain 29.0 dB, the two UHF bands, `OBSERVATION_ONLY`; it states the antenna is connected
    (the operator's statement; nothing measures it) and a non-empty site; it names the frozen declaration's hash.
 3. The declared seed (7535194158483371716) regenerates the frozen schedule digest `d35d706f...` (64 tunings, 3 visits each).
-4. The launch authorization named by path and SHA-256 verifies: status `AUTHORIZED`; window current at the moment of the run; bound to the frozen declaration hash AND to the
+4. The launch authorization named by path and SHA-256 verifies: status `AUTHORIZED`; a time window is OPTIONAL (the owner waived the requirement on 2026-11-17) and is enforced at the moment of the run only if the authorization names one; bound to the frozen declaration hash AND to the
    canonical SHA-256 of this exact run declaration (excluding its `launch_authorization` field); the operator's own confirmation text contains that digest; permitted steps and
    stop conditions enumerated. Editing the run declaration after authorizing breaks the binding.
 5. The output directory is new (the sequencer's `OUTPUT_DIR_NOT_EMPTY` rule).
@@ -35,7 +35,7 @@ Then the sequencer's first-contact rule applies: the family read back from rtl_t
 - [ ] Serial readback is SN 71874552 (E4000).
 - [ ] The antenna is connected; the venue and antenna are stated in the run declaration. The 50 ohm load is NOT fitted.
 - [ ] 750 MHz, 881 MHz and FM are out of scope; the run does not touch them.
-- [ ] The run declaration's digest is computed, the operator states their confirmation naming it, the window is set, and the authorization file's SHA-256 is written into the run declaration.
+- [ ] The run declaration's digest is computed, the operator states their confirmation naming it, a window is set only if wanted, and the authorization file's SHA-256 is written into the run declaration.
 - [ ] Expect refused tunings: 401-435 MHz was refused in part at 2 of 5 venues tried and the margin over 11.0 dB can be near zero at a degraded venue (accepted assumptions in the freeze record).
 
 ## Stop conditions (also enumerated in the authorization)

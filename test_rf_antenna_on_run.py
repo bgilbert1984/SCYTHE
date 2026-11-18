@@ -88,6 +88,8 @@ def authorize(tmp, decl, **overrides):
             "stop_conditions": ["stream not live", "device drops off the host"],
             "operator_confirmation": f"Run declaration digest confirmation is now established for: {digest}"}
     auth.update(overrides)
+    if auth.get("window") is None:
+        auth.pop("window")
     path = os.path.join(tmp, "launch_authorization.json")
     with open(path, "w") as handle:
         json.dump(auth, handle)
@@ -181,6 +183,13 @@ class LaunchAuthorization(unittest.TestCase):
                          "AOR_LAUNCH_AUTHORIZATION_WINDOW_UNPARSEABLE")
         self.assertEqual(self.code(permitted_steps=[]), "AOR_LAUNCH_AUTHORIZATION_STEPS_UNENUMERATED")
         self.assertEqual(self.code(stop_conditions=[]), "AOR_LAUNCH_AUTHORIZATION_STEPS_UNENUMERATED")
+
+    def test_the_time_window_is_optional_but_enforced_when_given(self):
+        decl = make_run_decl(self.tmp)
+        authorize(self.tmp, decl, window=None)
+        run.precontact(decl, now=NOW)                      # no window: accepted
+        self.assertEqual(self.code(window={"not_before": "2026-11-01T00:00:00Z", "not_after": "2026-11-02T00:00:00Z"}),
+                         "AOR_LAUNCH_AUTHORIZATION_WINDOW_NOT_CURRENT")
 
     def test_a_changed_file_breaks_the_named_hash(self):
         decl = make_run_decl(self.tmp)
