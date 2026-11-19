@@ -1,0 +1,446 @@
+[
+ {
+  "file": "t000_d+0.u8",
+  "tuning_index": 0,
+  "centre_hz": 401366668.0,
+  "gain_db": 29.0,
+  "passed": false,
+  "reasons": [
+   "CANARY_NOT_DETECTED"
+  ],
+  "neg": null,
+  "pos": null,
+  "std": 1.5608322620391846,
+  "clip_pct": 0.0,
+  "n_cands": 194
+ },
+ {
+  "file": "t000_d-100000.u8",
+  "tuning_index": 0,
+  "centre_hz": 401266668.0,
+  "gain_db": 29.0,
+  "passed": false,
+  "reasons": [
+   "CANARY_NOT_DETECTED"
+  ],
+  "neg": 10.54132572549298,
+  "pos": null,
+  "std": 1.6564892530441284,
+  "clip_pct": 0.0,
+  "n_cands": 151
+ },
+ {
+  "file": "t000_d+200000.u8",
+  "tuning_index": 0,
+  "centre_hz": 401566668.0,
+  "gain_db": 29.0,
+  "passed": false,
+  "reasons": [
+   "CANARY_BELOW_MIN_EXCESS"
+  ],
+  "neg": 10.519562346631757,
+  "pos": 12.013975218914293,
+  "std": 1.4527790546417236,
+  "clip_pct": 0.0,
+  "n_cands": 280
+ },
+ {
+  "file": "t000_d-50000.u8",
+  "tuning_index": 0,
+  "centre_hz": 401316668.0,
+  "gain_db": 29.0,
+  "passed": false,
+  "reasons": [
+   "CANARY_BELOW_MIN_EXCESS"
+  ],
+  "neg": 11.174857455748644,
+  "pos": 10.570326598140344,
+  "std": 1.456148624420166,
+  "clip_pct": 0.0,
+  "n_cands": 247
+ },
+ {
+  "file": "t008_d+0.u8",
+  "tuning_index": 8,
+  "centre_hz": 406882286.0,
+  "gain_db": 29.0,
+  "passed": false,
+  "reasons": [
+   "CANARY_NOT_DETECTED"
+  ],
+  "neg": null,
+  "pos": 11.870161617838468,
+  "std": 1.2985807657241821,
+  "clip_pct": 0.0,
+  "n_cands": 376
+ },
+ {
+  "file": "t008_d-100000.u8",
+  "tuning_index": 8,
+  "centre_hz": 406782286.0,
+  "gain_db": 29.0,
+  "passed": false,
+  "reasons": [
+   "CANARY_BELOW_MIN_EXCESS"
+  ],
+  "neg": 10.738587287980316,
+  "pos": 11.553599646786157,
+  "std": 1.3328680992126465,
+  "clip_pct": 0.0,
+  "n_cands": 293
+ },
+ {
+  "file": "t008_d+200000.u8",
+  "tuning_index": 8,
+  "centre_hz": 407082286.0,
+  "gain_db": 29.0,
+  "passed": false,
+  "reasons": [
+   "CANARY_BELOW_MIN_EXCESS"
+  ],
+  "neg": 10.440602870560639,
+  "pos": 10.891952845381551,
+  "std": 1.3245937824249268,
+  "clip_pct": 0.0,
+  "n_cands": 307
+ },
+ {
+  "file": "t008_d-50000.u8",
+  "tuning_index": 8,
+  "centre_hz": 406832286.0,
+  "gain_db": 29.0,
+  "passed": true,
+  "reasons": [],
+  "neg": 12.089129568766719,
+  "pos": 11.52847133746974,
+  "std": 1.3842483758926392,
+  "clip_pct": 0.0,
+  "n_cands": 272
+ },
+ {
+  "file": "t016_d+0.u8",
+  "tuning_index": 16,
+  "centre_hz": 415717818.0,
+  "gain_db": 29.0,
+  "passed": false,
+  "reasons": [
+   "CANARY_BELOW_MIN_EXCESS"
+  ],
+  "neg": 11.087484920464227,
+  "pos": 10.482598469884437,
+  "std": 1.4994041919708252,
+  "clip_pct": 0.0,
+  "n_cands": 260
+ },
+ {
+  "file": "t016_d-100000.u8",
+  "tuning_index": 16,
+  "centre_hz": 415617818.0,
+  "gain_db": 29.0,
+  "passed": true,
+  "reasons": [],
+  "neg": 11.04088961308799,
+  "pos": 12.310767186315115,
+  "std": 1.4739964008331299,
+  "clip_pct": 0.0,
+  "n_cands": 276
+ },
+ {
+  "file": "t016_d+200000.u8",
+  "tuning_index": 16,
+  "centre_hz": 415917818.0,
+  "gain_db": 29.0,
+  "passed": true,
+  "reasons": [],
+  "neg": 11.151932755255638,
+  "pos": 11.78502751837237,
+  "std": 1.4546175003051758,
+  "clip_pct": 0.0,
+  "n_cands": 246
+ },
+ {
+  "file": "t016_d-50000.u8",
+  "tuning_index": 16,
+  "centre_hz": 415667818.0,
+  "gain_db": 29.0,
+  "passed": false,
+  "reasons": [
+   "CANARY_NOT_DETECTED"
+  ],
+  "neg": null,
+  "pos": 11.893613301660244,
+  "std": 1.4668582677841187,
+  "clip_pct": 0.0,
+  "n_cands": 254
+ },
+ {
+  "file": "t024_d+0.u8",
+  "tuning_index": 24,
+  "centre_hz": 425221157.0,
+  "gain_db": 29.0,
+  "passed": false,
+  "reasons": [
+   "CANARY_BELOW_MIN_EXCESS"
+  ],
+  "neg": 10.57861998651422,
+  "pos": 12.192629705863139,
+  "std": 1.3857510089874268,
+  "clip_pct": 0.0,
+  "n_cands": 226
+ },
+ {
+  "file": "t024_d-100000.u8",
+  "tuning_index": 24,
+  "centre_hz": 425121157.0,
+  "gain_db": 29.0,
+  "passed": false,
+  "reasons": [
+   "CANARY_NOT_DETECTED"
+  ],
+  "neg": null,
+  "pos": 10.79550990567659,
+  "std": 1.3686379194259644,
+  "clip_pct": 0.0,
+  "n_cands": 260
+ },
+ {
+  "file": "t024_d+200000.u8",
+  "tuning_index": 24,
+  "centre_hz": 425421157.0,
+  "gain_db": 29.0,
+  "passed": true,
+  "reasons": [],
+  "neg": 11.387313098235868,
+  "pos": 12.445546154358194,
+  "std": 1.361543893814087,
+  "clip_pct": 0.0,
+  "n_cands": 305
+ },
+ {
+  "file": "t024_d-50000.u8",
+  "tuning_index": 24,
+  "centre_hz": 425171157.0,
+  "gain_db": 29.0,
+  "passed": false,
+  "reasons": [
+   "CANARY_NOT_DETECTED"
+  ],
+  "neg": 11.483882162051248,
+  "pos": null,
+  "std": 1.3701115846633911,
+  "clip_pct": 0.0,
+  "n_cands": 239
+ },
+ {
+  "file": "t032_d+0.u8",
+  "tuning_index": 32,
+  "centre_hz": 434616442.0,
+  "gain_db": 29.0,
+  "passed": true,
+  "reasons": [],
+  "neg": 12.234665799999396,
+  "pos": 12.49297049857917,
+  "std": 1.2469888925552368,
+  "clip_pct": 0.0,
+  "n_cands": 340
+ },
+ {
+  "file": "t032_d-100000.u8",
+  "tuning_index": 32,
+  "centre_hz": 434516442.0,
+  "gain_db": 29.0,
+  "passed": false,
+  "reasons": [
+   "CANARY_BELOW_MIN_EXCESS"
+  ],
+  "neg": 10.521470422546262,
+  "pos": 12.044128216828172,
+  "std": 1.2622246742248535,
+  "clip_pct": 0.0,
+  "n_cands": 337
+ },
+ {
+  "file": "t032_d+200000.u8",
+  "tuning_index": 32,
+  "centre_hz": 434816442.0,
+  "gain_db": 29.0,
+  "passed": true,
+  "reasons": [],
+  "neg": 12.517826614971817,
+  "pos": 11.059146002271515,
+  "std": 1.2885690927505493,
+  "clip_pct": 0.0,
+  "n_cands": 324
+ },
+ {
+  "file": "t032_d-50000.u8",
+  "tuning_index": 32,
+  "centre_hz": 434566442.0,
+  "gain_db": 29.0,
+  "passed": false,
+  "reasons": [
+   "CANARY_BELOW_MIN_EXCESS"
+  ],
+  "neg": 10.220606272592555,
+  "pos": 12.434280460469871,
+  "std": 1.27559232711792,
+  "clip_pct": 0.0,
+  "n_cands": 289
+ },
+ {
+  "file": "t040_d+0.u8",
+  "tuning_index": 40,
+  "centre_hz": 444337961.0,
+  "gain_db": 29.0,
+  "passed": true,
+  "reasons": [],
+  "neg": 13.54050990592569,
+  "pos": 13.44966981004074,
+  "std": 1.106801152229309,
+  "clip_pct": 0.0,
+  "n_cands": 813
+ },
+ {
+  "file": "t040_d-100000.u8",
+  "tuning_index": 40,
+  "centre_hz": 444237961.0,
+  "gain_db": 29.0,
+  "passed": true,
+  "reasons": [],
+  "neg": 12.701740869922416,
+  "pos": 12.329030541013886,
+  "std": 1.1111564636230469,
+  "clip_pct": 0.0,
+  "n_cands": 760
+ },
+ {
+  "file": "t040_d+200000.u8",
+  "tuning_index": 40,
+  "centre_hz": 444537961.0,
+  "gain_db": 29.0,
+  "passed": true,
+  "reasons": [],
+  "neg": 14.886636018797494,
+  "pos": 14.127670859031308,
+  "std": 1.1313022375106812,
+  "clip_pct": 0.0,
+  "n_cands": 839
+ },
+ {
+  "file": "t040_d-50000.u8",
+  "tuning_index": 40,
+  "centre_hz": 444287961.0,
+  "gain_db": 29.0,
+  "passed": true,
+  "reasons": [],
+  "neg": 13.825053696197271,
+  "pos": 13.271165810546787,
+  "std": 1.1522314548492432,
+  "clip_pct": 0.0,
+  "n_cands": 850
+ },
+ {
+  "file": "t048_d+0.u8",
+  "tuning_index": 48,
+  "centre_hz": 449787010.0,
+  "gain_db": 29.0,
+  "passed": true,
+  "reasons": [],
+  "neg": 15.05117210486413,
+  "pos": 14.178022658677174,
+  "std": 1.0450807809829712,
+  "clip_pct": 0.0,
+  "n_cands": 828
+ },
+ {
+  "file": "t048_d-100000.u8",
+  "tuning_index": 48,
+  "centre_hz": 449687010.0,
+  "gain_db": 29.0,
+  "passed": true,
+  "reasons": [],
+  "neg": 15.386240845481643,
+  "pos": 13.484298371131331,
+  "std": 0.9927334189414978,
+  "clip_pct": 0.0,
+  "n_cands": 850
+ },
+ {
+  "file": "t048_d+200000.u8",
+  "tuning_index": 48,
+  "centre_hz": 449987010.0,
+  "gain_db": 29.0,
+  "passed": true,
+  "reasons": [],
+  "neg": 14.409462996140093,
+  "pos": 14.30936491676336,
+  "std": 1.007749319076538,
+  "clip_pct": 0.0,
+  "n_cands": 885
+ },
+ {
+  "file": "t048_d-50000.u8",
+  "tuning_index": 48,
+  "centre_hz": 449737010.0,
+  "gain_db": 29.0,
+  "passed": true,
+  "reasons": [],
+  "neg": 14.361207817912678,
+  "pos": 15.206154464455608,
+  "std": 1.0004860162734985,
+  "clip_pct": 0.0,
+  "n_cands": 866
+ },
+ {
+  "file": "t056_d+0.u8",
+  "tuning_index": 56,
+  "centre_hz": 457299518.0,
+  "gain_db": 29.0,
+  "passed": true,
+  "reasons": [],
+  "neg": 14.772416341429054,
+  "pos": 15.422759849564724,
+  "std": 0.9152809977531433,
+  "clip_pct": 0.0,
+  "n_cands": 835
+ },
+ {
+  "file": "t056_d-100000.u8",
+  "tuning_index": 56,
+  "centre_hz": 457199518.0,
+  "gain_db": 29.0,
+  "passed": true,
+  "reasons": [],
+  "neg": 14.853365503243767,
+  "pos": 14.160799111659728,
+  "std": 0.9200847744941711,
+  "clip_pct": 0.0,
+  "n_cands": 800
+ },
+ {
+  "file": "t056_d+200000.u8",
+  "tuning_index": 56,
+  "centre_hz": 457499518.0,
+  "gain_db": 29.0,
+  "passed": true,
+  "reasons": [],
+  "neg": 14.479493922670912,
+  "pos": 16.278601382814475,
+  "std": 0.8995682001113892,
+  "clip_pct": 0.0,
+  "n_cands": 847
+ },
+ {
+  "file": "t056_d-50000.u8",
+  "tuning_index": 56,
+  "centre_hz": 457249518.0,
+  "gain_db": 29.0,
+  "passed": true,
+  "reasons": [],
+  "neg": 15.656966206039733,
+  "pos": 15.331829398079122,
+  "std": 0.8860654234886169,
+  "clip_pct": 0.0,
+  "n_cands": 886
+ }
+]
