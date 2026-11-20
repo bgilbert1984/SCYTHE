@@ -34,7 +34,7 @@ The failures sit in the same 401-435 MHz band in all three and the upper three t
 The 2026-11-18/19 repeats and run 4 at this venue were clean in the lower band (`521_ANTENNA_ON_HWY99_20261119_CANARY_REPEAT.md`, `521_ANTENNA_ON_HWY99_20261119_EVENING_CANARY_REPEAT.md`, `521_ANTENNA_ON_FOURTH_OBSERVATION_RUN_EVIDENCE.md`). The cause of the difference is not identified; this record adds no measurement that separates site, antenna position, cabling or local sources.
 
 ## Public dataset release
-- Published 2026-11-19/20 as a public Hugging Face dataset, `bgilbert1984/scythe-uhf-rtl-sdr-evidence`, license CC0-1.0.
+- Published 2026-11-19/20 as a public Hugging Face dataset, `bgilbert1984/scythe-uhf-rtl-sdr-evidence`, license CC0-1.0: https://huggingface.co/datasets/bgilbert1984/scythe-uhf-rtl-sdr-evidence
 - Contents: 1,672 raw IQ captures (904 files from 27 canary and feasibility sets, 768 visits from the four 192-visit observation runs), a captures table with the per-file gate results where they exist, a sets table, the per-set logs and scripts, about 14 GB, 1,831 files on the Hub.
 - Built on dedirock from the archives already verified there, not from the local directories. A separate local build from the original directories produced identical metadata, including every capture's sha256.
 - Hub-side check after the upload: every file in the build manifest is present, all 1,674 large files carry the same sha256 as the manifest, and all sizes match.
