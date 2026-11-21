@@ -10,7 +10,8 @@ It follows `521_UNIFORM_GATE_RECOMPUTE_AND_FLOOR_RISE.md`, which left open what 
 | `load_strong_20261115` | the same plan with the 50 ohm load fitted (owner statement): the control | 11-15 21:37 | not stated in its log |
 | `intermediate_20261115` | antenna-on, 32 captures: 750 MHz at 14.0, 11.5, 9.0, 6.5 and 4.0 dB and 93.3 MHz at 14.0, 1.5 and -1.0 dB | 11-15 08:13 | 12502 Mukilteo Speedway, as stated in its log |
 Per capture: sample standard deviation of the u8 samples (LSB, about the 127.5 mid-point), the share of samples at 0 or 255, and the strongest line over the median of the averaged 8192-point Hann spectrum (±20 kHz around the centre excluded). Medians over the four retune offsets.
-Power over load is the antenna-on sample power (std squared) over the load-fitted one at the same gain and centre.
+Power over load is the antenna-on sample power (std squared) over the load-fitted one at the same gain and centre. It is an **uncalibrated sample-domain power ratio**, not a measured RF input power.
+The antenna-on and load captures are from **different sessions** (11-14 and 11-15, about 30 hours apart), so the ratio assumes the receiver was equally stable in both; it is not a simultaneous measurement of input power. Receiver gain settings in dB are as set on the tuner and were not verified as calibrated power steps.
 
 ## Levels at 13601 Highway 99, 2026-11-14 (antenna-on) against the load control
 | centre | gain (dB) | std antenna-on (LSB) | std load (LSB) | samples at 0 or 255 | strongest line over median (dB) | power over load (dB) |
@@ -50,16 +51,24 @@ UHF floor rise over the load-fitted baseline (lower band 401-435 MHz / upper ban
 | 12502, 11-16 06:38 / 11-17 06:15 (nearest antenna-on UHF sets at 12502) | +1.5 / +3.7 dB | +1.8 / +2.6 dB | 20 of 20 each |
 | Hwy 99, 11-15 20:43, 11-17 20:26, 11-17 22:36 (bad sets) | +9.5, +7.8, +7.5 dB | +3.2, +5.0, +2.8 dB | 0, 2, 5 of 20 |
 
-- On 2026-11-14 the Hwy 99 FM band was strong enough to clip the ADC at 29 dB, and the UHF floor was raised by only +3.6 dB in the lower band, with every lower-band capture passing. So a strong out-of-band environment at this venue did not by itself produce the +6 to +9 dB lower-band rises seen on other days.
+- **What the FM clipping does and does not establish.** The clipping was measured with the receiver tuned onto the FM band. It shows a strong local signal environment. It does not quantify how much out-of-band FM energy reaches the nonlinear stages while the receiver is tuned to 401-457 MHz,
+  nor the receiver's overload susceptibility there: with the tuner retuned, its input filtering, gain distribution and mixer response differ. These captures are not a direct front-end isolation test.
+- On 2026-11-14 the Hwy 99 FM band was strong enough to clip the ADC at 29 dB when tuned onto it, and the UHF floor was raised by only +3.6 dB in the lower band, with every lower-band capture passing. So a strong out-of-band environment at this venue did not by itself produce the +6 to +9 dB lower-band rises seen on other days.
 - The Hwy 99 FM level was about 20 dB above 12502's, while the two venues' UHF floor rises were similar (+3.6 dB against +1.5 to +3.7 dB). In this pair the UHF rise does not scale with the FM level.
 - What the data cannot say: whether the strong-signal level or its coupling changed on the days of the large rises. No strong-band capture exists from a bad-floor day, and the pairs above are different days. This record does not exclude front-end overload; it shows that its presence at the venue is not sufficient.
 - A harmonic check (UHF lines at multiples of FM frequencies) was not done: the 29 dB FM captures are clipped and would produce their own spurs, and the match test would mostly return chance matches.
 
-## A test that would settle it (not run)
-When the antenna-side lower-band rise is high (about +6 dB or more, as the canary repeat shows within 1.5 minutes), repeat the canary on the antenna at 29.0, 21.5 and 14.0 dB, then at 29.0 dB with an FM band-stop filter in line, then with a 10 dB attenuator at the antenna.
-A source outside the receiver keeps its rise over the load across gains and falls with the attenuator by about the attenuation; a rise made inside the front end should fall faster than the gain or the attenuation. This needs the receiver and a bad-floor moment, not new equipment beyond the filter and attenuator.
+## A discriminating test (proposed, not run)
+This is a proposed experiment, not an authorization to operate hardware. Any hardware change would need its own record and the operator's authorization, and each configuration is a different configuration: results from one must not be pooled with another.
+Gain steps, FM rejection and attenuation can help tell candidate mechanisms apart (external broadband noise, front-end overload, internally generated mixing, a change in the antenna or cable), but the response need not follow a simple linear rule: receiver noise, quantization, gain-stage placement and nonlinear mixing all shape it. A reduction with a filter would support an FM-related contribution; it would not by itself say which receiver stage produced the floor elevation.
+1. **Confirm the episode.** Run the canary repeat (about 1.5 minutes) and proceed only if the lower-band rise over the load-fitted baseline is repeatable and about +6 dB or more. Keep the raw captures and note the conditions.
+2. **Gain sweep** at 29.0, 21.5 and 14.0 dB, allowing for the settling after each change.
+3. **FM band-stop filter in line**, same measurements. Measure the filter's insertion loss across the UHF band first, so that a general loss of antenna power is not read as an FM-specific effect.
+4. **10 dB attenuator** (measured, not nominal) at the antenna, same measurements.
+5. **Restore the baseline configuration.** If the elevated floor has gone before the sequence is finished, call the result inconclusive; do not attribute the change to the last intervention. Where the episode lasts, alternate configurations (baseline, filter, baseline, attenuator, baseline) rather than running each once.
+At every configuration record the raw IQ power (sample std), the floor rise over the load-fitted baseline, clipping, the canary excess on both sides and the candidate count.
 
 ## Where the data and the code are
-- In this repo (`scripts/s521_antenna_on_run/strong_band_20261121/`): `strong_levels.py` and its output `strong_levels.txt`. The script keeps the absolute paths it ran with.
+- In this repo (`scripts/s521_antenna_on_run/strong_band_20261121/`): `strong_levels.py` and its output `strong_levels.txt`. The script is kept as it ran: it has the capture machine's absolute paths hard-coded and writes `strong_levels.pkl` (spectra, not committed) to the working directory. It has not been re-run against the Hugging Face copies of the captures; a path-parameterised version that checks each source file's sha256 against the dataset's `captures.parquet` and writes deterministic CSV or JSON would be a separate change.
 - The raw captures are in the public Hugging Face dataset (`https://huggingface.co/datasets/bgilbert1984/scythe-uhf-rtl-sdr-evidence`) under `data/canary_sets/saturation_20261114`, `load_strong_20261115` and `intermediate_20261115`. Those three sets have no canary-gate columns there because of their other gains and centres; the UHF set `strong_20261114` has them.
 - No emitter record is created or changed, and no location is claimed. Nothing about the freeze changes on this evidence (`521_ANTENNA_ON_FREEZE_RECORD.md`, assumption 1).
