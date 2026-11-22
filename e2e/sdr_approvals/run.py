@@ -330,10 +330,10 @@ class Walkthrough:
             page.goto(self.base + self.GOVERNANCE_URL, wait_until="domcontentloaded", timeout=60000)
             page.wait_for_selector("#mission-governance .mgov__bar", timeout=60000)
             page.wait_for_timeout(2500)      # the panel's first refresh
+            page.click("#hypergraph-mode-approvals")   # the panel lives in the Live Hypergraph's APPROVALS tab (open by default)
         except PlaywrightError as exc:
             raise InfrastructureError(f"the governance page did not become ready: {str(exc).splitlines()[0]}")
-        if expand:
-            page.click("#mission-governance-toggle")
+        # expand is a no-op now: the tab shows the body (expanded: true); the toggle collapses it
 
     def gov_text(self, page, part=".mgov__body"):
         return page.inner_text(f"#mission-governance {part}".strip()).replace("\n", " | ")
@@ -346,7 +346,6 @@ class Walkthrough:
     def run_governance(self, browser):
         anon = self.open_governance(browser, None)
         with self.case(12, "Governance page, signed out: it says to sign in and shows no lifecycle state") as c:
-            anon.click("#mission-governance-toggle")
             text = self.gov_text(anon, "")
             c["ok"] = "Sign in on the main console" in text and "Lifecycle:" not in text
             c["detail"] = text[:160]

@@ -393,8 +393,7 @@
     .directive__context { margin-top:5px; padding:4px 5px; border-left:2px solid rgba(99,255,209,.55); background:rgba(7,20,34,.62); }
     .directive__context-signature { color:#63ffd1; }.directive__context-missing { color:#7f9bad; margin-top:2px; }
     @media (max-width:800px) { .live-hypergraph { height:220px; width:320px; } }
-    .mgov { position:absolute; top:36px; left:50%; transform:translateX(-50%); z-index:59; width:min(700px,calc(100vw - 24px));
-      box-sizing:border-box; border:1px solid rgba(0,212,255,.55); background:rgba(0,12,28,.94); color:#ccefff;
+    .mgov { overflow:auto; box-sizing:border-box; border:1px solid rgba(0,212,255,.55); background:rgba(0,12,28,.94); color:#ccefff;
       font:10px/1.35 ui-monospace,monospace; }
     .mgov__bar { display:flex; flex-wrap:wrap; align-items:center; gap:6px 10px; padding:5px 8px; }
     .mgov__title { color:#66ddff; letter-spacing:.08em; }
@@ -408,7 +407,7 @@
     .mgov__toggle, .mgov__action { font:10px ui-monospace,monospace; color:#ccefff; background:#0b1a2e; border:1px solid rgba(0,212,255,.55);
       padding:2px 8px; cursor:pointer; }
     .mgov__toggle:hover, .mgov__action:hover, .mgov__toggle:focus-visible, .mgov__action:focus-visible { color:#fff; outline:1px solid #00d4ff; }
-    .mgov__body { max-height:min(60vh,520px); overflow:auto; padding:0 8px 8px; border-top:1px dashed rgba(0,212,255,.3); }
+    .mgov__body { overflow:auto; padding:0 8px 8px; border-top:1px dashed rgba(0,212,255,.3); }
     .mgov__note { padding:5px 0; color:#f7d154; }
     .mgov__heading { margin:8px 0 4px; font-size:10px; color:#66ddff; letter-spacing:.06em; }
     .mgov__empty { color:#7fa6b8; padding:2px 0; }
@@ -421,7 +420,6 @@
     .mgov__step[data-reached="true"] { color:#63ffd1; border-color:rgba(99,255,209,.55); }
     .mgov__step[data-current="true"] { background:rgba(0,212,255,.16); }
     .mgov__step[data-terminal] { color:#ff6e6e; border-color:rgba(255,110,110,.7); background:rgba(255,110,110,.12); }
-    @media (max-width:1500px) { .mgov { left:12px; transform:none; } }
   </style>
   <script type="importmap">
   {"imports":{"three":"./node_modules/three/build/three.module.js","three/addons/":"./node_modules/three/examples/jsm/"}}
@@ -436,7 +434,6 @@
         aria-pressed="false" title="Pause evidence ticker motion">Ⅱ</button>
       <span class="notice__summary" data-system-ticker-summary aria-live="polite"></span>
     </div>
-    <aside id="mission-governance" class="mgov" aria-label="Mission operations: governance and approvals"></aside>
     <aside id="live-hypergraph" class="live-hypergraph" aria-label="Live network hypergraph">
       <button class="live-hypergraph__resize" type="button" data-live-graph-resize aria-label="Resize live hypergraph">↗</button>
       <button id="live-hypergraph-bundle" class="live-hypergraph__bundle" type="button"
@@ -452,6 +449,8 @@
         <button id="hypergraph-mode-semantic" type="button" role="tab" aria-pressed="false" aria-selected="false">SEMANTIC</button>
         <button id="hypergraph-mode-spectrum" type="button" role="tab" aria-pressed="false" aria-selected="false">SPECTRUM</button>
         <button id="hypergraph-mode-events" type="button" role="tab" aria-pressed="false" aria-selected="false">EVENTS</button>
+        <button id="hypergraph-mode-approvals" type="button" role="tab" aria-pressed="false" aria-selected="false"
+          title="Mission operations: governance state and the Approval Center">APPROVALS</button>
         <button id="live-hypergraph-max-detail" class="live-hypergraph__detail" type="button"
           role="switch" aria-pressed="false" title="Request the bounded 500-node / 1000-edge operator lens">MAX DETAIL</button>
       </div>
@@ -518,6 +517,8 @@
         aria-label="Bounded RF spectrum evidence" hidden></section>
       <section id="live-hypergraph-events-viewport" class="live-hypergraph__viewport workbench"
         aria-label="Bounded tactical graph event stream" hidden></section>
+      <section id="mission-governance" class="live-hypergraph__viewport mgov"
+        aria-label="Mission operations: governance and approvals" hidden></section>
       <div class="live-hypergraph__legend">PURPOSE // <span style="color:#fff">● SELECTED</span> · <span style="color:#00d4ff">● ACTIVE TRAFFIC</span> · <span style="color:#ff8c42">● SIGNAL</span> · <span style="color:#bb83ff">● NEW</span> · <span style="color:#f7d154">● DIVERSITY</span> · <span style="color:#7890a8">● CONTEXT</span> · <span style="color:#5de1c5">◉ INFERRED CITY</span><br>FLOW TYPE // <span style="color:#ff4f64">━ SECURITY</span> · <span style="color:#f7d154">━ DNS</span> · <span style="color:#00d4ff">━ HTTP</span> · <span style="color:#bb83ff">━ TLS</span> · <span style="color:#9d7cff">━ TLS/QUIC?</span> · <span style="color:#ff8c42">━ DISCOVERY</span> · <span style="color:#63ffd1">━ ICMP</span> · <span style="color:#7890a8">━ OTHER</span><br>DIRECTION CHEVRON // <span style="color:#00d4ff">▶ OUT</span> · <span style="color:#ff6fb7">▶ IN</span> · <span style="color:#f7d154">▶ LOCAL</span> · <span style="color:#7890a8">▶ TRANSIT</span> · <span style="color:#fff">▶ TUPLE ONLY</span> · MOVING DOTS = MEASURED COUNTER DELTAS · SHORT LINKS WITHHOLD ARROWS WHEN 8 PX CLEARANCE CANNOT BE PRESERVED<br>VISUAL MAGNITUDE // NODE SIZE = BOUNDED ACTIVITY · LINE WIDTH + ARROW SIZE = BOUNDED OBSERVED COUNTERS · FLOW LENGTH = LAYOUT / ENDPOINT SEPARATION, NEVER TRAFFIC, LATENCY, OR ROUTE<br>STATUS BADGE ABOVE HOST // <span style="color:#38f28f">● ACTIVE</span> · <span style="color:#ff4f64">● INACTIVE</span> · ABSENT UNKNOWN<br>TOPOLOGY // COLLISION-SEPARATED · NOT GEOLOCATION · CESIUM OVERLAP = NUMBERED GEOGRAPHIC CLUSTER · EDGE COLOR = FLOW TYPE · EDGE PATTERN = EVIDENCE · CHEVRON = OBSERVED SOURCE→DESTINATION · CLICK OBSERVED NODE, EDGE, OR HYPEREDGE</div>
     </aside>
     <aside id="causal-world-stack" class="world-stack" aria-label="Causal hypothesis world stack" hidden></aside>
@@ -684,7 +685,12 @@
     const missionGovernance = new MissionGovernancePanel({
       root: document.getElementById("mission-governance"),
       storages: [window.sessionStorage, window.localStorage],
-      missionId: deepLinkContext.mission});
+      missionId: deepLinkContext.mission, expanded: true,
+      onChange: ({pending}) => {   // a waiting approval must not hide behind an inactive tab
+        const tab = document.getElementById("hypergraph-mode-approvals");
+        tab.textContent = pending ? `APPROVALS (${pending})` : "APPROVALS";
+        tab.dataset.pending = String(pending);
+      }});
     const deepLinkNavigation = mountDeepLinkNav({root: document.getElementById("mission-governance"), from: "regional",
       targets: ["globe", "ops"], mission: deepLinkContext.mission, select: deepLinkContext.select, rejected: deepLinkContext.rejected});
     window.scytheEvidenceTicker = evidenceTicker;
@@ -825,6 +831,8 @@
     const modeExplorer = document.getElementById("hypergraph-mode-explorer");
     const workbenchModes = Object.fromEntries(["autopilot", "semantic", "spectrum", "events"].map((name) =>
       [name, document.getElementById(`hypergraph-mode-${name}`)]));
+    const modeApprovals = document.getElementById("hypergraph-mode-approvals");
+    const viewportApprovals = document.getElementById("mission-governance");
     const viewport3D = document.getElementById("live-hypergraph-3d-viewport");
     const viewport2D = document.getElementById("live-hypergraph-2d-viewport");
     const viewportLocation = document.getElementById("live-hypergraph-location-viewport");
@@ -877,6 +885,9 @@
       viewport3D.hidden = !show3D; viewport2D.hidden = !show2D; viewportLocation.hidden = !showLocation;
       viewportInfrastructure.hidden = !showInfrastructure;
       for (const [name, root] of Object.entries(workbenchRoots)) root.hidden = name !== mode;
+      viewportApprovals.hidden = mode !== "approvals";
+      modeApprovals.setAttribute("aria-pressed", String(mode === "approvals"));
+      modeApprovals.setAttribute("aria-selected", String(mode === "approvals"));
       mode3D.setAttribute("aria-pressed", String(Boolean(show3D)));
       mode3D.setAttribute("aria-selected", String(Boolean(show3D)));
       mode2D.setAttribute("aria-pressed", String(Boolean(show2D)));
@@ -908,6 +919,7 @@
     modeLocation.addEventListener("click", () => setHypergraphMode("location"));
     modeInfrastructure.addEventListener("click", () => setHypergraphMode("infrastructure"));
     modeExplorer.addEventListener("click", () => setHypergraphMode("explorer"));
+    modeApprovals.addEventListener("click", () => setHypergraphMode("approvals"));
     for (const [name, button] of Object.entries(workbenchModes))
       button.addEventListener("click", () => setHypergraphMode(name));
     try {

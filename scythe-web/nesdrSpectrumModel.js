@@ -34,10 +34,67 @@ export const NESDR_SMART_V5 = Object.freeze({
   input: "50 Ω FEMALE SMA",
   biasTee: "NOT FITTED",
   tunerRangeHz: Object.freeze([25e6, 1750e6]),
+  // [low, high, lowInclusive, highInclusive]; the tuner range above is their hull.
+  tunerRanges: Object.freeze([Object.freeze([25e6, 1750e6, true, true])]),
   directSamplingRangeHz: Object.freeze([100e3, 25e6]),
   nominalBandwidthHz: 2.4e6,
   authority: "MODEL_DECLARED",
+  key: "SMART_V5",
 });
+
+/**
+ * The Nooelec NESDR SMArt XTR (E4000). Range and gap are what `rtl_test` reported
+ * on SN 71874552 on 2026-11-14 (PLL-not-locked lines at 51, 1104, 1250 and
+ * 2206 MHz mark the edges, so those exact frequencies are excluded). Nothing else
+ * is claimed: the repo declares no direct-sampling range, input, bias tee or
+ * identified reference for it, and its reference is only a 100 ppm conservative
+ * bound (docs/521_AUTHORIZED_RUN_DECLARATION_XTR.json).
+ */
+export const NESDR_SMART_XTR = Object.freeze({
+  vendor: "NOOELEC",
+  model: "NESDR SMArt XTR",
+  usbBridge: "RTL2832U",
+  tuner: "E4000",
+  tunerNote: "AS REPORTED BY librtlsdr",
+  clock: "REFERENCE UNIDENTIFIED · 100 ppm CONSERVATIVE BOUND",
+  input: "UNDECLARED",
+  biasTee: "UNDECLARED",
+  tunerRangeHz: Object.freeze([52e6, 2205e6]),
+  tunerRanges: Object.freeze([Object.freeze([52e6, 1104e6, true, false]), Object.freeze([1250e6, 2205e6, false, true])]),
+  gapHz: Object.freeze([1104e6, 1250e6]),
+  directSamplingRangeHz: null,
+  nominalBandwidthHz: 2.4e6,
+  authority: "MODEL_DECLARED",
+  key: "SMART_XTR",
+});
+
+export const RECEIVER_PROFILES = Object.freeze({SMART_V5: NESDR_SMART_V5, SMART_XTR: NESDR_SMART_XTR});
+
+// librtlsdr names an R820T2 "R820T"; the E4000 names itself.
+const PROFILE_BY_REPORTED_TUNER = Object.freeze({E4000: "SMART_XTR", R820T: "SMART_V5", R820T2: "SMART_V5"});
+
+/**
+ * Which receiver the instrument surface describes. The dongle's own tuner report
+ * outranks everything: a selector cannot make an E4000 an R820T2. The selection is
+ * used only while the bridge has reported no tuner, and with neither the legacy
+ * v5 default stays but is marked unconfirmed. A tuner outside the catalogue yields
+ * profile null, which the callers render as undeclared rather than as a v5.
+ */
+export function resolveReceiverProfile(status = {}, selectedKey = null) {
+  const reported = String(status?.bridge?.device?.tuner_type ?? "").trim().toUpperCase();
+  if (reported && reported !== "UNKNOWN") {
+    const key = PROFILE_BY_REPORTED_TUNER[reported];
+    if (key) return {profile: RECEIVER_PROFILES[key], source: "DEVICE_REPORTED", tuner: reported};
+    return {profile: null, source: "DEVICE_REPORTED_UNCATALOGUED", tuner: reported};
+  }
+  if (selectedKey && RECEIVER_PROFILES[selectedKey]) {
+    return {profile: RECEIVER_PROFILES[selectedKey], source: "OPERATOR_SELECTED", tuner: null};
+  }
+  return {profile: NESDR_SMART_V5, source: "DEFAULT_UNCONFIRMED", tuner: null};
+}
+
+const withinRanges = (hz, ranges) => ranges.some(([low, high, lowIn, highIn]) =>
+  (lowIn ? hz >= low : hz > low) && (highIn ? hz <= high : hz < high));
 
 const UNDECLARED = "UNDECLARED";
 
@@ -107,11 +164,17 @@ export function deriveBinWidths(config = {}, frame = null) {
 }
 
 /** Identity rows for the header strip, each tagged with the authority that earned it. */
-export function deriveIdentity(status = {}) {
+export function deriveIdentity(status = {}, device = NESDR_SMART_V5) {
   const config = status?.bridge?.config ?? {};
   const sensorId = String(config.sensor_id ?? "").trim();
   const serial = sensorId.match(/(\d{6,})$/)?.[1] ?? null;
-  const device = NESDR_SMART_V5;
+  if (device === null) {
+    const tuner = String(status?.bridge?.device?.tuner_type ?? UNDECLARED);
+    return [{label: "RECEIVER", value: `UNCATALOGUED // TUNER ${tuner}`, authority: "DEVICE_REPORTED"},
+            {label: "SENSOR ID", value: sensorId || UNDECLARED, authority: sensorId ? "CONFIGURED_NOT_USB_ATTESTED" : UNDECLARED},
+            {label: "CAPTURE OWNER", value: String(status?.bridge?.capture_owner ?? UNDECLARED).toUpperCase(),
+             authority: "RF_BRIDGE_RUNTIME_STATUS"}];
+  }
   return [
     {label: "RECEIVER", value: `${device.vendor} ${device.model}`.toUpperCase(), authority: device.authority},
     {label: "SENSOR ID", value: sensorId || UNDECLARED,
@@ -133,20 +196,26 @@ export function deriveIdentity(status = {}) {
  * sampling is a distinct mode with distinct performance and is never folded into
  * the normal tuner range.
  */
-export function deriveTuningRegime(status = {}) {
+export function deriveTuningRegime(status = {}, device = NESDR_SMART_V5) {
   const centre = finite(status?.bridge?.config?.center_frequency_hz);
   if (centre === null) return {regime: UNDECLARED, authority: UNDECLARED, note: "NO CONFIGURED CENTRE FREQUENCY"};
-  const [low, high] = NESDR_SMART_V5.tunerRangeHz;
-  const [directLow, directHigh] = NESDR_SMART_V5.directSamplingRangeHz;
-  if (centre >= low && centre <= high) {
-    return {regime: "TUNER", authority: NESDR_SMART_V5.authority,
-            note: `WITHIN ORDINARY R820T2 RANGE ${formatHz(low)}–${formatHz(high)}`};
+  if (device === null) return {regime: UNDECLARED, authority: UNDECLARED, note: "NO COVERAGE DECLARED FOR THE REPORTED TUNER"};
+  const [low, high] = device.tunerRangeHz;
+  if (withinRanges(centre, device.tunerRanges)) {
+    return {regime: "TUNER", authority: device.authority,
+            note: `WITHIN ORDINARY ${device.tuner} RANGE ${formatHz(low)}–${formatHz(high)}`
+              + (device.gapHz ? ` EXCEPT ${formatHz(device.gapHz[0])}–${formatHz(device.gapHz[1])}` : "")};
   }
-  if (centre >= directLow && centre < directLow + (directHigh - directLow) + 1) {
-    return {regime: "DIRECT SAMPLING REQUIRED", authority: NESDR_SMART_V5.authority,
+  if (device.gapHz && centre >= device.gapHz[0] && centre <= device.gapHz[1]) {
+    return {regime: "OUTSIDE DECLARED RANGE", authority: device.authority,
+            note: `CENTRE ${formatHz(centre)} IS IN THE ${device.tuner} GAP ${formatHz(device.gapHz[0])}–${formatHz(device.gapHz[1])}`};
+  }
+  const direct = device.directSamplingRangeHz;
+  if (direct && centre >= direct[0] && centre < direct[1] + 1) {
+    return {regime: "DIRECT SAMPLING REQUIRED", authority: device.authority,
             note: "BELOW ORDINARY TUNER RANGE · PERFORMANCE DIFFERS FROM TUNER MODE"};
   }
-  return {regime: "OUTSIDE DECLARED RANGE", authority: NESDR_SMART_V5.authority,
+  return {regime: "OUTSIDE DECLARED RANGE", authority: device.authority,
           note: `CENTRE ${formatHz(centre)} IS OUTSIDE THE DECLARED MODEL COVERAGE`};
 }
 
@@ -155,7 +224,9 @@ export function deriveTuningRegime(status = {}) {
  * correction, direct-sampling state, antenna) are UNDECLARED rather than
  * invented, and an undeclared row is not a fault.
  */
-export function deriveHardwareHealth(status = {}, {now = Date.now() / 1000, sparse = null, antenna = null} = {}) {
+export function deriveHardwareHealth(status = {}, {now = Date.now() / 1000, sparse = null, antenna = null,
+    profile = NESDR_SMART_V5} = {}) {
+  const device = profile ?? NESDR_SMART_V5;   // nominal bandwidth is an RTL2832U fact, shared by both
   const bridge = status?.bridge ?? {};
   const config = bridge.config ?? {};
   const products = bridge.products ?? {};
@@ -186,7 +257,7 @@ export function deriveHardwareHealth(status = {}, {now = Date.now() / 1000, spar
     {label: "SAMPLE RATE", value: finite(config.sample_rate_hz) === null ? UNDECLARED
        : `${(finite(config.sample_rate_hz) / 1e6).toFixed(3)} MS/s`,
      level: finite(config.sample_rate_hz) === null ? HEALTH.UNDECLARED : HEALTH.LIVE,
-     detail: `MODEL NOMINAL ${(NESDR_SMART_V5.nominalBandwidthHz / 1e6).toFixed(1)} MHz · CONFIGURED VALUE GOVERNS`},
+     detail: `MODEL NOMINAL ${(device.nominalBandwidthHz / 1e6).toFixed(1)} MHz · CONFIGURED VALUE GOVERNS`},
     {label: "SAMPLE TYPE", value: String(config.sample_type ?? UNDECLARED).toUpperCase(),
      level: config.sample_type ? HEALTH.LIVE : HEALTH.UNDECLARED},
     {label: "RIGCTL", value: config.rigctl_host ? `${config.rigctl_host}:${config.rigctl_port}` : UNDECLARED,
@@ -196,8 +267,10 @@ export function deriveHardwareHealth(status = {}, {now = Date.now() / 1000, spar
     {label: "GAIN", value: UNDECLARED, level: HEALTH.UNDECLARED, detail: "BRIDGE PUBLISHES NO GAIN STATE"},
     {label: "TUNER PPM", value: UNDECLARED, level: HEALTH.UNDECLARED, detail: "NO CORRECTION REPORTED"},
     {label: "DIRECT SAMPLE", value: UNDECLARED, level: HEALTH.UNDECLARED, detail: "MODE NOT REPORTED BY BRIDGE"},
-    {label: "BIAS TEE", value: NESDR_SMART_V5.biasTee, level: HEALTH.UNDECLARED,
-     detail: "MODEL-DECLARED: NO BIAS TEE ON SMArt v5"},
+    {label: "BIAS TEE", value: profile === null ? UNDECLARED : device.biasTee, level: HEALTH.UNDECLARED,
+     detail: profile === null ? "NO COVERAGE DECLARED FOR THE REPORTED TUNER"
+       : device.biasTee === "NOT FITTED" ? `MODEL-DECLARED: NO BIAS TEE ON ${device.model}`
+       : `NOT DECLARED FOR ${device.model}`},
     // The antenna is not readable by any receiver measurement — see
     // rfAntennaDeclaration.js. An undeclared antenna is an omission, and a
     // declared one is the operator's word, never the instrument's.

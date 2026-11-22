@@ -17,7 +17,7 @@ import {
   deriveOutcomeBreakdown,
 } from "./rfClassificationOutcomes.js";
 import {
-  HEALTH, deriveClassificationSummary, deriveHardwareHealth, deriveIdentity,
+  HEALTH, RECEIVER_PROFILES, resolveReceiverProfile, deriveClassificationSummary, deriveHardwareHealth, deriveIdentity,
   deriveSparseRail, deriveSpectrumFrame, deriveTuningRegime, formatHz, formatReferenceHz,
   sensorAnchorNotice,
 } from "./nesdrSpectrumModel.js";
@@ -47,6 +47,8 @@ const LEVEL_CLASS = Object.freeze({
   [HEALTH.UNDECLARED]: "nesdr__state--undeclared",
 });
 
+const PROFILE_STORAGE_KEY = "scythe.nesdr.receiverProfile";
+
 export class NesdrSpectrumView {
   constructor({
     root, fetchImpl = globalThis.fetch, apiBase = "",
@@ -59,6 +61,7 @@ export class NesdrSpectrumView {
     antennaDeclareUrl = "/api/graphops/rf-antenna/declare",
     refreshMilliseconds = 1000,
     now = () => Date.now() / 1000,
+    storage = (() => { try { return globalThis.localStorage ?? null; } catch { return null; } })(),
   } = {}) {
     if (!root) throw new TypeError("NesdrSpectrumView requires a root element");
     this.root = root;
@@ -86,6 +89,11 @@ export class NesdrSpectrumView {
     this.lastReceipt = null;
     // The antenna is never sensed. It stays null until an operator says otherwise.
     this.antenna = null;
+    // Only a per-viewer convenience, and only used while the dongle reports no tuner.
+    this.storage = storage;
+    this.selectedProfile = null;
+    try { this.selectedProfile = this.storage?.getItem(PROFILE_STORAGE_KEY) ?? null; } catch { /* storage may be blocked */ }
+    this.receiver = resolveReceiverProfile({}, this.selectedProfile);
     this.#buildSkeleton();
   }
 
@@ -95,8 +103,27 @@ export class NesdrSpectrumView {
     this.root.classList.add("nesdr");
 
     this.identityStrip = el(doc, "div", "nesdr__identity");
-    this.headline = el(doc, "div", "nesdr__headline", "NESDR SMArt v5 // AWAITING BRIDGE STATUS");
+    this.headline = el(doc, "div", "nesdr__headline", "RECEIVER // AWAITING BRIDGE STATUS");
     this.regimeLine = el(doc, "div", "nesdr__regime");
+    this.profileRow = el(doc, "div", "nesdr__controls nesdr__profile");
+    this.profileSelect = el(doc, "select", "nesdr__select");
+    this.profileSelect.setAttribute("aria-label", "Receiver profile");
+    for (const [key, profile] of Object.entries(RECEIVER_PROFILES)) {
+      const option = el(doc, "option", "", `${profile.vendor} ${profile.model}`.toUpperCase());
+      option.value = key;
+      this.profileSelect.append(option);
+    }
+    this.profileSelect.addEventListener("change", () => {
+      this.selectedProfile = this.profileSelect.value;
+      try { this.storage?.setItem(PROFILE_STORAGE_KEY, this.selectedProfile); } catch { /* not persisted */ }
+      this.#renderProfile(this.state.status ?? {});
+      this.#renderIdentity(this.state.status ?? {});
+      this.#renderHealth(this.state.status ?? {}, this.state.sparse ?? {}, this.now());
+      const regime = deriveTuningRegime(this.state.status ?? {}, this.receiver.profile);
+      this.regimeLine.textContent = `TUNING REGIME // ${regime.regime} · ${regime.note}`;
+    });
+    this.profileNote = el(doc, "span", "nesdr__control-note");
+    this.profileRow.append(el(doc, "span", "nesdr__control-label", "RECEIVER PROFILE"), this.profileSelect, this.profileNote);
 
     this.traceCanvas = el(doc, "canvas", "nesdr__canvas nesdr__canvas--trace");
     this.traceCanvas.width = 512; this.traceCanvas.height = 150;
@@ -122,7 +149,7 @@ export class NesdrSpectrumView {
     const columns = el(doc, "div", "nesdr__columns");
     columns.append(plot, this.sparseRail);
 
-    this.root.append(this.headline, this.identityStrip, this.regimeLine, columns,
+    this.root.append(this.headline, this.profileRow, this.identityStrip, this.regimeLine, columns,
                      this.tuningPanel, this.antennaPanel, this.surveyPanel,
                      this.receiptLine, this.classificationLine, this.healthRail,
                      this.anchorLine);
@@ -581,12 +608,15 @@ export class NesdrSpectrumView {
     const liveness = error ? "STATUS UNREACHABLE"
       : sourceStale ? `STALE // ${frame.staleReason ?? "SOURCE_NOT_STREAMING"}`
       : fftStale ? "STALE" : "LIVE";
-    this.headline.textContent = `NOOELEC NESDR SMArt v5 // ${sensorId} // ${liveness}`;
+    this.#renderProfile(status ?? {});
+    const {profile} = this.receiver;
+    const receiverName = profile ? `${profile.vendor} ${profile.model}` : `UNCATALOGUED TUNER ${this.receiver.tuner}`;
+    this.headline.textContent = `${receiverName} // ${sensorId} // ${liveness}`;
     this.headline.className = `nesdr__headline ${error || fftStale
       ? "nesdr__state--degraded" : "nesdr__state--live"}`;
 
     this.#renderIdentity(status ?? {});
-    const regime = deriveTuningRegime(status ?? {});
+    const regime = deriveTuningRegime(status ?? {}, profile);
     this.regimeLine.textContent = `TUNING REGIME // ${regime.regime} · ${regime.note}`;
 
     // Only advance the waterfall on a genuinely new frame, so a stale product
@@ -606,10 +636,24 @@ export class NesdrSpectrumView {
     this.#renderAntenna(frame);
   }
 
+  /** Resolve which receiver this is. The dongle's reported tuner wins; the selector is for when it reports none. */
+  #renderProfile(status) {
+    this.receiver = resolveReceiverProfile(status, this.selectedProfile);
+    const {source, profile, tuner} = this.receiver;
+    const reported = source === "DEVICE_REPORTED" || source === "DEVICE_REPORTED_UNCATALOGUED";
+    if (profile) this.profileSelect.value = profile.key;
+    this.profileSelect.disabled = reported;   // a selector cannot change what the dongle says it is
+    this.profileNote.textContent = source === "DEVICE_REPORTED" ? `FROM DEVICE HEADER // TUNER ${tuner}`
+      : source === "DEVICE_REPORTED_UNCATALOGUED" ? `DEVICE REPORTS TUNER ${tuner} // NO COVERAGE DECLARED`
+      : source === "OPERATOR_SELECTED" ? "OPERATOR SELECTED // NOT CONFIRMED BY THE DEVICE"
+      : "DEFAULT // NO TUNER REPORTED YET // SELECT THE RECEIVER IN USE";
+    this.profileNote.className = `nesdr__control-note ${reported ? "" : "nesdr__state--undeclared"}`;
+  }
+
   #renderIdentity(status) {
     const doc = this.document;
     this.identityStrip.replaceChildren();
-    for (const row of deriveIdentity(status)) {
+    for (const row of deriveIdentity(status, this.receiver.profile)) {
       const cell = el(doc, "div", "nesdr__identity-cell");
       cell.append(el(doc, "span", "nesdr__identity-label", row.label),
                   el(doc, "span", "nesdr__identity-value", row.value),
@@ -668,7 +712,7 @@ export class NesdrSpectrumView {
   #renderHealth(status, sparse, now) {
     const doc = this.document;
     this.healthRail.replaceChildren();
-    for (const row of deriveHardwareHealth(status, {now, sparse, antenna: this.antenna})) {
+    for (const row of deriveHardwareHealth(status, {now, sparse, antenna: this.antenna, profile: this.receiver.profile})) {
       const cell = el(doc, "div", `nesdr__health-row ${LEVEL_CLASS[row.level] ?? ""}`);
       cell.append(el(doc, "span", "nesdr__health-label", row.label),
                   el(doc, "span", "nesdr__health-value", row.value));

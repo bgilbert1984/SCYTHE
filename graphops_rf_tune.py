@@ -26,6 +26,23 @@ TUNER_RANGE_HZ = (25e6, 1750e6)
 DIRECT_SAMPLING_RANGE_HZ = (100e3, 25e6)
 MAX_BANDWIDTH_HZ = 3_200_000
 
+# Coverage by the tuner the dongle itself reports in its rtl_tcp header
+# (bridge status: device.tuner_type). The R820T2 row is the model datasheet above.
+# The E4000 row is the Nooelec XTR (SN 71874552) as observed with `rtl_test` on
+# 2026-11-14: E4K range 52-2205 MHz with an L-band gap at 1104-1250 MHz, where the
+# PLL-not-locked lines at 51, 1104, 1250 and 2206 MHz are the range edges. Those
+# edge frequencies are therefore excluded. No direct-sampling range is declared for
+# it anywhere in this repo, so none is offered. A tuner outside this table is
+# refused: no coverage was ever declared for it.
+TUNER_COVERAGE = {
+    # Each range is (low, high, low_inclusive, high_inclusive).
+    "R820T2": {"label": "R820T2", "ranges": [(25e6, 1750e6, True, True)],
+               "direct": DIRECT_SAMPLING_RANGE_HZ},
+    "E4000": {"label": "E4000 (NESDR XTR)",
+              "ranges": [(52e6, 1104e6, True, False), (1250e6, 2205e6, False, True)], "direct": None},
+}
+TUNER_ALIASES = {"R820T": "R820T2", "R828D": None}   # librtlsdr reports a T2 as R820T
+
 TUNE_TOOL = "rf_tune"
 COVERAGE_AUTHORITY = "MODEL_DECLARED"
 
@@ -44,7 +61,19 @@ def _finite(value: Any, name: str) -> float:
     return number
 
 
-def validate_tune_request(payload: Any) -> Dict[str, Any]:
+def _coverage_for(tuner_type: Optional[str]) -> Dict[str, Any]:
+    """The declared coverage for a device-reported tuner; None means the legacy v5 default."""
+    if tuner_type is None:
+        return TUNER_COVERAGE["R820T2"]
+    key = TUNER_ALIASES.get(str(tuner_type), str(tuner_type))
+    if key not in TUNER_COVERAGE:
+        raise TuneProposalRefused(
+            f"the receiver reports tuner {tuner_type}, for which no coverage was declared; "
+            "nothing was proposed")
+    return TUNER_COVERAGE[key]
+
+
+def validate_tune_request(payload: Any, tuner_type: Optional[str] = None) -> Dict[str, Any]:
     """Validate a browser tuning request into bounded rf_tune parameters.
 
     Raises TuneProposalRefused rather than clamping: a silently corrected
@@ -73,17 +102,19 @@ def validate_tune_request(payload: Any) -> Dict[str, Any]:
 
     justification = str(payload.get("justification") or "").strip()[:512]
 
-    tuner_low, tuner_high = TUNER_RANGE_HZ
-    direct_low, direct_high = DIRECT_SAMPLING_RANGE_HZ
+    coverage = _coverage_for(tuner_type)
+    direct = coverage["direct"]
     boundaries = []
-    if tuner_low <= frequency <= tuner_high:
+    in_range = any((frequency >= low if low_in else frequency > low) and (frequency <= high if high_in else frequency < high)
+                   for low, high, low_in, high_in in coverage["ranges"])
+    if in_range:
         regime = "TUNER"
-    elif direct_low <= frequency < direct_high:
+    elif direct is not None and direct[0] <= frequency < direct[1]:
         # Direct sampling is a different signal path with different performance.
         # It is never entered implicitly on the operator's behalf.
         if not bool(payload.get("acknowledge_direct_sampling")):
             raise TuneProposalRefused(
-                f"{frequency / 1e6:.6f} MHz is below the declared R820T2 range and requires "
+                f"{frequency / 1e6:.6f} MHz is below the declared {coverage['label']} range and requires "
                 "direct sampling; acknowledge_direct_sampling must be set explicitly"
             )
         regime = "DIRECT_SAMPLING"
@@ -94,6 +125,8 @@ def validate_tune_request(payload: Any) -> Dict[str, Any]:
         )
 
     boundaries.extend([
+        f"COVERAGE PROFILE // {coverage['label']}"
+        + ("" if tuner_type is not None else " // DEFAULT, NO TUNER REPORTED"),
         "TUNING IS PROPOSED, NOT EXECUTED",
         "NO RIGCTL CONNECTION WAS OPENED BY THIS REQUEST",
         f"COVERAGE CLAIM AUTHORITY // {COVERAGE_AUTHORITY}",

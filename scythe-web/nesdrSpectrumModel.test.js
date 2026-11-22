@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  HEALTH, NESDR_SMART_V5, deriveBinWidths, deriveClassificationSummary, deriveHardwareHealth,
+  HEALTH, NESDR_SMART_V5, NESDR_SMART_XTR, resolveReceiverProfile, deriveBinWidths, deriveClassificationSummary, deriveHardwareHealth,
   deriveIdentity, deriveSparseRail, deriveSpectrumFrame, deriveTuningRegime, formatHz,
   sensorAnchorNotice,
 } from "./nesdrSpectrumModel.js";
@@ -185,4 +185,49 @@ test("frequencies format without implying resolution the product lacks", () => {
   assert.equal(formatHz(2000), "2.000 kHz");
   assert.equal(formatHz(null), "UNDECLARED");
   assert.equal(NESDR_SMART_V5.authority, "MODEL_DECLARED");
+});
+
+const xtrStatus = (centre, tuner = "E4000") => ({bridge: {config: {center_frequency_hz: centre, sensor_id: "nesdr-71874552"},
+  device: tuner ? {tuner_type: tuner} : undefined}});
+
+test("the dongle's reported tuner decides the profile and outranks a selection", () => {
+  assert.equal(resolveReceiverProfile(xtrStatus(433.92e6), "SMART_V5").profile, NESDR_SMART_XTR);
+  assert.equal(resolveReceiverProfile(xtrStatus(433.92e6), "SMART_V5").source, "DEVICE_REPORTED");
+  assert.equal(resolveReceiverProfile(xtrStatus(433.92e6, "R820T")).profile, NESDR_SMART_V5);
+});
+
+test("with no reported tuner the selection is used, and with neither the v5 default is marked unconfirmed", () => {
+  assert.equal(resolveReceiverProfile(xtrStatus(1e8, null), "SMART_XTR").source, "OPERATOR_SELECTED");
+  assert.equal(resolveReceiverProfile(xtrStatus(1e8, null), "SMART_XTR").profile, NESDR_SMART_XTR);
+  assert.equal(resolveReceiverProfile(xtrStatus(1e8, null), "bogus").source, "DEFAULT_UNCONFIRMED");
+  assert.equal(resolveReceiverProfile({}, null).profile, NESDR_SMART_V5);
+});
+
+test("an uncatalogued tuner yields no profile and an undeclared regime, never a v5", () => {
+  const resolved = resolveReceiverProfile(xtrStatus(1e8, "FC0012"), "SMART_V5");
+  assert.equal(resolved.profile, null);
+  assert.equal(resolved.source, "DEVICE_REPORTED_UNCATALOGUED");
+  assert.equal(deriveTuningRegime(xtrStatus(1e8, "FC0012"), null).regime, "UNDECLARED");
+  assert.match(deriveIdentity(xtrStatus(1e8, "FC0012"), null)[0].value, /UNCATALOGUED.*FC0012/);
+});
+
+test("the XTR regime knows the E4000 gap and its excluded edges, and claims no direct sampling", () => {
+  assert.equal(deriveTuningRegime(xtrStatus(2000e6), NESDR_SMART_XTR).regime, "TUNER");
+  assert.equal(deriveTuningRegime(xtrStatus(1000e6), NESDR_SMART_XTR).regime, "TUNER");
+  for (const hz of [1104e6, 1175e6, 1250e6]) {
+    const regime = deriveTuningRegime(xtrStatus(hz), NESDR_SMART_XTR);
+    assert.equal(regime.regime, "OUTSIDE DECLARED RANGE", String(hz));
+  }
+  assert.match(deriveTuningRegime(xtrStatus(1175e6), NESDR_SMART_XTR).note, /GAP/);
+  assert.equal(deriveTuningRegime(xtrStatus(5e6), NESDR_SMART_XTR).regime, "OUTSIDE DECLARED RANGE");
+  assert.equal(deriveTuningRegime(xtrStatus(2000e6), NESDR_SMART_V5).regime, "OUTSIDE DECLARED RANGE");
+});
+
+test("XTR identity claims only what the repo declares and never a bias tee or input it does not know", () => {
+  const rows = Object.fromEntries(deriveIdentity(xtrStatus(433.92e6), NESDR_SMART_XTR).map((row) => [row.label, row.value]));
+  assert.match(rows.RECEIVER, /NESDR SMARTXTR|NESDR SMART XTR|NESDR SMArt XTR/i);
+  assert.match(rows.TUNER, /E4000/);
+  assert.equal(rows["BIAS TEE"], "UNDECLARED");
+  assert.equal(rows.INPUT, "UNDECLARED");
+  assert.match(rows.CLOCK, /UNIDENTIFIED/);
 });
