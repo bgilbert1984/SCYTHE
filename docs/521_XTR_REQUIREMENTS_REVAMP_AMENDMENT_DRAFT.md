@@ -68,12 +68,12 @@ instead of "internal reference vs ingress finding". It touches `check_declaratio
 Either way: any later comparison of observed spur spacing with a 28.8 MHz comb is post-hoc commentary. It must never feed back into
 `reference_hz`/`reference_ppm` (the decision doc forbids result-selected references).
 
-### R4. Gain: make the table tuner-aware (blocker if the finding holds)
+### R4. Gain: make the table tuner-aware (DONE: finding held; merged as 0fb5e2c5 and 24bd8f94)
 - Gain steps confirmed by `rtl_test -t` (section 2): 29.7 dB is not an E4000 step. Add a tuner-aware gain table, pick a valid step (29.0 dB would match the surveys), and **freeze a new XTR
   authorization**, since `gain_db` is a chain field. That changes the chain digest and requires a new epoch/run id.
 
 ## 4. Slices if adopted
-1. (Done 2026-11-14: gain steps read with `rtl_test -t`.) 2. R4 gain table and new XTR freeze (implemented, uncommitted, on branch `fix/521-e4000-gain-table` in worktree `~/SCYTHE-r4-e4000-gain`: tuner-aware tables, family read back from the rtl_tcp header, draft `521_AUTHORIZED_RUN_DECLARATION_XTR_E4000.DRAFT.json`, `test_rf_521_e4000_gain.py`; the draft is NOT registered, so it authorizes nothing). Found on the way, not fixed: the sequencer's R820T2 table has 23.1/25.0/27.8 dB where the bridge driver table has 22.9/25.4/28.0. 3. R2 retirement (code + tests).
+1. (Done 2026-11-14: gain steps read with `rtl_test -t`.) 2. R4 gain table and new XTR freeze (DONE and merged: `_GAIN_TABLES_DB` is tuner-aware in `rf_spur_catalogue_sequencer.py`, the family is read back from the rtl_tcp header and an uncatalogued family is refused, pinned by `test_rf_521_e4000_gain.py`; the E4000 freeze `521_AUTHORIZED_RUN_DECLARATION_XTR_E4000.json` is registered, gain 29.0 dB, and the earlier XTR declaration is history-only. Status note added 2026-11-22; the proposal text around it is unchanged). Found on the way, not fixed: the sequencer's R820T2 table has 23.1/25.0/27.8 dB where the bridge driver table has 22.9/25.4/28.0. 3. R2 retirement (code + tests).
 4. R1 control gate. 5. R3 Option A prose in the XTR file, included in the R4 freeze. Each is its own proposal, acceptance, implementation.
 
 ## 5. What does not change
