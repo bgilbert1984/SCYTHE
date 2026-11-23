@@ -328,9 +328,16 @@ class Walkthrough:
         from playwright.sync_api import Error as PlaywrightError
         try:
             page.goto(self.base + self.GOVERNANCE_URL, wait_until="domcontentloaded", timeout=60000)
-            page.wait_for_selector("#mission-governance .mgov__bar", timeout=60000)
+            page.wait_for_selector("#mission-governance .mgov__bar", state="attached", timeout=60000)   # the panel sits in a tab that is hidden until selected
             page.wait_for_timeout(2500)      # the panel's first refresh
-            page.click("#hypergraph-mode-approvals")   # the panel lives in the Live Hypergraph's APPROVALS tab (open by default)
+            try:
+                page.click("#hypergraph-mode-approvals", timeout=30000)   # the panel lives in the Live Hypergraph's APPROVALS tab (open by default)
+            except PlaywrightError:
+                why = page.evaluate("""() => { const t = document.getElementById('hypergraph-mode-approvals'); if (!t) return 'tab missing';
+                  const r = t.getBoundingClientRect(), top = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+                  return JSON.stringify({rect: [r.x, r.y, r.width, r.height], disabled: t.disabled, hidden: t.offsetParent === null,
+                    top: top ? top.tagName + '#' + top.id + '.' + top.className : null, topIsTab: top === t}); }""")
+                raise InfrastructureError(f"the APPROVALS tab could not be clicked: {why}")
         except PlaywrightError as exc:
             raise InfrastructureError(f"the governance page did not become ready: {str(exc).splitlines()[0]}")
         # expand is a no-op now: the tab shows the body (expanded: true); the toggle collapses it

@@ -393,6 +393,10 @@
     .directive__context { margin-top:5px; padding:4px 5px; border-left:2px solid rgba(99,255,209,.55); background:rgba(7,20,34,.62); }
     .directive__context-signature { color:#63ffd1; }.directive__context-missing { color:#7f9bad; margin-top:2px; }
     @media (max-width:800px) { .live-hypergraph { height:220px; width:320px; } }
+    /* The APPROVALS tab needs room: with ten tabs the buttons wrap to a third row and the legend wraps tall, which
+       leaves the content row of the fixed-height grid at about zero. The legend does not apply to this tab. */
+    .live-hypergraph--approvals { min-height:min(440px,calc(100vh - 24px)); }
+    .live-hypergraph--approvals .live-hypergraph__legend { display:none; }
     .mgov { overflow:auto; box-sizing:border-box; border:1px solid rgba(0,212,255,.55); background:rgba(0,12,28,.94); color:#ccefff;
       font:10px/1.35 ui-monospace,monospace; }
     .mgov__bar { display:flex; flex-wrap:wrap; align-items:center; gap:6px 10px; padding:5px 8px; }
@@ -886,6 +890,7 @@
       viewportInfrastructure.hidden = !showInfrastructure;
       for (const [name, root] of Object.entries(workbenchRoots)) root.hidden = name !== mode;
       viewportApprovals.hidden = mode !== "approvals";
+      liveRoot.classList.toggle("live-hypergraph--approvals", mode === "approvals");
       modeApprovals.setAttribute("aria-pressed", String(mode === "approvals"));
       modeApprovals.setAttribute("aria-selected", String(mode === "approvals"));
       mode3D.setAttribute("aria-pressed", String(Boolean(show3D)));
