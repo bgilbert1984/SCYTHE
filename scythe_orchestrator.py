@@ -3029,8 +3029,11 @@ def orchestrator_graphops_rf_tune_propose():
     if not _graphops_directive_authorized():
         return jsonify({'error': 'Authentication required'}), 401
     from graphops_rf_tune import TuneProposalRefused, tune_receipt, validate_tune_request
+    from rf_bridge import get_rf_bridge
     try:
-        request_frame = validate_tune_request(request.get_json(silent=True))
+        # The tuner the dongle reported in its rtl_tcp header, never a browser claim.
+        reported = (get_rf_bridge().supported_gains_db() or {}).get("tuner_type")
+        request_frame = validate_tune_request(request.get_json(silent=True), tuner_type=reported)
     except TuneProposalRefused as exc:
         return jsonify({'status': 'refused', 'error': str(exc), 'proposed': False,
                         'executed': False, 'rigctlContacted': False}), 400

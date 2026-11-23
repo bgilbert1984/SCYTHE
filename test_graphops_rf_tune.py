@@ -9,6 +9,36 @@ def _request(**overrides):
     return {"frequency_hz": 101_700_000, "mode": "WFM", **overrides}
 
 
+class TunerCoverageTests(unittest.TestCase):
+    """Coverage follows the tuner the dongle reported, not the model the code was written for."""
+
+    def test_the_e4000_gap_is_refused_and_its_range_edges_are_excluded(self):
+        for hz in (1_104_000_000, 1_150_000_000, 1_250_000_000, 51_000_000, 2_206_000_000):
+            with self.assertRaisesRegex(TuneProposalRefused, "outside the declared coverage"):
+                validate_tune_request(_request(frequency_hz=hz), tuner_type="E4000")
+
+    def test_the_e4000_accepts_what_the_r820t2_cannot_reach(self):
+        frame = validate_tune_request(_request(frequency_hz=2_000_000_000), tuner_type="E4000")
+        self.assertEqual(frame["regime"], "TUNER")
+        self.assertIn("COVERAGE PROFILE // E4000 (NESDR XTR)", frame["boundaries"])
+        with self.assertRaises(TuneProposalRefused):
+            validate_tune_request(_request(frequency_hz=2_000_000_000), tuner_type="R820T")
+
+    def test_the_e4000_has_no_declared_direct_sampling(self):
+        with self.assertRaisesRegex(TuneProposalRefused, "outside the declared coverage"):
+            validate_tune_request(_request(frequency_hz=5_000_000, acknowledge_direct_sampling=True),
+                                  tuner_type="E4000")
+
+    def test_a_reported_r820t_is_treated_as_the_r820t2_and_no_tuner_keeps_the_default(self):
+        self.assertEqual(validate_tune_request(_request(), tuner_type="R820T")["regime"], "TUNER")
+        self.assertIn("DEFAULT, NO TUNER REPORTED", " ".join(validate_tune_request(_request())["boundaries"]))
+
+    def test_an_undeclared_tuner_is_refused_not_defaulted(self):
+        for tuner in ("FC0012", "R828D", "UNRECOGNISED_9"):
+            with self.assertRaisesRegex(TuneProposalRefused, "no coverage was declared"):
+                validate_tune_request(_request(), tuner_type=tuner)
+
+
 class TuneValidationTests(unittest.TestCase):
     def test_a_valid_request_becomes_bounded_rf_tune_parameters(self):
         frame = validate_tune_request(_request())

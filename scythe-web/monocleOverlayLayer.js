@@ -95,6 +95,8 @@ function injectStyles(documentRoot) {
     .scythe-web-monocle__row--controls { margin-top:6px; align-items:center; }
     .scythe-web-monocle__title { color:#00d4ff; font-weight:800; letter-spacing:.14em; }
     .scythe-web-monocle__value { color:#fff; font-size:16px; font-weight:700; flex:1; }
+    .scythe-web-monocle__quantity { color:#9fc7d8; letter-spacing:.06em; white-space:nowrap; }
+    .scythe-web-monocle__quantity:empty { display:none; }
     .scythe-web-monocle__detail { color:#86a9ba; overflow:hidden; text-overflow:ellipsis; }
     .scythe-web-monocle__body { margin-top:6px; display:grid; gap:2px; }
     .scythe-web-monocle--compact .scythe-web-monocle__body { display:none; }
@@ -129,6 +131,7 @@ function createHud(documentRoot, container, {frequencyHz = null, showOptical = f
   root.innerHTML = `
     <div class="scythe-web-monocle__row">
       <span class="scythe-web-monocle__title">RF FIELD INSPECTOR // ${frequencyLabel(frequencyHz)}</span>
+      <span data-role="quantity" class="scythe-web-monocle__quantity" title="What the value below measures"></span>
       <span data-role="evidence" class="scythe-web-monocle__badge">UNCLASSIFIED</span>
       <span data-role="value" class="scythe-web-monocle__value">NO VALIDATED SOLVER DATA</span>
     </div>
@@ -385,6 +388,7 @@ export class MonocleOverlayLayer {
       if (element) element.textContent = text;
     };
     set("value", model.value);
+    set("quantity", sample?.quantity ? String(sample.quantity).toUpperCase() : "");   // compact mode hides the body that names it
     set("detail", `${model.state} // ${model.detail}`);
     set("mode", `MODE // ${this.samplingMode}`);
     set("decision", sample?.coverage == null ? "THRESHOLD // UNAVAILABLE" :
@@ -413,6 +417,7 @@ export class MonocleOverlayLayer {
     const displayValue = Number.isFinite(Number(cell.display_value)) ? Number(cell.display_value) : Number(cell.value);
     const delta = Number.isFinite(Number(cell.display_delta)) ? Number(cell.display_delta) : displayValue - Number(cell.value);
     set("value", `${Number(cell.value).toPrecision(6)} ${cell.units ?? ""}`);
+    set("quantity", cell.quantity ? String(cell.quantity).toUpperCase() : "");
     set("mode", `MODE // ${this.samplingMode} // ${Number(cell.latitude_degrees).toFixed(5)}°, ${Number(cell.longitude_degrees).toFixed(5)}°`);
     set("detail", `CONTRACT VALUE // ${cell.value} ${cell.units ?? ""} // DISPLAY VALUE // ${displayValue} ${cell.units ?? ""} // Δ ${Number(delta).toPrecision(4)}`);
     set("decision", `THRESHOLD // ${cell.coverage_comparison ?? "?"} ${cell.coverage_threshold ?? "?"} ${cell.coverage_threshold_units ?? cell.units ?? ""} // ${cell.coverage ? "PASS" : "FAIL"}`);

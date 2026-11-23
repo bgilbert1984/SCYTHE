@@ -8,12 +8,13 @@ import {LIFECYCLE_STAGES, describeAction, describeOutcome, governanceBadges, lif
  */
 export class MissionGovernancePanel {
   constructor({root, fetchImpl = globalThis.fetch?.bind(globalThis), storages = [], missionId = null, pollMs = 10000,
-               setTimer = globalThis.setInterval?.bind(globalThis)} = {}) {
+               setTimer = globalThis.setInterval?.bind(globalThis), expanded = false, onChange = null} = {}) {
     this.root = root;
+    this.onChange = onChange;
     this.fetch = fetchImpl;
     this.storages = storages;
     this.missionId = missionId;
-    this.state = {governance: null, pending: [], recent: [], status: "loading", message: "", expanded: false};
+    this.state = {governance: null, pending: [], recent: [], status: "loading", message: "", expanded: Boolean(expanded)};
     this.build();
     this.render();
     this.refresh();
@@ -126,6 +127,7 @@ export class MissionGovernancePanel {
     this.note.hidden = !s.message;
     this.renderCenter();
     this.renderRecent();
+    this.onChange?.({pending: s.pending.length, status: s.status});
   }
 
   renderCenter() {
