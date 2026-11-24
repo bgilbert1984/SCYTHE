@@ -65,3 +65,7 @@ game/desktop/node_modules/
 game/desktop/out/
 game/desktop/.stage/
 game/desktop/.stage-profile/
+
+# EmbeddingEngine fallback location. Callers normally pass instance-scoped paths; these only apply when they do not.
+/embedding_index.faiss
+/embedding_store.duckdb
