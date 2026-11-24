@@ -39,8 +39,11 @@ logger = logging.getLogger(__name__)
 
 # Configuration
 DEFAULT_EVE_WS_URL = "ws://localhost:8081/ws"
-DEFAULT_PCAPNG_DIR = "/home/spectrcyde/NerfEngine/ftp_share/pcapng"
-DEFAULT_DB_PATH = "/home/spectrcyde/NerfEngine/new_hosts.db"
+# Anchored to this file. ftp_share/ and *.db are both gitignored, so these
+# land inside the checkout without becoming tracked content.
+_REPO_ROOT = Path(__file__).resolve().parent
+DEFAULT_PCAPNG_DIR = str(_REPO_ROOT / "ftp_share" / "pcapng")
+DEFAULT_DB_PATH = str(_REPO_ROOT / "new_hosts.db")
 DEFAULT_CAPTURE_DURATION = 10  # seconds per host capture
 DEFAULT_CAPTURE_PACKET_LIMIT = 1000  # packets per capture
 
