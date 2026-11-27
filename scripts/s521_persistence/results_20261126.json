@@ -1,0 +1,1343 @@
+{
+ "pass": "persistence_pass.py detect/aggregate/classify over the 8 antenna-on observation runs, 1,536 windows, 0 read errors",
+ "thresholds": {
+  "nfft": 4096,
+  "detect_db": 10.0,
+  "min_persistence": 0.6,
+  "min_covering_visits": 3,
+  "rf_fixed_min_centre_spread_khz": 50,
+  "clipped_visits_excluded": true,
+  "reference_harmonic_hz": 28800000
+ },
+ "distinct_rf_fixed_frequencies": 160,
+ "single_run": 134,
+ "classified": [
+  {
+   "freq_hz": 401238000.0,
+   "class": "SITE_LOCAL_PERSISTENT",
+   "runs_detecting": 2,
+   "runs_covering": 8,
+   "sites_detecting": [
+    "hwy99"
+   ],
+   "sites_covering": [
+    "harbourpointe",
+    "hwy99",
+    "muk12426",
+    "muk12502",
+    "sea6thave"
+   ],
+   "per_run": {
+    "run_20261117_mukilteo": {
+     "covering": 12,
+     "detecting": 0
+    },
+    "run_20261118_mukilteo": {
+     "covering": 12,
+     "detecting": 0
+    },
+    "run_20261118_mukilteo_12426": {
+     "covering": 12,
+     "detecting": 0
+    },
+    "run_20261119_hwy99": {
+     "covering": 12,
+     "detecting": 0
+    },
+    "run_20261122_harbourpointe_r2": {
+     "covering": 12,
+     "detecting": 0
+    },
+    "run_20261124_hwy99_ofinnigans": {
+     "covering": 12,
+     "detecting": 12
+    },
+    "run_20261126_hwy99": {
+     "covering": 12,
+     "detecting": 11
+    },
+    "run_20261126_sea6thave_r2": {
+     "covering": 12,
+     "detecting": 0
+    }
+   },
+   "max_snr_db": 12.7
+  },
+  {
+   "freq_hz": 403200000.0,
+   "class": "INSTRUMENT_REFERENCE_HARMONIC",
+   "runs_detecting": 8,
+   "runs_covering": 8,
+   "sites_detecting": [
+    "harbourpointe",
+    "hwy99",
+    "muk12426",
+    "muk12502",
+    "sea6thave"
+   ],
+   "sites_covering": [
+    "harbourpointe",
+    "hwy99",
+    "muk12426",
+    "muk12502",
+    "sea6thave"
+   ],
+   "per_run": {
+    "run_20261117_mukilteo": {
+     "covering": 9,
+     "detecting": 9
+    },
+    "run_20261118_mukilteo": {
+     "covering": 9,
+     "detecting": 9
+    },
+    "run_20261118_mukilteo_12426": {
+     "covering": 9,
+     "detecting": 9
+    },
+    "run_20261119_hwy99": {
+     "covering": 9,
+     "detecting": 9
+    },
+    "run_20261122_harbourpointe_r2": {
+     "covering": 9,
+     "detecting": 9
+    },
+    "run_20261124_hwy99_ofinnigans": {
+     "covering": 9,
+     "detecting": 9
+    },
+    "run_20261126_hwy99": {
+     "covering": 9,
+     "detecting": 7
+    },
+    "run_20261126_sea6thave_r2": {
+     "covering": 7,
+     "detecting": 7
+    }
+   },
+   "max_snr_db": 32.0
+  },
+  {
+   "freq_hz": 404992000.0,
+   "class": "SITE_LOCAL_PERSISTENT",
+   "runs_detecting": 2,
+   "runs_covering": 7,
+   "sites_detecting": [
+    "hwy99"
+   ],
+   "sites_covering": [
+    "harbourpointe",
+    "hwy99",
+    "muk12426",
+    "muk12502"
+   ],
+   "per_run": {
+    "run_20261117_mukilteo": {
+     "covering": 3,
+     "detecting": 0
+    },
+    "run_20261118_mukilteo": {
+     "covering": 3,
+     "detecting": 0
+    },
+    "run_20261118_mukilteo_12426": {
+     "covering": 3,
+     "detecting": 0
+    },
+    "run_20261119_hwy99": {
+     "covering": 3,
+     "detecting": 0
+    },
+    "run_20261122_harbourpointe_r2": {
+     "covering": 3,
+     "detecting": 0
+    },
+    "run_20261124_hwy99_ofinnigans": {
+     "covering": 3,
+     "detecting": 3
+    },
+    "run_20261126_hwy99": {
+     "covering": 3,
+     "detecting": 3
+    },
+    "run_20261126_sea6thave_r2": {
+     "covering": 2,
+     "detecting": 0
+    }
+   },
+   "max_snr_db": 15.0
+  },
+  {
+   "freq_hz": 405002000.0,
+   "class": "SITE_LOCAL_PERSISTENT",
+   "runs_detecting": 2,
+   "runs_covering": 7,
+   "sites_detecting": [
+    "hwy99"
+   ],
+   "sites_covering": [
+    "harbourpointe",
+    "hwy99",
+    "muk12426",
+    "muk12502"
+   ],
+   "per_run": {
+    "run_20261117_mukilteo": {
+     "covering": 3,
+     "detecting": 0
+    },
+    "run_20261118_mukilteo": {
+     "covering": 3,
+     "detecting": 0
+    },
+    "run_20261118_mukilteo_12426": {
+     "covering": 3,
+     "detecting": 0
+    },
+    "run_20261119_hwy99": {
+     "covering": 3,
+     "detecting": 0
+    },
+    "run_20261122_harbourpointe_r2": {
+     "covering": 3,
+     "detecting": 0
+    },
+    "run_20261124_hwy99_ofinnigans": {
+     "covering": 3,
+     "detecting": 3
+    },
+    "run_20261126_hwy99": {
+     "covering": 3,
+     "detecting": 3
+    },
+    "run_20261126_sea6thave_r2": {
+     "covering": 2,
+     "detecting": 0
+    }
+   },
+   "max_snr_db": 11.7
+  },
+  {
+   "freq_hz": 408005000.0,
+   "class": "SITE_LOCAL_PERSISTENT",
+   "runs_detecting": 2,
+   "runs_covering": 7,
+   "sites_detecting": [
+    "hwy99"
+   ],
+   "sites_covering": [
+    "harbourpointe",
+    "hwy99",
+    "muk12426",
+    "muk12502"
+   ],
+   "per_run": {
+    "run_20261117_mukilteo": {
+     "covering": 3,
+     "detecting": 0
+    },
+    "run_20261118_mukilteo": {
+     "covering": 3,
+     "detecting": 0
+    },
+    "run_20261118_mukilteo_12426": {
+     "covering": 3,
+     "detecting": 0
+    },
+    "run_20261119_hwy99": {
+     "covering": 3,
+     "detecting": 3
+    },
+    "run_20261122_harbourpointe_r2": {
+     "covering": 3,
+     "detecting": 0
+    },
+    "run_20261124_hwy99_ofinnigans": {
+     "covering": 3,
+     "detecting": 3
+    },
+    "run_20261126_hwy99": {
+     "covering": 3,
+     "detecting": 1
+    },
+    "run_20261126_sea6thave_r2": {
+     "covering": 2,
+     "detecting": 0
+    }
+   },
+   "max_snr_db": 18.3
+  },
+  {
+   "freq_hz": 410656000.0,
+   "class": "SITE_LOCAL_PERSISTENT",
+   "runs_detecting": 2,
+   "runs_covering": 8,
+   "sites_detecting": [
+    "hwy99"
+   ],
+   "sites_covering": [
+    "harbourpointe",
+    "hwy99",
+    "muk12426",
+    "muk12502",
+    "sea6thave"
+   ],
+   "per_run": {
+    "run_20261117_mukilteo": {
+     "covering": 6,
+     "detecting": 0
+    },
+    "run_20261118_mukilteo": {
+     "covering": 6,
+     "detecting": 0
+    },
+    "run_20261118_mukilteo_12426": {
+     "covering": 6,
+     "detecting": 0
+    },
+    "run_20261119_hwy99": {
+     "covering": 6,
+     "detecting": 0
+    },
+    "run_20261122_harbourpointe_r2": {
+     "covering": 6,
+     "detecting": 0
+    },
+    "run_20261124_hwy99_ofinnigans": {
+     "covering": 6,
+     "detecting": 6
+    },
+    "run_20261126_hwy99": {
+     "covering": 6,
+     "detecting": 6
+    },
+    "run_20261126_sea6thave_r2": {
+     "covering": 4,
+     "detecting": 0
+    }
+   },
+   "max_snr_db": 13.3
+  },
+  {
+   "freq_hz": 410672000.0,
+   "class": "SITE_LOCAL_PERSISTENT",
+   "runs_detecting": 2,
+   "runs_covering": 8,
+   "sites_detecting": [
+    "hwy99"
+   ],
+   "sites_covering": [
+    "harbourpointe",
+    "hwy99",
+    "muk12426",
+    "muk12502",
+    "sea6thave"
+   ],
+   "per_run": {
+    "run_20261117_mukilteo": {
+     "covering": 6,
+     "detecting": 0
+    },
+    "run_20261118_mukilteo": {
+     "covering": 6,
+     "detecting": 0
+    },
+    "run_20261118_mukilteo_12426": {
+     "covering": 6,
+     "detecting": 0
+    },
+    "run_20261119_hwy99": {
+     "covering": 6,
+     "detecting": 0
+    },
+    "run_20261122_harbourpointe_r2": {
+     "covering": 6,
+     "detecting": 0
+    },
+    "run_20261124_hwy99_ofinnigans": {
+     "covering": 6,
+     "detecting": 6
+    },
+    "run_20261126_hwy99": {
+     "covering": 6,
+     "detecting": 5
+    },
+    "run_20261126_sea6thave_r2": {
+     "covering": 4,
+     "detecting": 0
+    }
+   },
+   "max_snr_db": 18.9
+  },
+  {
+   "freq_hz": 425009500.0,
+   "class": "MULTI_SITE_PARTIAL",
+   "runs_detecting": 2,
+   "runs_covering": 7,
+   "sites_detecting": [
+    "harbourpointe",
+    "muk12426"
+   ],
+   "sites_covering": [
+    "harbourpointe",
+    "hwy99",
+    "muk12426",
+    "muk12502"
+   ],
+   "per_run": {
+    "run_20261117_mukilteo": {
+     "covering": 3,
+     "detecting": 0
+    },
+    "run_20261118_mukilteo": {
+     "covering": 3,
+     "detecting": 0
+    },
+    "run_20261118_mukilteo_12426": {
+     "covering": 3,
+     "detecting": 2
+    },
+    "run_20261119_hwy99": {
+     "covering": 3,
+     "detecting": 0
+    },
+    "run_20261122_harbourpointe_r2": {
+     "covering": 3,
+     "detecting": 2
+    },
+    "run_20261124_hwy99_ofinnigans": {
+     "covering": 3,
+     "detecting": 0
+    },
+    "run_20261126_hwy99": {
+     "covering": 3,
+     "detecting": 0
+    },
+    "run_20261126_sea6thave_r2": {
+     "covering": 2,
+     "detecting": 0
+    }
+   },
+   "max_snr_db": 12.6
+  },
+  {
+   "freq_hz": 425025000.0,
+   "class": "SITE_LOCAL_PERSISTENT",
+   "runs_detecting": 2,
+   "runs_covering": 7,
+   "sites_detecting": [
+    "hwy99"
+   ],
+   "sites_covering": [
+    "harbourpointe",
+    "hwy99",
+    "muk12426",
+    "muk12502"
+   ],
+   "per_run": {
+    "run_20261117_mukilteo": {
+     "covering": 3,
+     "detecting": 0
+    },
+    "run_20261118_mukilteo": {
+     "covering": 3,
+     "detecting": 0
+    },
+    "run_20261118_mukilteo_12426": {
+     "covering": 3,
+     "detecting": 0
+    },
+    "run_20261119_hwy99": {
+     "covering": 3,
+     "detecting": 0
+    },
+    "run_20261122_harbourpointe_r2": {
+     "covering": 3,
+     "detecting": 0
+    },
+    "run_20261124_hwy99_ofinnigans": {
+     "covering": 3,
+     "detecting": 2
+    },
+    "run_20261126_hwy99": {
+     "covering": 3,
+     "detecting": 2
+    },
+    "run_20261126_sea6thave_r2": {
+     "covering": 2,
+     "detecting": 0
+    }
+   },
+   "max_snr_db": 14.8
+  },
+  {
+   "freq_hz": 426002000.0,
+   "class": "SITE_LOCAL_PERSISTENT",
+   "runs_detecting": 2,
+   "runs_covering": 8,
+   "sites_detecting": [
+    "hwy99"
+   ],
+   "sites_covering": [
+    "harbourpointe",
+    "hwy99",
+    "muk12426",
+    "muk12502",
+    "sea6thave"
+   ],
+   "per_run": {
+    "run_20261117_mukilteo": {
+     "covering": 8,
+     "detecting": 0
+    },
+    "run_20261118_mukilteo": {
+     "covering": 8,
+     "detecting": 0
+    },
+    "run_20261118_mukilteo_12426": {
+     "covering": 8,
+     "detecting": 0
+    },
+    "run_20261119_hwy99": {
+     "covering": 8,
+     "detecting": 0
+    },
+    "run_20261122_harbourpointe_r2": {
+     "covering": 8,
+     "detecting": 0
+    },
+    "run_20261124_hwy99_ofinnigans": {
+     "covering": 8,
+     "detecting": 6
+    },
+    "run_20261126_hwy99": {
+     "covering": 8,
+     "detecting": 7
+    },
+    "run_20261126_sea6thave_r2": {
+     "covering": 5,
+     "detecting": 0
+    }
+   },
+   "max_snr_db": 11.4
+  },
+  {
+   "freq_hz": 431585500.0,
+   "class": "SITE_LOCAL_PERSISTENT",
+   "runs_detecting": 2,
+   "runs_covering": 7,
+   "sites_detecting": [
+    "hwy99"
+   ],
+   "sites_covering": [
+    "harbourpointe",
+    "hwy99",
+    "muk12426",
+    "muk12502"
+   ],
+   "per_run": {
+    "run_20261117_mukilteo": {
+     "covering": 3,
+     "detecting": 0
+    },
+    "run_20261118_mukilteo": {
+     "covering": 3,
+     "detecting": 0
+    },
+    "run_20261118_mukilteo_12426": {
+     "covering": 3,
+     "detecting": 0
+    },
+    "run_20261119_hwy99": {
+     "covering": 3,
+     "detecting": 0
+    },
+    "run_20261122_harbourpointe_r2": {
+     "covering": 3,
+     "detecting": 0
+    },
+    "run_20261124_hwy99_ofinnigans": {
+     "covering": 3,
+     "detecting": 2
+    },
+    "run_20261126_hwy99": {
+     "covering": 3,
+     "detecting": 2
+    },
+    "run_20261126_sea6thave_r2": {
+     "covering": 2,
+     "detecting": 0
+    }
+   },
+   "max_snr_db": 11.3
+  },
+  {
+   "freq_hz": 432066000.0,
+   "class": "SITE_LOCAL_PERSISTENT",
+   "runs_detecting": 2,
+   "runs_covering": 8,
+   "sites_detecting": [
+    "hwy99"
+   ],
+   "sites_covering": [
+    "harbourpointe",
+    "hwy99",
+    "muk12426",
+    "muk12502",
+    "sea6thave"
+   ],
+   "per_run": {
+    "run_20261117_mukilteo": {
+     "covering": 3,
+     "detecting": 0
+    },
+    "run_20261118_mukilteo": {
+     "covering": 3,
+     "detecting": 0
+    },
+    "run_20261118_mukilteo_12426": {
+     "covering": 3,
+     "detecting": 0
+    },
+    "run_20261119_hwy99": {
+     "covering": 3,
+     "detecting": 0
+    },
+    "run_20261122_harbourpointe_r2": {
+     "covering": 3,
+     "detecting": 0
+    },
+    "run_20261124_hwy99_ofinnigans": {
+     "covering": 3,
+     "detecting": 3
+    },
+    "run_20261126_hwy99": {
+     "covering": 3,
+     "detecting": 3
+    },
+    "run_20261126_sea6thave_r2": {
+     "covering": 3,
+     "detecting": 0
+    }
+   },
+   "max_snr_db": 18.3
+  },
+  {
+   "freq_hz": 438755000.0,
+   "class": "SITE_LOCAL_PERSISTENT",
+   "runs_detecting": 2,
+   "runs_covering": 7,
+   "sites_detecting": [
+    "hwy99"
+   ],
+   "sites_covering": [
+    "harbourpointe",
+    "hwy99",
+    "muk12426",
+    "muk12502"
+   ],
+   "per_run": {
+    "run_20261117_mukilteo": {
+     "covering": 3,
+     "detecting": 0
+    },
+    "run_20261118_mukilteo": {
+     "covering": 3,
+     "detecting": 0
+    },
+    "run_20261118_mukilteo_12426": {
+     "covering": 3,
+     "detecting": 0
+    },
+    "run_20261119_hwy99": {
+     "covering": 3,
+     "detecting": 2
+    },
+    "run_20261122_harbourpointe_r2": {
+     "covering": 3,
+     "detecting": 0
+    },
+    "run_20261124_hwy99_ofinnigans": {
+     "covering": 3,
+     "detecting": 0
+    },
+    "run_20261126_hwy99": {
+     "covering": 3,
+     "detecting": 3
+    },
+    "run_20261126_sea6thave_r2": {
+     "covering": 2,
+     "detecting": 0
+    }
+   },
+   "max_snr_db": 21.7
+  },
+  {
+   "freq_hz": 442486000.0,
+   "class": "SITE_LOCAL_PERSISTENT",
+   "runs_detecting": 2,
+   "runs_covering": 8,
+   "sites_detecting": [
+    "hwy99"
+   ],
+   "sites_covering": [
+    "harbourpointe",
+    "hwy99",
+    "muk12426",
+    "muk12502",
+    "sea6thave"
+   ],
+   "per_run": {
+    "run_20261117_mukilteo": {
+     "covering": 9,
+     "detecting": 0
+    },
+    "run_20261118_mukilteo": {
+     "covering": 9,
+     "detecting": 0
+    },
+    "run_20261118_mukilteo_12426": {
+     "covering": 9,
+     "detecting": 1
+    },
+    "run_20261119_hwy99": {
+     "covering": 9,
+     "detecting": 0
+    },
+    "run_20261122_harbourpointe_r2": {
+     "covering": 9,
+     "detecting": 0
+    },
+    "run_20261124_hwy99_ofinnigans": {
+     "covering": 9,
+     "detecting": 9
+    },
+    "run_20261126_hwy99": {
+     "covering": 9,
+     "detecting": 8
+    },
+    "run_20261126_sea6thave_r2": {
+     "covering": 7,
+     "detecting": 0
+    }
+   },
+   "max_snr_db": 13.5
+  },
+  {
+   "freq_hz": 445049500.0,
+   "class": "SITE_LOCAL_PERSISTENT",
+   "runs_detecting": 2,
+   "runs_covering": 8,
+   "sites_detecting": [
+    "hwy99"
+   ],
+   "sites_covering": [
+    "harbourpointe",
+    "hwy99",
+    "muk12426",
+    "muk12502",
+    "sea6thave"
+   ],
+   "per_run": {
+    "run_20261117_mukilteo": {
+     "covering": 11,
+     "detecting": 0
+    },
+    "run_20261118_mukilteo": {
+     "covering": 11,
+     "detecting": 0
+    },
+    "run_20261118_mukilteo_12426": {
+     "covering": 11,
+     "detecting": 0
+    },
+    "run_20261119_hwy99": {
+     "covering": 11,
+     "detecting": 7
+    },
+    "run_20261122_harbourpointe_r2": {
+     "covering": 11,
+     "detecting": 0
+    },
+    "run_20261124_hwy99_ofinnigans": {
+     "covering": 11,
+     "detecting": 8
+    },
+    "run_20261126_hwy99": {
+     "covering": 11,
+     "detecting": 1
+    },
+    "run_20261126_sea6thave_r2": {
+     "covering": 10,
+     "detecting": 0
+    }
+   },
+   "max_snr_db": 17.2
+  },
+  {
+   "freq_hz": 445055000.0,
+   "class": "SITE_LOCAL_PERSISTENT",
+   "runs_detecting": 3,
+   "runs_covering": 8,
+   "sites_detecting": [
+    "hwy99"
+   ],
+   "sites_covering": [
+    "harbourpointe",
+    "hwy99",
+    "muk12426",
+    "muk12502",
+    "sea6thave"
+   ],
+   "per_run": {
+    "run_20261117_mukilteo": {
+     "covering": 11,
+     "detecting": 0
+    },
+    "run_20261118_mukilteo": {
+     "covering": 11,
+     "detecting": 0
+    },
+    "run_20261118_mukilteo_12426": {
+     "covering": 11,
+     "detecting": 0
+    },
+    "run_20261119_hwy99": {
+     "covering": 11,
+     "detecting": 7
+    },
+    "run_20261122_harbourpointe_r2": {
+     "covering": 11,
+     "detecting": 0
+    },
+    "run_20261124_hwy99_ofinnigans": {
+     "covering": 11,
+     "detecting": 7
+    },
+    "run_20261126_hwy99": {
+     "covering": 11,
+     "detecting": 7
+    },
+    "run_20261126_sea6thave_r2": {
+     "covering": 10,
+     "detecting": 0
+    }
+   },
+   "max_snr_db": 15.9
+  },
+  {
+   "freq_hz": 447917000.0,
+   "class": "SITE_LOCAL_PERSISTENT",
+   "runs_detecting": 2,
+   "runs_covering": 8,
+   "sites_detecting": [
+    "hwy99"
+   ],
+   "sites_covering": [
+    "harbourpointe",
+    "hwy99",
+    "muk12426",
+    "muk12502",
+    "sea6thave"
+   ],
+   "per_run": {
+    "run_20261117_mukilteo": {
+     "covering": 6,
+     "detecting": 0
+    },
+    "run_20261118_mukilteo": {
+     "covering": 6,
+     "detecting": 0
+    },
+    "run_20261118_mukilteo_12426": {
+     "covering": 6,
+     "detecting": 0
+    },
+    "run_20261119_hwy99": {
+     "covering": 6,
+     "detecting": 0
+    },
+    "run_20261122_harbourpointe_r2": {
+     "covering": 6,
+     "detecting": 0
+    },
+    "run_20261124_hwy99_ofinnigans": {
+     "covering": 6,
+     "detecting": 5
+    },
+    "run_20261126_hwy99": {
+     "covering": 6,
+     "detecting": 4
+    },
+    "run_20261126_sea6thave_r2": {
+     "covering": 6,
+     "detecting": 0
+    }
+   },
+   "max_snr_db": 12.2
+  },
+  {
+   "freq_hz": 448000333.3,
+   "class": "MULTI_SITE_PARTIAL",
+   "runs_detecting": 3,
+   "runs_covering": 8,
+   "sites_detecting": [
+    "hwy99",
+    "muk12426"
+   ],
+   "sites_covering": [
+    "harbourpointe",
+    "hwy99",
+    "muk12426",
+    "muk12502",
+    "sea6thave"
+   ],
+   "per_run": {
+    "run_20261117_mukilteo": {
+     "covering": 6,
+     "detecting": 0
+    },
+    "run_20261118_mukilteo": {
+     "covering": 6,
+     "detecting": 0
+    },
+    "run_20261118_mukilteo_12426": {
+     "covering": 6,
+     "detecting": 6
+    },
+    "run_20261119_hwy99": {
+     "covering": 6,
+     "detecting": 0
+    },
+    "run_20261122_harbourpointe_r2": {
+     "covering": 6,
+     "detecting": 0
+    },
+    "run_20261124_hwy99_ofinnigans": {
+     "covering": 6,
+     "detecting": 6
+    },
+    "run_20261126_hwy99": {
+     "covering": 6,
+     "detecting": 5
+    },
+    "run_20261126_sea6thave_r2": {
+     "covering": 6,
+     "detecting": 0
+    }
+   },
+   "max_snr_db": 23.7
+  },
+  {
+   "freq_hz": 448083000.0,
+   "class": "SITE_LOCAL_PERSISTENT",
+   "runs_detecting": 2,
+   "runs_covering": 8,
+   "sites_detecting": [
+    "hwy99"
+   ],
+   "sites_covering": [
+    "harbourpointe",
+    "hwy99",
+    "muk12426",
+    "muk12502",
+    "sea6thave"
+   ],
+   "per_run": {
+    "run_20261117_mukilteo": {
+     "covering": 6,
+     "detecting": 0
+    },
+    "run_20261118_mukilteo": {
+     "covering": 6,
+     "detecting": 0
+    },
+    "run_20261118_mukilteo_12426": {
+     "covering": 6,
+     "detecting": 0
+    },
+    "run_20261119_hwy99": {
+     "covering": 6,
+     "detecting": 0
+    },
+    "run_20261122_harbourpointe_r2": {
+     "covering": 6,
+     "detecting": 0
+    },
+    "run_20261124_hwy99_ofinnigans": {
+     "covering": 6,
+     "detecting": 3
+    },
+    "run_20261126_hwy99": {
+     "covering": 6,
+     "detecting": 4
+    },
+    "run_20261126_sea6thave_r2": {
+     "covering": 6,
+     "detecting": 0
+    }
+   },
+   "max_snr_db": 12.7
+  },
+  {
+   "freq_hz": 449997000.0,
+   "class": "MULTI_RUN_SINGLE_SITE_OTHERS_UNCLEAR",
+   "runs_detecting": 2,
+   "runs_covering": 8,
+   "sites_detecting": [
+    "hwy99"
+   ],
+   "sites_covering": [
+    "harbourpointe",
+    "hwy99",
+    "muk12426",
+    "muk12502",
+    "sea6thave"
+   ],
+   "per_run": {
+    "run_20261117_mukilteo": {
+     "covering": 11,
+     "detecting": 0
+    },
+    "run_20261118_mukilteo": {
+     "covering": 11,
+     "detecting": 0
+    },
+    "run_20261118_mukilteo_12426": {
+     "covering": 11,
+     "detecting": 0
+    },
+    "run_20261119_hwy99": {
+     "covering": 11,
+     "detecting": 0
+    },
+    "run_20261122_harbourpointe_r2": {
+     "covering": 11,
+     "detecting": 4
+    },
+    "run_20261124_hwy99_ofinnigans": {
+     "covering": 11,
+     "detecting": 10
+    },
+    "run_20261126_hwy99": {
+     "covering": 11,
+     "detecting": 7
+    },
+    "run_20261126_sea6thave_r2": {
+     "covering": 11,
+     "detecting": 0
+    }
+   },
+   "max_snr_db": 13.7
+  },
+  {
+   "freq_hz": 450002000.0,
+   "class": "SITE_LOCAL_PERSISTENT",
+   "runs_detecting": 3,
+   "runs_covering": 8,
+   "sites_detecting": [
+    "hwy99"
+   ],
+   "sites_covering": [
+    "harbourpointe",
+    "hwy99",
+    "muk12426",
+    "muk12502",
+    "sea6thave"
+   ],
+   "per_run": {
+    "run_20261117_mukilteo": {
+     "covering": 11,
+     "detecting": 0
+    },
+    "run_20261118_mukilteo": {
+     "covering": 11,
+     "detecting": 0
+    },
+    "run_20261118_mukilteo_12426": {
+     "covering": 11,
+     "detecting": 0
+    },
+    "run_20261119_hwy99": {
+     "covering": 11,
+     "detecting": 10
+    },
+    "run_20261122_harbourpointe_r2": {
+     "covering": 11,
+     "detecting": 1
+    },
+    "run_20261124_hwy99_ofinnigans": {
+     "covering": 11,
+     "detecting": 10
+    },
+    "run_20261126_hwy99": {
+     "covering": 11,
+     "detecting": 6
+    },
+    "run_20261126_sea6thave_r2": {
+     "covering": 11,
+     "detecting": 0
+    }
+   },
+   "max_snr_db": 14.2
+  },
+  {
+   "freq_hz": 450061000.0,
+   "class": "SITE_LOCAL_PERSISTENT",
+   "runs_detecting": 2,
+   "runs_covering": 8,
+   "sites_detecting": [
+    "muk12502"
+   ],
+   "sites_covering": [
+    "harbourpointe",
+    "hwy99",
+    "muk12426",
+    "muk12502",
+    "sea6thave"
+   ],
+   "per_run": {
+    "run_20261117_mukilteo": {
+     "covering": 11,
+     "detecting": 7
+    },
+    "run_20261118_mukilteo": {
+     "covering": 11,
+     "detecting": 7
+    },
+    "run_20261118_mukilteo_12426": {
+     "covering": 11,
+     "detecting": 0
+    },
+    "run_20261119_hwy99": {
+     "covering": 11,
+     "detecting": 0
+    },
+    "run_20261122_harbourpointe_r2": {
+     "covering": 11,
+     "detecting": 0
+    },
+    "run_20261124_hwy99_ofinnigans": {
+     "covering": 11,
+     "detecting": 0
+    },
+    "run_20261126_hwy99": {
+     "covering": 11,
+     "detecting": 0
+    },
+    "run_20261126_sea6thave_r2": {
+     "covering": 11,
+     "detecting": 0
+    }
+   },
+   "max_snr_db": 14.4
+  },
+  {
+   "freq_hz": 452050000.0,
+   "class": "MULTI_SITE_PARTIAL",
+   "runs_detecting": 5,
+   "runs_covering": 7,
+   "sites_detecting": [
+    "hwy99",
+    "muk12426",
+    "muk12502"
+   ],
+   "sites_covering": [
+    "harbourpointe",
+    "hwy99",
+    "muk12426",
+    "muk12502"
+   ],
+   "per_run": {
+    "run_20261117_mukilteo": {
+     "covering": 3,
+     "detecting": 3
+    },
+    "run_20261118_mukilteo": {
+     "covering": 3,
+     "detecting": 0
+    },
+    "run_20261118_mukilteo_12426": {
+     "covering": 3,
+     "detecting": 3
+    },
+    "run_20261119_hwy99": {
+     "covering": 3,
+     "detecting": 3
+    },
+    "run_20261122_harbourpointe_r2": {
+     "covering": 3,
+     "detecting": 0
+    },
+    "run_20261124_hwy99_ofinnigans": {
+     "covering": 3,
+     "detecting": 3
+    },
+    "run_20261126_hwy99": {
+     "covering": 3,
+     "detecting": 3
+    },
+    "run_20261126_sea6thave_r2": {
+     "covering": 2,
+     "detecting": 0
+    }
+   },
+   "max_snr_db": 31.1
+  },
+  {
+   "freq_hz": 452434000.0,
+   "class": "SITE_LOCAL_PERSISTENT",
+   "runs_detecting": 2,
+   "runs_covering": 8,
+   "sites_detecting": [
+    "hwy99"
+   ],
+   "sites_covering": [
+    "harbourpointe",
+    "hwy99",
+    "muk12426",
+    "muk12502",
+    "sea6thave"
+   ],
+   "per_run": {
+    "run_20261117_mukilteo": {
+     "covering": 6,
+     "detecting": 0
+    },
+    "run_20261118_mukilteo": {
+     "covering": 6,
+     "detecting": 0
+    },
+    "run_20261118_mukilteo_12426": {
+     "covering": 6,
+     "detecting": 0
+    },
+    "run_20261119_hwy99": {
+     "covering": 6,
+     "detecting": 0
+    },
+    "run_20261122_harbourpointe_r2": {
+     "covering": 6,
+     "detecting": 0
+    },
+    "run_20261124_hwy99_ofinnigans": {
+     "covering": 6,
+     "detecting": 6
+    },
+    "run_20261126_hwy99": {
+     "covering": 5,
+     "detecting": 5
+    },
+    "run_20261126_sea6thave_r2": {
+     "covering": 5,
+     "detecting": 0
+    }
+   },
+   "max_snr_db": 20.2
+  },
+  {
+   "freq_hz": 456005000.0,
+   "class": "SITE_LOCAL_PERSISTENT",
+   "runs_detecting": 2,
+   "runs_covering": 8,
+   "sites_detecting": [
+    "hwy99"
+   ],
+   "sites_covering": [
+    "harbourpointe",
+    "hwy99",
+    "muk12426",
+    "muk12502",
+    "sea6thave"
+   ],
+   "per_run": {
+    "run_20261117_mukilteo": {
+     "covering": 5,
+     "detecting": 0
+    },
+    "run_20261118_mukilteo": {
+     "covering": 5,
+     "detecting": 0
+    },
+    "run_20261118_mukilteo_12426": {
+     "covering": 5,
+     "detecting": 0
+    },
+    "run_20261119_hwy99": {
+     "covering": 5,
+     "detecting": 4
+    },
+    "run_20261122_harbourpointe_r2": {
+     "covering": 5,
+     "detecting": 0
+    },
+    "run_20261124_hwy99_ofinnigans": {
+     "covering": 5,
+     "detecting": 1
+    },
+    "run_20261126_hwy99": {
+     "covering": 5,
+     "detecting": 4
+    },
+    "run_20261126_sea6thave_r2": {
+     "covering": 4,
+     "detecting": 0
+    }
+   },
+   "max_snr_db": 16.2
+  },
+  {
+   "freq_hz": 464906000.0,
+   "class": "MULTI_SITE_PARTIAL",
+   "runs_detecting": 4,
+   "runs_covering": 7,
+   "sites_detecting": [
+    "hwy99",
+    "muk12426",
+    "muk12502"
+   ],
+   "sites_covering": [
+    "harbourpointe",
+    "hwy99",
+    "muk12426",
+    "muk12502"
+   ],
+   "per_run": {
+    "run_20261117_mukilteo": {
+     "covering": 3,
+     "detecting": 2
+    },
+    "run_20261118_mukilteo": {
+     "covering": 3,
+     "detecting": 0
+    },
+    "run_20261118_mukilteo_12426": {
+     "covering": 3,
+     "detecting": 3
+    },
+    "run_20261119_hwy99": {
+     "covering": 3,
+     "detecting": 0
+    },
+    "run_20261122_harbourpointe_r2": {
+     "covering": 3,
+     "detecting": 1
+    },
+    "run_20261124_hwy99_ofinnigans": {
+     "covering": 3,
+     "detecting": 3
+    },
+    "run_20261126_hwy99": {
+     "covering": 3,
+     "detecting": 3
+    },
+    "run_20261126_sea6thave_r2": {
+     "covering": 2,
+     "detecting": 0
+    }
+   },
+   "max_snr_db": 20.8
+  }
+ ]
+}
