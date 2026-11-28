@@ -14,7 +14,7 @@ Integrity: every window must be exactly 8,388,608 bytes and match the sha256 in 
 pinned dataset revision and an isolated temporary cache (the shared Hugging Face cache is never touched); a run is processed
 only if all its visits read and verify, and every result file carries its provenance.
 
-usage: persistence_pass.py detect OUT_DIR --revision SHA [--captures PATH] [--sets a,b] [--local-root ~/s521_runs] [--workers 3]
+usage: persistence_pass.py detect OUT_DIR --revision SHA [--captures PATH] [--sets a,b] [--local-root ~/s521_runs | --remote-only] [--workers 3]
        persistence_pass.py aggregate OUT_DIR [--sets a,b]
        persistence_pass.py classify OUT_DIR --results PATH [--sets a,b]
 """
@@ -78,6 +78,9 @@ def code_sha256():
 
 
 def git_state():
+    env = os.environ.get("S521_SOFTWARE_COMMIT")          # set when the script runs from a copy outside a git checkout
+    if env:
+        return {"git_head": env, "git_dirty": None}
     here = os.path.dirname(os.path.abspath(__file__))
     try:
         head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=here, capture_output=True, text=True, timeout=20, check=True).stdout.strip()
@@ -146,7 +149,7 @@ def validate_window(raw, expected_sha):
 
 def read_window(set_id, rel, local_root, revision):
     sub = rel.split(f"data/runs/{set_id}/", 1)[1]
-    if set_id in LOCAL_DIRS:
+    if local_root and set_id in LOCAL_DIRS:
         with open(os.path.join(local_root, LOCAL_DIRS[set_id], sub), "rb") as fh:
             return fh.read()
     from huggingface_hub import hf_hub_download
@@ -216,7 +219,8 @@ def cmd_detect(a):
             except (OSError, ValueError):
                 pass
             print("recompute (existing file has no matching provenance)", set_id, flush=True)
-        jobs = [(set_id, r.file, float(r.centre_hz), float(r.retune_delta_hz), int(r.visit_position), a.local_root, str(r.sha256), a.revision)
+        local_root = None if a.remote_only else a.local_root
+        jobs = [(set_id, r.file, float(r.centre_hz), float(r.retune_delta_hz), int(r.visit_position), local_root, str(r.sha256), a.revision)
                 for r in grp.itertuples()]
         clipped = {int(r.visit_position): float(r.clipping_pct) for r in grp.itertuples()}
         site = str(grp.site_key.iloc[0])
@@ -450,6 +454,7 @@ def main():
     d.add_argument("--sets")
     d.add_argument("--local-root", default=os.path.expanduser("~/s521_runs"))
     d.add_argument("--workers", type=int, default=3)
+    d.add_argument("--remote-only", action="store_true", help="read every window from the pinned dataset revision, never from --local-root")
     g = sub.add_parser("aggregate")
     g.add_argument("out")
     g.add_argument("--sets")

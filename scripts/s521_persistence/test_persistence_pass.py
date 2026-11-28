@@ -221,6 +221,29 @@ class Integrity(unittest.TestCase):
         self.assertNotIn(".cache", seen["cache_dir"])
         self.assertFalse(os.path.exists(seen["cache_dir"]))                          # removed afterwards
 
+    def test_remote_only_ignores_a_local_copy_and_reads_the_pinned_dataset(self):
+        calls = []
+
+        def fake(repo, rel, repo_type, revision, cache_dir):
+            calls.append(revision)
+            path = os.path.join(cache_dir, "w.iq")
+            with open(path, "wb") as fh:
+                fh.write(b"remote")
+            return path
+
+        with tempfile.TemporaryDirectory() as root, mock.patch.dict(p.LOCAL_DIRS, {"setx": "x"}), mock.patch("huggingface_hub.hf_hub_download", fake):
+            os.makedirs(os.path.join(root, "x", "spool"))
+            with open(os.path.join(root, "x", "spool", "visit_0000.iq"), "wb") as fh:
+                fh.write(b"local")
+            rel = "data/runs/setx/spool/visit_0000.iq"
+            self.assertEqual(p.read_window("setx", rel, root, "rev9"), b"local")
+            self.assertEqual(p.read_window("setx", rel, None, "rev9"), b"remote")
+        self.assertEqual(calls, ["rev9"])
+
+    def test_the_software_commit_can_be_supplied_when_running_outside_a_checkout(self):
+        with mock.patch.dict(os.environ, {"S521_SOFTWARE_COMMIT": "abc123"}):
+            self.assertEqual(p.git_state()["git_head"], "abc123")
+
     def test_the_manifest_hash_is_order_independent_and_changes_with_content(self):
         a = [("f1", "aa"), ("f2", "bb")]
         self.assertEqual(p.manifest_sha256(a), p.manifest_sha256(list(reversed(a))))
