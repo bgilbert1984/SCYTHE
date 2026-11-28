@@ -1,4 +1,7 @@
 {
+ "status": "SUPERSEDED",
+ "superseded_by": "results_corrected_20261128_original8_runs.json (same 8 runs, corrected logic) and results_corrected_20261128_all9_runs.json",
+ "reason": "PR #516 review findings F-01, F-02, F-03: this file used a coverage denominator that counted visits blind to the bin, a cross-run step that skipped the RF-fixed rule and a 0.5 persistence threshold, and an instrument label from frequency alignment alone. Kept for the record only.",
  "pass": "persistence_pass.py detect/aggregate/classify over the 8 antenna-on observation runs, 1,536 windows, 0 read errors",
  "thresholds": {
   "nfft": 4096,
