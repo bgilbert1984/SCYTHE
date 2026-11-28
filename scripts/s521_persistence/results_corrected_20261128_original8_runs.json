@@ -1,17 +1,38 @@
 {
  "provenance": {
-  "analysis_schema_version": 1,
+  "analysis_schema_version": 2,
   "source_dataset_revision": "6426d013b1282882a87d860cc1a438e61619ddb5",
-  "capture_manifest_sha256": "3d6bdcd5d1db7f229db341cb99100088366f6df1d835e33f34913fbe562f15a9",
-  "analysis_config_sha256": "84044a6a8a04c9be08207224d5b5afece82eaf91628116df879dd20944f0f0db",
+  "captures_parquet_sha256": "a6dd201ab5908a2bc343c08d56966c356dcbca12e15f7c9f3fb90eee06a94799",
+  "capture_manifest_sha256": "3108491763fa5afa1b2a7b3a1c84eeb70f680ef57019bef15e8e1b4a9ad255e0",
+  "detection_document_sha256": {
+   "run_20261117_mukilteo": "5bfc232c9224568070b0c4a2336544a83206f494756343bb4164f2bb891796e0",
+   "run_20261118_mukilteo": "0f2d0d51b6c5ab6fb77bd12ed9dc56a8e82e5f7fdc4328ad861bc68f07e008c8",
+   "run_20261118_mukilteo_12426": "1d25637a6f53463ef88c61947cda547563f95dfc2c7f6b4aa23553e8b49edcf9",
+   "run_20261119_hwy99": "12f727fe1d4f8faf9185d21d4b1405e265227a47c711e458494cf98d484ca620",
+   "run_20261122_harbourpointe_r2": "d2a77ad1f2b6a22f8384ed9e9495bab0f9f01592538ba02ded6819840c30b8eb",
+   "run_20261124_hwy99_ofinnigans": "09fbb5b629035634154aa5296a141498a6a3b3d97ad29114116e047dfb3254fc",
+   "run_20261126_hwy99": "3a50dcd13efe7318acbdbee0d89799250e75aa272277d023ab1bb44561ba04fa",
+   "run_20261126_sea6thave_r2": "8e05aa716ea8b485ef9041885be3c196f768fd00264f51b7906ff83548006fee"
+  },
+  "analysis_config_sha256": "e3b76e64a0edef6d81c0162b2d26e7a4090d995a833bdd9be0fc68dcdf8cab97",
+  "analysis_code_sha256": "8f6a42e3a315ca2f66a1995e68ab1bf52434dd220c92fcb21953e86c24ea3468",
   "software": {
-   "code_sha256": "4f1ec079d2068a63ff20f57edf21f9b7e7fecc6cb75f33b8d28a89433cdcd8f6",
-   "git_head": "1e804b9617cfeb72adff3a424d8334ca96124d30",
+   "git_head": "1bd1680e564f8a05bb0b933c0458b6ea562938b5",
    "git_dirty": false
   },
   "expected_visits": 1536,
   "processed_visits": 1536,
-  "integrity_verified": true
+  "integrity_verified": true,
+  "capture_manifest_sha256_by_run": {
+   "run_20261117_mukilteo": "8de2f12b73f8637853c279bb994bceb0743097ac893dc37050977f109bccc177",
+   "run_20261118_mukilteo": "d9c867f23a9396f9b2afeb9102e822c21af263fa7c9c01f7ddeee6f8683b488c",
+   "run_20261118_mukilteo_12426": "3fb0c0b474e2785b4ee593421829478229acc53670f15fb46796d9d50f8747ba",
+   "run_20261119_hwy99": "9c6fccbc1983d78d5b19cc0142f1c1284cad5dc69dc68ba040a25554147cd4b9",
+   "run_20261122_harbourpointe_r2": "b5be9f4b019034a70c34a53ed51975f684db1b9b4cbbe6ff19f4612967030b2d",
+   "run_20261124_hwy99_ofinnigans": "95a6477e6f690e7f37c289cc32bdd287e90f354fefcff33f02b3066cbdf4675a",
+   "run_20261126_hwy99": "1b299c53f9c99fa3ce249423d33b6c80fedabf987d8729130943a560aad80365",
+   "run_20261126_sea6thave_r2": "40b390ed737b1b5e2eb73f6589c9a17d4910ffb933a4d245dd20da4a3482e15f"
+  }
  },
  "config": {
   "nfft": 4096,
@@ -29,7 +50,8 @@
   "min_spread_hz": 50000.0,
   "ref_hz": 28800000.0,
   "ref_tol_hz": 2000.0,
-  "group_hz": 3000.0,
+  "group_max_diameter_hz": 3000.0,
+  "presence_tol_bins": 2,
   "expected_bytes": 8388608
  },
  "runs": {
@@ -109,7 +131,10 @@
  "classified": [
   {
    "freq_hz": 400896000.0,
+   "freq_min_hz": 400896000.0,
+   "freq_max_hz": 400896000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -124,6 +149,17 @@
    ],
    "max_snr_db": 11.5,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261117_mukilteo",
+     "freq_hz": 400896000.0,
+     "persistence": 0.857,
+     "covering_visits": 7,
+     "detecting_visits": 6,
+     "centre_offset_spread_khz": 544.0,
+     "mean_snr_db": 11.5
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "DETECTING",
@@ -193,7 +229,10 @@
   },
   {
    "freq_hz": 400905000.0,
+   "freq_min_hz": 400905000.0,
+   "freq_max_hz": 400905000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -208,6 +247,17 @@
    ],
    "max_snr_db": 18.6,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261118_mukilteo_12426",
+     "freq_hz": 400905000.0,
+     "persistence": 1.0,
+     "covering_visits": 7,
+     "detecting_visits": 7,
+     "centre_offset_spread_khz": 544.0,
+     "mean_snr_db": 18.6
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -277,7 +327,10 @@
   },
   {
    "freq_hz": 401238000.0,
+   "freq_min_hz": 401238000.0,
+   "freq_max_hz": 401238000.0,
    "class": "SITE_LOCAL_PERSISTENT",
+   "unresolved_association": false,
    "runs_detecting": 2,
    "runs_observed": 8,
    "sites_detecting": [
@@ -292,6 +345,26 @@
    ],
    "max_snr_db": 12.7,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261124_hwy99_ofinnigans",
+     "freq_hz": 401238000.0,
+     "persistence": 1.0,
+     "covering_visits": 12,
+     "detecting_visits": 12,
+     "centre_offset_spread_khz": 858.5,
+     "mean_snr_db": 12.7
+    },
+    {
+     "run": "run_20261126_hwy99",
+     "freq_hz": 401238000.0,
+     "persistence": 0.917,
+     "covering_visits": 12,
+     "detecting_visits": 11,
+     "centre_offset_spread_khz": 858.5,
+     "mean_snr_db": 12.0
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -361,7 +434,10 @@
   },
   {
    "freq_hz": 401664000.0,
+   "freq_min_hz": 401664000.0,
+   "freq_max_hz": 401664000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -376,6 +452,17 @@
    ],
    "max_snr_db": 11.9,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261117_mukilteo",
+     "freq_hz": 401664000.0,
+     "persistence": 0.929,
+     "covering_visits": 14,
+     "detecting_visits": 13,
+     "centre_offset_spread_khz": 1239.0,
+     "mean_snr_db": 11.9
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "DETECTING",
@@ -445,7 +532,10 @@
   },
   {
    "freq_hz": 403200000.0,
+   "freq_min_hz": 403200000.0,
+   "freq_max_hz": 403200000.0,
    "class": "CONSISTENT_WITH_INTERNAL_MIXING",
+   "unresolved_association": false,
    "runs_detecting": 8,
    "runs_observed": 8,
    "sites_detecting": [
@@ -467,6 +557,80 @@
     "n": 14,
     "offset_hz": 0.0
    },
+   "members": [
+    {
+     "run": "run_20261117_mukilteo",
+     "freq_hz": 403200000.0,
+     "persistence": 1.0,
+     "covering_visits": 9,
+     "detecting_visits": 9,
+     "centre_offset_spread_khz": 1685.5,
+     "mean_snr_db": 28.7
+    },
+    {
+     "run": "run_20261118_mukilteo",
+     "freq_hz": 403200000.0,
+     "persistence": 1.0,
+     "covering_visits": 9,
+     "detecting_visits": 9,
+     "centre_offset_spread_khz": 1685.5,
+     "mean_snr_db": 32.0
+    },
+    {
+     "run": "run_20261118_mukilteo_12426",
+     "freq_hz": 403200000.0,
+     "persistence": 1.0,
+     "covering_visits": 9,
+     "detecting_visits": 9,
+     "centre_offset_spread_khz": 1685.5,
+     "mean_snr_db": 25.5
+    },
+    {
+     "run": "run_20261119_hwy99",
+     "freq_hz": 403200000.0,
+     "persistence": 1.0,
+     "covering_visits": 9,
+     "detecting_visits": 9,
+     "centre_offset_spread_khz": 1685.5,
+     "mean_snr_db": 28.5
+    },
+    {
+     "run": "run_20261122_harbourpointe_r2",
+     "freq_hz": 403200000.0,
+     "persistence": 1.0,
+     "covering_visits": 9,
+     "detecting_visits": 9,
+     "centre_offset_spread_khz": 1685.5,
+     "mean_snr_db": 24.4
+    },
+    {
+     "run": "run_20261124_hwy99_ofinnigans",
+     "freq_hz": 403200000.0,
+     "persistence": 1.0,
+     "covering_visits": 9,
+     "detecting_visits": 9,
+     "centre_offset_spread_khz": 1685.5,
+     "mean_snr_db": 27.1
+    },
+    {
+     "run": "run_20261126_hwy99",
+     "freq_hz": 403200000.0,
+     "persistence": 0.778,
+     "covering_visits": 9,
+     "detecting_visits": 7,
+     "centre_offset_spread_khz": 1685.5,
+     "mean_snr_db": 27.6
+    },
+    {
+     "run": "run_20261126_sea6thave_r2",
+     "freq_hz": 403200000.0,
+     "persistence": 1.0,
+     "covering_visits": 7,
+     "detecting_visits": 7,
+     "centre_offset_spread_khz": 1685.5,
+     "mean_snr_db": 15.3
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "DETECTING",
@@ -536,7 +700,10 @@
   },
   {
    "freq_hz": 404992000.0,
+   "freq_min_hz": 404992000.0,
+   "freq_max_hz": 404992000.0,
    "class": "SITE_LOCAL_PERSISTENT",
+   "unresolved_association": false,
    "runs_detecting": 2,
    "runs_observed": 7,
    "sites_detecting": [
@@ -550,6 +717,26 @@
    ],
    "max_snr_db": 15.0,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261124_hwy99_ofinnigans",
+     "freq_hz": 404992000.0,
+     "persistence": 1.0,
+     "covering_visits": 3,
+     "detecting_visits": 3,
+     "centre_offset_spread_khz": 300.0,
+     "mean_snr_db": 15.0
+    },
+    {
+     "run": "run_20261126_hwy99",
+     "freq_hz": 404992000.0,
+     "persistence": 1.0,
+     "covering_visits": 3,
+     "detecting_visits": 3,
+     "centre_offset_spread_khz": 300.0,
+     "mean_snr_db": 13.2
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -619,7 +806,10 @@
   },
   {
    "freq_hz": 405002000.0,
+   "freq_min_hz": 405002000.0,
+   "freq_max_hz": 405002000.0,
    "class": "SITE_LOCAL_PERSISTENT",
+   "unresolved_association": false,
    "runs_detecting": 2,
    "runs_observed": 7,
    "sites_detecting": [
@@ -633,6 +823,26 @@
    ],
    "max_snr_db": 11.7,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261124_hwy99_ofinnigans",
+     "freq_hz": 405002000.0,
+     "persistence": 1.0,
+     "covering_visits": 3,
+     "detecting_visits": 3,
+     "centre_offset_spread_khz": 300.0,
+     "mean_snr_db": 11.7
+    },
+    {
+     "run": "run_20261126_hwy99",
+     "freq_hz": 405002000.0,
+     "persistence": 1.0,
+     "covering_visits": 3,
+     "detecting_visits": 3,
+     "centre_offset_spread_khz": 300.0,
+     "mean_snr_db": 11.5
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -702,7 +912,10 @@
   },
   {
    "freq_hz": 405492000.0,
+   "freq_min_hz": 405492000.0,
+   "freq_max_hz": 405492000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 7,
    "sites_detecting": [
@@ -716,6 +929,17 @@
    ],
    "max_snr_db": 10.9,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261119_hwy99",
+     "freq_hz": 405492000.0,
+     "persistence": 0.667,
+     "covering_visits": 3,
+     "detecting_visits": 2,
+     "centre_offset_spread_khz": 150.0,
+     "mean_snr_db": 10.9
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -785,7 +1009,10 @@
   },
   {
    "freq_hz": 405504000.0,
+   "freq_min_hz": 405504000.0,
+   "freq_max_hz": 405504000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 7,
    "sites_detecting": [
@@ -799,6 +1026,17 @@
    ],
    "max_snr_db": 20.6,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261117_mukilteo",
+     "freq_hz": 405504000.0,
+     "persistence": 0.667,
+     "covering_visits": 3,
+     "detecting_visits": 2,
+     "centre_offset_spread_khz": 150.0,
+     "mean_snr_db": 20.6
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "DETECTING",
@@ -868,7 +1106,10 @@
   },
   {
    "freq_hz": 406490000.0,
+   "freq_min_hz": 406490000.0,
+   "freq_max_hz": 406490000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -883,6 +1124,17 @@
    ],
    "max_snr_db": 19.6,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261117_mukilteo",
+     "freq_hz": 406490000.0,
+     "persistence": 0.625,
+     "covering_visits": 8,
+     "detecting_visits": 5,
+     "centre_offset_spread_khz": 1269.5,
+     "mean_snr_db": 19.6
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "DETECTING",
@@ -952,7 +1204,10 @@
   },
   {
    "freq_hz": 406502000.0,
+   "freq_min_hz": 406502000.0,
+   "freq_max_hz": 406502000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -967,6 +1222,17 @@
    ],
    "max_snr_db": 27.0,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261122_harbourpointe_r2",
+     "freq_hz": 406502000.0,
+     "persistence": 0.75,
+     "covering_visits": 8,
+     "detecting_visits": 6,
+     "centre_offset_spread_khz": 566.0,
+     "mean_snr_db": 27.0
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -1036,7 +1302,10 @@
   },
   {
    "freq_hz": 406508000.0,
+   "freq_min_hz": 406508000.0,
+   "freq_max_hz": 406508000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -1051,6 +1320,17 @@
    ],
    "max_snr_db": 14.5,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261118_mukilteo",
+     "freq_hz": 406508000.0,
+     "persistence": 0.625,
+     "covering_visits": 8,
+     "detecting_visits": 5,
+     "centre_offset_spread_khz": 1269.5,
+     "mean_snr_db": 14.5
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "INTERMEDIATE",
@@ -1120,7 +1400,10 @@
   },
   {
    "freq_hz": 407997000.0,
+   "freq_min_hz": 407997000.0,
+   "freq_max_hz": 407997000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 7,
    "sites_detecting": [
@@ -1134,6 +1417,17 @@
    ],
    "max_snr_db": 14.4,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261122_harbourpointe_r2",
+     "freq_hz": 407997000.0,
+     "persistence": 1.0,
+     "covering_visits": 3,
+     "detecting_visits": 3,
+     "centre_offset_spread_khz": 150.0,
+     "mean_snr_db": 14.4
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -1203,7 +1497,10 @@
   },
   {
    "freq_hz": 408005000.0,
+   "freq_min_hz": 408005000.0,
+   "freq_max_hz": 408005000.0,
    "class": "SITE_LOCAL_PERSISTENT",
+   "unresolved_association": false,
    "runs_detecting": 2,
    "runs_observed": 7,
    "sites_detecting": [
@@ -1217,6 +1514,26 @@
    ],
    "max_snr_db": 18.3,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261119_hwy99",
+     "freq_hz": 408005000.0,
+     "persistence": 1.0,
+     "covering_visits": 3,
+     "detecting_visits": 3,
+     "centre_offset_spread_khz": 150.0,
+     "mean_snr_db": 18.3
+    },
+    {
+     "run": "run_20261124_hwy99_ofinnigans",
+     "freq_hz": 408005000.0,
+     "persistence": 1.0,
+     "covering_visits": 3,
+     "detecting_visits": 3,
+     "centre_offset_spread_khz": 150.0,
+     "mean_snr_db": 12.6
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -1286,7 +1603,10 @@
   },
   {
    "freq_hz": 408018000.0,
+   "freq_min_hz": 408018000.0,
+   "freq_max_hz": 408018000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 7,
    "sites_detecting": [
@@ -1300,6 +1620,17 @@
    ],
    "max_snr_db": 11.4,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261118_mukilteo_12426",
+     "freq_hz": 408018000.0,
+     "persistence": 0.667,
+     "covering_visits": 3,
+     "detecting_visits": 2,
+     "centre_offset_spread_khz": 100.0,
+     "mean_snr_db": 11.4
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -1369,7 +1700,10 @@
   },
   {
    "freq_hz": 410455000.0,
+   "freq_min_hz": 410455000.0,
+   "freq_max_hz": 410455000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -1384,6 +1718,17 @@
    ],
    "max_snr_db": 11.7,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261118_mukilteo_12426",
+     "freq_hz": 410455000.0,
+     "persistence": 0.75,
+     "covering_visits": 4,
+     "detecting_visits": 3,
+     "centre_offset_spread_khz": 853.0,
+     "mean_snr_db": 11.7
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -1453,7 +1798,10 @@
   },
   {
    "freq_hz": 410656000.0,
+   "freq_min_hz": 410656000.0,
+   "freq_max_hz": 410656000.0,
    "class": "SITE_LOCAL_PERSISTENT",
+   "unresolved_association": false,
    "runs_detecting": 2,
    "runs_observed": 8,
    "sites_detecting": [
@@ -1468,6 +1816,26 @@
    ],
    "max_snr_db": 13.3,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261124_hwy99_ofinnigans",
+     "freq_hz": 410656000.0,
+     "persistence": 1.0,
+     "covering_visits": 6,
+     "detecting_visits": 6,
+     "centre_offset_spread_khz": 1003.0,
+     "mean_snr_db": 12.5
+    },
+    {
+     "run": "run_20261126_hwy99",
+     "freq_hz": 410656000.0,
+     "persistence": 1.0,
+     "covering_visits": 6,
+     "detecting_visits": 6,
+     "centre_offset_spread_khz": 1003.0,
+     "mean_snr_db": 13.3
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -1537,7 +1905,10 @@
   },
   {
    "freq_hz": 410672000.0,
+   "freq_min_hz": 410672000.0,
+   "freq_max_hz": 410672000.0,
    "class": "SITE_LOCAL_PERSISTENT",
+   "unresolved_association": false,
    "runs_detecting": 2,
    "runs_observed": 8,
    "sites_detecting": [
@@ -1552,6 +1923,26 @@
    ],
    "max_snr_db": 18.7,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261124_hwy99_ofinnigans",
+     "freq_hz": 410672000.0,
+     "persistence": 1.0,
+     "covering_visits": 5,
+     "detecting_visits": 5,
+     "centre_offset_spread_khz": 953.0,
+     "mean_snr_db": 17.8
+    },
+    {
+     "run": "run_20261126_hwy99",
+     "freq_hz": 410672000.0,
+     "persistence": 0.8,
+     "covering_visits": 5,
+     "detecting_visits": 4,
+     "centre_offset_spread_khz": 953.0,
+     "mean_snr_db": 18.7
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -1621,7 +2012,10 @@
   },
   {
    "freq_hz": 414719000.0,
+   "freq_min_hz": 414719000.0,
+   "freq_max_hz": 414719000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -1636,6 +2030,17 @@
    ],
    "max_snr_db": 16.1,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261122_harbourpointe_r2",
+     "freq_hz": 414719000.0,
+     "persistence": 1.0,
+     "covering_visits": 9,
+     "detecting_visits": 9,
+     "centre_offset_spread_khz": 1333.5,
+     "mean_snr_db": 16.1
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -1705,7 +2110,10 @@
   },
   {
    "freq_hz": 415990000.0,
+   "freq_min_hz": 415990000.0,
+   "freq_max_hz": 415990000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -1720,6 +2128,17 @@
    ],
    "max_snr_db": 10.7,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261118_mukilteo_12426",
+     "freq_hz": 415990000.0,
+     "persistence": 0.667,
+     "covering_visits": 9,
+     "detecting_visits": 6,
+     "centre_offset_spread_khz": 1285.5,
+     "mean_snr_db": 10.7
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -1789,7 +2208,10 @@
   },
   {
    "freq_hz": 416000000.0,
+   "freq_min_hz": 416000000.0,
+   "freq_max_hz": 416000000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -1804,6 +2226,17 @@
    ],
    "max_snr_db": 19.5,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261126_hwy99",
+     "freq_hz": 416000000.0,
+     "persistence": 0.625,
+     "covering_visits": 8,
+     "detecting_visits": 5,
+     "centre_offset_spread_khz": 1135.5,
+     "mean_snr_db": 19.5
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -1873,7 +2306,10 @@
   },
   {
    "freq_hz": 417600000.0,
+   "freq_min_hz": 417600000.0,
+   "freq_max_hz": 417600000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 7,
    "sites_detecting": [
@@ -1887,6 +2323,17 @@
    ],
    "max_snr_db": 12.7,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261118_mukilteo",
+     "freq_hz": 417600000.0,
+     "persistence": 1.0,
+     "covering_visits": 3,
+     "detecting_visits": 3,
+     "centre_offset_spread_khz": 300.0,
+     "mean_snr_db": 12.7
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -1956,7 +2403,10 @@
   },
   {
    "freq_hz": 418676000.0,
+   "freq_min_hz": 418676000.0,
+   "freq_max_hz": 418676000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 7,
    "sites_detecting": [
@@ -1970,6 +2420,17 @@
    ],
    "max_snr_db": 11.5,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261118_mukilteo_12426",
+     "freq_hz": 418676000.0,
+     "persistence": 0.667,
+     "covering_visits": 3,
+     "detecting_visits": 2,
+     "centre_offset_spread_khz": 150.0,
+     "mean_snr_db": 11.5
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -2039,7 +2500,10 @@
   },
   {
    "freq_hz": 419990000.0,
+   "freq_min_hz": 419990000.0,
+   "freq_max_hz": 419990000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -2054,6 +2518,17 @@
    ],
    "max_snr_db": 12.5,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261118_mukilteo_12426",
+     "freq_hz": 419990000.0,
+     "persistence": 1.0,
+     "covering_visits": 4,
+     "detecting_visits": 4,
+     "centre_offset_spread_khz": 607.0,
+     "mean_snr_db": 12.5
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -2123,7 +2598,10 @@
   },
   {
    "freq_hz": 420016000.0,
+   "freq_min_hz": 420016000.0,
+   "freq_max_hz": 420016000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -2138,6 +2616,17 @@
    ],
    "max_snr_db": 11.9,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261117_mukilteo",
+     "freq_hz": 420016000.0,
+     "persistence": 0.75,
+     "covering_visits": 4,
+     "detecting_visits": 3,
+     "centre_offset_spread_khz": 556.5,
+     "mean_snr_db": 11.9
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "DETECTING",
@@ -2207,7 +2696,10 @@
   },
   {
    "freq_hz": 422400000.0,
+   "freq_min_hz": 422400000.0,
+   "freq_max_hz": 422400000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -2222,6 +2714,17 @@
    ],
    "max_snr_db": 10.9,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261118_mukilteo",
+     "freq_hz": 422400000.0,
+     "persistence": 0.778,
+     "covering_visits": 9,
+     "detecting_visits": 7,
+     "centre_offset_spread_khz": 1185.0,
+     "mean_snr_db": 10.9
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -2291,7 +2794,10 @@
   },
   {
    "freq_hz": 423441000.0,
+   "freq_min_hz": 423441000.0,
+   "freq_max_hz": 423441000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 7,
    "sites_detecting": [
@@ -2305,6 +2811,17 @@
    ],
    "max_snr_db": 11.9,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261122_harbourpointe_r2",
+     "freq_hz": 423441000.0,
+     "persistence": 0.667,
+     "covering_visits": 3,
+     "detecting_visits": 2,
+     "centre_offset_spread_khz": 250.0,
+     "mean_snr_db": 11.9
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -2374,7 +2891,10 @@
   },
   {
    "freq_hz": 423539000.0,
+   "freq_min_hz": 423539000.0,
+   "freq_max_hz": 423539000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 7,
    "sites_detecting": [
@@ -2388,6 +2908,17 @@
    ],
    "max_snr_db": 16.2,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261122_harbourpointe_r2",
+     "freq_hz": 423539000.0,
+     "persistence": 1.0,
+     "covering_visits": 3,
+     "detecting_visits": 3,
+     "centre_offset_spread_khz": 300.0,
+     "mean_snr_db": 16.2
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -2457,7 +2988,10 @@
   },
   {
    "freq_hz": 426002000.0,
+   "freq_min_hz": 426002000.0,
+   "freq_max_hz": 426002000.0,
    "class": "SITE_LOCAL_PERSISTENT",
+   "unresolved_association": false,
    "runs_detecting": 2,
    "runs_observed": 8,
    "sites_detecting": [
@@ -2472,6 +3006,26 @@
    ],
    "max_snr_db": 11.4,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261124_hwy99_ofinnigans",
+     "freq_hz": 426002000.0,
+     "persistence": 0.75,
+     "covering_visits": 8,
+     "detecting_visits": 6,
+     "centre_offset_spread_khz": 1488.5,
+     "mean_snr_db": 10.7
+    },
+    {
+     "run": "run_20261126_hwy99",
+     "freq_hz": 426002000.0,
+     "persistence": 0.875,
+     "covering_visits": 8,
+     "detecting_visits": 7,
+     "centre_offset_spread_khz": 1489.0,
+     "mean_snr_db": 11.4
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -2541,7 +3095,10 @@
   },
   {
    "freq_hz": 429005000.0,
+   "freq_min_hz": 429005000.0,
+   "freq_max_hz": 429005000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 7,
    "sites_detecting": [
@@ -2555,6 +3112,17 @@
    ],
    "max_snr_db": 14.2,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261124_hwy99_ofinnigans",
+     "freq_hz": 429005000.0,
+     "persistence": 1.0,
+     "covering_visits": 3,
+     "detecting_visits": 3,
+     "centre_offset_spread_khz": 150.0,
+     "mean_snr_db": 14.2
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -2624,7 +3192,10 @@
   },
   {
    "freq_hz": 429539000.0,
+   "freq_min_hz": 429539000.0,
+   "freq_max_hz": 429539000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 7,
    "sites_detecting": [
@@ -2638,6 +3209,17 @@
    ],
    "max_snr_db": 10.4,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261118_mukilteo_12426",
+     "freq_hz": 429539000.0,
+     "persistence": 0.667,
+     "covering_visits": 3,
+     "detecting_visits": 2,
+     "centre_offset_spread_khz": 50.0,
+     "mean_snr_db": 10.4
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -2707,7 +3289,10 @@
   },
   {
    "freq_hz": 430079000.0,
+   "freq_min_hz": 430079000.0,
+   "freq_max_hz": 430079000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -2722,6 +3307,17 @@
    ],
    "max_snr_db": 16.3,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261117_mukilteo",
+     "freq_hz": 430079000.0,
+     "persistence": 0.6,
+     "covering_visits": 5,
+     "detecting_visits": 3,
+     "centre_offset_spread_khz": 150.0,
+     "mean_snr_db": 16.3
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "DETECTING",
@@ -2791,7 +3387,10 @@
   },
   {
    "freq_hz": 431129000.0,
+   "freq_min_hz": 431129000.0,
+   "freq_max_hz": 431129000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 7,
    "sites_detecting": [
@@ -2805,6 +3404,17 @@
    ],
    "max_snr_db": 12.3,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261118_mukilteo_12426",
+     "freq_hz": 431129000.0,
+     "persistence": 1.0,
+     "covering_visits": 3,
+     "detecting_visits": 3,
+     "centre_offset_spread_khz": 250.0,
+     "mean_snr_db": 12.3
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -2874,7 +3484,10 @@
   },
   {
    "freq_hz": 431317000.0,
+   "freq_min_hz": 431317000.0,
+   "freq_max_hz": 431317000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 7,
    "sites_detecting": [
@@ -2888,6 +3501,17 @@
    ],
    "max_snr_db": 14.1,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261118_mukilteo_12426",
+     "freq_hz": 431317000.0,
+     "persistence": 1.0,
+     "covering_visits": 3,
+     "detecting_visits": 3,
+     "centre_offset_spread_khz": 250.0,
+     "mean_snr_db": 14.1
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -2957,7 +3581,10 @@
   },
   {
    "freq_hz": 431585500.0,
+   "freq_min_hz": 431585000.0,
+   "freq_max_hz": 431586000.0,
    "class": "SITE_LOCAL_PERSISTENT",
+   "unresolved_association": false,
    "runs_detecting": 2,
    "runs_observed": 7,
    "sites_detecting": [
@@ -2971,6 +3598,26 @@
    ],
    "max_snr_db": 11.3,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261124_hwy99_ofinnigans",
+     "freq_hz": 431585000.0,
+     "persistence": 0.667,
+     "covering_visits": 3,
+     "detecting_visits": 2,
+     "centre_offset_spread_khz": 250.0,
+     "mean_snr_db": 11.3
+    },
+    {
+     "run": "run_20261126_hwy99",
+     "freq_hz": 431586000.0,
+     "persistence": 0.667,
+     "covering_visits": 3,
+     "detecting_visits": 2,
+     "centre_offset_spread_khz": 150.0,
+     "mean_snr_db": 10.8
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -3040,7 +3687,10 @@
   },
   {
    "freq_hz": 431643000.0,
+   "freq_min_hz": 431643000.0,
+   "freq_max_hz": 431643000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 7,
    "sites_detecting": [
@@ -3054,6 +3704,17 @@
    ],
    "max_snr_db": 12.4,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261117_mukilteo",
+     "freq_hz": 431643000.0,
+     "persistence": 0.667,
+     "covering_visits": 3,
+     "detecting_visits": 2,
+     "centre_offset_spread_khz": 100.0,
+     "mean_snr_db": 12.4
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "DETECTING",
@@ -3123,7 +3784,10 @@
   },
   {
    "freq_hz": 432052000.0,
+   "freq_min_hz": 432052000.0,
+   "freq_max_hz": 432052000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -3138,6 +3802,17 @@
    ],
    "max_snr_db": 17.7,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261117_mukilteo",
+     "freq_hz": 432052000.0,
+     "persistence": 1.0,
+     "covering_visits": 3,
+     "detecting_visits": 3,
+     "centre_offset_spread_khz": 116.0,
+     "mean_snr_db": 17.7
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "DETECTING",
@@ -3207,7 +3882,10 @@
   },
   {
    "freq_hz": 432066000.0,
+   "freq_min_hz": 432066000.0,
+   "freq_max_hz": 432066000.0,
    "class": "SITE_LOCAL_PERSISTENT",
+   "unresolved_association": false,
    "runs_detecting": 2,
    "runs_observed": 8,
    "sites_detecting": [
@@ -3222,6 +3900,26 @@
    ],
    "max_snr_db": 18.3,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261124_hwy99_ofinnigans",
+     "freq_hz": 432066000.0,
+     "persistence": 1.0,
+     "covering_visits": 3,
+     "detecting_visits": 3,
+     "centre_offset_spread_khz": 116.5,
+     "mean_snr_db": 18.3
+    },
+    {
+     "run": "run_20261126_hwy99",
+     "freq_hz": 432066000.0,
+     "persistence": 1.0,
+     "covering_visits": 3,
+     "detecting_visits": 3,
+     "centre_offset_spread_khz": 116.5,
+     "mean_snr_db": 15.1
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -3291,7 +3989,10 @@
   },
   {
    "freq_hz": 432110000.0,
+   "freq_min_hz": 432110000.0,
+   "freq_max_hz": 432110000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -3306,6 +4007,17 @@
    ],
    "max_snr_db": 12.6,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261117_mukilteo",
+     "freq_hz": 432110000.0,
+     "persistence": 0.667,
+     "covering_visits": 3,
+     "detecting_visits": 2,
+     "centre_offset_spread_khz": 50.0,
+     "mean_snr_db": 12.6
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "DETECTING",
@@ -3375,7 +4087,10 @@
   },
   {
    "freq_hz": 432227000.0,
+   "freq_min_hz": 432227000.0,
+   "freq_max_hz": 432227000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -3390,6 +4105,17 @@
    ],
    "max_snr_db": 11.9,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261117_mukilteo",
+     "freq_hz": 432227000.0,
+     "persistence": 0.75,
+     "covering_visits": 4,
+     "detecting_visits": 3,
+     "centre_offset_spread_khz": 216.5,
+     "mean_snr_db": 11.9
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "DETECTING",
@@ -3459,7 +4185,10 @@
   },
   {
    "freq_hz": 432286000.0,
+   "freq_min_hz": 432286000.0,
+   "freq_max_hz": 432286000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -3474,6 +4203,17 @@
    ],
    "max_snr_db": 13.2,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261117_mukilteo",
+     "freq_hz": 432286000.0,
+     "persistence": 1.0,
+     "covering_visits": 5,
+     "detecting_visits": 5,
+     "centre_offset_spread_khz": 300.0,
+     "mean_snr_db": 13.2
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "DETECTING",
@@ -3543,7 +4283,10 @@
   },
   {
    "freq_hz": 432344000.0,
+   "freq_min_hz": 432344000.0,
+   "freq_max_hz": 432344000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -3558,6 +4301,17 @@
    ],
    "max_snr_db": 13.1,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261117_mukilteo",
+     "freq_hz": 432344000.0,
+     "persistence": 1.0,
+     "covering_visits": 6,
+     "detecting_visits": 6,
+     "centre_offset_spread_khz": 366.5,
+     "mean_snr_db": 13.1
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "DETECTING",
@@ -3627,7 +4381,10 @@
   },
   {
    "freq_hz": 432422000.0,
+   "freq_min_hz": 432422000.0,
+   "freq_max_hz": 432422000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -3642,6 +4399,17 @@
    ],
    "max_snr_db": 11.0,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261126_hwy99",
+     "freq_hz": 432422000.0,
+     "persistence": 1.0,
+     "covering_visits": 6,
+     "detecting_visits": 6,
+     "centre_offset_spread_khz": 366.5,
+     "mean_snr_db": 11.0
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -3711,7 +4479,10 @@
   },
   {
    "freq_hz": 435455000.0,
+   "freq_min_hz": 435455000.0,
+   "freq_max_hz": 435455000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -3726,6 +4497,17 @@
    ],
    "max_snr_db": 18.1,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261122_harbourpointe_r2",
+     "freq_hz": 435455000.0,
+     "persistence": 0.857,
+     "covering_visits": 7,
+     "detecting_visits": 6,
+     "centre_offset_spread_khz": 773.0,
+     "mean_snr_db": 18.1
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -3795,7 +4577,10 @@
   },
   {
    "freq_hz": 435946000.0,
+   "freq_min_hz": 435946000.0,
+   "freq_max_hz": 435946000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -3810,6 +4595,17 @@
    ],
    "max_snr_db": 12.4,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261124_hwy99_ofinnigans",
+     "freq_hz": 435946000.0,
+     "persistence": 0.8,
+     "covering_visits": 5,
+     "detecting_visits": 4,
+     "centre_offset_spread_khz": 335.5,
+     "mean_snr_db": 12.4
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -3879,7 +4675,10 @@
   },
   {
    "freq_hz": 436224000.0,
+   "freq_min_hz": 436224000.0,
+   "freq_max_hz": 436224000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 7,
    "sites_detecting": [
@@ -3893,6 +4692,17 @@
    ],
    "max_snr_db": 13.8,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261117_mukilteo",
+     "freq_hz": 436224000.0,
+     "persistence": 0.667,
+     "covering_visits": 3,
+     "detecting_visits": 2,
+     "centre_offset_spread_khz": 100.0,
+     "mean_snr_db": 13.8
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "DETECTING",
@@ -3962,7 +4772,10 @@
   },
   {
    "freq_hz": 437495000.0,
+   "freq_min_hz": 437495000.0,
+   "freq_max_hz": 437495000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -3977,6 +4790,17 @@
    ],
    "max_snr_db": 12.6,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261118_mukilteo_12426",
+     "freq_hz": 437495000.0,
+     "persistence": 1.0,
+     "covering_visits": 3,
+     "detecting_visits": 3,
+     "centre_offset_spread_khz": 826.0,
+     "mean_snr_db": 12.6
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -4046,7 +4870,10 @@
   },
   {
    "freq_hz": 438755000.0,
+   "freq_min_hz": 438755000.0,
+   "freq_max_hz": 438755000.0,
    "class": "SITE_LOCAL_PERSISTENT",
+   "unresolved_association": false,
    "runs_detecting": 2,
    "runs_observed": 7,
    "sites_detecting": [
@@ -4060,6 +4887,26 @@
    ],
    "max_snr_db": 21.7,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261119_hwy99",
+     "freq_hz": 438755000.0,
+     "persistence": 0.667,
+     "covering_visits": 3,
+     "detecting_visits": 2,
+     "centre_offset_spread_khz": 100.0,
+     "mean_snr_db": 15.0
+    },
+    {
+     "run": "run_20261126_hwy99",
+     "freq_hz": 438755000.0,
+     "persistence": 1.0,
+     "covering_visits": 3,
+     "detecting_visits": 3,
+     "centre_offset_spread_khz": 150.0,
+     "mean_snr_db": 21.7
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -4129,7 +4976,10 @@
   },
   {
    "freq_hz": 439044000.0,
+   "freq_min_hz": 439044000.0,
+   "freq_max_hz": 439044000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 7,
    "sites_detecting": [
@@ -4143,6 +4993,17 @@
    ],
    "max_snr_db": 11.4,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261118_mukilteo_12426",
+     "freq_hz": 439044000.0,
+     "persistence": 0.667,
+     "covering_visits": 3,
+     "detecting_visits": 2,
+     "centre_offset_spread_khz": 50.0,
+     "mean_snr_db": 11.4
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -4212,7 +5073,10 @@
   },
   {
    "freq_hz": 439060000.0,
+   "freq_min_hz": 439060000.0,
+   "freq_max_hz": 439060000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 7,
    "sites_detecting": [
@@ -4226,6 +5090,17 @@
    ],
    "max_snr_db": 12.7,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261118_mukilteo_12426",
+     "freq_hz": 439060000.0,
+     "persistence": 1.0,
+     "covering_visits": 3,
+     "detecting_visits": 3,
+     "centre_offset_spread_khz": 150.0,
+     "mean_snr_db": 12.7
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -4295,7 +5170,10 @@
   },
   {
    "freq_hz": 439076000.0,
+   "freq_min_hz": 439076000.0,
+   "freq_max_hz": 439076000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 7,
    "sites_detecting": [
@@ -4309,6 +5187,17 @@
    ],
    "max_snr_db": 20.9,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261118_mukilteo_12426",
+     "freq_hz": 439076000.0,
+     "persistence": 1.0,
+     "covering_visits": 3,
+     "detecting_visits": 3,
+     "centre_offset_spread_khz": 150.0,
+     "mean_snr_db": 20.9
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -4378,7 +5267,10 @@
   },
   {
    "freq_hz": 439088000.0,
+   "freq_min_hz": 439087000.0,
+   "freq_max_hz": 439089000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": true,
    "runs_detecting": 1,
    "runs_observed": 7,
    "sites_detecting": [
@@ -4392,6 +5284,26 @@
    ],
    "max_snr_db": 13.7,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261118_mukilteo_12426",
+     "freq_hz": 439087000.0,
+     "persistence": 0.667,
+     "covering_visits": 3,
+     "detecting_visits": 2,
+     "centre_offset_spread_khz": 50.0,
+     "mean_snr_db": 13.0
+    },
+    {
+     "run": "run_20261118_mukilteo_12426",
+     "freq_hz": 439089000.0,
+     "persistence": 1.0,
+     "covering_visits": 3,
+     "detecting_visits": 3,
+     "centre_offset_spread_khz": 150.0,
+     "mean_snr_db": 13.7
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -4461,7 +5373,10 @@
   },
   {
    "freq_hz": 439107000.0,
+   "freq_min_hz": 439107000.0,
+   "freq_max_hz": 439107000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 7,
    "sites_detecting": [
@@ -4475,6 +5390,17 @@
    ],
    "max_snr_db": 14.4,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261118_mukilteo_12426",
+     "freq_hz": 439107000.0,
+     "persistence": 1.0,
+     "covering_visits": 3,
+     "detecting_visits": 3,
+     "centre_offset_spread_khz": 150.0,
+     "mean_snr_db": 14.4
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -4544,7 +5470,10 @@
   },
   {
    "freq_hz": 439123000.0,
+   "freq_min_hz": 439123000.0,
+   "freq_max_hz": 439123000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 7,
    "sites_detecting": [
@@ -4558,6 +5487,17 @@
    ],
    "max_snr_db": 10.7,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261118_mukilteo_12426",
+     "freq_hz": 439123000.0,
+     "persistence": 0.667,
+     "covering_visits": 3,
+     "detecting_visits": 2,
+     "centre_offset_spread_khz": 50.0,
+     "mean_snr_db": 10.7
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -4627,7 +5567,10 @@
   },
   {
    "freq_hz": 441454000.0,
+   "freq_min_hz": 441454000.0,
+   "freq_max_hz": 441454000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -4642,6 +5585,17 @@
    ],
    "max_snr_db": 10.6,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261118_mukilteo_12426",
+     "freq_hz": 441454000.0,
+     "persistence": 0.667,
+     "covering_visits": 3,
+     "detecting_visits": 2,
+     "centre_offset_spread_khz": 300.0,
+     "mean_snr_db": 10.6
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -4711,7 +5665,10 @@
   },
   {
    "freq_hz": 442367000.0,
+   "freq_min_hz": 442367000.0,
+   "freq_max_hz": 442367000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -4726,6 +5683,17 @@
    ],
    "max_snr_db": 18.5,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261117_mukilteo",
+     "freq_hz": 442367000.0,
+     "persistence": 0.625,
+     "covering_visits": 8,
+     "detecting_visits": 5,
+     "centre_offset_spread_khz": 1364.5,
+     "mean_snr_db": 18.5
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "DETECTING",
@@ -4795,7 +5763,10 @@
   },
   {
    "freq_hz": 442486000.0,
+   "freq_min_hz": 442486000.0,
+   "freq_max_hz": 442486000.0,
    "class": "SITE_LOCAL_PERSISTENT",
+   "unresolved_association": false,
    "runs_detecting": 2,
    "runs_observed": 8,
    "sites_detecting": [
@@ -4810,6 +5781,26 @@
    ],
    "max_snr_db": 13.5,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261124_hwy99_ofinnigans",
+     "freq_hz": 442486000.0,
+     "persistence": 1.0,
+     "covering_visits": 9,
+     "detecting_visits": 9,
+     "centre_offset_spread_khz": 1664.5,
+     "mean_snr_db": 13.5
+    },
+    {
+     "run": "run_20261126_hwy99",
+     "freq_hz": 442486000.0,
+     "persistence": 0.889,
+     "covering_visits": 9,
+     "detecting_visits": 8,
+     "centre_offset_spread_khz": 1664.5,
+     "mean_snr_db": 12.7
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -4879,7 +5870,10 @@
   },
   {
    "freq_hz": 443951000.0,
+   "freq_min_hz": 443951000.0,
+   "freq_max_hz": 443951000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -4894,6 +5888,17 @@
    ],
    "max_snr_db": 13.6,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261118_mukilteo_12426",
+     "freq_hz": 443951000.0,
+     "persistence": 1.0,
+     "covering_visits": 6,
+     "detecting_visits": 6,
+     "centre_offset_spread_khz": 1426.5,
+     "mean_snr_db": 13.6
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -4963,7 +5968,10 @@
   },
   {
    "freq_hz": 444019000.0,
+   "freq_min_hz": 444019000.0,
+   "freq_max_hz": 444019000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -4978,6 +5986,17 @@
    ],
    "max_snr_db": 16.2,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261118_mukilteo_12426",
+     "freq_hz": 444019000.0,
+     "persistence": 0.833,
+     "covering_visits": 6,
+     "detecting_visits": 5,
+     "centre_offset_spread_khz": 1426.5,
+     "mean_snr_db": 16.2
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -5047,7 +6066,10 @@
   },
   {
    "freq_hz": 444086000.0,
+   "freq_min_hz": 444086000.0,
+   "freq_max_hz": 444086000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 7,
    "sites_detecting": [
@@ -5061,6 +6083,17 @@
    ],
    "max_snr_db": 17.4,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261118_mukilteo_12426",
+     "freq_hz": 444086000.0,
+     "persistence": 1.0,
+     "covering_visits": 5,
+     "detecting_visits": 5,
+     "centre_offset_spread_khz": 1326.5,
+     "mean_snr_db": 17.4
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -5130,7 +6163,10 @@
   },
   {
    "freq_hz": 444154000.0,
+   "freq_min_hz": 444154000.0,
+   "freq_max_hz": 444154000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 7,
    "sites_detecting": [
@@ -5144,6 +6180,17 @@
    ],
    "max_snr_db": 17.5,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261118_mukilteo_12426",
+     "freq_hz": 444154000.0,
+     "persistence": 0.75,
+     "covering_visits": 4,
+     "detecting_visits": 3,
+     "centre_offset_spread_khz": 1176.5,
+     "mean_snr_db": 17.5
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -5213,7 +6260,10 @@
   },
   {
    "freq_hz": 444221000.0,
+   "freq_min_hz": 444221000.0,
+   "freq_max_hz": 444221000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 7,
    "sites_detecting": [
@@ -5227,6 +6277,17 @@
    ],
    "max_snr_db": 16.3,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261118_mukilteo_12426",
+     "freq_hz": 444221000.0,
+     "persistence": 1.0,
+     "covering_visits": 4,
+     "detecting_visits": 4,
+     "centre_offset_spread_khz": 1176.5,
+     "mean_snr_db": 16.3
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -5296,7 +6357,10 @@
   },
   {
    "freq_hz": 444289000.0,
+   "freq_min_hz": 444289000.0,
+   "freq_max_hz": 444289000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 7,
    "sites_detecting": [
@@ -5310,6 +6374,17 @@
    ],
    "max_snr_db": 18.4,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261118_mukilteo_12426",
+     "freq_hz": 444289000.0,
+     "persistence": 0.667,
+     "covering_visits": 3,
+     "detecting_visits": 2,
+     "centre_offset_spread_khz": 636.0,
+     "mean_snr_db": 18.4
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -5379,7 +6454,10 @@
   },
   {
    "freq_hz": 444356000.0,
+   "freq_min_hz": 444356000.0,
+   "freq_max_hz": 444356000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -5394,6 +6472,17 @@
    ],
    "max_snr_db": 15.2,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261118_mukilteo_12426",
+     "freq_hz": 444356000.0,
+     "persistence": 1.0,
+     "covering_visits": 4,
+     "detecting_visits": 4,
+     "centre_offset_spread_khz": 886.0,
+     "mean_snr_db": 15.2
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -5463,7 +6552,10 @@
   },
   {
    "freq_hz": 444424000.0,
+   "freq_min_hz": 444424000.0,
+   "freq_max_hz": 444424000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -5478,6 +6570,17 @@
    ],
    "max_snr_db": 14.1,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261118_mukilteo_12426",
+     "freq_hz": 444424000.0,
+     "persistence": 1.0,
+     "covering_visits": 4,
+     "detecting_visits": 4,
+     "centre_offset_spread_khz": 1036.0,
+     "mean_snr_db": 14.1
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -5547,7 +6650,10 @@
   },
   {
    "freq_hz": 444491000.0,
+   "freq_min_hz": 444491000.0,
+   "freq_max_hz": 444491000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -5562,6 +6668,17 @@
    ],
    "max_snr_db": 13.7,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261118_mukilteo_12426",
+     "freq_hz": 444491000.0,
+     "persistence": 1.0,
+     "covering_visits": 6,
+     "detecting_visits": 6,
+     "centre_offset_spread_khz": 1083.5,
+     "mean_snr_db": 13.7
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -5631,7 +6748,10 @@
   },
   {
    "freq_hz": 444559000.0,
+   "freq_min_hz": 444559000.0,
+   "freq_max_hz": 444559000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -5646,6 +6766,17 @@
    ],
    "max_snr_db": 17.1,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261118_mukilteo_12426",
+     "freq_hz": 444559000.0,
+     "persistence": 0.625,
+     "covering_visits": 8,
+     "detecting_visits": 5,
+     "centre_offset_spread_khz": 1136.0,
+     "mean_snr_db": 17.1
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -5715,7 +6846,10 @@
   },
   {
    "freq_hz": 444626000.0,
+   "freq_min_hz": 444626000.0,
+   "freq_max_hz": 444626000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -5730,6 +6864,17 @@
    ],
    "max_snr_db": 19.4,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261118_mukilteo_12426",
+     "freq_hz": 444626000.0,
+     "persistence": 1.0,
+     "covering_visits": 9,
+     "detecting_visits": 9,
+     "centre_offset_spread_khz": 1233.5,
+     "mean_snr_db": 19.4
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -5799,7 +6944,10 @@
   },
   {
    "freq_hz": 444694000.0,
+   "freq_min_hz": 444694000.0,
+   "freq_max_hz": 444694000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -5814,6 +6962,17 @@
    ],
    "max_snr_db": 20.7,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261118_mukilteo_12426",
+     "freq_hz": 444694000.0,
+     "persistence": 0.625,
+     "covering_visits": 8,
+     "detecting_visits": 5,
+     "centre_offset_spread_khz": 1136.0,
+     "mean_snr_db": 20.7
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -5883,7 +7042,10 @@
   },
   {
    "freq_hz": 444712000.0,
+   "freq_min_hz": 444712000.0,
+   "freq_max_hz": 444712000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -5898,6 +7060,17 @@
    ],
    "max_snr_db": 14.3,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261124_hwy99_ofinnigans",
+     "freq_hz": 444712000.0,
+     "persistence": 0.667,
+     "covering_visits": 9,
+     "detecting_visits": 6,
+     "centre_offset_spread_khz": 1233.0,
+     "mean_snr_db": 14.3
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -5967,7 +7140,10 @@
   },
   {
    "freq_hz": 444761000.0,
+   "freq_min_hz": 444761000.0,
+   "freq_max_hz": 444761000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -5982,6 +7158,17 @@
    ],
    "max_snr_db": 20.1,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261118_mukilteo_12426",
+     "freq_hz": 444761000.0,
+     "persistence": 1.0,
+     "covering_visits": 9,
+     "detecting_visits": 9,
+     "centre_offset_spread_khz": 1233.5,
+     "mean_snr_db": 20.1
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -6051,7 +7238,10 @@
   },
   {
    "freq_hz": 444780000.0,
+   "freq_min_hz": 444780000.0,
+   "freq_max_hz": 444780000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -6066,6 +7256,17 @@
    ],
    "max_snr_db": 17.6,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261124_hwy99_ofinnigans",
+     "freq_hz": 444780000.0,
+     "persistence": 1.0,
+     "covering_visits": 9,
+     "detecting_visits": 9,
+     "centre_offset_spread_khz": 1233.0,
+     "mean_snr_db": 17.6
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -6135,7 +7336,10 @@
   },
   {
    "freq_hz": 444847000.0,
+   "freq_min_hz": 444847000.0,
+   "freq_max_hz": 444847000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -6150,6 +7354,17 @@
    ],
    "max_snr_db": 18.9,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261124_hwy99_ofinnigans",
+     "freq_hz": 444847000.0,
+     "persistence": 0.889,
+     "covering_visits": 9,
+     "detecting_visits": 8,
+     "centre_offset_spread_khz": 1233.0,
+     "mean_snr_db": 18.9
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -6219,7 +7434,10 @@
   },
   {
    "freq_hz": 444896000.0,
+   "freq_min_hz": 444896000.0,
+   "freq_max_hz": 444896000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -6234,6 +7452,17 @@
    ],
    "max_snr_db": 19.0,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261118_mukilteo_12426",
+     "freq_hz": 444896000.0,
+     "persistence": 1.0,
+     "covering_visits": 9,
+     "detecting_visits": 9,
+     "centre_offset_spread_khz": 1233.5,
+     "mean_snr_db": 19.0
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -6303,7 +7532,10 @@
   },
   {
    "freq_hz": 444915000.0,
+   "freq_min_hz": 444915000.0,
+   "freq_max_hz": 444915000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -6318,6 +7550,17 @@
    ],
    "max_snr_db": 18.4,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261124_hwy99_ofinnigans",
+     "freq_hz": 444915000.0,
+     "persistence": 1.0,
+     "covering_visits": 9,
+     "detecting_visits": 9,
+     "centre_offset_spread_khz": 1233.0,
+     "mean_snr_db": 18.4
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -6387,7 +7630,10 @@
   },
   {
    "freq_hz": 444982000.0,
+   "freq_min_hz": 444982000.0,
+   "freq_max_hz": 444982000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -6402,6 +7648,17 @@
    ],
    "max_snr_db": 26.9,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261124_hwy99_ofinnigans",
+     "freq_hz": 444982000.0,
+     "persistence": 0.889,
+     "covering_visits": 9,
+     "detecting_visits": 8,
+     "centre_offset_spread_khz": 1083.0,
+     "mean_snr_db": 26.9
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -6471,7 +7728,10 @@
   },
   {
    "freq_hz": 445031000.0,
+   "freq_min_hz": 445031000.0,
+   "freq_max_hz": 445031000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -6486,6 +7746,17 @@
    ],
    "max_snr_db": 18.3,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261118_mukilteo_12426",
+     "freq_hz": 445031000.0,
+     "persistence": 1.0,
+     "covering_visits": 10,
+     "detecting_visits": 10,
+     "centre_offset_spread_khz": 1627.5,
+     "mean_snr_db": 18.3
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -6555,7 +7826,10 @@
   },
   {
    "freq_hz": 445049500.0,
+   "freq_min_hz": 445049000.0,
+   "freq_max_hz": 445050000.0,
    "class": "SITE_LOCAL_PERSISTENT",
+   "unresolved_association": false,
    "runs_detecting": 2,
    "runs_observed": 8,
    "sites_detecting": [
@@ -6570,6 +7844,26 @@
    ],
    "max_snr_db": 17.2,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261124_hwy99_ofinnigans",
+     "freq_hz": 445049000.0,
+     "persistence": 0.727,
+     "covering_visits": 11,
+     "detecting_visits": 8,
+     "centre_offset_spread_khz": 1677.5,
+     "mean_snr_db": 17.2
+    },
+    {
+     "run": "run_20261119_hwy99",
+     "freq_hz": 445050000.0,
+     "persistence": 0.636,
+     "covering_visits": 11,
+     "detecting_visits": 7,
+     "centre_offset_spread_khz": 1627.5,
+     "mean_snr_db": 10.7
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -6639,7 +7933,10 @@
   },
   {
    "freq_hz": 445055000.0,
+   "freq_min_hz": 445055000.0,
+   "freq_max_hz": 445055000.0,
    "class": "SITE_LOCAL_PERSISTENT",
+   "unresolved_association": false,
    "runs_detecting": 3,
    "runs_observed": 8,
    "sites_detecting": [
@@ -6654,6 +7951,35 @@
    ],
    "max_snr_db": 15.9,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261119_hwy99",
+     "freq_hz": 445055000.0,
+     "persistence": 0.636,
+     "covering_visits": 11,
+     "detecting_visits": 7,
+     "centre_offset_spread_khz": 1677.5,
+     "mean_snr_db": 13.1
+    },
+    {
+     "run": "run_20261124_hwy99_ofinnigans",
+     "freq_hz": 445055000.0,
+     "persistence": 0.636,
+     "covering_visits": 11,
+     "detecting_visits": 7,
+     "centre_offset_spread_khz": 1677.5,
+     "mean_snr_db": 15.9
+    },
+    {
+     "run": "run_20261126_hwy99",
+     "freq_hz": 445055000.0,
+     "persistence": 0.636,
+     "covering_visits": 11,
+     "detecting_visits": 7,
+     "centre_offset_spread_khz": 1677.5,
+     "mean_snr_db": 15.8
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -6723,7 +8049,10 @@
   },
   {
    "freq_hz": 445068000.0,
+   "freq_min_hz": 445068000.0,
+   "freq_max_hz": 445068000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -6738,6 +8067,17 @@
    ],
    "max_snr_db": 12.5,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261126_hwy99",
+     "freq_hz": 445068000.0,
+     "persistence": 0.6,
+     "covering_visits": 10,
+     "detecting_visits": 6,
+     "centre_offset_spread_khz": 1677.5,
+     "mean_snr_db": 12.5
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -6807,7 +8147,10 @@
   },
   {
    "freq_hz": 445099000.0,
+   "freq_min_hz": 445099000.0,
+   "freq_max_hz": 445099000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -6822,6 +8165,17 @@
    ],
    "max_snr_db": 19.2,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261118_mukilteo_12426",
+     "freq_hz": 445099000.0,
+     "persistence": 0.636,
+     "covering_visits": 11,
+     "detecting_visits": 7,
+     "centre_offset_spread_khz": 1677.5,
+     "mean_snr_db": 19.2
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -6891,7 +8245,10 @@
   },
   {
    "freq_hz": 445117000.0,
+   "freq_min_hz": 445117000.0,
+   "freq_max_hz": 445117000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -6906,6 +8263,17 @@
    ],
    "max_snr_db": 17.8,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261124_hwy99_ofinnigans",
+     "freq_hz": 445117000.0,
+     "persistence": 1.0,
+     "covering_visits": 11,
+     "detecting_visits": 11,
+     "centre_offset_spread_khz": 1677.5,
+     "mean_snr_db": 17.8
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -6975,7 +8343,10 @@
   },
   {
    "freq_hz": 445160000.0,
+   "freq_min_hz": 445160000.0,
+   "freq_max_hz": 445160000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -6990,6 +8361,17 @@
    ],
    "max_snr_db": 13.1,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261119_hwy99",
+     "freq_hz": 445160000.0,
+     "persistence": 0.6,
+     "covering_visits": 10,
+     "detecting_visits": 6,
+     "centre_offset_spread_khz": 1677.5,
+     "mean_snr_db": 13.1
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -7059,7 +8441,10 @@
   },
   {
    "freq_hz": 445166000.0,
+   "freq_min_hz": 445166000.0,
+   "freq_max_hz": 445166000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -7074,6 +8459,17 @@
    ],
    "max_snr_db": 18.9,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261118_mukilteo_12426",
+     "freq_hz": 445166000.0,
+     "persistence": 1.0,
+     "covering_visits": 9,
+     "detecting_visits": 9,
+     "centre_offset_spread_khz": 1677.5,
+     "mean_snr_db": 18.9
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -7143,7 +8539,10 @@
   },
   {
    "freq_hz": 445184000.0,
+   "freq_min_hz": 445184000.0,
+   "freq_max_hz": 445184000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -7158,6 +8557,17 @@
    ],
    "max_snr_db": 16.6,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261124_hwy99_ofinnigans",
+     "freq_hz": 445184000.0,
+     "persistence": 0.8,
+     "covering_visits": 10,
+     "detecting_visits": 8,
+     "centre_offset_spread_khz": 1677.5,
+     "mean_snr_db": 16.6
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -7227,7 +8637,10 @@
   },
   {
    "freq_hz": 445227000.0,
+   "freq_min_hz": 445227000.0,
+   "freq_max_hz": 445227000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -7242,6 +8655,17 @@
    ],
    "max_snr_db": 15.0,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261119_hwy99",
+     "freq_hz": 445227000.0,
+     "persistence": 1.0,
+     "covering_visits": 10,
+     "detecting_visits": 10,
+     "centre_offset_spread_khz": 1527.0,
+     "mean_snr_db": 15.0
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -7311,7 +8735,10 @@
   },
   {
    "freq_hz": 445234000.0,
+   "freq_min_hz": 445234000.0,
+   "freq_max_hz": 445234000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -7326,6 +8753,17 @@
    ],
    "max_snr_db": 22.4,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261118_mukilteo_12426",
+     "freq_hz": 445234000.0,
+     "persistence": 0.6,
+     "covering_visits": 10,
+     "detecting_visits": 6,
+     "centre_offset_spread_khz": 1427.5,
+     "mean_snr_db": 22.4
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -7395,7 +8833,10 @@
   },
   {
    "freq_hz": 445252000.0,
+   "freq_min_hz": 445252000.0,
+   "freq_max_hz": 445252000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -7410,6 +8851,17 @@
    ],
    "max_snr_db": 14.1,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261124_hwy99_ofinnigans",
+     "freq_hz": 445252000.0,
+     "persistence": 1.0,
+     "covering_visits": 10,
+     "detecting_visits": 10,
+     "centre_offset_spread_khz": 1527.5,
+     "mean_snr_db": 14.1
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -7479,7 +8931,10 @@
   },
   {
    "freq_hz": 445295000.0,
+   "freq_min_hz": 445295000.0,
+   "freq_max_hz": 445295000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -7494,6 +8949,17 @@
    ],
    "max_snr_db": 16.1,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261119_hwy99",
+     "freq_hz": 445295000.0,
+     "persistence": 0.636,
+     "covering_visits": 11,
+     "detecting_visits": 7,
+     "centre_offset_spread_khz": 1002.5,
+     "mean_snr_db": 16.1
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -7563,7 +9029,10 @@
   },
   {
    "freq_hz": 445301000.0,
+   "freq_min_hz": 445301000.0,
+   "freq_max_hz": 445301000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -7578,6 +9047,17 @@
    ],
    "max_snr_db": 23.7,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261118_mukilteo_12426",
+     "freq_hz": 445301000.0,
+     "persistence": 0.833,
+     "covering_visits": 12,
+     "detecting_visits": 10,
+     "centre_offset_spread_khz": 1777.5,
+     "mean_snr_db": 23.7
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -7647,7 +9127,10 @@
   },
   {
    "freq_hz": 445328000.0,
+   "freq_min_hz": 445328000.0,
+   "freq_max_hz": 445328000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -7662,6 +9145,17 @@
    ],
    "max_snr_db": 11.8,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261118_mukilteo_12426",
+     "freq_hz": 445328000.0,
+     "persistence": 0.833,
+     "covering_visits": 12,
+     "detecting_visits": 10,
+     "centre_offset_spread_khz": 1777.5,
+     "mean_snr_db": 11.8
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -7731,7 +9225,10 @@
   },
   {
    "freq_hz": 445362000.0,
+   "freq_min_hz": 445362000.0,
+   "freq_max_hz": 445362000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -7746,6 +9243,17 @@
    ],
    "max_snr_db": 17.7,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261119_hwy99",
+     "freq_hz": 445362000.0,
+     "persistence": 1.0,
+     "covering_visits": 11,
+     "detecting_visits": 11,
+     "centre_offset_spread_khz": 1688.0,
+     "mean_snr_db": 17.7
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -7815,7 +9323,10 @@
   },
   {
    "freq_hz": 445396000.0,
+   "freq_min_hz": 445396000.0,
+   "freq_max_hz": 445396000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -7830,6 +9341,17 @@
    ],
    "max_snr_db": 12.6,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261118_mukilteo_12426",
+     "freq_hz": 445396000.0,
+     "persistence": 0.667,
+     "covering_visits": 12,
+     "detecting_visits": 8,
+     "centre_offset_spread_khz": 1688.5,
+     "mean_snr_db": 12.6
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -7899,7 +9421,10 @@
   },
   {
    "freq_hz": 445430000.0,
+   "freq_min_hz": 445430000.0,
+   "freq_max_hz": 445430000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -7914,6 +9439,17 @@
    ],
    "max_snr_db": 18.2,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261119_hwy99",
+     "freq_hz": 445430000.0,
+     "persistence": 0.7,
+     "covering_visits": 10,
+     "detecting_visits": 7,
+     "centre_offset_spread_khz": 1002.5,
+     "mean_snr_db": 18.2
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -7983,7 +9519,10 @@
   },
   {
    "freq_hz": 445531000.0,
+   "freq_min_hz": 445531000.0,
+   "freq_max_hz": 445531000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -7998,6 +9537,17 @@
    ],
    "max_snr_db": 22.9,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261118_mukilteo_12426",
+     "freq_hz": 445531000.0,
+     "persistence": 0.818,
+     "covering_visits": 11,
+     "detecting_visits": 9,
+     "centre_offset_spread_khz": 1152.5,
+     "mean_snr_db": 22.9
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -8067,7 +9617,10 @@
   },
   {
    "freq_hz": 445565000.0,
+   "freq_min_hz": 445565000.0,
+   "freq_max_hz": 445565000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -8082,6 +9635,17 @@
    ],
    "max_snr_db": 19.8,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261119_hwy99",
+     "freq_hz": 445565000.0,
+     "persistence": 0.75,
+     "covering_visits": 12,
+     "detecting_visits": 9,
+     "centre_offset_spread_khz": 1152.5,
+     "mean_snr_db": 19.8
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -8151,7 +9715,10 @@
   },
   {
    "freq_hz": 445598000.0,
+   "freq_min_hz": 445598000.0,
+   "freq_max_hz": 445598000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -8166,6 +9733,17 @@
    ],
    "max_snr_db": 12.8,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261118_mukilteo_12426",
+     "freq_hz": 445598000.0,
+     "persistence": 1.0,
+     "covering_visits": 12,
+     "detecting_visits": 12,
+     "centre_offset_spread_khz": 1152.5,
+     "mean_snr_db": 12.8
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -8235,7 +9813,10 @@
   },
   {
    "freq_hz": 445632000.0,
+   "freq_min_hz": 445632000.0,
+   "freq_max_hz": 445632000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -8250,6 +9831,17 @@
    ],
    "max_snr_db": 18.5,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261119_hwy99",
+     "freq_hz": 445632000.0,
+     "persistence": 1.0,
+     "covering_visits": 12,
+     "detecting_visits": 12,
+     "centre_offset_spread_khz": 1152.5,
+     "mean_snr_db": 18.5
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -8319,7 +9911,10 @@
   },
   {
    "freq_hz": 445666000.0,
+   "freq_min_hz": 445666000.0,
+   "freq_max_hz": 445666000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -8334,6 +9929,17 @@
    ],
    "max_snr_db": 13.3,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261118_mukilteo_12426",
+     "freq_hz": 445666000.0,
+     "persistence": 0.75,
+     "covering_visits": 12,
+     "detecting_visits": 9,
+     "centre_offset_spread_khz": 1152.5,
+     "mean_snr_db": 13.3
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -8403,7 +10009,10 @@
   },
   {
    "freq_hz": 445700000.0,
+   "freq_min_hz": 445700000.0,
+   "freq_max_hz": 445700000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -8418,6 +10027,17 @@
    ],
    "max_snr_db": 16.5,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261119_hwy99",
+     "freq_hz": 445700000.0,
+     "persistence": 0.75,
+     "covering_visits": 12,
+     "detecting_visits": 9,
+     "centre_offset_spread_khz": 1152.5,
+     "mean_snr_db": 16.5
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -8487,7 +10107,10 @@
   },
   {
    "freq_hz": 445706000.0,
+   "freq_min_hz": 445706000.0,
+   "freq_max_hz": 445706000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -8502,6 +10125,17 @@
    ],
    "max_snr_db": 25.2,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261118_mukilteo_12426",
+     "freq_hz": 445706000.0,
+     "persistence": 1.0,
+     "covering_visits": 12,
+     "detecting_visits": 12,
+     "centre_offset_spread_khz": 1152.5,
+     "mean_snr_db": 25.2
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -8571,7 +10205,10 @@
   },
   {
    "freq_hz": 445733000.0,
+   "freq_min_hz": 445733000.0,
+   "freq_max_hz": 445733000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -8586,6 +10223,17 @@
    ],
    "max_snr_db": 12.1,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261118_mukilteo_12426",
+     "freq_hz": 445733000.0,
+     "persistence": 1.0,
+     "covering_visits": 12,
+     "detecting_visits": 12,
+     "centre_offset_spread_khz": 1152.5,
+     "mean_snr_db": 12.1
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -8655,7 +10303,10 @@
   },
   {
    "freq_hz": 445767000.0,
+   "freq_min_hz": 445767000.0,
+   "freq_max_hz": 445767000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -8670,6 +10321,17 @@
    ],
    "max_snr_db": 14.6,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261119_hwy99",
+     "freq_hz": 445767000.0,
+     "persistence": 1.0,
+     "covering_visits": 12,
+     "detecting_visits": 12,
+     "centre_offset_spread_khz": 1152.5,
+     "mean_snr_db": 14.6
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -8739,7 +10401,10 @@
   },
   {
    "freq_hz": 445801000.0,
+   "freq_min_hz": 445801000.0,
+   "freq_max_hz": 445801000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -8754,6 +10419,17 @@
    ],
    "max_snr_db": 11.0,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261118_mukilteo_12426",
+     "freq_hz": 445801000.0,
+     "persistence": 0.667,
+     "covering_visits": 12,
+     "detecting_visits": 8,
+     "centre_offset_spread_khz": 1152.5,
+     "mean_snr_db": 11.0
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -8823,7 +10499,10 @@
   },
   {
    "freq_hz": 445841000.0,
+   "freq_min_hz": 445841000.0,
+   "freq_max_hz": 445841000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -8838,6 +10517,17 @@
    ],
    "max_snr_db": 21.3,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261118_mukilteo_12426",
+     "freq_hz": 445841000.0,
+     "persistence": 1.0,
+     "covering_visits": 12,
+     "detecting_visits": 12,
+     "centre_offset_spread_khz": 1152.5,
+     "mean_snr_db": 21.3
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -8907,7 +10597,10 @@
   },
   {
    "freq_hz": 445909000.0,
+   "freq_min_hz": 445909000.0,
+   "freq_max_hz": 445909000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -8922,6 +10615,17 @@
    ],
    "max_snr_db": 17.6,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261118_mukilteo_12426",
+     "freq_hz": 445909000.0,
+     "persistence": 0.727,
+     "covering_visits": 11,
+     "detecting_visits": 8,
+     "centre_offset_spread_khz": 1152.5,
+     "mean_snr_db": 17.6
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -8991,7 +10695,10 @@
   },
   {
    "freq_hz": 445976000.0,
+   "freq_min_hz": 445976000.0,
+   "freq_max_hz": 445976000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -9006,6 +10713,17 @@
    ],
    "max_snr_db": 18.8,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261118_mukilteo_12426",
+     "freq_hz": 445976000.0,
+     "persistence": 1.0,
+     "covering_visits": 11,
+     "detecting_visits": 11,
+     "centre_offset_spread_khz": 1152.5,
+     "mean_snr_db": 18.8
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -9075,7 +10793,10 @@
   },
   {
    "freq_hz": 446044000.0,
+   "freq_min_hz": 446044000.0,
+   "freq_max_hz": 446044000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -9090,6 +10811,17 @@
    ],
    "max_snr_db": 17.1,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261118_mukilteo_12426",
+     "freq_hz": 446044000.0,
+     "persistence": 0.75,
+     "covering_visits": 12,
+     "detecting_visits": 9,
+     "centre_offset_spread_khz": 1152.5,
+     "mean_snr_db": 17.1
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -9159,7 +10891,10 @@
   },
   {
    "freq_hz": 446111000.0,
+   "freq_min_hz": 446111000.0,
+   "freq_max_hz": 446111000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -9174,6 +10909,17 @@
    ],
    "max_snr_db": 19.0,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261118_mukilteo_12426",
+     "freq_hz": 446111000.0,
+     "persistence": 1.0,
+     "covering_visits": 11,
+     "detecting_visits": 11,
+     "centre_offset_spread_khz": 1002.5,
+     "mean_snr_db": 19.0
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -9243,7 +10989,10 @@
   },
   {
    "freq_hz": 446179000.0,
+   "freq_min_hz": 446179000.0,
+   "freq_max_hz": 446179000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -9258,6 +11007,17 @@
    ],
    "max_snr_db": 18.1,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261118_mukilteo_12426",
+     "freq_hz": 446179000.0,
+     "persistence": 0.6,
+     "covering_visits": 10,
+     "detecting_visits": 6,
+     "centre_offset_spread_khz": 1002.5,
+     "mean_snr_db": 18.1
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -9327,7 +11087,10 @@
   },
   {
    "freq_hz": 446246000.0,
+   "freq_min_hz": 446246000.0,
+   "freq_max_hz": 446246000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -9342,6 +11105,17 @@
    ],
    "max_snr_db": 17.4,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261118_mukilteo_12426",
+     "freq_hz": 446246000.0,
+     "persistence": 1.0,
+     "covering_visits": 10,
+     "detecting_visits": 10,
+     "centre_offset_spread_khz": 955.0,
+     "mean_snr_db": 17.4
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -9411,7 +11185,10 @@
   },
   {
    "freq_hz": 446307000.0,
+   "freq_min_hz": 446307000.0,
+   "freq_max_hz": 446307000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -9426,6 +11203,17 @@
    ],
    "max_snr_db": 12.5,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261119_hwy99",
+     "freq_hz": 446307000.0,
+     "persistence": 0.778,
+     "covering_visits": 9,
+     "detecting_visits": 7,
+     "centre_offset_spread_khz": 905.0,
+     "mean_snr_db": 12.5
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -9495,7 +11283,10 @@
   },
   {
    "freq_hz": 446314000.0,
+   "freq_min_hz": 446314000.0,
+   "freq_max_hz": 446314000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -9510,6 +11301,17 @@
    ],
    "max_snr_db": 15.7,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261118_mukilteo_12426",
+     "freq_hz": 446314000.0,
+     "persistence": 0.625,
+     "covering_visits": 8,
+     "detecting_visits": 5,
+     "centre_offset_spread_khz": 802.5,
+     "mean_snr_db": 15.7
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -9579,7 +11381,10 @@
   },
   {
    "freq_hz": 446381000.0,
+   "freq_min_hz": 446381000.0,
+   "freq_max_hz": 446381000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -9594,6 +11399,17 @@
    ],
    "max_snr_db": 14.0,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261118_mukilteo_12426",
+     "freq_hz": 446381000.0,
+     "persistence": 1.0,
+     "covering_visits": 7,
+     "detecting_visits": 7,
+     "centre_offset_spread_khz": 805.0,
+     "mean_snr_db": 14.0
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -9663,7 +11479,10 @@
   },
   {
    "freq_hz": 446449000.0,
+   "freq_min_hz": 446449000.0,
+   "freq_max_hz": 446449000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -9678,6 +11497,17 @@
    ],
    "max_snr_db": 13.3,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261118_mukilteo_12426",
+     "freq_hz": 446449000.0,
+     "persistence": 0.667,
+     "covering_visits": 6,
+     "detecting_visits": 4,
+     "centre_offset_spread_khz": 411.0,
+     "mean_snr_db": 13.3
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -9747,7 +11577,10 @@
   },
   {
    "freq_hz": 446651000.0,
+   "freq_min_hz": 446651000.0,
+   "freq_max_hz": 446651000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -9762,6 +11595,17 @@
    ],
    "max_snr_db": 14.3,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261118_mukilteo_12426",
+     "freq_hz": 446651000.0,
+     "persistence": 1.0,
+     "covering_visits": 7,
+     "detecting_visits": 7,
+     "centre_offset_spread_khz": 1513.0,
+     "mean_snr_db": 14.3
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -9831,7 +11675,10 @@
   },
   {
    "freq_hz": 446719000.0,
+   "freq_min_hz": 446719000.0,
+   "freq_max_hz": 446719000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -9846,6 +11693,17 @@
    ],
    "max_snr_db": 16.1,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261118_mukilteo_12426",
+     "freq_hz": 446719000.0,
+     "persistence": 0.857,
+     "covering_visits": 7,
+     "detecting_visits": 6,
+     "centre_offset_spread_khz": 1513.0,
+     "mean_snr_db": 16.1
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -9915,7 +11773,10 @@
   },
   {
    "freq_hz": 446786000.0,
+   "freq_min_hz": 446786000.0,
+   "freq_max_hz": 446786000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -9930,6 +11791,17 @@
    ],
    "max_snr_db": 16.3,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261118_mukilteo_12426",
+     "freq_hz": 446786000.0,
+     "persistence": 1.0,
+     "covering_visits": 8,
+     "detecting_visits": 8,
+     "centre_offset_spread_khz": 1763.0,
+     "mean_snr_db": 16.3
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -9999,7 +11871,10 @@
   },
   {
    "freq_hz": 446854000.0,
+   "freq_min_hz": 446854000.0,
+   "freq_max_hz": 446854000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -10014,6 +11889,17 @@
    ],
    "max_snr_db": 15.4,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261118_mukilteo_12426",
+     "freq_hz": 446854000.0,
+     "persistence": 0.875,
+     "covering_visits": 8,
+     "detecting_visits": 7,
+     "centre_offset_spread_khz": 1763.0,
+     "mean_snr_db": 15.4
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -10083,7 +11969,10 @@
   },
   {
    "freq_hz": 446921000.0,
+   "freq_min_hz": 446921000.0,
+   "freq_max_hz": 446921000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -10098,6 +11987,17 @@
    ],
    "max_snr_db": 13.3,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261118_mukilteo_12426",
+     "freq_hz": 446921000.0,
+     "persistence": 1.0,
+     "covering_visits": 7,
+     "detecting_visits": 7,
+     "centre_offset_spread_khz": 1552.0,
+     "mean_snr_db": 13.3
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -10167,7 +12067,10 @@
   },
   {
    "freq_hz": 446989000.0,
+   "freq_min_hz": 446989000.0,
+   "freq_max_hz": 446989000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -10182,6 +12085,17 @@
    ],
    "max_snr_db": 13.2,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261118_mukilteo_12426",
+     "freq_hz": 446989000.0,
+     "persistence": 0.857,
+     "covering_visits": 7,
+     "detecting_visits": 6,
+     "centre_offset_spread_khz": 1552.0,
+     "mean_snr_db": 13.2
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -10251,7 +12165,10 @@
   },
   {
    "freq_hz": 447056000.0,
+   "freq_min_hz": 447056000.0,
+   "freq_max_hz": 447056000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -10266,6 +12183,17 @@
    ],
    "max_snr_db": 11.0,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261118_mukilteo_12426",
+     "freq_hz": 447056000.0,
+     "persistence": 0.857,
+     "covering_visits": 7,
+     "detecting_visits": 6,
+     "centre_offset_spread_khz": 1552.0,
+     "mean_snr_db": 11.0
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -10335,7 +12263,10 @@
   },
   {
    "freq_hz": 447191000.0,
+   "freq_min_hz": 447191000.0,
+   "freq_max_hz": 447191000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -10350,6 +12281,17 @@
    ],
    "max_snr_db": 12.5,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261118_mukilteo_12426",
+     "freq_hz": 447191000.0,
+     "persistence": 1.0,
+     "covering_visits": 4,
+     "detecting_visits": 4,
+     "centre_offset_spread_khz": 1402.0,
+     "mean_snr_db": 12.5
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -10419,7 +12361,10 @@
   },
   {
    "freq_hz": 447259000.0,
+   "freq_min_hz": 447259000.0,
+   "freq_max_hz": 447259000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -10434,6 +12379,17 @@
    ],
    "max_snr_db": 15.4,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261118_mukilteo_12426",
+     "freq_hz": 447259000.0,
+     "persistence": 1.0,
+     "covering_visits": 3,
+     "detecting_visits": 3,
+     "centre_offset_spread_khz": 300.0,
+     "mean_snr_db": 15.4
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -10503,7 +12459,10 @@
   },
   {
    "freq_hz": 447326000.0,
+   "freq_min_hz": 447326000.0,
+   "freq_max_hz": 447326000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -10518,6 +12477,17 @@
    ],
    "max_snr_db": 16.0,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261118_mukilteo_12426",
+     "freq_hz": 447326000.0,
+     "persistence": 1.0,
+     "covering_visits": 3,
+     "detecting_visits": 3,
+     "centre_offset_spread_khz": 300.0,
+     "mean_snr_db": 16.0
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -10587,7 +12557,10 @@
   },
   {
    "freq_hz": 447394000.0,
+   "freq_min_hz": 447394000.0,
+   "freq_max_hz": 447394000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -10602,6 +12575,17 @@
    ],
    "max_snr_db": 15.5,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261118_mukilteo_12426",
+     "freq_hz": 447394000.0,
+     "persistence": 1.0,
+     "covering_visits": 3,
+     "detecting_visits": 3,
+     "centre_offset_spread_khz": 300.0,
+     "mean_snr_db": 15.5
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -10671,7 +12655,10 @@
   },
   {
    "freq_hz": 447461000.0,
+   "freq_min_hz": 447461000.0,
+   "freq_max_hz": 447461000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -10686,6 +12673,17 @@
    ],
    "max_snr_db": 15.5,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261118_mukilteo_12426",
+     "freq_hz": 447461000.0,
+     "persistence": 1.0,
+     "covering_visits": 3,
+     "detecting_visits": 3,
+     "centre_offset_spread_khz": 300.0,
+     "mean_snr_db": 15.5
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -10755,7 +12753,10 @@
   },
   {
    "freq_hz": 447529000.0,
+   "freq_min_hz": 447529000.0,
+   "freq_max_hz": 447529000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -10770,6 +12771,17 @@
    ],
    "max_snr_db": 15.8,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261118_mukilteo_12426",
+     "freq_hz": 447529000.0,
+     "persistence": 1.0,
+     "covering_visits": 3,
+     "detecting_visits": 3,
+     "centre_offset_spread_khz": 300.0,
+     "mean_snr_db": 15.8
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -10839,7 +12851,10 @@
   },
   {
    "freq_hz": 447596000.0,
+   "freq_min_hz": 447596000.0,
+   "freq_max_hz": 447596000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -10854,6 +12869,17 @@
    ],
    "max_snr_db": 15.6,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261118_mukilteo_12426",
+     "freq_hz": 447596000.0,
+     "persistence": 1.0,
+     "covering_visits": 4,
+     "detecting_visits": 4,
+     "centre_offset_spread_khz": 1037.0,
+     "mean_snr_db": 15.6
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -10923,7 +12949,10 @@
   },
   {
    "freq_hz": 447664000.0,
+   "freq_min_hz": 447664000.0,
+   "freq_max_hz": 447664000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -10938,6 +12967,17 @@
    ],
    "max_snr_db": 14.6,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261118_mukilteo_12426",
+     "freq_hz": 447664000.0,
+     "persistence": 1.0,
+     "covering_visits": 3,
+     "detecting_visits": 3,
+     "centre_offset_spread_khz": 1037.0,
+     "mean_snr_db": 14.6
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -11007,7 +13047,10 @@
   },
   {
    "freq_hz": 447731000.0,
+   "freq_min_hz": 447731000.0,
+   "freq_max_hz": 447731000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -11022,6 +13065,17 @@
    ],
    "max_snr_db": 11.6,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261118_mukilteo_12426",
+     "freq_hz": 447731000.0,
+     "persistence": 0.75,
+     "covering_visits": 4,
+     "detecting_visits": 3,
+     "centre_offset_spread_khz": 1187.0,
+     "mean_snr_db": 11.6
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -11091,7 +13145,10 @@
   },
   {
    "freq_hz": 447799000.0,
+   "freq_min_hz": 447799000.0,
+   "freq_max_hz": 447799000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -11106,6 +13163,17 @@
    ],
    "max_snr_db": 11.4,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261118_mukilteo_12426",
+     "freq_hz": 447799000.0,
+     "persistence": 1.0,
+     "covering_visits": 5,
+     "detecting_visits": 5,
+     "centre_offset_spread_khz": 1187.0,
+     "mean_snr_db": 11.4
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -11175,7 +13243,10 @@
   },
   {
    "freq_hz": 447866000.0,
+   "freq_min_hz": 447866000.0,
+   "freq_max_hz": 447866000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -11190,6 +13261,17 @@
    ],
    "max_snr_db": 14.2,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261118_mukilteo_12426",
+     "freq_hz": 447866000.0,
+     "persistence": 1.0,
+     "covering_visits": 6,
+     "detecting_visits": 6,
+     "centre_offset_spread_khz": 1337.0,
+     "mean_snr_db": 14.2
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -11259,7 +13341,10 @@
   },
   {
    "freq_hz": 447917000.0,
+   "freq_min_hz": 447917000.0,
+   "freq_max_hz": 447917000.0,
    "class": "SITE_LOCAL_PERSISTENT",
+   "unresolved_association": false,
    "runs_detecting": 2,
    "runs_observed": 8,
    "sites_detecting": [
@@ -11274,6 +13359,26 @@
    ],
    "max_snr_db": 12.2,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261124_hwy99_ofinnigans",
+     "freq_hz": 447917000.0,
+     "persistence": 0.833,
+     "covering_visits": 6,
+     "detecting_visits": 5,
+     "centre_offset_spread_khz": 1337.0,
+     "mean_snr_db": 11.4
+    },
+    {
+     "run": "run_20261126_hwy99",
+     "freq_hz": 447917000.0,
+     "persistence": 0.667,
+     "covering_visits": 6,
+     "detecting_visits": 4,
+     "centre_offset_spread_khz": 1337.0,
+     "mean_snr_db": 12.2
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -11343,7 +13448,10 @@
   },
   {
    "freq_hz": 447934000.0,
+   "freq_min_hz": 447934000.0,
+   "freq_max_hz": 447934000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -11358,6 +13466,17 @@
    ],
    "max_snr_db": 13.4,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261118_mukilteo_12426",
+     "freq_hz": 447934000.0,
+     "persistence": 1.0,
+     "covering_visits": 5,
+     "detecting_visits": 5,
+     "centre_offset_spread_khz": 1337.0,
+     "mean_snr_db": 13.4
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -11427,7 +13546,10 @@
   },
   {
    "freq_hz": 448000333.3,
+   "freq_min_hz": 448000000.0,
+   "freq_max_hz": 448001000.0,
    "class": "MULTI_SITE_PARTIAL",
+   "unresolved_association": false,
    "runs_detecting": 3,
    "runs_observed": 8,
    "sites_detecting": [
@@ -11443,6 +13565,35 @@
    ],
    "max_snr_db": 23.7,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261124_hwy99_ofinnigans",
+     "freq_hz": 448000000.0,
+     "persistence": 1.0,
+     "covering_visits": 6,
+     "detecting_visits": 6,
+     "centre_offset_spread_khz": 1337.0,
+     "mean_snr_db": 23.4
+    },
+    {
+     "run": "run_20261126_hwy99",
+     "freq_hz": 448000000.0,
+     "persistence": 0.833,
+     "covering_visits": 6,
+     "detecting_visits": 5,
+     "centre_offset_spread_khz": 1336.5,
+     "mean_snr_db": 23.7
+    },
+    {
+     "run": "run_20261118_mukilteo_12426",
+     "freq_hz": 448001000.0,
+     "persistence": 1.0,
+     "covering_visits": 6,
+     "detecting_visits": 6,
+     "centre_offset_spread_khz": 1337.0,
+     "mean_snr_db": 13.9
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -11512,7 +13663,10 @@
   },
   {
    "freq_hz": 448069000.0,
+   "freq_min_hz": 448069000.0,
+   "freq_max_hz": 448069000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -11527,6 +13681,17 @@
    ],
    "max_snr_db": 13.9,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261118_mukilteo_12426",
+     "freq_hz": 448069000.0,
+     "persistence": 1.0,
+     "covering_visits": 6,
+     "detecting_visits": 6,
+     "centre_offset_spread_khz": 1337.0,
+     "mean_snr_db": 13.9
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -11596,7 +13761,10 @@
   },
   {
    "freq_hz": 448083000.0,
+   "freq_min_hz": 448083000.0,
+   "freq_max_hz": 448083000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -11611,6 +13779,17 @@
    ],
    "max_snr_db": 12.7,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261126_hwy99",
+     "freq_hz": 448083000.0,
+     "persistence": 0.667,
+     "covering_visits": 6,
+     "detecting_visits": 4,
+     "centre_offset_spread_khz": 1337.0,
+     "mean_snr_db": 12.7
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -11680,7 +13859,10 @@
   },
   {
    "freq_hz": 448136000.0,
+   "freq_min_hz": 448136000.0,
+   "freq_max_hz": 448136000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -11695,6 +13877,17 @@
    ],
    "max_snr_db": 14.1,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261118_mukilteo_12426",
+     "freq_hz": 448136000.0,
+     "persistence": 1.0,
+     "covering_visits": 6,
+     "detecting_visits": 6,
+     "centre_offset_spread_khz": 1337.0,
+     "mean_snr_db": 14.1
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -11764,7 +13957,10 @@
   },
   {
    "freq_hz": 448204000.0,
+   "freq_min_hz": 448204000.0,
+   "freq_max_hz": 448204000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -11779,6 +13975,17 @@
    ],
    "max_snr_db": 14.3,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261118_mukilteo_12426",
+     "freq_hz": 448204000.0,
+     "persistence": 1.0,
+     "covering_visits": 6,
+     "detecting_visits": 6,
+     "centre_offset_spread_khz": 1337.0,
+     "mean_snr_db": 14.3
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -11848,7 +14055,10 @@
   },
   {
    "freq_hz": 448271000.0,
+   "freq_min_hz": 448271000.0,
+   "freq_max_hz": 448271000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -11863,6 +14073,17 @@
    ],
    "max_snr_db": 12.7,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261118_mukilteo_12426",
+     "freq_hz": 448271000.0,
+     "persistence": 1.0,
+     "covering_visits": 7,
+     "detecting_visits": 7,
+     "centre_offset_spread_khz": 1754.0,
+     "mean_snr_db": 12.7
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -11932,7 +14153,10 @@
   },
   {
    "freq_hz": 448642000.0,
+   "freq_min_hz": 448642000.0,
+   "freq_max_hz": 448642000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -11947,6 +14171,17 @@
    ],
    "max_snr_db": 16.3,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261118_mukilteo_12426",
+     "freq_hz": 448642000.0,
+     "persistence": 1.0,
+     "covering_visits": 7,
+     "detecting_visits": 7,
+     "centre_offset_spread_khz": 1754.0,
+     "mean_snr_db": 16.3
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -12016,7 +14251,10 @@
   },
   {
    "freq_hz": 449486000.0,
+   "freq_min_hz": 449486000.0,
+   "freq_max_hz": 449486000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -12031,6 +14269,17 @@
    ],
    "max_snr_db": 11.3,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261118_mukilteo_12426",
+     "freq_hz": 449486000.0,
+     "persistence": 0.714,
+     "covering_visits": 7,
+     "detecting_visits": 5,
+     "centre_offset_spread_khz": 1372.0,
+     "mean_snr_db": 11.3
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -12100,7 +14349,10 @@
   },
   {
    "freq_hz": 449689000.0,
+   "freq_min_hz": 449689000.0,
+   "freq_max_hz": 449689000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -12115,6 +14367,17 @@
    ],
    "max_snr_db": 11.9,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261118_mukilteo_12426",
+     "freq_hz": 449689000.0,
+     "persistence": 1.0,
+     "covering_visits": 7,
+     "detecting_visits": 7,
+     "centre_offset_spread_khz": 1423.0,
+     "mean_snr_db": 11.9
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -12184,7 +14447,10 @@
   },
   {
    "freq_hz": 449997000.0,
+   "freq_min_hz": 449997000.0,
+   "freq_max_hz": 449997000.0,
    "class": "MULTI_RUN_SINGLE_SITE_OTHERS_UNCLEAR",
+   "unresolved_association": false,
    "runs_detecting": 2,
    "runs_observed": 8,
    "sites_detecting": [
@@ -12199,6 +14465,26 @@
    ],
    "max_snr_db": 13.7,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261124_hwy99_ofinnigans",
+     "freq_hz": 449997000.0,
+     "persistence": 1.0,
+     "covering_visits": 10,
+     "detecting_visits": 10,
+     "centre_offset_spread_khz": 1684.0,
+     "mean_snr_db": 13.7
+    },
+    {
+     "run": "run_20261126_hwy99",
+     "freq_hz": 449997000.0,
+     "persistence": 0.7,
+     "covering_visits": 10,
+     "detecting_visits": 7,
+     "centre_offset_spread_khz": 1684.0,
+     "mean_snr_db": 12.2
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -12268,7 +14554,10 @@
   },
   {
    "freq_hz": 450002000.0,
+   "freq_min_hz": 450002000.0,
+   "freq_max_hz": 450002000.0,
    "class": "SITE_LOCAL_PERSISTENT",
+   "unresolved_association": false,
    "runs_detecting": 3,
    "runs_observed": 8,
    "sites_detecting": [
@@ -12283,6 +14572,35 @@
    ],
    "max_snr_db": 14.2,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261119_hwy99",
+     "freq_hz": 450002000.0,
+     "persistence": 1.0,
+     "covering_visits": 10,
+     "detecting_visits": 10,
+     "centre_offset_spread_khz": 1684.0,
+     "mean_snr_db": 14.2
+    },
+    {
+     "run": "run_20261124_hwy99_ofinnigans",
+     "freq_hz": 450002000.0,
+     "persistence": 1.0,
+     "covering_visits": 10,
+     "detecting_visits": 10,
+     "centre_offset_spread_khz": 1684.5,
+     "mean_snr_db": 13.6
+    },
+    {
+     "run": "run_20261126_hwy99",
+     "freq_hz": 450002000.0,
+     "persistence": 0.6,
+     "covering_visits": 10,
+     "detecting_visits": 6,
+     "centre_offset_spread_khz": 1434.0,
+     "mean_snr_db": 10.8
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -12352,7 +14670,10 @@
   },
   {
    "freq_hz": 450011000.0,
+   "freq_min_hz": 450011000.0,
+   "freq_max_hz": 450011000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -12367,6 +14688,17 @@
    ],
    "max_snr_db": 18.4,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261122_harbourpointe_r2",
+     "freq_hz": 450011000.0,
+     "persistence": 1.0,
+     "covering_visits": 11,
+     "detecting_visits": 11,
+     "centre_offset_spread_khz": 1684.5,
+     "mean_snr_db": 18.4
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -12436,7 +14768,10 @@
   },
   {
    "freq_hz": 450049000.0,
+   "freq_min_hz": 450049000.0,
+   "freq_max_hz": 450049000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -12451,6 +14786,17 @@
    ],
    "max_snr_db": 16.9,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261118_mukilteo",
+     "freq_hz": 450049000.0,
+     "persistence": 1.0,
+     "covering_visits": 11,
+     "detecting_visits": 11,
+     "centre_offset_spread_khz": 1684.5,
+     "mean_snr_db": 16.9
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -12520,7 +14866,10 @@
   },
   {
    "freq_hz": 450061000.0,
+   "freq_min_hz": 450061000.0,
+   "freq_max_hz": 450061000.0,
    "class": "SITE_LOCAL_PERSISTENT",
+   "unresolved_association": false,
    "runs_detecting": 2,
    "runs_observed": 8,
    "sites_detecting": [
@@ -12535,6 +14884,26 @@
    ],
    "max_snr_db": 14.4,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261117_mukilteo",
+     "freq_hz": 450061000.0,
+     "persistence": 0.636,
+     "covering_visits": 11,
+     "detecting_visits": 7,
+     "centre_offset_spread_khz": 1384.0,
+     "mean_snr_db": 13.3
+    },
+    {
+     "run": "run_20261118_mukilteo",
+     "freq_hz": 450061000.0,
+     "persistence": 0.636,
+     "covering_visits": 11,
+     "detecting_visits": 7,
+     "centre_offset_spread_khz": 1684.0,
+     "mean_snr_db": 14.4
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "DETECTING",
@@ -12604,7 +14973,10 @@
   },
   {
    "freq_hz": 452050000.0,
+   "freq_min_hz": 452050000.0,
+   "freq_max_hz": 452050000.0,
    "class": "MULTI_SITE_PARTIAL",
+   "unresolved_association": false,
    "runs_detecting": 5,
    "runs_observed": 7,
    "sites_detecting": [
@@ -12620,6 +14992,53 @@
    ],
    "max_snr_db": 31.1,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261117_mukilteo",
+     "freq_hz": 452050000.0,
+     "persistence": 1.0,
+     "covering_visits": 3,
+     "detecting_visits": 3,
+     "centre_offset_spread_khz": 150.0,
+     "mean_snr_db": 16.0
+    },
+    {
+     "run": "run_20261118_mukilteo_12426",
+     "freq_hz": 452050000.0,
+     "persistence": 1.0,
+     "covering_visits": 3,
+     "detecting_visits": 3,
+     "centre_offset_spread_khz": 150.0,
+     "mean_snr_db": 14.1
+    },
+    {
+     "run": "run_20261119_hwy99",
+     "freq_hz": 452050000.0,
+     "persistence": 1.0,
+     "covering_visits": 3,
+     "detecting_visits": 3,
+     "centre_offset_spread_khz": 150.0,
+     "mean_snr_db": 31.1
+    },
+    {
+     "run": "run_20261124_hwy99_ofinnigans",
+     "freq_hz": 452050000.0,
+     "persistence": 1.0,
+     "covering_visits": 3,
+     "detecting_visits": 3,
+     "centre_offset_spread_khz": 150.0,
+     "mean_snr_db": 20.5
+    },
+    {
+     "run": "run_20261126_hwy99",
+     "freq_hz": 452050000.0,
+     "persistence": 1.0,
+     "covering_visits": 3,
+     "detecting_visits": 3,
+     "centre_offset_spread_khz": 150.0,
+     "mean_snr_db": 14.9
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "DETECTING",
@@ -12689,7 +15108,10 @@
   },
   {
    "freq_hz": 452263000.0,
+   "freq_min_hz": 452263000.0,
+   "freq_max_hz": 452263000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -12704,6 +15126,17 @@
    ],
    "max_snr_db": 12.1,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261126_sea6thave_r2",
+     "freq_hz": 452263000.0,
+     "persistence": 0.75,
+     "covering_visits": 4,
+     "detecting_visits": 3,
+     "centre_offset_spread_khz": 453.5,
+     "mean_snr_db": 12.1
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -12773,7 +15206,10 @@
   },
   {
    "freq_hz": 452434000.0,
+   "freq_min_hz": 452434000.0,
+   "freq_max_hz": 452434000.0,
    "class": "SITE_LOCAL_PERSISTENT",
+   "unresolved_association": false,
    "runs_detecting": 2,
    "runs_observed": 8,
    "sites_detecting": [
@@ -12788,6 +15224,26 @@
    ],
    "max_snr_db": 20.2,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261124_hwy99_ofinnigans",
+     "freq_hz": 452434000.0,
+     "persistence": 1.0,
+     "covering_visits": 6,
+     "detecting_visits": 6,
+     "centre_offset_spread_khz": 853.5,
+     "mean_snr_db": 20.2
+    },
+    {
+     "run": "run_20261126_hwy99",
+     "freq_hz": 452434000.0,
+     "persistence": 1.0,
+     "covering_visits": 5,
+     "detecting_visits": 5,
+     "centre_offset_spread_khz": 603.5,
+     "mean_snr_db": 18.3
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -12857,7 +15313,10 @@
   },
   {
    "freq_hz": 454050000.0,
+   "freq_min_hz": 454050000.0,
+   "freq_max_hz": 454050000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -12872,6 +15331,17 @@
    ],
    "max_snr_db": 25.1,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261118_mukilteo_12426",
+     "freq_hz": 454050000.0,
+     "persistence": 1.0,
+     "covering_visits": 4,
+     "detecting_visits": 4,
+     "centre_offset_spread_khz": 1116.0,
+     "mean_snr_db": 25.1
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -12941,7 +15411,10 @@
   },
   {
    "freq_hz": 454056000.0,
+   "freq_min_hz": 454056000.0,
+   "freq_max_hz": 454056000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -12956,6 +15429,17 @@
    ],
    "max_snr_db": 20.8,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261119_hwy99",
+     "freq_hz": 454056000.0,
+     "persistence": 1.0,
+     "covering_visits": 4,
+     "detecting_visits": 4,
+     "centre_offset_spread_khz": 1116.5,
+     "mean_snr_db": 20.8
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -13025,7 +15509,10 @@
   },
   {
    "freq_hz": 454250000.0,
+   "freq_min_hz": 454250000.0,
+   "freq_max_hz": 454250000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 7,
    "sites_detecting": [
@@ -13039,6 +15526,17 @@
    ],
    "max_snr_db": 10.7,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261119_hwy99",
+     "freq_hz": 454250000.0,
+     "persistence": 0.667,
+     "covering_visits": 3,
+     "detecting_visits": 2,
+     "centre_offset_spread_khz": 300.0,
+     "mean_snr_db": 10.7
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -13108,7 +15606,10 @@
   },
   {
    "freq_hz": 454655000.0,
+   "freq_min_hz": 454655000.0,
+   "freq_max_hz": 454655000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 7,
    "sites_detecting": [
@@ -13122,6 +15623,17 @@
    ],
    "max_snr_db": 14.4,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261117_mukilteo",
+     "freq_hz": 454655000.0,
+     "persistence": 0.667,
+     "covering_visits": 3,
+     "detecting_visits": 2,
+     "centre_offset_spread_khz": 50.0,
+     "mean_snr_db": 14.4
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "DETECTING",
@@ -13191,7 +15703,10 @@
   },
   {
    "freq_hz": 456005000.0,
+   "freq_min_hz": 456005000.0,
+   "freq_max_hz": 456005000.0,
    "class": "SITE_LOCAL_PERSISTENT",
+   "unresolved_association": false,
    "runs_detecting": 2,
    "runs_observed": 8,
    "sites_detecting": [
@@ -13206,6 +15721,26 @@
    ],
    "max_snr_db": 16.2,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261119_hwy99",
+     "freq_hz": 456005000.0,
+     "persistence": 1.0,
+     "covering_visits": 4,
+     "detecting_visits": 4,
+     "centre_offset_spread_khz": 1132.0,
+     "mean_snr_db": 15.4
+    },
+    {
+     "run": "run_20261126_hwy99",
+     "freq_hz": 456005000.0,
+     "persistence": 1.0,
+     "covering_visits": 4,
+     "detecting_visits": 4,
+     "centre_offset_spread_khz": 1132.0,
+     "mean_snr_db": 16.2
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -13275,7 +15810,10 @@
   },
   {
    "freq_hz": 456191000.0,
+   "freq_min_hz": 456191000.0,
+   "freq_max_hz": 456191000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -13290,6 +15828,17 @@
    ],
    "max_snr_db": 15.3,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261122_harbourpointe_r2",
+     "freq_hz": 456191000.0,
+     "persistence": 1.0,
+     "covering_visits": 6,
+     "detecting_visits": 6,
+     "centre_offset_spread_khz": 1182.0,
+     "mean_snr_db": 15.3
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -13359,7 +15908,10 @@
   },
   {
    "freq_hz": 456542000.0,
+   "freq_min_hz": 456542000.0,
+   "freq_max_hz": 456542000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -13374,6 +15926,17 @@
    ],
    "max_snr_db": 15.4,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261122_harbourpointe_r2",
+     "freq_hz": 456542000.0,
+     "persistence": 1.0,
+     "covering_visits": 8,
+     "detecting_visits": 8,
+     "centre_offset_spread_khz": 1604.0,
+     "mean_snr_db": 15.4
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -13443,7 +16006,10 @@
   },
   {
    "freq_hz": 458175500.0,
+   "freq_min_hz": 458174000.0,
+   "freq_max_hz": 458177000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": true,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -13458,6 +16024,26 @@
    ],
    "max_snr_db": 20.5,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261118_mukilteo_12426",
+     "freq_hz": 458174000.0,
+     "persistence": 1.0,
+     "covering_visits": 5,
+     "detecting_visits": 5,
+     "centre_offset_spread_khz": 424.0,
+     "mean_snr_db": 12.4
+    },
+    {
+     "run": "run_20261118_mukilteo_12426",
+     "freq_hz": 458177000.0,
+     "persistence": 0.6,
+     "covering_visits": 5,
+     "detecting_visits": 3,
+     "centre_offset_spread_khz": 300.0,
+     "mean_snr_db": 20.5
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -13527,7 +16113,10 @@
   },
   {
    "freq_hz": 460015000.0,
+   "freq_min_hz": 460015000.0,
+   "freq_max_hz": 460015000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 7,
    "sites_detecting": [
@@ -13542,6 +16131,17 @@
    ],
    "max_snr_db": 16.0,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261122_harbourpointe_r2",
+     "freq_hz": 460015000.0,
+     "persistence": 1.0,
+     "covering_visits": 3,
+     "detecting_visits": 3,
+     "centre_offset_spread_khz": 250.0,
+     "mean_snr_db": 16.0
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -13611,7 +16211,10 @@
   },
   {
    "freq_hz": 462042000.0,
+   "freq_min_hz": 462042000.0,
+   "freq_max_hz": 462042000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -13626,6 +16229,17 @@
    ],
    "max_snr_db": 11.6,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261122_harbourpointe_r2",
+     "freq_hz": 462042000.0,
+     "persistence": 0.667,
+     "covering_visits": 3,
+     "detecting_visits": 2,
+     "centre_offset_spread_khz": 100.0,
+     "mean_snr_db": 11.6
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -13695,7 +16309,10 @@
   },
   {
    "freq_hz": 462253000.0,
+   "freq_min_hz": 462253000.0,
+   "freq_max_hz": 462253000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -13710,6 +16327,17 @@
    ],
    "max_snr_db": 12.5,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261118_mukilteo_12426",
+     "freq_hz": 462253000.0,
+     "persistence": 1.0,
+     "covering_visits": 3,
+     "detecting_visits": 3,
+     "centre_offset_spread_khz": 150.0,
+     "mean_snr_db": 12.5
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -13779,7 +16407,10 @@
   },
   {
    "freq_hz": 463186000.0,
+   "freq_min_hz": 463186000.0,
+   "freq_max_hz": 463186000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -13794,6 +16425,17 @@
    ],
    "max_snr_db": 10.4,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261122_harbourpointe_r2",
+     "freq_hz": 463186000.0,
+     "persistence": 0.667,
+     "covering_visits": 3,
+     "detecting_visits": 2,
+     "centre_offset_spread_khz": 50.0,
+     "mean_snr_db": 10.4
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -13863,7 +16505,10 @@
   },
   {
    "freq_hz": 464906000.0,
+   "freq_min_hz": 464906000.0,
+   "freq_max_hz": 464906000.0,
    "class": "MULTI_SITE_PARTIAL",
+   "unresolved_association": false,
    "runs_detecting": 4,
    "runs_observed": 7,
    "sites_detecting": [
@@ -13879,6 +16524,44 @@
    ],
    "max_snr_db": 20.8,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261117_mukilteo",
+     "freq_hz": 464906000.0,
+     "persistence": 0.667,
+     "covering_visits": 3,
+     "detecting_visits": 2,
+     "centre_offset_spread_khz": 150.0,
+     "mean_snr_db": 10.8
+    },
+    {
+     "run": "run_20261118_mukilteo_12426",
+     "freq_hz": 464906000.0,
+     "persistence": 1.0,
+     "covering_visits": 3,
+     "detecting_visits": 3,
+     "centre_offset_spread_khz": 250.0,
+     "mean_snr_db": 20.8
+    },
+    {
+     "run": "run_20261124_hwy99_ofinnigans",
+     "freq_hz": 464906000.0,
+     "persistence": 1.0,
+     "covering_visits": 3,
+     "detecting_visits": 3,
+     "centre_offset_spread_khz": 250.0,
+     "mean_snr_db": 17.5
+    },
+    {
+     "run": "run_20261126_hwy99",
+     "freq_hz": 464906000.0,
+     "persistence": 1.0,
+     "covering_visits": 3,
+     "detecting_visits": 3,
+     "centre_offset_spread_khz": 250.0,
+     "mean_snr_db": 15.3
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "DETECTING",
@@ -13948,7 +16631,10 @@
   },
   {
    "freq_hz": 466559000.0,
+   "freq_min_hz": 466559000.0,
+   "freq_max_hz": 466559000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -13963,6 +16649,17 @@
    ],
    "max_snr_db": 15.9,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261122_harbourpointe_r2",
+     "freq_hz": 466559000.0,
+     "persistence": 1.0,
+     "covering_visits": 8,
+     "detecting_visits": 8,
+     "centre_offset_spread_khz": 910.5,
+     "mean_snr_db": 15.9
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "QUIET",
@@ -14032,7 +16729,10 @@
   },
   {
    "freq_hz": 467993000.0,
+   "freq_min_hz": 467993000.0,
+   "freq_max_hz": 467993000.0,
    "class": "SINGLE_RUN",
+   "unresolved_association": false,
    "runs_detecting": 1,
    "runs_observed": 8,
    "sites_detecting": [
@@ -14047,6 +16747,17 @@
    ],
    "max_snr_db": 19.2,
    "reference_harmonic": null,
+   "members": [
+    {
+     "run": "run_20261117_mukilteo",
+     "freq_hz": 467993000.0,
+     "persistence": 1.0,
+     "covering_visits": 3,
+     "detecting_visits": 3,
+     "centre_offset_spread_khz": 300.0,
+     "mean_snr_db": 19.2
+    }
+   ],
    "per_run": {
     "run_20261117_mukilteo": {
      "state": "DETECTING",

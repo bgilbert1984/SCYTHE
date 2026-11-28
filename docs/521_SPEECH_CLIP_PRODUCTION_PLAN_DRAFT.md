@@ -61,12 +61,13 @@ Each stage writes a hash-pinned intermediate and a small report, and nothing run
 | 2A | coverage and classification corrections: one eligibility mask, one RF-fixed rule across runs and sites, cautious instrument vocabulary | no (done in this revision) |
 | 2B | integrity and reproducibility: size and sha256 checks, pinned dataset revision, isolated cache, provenance on every result, completeness gate | no (done in this revision) |
 | 2C | reprocess the nine runs with the corrected script (run on dedirock) | no (done in this revision) |
+| 2D | visit-level completeness certification, bounded frequency association, qualified-bin ranking, full input binding (the second review, section 11) | no (done in this revision) |
 | 3A | channelizer, demodulator and VAD, tested on synthetic IQ | no |
 | 3B | validation against known public or controlled sources (below) | no |
 | 4 | a **new narrowband dwell-capture declaration** (frequencies, dwell, gain, site, bands, tool versions, hash). **Held**: only if 3B passes and a candidate justifies it | yes, naming the digest, as for every run |
 | 5 | local transcription of slice 4 captures, for candidates with an authorization record only | yes, per candidate |
 | 6 | publish tier 0 and 1 tables; tier 2 only after review and counsel | yes |
-| 7 | optional: a terminated-input capture near 403.2 MHz to test the instrument-origin hypothesis (section 8) | no new authorization class: a load-fitted canary-style set |
+| 7 | optional: a terminated-input capture near 403.2 MHz to test the instrument-origin hypothesis (section 8) | yes: the normal capture authorization applies even though it fits an existing class (a load-fitted canary-style set) |
 
 ## 6. Validation before anything unknown is run
 - Prove the chain end to end on sources whose content is public: a broadcast FM station (the bridge already sees two near 99.9 and 100.7 MHz) and a NOAA weather radio channel (162.4-162.55 MHz, clean English). The pipeline must recover
@@ -80,8 +81,8 @@ Each stage writes a hash-pinned intermediate and a small report, and nothing run
 - It does not publish content from private communications, and it does not decode digital or encrypted voice.
 
 ## 8. Slices 2A-2C result: the persistence pass, corrected (observation only)
-`scripts/s521_persistence/persistence_pass.py` (detect, aggregate, classify; 33 unit tests) processed all 1,728 windows of the 9 runs at dataset revision `6426d013b1282882a87d860cc1a438e61619ddb5` with 0 errors, on dedirock. Every window was checked
-to be exactly 8,388,608 bytes and to match the sha256 in `metadata/captures.parquet`; remote reads used an isolated temporary cache. The line detector is unchanged: the eight original runs reproduce the first pass's per-run line-detection counts exactly.
+`scripts/s521_persistence/persistence_pass.py` (detect, aggregate, classify; 56 unit tests) processed all 1,728 windows of the 9 runs at dataset revision `6426d013b1282882a87d860cc1a438e61619ddb5` with 0 errors, on dedirock. Every window was checked
+to be exactly 8,388,608 bytes and to match the sha256 in `metadata/captures.parquet`; remote reads used an isolated temporary cache. The line detector is unchanged: the eight original runs reproduce the first pass's per-run line-detection counts exactly. Detection documents are accepted only if their visit records reconcile with the authoritative manifest at the record level (section 11), and the results below were regenerated under that validator: every entry is identical to the first corrected tables.
 Full tables with their provenance block: `scripts/s521_persistence/results_corrected_20261128_all9_runs.json` (all 9 runs) and `..._original8_runs.json` (the original 8, for comparison). The first results file (`results_20261126.json`) is marked superseded.
 
 **Rules.** A line is a narrow peak at least 10 dB over a running-median floor, at most 6 kHz wide, inside +/-920 kHz of the centre and outside the DC guard and the canary lines at plus and minus 255,996 Hz; visits above the frozen clipping limit
@@ -99,8 +100,8 @@ dropped out and none was added: 425.0095 MHz, 425.0250 MHz and 448.0830 MHz each
 - **A clock-like comb, as a hypothesis.** Of the 26 persistent lines, three sit within 2 kHz of a multiple of 4.8 MHz (28.8 MHz / 6): 403.200, 417.600 and 422.400 MHz; three of a multiple of 3.2 MHz (28.8 MHz / 9): 403.200, 422.400 and 448.000 MHz; and four of a whole MHz: 405.002, 426.002, 448.000 and 450.002 MHz.
   Chance would give well under one in each case. A clock-derived comb from the receiver, the host or something nearby fits, and the pass cannot separate those.
 - **452.050 and 464.906 MHz** appear at three venues but not all (452.050: 6 of 8 observing runs, up to 38 dB; 464.906: 4 of 8). Neither is on the clock combs above. A wide-area source, a harmonic product or a repeater pair would all do this; the pass cannot say which.
-- **Against the load-fitted baseline of 2026-11-27** (`hwy99_load_20261127`): nine lines from the first pass fell inside that set's coverage and all nine were absent with the load fitted (0.1-0.4 dB against 11-17 dB antenna-on); seven of them remain classified here (401.238, 426.002, 445.050, 445.055, 449.997, 450.002 and 450.061 MHz). So they enter through the antenna side and are not the receiver's own,
-  which still does not say whether the source is a transmitter or local electronics.
+- **Against the load-fitted baseline of 2026-11-27** (`hwy99_load_20261127`): nine lines from the first pass fell inside that set's coverage and all nine were absent with the load fitted (0.1-0.4 dB against 11-17 dB antenna-on); seven of them remain classified here (401.238, 426.002, 445.050, 445.055, 449.997, 450.002 and 450.061 MHz). That is consistent with an antenna-dependent contribution under those test conditions. It does not exclude
+  receiver-generated nonlinear mixing: an antenna-borne input can also produce internal intermodulation. It also does not say whether the source is a transmitter or local electronics.
 - **Not assessed:** rotating or hopping transmissions, modulation class, bandwidth and duty cycle.
 
 Band context, US allocations in broad terms and to be verified against 47 CFR 2.106 (context only, not identification): about 400.15-406 MHz meteorological aids and satellite; 406.0-406.1 MHz distress beacons; 406.1-420 MHz federal government; 420-450 MHz amateur 70 cm (shared with federal radiolocation); 450-470 MHz private land mobile (business, public safety), with GMRS/FRS around 462-467 MHz.
@@ -152,4 +153,15 @@ Persistent lines, all 9 runs (single-run lines are in the results file):
 | F-04 | no input validation, hash check, revision pin or provenance; partial results | fixed | exact window size, sha256 against the metadata, pinned revision, provenance block on every file, skip only on matching provenance, completeness gate, full table committed |
 | F-05 | deleting shared cache blobs | fixed | isolated temporary cache per read; the shared Hugging Face cache is never touched (no dangling links were found from the first pass) |
 | F-06 | three multi-site lines named where the results had four; tier 3 versus step 6 | fixed | section 8 is generated from the results file; tier 3 and step 6 reconciled; fail-closed authorization added |
+
+## 11. Corrections after the review of PR #518 (slice 2D)
+| ID | finding | status | what changed |
+|---|---|---|---|
+| P1-01 | completeness certified from provenance flags, not records | fixed | a document is accepted only if its visit records reconcile with the manifest (one verified record per manifest visit, same positions, same file, sha256, centre, retune and clipping, same site, no error records); the expected run inventory is required; duplicate runs, mismatched file names and runs missing from the manifest are refused; each document carries its own sha256 and an edited document is refused; cached documents are validated the same way before they are skipped |
+| P1-02 | transitive clustering dropped qualified observations | fixed | clusters have a maximum diameter (3 kHz), not a chain of neighbours; every member frequency and run is kept in `members`; each run is evaluated over the whole cluster span, so no qualified line is lost; clusters with adjacent neighbours, or two lines from one run, are marked `unresolved_association` (2 of 169, both single-run). Frequency proximity is a potential association, not proof of signal identity |
+| P2-03 | the strongest neighbouring bin overrode a qualified one | fixed | qualified bins (observed, persistent, RF-fixed) are ranked before unqualified ones |
+| P2-04 | the manifest did not bind all analytical inputs | fixed | the manifest hashes centre, retune, position, clipping and site as well as file and sha256; the revision must be a full 40-character commit sha; a local `captures.parquet` must be byte-identical to the file at that revision; results record `captures_parquet_sha256`, `detection_document_sha256` per run and `analysis_code_sha256` |
+| note | tests needed `huggingface_hub` | fixed | the tests use a stub module and run without the package or a network |
+
+The review's corrected-results check stands: regenerating all nine documents on dedirock under the stricter validator and the bounded clustering left every one of the 169 classified entries (167 for the original eight runs) unchanged. The review also correctly notes that its raw reprocessing was not independently repeated.
 
